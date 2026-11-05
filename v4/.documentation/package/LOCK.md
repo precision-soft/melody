@@ -149,7 +149,7 @@ gate := lock.NewLeaderGate(
 go gate.Run(runtimeInstance)
 ```
 
-[`LeaderGateConfig`](../../lock/leader_gate.go) is everything the gate declares beyond its locker and its lock name, resolved when the gate is built; every zero value is the default, the intervals derived from the `ttl`, and a field below its minimum panics naming it. A `RefreshInterval` above half the `ttl` is refused, naming the field and the ceiling, because a cadence slower than half the lease lets the lease lapse before the first refresh and two instances would both report leadership.
+[`LeaderGateConfig`](../../lock/leader_gate.go) is everything the gate declares beyond its locker and its lock name, resolved when the gate is built; every zero value is the default, the intervals derived from the `ttl`, and a field below its minimum panics naming it. A `RefreshInterval` above half the `ttl` is refused, naming the field and the ceiling, because a cadence slower than half the lease lets the lease lapse before the first refresh and two instances would both report leadership. `ReleaseTimeout` bounds the release at the end of a term: 5s when left out, at least 1ms, unlimited refused.
 
 | Field                           | Default                                                    | Minimum                         | Unlimited                                                |
 |---------------------------------|------------------------------------------------------------|---------------------------------|----------------------------------------------------------|

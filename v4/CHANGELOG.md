@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- lock: `LeaderGateConfig.ReleaseTimeout`, a `bound.Duration` of 5s when left out, at least 1ms, unlimited refused, bounds the release at the end of a term, as the exclusive doors' field does.
 - This major includes every change of the third major up to v3.14.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
 - bound: the `bound` package, `Duration` and `Count` with `Of`, `UnlimitedDuration` and `UnlimitedCount`, the three-state limit the limits and timeouts of the fourth major are written with, httpclient first: a field left out is absent and takes the framework's bounded default, a value below the field's minimum is refused naming the field, and unlimited is explicit, admitted only on the fields that say so; `Resolve` decides a field against its `Rule`, and the text and json forms read `unlimited`, a value or an absent key.
 - cli: `output.NewUnboundedTablePrinter` answers a table printer with no width cap, the one `SelectPrinter` answers for an unlimited `TableMaxWidth`.
@@ -164,6 +165,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- exception: `LogContext`, `IsAlreadyLogged`, `MarkLogged` and the cause chain return on an error chain whose `Unwrap` reaches itself, each link rendered once, where the search through `errors.As` never returned and the goroutine logging the error hung.
 - wiring: **Behavioural change**: carried from the third major (v3.14.1): `melody:wiring:generate` and `wiring.Generate` write the generated source in gofmt's form, indented with tabs, where it was indented with four spaces and every consumer's `gofmt -l` reported the file: the rendered source goes through `go/format` before it is written or printed, so the file written, the source on stdout and the source a staleness check regenerates in memory are the same bytes, and a source that does not format is refused with the rendered text in the error's context and no file written. A consumer regenerates its file once.
 - application: **Behavioural change**: carried from the third major (v3.14.2): with an empty `MELODY_LOG_PATH` the container logger of a command writes to standard error, where it wrote to standard output in every process, so the boot records of a command that prints a document a caller redirects to a file (`melody:openapi:generate > openapi.json`) were written into the document; the http process still journals to standard output.
 - mailer: **Behavioural change**: carried from the third major (v3.14.2): a custom header key is emitted trimmed, as the reserved and Message-ID checks already judged it, and a key that is empty or carries a byte outside the printable characters other than the colon is refused, where ` X-Campaign ` went out as a continuation of the previous header, an empty key as a line with no name, and `Message-ID ` suppressed the generated Message-ID while writing one no parser reads.

@@ -6,6 +6,7 @@ import (
     "math"
     "strings"
     "testing"
+    "time"
 
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -1503,5 +1504,90 @@ func TestContextDoors_ReadATypedNilProviderAsNoContextAndAPanickingOneAsPanicked
         if rendered := door(panicking); false == strings.Contains(rendered, "contextPanicked") {
             t.Fatalf("%s: expected a panicking provider read as panicked, got %s", name, rendered)
         }
+    }
+}
+
+type cyclicChainLink struct {
+    next error
+}
+
+func (instance *cyclicChainLink) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainLink) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChain() *cyclicChainLink {
+    first := &cyclicChainLink{}
+    first.next = &cyclicChainLink{next: first}
+
+    return first
+}
+
+func TestChainDoors_ReturnOnAChainThatReachesItself(t *testing.T) {
+    done := make(chan exceptioncontract.Context, 1)
+    go func() {
+        chain := newCyclicChain()
+        _ = IsAlreadyLogged(chain)
+        _ = MarkLogged(chain)
+        done <- LogContext(chain, LogContextConfig{})
+    }()
+
+    select {
+    case context := <-done:
+        chainEntries, isChain := context["causeChain"].([]string)
+        if false == isChain || 2 != len(chainEntries) {
+            t.Fatalf("expected the two links once each, got %#v", context["causeChain"])
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("the chain doors must return on a cyclic chain")
+    }
+}
+
+func TestChainHolds_FindsWhatErrorsAsFindsDepthFirst(t *testing.T) {
+    target := &cyclicChainLink{next: errors.New("end")}
+    joined := errors.Join(errors.New("first"), fmt.Errorf("wrapped: %w", target))
+
+    var found *cyclicChainLink
+    if false == chainHolds(joined, &found) || target != found {
+        t.Fatalf("expected the wrapped link through the join, got %v", found)
+    }
+
+    var absent *Error
+    if true == chainHolds(joined, &absent) {
+        t.Fatal("expected nothing of a type the chain does not hold")
+    }
+
+    if true == chainHolds(nil, &absent) {
+        t.Fatal("expected a nil error to hold nothing")
+    }
+}
+
+type selfUnwrappingValue struct{}
+
+func (instance selfUnwrappingValue) Error() string {
+    return "self unwrapping value"
+}
+
+func (instance selfUnwrappingValue) Unwrap() error {
+    return instance
+}
+
+func TestChainHolds_BoundsAChainWithoutPointerIdentity(t *testing.T) {
+    done := make(chan bool, 1)
+    go func() {
+        var absent *Error
+        done <- chainHolds(selfUnwrappingValue{}, &absent)
+    }()
+
+    select {
+    case found := <-done:
+        if true == found {
+            t.Fatal("expected nothing of a type the chain does not hold")
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("the search must end on a chain it cannot recognise a cycle in")
     }
 }

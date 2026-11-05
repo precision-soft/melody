@@ -1598,6 +1598,8 @@ func TestNewLeaderGate_RefusesAConfigurationTheRulesRefuseNamingTheField(t *test
         field  string
     }{
         {"a ttl under 2ms", LeaderGateConfig{Ttl: bound.Of(2*time.Millisecond - time.Microsecond)}, "LeaderGateConfig.Ttl"},
+        {"a release timeout under 1ms", LeaderGateConfig{ReleaseTimeout: bound.Of(time.Microsecond)}, "LeaderGateConfig.ReleaseTimeout"},
+        {"an unlimited release timeout", LeaderGateConfig{ReleaseTimeout: bound.UnlimitedDuration()}, "LeaderGateConfig.ReleaseTimeout"},
         {"an unlimited retry", LeaderGateConfig{RetryInterval: bound.UnlimitedDuration()}, "LeaderGateConfig.RetryInterval"},
         {"a refresh under 1ms", LeaderGateConfig{RefreshInterval: bound.Of(time.Microsecond)}, "LeaderGateConfig.RefreshInterval"},
         {"a threshold of 0", LeaderGateConfig{MaxConsecutiveRefreshFailures: bound.Of(0)}, "LeaderGateConfig.MaxConsecutiveRefreshFailures"},
@@ -1633,5 +1635,32 @@ func TestNewLeaderGate_AnUnlimitedThresholdBesideAnUnlimitedTtlIsRefusedNamingBo
     refusal, isMelodyErr := recovered.(*exception.Error)
     if false == isMelodyErr || "LeaderGateConfig.MaxConsecutiveRefreshFailures" != refusal.Context()["field"] || "LeaderGateConfig.Ttl" != refusal.Context()["besideField"] {
         t.Fatalf("expected a panic naming both fields, got %#v", recovered)
+    }
+}
+
+func TestLeaderGate_HandsItsReleaseTimeoutToTheRelease(t *testing.T) {
+    locker := &releaseDeadlineLocker{remaining: make(chan time.Duration, 1)}
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    config := fastGateConfig(bound.Of(time.Hour))
+    config.ReleaseTimeout = bound.Of(2 * time.Second)
+    gate := NewLeaderGate(locker, "worker:release-timeout", config)
+
+    done := make(chan error, 1)
+    go func() {
+        done <- gate.Run(testRuntimeWithContext(runContext))
+    }()
+
+    waitUntil(t, 2*time.Second, gate.IsLeader, "expected the gate to lead")
+    cancel()
+
+    if runErr := <-done; nil != runErr {
+        t.Fatalf("expected a clean shutdown, got: %v", runErr)
+    }
+
+    if remaining := <-locker.remaining; remaining > 2*time.Second || remaining <= time.Second {
+        t.Fatalf("expected the release to have just under 2s left, got %s", remaining)
     }
 }

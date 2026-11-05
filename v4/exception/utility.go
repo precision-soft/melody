@@ -1,7 +1,6 @@
 package exception
 
 import (
-    "errors"
     "fmt"
     "reflect"
     "strconv"
@@ -279,7 +278,7 @@ func reportsAlreadyLogged(alreadyLoggedValue exceptioncontract.AlreadyLogged) (a
     return alreadyLoggedValue.AlreadyLogged()
 }
 
-/* chainHolds is errors.As under a recover, the one door through which this package searches a chain; a chain that cannot be searched answers that it holds nothing. */
+/* chainHolds searches a chain as errors.As does, depth first, under a recover and a bound: errors.As never returns on a chain whose Unwrap reaches itself, and a chain that cannot be searched answers that it holds nothing. */
 func chainHolds(err error, target any) (found bool) {
     defer func() {
         if nil != recover() {
@@ -287,7 +286,68 @@ func chainHolds(err error, target any) (found bool) {
         }
     }()
 
-    return errors.As(err, target)
+    targetValue := reflect.ValueOf(target).Elem()
+    targetType := targetValue.Type()
+
+    visited := map[chainLinkIdentity]struct{}{}
+    pending := []error{err}
+
+    for walked := 0; 0 < len(pending) && walked < chainSearchLinkLimit; {
+        current := pending[len(pending)-1]
+        pending = pending[:len(pending)-1]
+
+        if nil == current || true == chainLinkAlreadyVisited(visited, current) {
+            continue
+        }
+        walked++
+
+        if true == reflect.TypeOf(current).AssignableTo(targetType) {
+            targetValue.Set(reflect.ValueOf(current))
+
+            return true
+        }
+
+        if searchable, isSearchable := current.(interface{ As(any) bool }); true == isSearchable && true == searchable.As(target) {
+            return true
+        }
+
+        switch wrapper := current.(type) {
+        case interface{ Unwrap() error }:
+            pending = append(pending, wrapper.Unwrap())
+        case interface{ Unwrap() []error }:
+            links := wrapper.Unwrap()
+            for index := len(links) - 1; 0 <= index; index-- {
+                pending = append(pending, links[index])
+            }
+        }
+    }
+
+    return false
+}
+
+/* chainSearchLinkLimit bounds a search whose links carry no pointer identity to recognise a cycle by */
+const chainSearchLinkLimit = 1024
+
+type chainLinkIdentity struct {
+    linkType reflect.Type
+    pointer  uintptr
+}
+
+/* chainLinkAlreadyVisited records a pointer link and answers whether it was met before; a value link has no identity and answers false */
+func chainLinkAlreadyVisited(visited map[chainLinkIdentity]struct{}, link error) bool {
+    reflected := reflect.ValueOf(link)
+    if reflect.Pointer != reflected.Kind() || true == reflected.IsNil() {
+        return false
+    }
+
+    identity := chainLinkIdentity{linkType: reflected.Type(), pointer: reflected.Pointer()}
+    if _, seen := visited[identity]; true == seen {
+        return true
+    }
+
+    visited[identity] = struct{}{}
+
+    return false
 }
 
 /* unwrapPanicked stands in a rendered chain for the causes of an Unwrap that panicked, and never reaches the error a caller holds. */
@@ -385,13 +445,14 @@ func BuildCauseChain(causeErr error, maxDepth int) []string {
 func walkCauseChain(roots []error, maxDepth int, visit func(link error)) {
     pending := append([]error{}, roots...)
     visited := 0
+    visitedLinks := map[chainLinkIdentity]struct{}{}
 
     for 0 < len(pending) && visited < maxDepth {
         current := pending[0]
         pending = pending[1:]
 
         /* a typed-nil link contributes nothing */
-        if true == isNilInterfaceValue(current) {
+        if true == isNilInterfaceValue(current) || true == chainLinkAlreadyVisited(visitedLinks, current) {
             continue
         }
 
