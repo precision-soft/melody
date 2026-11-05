@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -17,6 +18,9 @@ import (
 type InMemoryStorageConfig struct {
     /* CleanupInterval is how often lapsed sessions are swept; it is a cadence, not a lifetime: 1m by default, at least 1ms, unlimited refused, so a lapsed session is always collected. */
     CleanupInterval bound.Duration
+
+    /* MaxSessions bounds the sessions held at once: 100,000 when left out, at least 1, unlimited admitted. At the ceiling, once the lapsed ones are swept, a new id is refused and a stored one is still saved. */
+    MaxSessions bound.Count
 
     /* Clock is where every expiry instant, the stored one, the compared one and the sweep's tick, is read; nil is the system clock. The comparison is monotonic where the clock is, so an NTP step neither lapses nor resurrects a session; FileStorage is the wall-clock half of that trade, which SESSION.md names. */
     Clock clockcontract.Clock
@@ -28,11 +32,26 @@ var inMemoryStorageCleanupIntervalRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
+/* DefaultMaxSessions is how many sessions a storage holds when its MaxSessions is left out. */
+const DefaultMaxSessions = 100_000
+
+var inMemoryStorageMaxSessionsRule = bound.Rule[int]{
+    Name:              "InMemoryStorageConfig.MaxSessions",
+    Default:           DefaultMaxSessions,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
+}
+
 /* NewInMemoryStorage resolves the configuration, panicking on a field below its minimum by name, then builds the storage and starts its cleanup goroutine, which only CloseWithContext stops. */
 func NewInMemoryStorage(config InMemoryStorageConfig) *InMemoryStorage {
     cleanupInterval, cleanupIntervalErr := bound.Resolve(config.CleanupInterval, inMemoryStorageCleanupIntervalRule)
     if nil != cleanupIntervalErr {
         exception.Panic(exception.FromError(cleanupIntervalErr))
+    }
+
+    maxSessions, maxSessionsErr := bound.Resolve(config.MaxSessions, inMemoryStorageMaxSessionsRule)
+    if nil != maxSessionsErr {
+        exception.Panic(exception.FromError(maxSessionsErr))
     }
 
     clockInstance := config.Clock
@@ -45,6 +64,7 @@ func NewInMemoryStorage(config InMemoryStorageConfig) *InMemoryStorage {
     storage := &InMemoryStorage{
         sessions:        make(map[string]inMemorySessionEntry),
         cleanupInterval: cleanupInterval.Value,
+        maxSessions:     maxSessions,
         stopCleanup:     make(chan struct{}),
         cleanupDone:     make(chan struct{}),
         cleanupCancel:   cleanupCancel,
@@ -58,6 +78,8 @@ func NewInMemoryStorage(config InMemoryStorageConfig) *InMemoryStorage {
 
 /* InMemoryStorage holds the sessions of this process. The session map and the closed flag are read and written under mutex; the cleanup goroutine is stopped once, through stopCleanupOnce, and the interval and the clock are fixed at construction. */
 type InMemoryStorage struct {
+    maxSessions    bound.Resolved[int]
+    earliestExpiry time.Time
     mutex           sync.RWMutex
     sessions        map[string]inMemorySessionEntry
     closed          bool
@@ -136,10 +158,21 @@ func (instance *InMemoryStorage) Save(sessionId string, data map[string]any, ttl
         return exception.NewError("session storage is closed", nil, nil)
     }
 
+    if refusedErr := instance.refuseNewSessionAtCeilingLocked(sessionId); nil != refusedErr {
+        instance.mutex.Unlock()
+
+        return refusedErr
+    }
+
     instance.sessions[sessionId] = inMemorySessionEntry{
         data:      copyValue,
         expiresAt: expiresAt,
     }
+
+    if nil != expiresAt && (true == instance.earliestExpiry.IsZero() || true == expiresAt.Before(instance.earliestExpiry)) {
+        instance.earliestExpiry = *expiresAt
+    }
+
     instance.mutex.Unlock()
 
     return nil
@@ -258,6 +291,51 @@ func (instance *InMemoryStorage) cleanupExpired() {
         }
         instance.mutex.Unlock()
     }
+}
+
+/* refuseNewSessionAtCeilingLocked admits a stored id and, at the ceiling, sweeps only once an entry can have lapsed, so a flood of refused saves does not walk the whole table on each one. */
+func (instance *InMemoryStorage) refuseNewSessionAtCeilingLocked(sessionId string) error {
+    if true == instance.maxSessions.Unlimited || len(instance.sessions) < instance.maxSessions.Value {
+        return nil
+    }
+
+    if _, exists := instance.sessions[sessionId]; true == exists {
+        return nil
+    }
+
+    now := instance.clock.Now()
+    if false == instance.earliestExpiry.IsZero() && false == now.Before(instance.earliestExpiry) {
+        instance.earliestExpiry = time.Time{}
+
+        for storedSessionId, entry := range instance.sessions {
+            if nil == entry.expiresAt {
+                continue
+            }
+
+            if true == isLapsed(entry.expiresAt, now) {
+                delete(instance.sessions, storedSessionId)
+
+                continue
+            }
+
+            if true == instance.earliestExpiry.IsZero() || true == entry.expiresAt.Before(instance.earliestExpiry) {
+                instance.earliestExpiry = *entry.expiresAt
+            }
+        }
+    }
+
+    if len(instance.sessions) < instance.maxSessions.Value {
+        return nil
+    }
+
+    return exception.NewError(
+        "the in-memory session storage is full",
+        exceptioncontract.Context{
+            "field":       inMemoryStorageMaxSessionsRule.Name,
+            "maxSessions": instance.maxSessions.Value,
+        },
+        nil,
+    )
 }
 
 /* deleteLapsedLocked reads the entry again under the chunk's lock, since it may have been saved again or replaced since the ids were taken. */

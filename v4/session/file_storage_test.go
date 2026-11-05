@@ -3,6 +3,7 @@ package session
 import (
     "context"
     "errors"
+    "fmt"
     "math"
     "os"
     "path/filepath"
@@ -1703,5 +1704,161 @@ func TestFileStorage_SavesUnderABasenameThatFillsTheFilesystemComponent(t *testi
     entries, readErr := os.ReadDir(directory)
     if nil != readErr || 1 != len(entries) || filepath.Base(path) != entries[0].Name() {
         t.Fatalf("expected only the snapshot in the directory, got %v, %v", entries, readErr)
+    }
+}
+
+func TestFileStorage_MaxSessionsRefusesANewIdAtTheCeilingAndKeepsTheStoredOnes(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "sessions.json")
+
+    storage, storageErr := NewFileStorage(FileStorageConfig{Path: path, MaxSessions: bound.Of(2)})
+    if nil != storageErr {
+        t.Fatalf("unexpected storage error: %v", storageErr)
+    }
+
+    for _, sessionId := range []string{"first", "second"} {
+        if saveErr := storage.Save(sessionId, map[string]any{"key": "value"}, time.Hour); nil != saveErr {
+            t.Fatalf("unexpected save error: %v", saveErr)
+        }
+    }
+
+    saveErr := storage.Save("third", map[string]any{}, time.Hour)
+    if nil == saveErr || "the session file storage is full" != saveErr.Error() {
+        t.Fatalf("expected the new id refused, got %v", saveErr)
+    }
+
+    if "FileStorageConfig.MaxSessions" != exception.LogContext(saveErr, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(saveErr, exception.LogContextConfig{}))
+    }
+
+    if _, found, _ := storage.Load("third"); true == found {
+        t.Fatalf("expected the refused id not stored")
+    }
+
+    if resaveErr := storage.Save("first", map[string]any{"key": "other"}, time.Hour); nil != resaveErr {
+        t.Fatalf("expected a stored id saved at the ceiling, got %v", resaveErr)
+    }
+}
+
+func TestFileStorage_ASessionLapsedInALoadedFileFreesItsSlotAtTheCeiling(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Date(2020, time.March, 1, 12, 0, 0, 0, time.UTC))
+    path := filepath.Join(t.TempDir(), "sessions.json")
+
+    writer, writerErr := NewFileStorage(FileStorageConfig{Path: path, Clock: frozenClock})
+    if nil != writerErr {
+        t.Fatalf("unexpected storage error: %v", writerErr)
+    }
+
+    for sessionId, ttl := range map[string]time.Duration{"short": time.Minute, "long": 2 * time.Hour} {
+        if saveErr := writer.Save(sessionId, map[string]any{}, ttl); nil != saveErr {
+            t.Fatalf("unexpected save error: %v", saveErr)
+        }
+    }
+
+    frozenClock.Advance(time.Minute)
+
+    storage, storageErr := NewFileStorage(FileStorageConfig{Path: path, Clock: frozenClock, MaxSessions: bound.Of(2)})
+    if nil != storageErr {
+        t.Fatalf("unexpected storage error: %v", storageErr)
+    }
+
+    if saveErr := storage.Save("late", map[string]any{}, time.Hour); nil != saveErr {
+        t.Fatalf("expected the lapsed session's slot freed, got %v", saveErr)
+    }
+
+    if saveErr := storage.Save("fuller", map[string]any{}, time.Hour); nil == saveErr {
+        t.Fatalf("expected the id refused with the table full again")
+    }
+
+    /* the first instant anything lapses after the sweep, so a refused flood stops walking the table until then */
+    if expected := frozenClock.Now().Add(time.Hour).UnixNano(); expected != storage.earliestExpiry {
+        t.Fatalf("expected the sweep to move the earliest expiry to %d, got %d", expected, storage.earliestExpiry)
+    }
+
+    frozenClock.Advance(time.Hour)
+
+    if saveErr := storage.Save("after", map[string]any{}, time.Hour); nil != saveErr {
+        t.Fatalf("expected the sweep's next earliest expiry honoured, got %v", saveErr)
+    }
+}
+
+func TestNewFileStorage_MaxSessionsResolves(t *testing.T) {
+    defaulted, defaultedErr := NewFileStorage(FileStorageConfig{Path: filepath.Join(t.TempDir(), "sessions.json")})
+    if nil != defaultedErr || 100_000 != defaulted.maxSessions.Value {
+        t.Fatalf("expected 100,000 when left out, got %+v (%v)", defaulted, defaultedErr)
+    }
+
+    unlimited, unlimitedErr := NewFileStorage(FileStorageConfig{Path: filepath.Join(t.TempDir(), "sessions.json"), MaxSessions: bound.UnlimitedCount()})
+    if nil != unlimitedErr || false == unlimited.maxSessions.Unlimited {
+        t.Fatalf("expected unlimited admitted, got %+v (%v)", unlimited, unlimitedErr)
+    }
+
+    _, refusedErr := NewFileStorage(FileStorageConfig{Path: filepath.Join(t.TempDir(), "sessions.json"), MaxSessions: bound.Of(0)})
+    if nil == refusedErr || false == strings.Contains(fmt.Sprint(exception.LogContext(refusedErr, exception.LogContextConfig{})), "FileStorageConfig.MaxSessions") {
+        t.Fatalf("expected a zero ceiling refused naming the field, got %v", refusedErr)
+    }
+}
+
+func TestFileStorage_AFileHoldingMoreThanTheCeilingKeepsThemAndRefusesANewId(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "sessions.json")
+
+    writer, writerErr := NewFileStorage(FileStorageConfig{Path: path})
+    if nil != writerErr {
+        t.Fatalf("unexpected storage error: %v", writerErr)
+    }
+
+    for _, sessionId := range []string{"first", "second", "third"} {
+        if saveErr := writer.Save(sessionId, map[string]any{}, time.Hour); nil != saveErr {
+            t.Fatalf("unexpected save error: %v", saveErr)
+        }
+    }
+
+    storage, storageErr := NewFileStorage(FileStorageConfig{Path: path, MaxSessions: bound.Of(2)})
+    if nil != storageErr {
+        t.Fatalf("unexpected storage error: %v", storageErr)
+    }
+
+    for _, sessionId := range []string{"first", "second", "third"} {
+        if _, found, _ := storage.Load(sessionId); false == found {
+            t.Fatalf("expected %q kept", sessionId)
+        }
+    }
+
+    if saveErr := storage.Save("fourth", map[string]any{}, time.Hour); nil == saveErr {
+        t.Fatalf("expected a new id refused")
+    }
+
+    if saveErr := storage.Save("first", map[string]any{"key": "value"}, time.Hour); nil != saveErr {
+        t.Fatalf("expected a stored id saved, got %v", saveErr)
+    }
+}
+
+func TestFileStorage_TheHandleFormCarriesTheCeiling(t *testing.T) {
+    fileInstance, createErr := os.CreateTemp(t.TempDir(), "sessions")
+    if nil != createErr {
+        t.Fatalf("unexpected create error: %v", createErr)
+    }
+    defer func() {
+        _ = fileInstance.Close()
+    }()
+
+    storage, storageErr := NewFileStorage(FileStorageConfig{File: fileInstance, MaxSessions: bound.Of(1)})
+    if nil != storageErr {
+        t.Fatalf("unexpected storage error: %v", storageErr)
+    }
+
+    if saveErr := storage.Save("first", map[string]any{}, 0); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    if saveErr := storage.Save("second", map[string]any{}, 0); nil == saveErr || "the session file storage is full" != saveErr.Error() {
+        t.Fatalf("expected the new id refused, got %v", saveErr)
+    }
+
+    if deleteErr := storage.Delete("first"); nil != deleteErr {
+        t.Fatalf("unexpected delete error: %v", deleteErr)
+    }
+
+    if saveErr := storage.Save("second", map[string]any{}, 0); nil != saveErr {
+        t.Fatalf("expected the deleted session's slot freed, got %v", saveErr)
     }
 }

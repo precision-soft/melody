@@ -15,6 +15,7 @@ import (
     "sync"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -31,11 +32,21 @@ type FileStorageConfig struct {
     /* File is an open handle the caller owns and keeps owning: it is not closed here, and every write goes through it. A write cannot be atomic through a handle, but the snapshot is encoded whole first, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill mid-write can leave a torn document, which the next construction reports as a decode failure. A handle that cannot seek or that appends is refused, and so is a read-only one where the descriptor's access mode can be read; elsewhere its first Save reports it. */
     File *os.File
 
+    /* MaxSessions bounds the sessions held at once: 100,000 when left out, at least 1, unlimited admitted. At the ceiling, once the lapsed ones are swept, a new id is refused and a stored one is still saved; a file already holding more keeps them. */
+    MaxSessions bound.Count
+
     /* Clock is where every expiry instant is read; nil is the system clock. The file persists the wall reading, so expiry follows every step of the wall clock; SESSION.md names the trade. */
     Clock clockcontract.Clock
 }
 
-/* NewFileStorage builds the storage over the path or the handle the configuration names and loads the sessions the file holds, answering an error for a configuration naming both or neither, a path that cannot be created, a handle that cannot be written and a file that does not decode. */
+var fileStorageMaxSessionsRule = bound.Rule[int]{
+    Name:              "FileStorageConfig.MaxSessions",
+    Default:           DefaultMaxSessions,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
+}
+
+/* NewFileStorage builds the storage over the path or the handle the configuration names and loads the sessions the file holds, answering an error for a MaxSessions below its minimum, a configuration naming both or neither, a path that cannot be created, a handle that cannot be written and a file that does not decode. */
 func NewFileStorage(config FileStorageConfig) (*FileStorage, error) {
     if "" != config.Path && nil != config.File {
         return nil, exception.NewError(
@@ -48,20 +59,35 @@ func NewFileStorage(config FileStorageConfig) (*FileStorage, error) {
         )
     }
 
+    maxSessions, maxSessionsErr := bound.Resolve(config.MaxSessions, fileStorageMaxSessionsRule)
+    if nil != maxSessionsErr {
+        return nil, maxSessionsErr
+    }
+
     clockInstance := config.Clock
     if true == internal.IsNilInterface(clockInstance) {
         clockInstance = clock.NewSystemClock()
     }
 
+    var storage *FileStorage
+    var storageErr error
+
     if nil != config.File {
-        return newFileStorageFromFile(config.File, clockInstance)
-    }
-
-    if "" == config.Path {
+        storage, storageErr = newFileStorageFromFile(config.File, clockInstance)
+    } else if "" == config.Path {
         return nil, exception.NewError("session file storage declares neither a path nor a file", nil, nil)
+    } else {
+        storage, storageErr = newFileStorageFromPath(config.Path, clockInstance)
     }
 
-    return newFileStorageFromPath(config.Path, clockInstance)
+    if nil != storageErr {
+        return nil, storageErr
+    }
+
+    storage.maxSessions = maxSessions
+    storage.earliestExpiry = storage.earliestExpiryLocked()
+
+    return storage, nil
 }
 
 func newFileStorageFromPath(path string, clockInstance clockcontract.Clock) (*FileStorage, error) {
@@ -127,6 +153,8 @@ func newFileStorageFromFile(fileInstance *os.File, clockInstance clockcontract.C
 
 /* FileStorage is recommended for development only. Values are flushed as JSON and reloaded at construction, so after a restart an int reads back float64, a struct map[string]any and a time.Time a string, while in-process they keep the stored types. Every write re-encodes and fsyncs the whole snapshot, so its cost grows with the number of sessions. */
 type FileStorage struct {
+    maxSessions    bound.Resolved[int]
+    earliestExpiry int64
     mutex    sync.Mutex
     path     string
     file     *os.File
@@ -198,7 +226,18 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
     }
 
     previousEntry, hadPrevious := instance.sessionById[sessionId]
+
+    if false == hadPrevious {
+        if refusedErr := instance.refuseNewSessionAtCeilingLocked(); nil != refusedErr {
+            return refusedErr
+        }
+    }
+
     instance.sessionById[sessionId] = entry
+
+    if 0 != expiresAt && expiresAt < instance.earliestExpiry {
+        instance.earliestExpiry = expiresAt
+    }
 
     flushErr := instance.flushLocked()
     if nil != flushErr {
@@ -215,6 +254,45 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
     }
 
     return nil
+}
+
+/* refuseNewSessionAtCeilingLocked sweeps only once an entry can have lapsed, so a flood of refused saves does not walk the whole table on each one. */
+func (instance *FileStorage) refuseNewSessionAtCeilingLocked() error {
+    if true == instance.maxSessions.Unlimited || len(instance.sessionById) < instance.maxSessions.Value {
+        return nil
+    }
+
+    now := instance.clock.Now().UnixNano()
+    if now >= instance.earliestExpiry {
+        instance.purgeExpiredLocked()
+        instance.earliestExpiry = instance.earliestExpiryLocked()
+    }
+
+    if len(instance.sessionById) < instance.maxSessions.Value {
+        return nil
+    }
+
+    return exception.NewError(
+        "the session file storage is full",
+        exceptioncontract.Context{
+            "field":       fileStorageMaxSessionsRule.Name,
+            "maxSessions": instance.maxSessions.Value,
+        },
+        nil,
+    )
+}
+
+/* earliestExpiryLocked answers the first instant a stored session lapses, the far end of time where none of them expires. */
+func (instance *FileStorage) earliestExpiryLocked() int64 {
+    earliestExpiry := int64(math.MaxInt64)
+
+    for _, entry := range instance.sessionById {
+        if 0 != entry.ExpiresAt && entry.ExpiresAt < earliestExpiry {
+            earliestExpiry = entry.ExpiresAt
+        }
+    }
+
+    return earliestExpiry
 }
 
 func (instance *FileStorage) Delete(sessionId string) error {

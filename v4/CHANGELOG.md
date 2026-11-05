@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- session: `InMemoryStorageConfig.MaxSessions`, `FileStorageConfig.MaxSessions` and `DefaultMaxSessions`, 100,000 when left out, at least 1, unlimited admitted.
 - application: `ApplicationConfig.ScopeTeardownTimeout` and the key `MELODY_SCOPE_TEARDOWN_TIMEOUT` (`kernel.scope_teardown_timeout`) declare the term of a scope's close, the key winning over the field, a value below 1ms failing the boot, as does an http process whose term, the default included, does not stay strictly under `MELODY_HTTP_SHUTDOWN_TIMEOUT`; `Application.CloseWithContext` closes the application under the caller's deadline and returns the teardown failure it discovered; a nil context on that door, on the container's and on a scope's is refused with an error before the teardown is claimed.
 - container: `ContainerConfig.ScopeTeardownTimeout`, `ScopeTeardownTimeoutRule` and `DefaultScopeTeardownTimeout`, 3s when left out, at least 1ms, unlimited admitted.
 - lock: `LeaderGateConfig.ReleaseTimeout`, a `bound.Duration` of 5s when left out, at least 1ms, unlimited refused, bounds the release at the end of a term, as the exclusive doors' field does.
@@ -48,6 +49,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- session: **Behavioural change**: at `MaxSessions`, once the lapsed sessions are swept, the in-memory and file storages refuse a `Save` of a new id, where every cookie-less request writing to a session on a public route held one more entry for the session's whole ttl.
 - container: **Breaking**: `CloseWithContext` is declared on the `Container` and `Scope` contracts, and `config/contract.KernelConfiguration` declares `ScopeTeardownTimeout`.
 - container: **Behavioural change**: a scope's `Close` hands its scoped services a context ending at `ContainerConfig.ScopeTeardownTimeout`, so the close of a command's, a request's, a consumed message's or a cron run's scope ends at that term and reports the service that did not finish, where a service waiting on its context held the process or the response without limit.
 - example: the outbox relay's amqp transport prefetches 10 unacknowledged deliveries, the amqp transport's default, where it prefetched 1; the message bus transport keeps the 10 it set.
