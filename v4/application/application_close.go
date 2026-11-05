@@ -3,7 +3,6 @@ package application
 import (
     "context"
 
-    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -12,6 +11,16 @@ import (
 
 func (instance *Application) Close() {
     _ = instance.close(context.Background())
+}
+
+/* CloseWithContext is Close under the caller's deadline, handed to the teardown, and returns the teardown failure when this call discovered it. */
+func (instance *Application) CloseWithContext(closeContext context.Context) error {
+    /* refused before the once the close claims, so a refused call leaves the teardown to a later one */
+    if true == internal.IsNilInterface(closeContext) {
+        return exception.NewError("the close context is nil", exceptioncontract.Context{"door": "Application.CloseWithContext"}, nil)
+    }
+
+    return instance.close(closeContext)
 }
 
 /* closeBeforeExit is the exit handler's before-exit hook; it carries the deadline the shield holds the teardown to. */
@@ -52,7 +61,7 @@ func (instance *Application) performClose(closeContext context.Context) error {
         alreadyClosed = closedChecker.IsClosed()
     }
 
-    serviceContainerCloseErr := closeServiceContainerWithin(closeContext, serviceContainer)
+    serviceContainerCloseErr := serviceContainer.CloseWithContext(closeContext)
 
     /* a container already closed before this close reached it answers for a teardown somebody else performed: neither its failure nor its deadline record is this close's to report */
     if false == alreadyClosed {
@@ -80,12 +89,3 @@ func (instance *Application) performClose(closeContext context.Context) error {
     return nil
 }
 
-/* closeServiceContainerWithin uses the container's context-taking teardown when the value has one, since the contract declares Close alone; a container with only Close is closed with it, and the budget then bounds the shield around this step. */
-func closeServiceContainerWithin(closeContext context.Context, serviceContainer containercontract.Container) error {
-    contextCloser, isContextCloser := serviceContainer.(containercontract.ContextCloser)
-    if true == isContextCloser {
-        return contextCloser.CloseWithContext(closeContext)
-    }
-
-    return serviceContainer.Close()
-}

@@ -4,9 +4,14 @@ import (
     "bytes"
     "context"
     "errors"
+    "io"
     "testing"
+    "time"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     urfavecli "github.com/urfave/cli/v3"
@@ -212,5 +217,58 @@ func TestRoot_SetWriterWithATypedNilLeavesTheEngineDefault(t *testing.T) {
         if nil != registered.Writer || nil != registered.ErrWriter {
             t.Fatalf("expected the command's streams nil, got %#v %#v", registered.Writer, registered.ErrWriter)
         }
+    }
+}
+
+type contextWaitingScopedService struct{}
+
+func (instance *contextWaitingScopedService) CloseWithContext(closeContext context.Context) error {
+    <-closeContext.Done()
+
+    return closeContext.Err()
+}
+
+func TestRoot_RunEndsAtTheScopeTeardownTimeoutWithTheScopeFailure(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{ScopeTeardownTimeout: bound.Of(50 * time.Millisecond)})
+    container.MustRegisterScoped[*contextWaitingScopedService](
+        serviceContainer,
+        "scoped.waiting",
+        func(resolver containercontract.Resolver) (*contextWaitingScopedService, error) {
+            return &contextWaitingScopedService{}, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    command := &testCommand{
+        nameValue:        "probe",
+        descriptionValue: "probe",
+        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            _, resolveErr := container.FromResolver[*contextWaitingScopedService](runtimeInstance.Context(), runtimeInstance.Scope(), "scoped.waiting")
+
+            return resolveErr
+        },
+    }
+
+    root := NewRoot("app", "app")
+    root.SetWriter(io.Discard)
+    root.SetErrorWriter(io.Discard)
+    root.Register(command, &testRuntime{
+        contextValue:   context.Background(),
+        scopeValue:     serviceContainer.NewScope(),
+        containerValue: serviceContainer,
+    })
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- root.Run(context.Background(), []string{"app", "probe"})
+    }()
+
+    select {
+    case runErr := <-finished:
+        if nil == runErr {
+            t.Fatalf("expected the scope's failure to reach the run's error")
+        }
+    case <-time.After(container.DefaultScopeTeardownTimeout / 2):
+        t.Fatalf("expected the run to end at the configured scope teardown timeout")
     }
 }

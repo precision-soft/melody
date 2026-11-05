@@ -289,6 +289,10 @@ func (instance *stubKernelConfiguration) TeardownTimeout() bound.Duration {
     return bound.Duration{}
 }
 
+func (instance *stubKernelConfiguration) ScopeTeardownTimeout() bound.Duration {
+    return bound.Duration{}
+}
+
 func (instance *stubKernelConfiguration) ContainerCreationWaiters() bound.Count {
     return bound.Count{}
 }

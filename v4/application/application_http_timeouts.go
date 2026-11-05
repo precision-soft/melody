@@ -8,6 +8,8 @@ import (
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -74,6 +76,38 @@ func resolveContainerTeardownSequential(configuration configcontract.Configurati
 
 func resolveTeardownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {
     return resolveApplicationLimit(configuration.Kernel().TeardownTimeout(), applicationConfig.TeardownTimeout, config.TeardownTimeoutRule)
+}
+
+func resolveScopeTeardownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {
+    return resolveApplicationLimit(configuration.Kernel().ScopeTeardownTimeout(), applicationConfig.ScopeTeardownTimeout, container.ScopeTeardownTimeoutRule)
+}
+
+/* refuseScopeTeardownOutlastingHttpShutdown fails an http boot whose request scope may still be closing when the shutdown's wait ends, which every stop catching a slow close would report as a scope left open and exit non-zero on. */
+func refuseScopeTeardownOutlastingHttpShutdown(configuration configcontract.Configuration, applicationConfig ApplicationConfig) error {
+    scopeTeardownTimeout, scopeTeardownTimeoutErr := resolveScopeTeardownTimeout(configuration, applicationConfig)
+    if nil != scopeTeardownTimeoutErr {
+        return scopeTeardownTimeoutErr
+    }
+
+    httpShutdownTimeout := configuration.Http().ShutdownTimeout()
+    if true == httpShutdownTimeout.Unlimited {
+        return nil
+    }
+
+    if false == scopeTeardownTimeout.Unlimited && scopeTeardownTimeout.Value < httpShutdownTimeout.Value {
+        return nil
+    }
+
+    return exception.NewError(
+        "the scope teardown timeout must stay under the http shutdown timeout",
+        exceptioncontract.Context{
+            "scopeTeardownKey":     config.ScopeTeardownTimeoutKey,
+            "scopeTeardownTimeout": scopeTeardownTimeout.Limit().String(),
+            "httpShutdownKey":      config.HttpShutdownTimeoutKey,
+            "httpShutdownTimeout":  httpShutdownTimeout.Value.String(),
+        },
+        nil,
+    )
 }
 
 func resolveApplicationLimit[T bound.Unit](keyLimit bound.Limit[T], fieldLimit bound.Limit[T], rule bound.Rule[T]) (bound.Resolved[T], error) {

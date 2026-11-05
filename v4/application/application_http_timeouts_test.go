@@ -7,7 +7,9 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
+    "github.com/precision-soft/melody/v4/container"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -230,5 +232,61 @@ func TestResolveContainerTeardownSequential_TheKeyWinsOverTheField(t *testing.T)
 
     if false == resolveContainerTeardownSequential(newLimitConfiguration(t, map[string]string{config.ContainerTeardownSequentialKey: "true"}), ApplicationConfig{}) {
         t.Fatalf("expected the key to choose the sequential teardown")
+    }
+}
+
+func TestResolveScopeTeardownTimeout_FollowsTheSamePrecedenceAndAdmitsUnlimited(t *testing.T) {
+    byDefault, byDefaultErr := resolveScopeTeardownTimeout(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{})
+    if nil != byDefaultErr || container.DefaultScopeTeardownTimeout != byDefault.Value {
+        t.Fatalf("expected the default, got %+v (%v)", byDefault, byDefaultErr)
+    }
+
+    fromField, fromFieldErr := resolveScopeTeardownTimeout(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{ScopeTeardownTimeout: bound.UnlimitedDuration()})
+    if nil != fromFieldErr || false == fromField.Unlimited {
+        t.Fatalf("expected the field's unlimited, got %+v (%v)", fromField, fromFieldErr)
+    }
+
+    fromKey, fromKeyErr := resolveScopeTeardownTimeout(newLimitConfiguration(t, map[string]string{config.ScopeTeardownTimeoutKey: "7s"}), ApplicationConfig{ScopeTeardownTimeout: bound.UnlimitedDuration()})
+    if nil != fromKeyErr || 7*time.Second != fromKey.Value {
+        t.Fatalf("expected the key to win, got %+v (%v)", fromKey, fromKeyErr)
+    }
+
+    if _, refusedErr := resolveScopeTeardownTimeout(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{ScopeTeardownTimeout: bound.Of(time.Duration(0))}); nil == refusedErr {
+        t.Fatalf("expected a zero scope teardown timeout field refused")
+    }
+}
+
+func TestRefuseScopeTeardownOutlastingHttpShutdown_AdmitsOnlyATermStrictlyUnderTheWait(t *testing.T) {
+    if refusedErr := refuseScopeTeardownOutlastingHttpShutdown(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{}); nil != refusedErr {
+        t.Fatalf("expected the two defaults admitted, got %v", refusedErr)
+    }
+
+    admitted := newLimitConfiguration(t, map[string]string{config.HttpShutdownTimeoutKey: "2s", config.ScopeTeardownTimeoutKey: "1999ms"})
+    if refusedErr := refuseScopeTeardownOutlastingHttpShutdown(admitted, ApplicationConfig{}); nil != refusedErr {
+        t.Fatalf("expected a term just under the wait admitted, got %v", refusedErr)
+    }
+
+    refusedCases := map[string]struct {
+        values            map[string]string
+        applicationConfig ApplicationConfig
+    }{
+        "equal":                 {values: map[string]string{config.HttpShutdownTimeoutKey: "2s", config.ScopeTeardownTimeoutKey: "2s"}},
+        "above":                 {values: map[string]string{config.HttpShutdownTimeoutKey: "2s", config.ScopeTeardownTimeoutKey: "3s"}},
+        "the default above":     {values: map[string]string{config.HttpShutdownTimeoutKey: "2s"}},
+        "the default equal":     {values: map[string]string{config.HttpShutdownTimeoutKey: "3s"}},
+        "unlimited by the key":  {values: map[string]string{config.ScopeTeardownTimeoutKey: "unlimited"}},
+        "unlimited by the field": {values: map[string]string{}, applicationConfig: ApplicationConfig{ScopeTeardownTimeout: bound.UnlimitedDuration()}},
+    }
+
+    for name, refusedCase := range refusedCases {
+        refusedErr := refuseScopeTeardownOutlastingHttpShutdown(newLimitConfiguration(t, refusedCase.values), refusedCase.applicationConfig)
+        if nil == refusedErr || "the scope teardown timeout must stay under the http shutdown timeout" != refusedErr.Error() {
+            t.Fatalf("%s: expected the refusal, got %v", name, refusedErr)
+        }
+
+        refusalContext := exception.LogContext(refusedErr, exception.LogContextConfig{})
+        if config.ScopeTeardownTimeoutKey != refusalContext["scopeTeardownKey"] || config.HttpShutdownTimeoutKey != refusalContext["httpShutdownKey"] {
+            t.Fatalf("%s: expected the refusal to name both keys, got %v", name, refusalContext)
+        }
     }
 }

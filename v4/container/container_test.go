@@ -8,6 +8,7 @@ import (
     "sync"
     "sync/atomic"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -1581,4 +1582,72 @@ func TestNewContainer_RefusesACreationWaitersBoundBelowOneNamingTheField(t *test
     }()
 
     NewContainer(ContainerConfig{CreationWaiters: bound.Of(0)})
+}
+
+func TestNewContainer_ResolvesTheScopeTeardownTimeout(t *testing.T) {
+    defaulted := NewContainer(ContainerConfig{}).(*container)
+    if false != defaulted.scopeTeardownTimeout.Unlimited || 3*time.Second != defaulted.scopeTeardownTimeout.Value {
+        t.Fatalf("expected a left-out timeout to resolve to 3s, got %+v", defaulted.scopeTeardownTimeout)
+    }
+
+    given := NewContainer(ContainerConfig{ScopeTeardownTimeout: bound.Of(time.Millisecond)}).(*container)
+    if time.Millisecond != given.scopeTeardownTimeout.Value {
+        t.Fatalf("expected the minimum of 1ms to be admitted, got %+v", given.scopeTeardownTimeout)
+    }
+
+    unlimited := NewContainer(ContainerConfig{ScopeTeardownTimeout: bound.UnlimitedDuration()}).(*container)
+    if false == unlimited.scopeTeardownTimeout.Unlimited {
+        t.Fatalf("expected unlimited to be admitted, got %+v", unlimited.scopeTeardownTimeout)
+    }
+}
+
+func TestNewContainer_RefusesAScopeTeardownTimeoutBelowItsMinimumNamingTheField(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError || "the limit is below its minimum" != recoveredErr.Error() {
+            t.Fatalf("expected the timeout below its minimum to be refused, got %v", recoveredErr)
+        }
+
+        if "ContainerConfig.ScopeTeardownTimeout" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name ContainerConfig.ScopeTeardownTimeout, got %v", exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        }
+    }()
+
+    NewContainer(ContainerConfig{ScopeTeardownTimeout: bound.Of(time.Duration(0))})
+}
+
+type closeCountingService struct {
+    closes atomic.Int32
+}
+
+func (instance *closeCountingService) CloseWithContext(closeContext context.Context) error {
+    instance.closes.Add(1)
+
+    return nil
+}
+
+func TestContainer_CloseWithContextRefusesANilContextAndLeavesTheTeardownToALaterCall(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    MustRegister[*closeCountingService](
+        serviceContainer,
+        "app.counting",
+        func(resolver containercontract.Resolver) (*closeCountingService, error) {
+            return &closeCountingService{}, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+    service := MustFromResolver[*closeCountingService](context.Background(), serviceContainer, "app.counting")
+
+    //nolint:staticcheck // the nil context is the input under test
+    if closeErr := serviceContainer.CloseWithContext(nil); nil == closeErr || "the close context is nil" != closeErr.Error() {
+        t.Fatalf("expected the nil context refused, got %v", closeErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if 1 != service.closes.Load() {
+        t.Fatalf("expected the later close to close the service once, got %d", service.closes.Load())
+    }
 }

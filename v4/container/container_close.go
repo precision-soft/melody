@@ -294,6 +294,11 @@ func (instance *container) Close() error {
 
 /* CloseWithContext is Close under the caller's deadline, handed to every service that can observe one. The deadline bounds the teardown as a whole, so each service sees what is left of it. A teardown that runs past it keeps a record of the budget, what it spent, the closers running at the deadline and those reached after it; the record travels in the error of a failed teardown and through TeardownDeadlineOverrun after a clean one, and is never a failure itself. A context with no deadline sets no term. */
 func (instance *container) CloseWithContext(closeContext context.Context) error {
+    /* refused before the once, which a panic inside the teardown would consume, leaving a later Close answering nil with nothing closed */
+    if true == internal.IsNilInterface(closeContext) {
+        return exception.NewError("the close context is nil", exceptioncontract.Context{"door": "container.CloseWithContext"}, nil)
+    }
+
     instance.closeOnce.Do(func() {
         instance.closeErr = instance.closeInternal(closeContext)
     })

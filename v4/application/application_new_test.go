@@ -224,3 +224,41 @@ func TestNewApplication_TheContainerTeardownSequentialFieldReachesTheContainer(t
         _ = serviceContainer.Close()
     }
 }
+
+type scopeTeardownTimeoutProbe struct {
+    hasDeadline bool
+}
+
+func (instance *scopeTeardownTimeoutProbe) CloseWithContext(closeContext context.Context) error {
+    _, instance.hasDeadline = closeContext.Deadline()
+
+    return nil
+}
+
+func TestNewApplication_TheScopeTeardownTimeoutFieldReachesTheContainersScopes(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ScopeTeardownTimeout: bound.UnlimitedDuration()})
+    serviceContainer := applicationInstance.kernel.ServiceContainer()
+    defer func() {
+        _ = serviceContainer.Close()
+    }()
+
+    container.MustRegisterScoped[*scopeTeardownTimeoutProbe](
+        serviceContainer,
+        "app.scope.teardown.timeout",
+        func(resolver containercontract.Resolver) (*scopeTeardownTimeoutProbe, error) {
+            return &scopeTeardownTimeoutProbe{}, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    scope := serviceContainer.NewScope()
+    probe := container.MustFromResolver[*scopeTeardownTimeoutProbe](context.Background(), scope, "app.scope.teardown.timeout")
+
+    if closeErr := scope.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if true == probe.hasDeadline {
+        t.Fatalf("expected the application's unlimited timeout to reach the scope, the close carried a deadline")
+    }
+}

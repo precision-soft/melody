@@ -492,6 +492,11 @@ func (instance *Configuration) buildKernelConfiguration() error {
         return teardownTimeoutErr
     }
 
+    scopeTeardownTimeout, scopeTeardownTimeoutErr := checkedParameterLimit(instance.MustGet(KernelScopeTeardownTimeout), ScopeTeardownTimeoutKey, container.ScopeTeardownTimeoutRule)
+    if nil != scopeTeardownTimeoutErr {
+        return scopeTeardownTimeoutErr
+    }
+
     containerCreationWaiters, containerCreationWaitersErr := checkedParameterLimit(instance.MustGet(KernelContainerCreationWaiters), ContainerCreationWaitersKey, container.CreationWaitersRule)
     if nil != containerCreationWaitersErr {
         return containerCreationWaitersErr
@@ -512,6 +517,7 @@ func (instance *Configuration) buildKernelConfiguration() error {
         instance.MustGet(KernelLogLevel).MustString(),
         instance.MustGet(KernelCacheDir).MustString(),
         teardownTimeout,
+        scopeTeardownTimeout,
         containerCreationWaiters,
     )
     if nil != newKernelConfigurationErr {

@@ -1090,3 +1090,44 @@ func TestConfigurationContainerTeardownSequentialRejectsAValueThatIsNoBooleanNam
         t.Fatalf("expected the refusal to name the key, got %v", exception.LogContext(configurationErr, exception.LogContextConfig{}))
     }
 }
+
+func TestConfigurationScopeTeardownTimeoutIsAbsentWhenLeftOutAndReadFromTheEnvironment(t *testing.T) {
+    if false == newTeardownTimeoutConfiguration(t, map[string]string{}).Kernel().ScopeTeardownTimeout().IsAbsent() {
+        t.Fatalf("expected the scope teardown timeout absent when left out")
+    }
+
+    configuration := newTeardownTimeoutConfiguration(t, map[string]string{ScopeTeardownTimeoutKey: "7s"})
+    if bound.Of(7*time.Second) != configuration.Kernel().ScopeTeardownTimeout() {
+        t.Fatalf("expected the configured timeout, got %v", configuration.Kernel().ScopeTeardownTimeout())
+    }
+
+    if "7s" != configuration.MustGet(KernelScopeTeardownTimeout).MustString() {
+        t.Fatalf("expected the parameter to carry the key's value")
+    }
+
+    if false == newTeardownTimeoutConfiguration(t, map[string]string{ScopeTeardownTimeoutKey: "unlimited"}).Kernel().ScopeTeardownTimeout().IsUnlimited() {
+        t.Fatalf("expected unlimited")
+    }
+}
+
+func TestConfigurationScopeTeardownTimeoutRejectsAValueOutsideItsRuleNamingTheKey(t *testing.T) {
+    for _, value := range []string{"-1s", "0s", "soon"} {
+        environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: map[string]string{ScopeTeardownTimeoutKey: value}})
+        if nil != environmentErr {
+            t.Fatalf("new environment error: %v", environmentErr)
+        }
+
+        _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+        if nil == configurationErr {
+            t.Fatalf("expected the scope teardown timeout %q to fail the boot", value)
+        }
+
+        if "soon" != value && false == strings.Contains(fmt.Sprint(exception.LogContext(configurationErr, exception.LogContextConfig{})), "ContainerConfig.ScopeTeardownTimeout") {
+            t.Fatalf("expected the refusal of %q to name its rule, got %v", value, exception.LogContext(configurationErr, exception.LogContextConfig{}))
+        }
+
+        if ScopeTeardownTimeoutKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
+            t.Fatalf("expected the refusal of %q to name the key, got %v", value, exception.LogContext(configurationErr, exception.LogContextConfig{}))
+        }
+    }
+}

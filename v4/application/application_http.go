@@ -132,6 +132,10 @@ func (instance *Application) runHttp(
         return serverLimitsErr
     }
 
+    if refusedErr := refuseScopeTeardownOutlastingHttpShutdown(configuration, instance.applicationConfig); nil != refusedErr {
+        return refusedErr
+    }
+
     httpKernel := instance.kernel.HttpKernel()
     httpKernel.Use(instance.httpMiddlewares.all(instance.kernel))
 

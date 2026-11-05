@@ -23,6 +23,7 @@ func newKernelConfiguration(
     logLevel string,
     cacheDir string,
     teardownTimeout bound.Duration,
+    scopeTeardownTimeout bound.Duration,
     containerCreationWaiters bound.Count,
 ) (*kernelConfiguration, error) {
     parsedLogLevel, parseLogLevelErr := parseKernelLogLevel(logLevel)
@@ -40,6 +41,7 @@ func newKernelConfiguration(
         logLevel:        parsedLogLevel,
         cacheDir:        cacheDir,
         teardownTimeout:          teardownTimeout,
+        scopeTeardownTimeout:     scopeTeardownTimeout,
         containerCreationWaiters: containerCreationWaiters,
     }
 
@@ -61,6 +63,7 @@ type kernelConfiguration struct {
     logLevel        loggingcontract.Level
     cacheDir        string
     teardownTimeout bound.Duration
+    scopeTeardownTimeout bound.Duration
     containerCreationWaiters bound.Count
     containerTeardownSequential configcontract.Switch
 }
@@ -229,6 +232,11 @@ func (instance *kernelConfiguration) validateCacheDir() error {
 /* TeardownTimeout is MELODY_TEARDOWN_TIMEOUT as the deployment set it, absent when the key says nothing; the application decides it against its own config and TeardownTimeoutRule. */
 func (instance *kernelConfiguration) TeardownTimeout() bound.Duration {
     return instance.teardownTimeout
+}
+
+/* ScopeTeardownTimeout is MELODY_SCOPE_TEARDOWN_TIMEOUT as the deployment set it, absent when the key says nothing; the application decides it against its own config and container.ScopeTeardownTimeoutRule. */
+func (instance *kernelConfiguration) ScopeTeardownTimeout() bound.Duration {
+    return instance.scopeTeardownTimeout
 }
 
 /* ContainerCreationWaiters is MELODY_CONTAINER_CREATION_WAITERS as the deployment set it, absent when the key says nothing; the application decides it against its own config and container.CreationWaitersRule. */

@@ -9,6 +9,7 @@ import (
     "strings"
     "sync"
     "sync/atomic"
+    "time"
 
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -16,6 +17,17 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
 )
+
+/* DefaultScopeTeardownTimeout is how long a scope's Close gives its scoped services when ContainerConfig.ScopeTeardownTimeout is left out. It stays under config.DefaultHttpShutdownTimeout, since a request scope still closing when a shutdown's wait ends is reported as left open. */
+const DefaultScopeTeardownTimeout = 3 * time.Second
+
+/* ScopeTeardownTimeoutRule resolves ContainerConfig.ScopeTeardownTimeout: 3s when left out, at least 1ms, unlimited admitted. */
+var ScopeTeardownTimeoutRule = bound.Rule[time.Duration]{
+    Name:              "ContainerConfig.ScopeTeardownTimeout",
+    Default:           DefaultScopeTeardownTimeout,
+    Minimum:           bound.TimeoutMinimum,
+    UnlimitedAdmitted: true,
+}
 
 /* DefaultCreationWaiters is how many resolutions may wait on one in-flight creation when ContainerConfig.CreationWaiters is left out: every concurrent request of one server waiting on the same singleton at a cold start. */
 const DefaultCreationWaiters = 1024
@@ -30,6 +42,8 @@ var CreationWaitersRule = bound.Rule[int]{
 
 /* ContainerConfig is what a container declares beyond its registrations; the zero value is the default. */
 type ContainerConfig struct {
+    /* ScopeTeardownTimeout bounds what a scope's Close hands its scoped services: 3s when left out, at least 1ms, unlimited admitted for no term. */
+    ScopeTeardownTimeout bound.Duration
     /* CreationWaiters bounds the resolutions that may wait on one in-flight creation: 1,024 when left out, at least 1, unlimited admitted. One more is refused with ErrCreationWaitersExceeded. */
     CreationWaiters bound.Count
     /* TeardownSequential closes the services one after the other in the plan's order, where the default closes in one wave every service the teardown graph proves unrelated to the others in it: the opt-out for services whose Close methods touch shared external state the container cannot see, such as one file or one remote session. */
@@ -43,8 +57,14 @@ func NewContainer(config ContainerConfig) containercontract.Container {
         exception.Panic(exception.FromError(creationWaitersErr))
     }
 
+    scopeTeardownTimeout, scopeTeardownTimeoutErr := bound.Resolve(config.ScopeTeardownTimeout, ScopeTeardownTimeoutRule)
+    if nil != scopeTeardownTimeoutErr {
+        exception.Panic(exception.FromError(scopeTeardownTimeoutErr))
+    }
+
     return &container{
         creationWaiters:             creationWaiters,
+        scopeTeardownTimeout:        scopeTeardownTimeout,
         teardownInWaves:             false == config.TeardownSequential,
         closedChannel:               make(chan struct{}),
         providers:                   make(map[string]providerAny),
@@ -115,6 +135,8 @@ type container struct {
     /* closedChannel is closed under the lock that raises isClosed, so a resolution parked on another goroutine's creation leaves when the teardown begins */
     closedChannel chan struct{}
     creationWaiters bound.Resolved[int]
+
+    scopeTeardownTimeout bound.Resolved[time.Duration]
     /* afterCreationWaitReleased is a test seam: it runs once a waiter left its wait on a release, before it re-takes the lock */
     afterCreationWaitReleased func()
     /* the hand-declared edges, kept beside the graph they were written into so a refusal can quote them */

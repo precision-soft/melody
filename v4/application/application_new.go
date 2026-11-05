@@ -39,6 +39,9 @@ type ApplicationConfig struct {
     MaxHeaderBytes bound.Count
     /* TeardownTimeout budgets the whole ordered teardown of a clean stop: at least 1ms, unlimited admitted for a supervisor that grants no deadline. */
     TeardownTimeout bound.Duration
+    /* ScopeTeardownTimeout bounds the close of a request's, a command's, a message's and a cron run's scope: 3s when left out, at least 1ms, unlimited admitted for no term. */
+    ScopeTeardownTimeout bound.Duration
+
     /* ContainerCreationWaiters bounds the resolutions that may wait on one in-flight creation: 1,024 when left out, at least 1, unlimited admitted. */
     ContainerCreationWaiters bound.Count
     /* ContainerTeardownSequential closes the container's services one after the other instead of in waves, for services whose Close methods touch shared external state the container cannot see; MELODY_CONTAINER_TEARDOWN_SEQUENTIAL wins over it when set. */
@@ -94,6 +97,11 @@ func NewApplication(
         exception.Panic(exception.NewError("the teardown timeout is refused", nil, teardownTimeoutErr))
     }
 
+    scopeTeardownTimeout, scopeTeardownTimeoutErr := resolveScopeTeardownTimeout(configuration, applicationConfig)
+    if nil != scopeTeardownTimeoutErr {
+        exception.Panic(exception.NewError("the scope teardown timeout is refused", nil, scopeTeardownTimeoutErr))
+    }
+
     containerCreationWaiters, containerCreationWaitersErr := resolveContainerCreationWaiters(configuration, applicationConfig)
     if nil != containerCreationWaitersErr {
         exception.Panic(exception.NewError("the container creation waiters are refused", nil, containerCreationWaitersErr))
@@ -108,8 +116,9 @@ func NewApplication(
         ctx,
         configuration,
         container.NewContainer(container.ContainerConfig{
-            CreationWaiters:    containerCreationWaiters.Limit(),
-            TeardownSequential: resolveContainerTeardownSequential(configuration, applicationConfig),
+            ScopeTeardownTimeout: scopeTeardownTimeout.Limit(),
+            CreationWaiters:      containerCreationWaiters.Limit(),
+            TeardownSequential:   resolveContainerTeardownSequential(configuration, applicationConfig),
         }),
         httpRouter,
         event.NewEventDispatcher(clockInstance),

@@ -346,6 +346,7 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 - [`(*Application).Boot()`](../../application/application.go)
 - [`(*Application).Run()`](../../application/application.go)
 - [`(*Application).Close()`](../../application/application_close.go)
+- [`(*Application).CloseWithContext(closeContext context.Context) error`](../../application/application_close.go)
 - [`(*Application).ProcessRole()`](../../application/application.go) — the role this process resolved to, the same string `ServiceProcessRole` answers
 
 ### Registration APIs
@@ -374,7 +375,7 @@ one, the budget is what bounds the wait.
 
 ### Server limits
 
-An http process serves with five per-request limits, a clean stop spends one teardown budget, and the container bounds the resolutions waiting on one creation. Each is a [`bound`](../../bound/limit.go) limit with three sources, decided in this order: the configuration key a deployment sets, then the field of [`ApplicationConfig`](../../application/application_new.go), then the framework default.
+An http process serves with five per-request limits, a clean stop spends one teardown budget, the close of a scope runs under one term, and the container bounds the resolutions waiting on one creation. Each is a [`bound`](../../bound/limit.go) limit with three sources, decided in this order: the configuration key a deployment sets, then the field of [`ApplicationConfig`](../../application/application_new.go), then the framework default.
 
 | Field                      | Key                                 | Default | Minimum | Unlimited |
 |----------------------------|-------------------------------------|---------|---------|-----------|
@@ -384,6 +385,7 @@ An http process serves with five per-request limits, a clean stop spends one tea
 | `IdleTimeout`              | `MELODY_HTTP_IDLE_TIMEOUT`          | 60s     | 1ms     | refused   |
 | `MaxHeaderBytes`           | `MELODY_HTTP_MAX_HEADER_BYTES`      | 1 MiB   | 4 KiB   | refused   |
 | `TeardownTimeout`          | `MELODY_TEARDOWN_TIMEOUT`           | 10s     | 1ms     | admitted  |
+| `ScopeTeardownTimeout`     | `MELODY_SCOPE_TEARDOWN_TIMEOUT`     | 3s      | 1ms     | admitted  |
 | `ContainerCreationWaiters` | `MELODY_CONTAINER_CREATION_WAITERS` | 1,024   | 1       | admitted  |
 
 The field is the application's own default for its deployments, and the key is the deployment's word over it. A key read `unlimited` where the rule refuses it, or a value below the minimum from either source, fails the boot naming the field, and the key when the key carried it. Unlimited is refused on the five server limits because `net/http` reads no bound as no timeout, which leaves a slow client holding a connection; a deployment that wants a long one names it. A teardown without a deadline is `unlimited`, and so is a container that admits every waiter.

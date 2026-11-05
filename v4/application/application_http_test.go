@@ -429,6 +429,7 @@ func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T
             values: map[string]string{
                 config.HttpAddressKey:         "127.0.0.1:34519",
                 config.HttpShutdownTimeoutKey: "50ms",
+                config.ScopeTeardownTimeoutKey: "10ms",
             },
         },
     )
@@ -802,6 +803,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
             values: map[string]string{
                 config.HttpAddressKey:         "127.0.0.1:34521",
                 config.HttpShutdownTimeoutKey: "200ms",
+                config.ScopeTeardownTimeoutKey: "10ms",
             },
         },
     )
@@ -1580,5 +1582,38 @@ func TestRunHttp_RefusesAServerLimitTheApplicationConfigSetsBelowItsMinimum(t *t
 
     if runErr := applicationInstance.runHttp(cancelledContext); nil == runErr {
         t.Fatalf("expected a zero read timeout refused")
+    }
+}
+
+func TestRunHttp_RefusesAScopeTeardownTimeoutOutlastingTheShutdownBeforeServing(t *testing.T) {
+    environment, environmentErr := config.NewEnvironment(
+        &mapEnvironmentSource{
+            values: map[string]string{
+                config.HttpAddressKey:         "127.0.0.1:34523",
+                config.HttpShutdownTimeoutKey: "2s",
+            },
+        },
+    )
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    applicationInstance := &Application{
+        ctx:                  context.Background(),
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
+        kernel:               newTestKernel(),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        moduleConfigurations: make(map[string]any),
+    }
+
+    runErr := applicationInstance.runHttp(context.Background())
+    if nil == runErr || "the scope teardown timeout must stay under the http shutdown timeout" != runErr.Error() {
+        t.Fatalf("expected the boot refused by name, got %v", runErr)
     }
 }

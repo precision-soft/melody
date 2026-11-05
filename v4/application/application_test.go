@@ -1361,3 +1361,59 @@ func TestRun_ClosesIndependentDependentsTogetherUnderTheConfiguredBudget(t *test
         t.Fatalf("expected a deadline inside the configured three-second budget, got %v", remaining)
     }
 }
+
+type deadlineRecordingCloser struct {
+    hasDeadline bool
+}
+
+func (instance *deadlineRecordingCloser) CloseWithContext(closeContext context.Context) error {
+    _, instance.hasDeadline = closeContext.Deadline()
+
+    return nil
+}
+
+func TestCloseWithContext_HandsTheCallersDeadlineToTheTeardown(t *testing.T) {
+    applicationInstance := newCollisionTestApplication(t)
+
+    applicationInstance.RegisterService(
+        "service.test.deadline.closer",
+        func(resolver containercontract.Resolver) (*deadlineRecordingCloser, error) {
+            return &deadlineRecordingCloser{}, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    closer := container.MustFromResolver[*deadlineRecordingCloser](t.Context(), applicationInstance.kernel.ServiceContainer(), "service.test.deadline.closer")
+
+    closeContext, cancel := context.WithTimeout(context.Background(), time.Minute)
+    defer cancel()
+
+    if closeErr := applicationInstance.CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if false == closer.hasDeadline {
+        t.Fatalf("expected the teardown to hand the service the caller's deadline")
+    }
+}
+
+func TestCloseWithContext_ReportsTheFailureItDiscovered(t *testing.T) {
+    applicationInstance := newFailingCloseApplication(t)
+
+    if closeErr := applicationInstance.CloseWithContext(context.Background()); nil == closeErr {
+        t.Fatalf("expected the teardown failure returned")
+    }
+}
+
+func TestCloseWithContext_RefusesANilContextAndLeavesTheTeardownToALaterCall(t *testing.T) {
+    applicationInstance := newFailingCloseApplication(t)
+
+    //nolint:staticcheck // the nil context is the input under test
+    if closeErr := applicationInstance.CloseWithContext(nil); nil == closeErr || "the close context is nil" != closeErr.Error() {
+        t.Fatalf("expected the nil context refused, got %v", closeErr)
+    }
+
+    if closeErr := applicationInstance.CloseWithContext(context.Background()); nil == closeErr {
+        t.Fatalf("expected the later call to run the teardown and report its failure")
+    }
+}

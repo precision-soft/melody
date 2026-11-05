@@ -8,7 +8,9 @@ import (
     "strings"
     "sync"
     "sync/atomic"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -21,6 +23,7 @@ func newScope(containerInstance *container, plan *scopePlan) containercontract.S
     }
 
     scopeInstance := &scope{
+        teardownTimeout:      containerInstance.scopeTeardownTimeout,
         plan:                 plan,
         instances:            make(map[string]any),
         typeInstances:        make(map[reflect.Type]any),
@@ -53,6 +56,8 @@ type scope struct {
     container atomic.Pointer[container]
     /* the immutable plan this scope was created against, shared by reference so creating a scope is O(1) */
     plan          *scopePlan
+
+    teardownTimeout bound.Resolved[time.Duration]
     instances     map[string]any
     typeInstances map[reflect.Type]any
     /* the services built through this scope, apart from the overrides installed into it, which outlive the scope */
@@ -496,13 +501,24 @@ func (instance *scope) Closed() bool {
     return nil == instance.container.Load()
 }
 
-/* Close ends the request the scope stands for and closes only the services the scope built: overrides belong to their installers, but one installed ClosedWithScope, and singletons to the root container. It is CloseWithContext with no deadline. */
+/* Close ends the request the scope stands for and closes only the services the scope built: overrides belong to their installers, but one installed ClosedWithScope, and singletons to the root container. It is CloseWithContext under the container's ScopeTeardownTimeout, with no deadline where that is unlimited. */
 func (instance *scope) Close() error {
-    return instance.CloseWithContext(context.Background())
+    if true == instance.teardownTimeout.Unlimited {
+        return instance.CloseWithContext(context.Background())
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), instance.teardownTimeout.Value)
+    defer cancel()
+
+    return instance.CloseWithContext(closeContext)
 }
 
-/* CloseWithContext is Close under the caller's deadline, handed to every scoped service carrying CloseWithContext. It is on the concrete scope, reached through a type assertion. */
+/* CloseWithContext is Close under the caller's deadline, handed to every scoped service carrying CloseWithContext. */
 func (instance *scope) CloseWithContext(closeContext context.Context) error {
+    if true == internal.IsNilInterface(closeContext) {
+        return exception.NewError("the close context is nil", exceptioncontract.Context{"door": "scope.CloseWithContext"}, nil)
+    }
+
     /* the dependency graph is guarded by the container mutex, so the snapshot takes the container lock first; an edge a racing creation misses degrades to creation order */
     dependencyGraph := map[string]map[string]struct{}(nil)
 

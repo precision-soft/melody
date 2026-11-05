@@ -77,6 +77,10 @@ var environmentKeyAliasMap = map[string][]string{
         TeardownTimeoutKey,
         KernelTeardownTimeout,
     },
+    ScopeTeardownTimeoutKey: {
+        ScopeTeardownTimeoutKey,
+        KernelScopeTeardownTimeout,
+    },
     ContainerCreationWaitersKey: {
         ContainerCreationWaitersKey,
         KernelContainerCreationWaiters,

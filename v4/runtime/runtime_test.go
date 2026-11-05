@@ -113,6 +113,10 @@ func (instance containerStub) Close() error {
     return errors.New("not implemented")
 }
 
+func (instance containerStub) CloseWithContext(closeContext context.Context) error {
+    return errors.New("not implemented")
+}
+
 func TestNew_PanicsOnNilScope(t *testing.T) {
     ctx := context.Background()
 
@@ -181,6 +185,10 @@ func (instance scopeStub) MustRegisterScoped(serviceName string, provider any, o
 }
 
 func (instance scopeStub) Close() error {
+    return errors.New("not implemented")
+}
+
+func (instance scopeStub) CloseWithContext(closeContext context.Context) error {
     return errors.New("not implemented")
 }
 

@@ -25,6 +25,9 @@ type KernelConfiguration interface {
     /* TeardownTimeout is MELODY_TEARDOWN_TIMEOUT as the deployment set it, absent when the key says nothing: the application decides it against its own config, the key winning. */
     TeardownTimeout() bound.Duration
 
+    /* ScopeTeardownTimeout is MELODY_SCOPE_TEARDOWN_TIMEOUT as the deployment set it, absent when the key says nothing: the application decides it against its own config, the key winning. */
+    ScopeTeardownTimeout() bound.Duration
+
     /* ContainerCreationWaiters is MELODY_CONTAINER_CREATION_WAITERS as the deployment set it, absent when the key says nothing: the application decides it against its own config, the key winning. */
     ContainerCreationWaiters() bound.Count
 

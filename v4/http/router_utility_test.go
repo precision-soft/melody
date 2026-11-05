@@ -612,6 +612,8 @@ func (instance *testScope) MustRegisterScoped(serviceName string, provider any, 
 
 func (instance *testScope) Close() error { return nil }
 
+func (instance *testScope) CloseWithContext(closeContext context.Context) error { return nil }
+
 var _ containercontract.Scope = (*testScope)(nil)
 
 type testRuntime struct {

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- application: `ApplicationConfig.ScopeTeardownTimeout` and the key `MELODY_SCOPE_TEARDOWN_TIMEOUT` (`kernel.scope_teardown_timeout`) declare the term of a scope's close, the key winning over the field, a value below 1ms failing the boot, as does an http process whose term, the default included, does not stay strictly under `MELODY_HTTP_SHUTDOWN_TIMEOUT`; `Application.CloseWithContext` closes the application under the caller's deadline and returns the teardown failure it discovered; a nil context on that door, on the container's and on a scope's is refused with an error before the teardown is claimed.
+- container: `ContainerConfig.ScopeTeardownTimeout`, `ScopeTeardownTimeoutRule` and `DefaultScopeTeardownTimeout`, 3s when left out, at least 1ms, unlimited admitted.
 - lock: `LeaderGateConfig.ReleaseTimeout`, a `bound.Duration` of 5s when left out, at least 1ms, unlimited refused, bounds the release at the end of a term, as the exclusive doors' field does.
 - This major includes every change of the third major up to v3.14.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
 - bound: the `bound` package, `Duration` and `Count` with `Of`, `UnlimitedDuration` and `UnlimitedCount`, the three-state limit the limits and timeouts of the fourth major are written with, httpclient first: a field left out is absent and takes the framework's bounded default, a value below the field's minimum is refused naming the field, and unlimited is explicit, admitted only on the fields that say so; `Resolve` decides a field against its `Rule`, and the text and json forms read `unlimited`, a value or an absent key.
@@ -46,6 +48,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- container: **Breaking**: `CloseWithContext` is declared on the `Container` and `Scope` contracts, and `config/contract.KernelConfiguration` declares `ScopeTeardownTimeout`.
+- container: **Behavioural change**: a scope's `Close` hands its scoped services a context ending at `ContainerConfig.ScopeTeardownTimeout`, so the close of a command's, a request's, a consumed message's or a cron run's scope ends at that term and reports the service that did not finish, where a service waiting on its context held the process or the response without limit.
 - example: the outbox relay's amqp transport prefetches 10 unacknowledged deliveries, the amqp transport's default, where it prefetched 1; the message bus transport keeps the 10 it set.
 - example: the in-process cron runner cancels a scheduled command after one hour, the runner's default, where only the rates refresh had a deadline of its own and every other entry ran with none; the object storage client's `S3_INSECURE` reading is unchanged, written through `Insecure`.
 - config: **Breaking**: `config/contract.HttpConfiguration` declares `StaticExcludedPaths`, `SessionTtl`, `SessionTombstoneRetention` and `ShutdownTimeout`, which the third major carried on the sibling `ExtendedHttpConfiguration`; the sibling is removed, and a configuration of an application's own implements the four, where the third major read it with the defaults.

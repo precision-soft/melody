@@ -3,6 +3,7 @@ package container
 import (
     "context"
     "errors"
+    "fmt"
     "reflect"
     "runtime"
     "strings"
@@ -11,6 +12,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -2685,5 +2687,158 @@ func TestScope_MustOverrideDoors_CarryTheOptionsToTheTeardown(t *testing.T) {
                 }
             }
         })
+    }
+}
+
+type deadlineRecordingScopedService struct {
+    deadline    time.Time
+    hasDeadline bool
+    closed      chan struct{}
+}
+
+func (instance *deadlineRecordingScopedService) CloseWithContext(closeContext context.Context) error {
+    instance.deadline, instance.hasDeadline = closeContext.Deadline()
+    close(instance.closed)
+
+    return nil
+}
+
+func newScopeWithDeadlineRecordingService(t *testing.T, config ContainerConfig) (containercontract.Scope, *deadlineRecordingScopedService) {
+    t.Helper()
+
+    service := &deadlineRecordingScopedService{closed: make(chan struct{})}
+
+    serviceContainer := NewContainer(config)
+    MustRegisterScoped[*deadlineRecordingScopedService](
+        serviceContainer,
+        "scoped.recording",
+        func(resolver containercontract.Resolver) (*deadlineRecordingScopedService, error) {
+            return service, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    scopeInstance := serviceContainer.NewScope()
+    if _, resolveErr := FromResolver[*deadlineRecordingScopedService](context.Background(), scopeInstance, "scoped.recording"); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    return scopeInstance, service
+}
+
+func TestScope_CloseHandsItsServicesTheConfiguredTeardownTimeout(t *testing.T) {
+    scopeInstance, service := newScopeWithDeadlineRecordingService(t, ContainerConfig{ScopeTeardownTimeout: bound.Of(40 * time.Second)})
+
+    before := time.Now()
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if false == service.hasDeadline {
+        t.Fatalf("expected the service to be handed a deadline")
+    }
+
+    if remaining := service.deadline.Sub(before); remaining < 39*time.Second || remaining > 41*time.Second {
+        t.Fatalf("expected a deadline about 40s away, got %s", remaining)
+    }
+}
+
+func TestScope_CloseHandsItsServicesTheDefaultTeardownTimeoutWhenLeftOut(t *testing.T) {
+    scopeInstance, service := newScopeWithDeadlineRecordingService(t, ContainerConfig{})
+
+    before := time.Now()
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if remaining := service.deadline.Sub(before); false == service.hasDeadline || remaining > DefaultScopeTeardownTimeout+time.Second || remaining < DefaultScopeTeardownTimeout-time.Second {
+        t.Fatalf("expected the default deadline, got %v away (has deadline: %v)", remaining, service.hasDeadline)
+    }
+}
+
+func TestScope_CloseHandsNoDeadlineUnderAnUnlimitedTeardownTimeout(t *testing.T) {
+    scopeInstance, service := newScopeWithDeadlineRecordingService(t, ContainerConfig{ScopeTeardownTimeout: bound.UnlimitedDuration()})
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if true == service.hasDeadline {
+        t.Fatalf("expected no deadline under an unlimited timeout, got %v", service.deadline)
+    }
+}
+
+func TestScope_CloseWithContextTakesTheCallersTermOverTheConfiguredOne(t *testing.T) {
+    scopeInstance, service := newScopeWithDeadlineRecordingService(t, ContainerConfig{ScopeTeardownTimeout: bound.Of(40 * time.Second)})
+
+    if closeErr := scopeInstance.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if true == service.hasDeadline {
+        t.Fatalf("expected the caller's context, which has no deadline, got %v", service.deadline)
+    }
+}
+
+type contextWaitingScopedService struct{}
+
+func (instance *contextWaitingScopedService) CloseWithContext(closeContext context.Context) error {
+    <-closeContext.Done()
+
+    return closeContext.Err()
+}
+
+func TestScope_CloseReturnsAtTheTimeoutAndReportsTheServiceThatDidNotFinish(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{ScopeTeardownTimeout: bound.Of(50 * time.Millisecond)})
+    MustRegisterScoped[*contextWaitingScopedService](
+        serviceContainer,
+        "scoped.waiting",
+        func(resolver containercontract.Resolver) (*contextWaitingScopedService, error) {
+            return &contextWaitingScopedService{}, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    scopeInstance := serviceContainer.NewScope()
+    if _, resolveErr := FromResolver[*contextWaitingScopedService](context.Background(), scopeInstance, "scoped.waiting"); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    closed := make(chan error, 1)
+    go func() {
+        closed <- scopeInstance.Close()
+    }()
+
+    /* under the 3s default, so a close running on the default instead of the configured term is caught */
+    select {
+    case closeErr := <-closed:
+        if nil == closeErr {
+            t.Fatalf("expected the service that ran out of budget reported")
+        }
+
+        if false == strings.Contains(fmt.Sprint(exception.LogContext(closeErr, exception.LogContextConfig{})), "scoped.waiting") {
+            t.Fatalf("expected the failure to name the service, got %v", exception.LogContext(closeErr, exception.LogContextConfig{}))
+        }
+    case <-time.After(DefaultScopeTeardownTimeout / 2):
+        t.Fatalf("expected the close to return at its timeout")
+    }
+}
+
+func TestScope_CloseWithContextRefusesANilContextAndLeavesTheCloseToALaterCall(t *testing.T) {
+    scopeInstance, service := newScopeWithDeadlineRecordingService(t, ContainerConfig{})
+
+    //nolint:staticcheck // the nil context is the input under test
+    if closeErr := scopeInstance.CloseWithContext(nil); nil == closeErr || "the close context is nil" != closeErr.Error() {
+        t.Fatalf("expected the nil context refused, got %v", closeErr)
+    }
+
+    if closeErr := scopeInstance.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    select {
+    case <-service.closed:
+    default:
+        t.Fatalf("expected the later close to close the service")
     }
 }
