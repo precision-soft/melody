@@ -10,7 +10,7 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 - [`cli/output`](../../cli/output)\
   Output helpers (flags/options, printers, table rendering, and structured envelopes) used by commands.
 
-> Looking for a crontab generator? The cron integration lives in its own module: see [`integrations/cron/`](../../../integrations/cron/) (use the [`v3`](../../../integrations/cron/v4/) binding).
+> Looking for a crontab generator? The cron integration lives in its own module: see [`integrations/cron/`](../../../integrations/cron/) (use the [`v4`](../../../integrations/cron/v4/) binding).
 
 ## Responsibilities
 

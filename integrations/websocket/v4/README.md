@@ -1,10 +1,10 @@
-# Melody WebSocket integration (v3)
+# Melody WebSocket integration (v4)
 
 Bidirectional WebSocket streaming for Melody, built on [`coder/websocket`](https://github.com/coder/websocket). It bridges the core [`http.ServerSentEventHub`](https://github.com/precision-soft/melody) so the same topic-keyed fan-out powers both Server-Sent Events and WebSockets.
 
 ## Version lines
 
-This integration is v3-only (`github.com/precision-soft/melody/integrations/websocket/v4`); no v1 or v2 bindings are currently planned.
+This integration ships for the third and the fourth major (`github.com/precision-soft/melody/integrations/websocket/v4`); no v1 or v2 bindings are currently planned.
 
 ## Installation
 

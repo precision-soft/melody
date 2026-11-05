@@ -1,4 +1,4 @@
-# Melody outbox integration (v3)
+# Melody outbox integration (v4)
 
 A transactional-outbox implementation for the [`messagebus`](https://github.com/precision-soft/melody) package over [Bun](https://bun.uptrace.dev/): business writes and the messages they produce commit in one database transaction, and a relay drains the outbox table to any `messagebus/contract.Transport` (for example the AMQP integration) with retry, exponential backoff and a dead-letter terminal state.
 

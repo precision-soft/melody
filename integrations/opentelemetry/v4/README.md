@@ -1,4 +1,4 @@
-# Melody OpenTelemetry integration (v3)
+# Melody OpenTelemetry integration (v4)
 
 HTTP observability for Melody: distributed tracing and Prometheus metrics as HTTP middlewares, built on [`go.opentelemetry.io/otel`](https://github.com/open-telemetry/opentelemetry-go).
 
@@ -6,7 +6,7 @@ Structured logging already exists in core Melody; this integration adds traces a
 
 ## Version lines
 
-This integration is v3-only (`github.com/precision-soft/melody/integrations/opentelemetry/v4`); no v1 or v2 bindings are currently planned.
+This integration ships for the third and the fourth major (`github.com/precision-soft/melody/integrations/opentelemetry/v4`); no v1 or v2 bindings are currently planned.
 
 ## Installation
 

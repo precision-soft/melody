@@ -1,6 +1,6 @@
-# Melody Bun ORM migration commands (v3)
+# Melody Bun ORM migration commands (v4)
 
-This module exposes Bun migrations as Melody v3 CLI commands ([`clicontract.Command`](../../../../v4/cli/contract/command.go)).
+This module exposes Bun migrations as Melody v4 CLI commands ([`clicontract.Command`](../../../../v4/cli/contract/command.go)).
 
 Import path: `github.com/precision-soft/melody/integrations/bunorm/migrate/v4`
 
@@ -70,7 +70,7 @@ app.RegisterModule(bunormmigrate.NewModule(bunormmigrate.ModuleConfig{
 }))
 ```
 
-`NewModule` is available for the v1, v2, and v3 bindings.
+`NewModule` is available for the v1, v2, v3 and v4 bindings.
 
 ## Multiple database contexts
 

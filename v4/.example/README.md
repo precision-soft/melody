@@ -274,7 +274,7 @@ A console run has no signed-in user, so the audit trail and the catalogue journa
 
 ## Platform integrations (optional, env-gated)
 
-The example wires **every v3 platform integration**. Each backend that needs external infrastructure is **gated on an environment variable**: when the variable is unset the application boots with an in-process fallback (remove the integration lines from [`.env`](./.env) and the example runs with zero infrastructure), and when it is set the matching integration is activated and resolved through the same core service constant, so the rest of the app is unchanged. The committed `.env` sets these variables to the dev compose service endpoints so `./dc up:all` wires everything out of the box.
+The example wires **every v4 platform integration**. Each backend that needs external infrastructure is **gated on an environment variable**: when the variable is unset the application boots with an in-process fallback (remove the integration lines from [`.env`](./.env) and the example runs with zero infrastructure), and when it is set the matching integration is activated and resolved through the same core service constant, so the rest of the app is unchanged. The committed `.env` sets these variables to the dev compose service endpoints so `./dc up:all` wires everything out of the box.
 
 | Integration                                                                                                                                      | Activated by                                      | Falls back to            | Reached at                                    |
 |--------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|--------------------------|-----------------------------------------------|
@@ -457,18 +457,18 @@ The dev [`docker-compose.yml`](../../.dev/docker/docker-compose.yml) provides th
 ./dc up:all --build
 ```
 
-This brings up the backing services **and** the example itself: the `dev` container builds the frontend bundle and runs the app under a hot-reload + restart supervisor. The example reads its integration endpoints from [`.env`](./.env), which points at the compose service names (`REDIS_ADDRESS=redis:6379`, `MYSQL_HOST=mysql`, `AMQP_DSN=amqp://…@rabbitmq:5672/`, `S3_ENDPOINT=localstack:4566`, `SMTP_ADDRESS=mailpit:1025`, `OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317`), so no manual configuration is needed. Open it on the mapped host port:
+This brings up the backing services **and** the example itself: the `dev-v4` container builds the frontend bundle and runs the app under a hot-reload + restart supervisor. The example reads its integration endpoints from [`.env`](./.env), which points at the compose service names (`REDIS_ADDRESS=redis:6379`, `MYSQL_HOST=mysql`, `AMQP_DSN=amqp://…@rabbitmq:5672/`, `S3_ENDPOINT=localstack:4566`, `SMTP_ADDRESS=mailpit:1025`, `OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317`), so no manual configuration is needed. Open it on the mapped host port:
 
-- http://localhost:8180 (the `DEV_HTTP_HOST_PORT`, `8180` by default)
+- `v4-example.melody.localhost.precision-soft.com` through the load balancer, on `LOAD_BALANCER_HTTP_HOST_PORT` (`80` by default); the `dev` container on `DEV_HTTP_HOST_PORT` serves the third major's example
 
 Notes:
 
 - **`--build` rebuilds the dev image** — use it after changing dependencies or the container [`entrypoint.sh`](../../.dev/docker/entrypoint.sh). For day-to-day Go/HTML/asset edits `./dc up:all` (without `--build`) is enough; reflex hot-reloads them.
-- **Always `up:all`, not plain `up`.** The backends live on the compose `all` profile, so `./dc up` / `./dc up:minimal` start only the three dev containers (`dev`, `dev-v1`, `dev-v2`) and the load balancer — the example would then have no Redis/MySQL to reach. Use `./dc up:all` whenever you want the live integrations.
+- **Always `up:all`, not plain `up`.** The backends live on the compose `all` profile, so `./dc up` / `./dc up:minimal` start only the dev containers (`dev`, `dev-v1`, `dev-v2`, `dev-v4`) and the load balancer — the example would then have no Redis/MySQL to reach. Use `./dc up:all` whenever you want the live integrations.
 - **Cold-start is self-healing.** If a backend is not ready yet — or you start it afterwards — the MySQL/Redis providers retry the initial connection with backoff and the entrypoint supervisor restarts the process, so the app comes up on its own without a manual restart.
 - **A proxy in front has to forward the host the browser asked for.** The websocket module is wired with no origin patterns, so the library's same-origin default is what stops a foreign page from riding a signed-in visitor's session cookie onto the feed — and that default compares the browser's Origin header with the Host the application was handed. An nginx that forwards the server name rather than the raw Host strips the port, so on any published port but 80 the two disagree and every upgrade is refused with 403, which reads exactly like the refusal a foreign origin gets. The dev load balancer forwards the raw Host; a deployment behind a different proxy has to do the same, or name its own allowed origins.
 
-The endpoints listed above then work against the mapped host port, e.g. `curl localhost:8180/platform/check`, `curl localhost:8180/encrypt/roundtrip`.
+The endpoints listed above then work through that host, e.g. `curl -H 'Host: v4-example.melody.localhost.precision-soft.com' localhost/platform/check`, `curl -H 'Host: v4-example.melody.localhost.precision-soft.com' localhost/encrypt/roundtrip`.
 
 #### Running the binary directly against mapped ports
 

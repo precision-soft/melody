@@ -139,7 +139,7 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 ### Container: a container is built from one configuration struct, and a resolution waiting on another goroutine's creation is bounded and released by Close
 
-**What changed.** [`NewContainer`](../container/container.go) takes a [`ContainerConfig`](../container/container.go), whose zero value is the default. Its one field, `CreationWaiters`, is a `bound.Count` that bounds the resolutions that may wait on one service another goroutine is building: 1,024 when left out, at least 1, and unlimited admitted. One more waiter is refused at once with [`ErrCreationWaitersExceeded`](../container/errors.go). A value below 1 panics at `NewContainer`, naming `ContainerConfig.CreationWaiters`. The application declares the bound through `ApplicationConfig.ContainerCreationWaiters` and the key `MELODY_CONTAINER_CREATION_WAITERS` (`kernel.container_creation_waiters`), the key winning over the field. [`KernelConfiguration`](../config/contract/kernel.go) declares `ContainerCreationWaiters`, the key as the deployment set it.
+**What changed.** [`NewContainer`](../container/container.go) takes a [`ContainerConfig`](../container/container.go), whose zero value is the default. Its field `CreationWaiters` is a `bound.Count` that bounds the resolutions that may wait on one service another goroutine is building: 1,024 when left out, at least 1, and unlimited admitted. One more waiter is refused at once with [`ErrCreationWaitersExceeded`](../container/errors.go). A value below 1 panics at `NewContainer`, naming `ContainerConfig.CreationWaiters`. The application declares the bound through `ApplicationConfig.ContainerCreationWaiters` and the key `MELODY_CONTAINER_CREATION_WAITERS` (`kernel.container_creation_waiters`), the key winning over the field. [`KernelConfiguration`](../config/contract/kernel.go) declares `ContainerCreationWaiters`, the key as the deployment set it.
 
 A waiter is released by what it waits in. The container's `Close` releases every waiter with `ErrContainerClosed` the moment the teardown begins. A scope's `Close` releases the waiters on that scope's own creations with `ErrScopeClosed`. A creation that finished in the same instant is still answered as its value. In the third major a waiter parked until the provider returned, so a provider that never returned held its waiters past `Close`, and a resolution of the service arriving while the teardown ran parked beside them; only once the teardown finished was a later resolution refused.
 
@@ -1811,9 +1811,9 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 **Remedy.** None for a wiring that meant the ping to be bounded — this is the bound it always documented. A wiring that genuinely wanted an unbounded ping must now say so by turning the ping off (`ClientConfig.BootPingDisabled: true`) and pinging itself; a value large enough to stand in for "unbounded" also works, and reads as the deadline it is.
 
-### Rueidis cache: `Backend.Close` ends the backend, and `ClearByPrefix` refuses the empty prefix
+### Rueidis cache: `Backend.CloseWithContext` ends the backend, and `ClearByPrefix` refuses the empty prefix
 
-**What changed.** Two refusals the in-memory backend behind the same contract already gave. `Backend.Close` marks the backend closed and every later operation answers `cache backend is closed`; a handle minted by `BackendService.WithContext` reads its owner's flag, so the service's `Close` reaches the per-request handles the runtime door mints. And `ClearByPrefix("")` is refused as an empty key instead of being read as the whole namespace. The shared `rueidis.Client` is still not closed by the backend: it belongs to whoever built it.
+**What changed.** Two refusals the in-memory backend behind the same contract already gave. `Backend.CloseWithContext` marks the backend closed and every later operation answers `cache backend is closed`; a handle minted by `BackendService.WithContext` reads its owner's flag, so the service's `CloseWithContext` reaches the per-request handles the runtime door mints. And `ClearByPrefix("")` is refused as an empty key instead of being read as the whole namespace. The shared `rueidis.Client` is still not closed by the backend: it belongs to whoever built it.
 
 **Symptom.** Code that used a backend after closing it — a teardown-ordering bug — used to keep serving through the client and now fails immediately with a named refusal. Code that passed an empty prefix to `ClearByPrefix`, deliberately or because a prefix assembled at run time came out empty, used to wipe every entry under the backend's own prefix and now gets `cache key is empty`.
 
@@ -2762,13 +2762,13 @@ sessionInstance.Set("profile", profile)
 
 **Remedy.** None for the common wiring. An application that relied on the later catalog overriding the earlier one passes the overriding catalog first.
 
-### Security: `NewAccessControlRule` refuses `PUBLIC_ACCESS`
+### Security: a raw prefix rule refuses `PUBLIC_ACCESS`
 
-**What changed.** `security.NewAccessControlRule` builds its rule through `accesscontrol.NewRawPrefixRule`, which refuses `PUBLIC_ACCESS` with a panic at construction. A raw public prefix opens every path that merely starts with it (`/public` opens `/publicadmin`) and, being the longest match, shadows a bounded denial beneath it.
+**What changed.** `accesscontrol.NewRawPrefixRule` refuses `PUBLIC_ACCESS` with a panic at construction. A raw public prefix opens every path that merely starts with it (`/public` opens `/publicadmin`) and, being the longest match, shadows a bounded denial beneath it. The third major's `security.NewAccessControlRule`, which built through it, is removed with the other deprecated rule constructors.
 
-**Symptom.** A boot that declares `NewAccessControlRule("/public", "PUBLIC_ACCESS")` panics with `access control PUBLIC_ACCESS may not be declared on a raw prefix rule; use a segment prefix, exact, or regex rule`. A rule without `PUBLIC_ACCESS` is unchanged by this section; the path refusals of the raw prefix rule (a relative, a non-canonical or a slash-terminated path) are those of the access-control section above.
+**Symptom.** A boot that declares `accesscontrol.NewRawPrefixRule("/public", accesscontrol.RuleConfig{Attributes: []string{"PUBLIC_ACCESS"}})` panics with `access control PUBLIC_ACCESS may not be declared on a raw prefix rule; use a segment prefix, exact, or regex rule`. A rule without `PUBLIC_ACCESS` is unchanged by this section; the path refusals of the raw prefix rule (a relative, a non-canonical or a slash-terminated path) are those of the access-control section above.
 
-**Remedy.** Declare the public area with `AccessControlBuilder.AllowAnonymous("/public")`, `NewAccessControlRuleWithSegmentPrefix("/public", "PUBLIC_ACCESS")` or `accesscontrol.NewSegmentPrefixRule`. Each governs `/public` and `/public/...` and nothing else.
+**Remedy.** Declare the public area with `AccessControlBuilder.AllowAnonymous("/public")` or `accesscontrol.NewSegmentPrefixRule`. Each governs `/public` and `/public/...` and nothing else.
 
 ### Security: a regex rule carrying `PUBLIC_ACCESS` must anchor every branch
 

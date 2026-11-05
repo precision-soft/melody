@@ -1,6 +1,6 @@
-# Bun ORM integration (v3)
+# Bun ORM integration (v4)
 
-This directory contains the **optional Bun ORM integration** for Melody v3.
+This directory contains the **optional Bun ORM integration** for Melody v4.
 
 The integration is split into independent Go modules so consumers depend only on what they need:
 

@@ -1,4 +1,4 @@
-# Melody AWS S3 integration (v3)
+# Melody AWS S3 integration (v4)
 
 An S3-compatible implementation of the Melody core [`storage`](https://github.com/precision-soft/melody) contract, backed by [`minio-go`](https://github.com/minio/minio-go). Works with MinIO and AWS S3 (and any S3-compatible service).
 
@@ -6,7 +6,7 @@ It implements `storage/contract.Storage`, so application code written against th
 
 ## Version lines
 
-This integration is v3-only (`github.com/precision-soft/melody/integrations/aws/s3/v4`); no v1 or v2 bindings are currently planned.
+This integration ships for the third and the fourth major (`github.com/precision-soft/melody/integrations/aws/s3/v4`); no v1 or v2 bindings are currently planned.
 
 ## Installation
 

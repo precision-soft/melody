@@ -1,4 +1,4 @@
-# Melody AMQP integration (v3)
+# Melody AMQP integration (v4)
 
 A durable, transport-agnostic [`messagebus`](https://github.com/precision-soft/melody) transport backed by RabbitMQ (AMQP 0-9-1), built on [`rabbitmq/amqp091-go`](https://github.com/rabbitmq/amqp091-go).
 
@@ -6,7 +6,7 @@ It implements `messagebus/contract.Transport`, so a Melody message bus can route
 
 ## Version lines
 
-This integration is v3-only (`github.com/precision-soft/melody/integrations/amqp/v4`); no v1 or v2 bindings are currently planned.
+This integration ships for the third and the fourth major (`github.com/precision-soft/melody/integrations/amqp/v4`); no v1 or v2 bindings are currently planned.
 
 ## Installation
 

@@ -1,4 +1,4 @@
-# Melody MySQL lock integration (v3)
+# Melody MySQL lock integration (v4)
 
 A MySQL-backed implementation of the Melody core [`lock`](https://github.com/precision-soft/melody) contract, built on MySQL advisory locks (`GET_LOCK` / `RELEASE_LOCK`). It is a drop-in `lock/contract.Locker` for applications that already run a MySQL database through [`bunorm`](../../v4) and want a distributed named lock without standing up Redis.
 

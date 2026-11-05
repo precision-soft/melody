@@ -1,6 +1,6 @@
-# Bun ORM PostgreSQL provider (v3)
+# Bun ORM PostgreSQL provider (v4)
 
-PostgreSQL provider for the Melody v3 [`bunorm`](../../v4) integration. It implements [`bunorm.Provider`](../../v4/provider.go) and produces a Bun database handle configured with the PostgreSQL dialect.
+PostgreSQL provider for the Melody v4 [`bunorm`](../../v4) integration. It implements [`bunorm.Provider`](../../v4/provider.go) and produces a Bun database handle configured with the PostgreSQL dialect.
 
 Import path: `github.com/precision-soft/melody/integrations/bunorm/pgsql/v4`
 
