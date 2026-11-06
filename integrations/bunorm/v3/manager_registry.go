@@ -2,7 +2,6 @@ package bunorm
 
 import (
     "context"
-    "errors"
     "fmt"
     "reflect"
     "runtime/debug"
@@ -471,7 +470,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
             }
 
             /* an open the registry ended through openContext reaches its waiter as the registry's refusal with the cancellation under it; a refusal that does not carry the cancellation is the provider's own and travels unchanged. A provider that refuses with a cancellation of its own after the close is still read as ended by the registry, since nothing on the error says whose it is */
-            if true == instance.closed && nil != instance.openContext.Err() && true == errors.Is(openErr, context.Canceled) {
+            if true == instance.closed && nil != instance.openContext.Err() && true == exception.ChainIs(openErr, context.Canceled) {
                 pendingOpen.openError = keepLoggedMark(exception.NewError(
                     fmt.Sprintf("bunorm manager %s open ended by the registry closing while it was in flight", name),
                     map[string]any{"manager": name},

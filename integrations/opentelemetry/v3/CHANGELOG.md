@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- metrics: a handler's error whose `Unwrap` chain reaches itself no longer holds the request in the status classification, and a writer's flush or hijack failure of that shape no longer holds the response writer.
+
 ## [v3.2.0] - 2026-10-19 - Client-Facing Status Recording, Bounded Flush on Teardown, Refused Nil Middlewares and Redacted Exporter Headers
 
 ### Added

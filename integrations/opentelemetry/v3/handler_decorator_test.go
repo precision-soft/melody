@@ -312,3 +312,27 @@ func TestStatusRecordingResponseWriter_SwitchingProtocolsIsRecordedAsTheFinalSta
         t.Fatalf("expected %d to be recorded, got %d", nethttp.StatusSwitchingProtocols, recorder.observedStatusCode())
     }
 }
+
+type cyclicControlWriter struct {
+    nethttp.ResponseWriter
+}
+
+func (instance *cyclicControlWriter) FlushError() error {
+    return newCyclicChainError()
+}
+
+func (instance *cyclicControlWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+    return nil, nil, newCyclicChainError()
+}
+
+func TestStatusRecordingResponseWriter_ReturnsOnACyclicChain(t *testing.T) {
+    writer := &statusRecordingResponseWriter{ResponseWriter: &cyclicControlWriter{ResponseWriter: httptest.NewRecorder()}}
+
+    assertReturnsOnACyclicChain(t, func() {
+        writer.Flush()
+
+        if _, _, hijackErr := writer.Hijack(); nil == hijackErr {
+            t.Error("expected the hijack's failure")
+        }
+    })
+}

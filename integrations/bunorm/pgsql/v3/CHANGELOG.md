@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- pgsql: `IsDuplicateKey` returns on an error whose `Unwrap` chain reaches itself.
+
 ## [v3.3.0] - 2026-10-19 - Named Driver Deadlines, Unlimited Bounds, Context-Aware Opens, Routed Diagnostics and Typed Duplicate-Key Reading
 
 ### Added

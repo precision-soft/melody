@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- runner: a scheduled command's error whose `Unwrap` chain reaches itself no longer holds the dispatch worker that classifies it, nor the command that renders it.
+
+### Documentation
+
+- documentation: the README states v3.14.0 as the framework minimum, the version this module's `go.mod` requires, where it stated v3.6.0.
+
 ## [v3.8.0] - 2026-10-19 - Runner Timezone and Deadlines, Standard Flags on Every Command, Pruned Generation and Journaled Run Output
 
 ### Added

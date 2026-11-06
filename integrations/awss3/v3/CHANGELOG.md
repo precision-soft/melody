@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- storage: an upload body's read error whose `Unwrap` chain reaches itself no longer holds the goroutine that checks the body's end.
+
 ## [v3.1.0] - 2026-10-19 - Refused Empty Credentials and Traversal Keys, Streaming Size Enforcement and Named Plaintext Endpoints
 
 ### Fixed

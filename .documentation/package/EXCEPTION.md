@@ -32,6 +32,8 @@ Melody uses this package to:
     - [`Logged`](../../exception/utility.go)
     - [`IsAlreadyLogged`](../../exception/utility.go)
     - [`PanicCause`](../../exception/utility.go)
+    - [`ChainAs`](../../exception/chain.go)
+    - [`ChainIs`](../../exception/chain.go)
 - Fail-fast helpers:
     - [`Panic`](../../exception/panic.go)
     - [`Exit`](../../exception/panic.go)

@@ -292,7 +292,7 @@ func (instance *AsyncStorage) CloseWithContext(closeContext context.Context) err
 
     /* with a zero grace no reaction can be observed, so the answer names the spent budget and the entries not confirmed stored; this is decided before any timer, since a timer of zero is not "now". A context that has ended carries its own error as the cause; one its caller had cancelled at entry is answered as cancelled before the close began, and one its caller cancelled since as the caller's withdrawal with no grace left */
     if 0 >= cancellationGrace {
-        if true == errors.Is(entryErr, context.Canceled) {
+        if true == exception.ChainIs(entryErr, context.Canceled) {
             return instance.cancelledWithoutAGraceVerdict(entryErr, "async audit storage had its close cancelled by its caller before it began; the save in hand was cancelled without a grace to observe its reaction, and the entries still outstanding were not confirmed stored")
         }
 

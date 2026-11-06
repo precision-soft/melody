@@ -4,7 +4,6 @@ import (
     "context"
     "crypto/sha256"
     "encoding/hex"
-    "errors"
     "fmt"
     "io"
     "io/fs"
@@ -370,7 +369,7 @@ func writeResponse(
                 }
             } else {
                 err := sessionManager.SaveSession(sessionInstance)
-                if true == errors.Is(err, session.ErrSessionDeleted) {
+                if true == exception.ChainIs(err, session.ErrSessionDeleted) {
                     /* the session ended while this request was running: another request logged it out, or rotated it away. That is not a failure of this request and not a storage outage: the write is refused so the deleted session cannot be re-created, the cookie is expired so the client stops presenting an id the store does not hold, and the handler's own response is served unchanged. */
                     sessionPersistFailed = true
 
@@ -485,7 +484,7 @@ func closeResponseBodySafely(closer io.Closer) (closeErr error) {
 
 /* isClientAbortWriteError classifies a response-write failure the client caused rather than the server: the broken-pipe and connection-reset errors a write to a gone peer answers with, and the plain cancellation net/http applies to the request context the moment the peer disconnects, read through its cause. A deadline or a cause-carrying cancellation the application set on the context is not the client's doing, so a write failure after it stays a server-side one. */
 func isClientAbortWriteError(request httpcontract.Request, err error) bool {
-    if true == errors.Is(err, syscall.EPIPE) || true == errors.Is(err, syscall.ECONNRESET) {
+    if true == exception.ChainIs(err, syscall.EPIPE) || true == exception.ChainIs(err, syscall.ECONNRESET) {
         return true
     }
 
@@ -747,7 +746,7 @@ func closeDiscardedResponseBody(response httpcontract.Response, logger loggingco
     }
 
     /* the response may already have been closed by the writer's own deferred Close, when the panic that discarded it unwound from inside WriteToHttpResponseWriter. Closing an os.File twice is safe and reports this; it is not a failure worth an error line on a path that is already reporting a panic. */
-    if true == errors.Is(closeErr, fs.ErrClosed) {
+    if true == exception.ChainIs(closeErr, fs.ErrClosed) {
         return
     }
 

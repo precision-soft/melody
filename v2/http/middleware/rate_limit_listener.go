@@ -2,7 +2,6 @@ package middleware
 
 import (
     "context"
-    "errors"
     nethttp "net/http"
 
     eventcontract "github.com/precision-soft/melody/v2/event/contract"
@@ -64,7 +63,7 @@ func RegisterRateLimitRequestListener(
                     /* the returned allowed value already reflects the limiter's failure policy; the listener only reports the store failure. The caller's own cancellation is recorded at warning under its own name, since it is a client hanging up and not a store outage; a limiter that filed its own record marks it. */
                     logger := logging.LoggerFromRuntime(runtimeInstance)
                     if nil != logger {
-                        if true == errors.Is(allowErr, context.Canceled) {
+                        if true == exception.ChainIs(allowErr, context.Canceled) {
                             logger.Warning(
                                 "rate limiter call cancelled",
                                 exception.LogContext(allowErr, exceptioncontract.Context{"key": key}),

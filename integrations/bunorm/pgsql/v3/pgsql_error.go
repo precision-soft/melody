@@ -1,7 +1,8 @@
 package pgsql
 
 import (
-    "errors"
+
+    "github.com/precision-soft/melody/v3/exception"
 )
 
 /* sqlStateCarrier is the shape of a PostgreSQL protocol error as pgdriver spells it — pgdriver.Error implements it — matched as an interface because the driver exports no constructor for its error type. */
@@ -22,12 +23,12 @@ func IsDuplicateKey(err error) bool {
 /* sqlStateOf reads the SQLSTATE a PostgreSQL protocol error carries, from pgdriver's Field('C') or from the SQLState() the other drivers answer, and an empty string when the chain holds neither. */
 func sqlStateOf(err error) string {
     var carrier sqlStateCarrier
-    if true == errors.As(err, &carrier) {
+    if true == exception.ChainAs(err, &carrier) {
         return carrier.Field('C')
     }
 
     var reporter sqlStateReporter
-    if true == errors.As(err, &reporter) {
+    if true == exception.ChainAs(err, &reporter) {
         return reporter.SQLState()
     }
 

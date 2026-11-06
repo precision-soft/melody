@@ -411,7 +411,7 @@ func aggregateCliErrors(runErr error, closeErrorByName map[string]error) error {
         runErr,
     )
 
-    /* errors.As matches the outermost ExitError in the chain, so the aggregate is returned wrapped and the shutdown failures it alone carries reach the log; a typed-nil link would answer code 0, which NewExitError refuses, so the aggregate is returned plainly then */
+    /* the search matches the outermost ExitError in the chain, so the aggregate is returned wrapped and the shutdown failures it alone carries reach the log; a typed-nil link would answer code 0, which NewExitError refuses, so the aggregate is returned plainly then */
     if exitError, isExit := internal.ExitErrorInChain(runErr); true == isExit {
         return exception.NewExitError(exitError.ExitCode(), aggregatedErr)
     }

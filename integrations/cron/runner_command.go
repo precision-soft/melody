@@ -1034,7 +1034,7 @@ func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling e
     siblingContext := map[string]any{}
 
     var provider exceptioncontract.ContextProvider
-    if true == errors.As(sibling, &provider) && false == isNilInterface(provider) {
+    if true == exception.ChainAs(sibling, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             siblingContext[key] = value
         }
@@ -1100,7 +1100,7 @@ func isShutdownCancellation(runtimeInstance runtimecontract.Runtime, invokeErr e
         return false
     }
 
-    return true == errors.Is(invokeErr, context.Canceled) && false == errors.Is(invokeErr, context.DeadlineExceeded)
+    return true == exception.ChainIs(invokeErr, context.Canceled) && false == exception.ChainIs(invokeErr, context.DeadlineExceeded)
 }
 
 /* resolveAbandonedRun answers a run whose abandon window lapsed. It reads the completion channel once more before announcing the kill, because the outer select picks at random between two ready cases and a command that returned in that instant has done its work; a test hands it a channel that already carries the answer. */

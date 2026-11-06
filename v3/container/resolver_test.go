@@ -5,6 +5,7 @@ import (
     "reflect"
     "strings"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     alpha "github.com/precision-soft/melody/v3/container/internal/collisionalpha/contract"
@@ -655,4 +656,59 @@ func TestFromResolverByType_MismatchNamesTheRequestedTypeBesideTheCanonical(t *t
     if "container.resolverTestService" != context["expectedType"] || "*container.resolverTestService" != context["canonicalType"] || "*container.resolverTestService" != context["actualType"] {
         t.Fatalf("expected the requested, canonical and actual types to be told apart, got %v", context)
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestFromResolver_ReturnsOnACyclicChainFromAProvider(t *testing.T) {
+    serviceContainer := NewContainer()
+    serviceContainer.MustRegister(
+        "service.cyclic",
+        func(resolver containercontract.Resolver) (*resolverTestService, error) {
+            return nil, newCyclicChainError()
+        },
+    )
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, nameErr := FromResolver[*resolverTestService](serviceContainer, "service.cyclic"); nil == nameErr {
+            t.Error("expected the provider's failure by name")
+        }
+
+        if _, typeErr := FromResolverByType[*resolverTestService](serviceContainer); nil == typeErr {
+            t.Error("expected the provider's failure by type")
+        }
+    })
 }

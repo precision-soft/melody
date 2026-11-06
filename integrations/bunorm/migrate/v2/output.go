@@ -217,7 +217,7 @@ func errorDetailsOf(runErr error) map[string]any {
 
     var provider exceptioncontract.ContextProvider
     /* the As target is read through the typed-nil door: bun's migrator wraps a migration error with %w after a plain nil test, so a typed-nil link can satisfy As and would panic in Context(), unwinding finish before the document is written */
-    if true == errors.As(runErr, &provider) && false == isNilInterface(provider) {
+    if true == exception.ChainAs(runErr, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             details[key] = value
         }

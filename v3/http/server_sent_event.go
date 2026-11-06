@@ -1,7 +1,6 @@
 package http
 
 import (
-    "errors"
     "io"
     nethttp "net/http"
     "strconv"
@@ -236,7 +235,7 @@ func (instance *ServerSentEventWriter) rearmWriteDeadlineLocked() {
     }
 
     deadlineErr := nethttp.NewResponseController(instance.writer).SetWriteDeadline(clock.Now().Add(instance.writeBudget))
-    if true == errors.Is(deadlineErr, nethttp.ErrNotSupported) {
+    if true == exception.ChainIs(deadlineErr, nethttp.ErrNotSupported) {
         instance.deadlineUnsupported = true
     }
 }

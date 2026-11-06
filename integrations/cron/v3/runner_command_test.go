@@ -4314,3 +4314,60 @@ func TestLoadLocation_RefusalCarriesTheStandardLibrarysReason(t *testing.T) {
         t.Fatalf("expected the standard library's reason in the context, got %v", melodyErr.Context())
     }
 }
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestRunnerFailureDoors_ReturnOnACyclicChain(t *testing.T) {
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    cancelledRuntime := newRunnerTestRuntime(cancelledContext)
+
+    assertReturnsOnACyclicChain(t, func() {
+        if true == isShutdownCancellation(cancelledRuntime, newCyclicChainError()) {
+            t.Error("expected a chain without a cancellation to read as a failure")
+        }
+
+        if nil == withSiblingFailure(map[string]any{}, "close", newCyclicChainError()) {
+            t.Error("expected the merged context")
+        }
+
+        errorDetailsOf(newCyclicChainError())
+
+        if false == isShutdownCancellation(cancelledRuntime, errors.Join(context.Canceled, newCyclicChainError())) {
+            t.Error("expected a cancellation on a cyclic chain to read as the shutdown")
+        }
+    })
+}

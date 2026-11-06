@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- runner: a scheduled command's error whose `Unwrap` chain reaches itself no longer holds the dispatch worker that classifies it, nor the command that renders it.
+
 ## [v1.7.1] - 2026-10-19 - Dotted Log Subdirectories, Owned Log Directories, Atomic Crontab Writes and Exact Ownership Markers
 
 ### Fixed

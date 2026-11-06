@@ -2,7 +2,6 @@ package config
 
 import (
     "bufio"
-    "errors"
     "io/fs"
     "path/filepath"
     "sort"
@@ -132,7 +131,7 @@ func (instance *EnvironmentSource) loadDotEnvEnvironmentFiles(
 func (instance *EnvironmentSource) loadOptionalDotEnvFile(values map[string]string, pathValue string) error {
     _, err := fs.Stat(instance.fileSystem, pathValue)
     if nil != err {
-        if true == errors.Is(err, fs.ErrNotExist) {
+        if true == exception.ChainIs(err, fs.ErrNotExist) {
             return nil
         }
 

@@ -2,7 +2,6 @@ package http
 
 import (
     "context"
-    "errors"
     nethttp "net/http"
     "runtime/debug"
     "sort"
@@ -572,7 +571,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             message := "bad request"
 
             var maxBytesError *nethttp.MaxBytesError
-            if true == errors.As(melodyRequest.bodyReadErr, &maxBytesError) {
+            if true == exception.ChainAs(melodyRequest.bodyReadErr, &maxBytesError) {
                 statusCode = nethttp.StatusRequestEntityTooLarge
                 message = "payload too large"
             }
@@ -962,7 +961,7 @@ func normalizeBodyLimitError(handlerErr error) error {
     }
 
     var maxBytesError *nethttp.MaxBytesError
-    if true == errors.As(handlerErr, &maxBytesError) {
+    if true == exception.ChainAs(handlerErr, &maxBytesError) {
         return exception.NewHttpExceptionWithCause(nethttp.StatusRequestEntityTooLarge, "payload too large", handlerErr)
     }
 
@@ -993,7 +992,7 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
         },
     )
 
-    clientCancelled := true == errors.Is(handlerErr, context.Canceled) &&
+    clientCancelled := true == exception.ChainIs(handlerErr, context.Canceled) &&
         nil != httpRequest && context.Canceled == context.Cause(httpRequest.Context())
 
     httpException := exception.AsHttpException(handlerErr)

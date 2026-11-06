@@ -10,6 +10,16 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v2.13.3] - 2026-11-06 - Bounded Error Chain Search
+
+### Added
+
+- exception: `ChainAs` and `ChainIs`, what `errors.As` and `errors.Is` answer, returning on an error chain whose `Unwrap` reaches itself. A patch release carrying public symbols is a deliberate exception to the back-port rule of `CONTRIBUTING.md`: the two exist strictly to repair the defect under Fixed, on this major and in the integration modules, which cannot reach the framework's internal packages, so that the search is not duplicated in every module.
+
+### Fixed
+
+- exception: an error whose `Unwrap` chain reaches itself no longer holds the goroutine that reads it forever, where `errors.As` and `errors.Is` never return on such a chain: `LogContext`, `IsAlreadyLogged`, `MarkLogged`, `FromError`, `AsHttpException`, `IsDeserializationError` and `LogError` return, a handler's or a session save's cyclic error is answered 500, a body read's 400, a limiter's is recorded as a store failure, a file system's is a miss of the static server and a refusal of the dotenv load, and a provider's and a command's travel out as any other failure. A search reads a link met twice once and stops after 65,536 links. `BuildCauseChain` and `BuildCauseContextChain` render each pointer link once, so a join holding one link twice reads it once.
+
 ### Documentation
 
 - documentation: the container document's scoped-services sample resolves its repository by type, where it called a bunorm helper that does not exist.
@@ -1259,7 +1269,9 @@ The example application inside this major keeps no changelog: it is not a projec
 
 - `go.mod` — introduce Melody v2 module (`github.com/precision-soft/melody/v2`)
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v2.13.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v2.13.3...HEAD
+
+[v2.13.3]: https://github.com/precision-soft/melody/compare/v2.13.2...v2.13.3
 
 [v2.13.2]: https://github.com/precision-soft/melody/compare/v2.13.1...v2.13.2
 

@@ -4,7 +4,6 @@ import (
     "bufio"
     "bytes"
     "context"
-    "errors"
     "io"
     "path"
     "strings"
@@ -251,7 +250,7 @@ func (instance *sizeCheckedReader) endOfBody() error {
         return instance.reject()
     }
 
-    if nil != peekErr && false == errors.Is(peekErr, io.EOF) {
+    if nil != peekErr && false == exception.ChainIs(peekErr, io.EOF) {
         return peekErr
     }
 

@@ -5,6 +5,7 @@ import (
     "reflect"
     "strings"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/container/contract"
     alpha "github.com/precision-soft/melody/container/internal/collisionalpha/contract"
@@ -529,4 +530,59 @@ func TestFromResolver_KeepsTheServiceNameANestedFailureCarries(t *testing.T) {
     if "service.nested" != typedError.Context()["serviceName"] {
         t.Fatalf("expected the nested failure to keep the name of the service that failed, got %v", typedError.Context()["serviceName"])
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestFromResolver_ReturnsOnACyclicChainFromAProvider(t *testing.T) {
+    serviceContainer := NewContainer()
+    serviceContainer.MustRegister(
+        "service.cyclic",
+        func(resolver containercontract.Resolver) (*resolverTestService, error) {
+            return nil, newCyclicChainError()
+        },
+    )
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, nameErr := FromResolver[*resolverTestService](serviceContainer, "service.cyclic"); nil == nameErr {
+            t.Error("expected the provider's failure by name")
+        }
+
+        if _, typeErr := FromResolverByType[*resolverTestService](serviceContainer); nil == typeErr {
+            t.Error("expected the provider's failure by type")
+        }
+    })
 }

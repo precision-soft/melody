@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- mysql: `IsDuplicateKey` returns on an error whose `Unwrap` chain reaches itself.
+
 ## [v1.2.1] - 2026-10-19 - IPv6 Host Joining, Pinged First Connection, Refused Empty Host and Backoff Floor
 
 ### Changed

@@ -8,10 +8,21 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v3.14.3] - 2026-11-06 - Bounded Error Chain Search
+
+### Added
+
+- exception: `ChainAs` and `ChainIs`, what `errors.As` and `errors.Is` answer, returning on an error chain whose `Unwrap` reaches itself. A patch release carrying public symbols is a deliberate exception to the back-port rule of `CONTRIBUTING.md`: the two exist strictly to repair the defect under Fixed, on this major and in the integration modules, which cannot reach the framework's internal packages, so that the search is not duplicated in every module.
+
+### Fixed
+
+- exception: an error whose `Unwrap` chain reaches itself no longer holds the goroutine that reads it forever, where `errors.As` and `errors.Is` never return on such a chain: `LogContext`, `IsAlreadyLogged`, `MarkLogged`, `FromError`, `AsHttpException`, `IsDeserializationError`, `IsInfrastructureFailure` and `LogError` return, a handler's or a session save's cyclic error is answered 500, a body read's 400, a limiter's is recorded as a store failure, a file system's is a miss of the static server and a refusal of the dotenv load, and a provider's and a command's travel out as any other failure. A search reads a link met twice once and stops after 65,536 links. `BuildCauseChain` and `BuildCauseContextChain` render each pointer link once, so a join holding one link twice reads it once. On this major, a link whose `Unwrap`, `Is` or `As` panics reads as holding nothing at the searches of the kernel, the listener, the resolver and the rest of the framework, as it already did inside `exception`, where the panic reached the kernel's recovery.
+
 ### Documentation
 
 - documentation: the container document's scoped-services sample resolves its repository by type, where it called a bunorm helper that does not exist.
 - documentation: the security document reads a fractional `iat` as the validator does, rounded down for the future refusal too, where it described the rounding up the third major replaced.
+- documentation: the security document links `OnBehalfOf` to the type that declares it, `AuthenticatedToken`, where it linked the token contract, which does not declare it.
 
 ## [v3.14.2] - 2026-10-22 - Time-Claim Resolution, Storage and Mailer Hardening
 
@@ -1183,7 +1194,9 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.3...HEAD
+
+[v3.14.3]: https://github.com/precision-soft/melody/compare/v3.14.2...v3.14.3
 
 [v3.14.2]: https://github.com/precision-soft/melody/compare/v3.14.1...v3.14.2
 

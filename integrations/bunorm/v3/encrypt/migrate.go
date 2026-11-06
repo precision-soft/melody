@@ -561,7 +561,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
 
 /* classifyRunError separates a run the operator stopped from one that broke: both are errors, but an interruption names itself and carries how far the run got. An empty message hands a pre-wrapped error through unchanged. */
 func (instance *Migrator) classifyRunError(spec TableSpec, processed int, message string, cause error) error {
-    if true == errors.Is(cause, context.Canceled) || true == errors.Is(cause, context.DeadlineExceeded) {
+    if true == exception.ChainIs(cause, context.Canceled) || true == exception.ChainIs(cause, context.DeadlineExceeded) {
         return exception.NewError(
             "migrate was interrupted by the caller's context; the run is incomplete and a re-run picks up the remaining rows",
             map[string]any{"table": spec.Table, "processed": processed},

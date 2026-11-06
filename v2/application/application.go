@@ -2,7 +2,6 @@ package application
 
 import (
     "context"
-    "errors"
     "io/fs"
     "os"
     "sync"
@@ -283,11 +282,11 @@ func (instance *Application) Run(ctx context.Context) {
 func resolveCliExitError(runCliErr error) (*exception.ExitError, bool) {
     var exitError *exception.ExitError
 
-    if false == errors.As(runCliErr, &exitError) {
+    if false == exception.ChainAs(runCliErr, &exitError) {
         return nil, false
     }
 
-    /* errors.As reports success on a typed-nil link; it is answered as absent, so the run falls through to the ordinary panic that carries its real error */
+    /* the search reports success on a typed-nil link; it is answered as absent, so the run falls through to the ordinary panic that carries its real error */
     if nil == exitError {
         return nil, false
     }

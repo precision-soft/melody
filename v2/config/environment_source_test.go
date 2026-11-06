@@ -2,10 +2,12 @@ package config
 
 import (
     "fmt"
+    "io/fs"
     "os"
     "path/filepath"
     "strings"
     "testing"
+    "time"
 
     configcontract "github.com/precision-soft/melody/v2/config/contract"
     "github.com/precision-soft/melody/v2/exception"
@@ -618,5 +620,59 @@ func TestMarkSecret_ReachesADotEnvValueAssembledFromTheMarkedKey(t *testing.T) {
         if true == configuration.MustGet(name).IsSecret() {
             t.Fatalf("expected %s, which reads no marked key, unmarked", name)
         }
+    }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type cyclicOpenFileSystem struct{}
+
+func (instance *cyclicOpenFileSystem) Open(name string) (fs.File, error) {
+    return nil, newCyclicChainError()
+}
+
+func TestLoadOptionalDotEnvFile_ReturnsOnACyclicChainFromTheFileSystem(t *testing.T) {
+    source := NewEnvironmentSource(&cyclicOpenFileSystem{}, ".")
+
+    var loadErr error
+    assertReturnsOnACyclicChain(t, func() {
+        loadErr = source.loadOptionalDotEnvFile(map[string]string{}, ".env")
+    })
+
+    if nil == loadErr {
+        t.Fatal("expected the refusal of a file system that cannot be read")
     }
 }

@@ -420,3 +420,32 @@ func TestRequest_BindJsonAndValidateValidatesAnEmptyObjectBoundThroughAPointer(t
         t.Fatalf("expected the empty object refused by validation, got %v and %d", bindErr, statusCode)
     }
 }
+
+func TestRequest_BindJsonReturnsOnACyclicChainFromTheBody(t *testing.T) {
+    var bindErr error
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/bind",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            var target map[string]any
+            bindErr = request.(*Request).BindJson(&target)
+
+            return TextResponse(nethttp.StatusOK, "served"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "/bind", &cyclicBodyReader{})
+    netRequest.Header.Set("Content-Type", "application/json")
+
+    assertReturnsOnACyclicChain(t, func() {
+        handler.ServeHTTP(httptest.NewRecorder(), netRequest)
+    })
+
+    if nil == bindErr {
+        t.Fatal("expected the refusal of a body that cannot be read")
+    }
+}
