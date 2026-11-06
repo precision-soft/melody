@@ -36,7 +36,6 @@ func TestNewGenerateCommandIdentity(t *testing.T) {
         t.Fatalf("Description() should not be empty")
     }
 
-    /* the command carries its 9 own flags plus the standard set every melody command accepts, which the framework's -v/-vv rewrite into --verbosity needs */
     flags := command.Flags()
     expectedFlagCount := 9 + len(output.StandardFlags())
     if expectedFlagCount != len(flags) {
@@ -2186,7 +2185,6 @@ func TestAtomicWriteFileRollsBackTemporaryOnRenameFailure(t *testing.T) {
     }
 }
 
-/* a destination already in place keeps its mode across the atomic rewrite, as on the framework's and the migrate module's atomic writers, so a crontab narrowed to 0600 stays 0600; a destination that does not exist yet is created with the mode the caller chose */
 func TestAtomicWriteFileKeepsTheModeOfAnExistingDestination(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -2264,7 +2262,6 @@ func TestRunCrontabNoUserTemplateWithHeartbeatAndNoUserSucceeds(t *testing.T) {
     }
 }
 
-/* a malformed opt-in is not an absent one: reading it as "not enabled" would emit a crontab without the liveness line the operator asked for and report success, leaving a typo indistinguishable from never having asked. */
 func TestRun_RefusesAMalformedHeartbeatOptIn(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2368,7 +2365,6 @@ func TestGenerateCommand_ConfigurationResolvesThroughTheRunScope(t *testing.T) {
     }
 }
 
-/* the framework rewrites -v/-vv into --verbosity for every command; the standard flags make the generator survive its own framework's convention. */
 func TestGenerateCommand_AcceptsTheStandardVerbosityFlag(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -2388,7 +2384,6 @@ func TestGenerateCommand_AcceptsTheStandardVerbosityFlag(t *testing.T) {
     }
 }
 
-/* under --format=json the generator's summary is the one machine-readable document. */
 func TestGenerateCommand_JsonFormatRendersOneDocument(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -2432,7 +2427,6 @@ func TestGenerateCommand_JsonFormatRendersOneDocument(t *testing.T) {
     }
 }
 
-/* the report is a defer, so the document exists whatever stopped the run while the cli silences the command's own error line in json mode; it names what had already been written, because destinations are written one by one with no rollback and a failure on the third of four leaves two files on disk */
 func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -2487,7 +2481,6 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
         t.Fatalf("expected the cause to name the missing logs-dir, got %q", document.Error.Cause.Message)
     }
 
-    /* the document carries the failure's details and cause chain, the context the journal carries for the same value */
     if nil == document.Error.Details {
         t.Fatalf("expected the failure details to be an object, got %q", stdout)
     }
@@ -2500,12 +2493,10 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
         t.Fatalf("expected the chain to start at the failure itself, got %v", document.Error.Cause.Details["chain"])
     }
 
-    /* the writes key stays an array on a failed run: a consumer keying on it must not meet a null */
     if nil == document.Data.Writes {
         t.Fatalf("expected an empty writes array on a failed run, got %q", stdout)
     }
 
-    /* the success path must stay exactly what it was, or the guard above would pass for a command that reports every run as failed */
     successStdout, successErr := runGenerateCommand(
         t,
         []clicontract.Command{
@@ -2537,7 +2528,6 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
     }
 }
 
-/* one Configuration drives the generated manifest and the in-process runner alike, so an entry's own arguments have to reach both: an argument honoured by only one of them is a divergence nothing would report. They come after the instance flags this generator adds, so the line reads as the entry declared it. */
 func TestGenerateCommand_EntryArgumentsReachTheGeneratedLine(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2574,11 +2564,9 @@ func TestGenerateCommand_EntryArgumentsReachTheGeneratedLine(t *testing.T) {
     }
 }
 
-/* the destinations are written one by one with no rollback, so a failure on a later one leaves the earlier files on disk: the document has to name them, or the consumer cannot tell a run that wrote nothing from one that wrote half */
 func TestGenerateCommand_JsonNamesTheDestinationsWrittenBeforeTheFailure(t *testing.T) {
     tempDir := t.TempDir()
 
-    /* the second destination cannot be created: its parent is a file, so MkdirAll fails after the first has been written */
     blockingFile := filepath.Join(tempDir, "blocked")
     if writeErr := os.WriteFile(blockingFile, []byte("not a directory"), 0o644); nil != writeErr {
         t.Fatalf("failed to place the blocking file: %v", writeErr)
@@ -2631,7 +2619,6 @@ func TestGenerateCommand_JsonNamesTheDestinationsWrittenBeforeTheFailure(t *test
     }
 }
 
-/* Render is userland and Schedule.Defaults is documented as mutating in place, so every entry carries its own schedule: a template calling it on the schedule it receives would otherwise rewrite the one behind every sibling entry of the same command. */
 func TestExpandEntriesForCommand_EveryEntryCarriesItsOwnSchedule(t *testing.T) {
     schedule := &Schedule{Minute: "0", Hour: "3"}
 
@@ -2670,7 +2657,6 @@ func TestExpandEntriesForCommand_EveryEntryCarriesItsOwnSchedule(t *testing.T) {
     }
 }
 
-/* a destination an earlier version wrote is never reconciled by default, so a job retired between versions keeps running forever and a job MOVED to another destination runs from both files — the double execution the runner refuses at construction, produced silently by the generator. --prune is the opt-in that closes it. */
 func TestRunPruneEmptiesADestinationThisRunNoLongerProduces(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2706,7 +2692,6 @@ func TestRunPruneEmptiesADestinationThisRunNoLongerProduces(t *testing.T) {
         t.Fatalf("the first generation did not name the job: %s", firstContent)
     }
 
-    /* the next version moves the same job to the default destination */
     stdout, secondErr := runGenerateCommand(
         t,
         []clicontract.Command{
@@ -2747,7 +2732,6 @@ func TestRunPruneEmptiesADestinationThisRunNoLongerProduces(t *testing.T) {
     }
 }
 
-/* without the flag the sweep does not run at all, so a deployment that manages the output directory itself is untouched */
 func TestRunWithoutPruneLeavesAStaleDestinationUntouched(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2795,7 +2779,6 @@ func TestRunWithoutPruneLeavesAStaleDestinationUntouched(t *testing.T) {
     }
 }
 
-/* emptying a file is not reversible, so the sweep touches only what it can prove it wrote: a file the operator put in the same directory carries no ownership marker and is left exactly as it is */
 func TestRunPruneLeavesAFileItCannotProveItWrote(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2834,7 +2817,6 @@ func TestRunPruneLeavesAFileItCannotProveItWrote(t *testing.T) {
     }
 }
 
-/* emptying the configuration makes every destination the previous one wrote stale, so the sweep runs there too, while the run itself stays a success */
 func TestRunPruneSweepsWhenTheConfigurationBecomesEmpty(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2881,7 +2863,6 @@ func TestRunPruneSweepsWhenTheConfigurationBecomesEmpty(t *testing.T) {
     }
 }
 
-/* the machine document names the sweep beside the writes, as a list on every run rather than a field whose json type changes with the outcome */
 func TestRunPruneIsReportedInTheJsonEnvelope(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2940,7 +2921,6 @@ func TestRunPruneIsReportedInTheJsonEnvelope(t *testing.T) {
     }
 }
 
-/* a run that sweeps nothing still answers a list rather than null, so a consumer can key on it unconditionally */
 func TestRunReportsAnEmptyPrunedListWhenNothingIsSwept(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -2981,7 +2961,6 @@ func TestRunReportsAnEmptyPrunedListWhenNothingIsSwept(t *testing.T) {
     }
 }
 
-/* the marker is what the sweep reads, so both dialects have to carry it in what they actually render */
 func TestCrontabTemplatesRenderTheirOwnershipMarker(t *testing.T) {
     for _, template := range BuiltinTemplates() {
         ownedTemplate, isOwned := template.(OwnedTemplate)
@@ -2989,7 +2968,6 @@ func TestCrontabTemplatesRenderTheirOwnershipMarker(t *testing.T) {
             t.Fatalf("expected %q to name its ownership marker", template.Name())
         }
 
-        /* the marker is read back from the same door the rendering is compared against, so it is pinned to the constant as well: an empty marker would satisfy every containment check while making the template unprunable, which is the fail-safe rather than the contract */
         if CrontabOwnershipMarker != ownedTemplate.OwnershipMarker() {
             t.Fatalf("expected %q to name the crontab marker, got %q", template.Name(), ownedTemplate.OwnershipMarker())
         }
@@ -3085,7 +3063,6 @@ func TestRunKeepsARelativeFlagPathRelativeToTheWorkingDirectory(t *testing.T) {
     }
 }
 
-/* TestErrorDetailsOf_CarriesTheFailuresOwnContext pins the guard where it lives: the generate failures reachable from the command carry no context of their own, so through the command the guard would pass just as well emptied. */
 func TestErrorDetailsOf_CarriesTheFailuresOwnContext(t *testing.T) {
     runErr := exception.NewError(
         "the cron manifest could not be renamed into place",
@@ -3104,7 +3081,6 @@ func TestErrorDetailsOf_CarriesTheFailuresOwnContext(t *testing.T) {
     }
 }
 
-/* a failure carrying no context still answers an object: a field whose json type changes with the outcome cannot be consumed at all */
 func TestErrorDetailsOf_KeepsAnObjectWithoutAContext(t *testing.T) {
     details := errorDetailsOf(errors.New("bare failure"))
 
@@ -3117,7 +3093,6 @@ func TestErrorDetailsOf_KeepsAnObjectWithoutAContext(t *testing.T) {
     }
 }
 
-/* the cause starts at the failure itself here, unlike the migrate envelope: this document's message is a fixed label, so the failure's own sentence lives in the cause */
 func TestErrorCauseOf_StartsAtTheFailureAndCarriesTheChain(t *testing.T) {
     runErr := exception.NewError(
         "the cron manifest could not be renamed into place",
@@ -3144,7 +3119,6 @@ func TestErrorCauseOf_StartsAtTheFailureAndCarriesTheChain(t *testing.T) {
     }
 }
 
-/* a failure with nothing under it answers no cause at all, and null is the honest answer there */
 func TestErrorCauseOf_AnswersNothingForAFailureWithoutACause(t *testing.T) {
     if nil != errorCauseOf(nil) {
         t.Fatal("expected no cause for a nil failure")
@@ -3174,7 +3148,6 @@ func (instance *noUserColumnTemplate) RendersUserColumn() bool {
     return false
 }
 
-/* a registered dialect that renders no user column places its heartbeat without one, as the builtin that renders none does; judged by name alone, the readme's kubernetes example would be refused for a crontab user it never renders. */
 func TestGenerateCommand_ARegisteredNoUserDialectNeedsNoUserForTheHeartbeat(t *testing.T) {
     directory := t.TempDir()
 
@@ -3198,7 +3171,6 @@ func TestGenerateCommand_ARegisteredNoUserDialectNeedsNoUserForTheHeartbeat(t *t
     }
 }
 
-/* a run that fails part way through still names what it already did on the text rendering, as on the json one, since emptying a destination is irreversible. It is driven through the report door rather than a sweep made to fail, because the sweep opens only regular files it wrote and can read, so the state is constructed rather than waited for. */
 func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testing.T) {
     var stdout bytes.Buffer
     commandContext := &clicontract.CommandContext{Writer: &stdout}
@@ -3231,7 +3203,6 @@ func TestGenerateCommand_TheTextBranchNamesWhatItProducedBeforeFailing(t *testin
     }
 }
 
-/* the sweep considers only regular files: opening a fifo with no writer never returns, so a named pipe beside the destinations would wedge the generator with no deadline and no diagnostic. */
 func TestGenerateCommand_TheSweepDoesNotOpenANamedPipe(t *testing.T) {
     directory := t.TempDir()
 
@@ -3265,7 +3236,6 @@ func TestGenerateCommand_TheSweepDoesNotOpenANamedPipe(t *testing.T) {
     }
 }
 
-/* the escape refusal draws the outer boundary and this pins the inside of it: a LogFileName carrying a subdirectory stays within the logs dir, and the generator creates that subdirectory, because under system cron the shell aborts the command when the >> redirection cannot create its file. */
 func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -3302,7 +3272,6 @@ func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
     }
 }
 
-/* the emptying is irreversible, so ownership is not a substring question: a file that quotes the marker inside a longer line, or past the leading lines, is not one this generator wrote, and a custom dialect that suffixes the builtin marker declares files of its own, which a substring match would claim for the builtin run */
 func TestFileCarriesOwnershipMarker_MatchesOnlyAnExactLeadingLine(t *testing.T) {
     tempDir := t.TempDir()
 
@@ -3348,7 +3317,6 @@ func TestFileCarriesOwnershipMarker_MatchesOnlyAnExactLeadingLine(t *testing.T) 
     }
 }
 
-/* the binary is the fourth path-shaped value the generator resolves, and its parameter follows the rule of the other three: relative from the configuration means under the project, relative from the flag means where the shell is. */
 func TestRunAnchorsARelativeBinaryParameterAtTheProjectDirectory(t *testing.T) {
     projectDirectory := t.TempDir()
     workingDirectory := t.TempDir()
@@ -3415,7 +3383,6 @@ func TestRunKeepsARelativeBinaryFlagRelativeToTheWorkingDirectory(t *testing.T) 
     }
 }
 
-/* ownershipLineDialects lists the builtin dialects whose rendering the ownership-line tests read back, with the arguments each needs to render an entry */
 func ownershipLineDialects() []struct {
     name  string
     extra []string
@@ -3429,7 +3396,6 @@ func ownershipLineDialects() []struct {
     }
 }
 
-/* containsExactLeadingLine answers whether the content carries the line as a whole trimmed line of its own among the leading lines the sweep reads, which is the only reading the reconciliation performs */
 func containsExactLeadingLine(content string, line string) bool {
     lines := strings.SplitN(content, "\n", ownershipMarkerLineLimit+1)
     if ownershipMarkerLineLimit < len(lines) {
@@ -3624,7 +3590,6 @@ func TestRunPruneIsRefusedWhenTheApplicationHasNoName(t *testing.T) {
         t.Fatalf("expected the sweep to be refused for want of an application name, got: %v", runErr)
     }
 
-    /* the writes precede the sweep, so the run's own destination is on disk under the bare marker — recognisable, and no application's */
     content, readErr := os.ReadFile(outputPath)
     if nil != readErr {
         t.Fatalf("expected the destination to be written before the sweep was refused: %v", readErr)
@@ -3681,7 +3646,6 @@ func TestFileCarriesOwnershipMarker_KeepsOneApplicationsLineApartFromAnothersAnd
     }
 }
 
-/* decoratingCrontabTemplate embeds the builtin crontab dialect and decorates its rendering: the shape an application writes to override a builtin, registered under the builtin's own name through RegisterTemplate. The embedding promotes the builtin's unexported doors onto it — the per-application copy door included. */
 type decoratingCrontabTemplate struct {
     *CrontabTemplate
 }
@@ -3692,7 +3656,6 @@ func (instance *decoratingCrontabTemplate) Render(entries []Entry, options Rende
     return "# decorated by the application\n" + rendered, renderErr
 }
 
-/* the wrapper is used as it is, and so is the line it answers: the bare prefix promoted from the builtin it embeds, which an earlier release or another application's wrapper writes as well. A named application's --prune sweeping on it would empty those destinations, the cross-application emptying the named line prevents, so the sweep is refused and the destination written. */
 func TestRunPruneIsRefusedOnADialectWhoseLineDoesNotNameTheApplication(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
@@ -3779,7 +3742,6 @@ func TestRunLeavesADialectEmbeddingABuiltinAsItIsInsteadOfReplacingItWithTheBare
     }
 }
 
-/* a basename of 255 bytes is the longest a path component admits; the temp file beside it must fit the same component */
 func TestAtomicWriteFileReplacesADestinationWhoseBasenameFillsTheFilesystemComponent(t *testing.T) {
     tempDir := t.TempDir()
     destination := filepath.Join(tempDir, strings.Repeat("c", 255))
@@ -3816,7 +3778,6 @@ func TestResolveEntryLogPath_AMultiInstanceNameInADottedSubdirectoryKeepsTheDire
     }
 }
 
-/* withLogDirectoryOwnership replaces the process and system doors the chown reads, so the pin runs as any user */
 func withLogDirectoryOwnership(t *testing.T, effectiveUserId int, lookup func(string) (*user.User, error)) *[]string {
     t.Helper()
 

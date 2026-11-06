@@ -12,7 +12,6 @@ import (
 
 const causeChainMaxDepth = 8
 
-/* LevelEnabled asks a logger whether a record at this level would survive its threshold, and answers true for one that cannot be asked; it is the one door onto loggingcontract.LevelReporter. Ask it only where the answer saves work otherwise thrown away. */
 func LevelEnabled(logger loggingcontract.Logger, level loggingcontract.Level) bool {
     levelReporter, isReporter := logger.(loggingcontract.LevelReporter)
     if false == isReporter {
@@ -22,7 +21,7 @@ func LevelEnabled(logger loggingcontract.Logger, level loggingcontract.Level) bo
     return levelReporter.Enabled(level)
 }
 
-/* LogError writes one record for the error, or none when it is nil, a typed nil or already logged; the mark is read at the depth exception.MarkLogged writes it, the nearest AlreadyLogged implementer in the chain. A top-level *exception.Error contributes its own level, message and context, while any other error is logged at error level under its full message, with the nearest provider's context and its cause chain. A nil logger falls back to the standard library's log package, its default logger writing the level, the message and the context as one text line. */
+/* LogError writes nothing for a nil, typed-nil or already logged error; a nil logger uses the standard log package */
 func LogError(logger loggingcontract.Logger, err error) {
     if nil == err || true == internal.IsNilInterface(err) {
         return
@@ -41,7 +40,7 @@ func LogError(logger loggingcontract.Logger, err error) {
         enrichedContext := enrichContextWithCause(exceptionValue)
 
         if nil == logger || true == internal.IsNilInterface(logger) {
-            /* the one-record-one-line guarantee the default logger holds: this fallback writes through the raw standard logger, so it escapes on its own */
+            /* this fallback writes through the raw standard logger, so it escapes on its own */
             if 0 < len(enrichedContext) {
                 log.Printf("[%s] %s context=%v", levelUpper, internal.EscapeControlCharacters(exceptionValue.Message()), internal.EscapeControlCharacters(renderTextValue(enrichedContext)))
             } else {
@@ -55,7 +54,7 @@ func LogError(logger loggingcontract.Logger, err error) {
         return
     }
 
-    /* the message is rendered with the context under a recover: this path runs from the recovery handlers, where Error() may dereference the very nil that caused the panic */
+    /* the message renders under a recover: this path runs from recovery handlers, where Error() may dereference a nil */
     enrichedContext := exception.LogContext(err)
     renderedMessage, isRendered := enrichedContext["error"].(string)
     if false == isRendered || "" == renderedMessage {
@@ -108,7 +107,6 @@ func enrichContextWithCause(exceptionValue *exception.Error) exceptioncontract.C
         context = exceptioncontract.Context{}
     }
 
-    /* a typed-nil cause is the nil its producer meant, and BuildCauseChain answers an empty chain for it */
     causeErr := exceptionValue.CauseErr()
     if nil == causeErr || true == internal.IsNilInterface(causeErr) {
         return context

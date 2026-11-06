@@ -230,7 +230,6 @@ func TestFromResolverByType_TypeMismatch(t *testing.T) {
 func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
     serviceContainer := NewContainer()
 
-    /* an unqualified recover accepts any panic at all, including one thrown by an unrelated guard in the same call; the message is what names the refusal under test */
     testhelper.AssertPanicsWithError(
         t,
         func() {
@@ -250,7 +249,6 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
     }, WithTypeRegistration(true))
 
     MustRegister(serviceContainer, "bus.alpha", func(resolver containercontract.Resolver) (*alpha.Bus, error) {
-        /* the alpha provider resolves the beta bus by type: both nodes key on "contract.Bus" through String(), so a shared key would flag a false cycle here */
         betaBus, betaErr := FromResolverByType[*beta.Bus](resolver)
         if nil != betaErr {
             return nil, betaErr
@@ -480,7 +478,6 @@ func TestLazy_NilResolverSurfacesAsAnErrorAtFirstUse(t *testing.T) {
     }
 }
 
-/* the type-keyed door dresses its failure the way the name-keyed twin does: a melody error travels out whole with the type written into its context in place, and a foreign error is wrapped naming the type, so the operator reading either record learns which resolution failed. */
 func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T) {
     melodyErr := exception.NewError("service creation failed", nil, nil)
 
@@ -512,7 +509,6 @@ func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T)
     }
 }
 
-/* a failure that already names a service — the nested resolution that failed — keeps that name through the outer resolution: the outer name would point the reader at a service that is registered */
 func TestFromResolver_KeepsTheServiceNameANestedFailureCarries(t *testing.T) {
     nestedErr := exception.NewError(
         "service is not registered",

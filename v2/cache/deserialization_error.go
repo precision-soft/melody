@@ -5,7 +5,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
 )
 
-/* NewDeserializationError marks a cache read that found a payload the serializer cannot decode, naming the keys it was found under. Remember treats this type as a miss and recomputes, overwriting the corrupt payload, while every other error means the cache failed; a Cache of your own that wraps its deserialization failures in it inherits that. */
+/* NewDeserializationError marks a payload Remember treats as a miss and recomputes; any other error is a cache failure. */
 func NewDeserializationError(keys []string, causeErr error) *DeserializationError {
     return &DeserializationError{
         exceptionErr: exception.NewError(

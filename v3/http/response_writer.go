@@ -19,7 +19,6 @@ func WriteToHttpResponseWriter(
     responseWriter nethttp.ResponseWriter,
     response httpcontract.Response,
 ) error {
-    /* the interface is read through, not compared, so a typed-nil response is refused rather than dereferenced */
     if true == internal.IsNilInterface(response) {
         return nil
     }
@@ -29,7 +28,7 @@ func WriteToHttpResponseWriter(
         statusCode = nethttp.StatusOK
     }
 
-    /* a status outside net/http's [100, 999] is refused before anything is written, the headers included, since WriteHeader would panic and a caller writing its own response after the error must not inherit this one's Set-Cookie */
+    /* refused before anything is written: WriteHeader would panic and a later response must not inherit this Set-Cookie */
     if 100 > statusCode || 999 < statusCode {
         return exception.NewError(
             "response status code is out of range",
@@ -42,7 +41,7 @@ func WriteToHttpResponseWriter(
 
     headers := response.Headers()
     if nil != headers {
-        /* a key the response names replaces the writer's values for it, so a header both sides set reaches the client once; keys it does not name keep the writer's values. Set-Cookie is appended, since each line is a separate cookie. */
+        /* Set-Cookie is appended, since each line is a separate cookie; other named keys replace the writer's values */
         for key, values := range headers {
             if "Set-Cookie" != nethttp.CanonicalHeaderKey(key) {
                 responseWriter.Header().Del(key)
@@ -88,23 +87,19 @@ func WriteToHttpResponseWriter(
     return nil
 }
 
-/* headerCommitRecorder reports whether the response headers were already committed. */
 type headerCommitRecorder interface {
     HeadersWritten() bool
 }
 
-/* sessionPersistenceRecorder lets writeResponse persist the session at most once per request. */
 type sessionPersistenceRecorder interface {
     SessionPersisted() bool
     MarkSessionPersisted()
 }
 
-/* committedStatusRecorder reports the status committed on the connection; zero means none was committed through the recorder, a hijacked connection included. */
 type committedStatusRecorder interface {
     CommittedStatusCode() int
 }
 
-/* recordingResponseWriter records what the delegate committed, so the kernel can tell a response it still owns from one already on the wire. Its fields are written and read on the serving goroutine only and carry no lock; the server-sent-event writer serializes its own frames. */
 type recordingResponseWriter struct {
     nethttp.ResponseWriter
     wroteHeader      bool
@@ -118,7 +113,7 @@ func newRecordingResponseWriter(responseWriter nethttp.ResponseWriter) *recordin
     }
 }
 
-/* WriteHeader raises the commit flag only after the delegate returns, since the delegate panics on an invalid status before anything is written. An informational status other than 101 (103 Early Hints) commits nothing: net/http sends it ahead of the final header, which is still to be written. A call after the commit reaches the delegate, which ignores it, and leaves the recorded status as the one the connection carries. */
+/* WriteHeader raises the commit flag only after the delegate returns, since the delegate panics on an invalid status */
 func (instance *recordingResponseWriter) WriteHeader(statusCode int) {
     instance.ResponseWriter.WriteHeader(statusCode)
     if true == instance.wroteHeader {
@@ -133,7 +128,7 @@ func (instance *recordingResponseWriter) WriteHeader(statusCode int) {
     instance.statusCode = statusCode
 }
 
-/* Write raises the flag after the delegate returns, error or not: a write the client disconnected under has still committed the implicit header. */
+/* Write raises the flag after the delegate returns, error or not: a failed write has still committed the implicit header. */
 func (instance *recordingResponseWriter) Write(data []byte) (int, error) {
     written, writeErr := instance.ResponseWriter.Write(data)
     instance.recordImplicitCommit()
@@ -141,16 +136,14 @@ func (instance *recordingResponseWriter) Write(data []byte) (int, error) {
     return written, writeErr
 }
 
-/* Flush flushes through a ResponseController, so it reaches the connection through any wrapper that implements Unwrap, and records the commit after it returns. */
 func (instance *recordingResponseWriter) Flush() {
-    /* a flush that reached a flusher committed the header even when its write failed; only ErrNotSupported means nothing was flushed */
+    /* a flush that reached a flusher committed the header even when its write failed; only ErrNotSupported flushed nothing */
     flushErr := nethttp.NewResponseController(instance.ResponseWriter).Flush()
     if false == exception.ChainIs(flushErr, nethttp.ErrNotSupported) {
         instance.recordImplicitCommit()
     }
 }
 
-/* recordImplicitCommit records a commit that reached the connection without an explicit WriteHeader, as the implicit 200 unless an explicit status was named first. */
 func (instance *recordingResponseWriter) recordImplicitCommit() {
     instance.wroteHeader = true
     if 0 == instance.statusCode {
@@ -162,12 +155,10 @@ func (instance *recordingResponseWriter) HeadersWritten() bool {
     return instance.wroteHeader
 }
 
-/* CommittedStatusCode answers the status the connection carries: the explicit one, or the implicit 200 recorded with the first byte. Zero means nothing was committed through this recorder, a hijacked connection included. */
 func (instance *recordingResponseWriter) CommittedStatusCode() int {
     return instance.statusCode
 }
 
-/* SessionPersisted reports whether an earlier writeResponse call already persisted the session for this request. */
 func (instance *recordingResponseWriter) SessionPersisted() bool {
     return instance.sessionPersisted
 }
@@ -176,7 +167,6 @@ func (instance *recordingResponseWriter) MarkSessionPersisted() {
     instance.sessionPersisted = true
 }
 
-/* Hijack is forwarded for connection upgrades; only a successful hijack counts as a commit. Under HTTP/2 the call returns an error. */
 func (instance *recordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
     hijacker, isHijacker := instance.ResponseWriter.(nethttp.Hijacker)
     if false == isHijacker {
@@ -191,7 +181,6 @@ func (instance *recordingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, 
     return connection, readWriter, hijackErr
 }
 
-/* ReadFrom is forwarded to keep the sendfile fast path. The commit is recorded after the copy, only when a byte reached the delegate, in a defer so a source that panics mid-copy unwinds through it. */
 func (instance *recordingResponseWriter) ReadFrom(reader io.Reader) (written int64, copyErr error) {
     defer func() {
         if 0 < written {
@@ -204,7 +193,7 @@ func (instance *recordingResponseWriter) ReadFrom(reader io.Reader) (written int
     return written, copyErr
 }
 
-/* Unwrap exposes the underlying writer to http.ResponseController. http.Pusher is deliberately not forwarded. */
+/* Unwrap exposes the writer to http.ResponseController; http.Pusher is deliberately not forwarded */
 func (instance *recordingResponseWriter) Unwrap() nethttp.ResponseWriter {
     return instance.ResponseWriter
 }

@@ -24,7 +24,7 @@ import (
 
 const defaultMaxRateLimitKeys = 1_000_000
 
-/* NewFixedWindowLimiter builds a limiter whose counters live in this process only: every restart hands each caller a full budget back, and each replica enforces the limit on its own. That suits traffic shaping, not login, one-time-password or password-reset routes, where the limit is a security control and integrations/rueidis.RateLimiter is the distributed drop-in. */
+/* NewFixedWindowLimiter counts in this process only; for a security limit use integrations/rueidis.RateLimiter. */
 func NewFixedWindowLimiter(rate int, window time.Duration) *FixedWindowLimiter {
     return NewFixedWindowLimiterWithClock(clock.NewSystemClock(), rate, window)
 }
@@ -49,7 +49,7 @@ func NewFixedWindowLimiterWithClock(clockInstance clockcontract.Clock, rate int,
         )
     }
 
-    /* a non-positive window makes Allow refill to full capacity on every request (window <= elapsed is always true), silently disabling the limiter; a non-positive rate denies all traffic. Normalize both, mirroring CompressionMiddleware's MinSize clamp. */
+    /* a non-positive window refills on every request, silently disabling the limiter; a non-positive rate denies all traffic */
     if 0 >= rate {
         rate = 1
     }
@@ -83,7 +83,7 @@ type FixedWindowLimiter struct {
     lastCeilingPruneAt time.Time
 }
 
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and the idle-entry prune, run at most once per window, frees nothing or is skipped, a request under an unseen key is denied rather than minting a bucket, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+/* SetMaxKeys denies an unseen key when the map is full and the prune frees nothing or is skipped; non-positive is ignored. */
 func (instance *FixedWindowLimiter) SetMaxKeys(maxKeys int) {
     if 0 >= maxKeys {
         return
@@ -125,7 +125,7 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
         instance.buckets[key] = bucket
     }
 
-    /* the window is fixed, not a token bucket: the allowance is restored whole at the edge rather than proportionally to elapsed time, so up to twice the rate can pass across an instant straddling it. SlidingWindowLimiter holds the rate over every trailing window. */
+    /* the window is fixed, not a token bucket: up to twice the rate can pass across an instant straddling the edge */
     elapsed := now.Sub(bucket.lastRefill)
 
     if instance.window <= elapsed {
@@ -168,7 +168,7 @@ func (instance *FixedWindowLimiter) cleanupIfNeededLocked(now time.Time) {
     instance.lastCleanupAt = now
 }
 
-/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window. The prune walks the whole map, and at the ceiling every request under an unseen key would pay that walk while holding the lock all traffic shares — the bound meant to protect memory would become a processing amplifier for the very traffic it exists to survive. An entry only falls idle after twice the window, so a finer cadence cannot free meaningfully more; between prunes an unseen key is denied without a walk. */
+/* at most once per window: the prune walks the whole map under the lock all traffic shares */
 func (instance *FixedWindowLimiter) pruneAtCeilingLocked(now time.Time) {
     if false == instance.lastCeilingPruneAt.IsZero() && instance.window > now.Sub(instance.lastCeilingPruneAt) {
         return
@@ -189,7 +189,7 @@ func (instance *FixedWindowLimiter) pruneIdleLocked(now time.Time) {
     }
 }
 
-/* idlePruneThreshold is twice the window, saturating at the top of the duration range: past the midpoint the doubling would wrap negative, every entry would read as idle, and a budget the window promised to hold would refill at each cleanup. */
+/* saturates at the top of the duration range: past the midpoint the doubling wraps negative and every entry reads idle */
 func idlePruneThreshold(window time.Duration) time.Duration {
     if window > math.MaxInt64/2 {
         return math.MaxInt64
@@ -200,7 +200,7 @@ func idlePruneThreshold(window time.Duration) time.Duration {
 
 var _ httpcontract.RateLimiter = (*FixedWindowLimiter)(nil)
 
-/* NewSlidingWindowLimiter holds its timestamps in THIS process, exactly as NewFixedWindowLimiter holds its counters: a restart returns every caller's full budget and each replica enforces the limit on its own, so the deployment allows the limit times the number of instances. Where the limit is a security control rather than traffic shaping, use the distributed drop-in in integrations/rueidis. */
+/* NewSlidingWindowLimiter counts in this process only; for a security limit use the drop-in in integrations/rueidis. */
 func NewSlidingWindowLimiter(limit int, window time.Duration) *SlidingWindowLimiter {
     return NewSlidingWindowLimiterWithClock(clock.NewSystemClock(), limit, window)
 }
@@ -212,7 +212,7 @@ func NewSlidingWindowLimiterWithClock(clockInstance clockcontract.Clock, limit i
         )
     }
 
-    /* a non-positive window prunes every recorded request (windowStart >= now), so the limit is never reached and the limiter is silently disabled; a non-positive limit denies all traffic. Normalize both, mirroring CompressionMiddleware's MinSize clamp. */
+    /* a non-positive window prunes every recorded request, silently disabling the limiter; a non-positive limit denies all */
     if 0 >= limit {
         limit = 1
     }
@@ -244,7 +244,7 @@ type SlidingWindowLimiter struct {
     lastCeilingPruneAt time.Time
 }
 
-/* SetMaxKeys bounds how many distinct keys the limiter tracks. When the map is full and the idle-entry prune, run at most once per window, frees nothing or is skipped, a request under an unseen key is denied rather than minting a window, so an attacker varying the key cannot grow the map without bound. A non-positive value is ignored. */
+/* SetMaxKeys denies an unseen key when the map is full and the prune frees nothing or is skipped; non-positive is ignored. */
 func (instance *SlidingWindowLimiter) SetMaxKeys(maxKeys int) {
     if 0 >= maxKeys {
         return
@@ -286,7 +286,7 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
         instance.windows[key] = window
     }
 
-    /* the marks are appended in clock order, so the expired ones are a contiguous prefix and the window is trimmed by index; append reclaims the vacated head, so the compaction is amortized rather than a full copy per call under the lock every key shares. The recorded instant is clamped to the last mark to keep the order the binary search needs: a clock that steps back would otherwise let the search cut a live mark. The clamp can only hold a mark inside the window longer, which shortens the caller's budget and never widens it. */
+    /* the recorded instant is clamped to the last mark: a clock that steps back would let the binary search cut a live mark */
     liveFrom := sort.Search(
         len(window.requests),
         func(index int) bool {
@@ -341,7 +341,7 @@ func (instance *SlidingWindowLimiter) cleanupIfNeededLocked(now time.Time) {
     instance.lastCleanupAt = now
 }
 
-/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window. The prune walks the whole map, and at the ceiling every request under an unseen key would pay that walk while holding the lock all traffic shares — the bound meant to protect memory would become a processing amplifier for the very traffic it exists to survive. An entry only falls idle after twice the window, so a finer cadence cannot free meaningfully more; between prunes an unseen key is denied without a walk. */
+/* at most once per window: the prune walks the whole map under the lock all traffic shares */
 func (instance *SlidingWindowLimiter) pruneAtCeilingLocked(now time.Time) {
     if false == instance.lastCeilingPruneAt.IsZero() && instance.window > now.Sub(instance.lastCeilingPruneAt) {
         return
@@ -426,7 +426,6 @@ func (instance *RateLimitConfig) SetClientIpResolver(resolver ClientIpResolver) 
     instance.clientIpResolver = resolver
 }
 
-/* clientIp answers the client key the limiter counts under: the resolved address, with an IPv6 address aggregated to its /64 by clientIpRateLimitKey */
 func (instance *RateLimitConfig) clientIp(request httpcontract.Request) string {
     if nil != instance.clientIpResolver {
         return clientIpRateLimitKey(instance.clientIpResolver(request))
@@ -435,7 +434,7 @@ func (instance *RateLimitConfig) clientIp(request httpcontract.Request) string {
     return clientIpRateLimitKey(DefaultClientIp(request))
 }
 
-/* clientIpRateLimitKey aggregates an IPv6 address to its /64, the block one host is routinely handed: keyed on the /128, one host rotates through 2^64 addresses, each with a budget of its own, and fills the limiter's key table, which then refuses every new client. An IPv4 address, written bare or mapped into IPv6, keys on itself; a value that is not an address is kept as it is. */
+/* keyed on the /128, one host rotates through 2^64 addresses, each with a budget of its own, and fills the key table */
 func clientIpRateLimitKey(clientIp string) string {
     address, parseErr := netip.ParseAddr(clientIp)
     if nil != parseErr {
@@ -451,7 +450,6 @@ func clientIpRateLimitKey(clientIp string) string {
 }
 
 func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
-    /* the limiter is read through the interface: a typed-nil limiter passes the plain comparison, looks live, and dereferences its nil receiver on the first request the middleware meters — a boot-time refusal by name instead of a per-request panic */
     if nil == config || true == internal.IsNilInterface(config.Limiter()) {
         exception.Panic(
             exception.NewError("limiter is required for rate limit middleware", nil, nil),
@@ -477,7 +475,7 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
                 var allowErr error
                 allowed, allowErr = runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
                 if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
-                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure. The caller's own cancellation is recorded at warning under its own name, since it is a client hanging up and not a store outage; a limiter that filed its own record marks it. */
+                    /* the returned allowed value already reflects the limiter's failure policy; the middleware only reports the store failure */
                     logger := logging.LoggerFromRuntime(runtimeInstance)
                     if nil != logger {
                         if true == exception.ChainIs(allowErr, context.Canceled) {
@@ -503,7 +501,7 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
                     return response, limitErr
                 }
 
-                /* a limit handler that produced neither response nor error still refused the request, the reading the listener door gives the same outcome: passed through, the nil response would be normalized into an empty 204 and the refused request served as success */
+                /* a limit handler with neither response nor error still refused the request: a nil response would be served as success */
                 if true == internal.IsNilInterface(response) {
                     return http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests"), nil
                 }
@@ -516,12 +514,12 @@ func RateLimitMiddleware(config *RateLimitConfig) httpcontract.Middleware {
     }
 }
 
-/* SimpleRateLimit keys on the direct peer address (an IPv6 one on its /64 block), so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use SimpleRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
+/* SimpleRateLimit keys on the direct peer address, so behind a reverse proxy every client shares the proxy's budget. */
 func SimpleRateLimit(requestsPerMinute int) httpcontract.Middleware {
     return SimpleRateLimitWithResolver(requestsPerMinute, nil)
 }
 
-/* SimpleRateLimitWithResolver is SimpleRateLimit with the client address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so a per-IP budget behind a reverse proxy is charged to the client rather than to the proxy. A nil resolver keeps the direct peer. */
+/* SimpleRateLimitWithResolver keeps the direct peer for a nil resolver. */
 func SimpleRateLimitWithResolver(
     requestsPerMinute int,
     clientIpResolver ClientIpResolver,
@@ -539,12 +537,12 @@ func SimpleRateLimitWithResolver(
     return RateLimitMiddleware(config)
 }
 
-/* IpRateLimit keys on the direct peer address (an IPv6 one on its /64 block), so behind a reverse proxy every client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use IpRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
+/* IpRateLimit keys on the direct peer address, so behind a reverse proxy every client shares the proxy's single budget. */
 func IpRateLimit(requestsPerMinute int) httpcontract.Middleware {
     return IpRateLimitWithResolver(requestsPerMinute, nil)
 }
 
-/* IpRateLimitWithResolver is IpRateLimit with the client address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so a per-IP budget behind a reverse proxy is charged to the client rather than to the proxy. A nil resolver keeps the direct peer. */
+/* IpRateLimitWithResolver keeps the direct peer for a nil resolver. */
 func IpRateLimitWithResolver(
     requestsPerMinute int,
     clientIpResolver ClientIpResolver,
@@ -566,7 +564,7 @@ func IpRateLimitWithResolver(
     return RateLimitMiddleware(config)
 }
 
-/* UserRateLimit falls back to the direct peer address (an IPv6 one on its /64 block) for a request that carries no user id, so behind a reverse proxy every anonymous client shares the proxy's single budget. It builds its config internally and returns only the middleware, so the resolver cannot be set afterwards: use UserRateLimitWithResolver with NewForwardedClientIpResolver where a trusted edge sits in front. */
+/* UserRateLimit falls back to the direct peer address, so behind a reverse proxy anonymous clients share one budget. */
 func UserRateLimit(
     requestsPerMinute int,
     getUserId KeyExtractor,
@@ -574,13 +572,12 @@ func UserRateLimit(
     return UserRateLimitWithResolver(requestsPerMinute, getUserId, nil)
 }
 
-/* UserRateLimitWithResolver is UserRateLimit with the anonymous fallback address read through the given resolver — pass NewForwardedClientIpResolver with the same policy handed to Kernel.SetForwardedHeadersPolicy so unauthenticated traffic behind a reverse proxy is charged per client rather than to the proxy. A nil resolver keeps the direct peer. */
+/* UserRateLimitWithResolver keeps the direct peer for a nil resolver. */
 func UserRateLimitWithResolver(
     requestsPerMinute int,
     getUserId KeyExtractor,
     clientIpResolver ClientIpResolver,
 ) httpcontract.Middleware {
-    /* refused at construction, the way the middleware constructor refuses its missing limiter: accepted here, the nil callback dies on the request path, once per request, inside a closure no caller can reach */
     if nil == getUserId {
         exception.Panic(
             exception.NewError("get user id callback is required for user rate limit middleware", nil, nil),

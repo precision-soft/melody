@@ -188,7 +188,6 @@ func TestKernel_ClosesDiscardedResponseBodyWhenResponseListenerSwapsResponse(t *
 
     handler.ServeHTTP(recorder, request)
 
-    /* an EventKernelResponse listener swapped the response, so the original file-backed body must be closed rather than leaked */
     if 1 != body.closeCount {
         t.Fatalf("expected the discarded original response body to be closed exactly once after a response listener swapped the response, got %d", body.closeCount)
     }
@@ -369,7 +368,6 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
 
     request := httptest.NewRequest(nethttp.MethodGet, "/save", nil)
 
-    /* the write fails after the headers were committed, so the first writeResponse persists the session and then panics, and the panic-recovery path re-enters writeResponse. */
     handler.ServeHTTP(&writeFailingResponseWriter{}, request)
 
     if 1 != storage.saveCount {
@@ -377,7 +375,6 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
     }
 }
 
-/* the wiring panics of the request setup are raised above the main recovery guard, where a client would meet a reset connection with nothing recorded; the early guard answers them, and it sits between the terminate guard and the scope close, which the status read at close time proves. */
 func TestKernel_ServeHttpClosesScopeWhenRequestLoggerSetupFails(t *testing.T) {
     recorder := httptest.NewRecorder()
 
@@ -745,13 +742,11 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
         t.Fatalf("expected the response despite the dispatch error, got %d", recorder.Code)
     }
 
-    /* the dispatcher already logs "event listener error" once and marks the returned wrapper as logged; the handler-response finalization block must respect that mark (logEventDispatchError) instead of re-logging it — inline logging here would produce two error lines for one failure */
     if 1 != atomic.LoadInt64(&countingLogger.errorCount) {
         t.Fatalf("expected the dispatch error to be logged exactly once on the handler-response path, got %d error logs", atomic.LoadInt64(&countingLogger.errorCount))
     }
 }
 
-/* closeTrackingReader stands in for a file-backed response body (FileResponse / static ServeReader): the only thing that matters here is whether the kernel closed the descriptor. */
 type closeTrackingReader struct {
     closed atomic.Bool
 }
@@ -765,7 +760,6 @@ func (instance *closeTrackingReader) Close() error {
     return nil
 }
 
-/* panicOnceSessionStorage blows up on its first Save, the way a database driver does on a lost connection. writeResponse persists the session before WriteToHttpResponseWriter registers the body's deferred Close, so that panic unwinds with the response's descriptor still open. It succeeds afterwards so the kernel's recovery path can finish and write the error response. */
 type panicOnceSessionStorage struct {
     panicked atomic.Bool
 }
@@ -790,7 +784,6 @@ func (instance *panicOnceSessionStorage) Close() error {
     return nil
 }
 
-/* writeResponse persists the session BEFORE WriteToHttpResponseWriter registers the body's deferred Close, so a panic in the session backend unwinds with the file-backed response assigned to finalResponse and its descriptor still open. The recover handler replaces finalResponse with an error response; unless it closes the discarded one, every such request leaks a file descriptor. */
 func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) {
     bodyReader := &closeTrackingReader{}
     storage := &panicOnceSessionStorage{}
@@ -810,7 +803,6 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
                 t.Fatal("expected the session attribute to be a session")
             }
 
-            /* dirty the session so writeResponse persists it — and panics doing so */
             sessionInstance.Set("key", "value")
 
             response := &Response{}
@@ -836,7 +828,6 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
     }
 }
 
-/* net/http documents this sentinel as "abort the connection and suppress the log"; converted into an error it would answer an aborted upload with a 500 and an error line, and a reverse proxy panics with it on every client disconnect mid-stream */
 func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.T) {
     router := NewRouter()
 
@@ -861,7 +852,6 @@ func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.
     }
 }
 
-/* the kernel resolves the scheme through the configured forwarded-headers policy and publishes it on the request; a listener has no access to that policy, so without the attribute the access log would report http for every request a trusted proxy terminated as https */
 func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
     router := NewRouter()
 
@@ -1259,7 +1249,6 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
     }
 }
 
-/* A handler returning (nil, nil) is answered with an empty 204 that goes through kernel.response like any other response: the one hook that decorates a response has to see it, or a nil-returning cross-origin DELETE would come back without Access-Control-Allow-Origin while the identical explicit 204 carries it, and the access log would record status 0. */
 func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1322,7 +1311,6 @@ func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.
     }
 }
 
-/* A listener may still replace the synthesized empty response, the same way it may replace any other. */
 func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1367,7 +1355,6 @@ func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing
     }
 }
 
-/* errorContextRecordingLogger captures every Error call with its context, so a test can assert not just that something was logged but what the record carries. */
 type errorContextRecordingLogger struct {
     mutex         sync.Mutex
     errorMessages []string
@@ -1407,8 +1394,6 @@ func (instance *errorContextRecordingLogger) errorContextFor(message string) (lo
 
     return nil, false
 }
-
-/* the recovery boundary must record the stack of the panic site: the error value alone names the symptom but not the line that raised it, and net/http's own stack print never fires for a panic this recovery absorbs — without the frames a production nil-pointer is unlocatable from the logs */
 
 func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
     router := NewRouter()
@@ -1450,8 +1435,6 @@ func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
         t.Fatalf("expected a goroutine stack in the panicStack field, got %q", panicStack)
     }
 }
-
-/* the error handler is application code invoked while the failed response's body is still open and held only in a local the recovery defer cannot see: a panic escaping it must not leak that body — the kernel recovers it, logs it with its stack, and serves the default error response with every close still running */
 
 func TestKernel_ErrorHandlerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *testing.T) {
     bodyReader := &closeTrackingReader{}
@@ -1577,8 +1560,6 @@ func TestKernel_ErrorHandlerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testi
     }
 }
 
-/* a urlencoded body whose read failed must refuse the request the way the json path refuses the identical condition: dispatching it would hand the handler a syntactically valid request whose form is simply empty, and an oversized submission would be processed as an empty one */
-
 func TestKernel_OversizedUrlencodedFormIsRefusedWith413(t *testing.T) {
     handlerInvoked := false
 
@@ -1611,7 +1592,6 @@ func TestKernel_OversizedUrlencodedFormIsRefusedWith413(t *testing.T) {
     }
 }
 
-/* brokenBodyReader fails mid-read the way a client aborting an upload does. */
 type brokenBodyReader struct {
     served bool
 }
@@ -1662,7 +1642,6 @@ type typedNilReturningSessionManager struct {
     delegate sessioncontract.Manager
 }
 
-/* Session reports "no such session" the way a careless implementation does: by returning a nil pointer of its own session type, which is not equal to nil once it is carried in the interface. */
 func (instance *typedNilReturningSessionManager) Session(sessionId string) sessioncontract.Session {
     var typedNil *session.Session
 
@@ -1689,7 +1668,6 @@ func (instance *typedNilReturningSessionManager) Close() error {
     return instance.delegate.Close()
 }
 
-/* The session manager is a replaceable service, so the kernel must test what it hands back with IsNilInterface rather than against nil: a typed nil passes a bare comparison, the kernel skips NewSession and publishes it, and the first handler that touches the session dereferences nil. The request must be served a working session instead. */
 func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1706,7 +1684,6 @@ func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
                 return TextResponse(nethttp.StatusInternalServerError, "not a session"), nil
             }
 
-            /* a typed nil reaches here as a non-nil interface and panics on the first call */
             publishedSession.Set("touched", "yes")
 
             return TextResponse(nethttp.StatusOK, publishedSession.Id()), nil
@@ -1791,7 +1768,6 @@ func (instance *warningRecordingLogger) warningContextFor(message string) (loggi
     return nil, false
 }
 
-/* the no-route record is written for exactly the requests nobody routed, and a query string routinely carries a credential — the record keeps the parameter names for diagnosis and must not carry the values into the journal */
 func TestKernel_TheNoRouteRecordRedactsQueryValues(t *testing.T) {
     router := NewRouter()
 
@@ -1819,7 +1795,6 @@ func TestKernel_TheNoRouteRecordRedactsQueryValues(t *testing.T) {
     }
 }
 
-/* the method-not-allowed record redacts the same way: the 405 is answered before any handler runs, so this record is the only trace of the request — names kept, values withheld */
 func TestKernel_TheMethodNotAllowedRecordRedactsQueryValues(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1859,7 +1834,6 @@ func TestKernel_TheMethodNotAllowedRecordRedactsQueryValues(t *testing.T) {
     }
 }
 
-/* A handler that commits its own response and then rotates the session loses everything the session held: the rotation deletes the previous entry, and the response path refuses to store the replacement because no Set-Cookie can reach the client on a committed response. Refusing the write is right, but it must not be silent — without a line in the log this is indistinguishable from the ordinary case the branch exists for, a first-time visitor on a stream with nothing worth storing. */
 func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -1894,7 +1868,6 @@ func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
     }
 }
 
-/* a listener that stops propagation is entitled to answer the request, but not with a listener marked required never consulted: a check for the absence of a response alone would serve the page of a cache listener that stopped propagation ahead of access control to whoever asked */
 func TestKernel_FailsClosedWhenARequiredListenerWasSkippedEvenThoughAResponseWasProduced(t *testing.T) {
     handlerRan := false
 
@@ -1970,7 +1943,6 @@ func TestKernel_FailsClosedWhenARequiredListenerWasSkippedEvenThoughAResponseWas
     }
 }
 
-/* a stopping listener that skipped nothing required keeps answering the request: the refusal must not cost every short-circuiting listener its response */
 func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkipped(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2016,7 +1988,6 @@ func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkippe
     }
 }
 
-/* noMatchRouter reports "no match" the way the contract permits and the framework's own router does not: a nil result beside the false flag. */
 type noMatchRouter struct {
     *Router
 }
@@ -2040,7 +2011,6 @@ func TestKernel_ServeHttpAnswersARouterThatReportsNoMatchWithANilResult(t *testi
     }
 }
 
-/* The terminate dispatch is the one in ServeHttp with no recovery above it — its defer is registered before the recovery defer, so it runs after that one has already fired. It needs none: the dispatcher recovers a listener panic per listener and hands it back as an error. This pins that division, because a recovery added here would swallow the one panic the dispatcher re-raises on purpose, a deliberate exit. */
 func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2073,7 +2043,6 @@ func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.
     }
 }
 
-/* The listener is what the assertion turns on, not the status: writeResponse answers 204 for an absent response whichever way it became absent, so a status alone cannot tell the kernel's door from the writer's fallback. A listener is the only thing that decorates a response, and it must see the empty 204 the door built rather than the nothing a typed nil would have carried this far. */
 func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2121,7 +2090,6 @@ func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault
     }
 }
 
-/* explodingError is what an application error looks like when its own rendering is broken. It is the input that reaches the window: a listener cannot panic out of a dispatch — the dispatcher recovers it per listener — so the only thing left between the chain returning and the response being published is the log context the kernel builds from the error, which reads it by calling Error(). */
 type explodingError struct{}
 
 func (instance *explodingError) Error() string {
@@ -2399,7 +2367,6 @@ func TestKernel_ErrorResponseCarriesTheRequestIdOnce(t *testing.T) {
     }
 }
 
-/* the discipline of the one record a handler failure files: an error something upstream already logged files nothing, a deliberate 4xx is a refusal at warning, a 5xx keeps error, the client's own cancellation is named for what it is — and every branch marks the error so the exception listener attaches coordinates instead of filing the failure a second time. */
 func TestLogHandlerError_ADeliberate4xxFilesOneWarningAndMarksTheError(t *testing.T) {
     capture := &exceptionListenerCaptureLogger{}
     handlerErr := exception.TooManyRequests("rate limit exceeded")
@@ -2477,7 +2444,6 @@ func TestLogHandlerError_ACancellationCarryingTheApplicationsCauseStaysAnError(t
     }
 }
 
-/* a cancellation returned while the request context is alive is NOT the client's disconnect — a handler bug cancelled something of its own — and stays at the error level a genuine fault carries. */
 func TestLogHandlerError_ACancellationWithALiveRequestContextStaysAnError(t *testing.T) {
     capture := &exceptionListenerCaptureLogger{}
 
@@ -2488,7 +2454,6 @@ func TestLogHandlerError_ACancellationWithALiveRequestContextStaysAnError(t *tes
     }
 }
 
-/* the trusted proxy list decides every request's proxy trust; retained live, a caller reusing its slice would rewrite the decision mid-serving as a data race, so the setter copies. */
 func TestSetForwardedHeadersPolicy_CopiesTheTrustedProxyList(t *testing.T) {
     kernel := NewKernel(NewRouter())
 
@@ -2505,7 +2470,6 @@ func TestSetForwardedHeadersPolicy_CopiesTheTrustedProxyList(t *testing.T) {
     }
 }
 
-/* recordCountingLogger counts what each level received, so a test can assert that one failure left one record. */
 type recordCountingLogger struct {
     loggingcontract.Logger
 
@@ -2552,7 +2516,6 @@ func serveAndCountErrorRecords(t *testing.T, handler httpcontract.Handler) *reco
     return countingLogger
 }
 
-/* a handler's plain errors.New carries no AlreadyLogged implementer, so the kernel wraps it in a marked carrier; without the carrier the exception listener would file the same failure a second time */
 func TestKernel_AForeignHandlerErrorFilesOneRecordNotTwo(t *testing.T) {
     countingLogger := serveAndCountErrorRecords(
         t,
@@ -2566,7 +2529,6 @@ func TestKernel_AForeignHandlerErrorFilesOneRecordNotTwo(t *testing.T) {
     }
 }
 
-/* the value a runtime panic recovers to is a runtime.Error, the case the recovery exists for, and it carries the mark no better than a plain error does */
 func TestKernel_ARuntimePanicFilesOneRecordNotTwo(t *testing.T) {
     countingLogger := serveAndCountErrorRecords(
         t,
@@ -2681,7 +2643,6 @@ func (instance *kernelHandlerErrorCaptureLogger) Error(message string, context l
     instance.errorMessages = append(instance.errorMessages, message)
 }
 
-/* TestLogHandlerError_ARuleWiringFaultIsFiledAtError pins the classification on the writer that runs FIRST. A validation exception a handler returns is filed here and MARKED here, so the exception listener, which carries the same rule of its own, only attaches coordinates to it and never reaches its error branch. A struct tag naming a rule that does not exist refuses every request that route will ever serve, so it is an error, not a warning among the users who mistyped their address. */
 func TestLogHandlerError_ARuleWiringFaultIsFiledAtError(t *testing.T) {
     capture := &kernelHandlerErrorCaptureLogger{Logger: logging.NewNopLogger()}
 
@@ -2699,7 +2660,6 @@ func TestLogHandlerError_ARuleWiringFaultIsFiledAtError(t *testing.T) {
     }
 }
 
-/* a deliberate 4xx blaming the submitted VALUE is a refusal and keeps its warning: the classification separates the declaration from the value rather than raising every 4xx */
 func TestLogHandlerError_AGenuineFieldRefusalStaysAtWarning(t *testing.T) {
     capture := &kernelHandlerErrorCaptureLogger{Logger: logging.NewNopLogger()}
 
@@ -2717,7 +2677,6 @@ func TestLogHandlerError_AGenuineFieldRefusalStaysAtWarning(t *testing.T) {
     }
 }
 
-/* the counter is what a shutdown reads to tell a drained server from one that still has work inside it, so it must rise for the whole time a request is being served and fall exactly when the scope closes. The proof holds the handler open and reads the count from another goroutine: reading it after the request returned would pass just as well against a counter that was never incremented at all. */
 func TestKernel_OpenRequestScopesRisesWhileARequestIsServedAndFallsWhenItsScopeCloses(t *testing.T) {
     handlerEntered := make(chan struct{})
     releaseHandler := make(chan struct{})
@@ -2765,7 +2724,6 @@ func TestKernel_OpenRequestScopesRisesWhileARequestIsServedAndFallsWhenItsScopeC
     }
 }
 
-/* the release rides the same defer as the close rather than the handler's return, so a request whose handler panics — the path with its own recovery defers above this one — still gives its scope back. A leaked count would make every later shutdown wait out its whole budget and then report a drain failure for a server with nothing in it. */
 func TestKernel_OpenRequestScopesIsReleasedWhenTheHandlerPanics(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2803,7 +2761,6 @@ func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     handler := NewKernel(router).ServeHttp(serviceContainer)
 
-    /* the path folds to "/login", which the access-control matcher would authorize as a different rule than the admin handler the router reaches; the kernel must refuse it before either runs */
     request := httptest.NewRequest(nethttp.MethodGet, "/admin/x/../../login", nil)
     recorder := httptest.NewRecorder()
 
@@ -2818,7 +2775,6 @@ func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
     }
 }
 
-/* the whitespace spelling routes to the catch-all under "/admin" while the access-control matcher trims it and answers with the rule of "/admin"; refused at the kernel, neither is asked */
 func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T) {
     for _, rawPath := range []string{"/admin%20", "/admin%09", "/admin%C2%A0"} {
         handlerRan := false
@@ -2851,7 +2807,6 @@ func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T
     }
 }
 
-/* the LEADING twin of the padded path: Go's own server refuses a request line that does not begin with "/", but a handler mounted in front of the kernel that rewrites the path (the standard library's StripPrefix) hands the kernel " /public" for "/api%20/public", which the router would route as a segment of its own while the access-control matcher trims it and answers with the rule of "/public" */
 func TestKernel_RefusesALeadingWhitespacePathAHandlerInFrontHandedIt(t *testing.T) {
     for _, rawPath := range []string{"/api%20/public", "/api%09/public", "/api%C2%A0/public"} {
         handlerRan := false
@@ -2914,7 +2869,6 @@ func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
     }
 }
 
-/* net/http decodes "%2F" into a separator before the kernel reads the path, so "/admin%2Fusers", one segment to a proxy or a WAF rule written against the raw request line, would reach the "/admin/users" handler; a spelling that carries an encoded separator is refused before routing acts on it, in either case of the hex digit */
 func TestKernel_RefusesAnEncodedSeparatorBeforeTheHandler(t *testing.T) {
     for _, rawPath := range []string{"/admin%2Fusers", "/admin%2fusers", "/public%2F", "/files/a%2Fb/c", "/admin%2Fusers{", "/admin%2Fusers/\xc3\xa9"} {
         handlerRan := ""
@@ -2950,7 +2904,6 @@ func TestKernel_RefusesAnEncodedSeparatorBeforeTheHandler(t *testing.T) {
     }
 }
 
-/* the refusal reads the separator the client encoded and nothing else: a literal "%2F" a segment carries once decoded ("%252F"), an encoded separator in the query and an escape that is not a separator are served as they were */
 func TestKernel_ServesTheSpellingsThatCarryNoEncodedSeparator(t *testing.T) {
     for rawPath, expectedBody := range map[string]string{
         "/a/x%252Fy":         "x%2Fy",
@@ -2994,7 +2947,6 @@ func TestKernel_ServesTheSpellingsThatCarryNoEncodedSeparator(t *testing.T) {
     }
 }
 
-/* a multipart upload past the body limit surfaces as a handler's *MaxBytesError, which is not an HttpException and would render 500 at error level where the urlencoded and json paths answer 413; the normalizer maps it onto a 413 HttpException so the three body paths agree, and leaves any other error untouched. */
 func TestNormalizeBodyLimitError_MapsMaxBytesErrorTo413(t *testing.T) {
     maxBytesError := &nethttp.MaxBytesError{Limit: 1048576}
 
@@ -3024,7 +2976,6 @@ func TestNormalizeBodyLimitError_LeavesOtherErrorsUntouched(t *testing.T) {
     }
 }
 
-/* the abort sentinel suppresses the response, not the ownership of what it holds: a deliberate abort over a file-backed response still closes the descriptor, which is also why invokeErrorHandlerSafely refuses to honour the sentinel. */
 func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
     bodyReader := &closeTrackingReader{}
 
@@ -3045,7 +2996,6 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
 
     kernel := NewKernel(router)
 
-    /* the panic is raised by an OUTER middleware AFTER next() returned, which is the window in which the response the chain produced is held only by the recording shim */
     kernel.Use(func(next httpcontract.Handler) httpcontract.Handler {
         return func(
             runtimeInstance runtimecontract.Runtime,
@@ -3076,7 +3026,6 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
     }
 }
 
-/* serveNegotiatedKernelProbe drives one request through a kernel whose container carries a json and a plain-text serializer, the two a client can name in Accept */
 func serveNegotiatedKernelProbe(t *testing.T, method string, target string, accept string) *httptest.ResponseRecorder {
     t.Helper()
 
@@ -3165,12 +3114,10 @@ func TestKernel_AnswersANotFoundWithoutAHandlerInTheRepresentationTheClientNegot
     }
 }
 
-/* loggedMarkSentinelErr and loggedMarkWrappedSentinelErr are the package-level failure values an application returns from more than one request */
 var loggedMarkSentinelErr = exception.NewError("the shared failure", nil, nil)
 
 var loggedMarkWrappedSentinelErr = exception.NewError("the shared wrapped failure", nil, nil)
 
-/* servedLoggedMarkKernel serves one route over a kernel whose logger keeps every record, with the framework's exception listener installed */
 func servedLoggedMarkKernel(handler httpcontract.Handler) (nethttp.Handler, *recordsCaptureLogger) {
     capture := &recordsCaptureLogger{}
 
@@ -3195,7 +3142,6 @@ func distinctRequestIdsOf(records []capturedRecord) map[string]bool {
     return requestIds
 }
 
-/* every request that fails files its own record, whether the error value is fresh, a package-level sentinel or a sentinel wrapped by the handler: the logged mark belongs to one occurrence, never to the value. An error a lower layer filed and marked before it returned is not filed again. */
 func TestKernel_EveryRequestFilesItsOwnRecordOfASharedErrorValue(t *testing.T) {
     cases := []struct {
         name            string
@@ -3247,7 +3193,6 @@ func TestKernel_EveryRequestFilesItsOwnRecordOfASharedErrorValue(t *testing.T) {
     }
 }
 
-/* the waiters of one remember flight are handed one error value: each request still files its own record, under its own request id */
 func TestKernel_TheWaitersOfOneRememberFlightFileOneRecordEach(t *testing.T) {
     flightErr := exception.NewError("the flight failed", nil, nil)
 
@@ -3303,7 +3248,6 @@ func TestKernel_TheWaitersOfOneRememberFlightFileOneRecordEach(t *testing.T) {
     }
 }
 
-/* an application listener on the kernel exception event reads the mark the kernel left, as every reader of the mark does: a failure the kernel filed is not filed a second time by it */
 func TestKernel_AnApplicationListenerReadsTheMarkOfTheOccurrenceTheKernelFiled(t *testing.T) {
     capture := &recordsCaptureLogger{}
 
@@ -3353,7 +3297,6 @@ func TestKernel_AnApplicationListenerReadsTheMarkOfTheOccurrenceTheKernelFiled(t
     }
 }
 
-/* a panic carrying an error value other requests also raise files one record per request: the recovery hands on a marked occurrence, never a mark written into the value */
 func TestKernel_EveryPanicCarryingASharedErrorValueFilesItsOwnRecord(t *testing.T) {
     sharedPanicErr := exception.NewError("the shared panic", nil, nil)
 
@@ -3376,7 +3319,6 @@ func TestKernel_EveryPanicCarryingASharedErrorValueFilesItsOwnRecord(t *testing.
     }
 }
 
-/* in debug mode the payload shows the request's coordinates beside the error's own context, read from the occurrence the kernel marked, while the error value keeps none */
 func TestKernel_TheDebugPayloadShowsTheCoordinatesOfTheOccurrence(t *testing.T) {
     sharedErr := exception.NewError("the shared failure in debug", map[string]any{"detail": "kept"}, nil)
 

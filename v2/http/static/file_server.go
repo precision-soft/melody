@@ -23,12 +23,11 @@ import (
 type FileServer struct {
     config     *FileServerConfig
     fileSystem fs.FS
-    /* contentTags keeps the content tag of each file that carries no modification time, see entityTag */
     contentTags *sync.Map
 }
 
 func NewFileServer(options *Options) *FileServer {
-    /* nil options are refused by name rather than read as a default: every sibling door that normalizes an absent configuration falls back to inert defaults, but the default here would be a live file server over the "public" directory — a nil that is almost always a wiring mistake would start serving files nobody asked served. */
+    /* nil options are refused by name: the default would be a live file server over the "public" directory */
     if nil == options {
         exception.Panic(
             exception.NewError("options are required for the static file server", nil, nil),
@@ -61,7 +60,7 @@ func NewFileServer(options *Options) *FileServer {
         exception.Panic(exception.NewError("file system may not be nil for the file server", nil, nil))
     }
 
-    /* in the embedded mode the public directory is a path inside a filesystem frozen at compile time, while the value naming it stays a runtime key, so the directory is proven to exist here: a public directory the build did not embed is a wiring fault of the deployment, and ignoring the key would dissolve the join that confines a stripped prefix to it. */
+    /* a public directory the build did not embed is a wiring fault: ignoring the key dissolves the stripped prefix confinement */
     if ModeEmbedded == options.fileServerConfig.mode {
         embeddedPublicDir := strings.TrimSpace(options.fileServerConfig.publicDir)
         if "" != embeddedPublicDir {
@@ -80,7 +79,7 @@ func NewFileServer(options *Options) *FileServer {
         }
     }
 
-    /* the configuration is copied here — struct and both lists — so the server is immutable once built: the defaults below land on the copy instead of being written into the caller's struct, and a setter called after construction configures the next server rather than racing the in-flight requests of this one, which read these fields with no lock. */
+    /* copied, struct and both lists: in-flight requests read these fields with no lock, so the server is immutable once built */
     configCopy := *options.fileServerConfig
     configCopy.allowedDotPrefixList = append([]string{}, options.fileServerConfig.allowedDotPrefixList...)
     configCopy.excludedPathList = append([]string{}, options.fileServerConfig.excludedPathList...)
@@ -90,7 +89,7 @@ func NewFileServer(options *Options) *FileServer {
         config.indexFile = "index.html"
     }
 
-    /* an explicit zero is honoured as max-age=0, always revalidate, because the configuration door validates zero as a distinct choice; only a negative value reads as unset and takes the default. */
+    /* an explicit zero is honoured as max-age=0; only a negative value reads as unset and takes the default */
     if true == config.enableCache && 0 > config.cacheMaxAge {
         config.cacheMaxAge = 3600
     }
@@ -174,7 +173,7 @@ func (instance *FileServer) Serve(
     method := request.HttpRequest().Method
 
     if false == isRetrievalMethod(method) {
-        /* debug, not info: with the middleware registered globally this fires for every POST and PUT in the application — the per-request noise the logging comment on logOpenFailure exists to keep out of the journal */
+        /* debug, not info: with the middleware registered globally this fires for every POST and PUT */
         logger.Debug(
             "static serve method not eligible",
             loggingcontract.Context{
@@ -213,7 +212,7 @@ func (instance *FileServer) Serve(
                 requestPath = "/"
             }
         } else {
-            /* debug, not info: every request outside the mounted prefix takes this exit, so anything louder files one record per ordinary api request and the operator filters the message out — the reasoning logOpenFailure states for the ordinary miss */
+            /* debug, not info: every request outside the mounted prefix takes this exit */
             logger.Debug(
                 "static serve strip prefix mismatch",
                 loggingcontract.Context{
@@ -245,7 +244,7 @@ func (instance *FileServer) Serve(
     }
 
     if "/" == cleanedPath {
-        /* the spellings that fold into the root are refused for the reason the branch below states: the matchers in front compare the raw path, so "/open/.." would serve the mount's index page from behind whatever rule another prefix carries. Canonical is the mount root itself, with or without its trailing slash. */
+        /* spellings folding into the root are refused: the matchers compare the raw path; canonical is the mount root itself */
         canonicalRoot := strings.TrimSuffix(instance.config.stripPrefix, "/")
 
         if canonicalRoot != request.HttpRequest().URL.Path && canonicalRoot+"/" != request.HttpRequest().URL.Path {
@@ -260,10 +259,9 @@ func (instance *FileServer) Serve(
             return 0, nil, nil, false
         }
 
-        /* the mount root answers with the configured index file, because that page is what a browser asks for by visiting the site */
         cleanedPath = "/" + instance.config.indexFile
 
-        /* the exclusion list was consulted with the spelling the client sent, and the root resolves to the index file only after that consultation: an exclusion naming the index file must fire for the resolved spelling too, or "/" would serve off the disk the very page the operator handed to the application */
+        /* the root resolves to the index only after the exclusion check, so an exclusion naming the index must fire here too */
         if true == hasExcludedPathPrefix(strings.TrimSuffix(instance.config.stripPrefix, "/")+cleanedPath, instance.config.excludedPathList) {
             logger.Debug(
                 "static serve excluded path",
@@ -275,7 +273,7 @@ func (instance *FileServer) Serve(
             return 0, nil, nil, false
         }
     } else {
-        /* the file has to sit at exactly the path that was received. path.Clean folds "..", "//", "/./" and a trailing slash away, and serving the folded target under the received spelling puts the file behind a URL access control never saw: the matchers in front of the application compare the raw path, so a rule on "/internal/" does not fire for "/open/../internal/secret.json". A refusal is the only answer that keeps the two views of the request in agreement — a redirect would still teach the client a spelling that reaches the file while sidestepping the rule. The strip prefix is configuration rather than client input, so the comparison rebuilds the whole path around it: comparing only the remainder would let a doubled slash at the prefix boundary be absorbed by the strip and pass unnoticed. */
+        /* a folded path is refused, not served or redirected: the matchers compare the raw path, so their rule would not fire */
         canonicalPath := strings.TrimSuffix(instance.config.stripPrefix, "/") + cleanedPath
 
         if canonicalPath != request.HttpRequest().URL.Path {
@@ -381,7 +379,7 @@ func (instance *FileServer) Serve(
             headers.Set("ETag", etag)
         }
 
-        /* a filesystem that carries no modification time reports the zero instant, which is not a validator: it is never After anything, so every If-Modified-Since would be answered 304. No Last-Modified header is written, and the entity tag, built from the file's bytes, is the only validator. */
+        /* a zero modification time is not a validator: it is never After anything, so every If-Modified-Since would answer 304 */
         if false == fileInfo.ModTime().IsZero() {
             lastModified := fileInfo.ModTime().UTC().Format(nethttp.TimeFormat)
             headers.Set("Last-Modified", lastModified)
@@ -405,11 +403,10 @@ func (instance *FileServer) Serve(
             return nethttp.StatusNotModified, headers, nil, true
         }
 
-        /* the modification date is only consulted when no entity tag was offered: a client that sent one has already stated which bytes it holds, and the tag is the accurate answer to that question. Consulting the date as well turns a deploy that rewrites content while preserving modification times — a checkout, a rsync with --times, a container image rebuild — into a 304 for every cache that just proved, by offering a tag that does not match, that it holds different bytes. */
+        /* the date is consulted only without an entity tag: a deploy preserving modification times would 304 stale caches */
         if "" == strings.TrimSpace(ifNoneMatch) && false == fileInfo.ModTime().IsZero() {
             ifModifiedSince := request.Header("If-Modified-Since")
             if "" != ifModifiedSince {
-                /* the field carries any of the three date formats an HTTP date may take, and only one of them is nethttp.TimeFormat; parsing that one alone silently re-sends the whole body to a client whose cache writes asctime or the RFC 850 form */
                 if clientTime, parseErr := nethttp.ParseTime(ifModifiedSince); nil == parseErr {
                     modifiedAt := fileInfo.ModTime().UTC().Truncate(time.Second)
 
@@ -475,7 +472,6 @@ func (instance *FileServer) Serve(
     return nethttp.StatusOK, headers, content, true
 }
 
-/* the streaming resolution carries the same log record as the buffered one: every static byte a running application serves is resolved here, so a refusal that stays silent — a traversal attempt, a symlink escape, a path the file system rejects — leaves the only trace of the attempt nowhere */
 func (instance *FileServer) serveForStreaming(
     request httpcontract.Request,
     logger loggingcontract.Logger,
@@ -489,7 +485,7 @@ func (instance *FileServer) serveForStreaming(
     method := request.HttpRequest().Method
 
     if false == isRetrievalMethod(method) {
-        /* debug, not info: with the middleware registered globally this fires for every POST and PUT in the application — the per-request noise the logging comment on logOpenFailure exists to keep out of the journal */
+        /* debug, not info: with the middleware registered globally this fires for every POST and PUT */
         logger.Debug(
             "static serve method not eligible",
             loggingcontract.Context{
@@ -528,7 +524,7 @@ func (instance *FileServer) serveForStreaming(
                 requestPath = "/"
             }
         } else {
-            /* debug, not info: every request outside the mounted prefix takes this exit, so anything louder files one record per ordinary api request and the operator filters the message out — the reasoning logOpenFailure states for the ordinary miss */
+            /* debug, not info: every request outside the mounted prefix takes this exit */
             logger.Debug(
                 "static serve strip prefix mismatch",
                 loggingcontract.Context{
@@ -560,7 +556,7 @@ func (instance *FileServer) serveForStreaming(
     }
 
     if "/" == cleanedPath {
-        /* the spellings that fold into the root are refused for the reason the branch below states: the matchers in front compare the raw path, so "/open/.." would serve the mount's index page from behind whatever rule another prefix carries. Canonical is the mount root itself, with or without its trailing slash. */
+        /* spellings folding into the root are refused: the matchers compare the raw path; canonical is the mount root itself */
         canonicalRoot := strings.TrimSuffix(instance.config.stripPrefix, "/")
 
         if canonicalRoot != request.HttpRequest().URL.Path && canonicalRoot+"/" != request.HttpRequest().URL.Path {
@@ -575,10 +571,9 @@ func (instance *FileServer) serveForStreaming(
             return 0, nil, nil, nil, false
         }
 
-        /* the mount root answers with the configured index file, because that page is what a browser asks for by visiting the site */
         cleanedPath = "/" + instance.config.indexFile
 
-        /* the exclusion list was consulted with the spelling the client sent, and the root resolves to the index file only after that consultation: an exclusion naming the index file must fire for the resolved spelling too, or "/" would serve off the disk the very page the operator handed to the application */
+        /* the root resolves to the index only after the exclusion check, so an exclusion naming the index must fire here too */
         if true == hasExcludedPathPrefix(strings.TrimSuffix(instance.config.stripPrefix, "/")+cleanedPath, instance.config.excludedPathList) {
             logger.Debug(
                 "static serve excluded path",
@@ -590,7 +585,7 @@ func (instance *FileServer) serveForStreaming(
             return 0, nil, nil, nil, false
         }
     } else {
-        /* the file has to sit at exactly the path that was received. path.Clean folds "..", "//", "/./" and a trailing slash away, and serving the folded target under the received spelling puts the file behind a URL access control never saw: the matchers in front of the application compare the raw path, so a rule on "/internal/" does not fire for "/open/../internal/secret.json". A refusal is the only answer that keeps the two views of the request in agreement — a redirect would still teach the client a spelling that reaches the file while sidestepping the rule. The strip prefix is configuration rather than client input, so the comparison rebuilds the whole path around it: comparing only the remainder would let a doubled slash at the prefix boundary be absorbed by the strip and pass unnoticed. */
+        /* a folded path is refused, not served or redirected: the matchers compare the raw path, so their rule would not fire */
         canonicalPath := strings.TrimSuffix(instance.config.stripPrefix, "/") + cleanedPath
 
         if canonicalPath != request.HttpRequest().URL.Path {
@@ -697,7 +692,7 @@ func (instance *FileServer) serveForStreaming(
             headers.Set("ETag", etag)
         }
 
-        /* a filesystem that carries no modification time reports the zero instant, which is not a validator: it is never After anything, so every If-Modified-Since would be answered 304. No Last-Modified header is written, and the entity tag, built from the file's bytes, is the only validator. */
+        /* a zero modification time is not a validator: it is never After anything, so every If-Modified-Since would answer 304 */
         if false == fileInfo.ModTime().IsZero() {
             lastModified := fileInfo.ModTime().UTC().Format(nethttp.TimeFormat)
             headers.Set("Last-Modified", lastModified)
@@ -722,11 +717,10 @@ func (instance *FileServer) serveForStreaming(
             return nethttp.StatusNotModified, headers, nil, nil, true
         }
 
-        /* the modification date is only consulted when no entity tag was offered: a client that sent one has already stated which bytes it holds, and the tag is the accurate answer to that question. Consulting the date as well turns a deploy that rewrites content while preserving modification times — a checkout, a rsync with --times, a container image rebuild — into a 304 for every cache that just proved, by offering a tag that does not match, that it holds different bytes. */
+        /* the date is consulted only without an entity tag: a deploy preserving modification times would 304 stale caches */
         if "" == strings.TrimSpace(ifNoneMatch) && false == fileInfo.ModTime().IsZero() {
             ifModifiedSince := request.Header("If-Modified-Since")
             if "" != ifModifiedSince {
-                /* the field carries any of the three date formats an HTTP date may take, and only one of them is nethttp.TimeFormat; parsing that one alone silently re-sends the whole body to a client whose cache writes asctime or the RFC 850 form */
                 if clientTime, parseErr := nethttp.ParseTime(ifModifiedSince); nil == parseErr {
                     modifiedAt := fileInfo.ModTime().UTC().Truncate(time.Second)
 
@@ -775,9 +769,7 @@ var fallbackContentTypeByExtension = map[string]string{
     ".woff2": "font/woff2",
 }
 
-/* logOpenFailure separates a refusal from a miss, which the level is the only thing that can say. The static server is consulted for every request a route did not answer, so a path that simply names no file is the ordinary case and is recorded at debug along with the successful resolutions; anything louder files one record per request that is not a static asset, and an operator learns to filter the whole message out.
-
-   A permission error is not that case. What produces one here are the two containment guards of dirFileSystem.Open — the dot-dot prefix refusal and the check that a path's symlinks resolve inside the base directory — which answer the bare fs.ErrPermission, and the operating system refusing the open, which answers a *fs.PathError carrying it; in the embedded mode none of them can fire. Recorded at debug it is byte-identical to a typo in a stylesheet href, which is exactly the indistinguishability the logging on this path exists to end. */
+/* logOpenFailure separates a refusal from a miss: a miss is the ordinary case, at debug; a permission error is not */
 func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr error) {
     logContext := exception.LogContext(
         openErr,
@@ -786,7 +778,6 @@ func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr 
         },
     )
 
-    /* the containment guards answer the bare fs.ErrPermission, the operating system a *fs.PathError carrying it */
     var pathErr *fs.PathError
     if true == exception.ChainAs(openErr, &pathErr) && true == exception.ChainIs(openErr, fs.ErrPermission) {
         logger.Warning("static serve could not open a path the operating system refused", logContext)

@@ -24,12 +24,11 @@ import (
 type FileServer struct {
     config     *FileServerConfig
     fileSystem fs.FS
-    /* contentTags keeps the content tag of each file that carries no modification time, see entityTag */
     contentTags *sync.Map
 }
 
 func NewFileServer(options *Options) *FileServer {
-    /* nil options are refused by name, since the default would be a live file server over the "public" directory */
+    /* nil options are refused, since the default would be a live file server over the "public" directory */
     if nil == options {
         exception.Panic(
             exception.NewError("options are required for the static file server", nil, nil),
@@ -62,7 +61,6 @@ func NewFileServer(options *Options) *FileServer {
         exception.Panic(exception.NewError("file system may not be nil for the file server", nil, nil))
     }
 
-    /* in the embedded mode the public directory must exist inside the embedded filesystem, so a directory the build did not embed is refused at construction rather than answering 404 for every asset */
     if ModeEmbedded == options.fileServerConfig.mode {
         embeddedPublicDir := strings.TrimSpace(options.fileServerConfig.publicDir)
         if "" != embeddedPublicDir {
@@ -79,7 +77,6 @@ func NewFileServer(options *Options) *FileServer {
                 )
             }
 
-            /* a name the build embedded as a file is refused apart from one it did not embed: the two are different mistakes in the build */
             if false == publicDirInfo.IsDir() {
                 exception.Panic(
                     exception.NewError(
@@ -94,7 +91,7 @@ func NewFileServer(options *Options) *FileServer {
         }
     }
 
-    /* the configuration is copied, struct and both lists, so the server is immutable once built: requests read these fields with no lock */
+    /* the configuration is copied, struct and both lists: requests read these fields with no lock */
     configCopy := *options.fileServerConfig
     configCopy.allowedDotPrefixList = append([]string{}, options.fileServerConfig.allowedDotPrefixList...)
     configCopy.excludedPathList = append([]string{}, options.fileServerConfig.excludedPathList...)
@@ -261,7 +258,6 @@ func (instance *FileServer) resolveAndOpen(
     method := request.HttpRequest().Method
 
     if false == isRetrievalMethod(method) {
-        /* debug, since with the middleware registered globally this fires for every POST and PUT */
         logger.Debug(
             "static serve method not eligible",
             loggingcontract.Context{
@@ -272,7 +268,7 @@ func (instance *FileServer) resolveAndOpen(
         return nil, false
     }
 
-    /* the spelling the router matched, not the decoded URL.Path, so an encoded separator names a file whose name carries "%2F" rather than a file under another prefix the access-control matcher never weighed */
+    /* the spelling the router matched, not the decoded URL.Path, so an encoded separator names no file under another prefix */
     routedPath := melodyhttp.RequestPathAsRouted(internal.RequestPathAsSent(request.HttpRequest().URL))
     requestPath := routedPath
 
@@ -302,7 +298,6 @@ func (instance *FileServer) resolveAndOpen(
                 requestPath = "/"
             }
         } else {
-            /* debug, since every request outside the mounted prefix takes this exit */
             logger.Debug(
                 "static serve strip prefix mismatch",
                 loggingcontract.Context{
@@ -334,7 +329,7 @@ func (instance *FileServer) resolveAndOpen(
     }
 
     if "/" == cleanedPath {
-        /* a spelling that folds into the root is refused, since the matchers in front compare the raw path and "/open/.." would serve the mount's index page from behind another prefix's rule; the mount root itself, with or without its trailing slash, is canonical */
+        /* a spelling that folds into the root is refused, since the matchers in front compare the raw path */
         canonicalRoot := strings.TrimSuffix(instance.config.stripPrefix, "/")
 
         if canonicalRoot != routedPath && canonicalRoot+"/" != routedPath {
@@ -349,7 +344,6 @@ func (instance *FileServer) resolveAndOpen(
             return nil, false
         }
 
-        /* the mount root answers with the configured index file */
         cleanedPath = "/" + instance.config.indexFile
 
         /* the exclusion list is consulted again for the resolved index file, so an exclusion naming it fires for "/" too */
@@ -364,7 +358,7 @@ func (instance *FileServer) resolveAndOpen(
             return nil, false
         }
     } else {
-        /* the file must sit at exactly the path received: the matchers in front compare the raw path, so serving a folded target would put the file behind a url access control never saw, and a redirect would teach that url. The comparison rebuilds the whole path around the configured strip prefix, so a doubled slash at the boundary is not absorbed. */
+        /* the file must sit at exactly the path received, since the matchers in front compare the raw path */
         canonicalPath := strings.TrimSuffix(instance.config.stripPrefix, "/") + cleanedPath
 
         if canonicalPath != routedPath {
@@ -455,7 +449,7 @@ func (instance *FileServer) resolveAndOpen(
         return nil, false
     }
 
-    /* only a regular file is served, read off the opened handle: a FIFO would park the goroutine and a device or socket is not a file's bytes */
+    /* only a regular file is served, read off the opened handle: a FIFO would park the goroutine */
     if false == fileInfo.Mode().IsRegular() {
         _ = file.Close()
 
@@ -488,7 +482,6 @@ func (instance *FileServer) resolveAndOpen(
             headers.Set("ETag", etag)
         }
 
-        /* a filesystem with no modification time reports the zero instant, so no Last-Modified is sent and the entity tag is the only validator */
         if false == fileInfo.ModTime().IsZero() {
             lastModified := fileInfo.ModTime().UTC().Format(nethttp.TimeFormat)
             headers.Set("Last-Modified", lastModified)
@@ -520,11 +513,10 @@ func (instance *FileServer) resolveAndOpen(
             }, true
         }
 
-        /* the modification date is consulted only when no entity tag was offered: a client that sent one stated which bytes it holds, and a deploy may keep modification times while changing content */
+        /* the modification date is read only without an entity tag: a deploy may keep modification times while changing content */
         if "" == strings.TrimSpace(ifNoneMatch) && false == fileInfo.ModTime().IsZero() {
             ifModifiedSince := request.Header("If-Modified-Since")
             if "" != ifModifiedSince {
-                /* an HTTP date may take any of three formats */
                 if clientTime, parseErr := nethttp.ParseTime(ifModifiedSince); nil == parseErr {
                     modifiedAt := fileInfo.ModTime().UTC().Truncate(time.Second)
 
@@ -561,7 +553,6 @@ func (instance *FileServer) resolveAndOpen(
     }, true
 }
 
-/* the streaming resolution logs as the buffered one does, since every static byte served is resolved here */
 func (instance *FileServer) serveForStreaming(
     request httpcontract.Request,
     logger loggingcontract.Logger,
@@ -609,7 +600,6 @@ var fallbackContentTypeByExtension = map[string]string{
     ".woff2": "font/woff2",
 }
 
-/* logOpenFailure records an ordinary miss at debug, since the static server is consulted for every unrouted request, and a refusal at warning, worded by its cause: a containment guard of dirFileSystem.Open, the operating system, or a path that is not a regular file. */
 func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr error) {
     logContext := exception.LogContext(
         openErr,
@@ -626,7 +616,6 @@ func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr 
         return
     }
 
-    /* the containment guards answer the bare fs.ErrPermission, the operating system a *fs.PathError carrying it */
     var pathErr *fs.PathError
     if true == exception.ChainAs(openErr, &pathErr) && true == exception.ChainIs(openErr, fs.ErrPermission) {
         logger.Warning("static serve could not open a path the operating system refused", logContext)
