@@ -22,7 +22,7 @@ jobs:
                 with:
                     go-version-file: go.work
                     cache: true
-            # the files a generator writes are not committed, and the v3 example compiles only with its
+            # the files a generator writes are not committed, and the v3 and v4 examples compile only with their
             # generated wiring. Mirrors the generation `.dev/validate/all.sh` runs before its lanes.
             -   name: generate the uncommitted files
                 run: .dev/generate.sh
@@ -122,14 +122,15 @@ jobs:
             -   name: race detector on the concurrency-carrying core packages
                 run: |
                     set -euo pipefail
-                    for major_directory in . v2 v3; do
+                    for major_directory in . v2 v3 v4; do
                         (cd "${major_directory}" && go test -race -count=1 ./bag/... ./cache/... ./clock/... ./container/... ./application/... ./config/... ./event/... ./exception/... ./httpclient/... ./logging/... ./cli/... ./validation/... ./session/... ./security/... ./http/... ./internal/...)
                     done
                     (cd v3 && go test -race -count=1 ./mailer/... ./lock/... ./messagebus/... ./openapi/...)
-                    for cron_directory in integrations/cron integrations/cron/v2 integrations/cron/v3; do
+                    (cd v4 && go test -race -count=1 ./mailer/... ./lock/... ./messagebus/... ./openapi/...)
+                    for cron_directory in integrations/cron integrations/cron/v2 integrations/cron/v3 integrations/cron/v4; do
                         (cd "${cron_directory}" && go test -race -count=1 ./...)
                     done
-                    for bunorm_directory in integrations/bunorm integrations/bunorm/v2 integrations/bunorm/v3; do
+                    for bunorm_directory in integrations/bunorm integrations/bunorm/v2 integrations/bunorm/v3 integrations/bunorm/v4; do
                         (cd "${bunorm_directory}" && go test -race -count=1 ./...)
                     done
 
@@ -209,9 +210,9 @@ jobs:
                             echo "::endgroup::"
                         done
                     # the bookkeeping init of the examples whose journal lives on postgres
-                    # (v1 and v3) against the live postgres, named because the examples
+                    # (v1, v3 and v4) against the live postgres, named because the examples
                     # are not integration modules
-                    for EXAMPLE_DIRECTORY in .example v3/.example; do
+                    for EXAMPLE_DIRECTORY in .example v3/.example v4/.example; do
                         echo "::group::live ${EXAMPLE_DIRECTORY} migration bookkeeping"
                         (cd "${EXAMPLE_DIRECTORY}" && go test -race -count=1 -run TestInitializeMigrationBookkeepingSurvivesConcurrentCreatorsOnPostgres ./migration)
                         echo "::endgroup::"

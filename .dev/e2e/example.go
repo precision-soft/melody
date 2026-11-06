@@ -20,7 +20,7 @@ import (
 /* exampleMajorListVariable names the environment variable that selects which majors the per-major example sections exercise. Unset means every major — the project's default run is the full run. */
 const exampleMajorListVariable = "MELODY_E2E_MAJORS"
 
-const exampleMajorListDefault = "1 2 3"
+const exampleMajorListDefault = "1 2 3 4"
 
 /* the shared credentials the three example applications seed identically (repository/seed.go): "user" holds ROLE_USER only, which is what makes the admin route below answer 403 rather than 200. */
 const (
@@ -52,12 +52,15 @@ type exampleMajor struct {
     requestSurfaceProbes bool
     /* shutdownStreamProbe names the major whose example releases its event streams through the application's http shutdown hook (OnHttpShutdown closing the hub), so the closing SIGINT is sent with a signed-in stream still open. The frozen majors' examples keep their own shutdown wiring and are not re-proved here. */
     shutdownStreamProbe bool
+    /* firewallDoors names the major whose firewall serves the sign-in and the sign-out on kernel.request: the sign-in posts to its own door, off the page's path, and the sign-out is a POST. */
+    firewallDoors bool
 }
 
 var exampleMajorCatalog = []exampleMajor{
     {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true, journalOnPostgres: true},
     {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true},
     {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true},
+    {number: 4, label: "v4", relativeDirectory: "v4/.example", port: 18094, integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true, firewallDoors: true},
 }
 
 /* exampleMysqlDsn answers the dsn of one major's own database. The three examples share the development mysql but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one the supervised sections use, and this swaps the database segment of it for the major being driven.
@@ -239,7 +242,7 @@ func assertExampleSessionSurvivesRestart(
 ) *exampleApplication {
     client := newExampleClient(major)
 
-    signedIn := client.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody(exampleUsername, examplePassword))
+    signedIn := client.call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody(exampleUsername, examplePassword))
     if http.StatusOK != signedIn.statusCode {
         fail("[%s] the restart probe could not sign in (%d): %s", major.label, signedIn.statusCode, exampleTruncate(signedIn.body))
     }
@@ -598,6 +601,7 @@ const (
     exampleRoutesRouteNoSlash = "/routes"
     exampleMissingRoute       = "/assets/no-such-route/"
     exampleLoginRoute         = "/login/"
+    exampleLoginDoorRoute     = "/login/check/"
     exampleLogoutRoute        = "/logout/"
     exampleHealthRoute        = "/health"
     exampleIndexFileRoute     = "/index.html"
@@ -656,7 +660,11 @@ func assertExamplePublicRoutes(major exampleMajor, client *exampleClient) {
         fail("[%s] %s answered %d, wanted 200 from the public route listing", major.label, exampleRoutesRoute, listing.statusCode)
     }
     /* a 200 alone would also come from an error page, so the assertion is that the route table itself is in the body — the application booted its routes, it did not merely open a socket */
-    if false == strings.Contains(listing.body, "example.login.submit") {
+    signInRouteName := "example.login.submit"
+    if true == major.firewallDoors {
+        signInRouteName = "example.login.check"
+    }
+    if false == strings.Contains(listing.body, signInRouteName) {
         fail("[%s] %s answered 200 without the route table in it: %s", major.label, exampleRoutesRoute, exampleTruncate(listing.body))
     }
     pass("[%s] the public route listing served the booted route table", major.label)
@@ -728,7 +736,7 @@ func assertExampleAnonymousRejection(major exampleMajor, client *exampleClient) 
 }
 
 func assertExampleLoginFlow(major exampleMajor, client *exampleClient) {
-    rejected := client.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody(exampleUsername, exampleWrongPassword))
+    rejected := client.call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody(exampleUsername, exampleWrongPassword))
     if http.StatusUnauthorized != rejected.statusCode {
         fail("[%s] login with a wrong password answered %d, wanted 401: %s", major.label, rejected.statusCode, exampleTruncate(rejected.body))
     }
@@ -737,7 +745,7 @@ func assertExampleLoginFlow(major exampleMajor, client *exampleClient) {
     }
     pass("[%s] login with a wrong password was refused and issued no session", major.label)
 
-    accepted := client.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody(exampleUsername, examplePassword))
+    accepted := client.call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody(exampleUsername, examplePassword))
     if http.StatusOK != accepted.statusCode {
         fail("[%s] login answered %d, wanted 200: %s", major.label, accepted.statusCode, exampleTruncate(accepted.body))
     }
@@ -797,7 +805,11 @@ func assertExampleLoginFlow(major exampleMajor, client *exampleClient) {
     pass("[%s] the catalogue answered the ROLE_USER session with its viewer's roles", major.label)
 
     refusedPage := client.call("GET", "/products/", "text/html", "", "")
-    if http.StatusForbidden != refusedPage.statusCode || false == strings.Contains(refusedPage.body, `href="/logout/">Log out<`) || false == strings.Contains(refusedPage.body, `href="/catalogue/">Home<`) {
+    logoutExit := `href="/logout/">Log out<`
+    if true == major.firewallDoors {
+        logoutExit = `action="/logout/" class="d-inline"><button class="btn btn-primary" type="submit">Log out<`
+    }
+    if http.StatusForbidden != refusedPage.statusCode || false == strings.Contains(refusedPage.body, logoutExit) || false == strings.Contains(refusedPage.body, `href="/catalogue/">Home<`) {
         fail("[%s] /products/ answered %d to the ROLE_USER session without the refusal page's exits: %s", major.label, refusedPage.statusCode, exampleTruncate(refusedPage.body))
     }
     pass("[%s] the product list refused the ROLE_USER session with a page offering the catalogue and the logout", major.label)
@@ -883,7 +895,7 @@ func assertExampleLoginIsThrottled(major exampleMajor, client *exampleClient, re
     throttledAt := 0
 
     for attempt := 1; attempt <= exampleLoginThrottleAttemptCeiling; attempt++ {
-        response := client.call("POST", exampleLoginRoute, "", "application/json", body)
+        response := client.call("POST", exampleSignInRoute(major), "", "application/json", body)
 
         if http.StatusTooManyRequests == response.statusCode {
             throttledAt = attempt
@@ -968,8 +980,34 @@ func assertExampleStaticTraversal(major exampleMajor, client *exampleClient) {
     pass("[%s] %d encoded ../ traversal attempts stayed inside the public directory", major.label, len(probeList))
 }
 
+/* exampleSignInRoute answers where a major's sign-in posts. */
+func exampleSignInRoute(major exampleMajor) string {
+    if true == major.firewallDoors {
+        return exampleLoginDoorRoute
+    }
+
+    return exampleLoginRoute
+}
+
 func assertExampleLogout(major exampleMajor, client *exampleClient) {
-    loggedOut := client.call("GET", exampleLogoutRoute, "", "", "")
+    var loggedOut exampleResponse
+    if true == major.firewallDoors {
+        for _, method := range []string{"GET", "HEAD"} {
+            if ignored := client.call(method, exampleLogoutRoute, "", "", ""); http.StatusNotFound != ignored.statusCode {
+                fail("[%s] %s %s answered %d, wanted 404: the door serves POST alone and no route may stand on its path", major.label, method, exampleLogoutRoute, ignored.statusCode)
+            }
+        }
+
+        if ignored := client.call("GET", exampleLoginDoorRoute, "", "", ""); http.StatusNotFound != ignored.statusCode {
+            fail("[%s] GET %s answered %d, wanted 404", major.label, exampleLoginDoorRoute, ignored.statusCode)
+        }
+
+        pass("[%s] a safe method on a firewall door's path answered 404", major.label)
+
+        loggedOut = client.call("POST", exampleLogoutRoute, "text/html", "", "")
+    } else {
+        loggedOut = client.call("GET", exampleLogoutRoute, "", "", "")
+    }
     if http.StatusFound != loggedOut.statusCode {
         fail("[%s] %s answered %d, wanted 302", major.label, exampleLogoutRoute, loggedOut.statusCode)
     }
@@ -1217,7 +1255,7 @@ const exampleShutdownStreamCeiling = 3 * time.Second
 /* openExampleShutdownStream signs the seeded editor in and opens the catalog event stream, reading up to its preamble, so the SIGINT that follows finds a live stream the server cannot drain on its own. The body is registered for release on the failure path, since fail() exits without running deferred functions. */
 func openExampleShutdownStream(major exampleMajor) *http.Response {
     editorClient := newExampleHttpClient()
-    signInExampleHttpEditor(editorClient, major.baseUrl(), "")
+    signInExampleHttpMajorEditor(editorClient, major, major.baseUrl(), "")
 
     response := newLiveExampleClient(major.baseUrl()).openStream(serverSentEventLabel, serverSentEventStreamRoute+"?topic="+liveExampleUnique("e2e-shutdown"), map[string]string{
         "Accept": "text/event-stream",

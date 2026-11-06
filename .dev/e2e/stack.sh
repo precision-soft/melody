@@ -1391,7 +1391,7 @@ check_section_start "TEARDOWN BUDGET" "${TAG_VALIDATE}" "e2e"
 # when it has already passed and rendered in ns below a microsecond, so the record is read in all three spellings. A budget of
 # 0s is the documented "no deadline": a healthy teardown exits zero under it, where a reader folding zero into
 # the default would exit zero as well, which is why the 0s arm only pins that zero is admitted at boot and on
-# the exit path. The port is 18084: 18081–18083 are the Go harness's three examples and 18080 the signal
+# the exit path. The port is 18084: 18081–18083 and 18094 are the Go harness's examples and 18080 the signal
 # section's, and the two scripts run in sequence today, not by contract.
 run_in_dev_capture "${EXAMPLE_DIRECTORY_STRING}" "WORK_DIRECTORY=/tmp/example-teardown-e2e
     rm -rf \"\${WORK_DIRECTORY}\"

@@ -48,6 +48,7 @@ Sections:
   - EXAMPLE APPLICATION v1 (example)  — the .example application of major 1, built and booted by the harness
   - EXAMPLE APPLICATION v2 (example)  — the same, for major 2
   - EXAMPLE APPLICATION v3 (example)  — the same, for major 3
+  - EXAMPLE APPLICATION v4 (example)  — the same, for major 4
 
 The thirteen example-over-http sections all drive the ONE application the dev container supervises on
 EXAMPLE_BASE_URL, so they share a fixture and observe two rules stated in examplehttp.go beside the calls:

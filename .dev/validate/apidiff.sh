@@ -4,6 +4,8 @@
 # carries, and gates on every difference.
 #
 #   .dev/validate/apidiff.sh [--report]
+#   .dev/validate/apidiff.sh --module DIR [--module DIR ...]
+#   .dev/validate/apidiff.sh --list
 #   .dev/validate/apidiff.sh --compare OLD NEW
 #
 # The band exists because no other lane asks the question. The compatibility lane next to it builds each
@@ -69,6 +71,11 @@
 # `--report` prints the current differences as baseline-shaped rows with the disposition left
 # `unclassified` and the reason empty, for seeding the file after a release moves the tags.
 #
+# `--module DIR` compares only the named modules, each one a published module the band discovers, against
+# the baseline rows of those modules; every row is still parsed, and a row naming no discovered module is
+# still stale. `--list` prints the discovered modules and needs no container: all.sh reads it to key the
+# band per module.
+#
 # `--compare OLD NEW` compares one explicit pair, without the baseline, and prints the classified rows.
 # OLD and NEW are each a module directory in this tree or a `path@version`. This is the second axis the
 # major split needs — a copied major against the one it was copied from — and it comes with a measured
@@ -102,11 +109,28 @@ cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
 MODE_STRING="gate"
 COMPARE_OLD_STRING=""
 COMPARE_NEW_STRING=""
+REQUESTED_MODULE_LIST_STRING=""
 if [[ "--report" = "${1-}" ]]; then
     MODE_STRING="report"
     if [[ "" != "${2-}" ]]; then
         fail "--report takes no argument"
     fi
+elif [[ "--list" = "${1-}" ]]; then
+    MODE_STRING="list"
+    if [[ "" != "${2-}" ]]; then
+        fail "--list takes no argument"
+    fi
+elif [[ "--module" = "${1-}" ]]; then
+    while [[ 0 -lt $# ]]; do
+        if [[ "--module" != "${1}" ]]; then
+            fail "--module goes only with further --module: ${1}"
+        fi
+        if [[ "" = "${2-}" ]]; then
+            fail "--module takes a module directory relative to the repository root"
+        fi
+        REQUESTED_MODULE_LIST_STRING="${REQUESTED_MODULE_LIST_STRING}${2}"$'\n'
+        shift 2
+    done
 elif [[ "--compare" = "${1-}" ]]; then
     MODE_STRING="compare"
     COMPARE_OLD_STRING="${2-}"
@@ -187,17 +211,6 @@ if [[ "gate" = "${MODE_STRING}" && -f "${BASELINE_FILE_PATH}" ]]; then
     done < "${BASELINE_FILE_PATH}"
 fi
 
-acquire_validation_lock
-
-require_docker
-require_docker_daemon
-
-if ! docker_compose_service_exists "${SERVICE_NAME_STRING}"; then
-    fail "missing docker compose service: ${SERVICE_NAME_STRING}"
-fi
-
-ensure_service_running "${SERVICE_NAME_STRING}"
-
 # every published module of every major, discovered rather than listed: the root module, the versioned
 # majors, and every integration module. The example applications are out by rule, not by accident — they
 # are consumers, carry no tag, and publish no surface — and so is the e2e harness.
@@ -234,6 +247,29 @@ get_published_module_relative_path_list() {
         done
     } | sort -u
 }
+
+DISCOVERED_MODULE_LIST_STRING="$(get_published_module_relative_path_list)"
+
+if [[ "list" = "${MODE_STRING}" ]]; then
+    printf '%s\n' "${DISCOVERED_MODULE_LIST_STRING}"
+    exit 0
+fi
+
+SELECTED_MODULE_LIST_STRING="${DISCOVERED_MODULE_LIST_STRING}"
+if [[ "" != "${REQUESTED_MODULE_LIST_STRING}" ]]; then
+    SELECTED_MODULE_LIST_STRING="$(select_requested_module_list "${REQUESTED_MODULE_LIST_STRING}" <<<"${DISCOVERED_MODULE_LIST_STRING}")"
+fi
+
+acquire_validation_lock
+
+require_docker
+require_docker_daemon
+
+if ! docker_compose_service_exists "${SERVICE_NAME_STRING}"; then
+    fail "missing docker compose service: ${SERVICE_NAME_STRING}"
+fi
+
+ensure_service_running "${SERVICE_NAME_STRING}"
 
 # the module path of a directory, read through the toolchain rather than out of the file's text: the
 # module directive has two spellings and a reader that greps for one answers a question about spelling.
@@ -768,7 +804,7 @@ while IFS= read -r MODULE_RELATIVE_PATH_STRING; do
         continue
     fi
     MODULE_RELATIVE_PATH_LIST+=("${MODULE_RELATIVE_PATH_STRING}")
-done < <(get_published_module_relative_path_list)
+done <<<"${SELECTED_MODULE_LIST_STRING}"
 
 if [[ 0 -eq "${#MODULE_RELATIVE_PATH_LIST[@]}" ]]; then
     fail "no published module found to compare — an empty module list here would report a pass over nothing"
@@ -801,12 +837,21 @@ for MODULE_RELATIVE_PATH_STRING in "${MODULE_RELATIVE_PATH_LIST[@]}"; do
     COMPARISON_INPUT_LIST+=("${MODULE_RELATIVE_PATH_STRING}"$'\t'"${MODULE_PATH_STRING}"$'\t'"${MODULE_PATH_STRING}@${VERSION_STRING}")
 done
 
-if [[ 0 -eq "${#COMPARISON_INPUT_LIST[@]}" ]]; then
+# a subset of untagged modules, such as a major before its first tag, is a run with nothing to compare by
+# construction; a tree from which no release tag was read is a run that read no tag, whatever was asked
+if [[ "" = "$(released_melody_module_path_list "${REPOSITORY_ROOT_DIRECTORY_STRING}")" ]]; then
+    fail "no released melody module was read from the tags — every module would read as untagged, and a pass over nothing is not a pass"
+fi
+
+if [[ 0 -eq "${#COMPARISON_INPUT_LIST[@]}" && "" = "${REQUESTED_MODULE_LIST_STRING}" ]]; then
     fail "none of the ${#MODULE_RELATIVE_PATH_LIST[@]} discovered module(s) carries a tag — nothing to compare, and a pass over nothing is not a pass"
 fi
 
-COMPARISON_OUTPUT_STRING="$(run_comparisons "${COMPARISON_INPUT_LIST[@]}")"
-verify_protocol "${COMPARISON_OUTPUT_STRING}" "${#COMPARISON_INPUT_LIST[@]}"
+COMPARISON_OUTPUT_STRING=""
+if [[ 0 -lt "${#COMPARISON_INPUT_LIST[@]}" ]]; then
+    COMPARISON_OUTPUT_STRING="$(run_comparisons "${COMPARISON_INPUT_LIST[@]}")"
+    verify_protocol "${COMPARISON_OUTPUT_STRING}" "${#COMPARISON_INPUT_LIST[@]}"
+fi
 
 MEASURED_FACT_LIST_STRING="$(read_measured_fact_list "${COMPARISON_OUTPUT_STRING}")"
 
@@ -827,14 +872,14 @@ fi
 
 MEASURED_COUNT_NUMBER="$(printf '%s\n' "${MEASURED_FACT_LIST_STRING}" | grep -c . || true)"
 
-info "${#MODULE_RELATIVE_PATH_LIST[@]} published module(s) discovered: ${#COMPARISON_INPUT_LIST[@]} compared with their last tag, ${#SKIPPED_LINE_LIST[@]} skipped, ${MEASURED_COUNT_NUMBER} difference(s) measured, ${#BASELINE_KEY_LIST[@]} baseline row(s)"
+info "${#MODULE_RELATIVE_PATH_LIST[@]} of $(grep -c . <<<"${DISCOVERED_MODULE_LIST_STRING}") discovered published module(s) run: ${#COMPARISON_INPUT_LIST[@]} compared with their last tag, ${#SKIPPED_LINE_LIST[@]} skipped, ${MEASURED_COUNT_NUMBER} difference(s) measured, ${#BASELINE_KEY_LIST[@]} baseline row(s)"
 
 for SKIPPED_LINE_STRING in "${SKIPPED_LINE_LIST[@]}"; do
     info "skipped ${SKIPPED_LINE_STRING}"
 done
 
 if [[ $((${#COMPARISON_INPUT_LIST[@]} + ${#SKIPPED_LINE_LIST[@]})) -ne "${#MODULE_RELATIVE_PATH_LIST[@]}" ]]; then
-    fail "compared ${#COMPARISON_INPUT_LIST[@]} + skipped ${#SKIPPED_LINE_LIST[@]} does not equal the ${#MODULE_RELATIVE_PATH_LIST[@]} modules discovered — the run did not account for every module"
+    fail "compared ${#COMPARISON_INPUT_LIST[@]} + skipped ${#SKIPPED_LINE_LIST[@]} does not equal the ${#MODULE_RELATIVE_PATH_LIST[@]} modules run — the run did not account for every module"
 fi
 
 FAILED_BOOLEAN="false"
@@ -883,22 +928,19 @@ for INDEX_NUMBER in "${!BASELINE_KEY_LIST[@]}"; do
         continue
     fi
 
-    FAILED_BOOLEAN="true"
-
-    DISCOVERED_BOOLEAN="false"
-    for MODULE_RELATIVE_PATH_STRING in "${MODULE_RELATIVE_PATH_LIST[@]}"; do
-        if [[ "${MODULE_RELATIVE_PATH_STRING}" = "${BASELINE_MODULE_LIST[${INDEX_NUMBER}]}" ]]; then
-            DISCOVERED_BOOLEAN="true"
-            break
-        fi
-    done
-
-    STALE_OBJECT_STRING="$(printf '%s' "${BASELINE_KEY_LIST[${INDEX_NUMBER}]}" | cut -f2)"
-    if [[ "false" = "${DISCOVERED_BOOLEAN}" ]]; then
+    if ! grep -Fxq -- "${BASELINE_MODULE_LIST[${INDEX_NUMBER}]}" <<<"${DISCOVERED_MODULE_LIST_STRING}"; then
+        FAILED_BOOLEAN="true"
         println "stale baseline row: ${BASELINE_MODULE_LIST[${INDEX_NUMBER}]} is no longer a published module in this tree — the row names something the run cannot measure, so it has to go"
         continue
     fi
 
+    # a row of a discovered module this run did not compare is neither unfiled nor stale here
+    if ! grep -Fxq -- "${BASELINE_MODULE_LIST[${INDEX_NUMBER}]}" <<<"${SELECTED_MODULE_LIST_STRING}"; then
+        continue
+    fi
+
+    FAILED_BOOLEAN="true"
+    STALE_OBJECT_STRING="$(printf '%s' "${BASELINE_KEY_LIST[${INDEX_NUMBER}]}" | cut -f2)"
     println "stale baseline row: ${BASELINE_MODULE_LIST[${INDEX_NUMBER}]} ${STALE_OBJECT_STRING} no longer differs from the last tag — the change it files is gone, or a release moved the tag past it, so the row has to go"
 done
 

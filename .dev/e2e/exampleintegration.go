@@ -145,7 +145,7 @@ func exampleEditorClient(major exampleMajor, application *exampleApplication) *e
 
     response := editor.call(
         "POST",
-        exampleLoginRoute,
+        exampleSignInRoute(major),
         "application/json",
         "application/json",
         exampleCredentialBody(exampleEditorUsername, exampleEditorPassword),

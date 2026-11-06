@@ -1,0 +1,136 @@
+package rueidis
+
+import (
+    "reflect"
+
+    "github.com/redis/rueidis"
+
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/exception"
+)
+
+/* ModuleConfig declares what the module registers: the client, the Connection that owns it, and the locker and token store services under AsLocker and AsTokenStore, each built from its config, whose zero value is the default. */
+type ModuleConfig struct {
+    Client rueidis.Client
+
+    AsLocker bool
+
+    Locker LockerConfig
+
+    AsTokenStore bool
+
+    TokenStore TokenStoreConfig
+
+    /* Connection, when set, is registered as the service that owns the client, so the container's ordered teardown closes it; the raw client's Close returns nothing, so registered alone it cannot join the teardown. Wrap the opened client with NewConnection and hand both in, or only the Connection, from which a nil Client is read. Every client-backed service this module registers resolves the connection as its dependency, so a run that resolves one of them orders the connection's close after it, and a run that resolves none leaves it unclosed, as the messagebus transports document. */
+    Connection *Connection
+}
+
+func NewModule(config ModuleConfig) *Module {
+    return &Module{config: config}
+}
+
+type Module struct {
+    config ModuleConfig
+}
+
+func (instance *Module) Name() string {
+    return "rueidis"
+}
+
+func (instance *Module) Description() string {
+    return "registers the redis client and optionally the connection owner, the locker and the revocable token store services"
+}
+
+/* clientIsNil reads a typed nil as nil, which a bare comparison on the interface takes for a live client. */
+func clientIsNil(client rueidis.Client) bool {
+    if nil == client {
+        return true
+    }
+
+    value := reflect.ValueOf(client)
+
+    return reflect.Pointer == value.Kind() && true == value.IsNil()
+}
+
+/* refuseARoleTheModuleCannotServe fails the boot on a role asked of a module with no client, and on a role's configuration handed with the role off, where neither would register anything and the service would be missed only at its first resolve. */
+func refuseARoleTheModuleCannotServe(config ModuleConfig, hasClient bool) {
+    for _, role := range []struct {
+        flagField   string
+        flag        bool
+        configField string
+        isZero      bool
+    }{
+        {"ModuleConfig.AsLocker", config.AsLocker, "ModuleConfig.Locker", reflect.ValueOf(config.Locker).IsZero()},
+        {"ModuleConfig.AsTokenStore", config.AsTokenStore, "ModuleConfig.TokenStore", reflect.ValueOf(config.TokenStore).IsZero()},
+    } {
+        if true == role.flag && false == hasClient {
+            exception.Panic(exception.NewError(
+                "the rueidis module is asked for a role and has no client",
+                map[string]any{"field": role.flagField, "requires": "ModuleConfig.Client"},
+                nil,
+            ))
+        }
+
+        if false == role.flag && false == role.isZero {
+            exception.Panic(exception.NewError(
+                "the rueidis module is handed a role's configuration with the role off",
+                map[string]any{"field": role.configField, "enabledBy": role.flagField},
+                nil,
+            ))
+        }
+    }
+}
+
+func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
+    client := instance.config.Client
+    if true == clientIsNil(client) && nil != instance.config.Connection {
+        client = instance.config.Connection.Client()
+    }
+
+    refuseARoleTheModuleCannotServe(instance.config, false == clientIsNil(client))
+
+    if true == clientIsNil(client) {
+        return
+    }
+
+    refuseAClientAConnectionDoesNotOwn(instance.config)
+
+    if nil != instance.config.Connection {
+        RegisterConnectionService(registrar, instance.config.Connection)
+    }
+
+    RegisterClientService(registrar, client)
+
+    if true == instance.config.AsLocker {
+        RegisterLockerService(registrar, client, instance.config.Locker)
+    }
+
+    if true == instance.config.AsTokenStore {
+        RegisterTokenStoreService(registrar, client, instance.config.TokenStore)
+    }
+}
+
+var (
+    _ applicationcontract.Module        = (*Module)(nil)
+    _ applicationcontract.ServiceModule = (*Module)(nil)
+)
+
+/* refuseAClientAConnectionDoesNotOwn refuses a configuration whose Client and Connection name different clients: the services run on Client while the teardown closes the Connection's, so the client in use would never be closed and the closed one never used. Two clients are compared only where both dynamic types are comparable; a client of a type that is not is admitted, the check unable to tell. */
+func refuseAClientAConnectionDoesNotOwn(config ModuleConfig) {
+    if nil == config.Client || nil == config.Connection || nil == config.Connection.Client() {
+        return
+    }
+
+    owned := config.Connection.Client()
+    if false == reflect.TypeOf(config.Client).Comparable() || false == reflect.TypeOf(owned).Comparable() {
+        return
+    }
+
+    if config.Client != owned {
+        exception.Panic(exception.NewError(
+            "rueidis module: Client and Connection name different clients",
+            map[string]any{"hint": "hand the Connection alone, or the client the Connection wraps as Client"},
+            nil,
+        ))
+    }
+}
