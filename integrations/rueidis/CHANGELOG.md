@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.2.2] - 2026-11-06 - Bounded Error Chain Search
+
 ### Fixed
 
 - rate limit: a store failure whose `Unwrap` chain reaches itself no longer holds the limiter that classifies it.
@@ -103,7 +105,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `cache/backend.go` — `cache.Backend` wrapper around `rueidis.Client` with `Get()`, `Set()`, `Delete()`, `Has()`, `ClearByPrefix()`, `Many()`, `SetMultiple()`, `DeleteMultiple()`, `Increment()`, `Decrement()`
 - `cache/backend_service.go` — `cache.BackendService` wrapper; `WithContext()` binds a backend to a specific context; `BackendFromRuntime()` obtains a backend from the Melody runtime with bound context
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.2.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.2.2...HEAD
+
+[v1.2.2]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.2.1...integrations/rueidis/v1.2.2
 
 [v1.2.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v1.2.0...integrations/rueidis/v1.2.1
 

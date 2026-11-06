@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.3.2] - 2026-11-06 - Bounded Error Chain Search
+
 ### Fixed
 
 - output: a migration's error whose `Unwrap` chain reaches itself no longer holds the command that renders it.
@@ -109,7 +111,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `migrate.go` — `migrate.Up()` / `UpWithOption()` — forward-migration convenience; `Down()` / `DownWithOption()` — rollback convenience
 - `README.md` — migration workflow documentation; CLI commands introduced in the v2 binding
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.3.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.3.2...HEAD
+
+[v1.3.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.3.1...integrations/bunorm/migrate/v1.3.2
 
 [v1.3.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/migrate/v1.3.0...integrations/bunorm/migrate/v1.3.1
 

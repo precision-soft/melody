@@ -19,8 +19,8 @@ github.com/minio/minio-go/v7 v7.0.77 h1:GaGghJRg9nwDVlNbwYjSDJT1rqltQkBFDsypWX1v
 github.com/minio/minio-go/v7 v7.0.77/go.mod h1:AVM3IUN6WwKzmwBxVdjzhH8xq+f57JSbbvzqvUzR6eg=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/precision-soft/melody/v3 v3.7.0 h1:1ZoEffT8/0bLIHbFogJbeZY+uVvzsP7FsgXQgdQVY/U=
-github.com/precision-soft/melody/v3 v3.7.0/go.mod h1:pz62RacpD5/8Og1Xlv9ggfnuOxoszvkQveWZ6wJyMoY=
+github.com/precision-soft/melody/v3 v3.14.3 h1:3PAKSefagkj2rQzc8Fy20FNqzJ2cFCcMZxxW5zknqqA=
+github.com/precision-soft/melody/v3 v3.14.3/go.mod h1:w1NFW/bmYJsENG5HZ1FG/8yhDfIT88ccTUdo33toTIE=
 github.com/rs/xid v1.6.0 h1:fV591PaemRlL6JfRxGDEPl69wICngIQ3shQtzfy2gxU=
 github.com/rs/xid v1.6.0/go.mod h1:7XoLgs4eV+QndskICGsho+ADou8ySMSjJKDIan90Nz0=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=

@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/minio/minio-go/v7 v7.0.77
-	github.com/precision-soft/melody/v3 v3.7.0
+	github.com/precision-soft/melody/v3 v3.14.3
 )
 
 require (

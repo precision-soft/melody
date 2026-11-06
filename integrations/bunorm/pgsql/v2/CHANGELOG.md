@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.1.2] - 2026-11-06 - Bounded Error Chain Search
+
 ### Fixed
 
 - provider: a post-build hook's error whose `Unwrap` chain reaches itself no longer holds the open that classifies it.
@@ -119,7 +121,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code moved to `integrations/bunorm/pgsql/v2/` with matching module path
 - Dependencies: `github.com/precision-soft/melody/integrations/bunorm/v2 v2.0.0`, `github.com/precision-soft/melody/v2 v2.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.1.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.1.2...HEAD
+
+[v2.1.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.1.1...integrations/bunorm/pgsql/v2.1.2
 
 [v2.1.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v2.1.0...integrations/bunorm/pgsql/v2.1.1
 

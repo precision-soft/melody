@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.2.1] - 2026-11-06 - Bounded Error Chain Search
+
 ### Fixed
 
 - metrics: a handler's error whose `Unwrap` chain reaches itself no longer holds the request in the status classification, and a writer's flush or hijack failure of that shape no longer holds the response writer.
@@ -70,7 +72,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 [v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/opentelemetry/v3.0.0
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.2.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.2.1...HEAD
+
+[v3.2.1]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.2.0...integrations/opentelemetry/v3.2.1
 
 [v3.2.0]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.1.0...integrations/opentelemetry/v3.2.0
 

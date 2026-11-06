@@ -8,6 +8,12 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v3.14.4] - 2026-11-06 - Build Version Matches the Release
+
+### Fixed
+
+- version: `BuildVersion()` and the command envelope's `meta.version.melody` answer this release, where a build without `-ldflags` answered `v3.14.0` on every release since.
+
 ## [v3.14.3] - 2026-11-06 - Bounded Error Chain Search
 
 ### Added
@@ -1194,7 +1200,9 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.3...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.4...HEAD
+
+[v3.14.4]: https://github.com/precision-soft/melody/compare/v3.14.3...v3.14.4
 
 [v3.14.3]: https://github.com/precision-soft/melody/compare/v3.14.2...v3.14.3
 

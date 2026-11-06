@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/go-sql-driver/mysql v1.8.1
-	github.com/precision-soft/melody v1.19.1
+	github.com/precision-soft/melody v1.19.3
 	github.com/precision-soft/melody/integrations/bunorm v1.1.1
 	github.com/precision-soft/melody/integrations/bunorm/migrate v1.3.1
 	github.com/precision-soft/melody/integrations/bunorm/mysql v1.2.1

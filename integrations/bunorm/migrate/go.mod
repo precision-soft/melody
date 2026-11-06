@@ -3,7 +3,7 @@ module github.com/precision-soft/melody/integrations/bunorm/migrate
 go 1.24.0
 
 require (
-	github.com/precision-soft/melody v1.19.0
+	github.com/precision-soft/melody v1.19.3
 	github.com/precision-soft/melody/integrations/bunorm v1.1.0
 	github.com/uptrace/bun v1.2.17
 )

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.1.1] - 2026-11-06 - Bounded Error Chain Search
+
 ### Fixed
 
 - storage: an upload body's read error whose `Unwrap` chain reaches itself no longer holds the goroutine that checks the body's end.
@@ -63,7 +65,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `storage.go` — object keys are now normalized the same way the core `LocalStorage` backend normalizes them (backslash to forward slash, clean `.`/`..` segments, strip the leading slash) before every `Put`/`Get`/`Delete`/`Exists`/`PresignedUrl` call. Keys were passed to S3 verbatim while `LocalStorage` cleaned them, so the same key string addressed different objects depending on the backend, and `PresignedUrl("a/../f.txt")` signed a path the browser collapses before sending (yielding `SignatureDoesNotMatch`). An empty or `.`/`..`-only key is now rejected, matching the `LocalStorage` contract.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.1...HEAD
+
+[v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.0...integrations/awss3/v3.1.1
 
 [v3.1.0]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.0.3...integrations/awss3/v3.1.0
 

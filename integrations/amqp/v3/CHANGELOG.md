@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.3.4] - 2026-11-06 - Bounded Error Chain Search
+
 ### Fixed
 
 - transport: a dialer's error whose `Unwrap` chain reaches itself no longer holds the `Send` or the server-sent event backplane that classifies it, and a close error on such a chain no longer holds `Close`.
@@ -179,7 +181,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `transport.go`, `server_sent_event_backplane.go` — `resetPublishChannel` is now identity-aware: it closes the cached publish channel only when it is still the one the failing caller used. Two publishers that both failed on the same dead channel could otherwise have the second caller's reset close the healthy channel the first caller had just reopened, turning a recoverable single-retry into a spurious publish error on an otherwise-healthy broker. `publishOnce` now returns the channel it used and `resetPublishChannel` compares identity before closing.
 - `transport.go` — `consumeChannelForAck` now applies the same `IsClosed()` guard as `ensureConsumeChannel`/`ensurePublishChannel`. It returned the cached consume channel without checking whether the broker had closed it, so when a channel-level loss occurred between a delivery and its `Ack`/`Nack` — before the consume loop reset the channel — the acknowledgement was attempted on the already-closed channel. It now treats a non-nil but closed channel as absent and returns the clean `"amqp consume channel is not open"` error, letting the still-unacknowledged message redeliver on the next consume generation (at-least-once preserved).
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.3...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.4...HEAD
+
+[v3.3.4]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.3...integrations/amqp/v3.3.4
 
 [v3.3.3]: https://github.com/precision-soft/melody/compare/integrations/amqp/v3.3.2...integrations/amqp/v3.3.3
 

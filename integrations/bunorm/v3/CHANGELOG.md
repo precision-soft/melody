@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.4] - 2026-11-06 - Bounded Error Chain Search
+
 ### Fixed
 
 - bunorm: an error whose `Unwrap` chain reaches itself no longer holds the goroutine that reads it: a provider's in the registry's open and the read-write splitter, a storage's or a unit of work's in the audit tracker, and a run's in the encryption migrator.
@@ -234,7 +236,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.3...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.4...HEAD
+
+[v3.6.4]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.3...integrations/bunorm/v3.6.4
 
 [v3.6.3]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.2...integrations/bunorm/v3.6.3
 

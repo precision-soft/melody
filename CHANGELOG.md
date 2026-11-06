@@ -10,6 +10,12 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v1.19.4] - 2026-11-06 - Build Version Matches the Release
+
+### Fixed
+
+- version: `BuildVersion()` and the command envelope's `meta.version.melody` answer this release, where a build without `-ldflags` answered `v1.19.1` on every release since.
+
 ## [v1.19.3] - 2026-11-06 - Bounded Error Chain Search
 
 ### Added
@@ -1397,7 +1403,9 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.19.3...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.19.4...HEAD
+
+[v1.19.4]: https://github.com/precision-soft/melody/compare/v1.19.3...v1.19.4
 
 [v1.19.3]: https://github.com/precision-soft/melody/compare/v1.19.2...v1.19.3
 
