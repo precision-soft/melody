@@ -32,7 +32,7 @@ type BackendConfig struct {
     /* MaxKeyLength bounds the key the caller hands in, before the prefix is put in front of it, since the prefix is the operator's and must not change which keys are refused: 1024 by default, at least 1, unlimited refused. */
     MaxKeyLength bound.Count
 
-    /* CommandTimeout bounds every operation dispatched without a caller context, a Clear of many DEL batches included, so a store that accepts connections but stops answering cannot hold a request-path read, which the client retries for as long as its context allows: 1s by default, at least 1ms, unlimited refused. */
+    /* CommandTimeout bounds every operation dispatched without a caller context, each SCAN and DEL round trip of a Clear on its own, so a store that accepts connections but stops answering cannot hold a request-path read, which the client retries for as long as its context allows: 1s by default, at least 1ms, unlimited refused. */
     CommandTimeout bound.Duration
 }
 
@@ -149,6 +149,16 @@ type Backend struct {
     closed         atomic.Bool
     /* ownerClosed is the closed flag of the backend this handle was derived from, nil on a backend built directly: a handle WithContext mints per request lives exactly as long as its owner, so the owner's CloseWithContext must reach it. A sibling backend over the same client stays independent; the client belongs to whoever built it. */
     ownerClosed *atomic.Bool
+}
+
+/* roundTripContext answers the context one store round trip of a walk runs on. */
+type roundTripContext func() (context.Context, context.CancelFunc)
+
+/* callerRoundTrip keeps every round trip of a walk on the caller's one context, whose deadline bounds the walk as a whole. */
+func callerRoundTrip(ctx context.Context) roundTripContext {
+    return func() (context.Context, context.CancelFunc) {
+        return ctx, func() {}
+    }
 }
 
 /* operationContext bounds an operation dispatched without a caller context: the constructor's context plus the command timeout. */
@@ -310,12 +320,24 @@ func (instance *Backend) Has(key string) (bool, error) {
 }
 
 func (instance *Backend) ClearCtx(ctx context.Context) error {
+    return instance.clear(callerRoundTrip(ctx))
+}
+
+/* Deprecated: prefer ClearCtx, which takes ctx per call. The command timeout bounds each SCAN and each DEL rather than the walk, whose length is the size of the namespace. */
+func (instance *Backend) Clear() error {
+    return instance.clear(instance.operationContext)
+}
+
+func (instance *Backend) clear(roundTrip roundTripContext) error {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return closedErr
     }
 
-    pattern := escapeRedisGlobMeta(instance.prefix) + "*"
-    keys, scanErr := instance.scanKeys(ctx, pattern)
+    return instance.deleteMatching(roundTrip, escapeRedisGlobMeta(instance.prefix)+"*")
+}
+
+func (instance *Backend) deleteMatching(roundTrip roundTripContext, pattern string) error {
+    keys, scanErr := instance.scanKeys(roundTrip, pattern)
     if nil != scanErr {
         return scanErr
     }
@@ -324,19 +346,20 @@ func (instance *Backend) ClearCtx(ctx context.Context) error {
         return nil
     }
 
-    return instance.deleteKeysInBatches(ctx, keys)
-}
-
-/* Deprecated: prefer ClearCtx, which takes ctx per call. */
-func (instance *Backend) Clear() error {
-    ctx, cancel := instance.operationContext()
-    defer cancel()
-
-    return instance.ClearCtx(ctx)
+    return instance.deleteKeysInBatches(roundTrip, keys)
 }
 
 /* ClearByPrefixCtx refuses the empty prefix as every other operation refuses the empty key: a run-time prefix that comes out empty, "tenant:" plus an unresolved id, would select the whole namespace. ClearCtx is the door for the whole namespace. */
 func (instance *Backend) ClearByPrefixCtx(ctx context.Context, prefix string) error {
+    return instance.clearByPrefix(callerRoundTrip(ctx), prefix)
+}
+
+/* Deprecated: prefer ClearByPrefixCtx, which takes ctx per call. The command timeout bounds each SCAN and each DEL rather than the walk, whose length is the size of the subtree. */
+func (instance *Backend) ClearByPrefix(prefix string) error {
+    return instance.clearByPrefix(instance.operationContext, prefix)
+}
+
+func (instance *Backend) clearByPrefix(roundTrip roundTripContext, prefix string) error {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return closedErr
     }
@@ -346,25 +369,7 @@ func (instance *Backend) ClearByPrefixCtx(ctx context.Context, prefix string) er
         return normalizeErr
     }
 
-    pattern := escapeRedisGlobMeta(normalizedPrefix) + "*"
-    keys, scanErr := instance.scanKeys(ctx, pattern)
-    if nil != scanErr {
-        return scanErr
-    }
-
-    if 0 == len(keys) {
-        return nil
-    }
-
-    return instance.deleteKeysInBatches(ctx, keys)
-}
-
-/* Deprecated: prefer ClearByPrefixCtx, which takes ctx per call. */
-func (instance *Backend) ClearByPrefix(prefix string) error {
-    ctx, cancel := instance.operationContext()
-    defer cancel()
-
-    return instance.ClearByPrefixCtx(ctx, prefix)
+    return instance.deleteMatching(roundTrip, escapeRedisGlobMeta(normalizedPrefix)+"*")
 }
 
 func (instance *Backend) ManyCtx(ctx context.Context, keys []string) (map[string][]byte, error) {
@@ -725,12 +730,12 @@ func escapeRedisGlobMeta(value string) string {
 }
 
 /* scanKeys walks every node of the client rather than the one connection a single Do reaches: against a cluster a scan on one node reports only that node's slice of the keyspace, so a prefix wipe would leave the rest behind and report success. Nodes answers a single-node client with itself. */
-func (instance *Backend) scanKeys(ctx context.Context, pattern string) ([]string, error) {
+func (instance *Backend) scanKeys(roundTrip roundTripContext, pattern string) ([]string, error) {
     keys := make([]string, 0)
 
     nodes := instance.client.Nodes()
     for _, node := range nodes {
-        nodeKeys, nodeErr := scanNodeKeys(ctx, node, pattern, instance.scanCount)
+        nodeKeys, nodeErr := scanNodeKeys(roundTrip, node, pattern, instance.scanCount)
         if nil != nodeErr {
             return nil, nodeErr
         }
@@ -741,15 +746,18 @@ func (instance *Backend) scanKeys(ctx context.Context, pattern string) ([]string
     return keys, nil
 }
 
-func scanNodeKeys(ctx context.Context, node rueidis.Client, pattern string, scanCount int) ([]string, error) {
+func scanNodeKeys(roundTrip roundTripContext, node rueidis.Client, pattern string, scanCount int) ([]string, error) {
     cursor := uint64(0)
     keys := make([]string, 0)
 
     for {
+        ctx, cancel := roundTrip()
         response := node.Do(
             ctx,
             node.B().Scan().Cursor(cursor).Match(pattern).Count(int64(scanCount)).Build(),
         )
+        cancel()
+
         if err := response.Error(); nil != err {
             return nil, err
         }
@@ -805,7 +813,7 @@ func scanNodeKeys(ctx context.Context, node rueidis.Client, pattern string, scan
     return keys, nil
 }
 
-func (instance *Backend) deleteKeysInBatches(ctx context.Context, keys []string) error {
+func (instance *Backend) deleteKeysInBatches(roundTrip roundTripContext, keys []string) error {
     if 0 == len(keys) {
         return nil
     }
@@ -817,7 +825,12 @@ func (instance *Backend) deleteKeysInBatches(ctx context.Context, keys []string)
         }
 
         batch := keys[startIndex:endIndex]
-        if batchErr := instance.firstDeleteFailure(rueidis.MDel(instance.client, ctx, batch)); nil != batchErr {
+
+        ctx, cancel := roundTrip()
+        batchErr := instance.firstDeleteFailure(rueidis.MDel(instance.client, ctx, batch))
+        cancel()
+
+        if nil != batchErr {
             /* a multi-batch wipe that fails part-way is reported at the operation's own extent, since the earlier batches are irreversibly gone and batch-only counts could not say how much was destroyed; a single-batch operation keeps the batch report, which already is the operation's */
             if len(keys) <= instance.deleteBatch {
                 return batchErr

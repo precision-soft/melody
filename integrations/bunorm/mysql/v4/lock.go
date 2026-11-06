@@ -20,7 +20,7 @@ import (
 
 /* LockerConfig is what a locker declares beyond its database; its zero value is the default. */
 type LockerConfig struct {
-    /* ReleaseTimeout bounds the locker's own round trips, each on a context of its own: the release, the orphan release of a failed acquire, the refresh probe and the liveness ping. 5s by default, at least 1ms, unlimited refused, since a release that never ends holds the pinned connection and the lock with it. A release handed a runtime whose context carries an earlier deadline, still ahead, ends at that one. */
+    /* ReleaseTimeout bounds the locker's own round trips, each on a context of its own: the release, the orphan release of a failed acquire, the refresh probe and the liveness ping. 5s by default, at least 1ms, unlimited refused, since a release that never ends holds the pinned connection and the lock with it. A release handed a runtime whose context carries an earlier deadline, still ahead, ends at that one, and a release that fails gives the session up, which frees the lock. */
     ReleaseTimeout bound.Duration
 }
 

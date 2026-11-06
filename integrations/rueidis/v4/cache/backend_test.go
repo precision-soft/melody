@@ -631,7 +631,7 @@ func TestDeleteKeysInBatches_DeletesEveryBatchIncludingThePartialLast(t *testing
 
     backend.deleteBatch = 3
 
-    if deleteErr := backend.deleteKeysInBatches(context.Background(), keys); nil != deleteErr {
+    if deleteErr := backend.deleteKeysInBatches(callerRoundTrip(context.Background()), keys); nil != deleteErr {
         t.Fatalf("deleteKeysInBatches: %v", deleteErr)
     }
 
@@ -647,7 +647,7 @@ func TestDeleteKeysInBatches_DeletesEveryBatchIncludingThePartialLast(t *testing
 func TestDeleteKeysInBatches_AnEmptyKeyListIsNotAFailure(t *testing.T) {
     backend, _ := liveBackend(t)
 
-    if deleteErr := backend.deleteKeysInBatches(context.Background(), nil); nil != deleteErr {
+    if deleteErr := backend.deleteKeysInBatches(callerRoundTrip(context.Background()), nil); nil != deleteErr {
         t.Fatalf("an empty batch must not be a failure: %v", deleteErr)
     }
 }
@@ -1028,7 +1028,7 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    deleteErr := backend.deleteKeysInBatches(cancelledContext, keys)
+    deleteErr := backend.deleteKeysInBatches(callerRoundTrip(cancelledContext), keys)
     if nil == deleteErr {
         t.Fatal("expected the cancelled batch walk to fail")
     }
@@ -1038,7 +1038,7 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
         t.Fatalf("expected the operation-level extent on the error, got %v", extent)
     }
 
-    singleBatchErr := backend.deleteKeysInBatches(cancelledContext, keys[:1])
+    singleBatchErr := backend.deleteKeysInBatches(callerRoundTrip(cancelledContext), keys[:1])
     if nil == singleBatchErr {
         t.Fatal("expected the cancelled single batch to fail")
     }
@@ -1186,5 +1186,160 @@ func TestBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
         if closedErr := call(); nil == closedErr || false == strings.Contains(closedErr.Error(), "cache backend is closed") {
             t.Fatalf("expected %s refused after Close, got %v", door, closedErr)
         }
+    }
+}
+
+/* delayedClient holds every command for a fixed delay, or until its context ends, so a walk's cost is the pin's arithmetic and not the store's load. */
+type delayedClient struct {
+    rueidis.Client
+    delay time.Duration
+}
+
+func (instance *delayedClient) wait(ctx context.Context) {
+    select {
+    case <-time.After(instance.delay):
+    case <-ctx.Done():
+    }
+}
+
+func (instance *delayedClient) Do(ctx context.Context, command rueidis.Completed) rueidis.RedisResult {
+    instance.wait(ctx)
+
+    return instance.Client.Do(ctx, command)
+}
+
+func (instance *delayedClient) DoMulti(ctx context.Context, commands ...rueidis.Completed) []rueidis.RedisResult {
+    instance.wait(ctx)
+
+    return instance.Client.DoMulti(ctx, commands...)
+}
+
+func (instance *delayedClient) Nodes() map[string]rueidis.Client {
+    nodes := instance.Client.Nodes()
+
+    delayed := make(map[string]rueidis.Client, len(nodes))
+    for name, node := range nodes {
+        delayed[name] = &delayedClient{Client: node, delay: instance.delay}
+    }
+
+    return delayed
+}
+
+/* newDelayedNamespaceBackend fills 30 keys and walks them one per round trip, so a Clear makes at least 30 SCAN and 30 DEL round trips of the delay each. */
+func newDelayedNamespaceBackend(t *testing.T, delay time.Duration, commandTimeout time.Duration) (*Backend, []string) {
+    t.Helper()
+
+    _, client := liveBackend(t)
+
+    prefix := "melody:test:wide:" + t.Name() + ":"
+
+    filler, fillerErr := NewBackend(context.Background(), client, BackendConfig{Prefix: prefix})
+    if nil != fillerErr {
+        t.Fatalf("NewBackend: %v", fillerErr)
+    }
+
+    keys := make([]string, 0, 30)
+    items := make(map[string][]byte, 30)
+    for index := 0; index < 30; index = index + 1 {
+        key := "key-" + strconv.Itoa(index)
+        keys = append(keys, key)
+        items[key] = []byte("payload")
+    }
+
+    if setErr := filler.SetMultipleCtx(context.Background(), items, bound.Of(time.Minute)); nil != setErr {
+        t.Fatalf("SetMultipleCtx: %v", setErr)
+    }
+
+    t.Cleanup(func() {
+        if clearErr := filler.ClearCtx(context.Background()); nil != clearErr {
+            t.Errorf("cleanup: %v", clearErr)
+        }
+    })
+
+    backend, backendErr := NewBackend(context.Background(), &delayedClient{Client: client, delay: delay}, BackendConfig{
+        Prefix:         prefix,
+        ScanCount:      bound.Of(1),
+        DeleteBatch:    bound.Of(1),
+        CommandTimeout: bound.Of(commandTimeout),
+    })
+    if nil != backendErr {
+        t.Fatalf("NewBackend: %v", backendErr)
+    }
+
+    return backend, keys
+}
+
+func TestClear_BoundsEachRoundTripNotTheWalk(t *testing.T) {
+    /* 60 round trips of 20ms outlast the 500ms budget that each one of them fits in by far */
+    backend, keys := newDelayedNamespaceBackend(t, 20*time.Millisecond, 500*time.Millisecond)
+
+    if clearErr := backend.Clear(); nil != clearErr {
+        t.Fatalf("expected a namespace wider than one command timeout cleared, got %v", clearErr)
+    }
+
+    values, manyErr := backend.ManyCtx(context.Background(), keys)
+    if nil != manyErr {
+        t.Fatalf("ManyCtx: %v", manyErr)
+    }
+
+    if 0 != len(values) {
+        t.Fatalf("expected the namespace emptied, %d survived", len(values))
+    }
+}
+
+func TestClearByPrefix_BoundsEachRoundTripNotTheWalk(t *testing.T) {
+    backend, keys := newDelayedNamespaceBackend(t, 20*time.Millisecond, 500*time.Millisecond)
+
+    if clearErr := backend.ClearByPrefix("key-"); nil != clearErr {
+        t.Fatalf("expected a subtree wider than one command timeout cleared, got %v", clearErr)
+    }
+
+    values, manyErr := backend.ManyCtx(context.Background(), keys)
+    if nil != manyErr {
+        t.Fatalf("ManyCtx: %v", manyErr)
+    }
+
+    if 0 != len(values) {
+        t.Fatalf("expected the subtree emptied, %d survived", len(values))
+    }
+}
+
+func TestClearCtx_TheCallersContextBoundsTheWholeWalk(t *testing.T) {
+    backend, _ := newDelayedNamespaceBackend(t, 20*time.Millisecond, time.Minute)
+
+    ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+    defer cancel()
+
+    if clearErr := backend.ClearCtx(ctx); false == errors.Is(clearErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the caller's deadline to end the walk, got %v", clearErr)
+    }
+}
+
+func TestClearByPrefixCtx_TheCallersContextBoundsTheWholeWalk(t *testing.T) {
+    backend, _ := newDelayedNamespaceBackend(t, 20*time.Millisecond, time.Minute)
+
+    ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+    defer cancel()
+
+    if clearErr := backend.ClearByPrefixCtx(ctx, "key-"); false == errors.Is(clearErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the caller's deadline to end the walk, got %v", clearErr)
+    }
+}
+
+func TestClear_AWedgedRoundTripIsCutByTheCommandTimeout(t *testing.T) {
+    backend, _ := newDelayedNamespaceBackend(t, time.Hour, 50*time.Millisecond)
+
+    finished := make(chan error, 1)
+    go func() {
+        finished <- backend.Clear()
+    }()
+
+    select {
+    case clearErr := <-finished:
+        if false == errors.Is(clearErr, context.DeadlineExceeded) {
+            t.Fatalf("expected the deadline to cut the round trip, got %v", clearErr)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatalf("expected a wedged round trip cut at the command timeout")
     }
 }

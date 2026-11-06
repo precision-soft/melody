@@ -184,7 +184,7 @@ Package: [`cache`](./cache). [`cache.NewBackend(ctx, client, BackendConfig)`](./
 - `ScanCount` — the `COUNT` hint of the `SCAN` walk `Clear` and `ClearByPrefix` run: 1000 when left out, at least 1, unlimited refused.
 - `DeleteBatch` — how many keys one `DEL` carries: 500 when left out, at least 1, unlimited refused.
 - `MaxKeyLength` — the key bound the refusals are measured against, on the key the caller hands in, before the prefix: 1024 when left out, at least 1, unlimited refused.
-- `CommandTimeout` — bounds every operation dispatched without a caller context, a `Clear` of many `DEL` batches included: 1s when left out, at least 1ms, unlimited refused. Unbounded, a request-path read against a store that accepts connections but stops answering would be retried for as long as the context allows and hang the handler. The ctx-first variants run on the caller's context alone.
+- `CommandTimeout` — bounds every operation dispatched without a caller context, each `SCAN` and `DEL` round trip of a `Clear` or a `ClearByPrefix` on its own, so the size of a namespace is not capped by it: 1s when left out, at least 1ms, unlimited refused. Unbounded, a request-path read against a store that accepts connections but stops answering would be retried for as long as the context allows and hang the handler. The ctx-first variants run on the caller's context alone.
 
 ### BackendFromRuntime
 
