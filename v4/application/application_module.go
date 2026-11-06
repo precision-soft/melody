@@ -146,6 +146,8 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
     }
     instance.bootWarnings = append(instance.bootWarnings, securityBuilder.BootWarnings()...)
 
+    instance.declareFirewallDoorRoutes()
+
     /* one loop per hook: each hook runs across every module before the next begins, the granularity the contracts document, so a module may rely on every sibling's listeners before any middleware registers */
     for _, moduleInstance := range instance.modules {
         if eventsModule, ok := moduleInstance.(applicationcontract.EventModule); true == ok {

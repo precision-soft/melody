@@ -242,3 +242,122 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherPriority(t *testing.T) {
         t.Fatalf("expected the higher priority route to answer, got %q", string(body))
     }
 }
+
+func TestDeclareRouteDefinition_IsPublishedAndNeverMatched(t *testing.T) {
+    router := NewRouter()
+    router.DeclareRouteDefinition("/login/check/", httpcontract.RouteOptions{Name: "door.login", Methods: []string{nethttp.MethodPost}, Attributes: ExposedRouteAttributes(RouteZonePublic)})
+
+    definition, exists := router.RouteRegistry().RouteDefinition("door.login")
+    if false == exists || "/login/check" != definition.Pattern() {
+        t.Fatalf("expected the definition published, got %v", definition)
+    }
+
+    url, generateErr := NewUrlGenerator(router.RouteRegistry()).GeneratePath("door.login", nil)
+    if nil != generateErr || "/login/check" != url {
+        t.Fatalf("expected the door's url, got %q and %v", url, generateErr)
+    }
+
+    if 1 != len(BuildRouteManifest(router.RouteDefinitions()).Routes) {
+        t.Fatalf("expected the exposed door in the manifest, got %+v", BuildRouteManifest(router.RouteDefinitions()))
+    }
+
+    matchResult, matched := router.Match(nethttp.MethodPost, "/login/check", "", "http")
+    if true == matched || nil != matchResult.Handler {
+        t.Fatal("expected no handler for a definition-only route")
+    }
+
+    if "door.login" != matchResult.RouteAttributes[RouteAttributeName] || true != matchResult.RouteAttributes[RouteAttributeDefinitionOnly] {
+        t.Fatalf("expected the definition named on its method, got %+v", matchResult.RouteAttributes)
+    }
+
+    if _, declaresMethods := matchResult.RouteAttributes[RouteAttributeMethods]; true == declaresMethods {
+        t.Fatal("expected no allowed methods, which the kernel would answer as a 405")
+    }
+}
+
+func TestDeclareRouteDefinition_AnswersOnlyItsMethodAndItsSegments(t *testing.T) {
+    router := NewRouter()
+    router.DeclareRouteDefinition("/login/check", httpcontract.RouteOptions{Name: "door.login", Methods: []string{nethttp.MethodPost}})
+
+    for _, testCase := range []struct {
+        method string
+        path   string
+    }{
+        {nethttp.MethodGet, "/login/check"},
+        {nethttp.MethodPost, "/login%2Fcheck"},
+        {nethttp.MethodPost, "/login"},
+    } {
+        matchResult, _ := router.Match(testCase.method, testCase.path, "", "http")
+        if _, named := matchResult.RouteAttributes[RouteAttributeDefinitionOnly]; true == named {
+            t.Fatalf("expected %s %s not to name the definition", testCase.method, testCase.path)
+        }
+    }
+
+    matchResult, _ := router.Match(nethttp.MethodPost, "/login/check/", "", "http")
+    if _, named := matchResult.RouteAttributes[RouteAttributeDefinitionOnly]; false == named {
+        t.Fatal("expected the trailing slash to name the definition, as the router reads it")
+    }
+}
+
+func TestDeclareRouteDefinition_RefusesAReservedAttributeAndADuplicateName(t *testing.T) {
+    router := NewRouter()
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatal("expected the reserved attribute refused")
+            }
+        }()
+
+        router.DeclareRouteDefinition("/door", httpcontract.RouteOptions{Name: "door", Attributes: map[string]any{"_private": true}})
+    }()
+
+    router.DeclareRouteDefinition("/door", httpcontract.RouteOptions{Name: "door", Methods: []string{nethttp.MethodPost}})
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatal("expected the duplicate name refused")
+            }
+        }()
+
+        router.Handle(nethttp.MethodGet, "/elsewhere", routeRegistryTestHandler())
+        router.HandleNamed("door", nethttp.MethodGet, "/other", routeRegistryTestHandler())
+    }()
+}
+
+func TestDeclareRouteDefinition_TwoOnOnePathAnswerTheirOwnMethodsAndCarryTheirAttributes(t *testing.T) {
+    router := NewRouter()
+    router.DeclareRouteDefinition("/auth", httpcontract.RouteOptions{Name: "door.in", Methods: []string{nethttp.MethodPost}, Attributes: map[string]any{"tenant": "private"}})
+    router.DeclareRouteDefinition("/auth", httpcontract.RouteOptions{Name: "door.out", Methods: []string{nethttp.MethodDelete}})
+
+    posted, _ := router.Match(nethttp.MethodPost, "/auth", "", "http")
+    if "door.in" != posted.RouteAttributes[RouteAttributeName] || "private" != posted.RouteAttributes["tenant"] {
+        t.Fatalf("expected the first definition with its attributes, got %+v", posted.RouteAttributes)
+    }
+
+    deleted, _ := router.Match(nethttp.MethodDelete, "/auth", "", "http")
+    if "door.out" != deleted.RouteAttributes[RouteAttributeName] {
+        t.Fatalf("expected the second definition, got %+v", deleted.RouteAttributes)
+    }
+}
+
+func TestRoutesClaimingPath_AnswersEveryRouteThatMatchesWhateverItsMethodHostOrScheme(t *testing.T) {
+    router := NewRouter()
+    router.DeclareRouteDefinition("/login/check", httpcontract.RouteOptions{Name: "door.login", Methods: []string{nethttp.MethodPost}})
+    router.HandleNamed("literal", nethttp.MethodGet, "/login/check/", routeRegistryTestHandler())
+    router.HandleNamed("parameter", nethttp.MethodPut, "/login/:step", routeRegistryTestHandler())
+    router.HandleWithOptions("/*rest...", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "catchAll", Host: "other.example", Methods: []string{nethttp.MethodGet}})
+    router.HandleNamed("elsewhere", nethttp.MethodGet, "/login", routeRegistryTestHandler())
+    router.HandleWithOptions("/login/:digits", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "constrained", Requirements: map[string]string{"digits": "[0-9]+"}})
+    router.HandleWithOptions("/:_locale/check", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "localized", Locales: []string{"en"}})
+
+    names := map[string]bool{}
+    for _, definition := range router.RoutesClaimingPath("/login/check") {
+        names[definition.Name()] = true
+    }
+
+    if 3 != len(names) || false == names["literal"] || false == names["parameter"] || false == names["catchAll"] {
+        t.Fatalf("expected the literal, the parameter and the catch-all, got %v", names)
+    }
+}

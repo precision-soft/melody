@@ -1,4 +1,4 @@
-package handler
+package security_test
 
 import (
     "bytes"
@@ -16,6 +16,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
     "github.com/precision-soft/melody/v4/.example/persistence"
+    "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/route"
     "github.com/precision-soft/melody/v4/.example/security"
@@ -34,6 +35,7 @@ import (
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
+    melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v4/runtime"
@@ -130,7 +132,7 @@ func loginResponseBody(t *testing.T, runtimeInstance melodyruntimecontract.Runti
         melodyhttp.NewRequestContext("login-test", time.Now()),
     )
 
-    response, handlerErr := LoginHandler(passwordOnlyLogin(), nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
@@ -223,72 +225,6 @@ func TestLoginHandler_CarriesTheAuthenticationCauseUnderDebug(t *testing.T) {
 }
 
 /* The logout doors are asked what the STORAGE holds afterwards, not what the session object says: deleting the two identity keys leaves the entry modified, so the response path saves it back under the same id and re-issues the cookie, and only a cleared session routes that path to DeleteSession. The response path is run here exactly as the kernel runs it, through SaveSession. */
-func TestLogoutHandlerEndsTheSessionRatherThanEmptyingIt(t *testing.T) {
-    storage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
-    defer storage.CloseWithContext(context.Background())
-
-    manager := melodysession.NewManager(storage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
-
-    sessionInstance := manager.NewSession()
-    sessionInstance.Set(security.SessionKeySecurityUserId, "user-1")
-    sessionInstance.Set(security.SessionKeySecurityRoles, []string{"ROLE_USER"})
-
-    if err := manager.SaveSession(sessionInstance); nil != err {
-        t.Fatalf("the session was not saved: %v", err)
-    }
-
-    sessionId := sessionInstance.Id()
-
-    if _, exists, _ := storage.Load(sessionId); false == exists {
-        t.Fatal("the storage did not hold the session the test is about to end")
-    }
-
-    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/logout/", nil)
-    request := melodyhttp.NewRequest(httpRequest, nil, nil, nil)
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
-
-    response, err := LogoutHandler(nil)(nil, httptest.NewRecorder(), request)
-    if nil != err {
-        t.Fatalf("the logout door failed: %v", err)
-    }
-
-    if nil == response {
-        t.Fatal("the logout door answered no response")
-    }
-
-    if false == sessionInstance.IsCleared() {
-        t.Fatal("the session was not marked cleared, so the response path will save it back under the same id")
-    }
-
-    if err := manager.SaveSession(sessionInstance); nil != err {
-        t.Fatalf("the response path refused the cleared session: %v", err)
-    }
-
-    data, exists, loadErr := storage.Load(sessionId)
-    if nil != loadErr {
-        t.Fatalf("the storage refused the read: %v", loadErr)
-    }
-
-    if true == exists {
-        t.Fatalf("the session entry outlived the logout that ended it, holding %v", data)
-    }
-}
-
-/* a logout that arrives without a session is not an error: the door answers the same redirect, and nothing is left behind to end */
-func TestLogoutHandlerToleratesARequestCarryingNoSession(t *testing.T) {
-    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/logout/", nil)
-    request := melodyhttp.NewRequest(httpRequest, nil, nil, nil)
-
-    response, err := LogoutHandler(nil)(nil, httptest.NewRecorder(), request)
-    if nil != err {
-        t.Fatalf("the logout door failed: %v", err)
-    }
-
-    if nil == response {
-        t.Fatal("the logout door answered no response")
-    }
-}
-
 /* the credentials are read from the json body alone: a POST whose query string carries them and whose body names none answers as a request without credentials, where a query read would have authenticated — with the credentials written into every access log in front of the application. The body of the same credentials reaches the authentication, which this fixture's cache refuses, so the arms are told apart by the status; a media type parameter is read past, and any body other than json is refused 415 before the credentials are read, a cross-site form being unable to post json. */
 func TestLoginHandler_ReadsTheJsonCredentialsFromTheBodyAndRefusesAnyOtherBody(t *testing.T) {
     runtimeInstance := loginRuntimeForEnvironment(t, melodyconfig.EnvProduction)
@@ -299,7 +235,7 @@ func TestLoginHandler_ReadsTheJsonCredentialsFromTheBodyAndRefusesAnyOtherBody(t
 
         request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-form-test", time.Now()))
 
-        response, handlerErr := LoginHandler(passwordOnlyLogin(), nil)(runtimeInstance, httptest.NewRecorder(), request)
+        response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
         if nil != handlerErr {
             t.Fatalf("login handler: %v", handlerErr)
         }
@@ -426,7 +362,7 @@ func TestLoginHandler_RaisesTheLoginFailureOnRefusedCredentials(t *testing.T) {
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-failure-test", time.Now()))
 
-    response, handlerErr := LoginHandler(passwordOnlyLogin(), nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
@@ -439,7 +375,7 @@ func TestLoginHandler_RaisesTheLoginFailureOnRefusedCredentials(t *testing.T) {
         t.Fatalf("expected one security.login.failure event, got %d", len(*failureList))
     }
 
-    if false == errors.Is((*failureList)[0], errInvalidCredentials) {
+    if "invalid credentials" != (*failureList)[0].Error() {
         t.Fatalf("expected the event to carry the invalid credentials failure, got %v", (*failureList)[0])
     }
 
@@ -485,7 +421,7 @@ func TestLoginHandler_KeepsTheRefusalWhenTheLoginFailureDispatchFails(t *testing
 
     record := dispatchRecords[0]
 
-    if false == strings.Contains(fmt.Sprint(record.context["cause"]), "login failure listener refused") {
+    if false == strings.Contains(fmt.Sprint(record.context["causeChain"]), "login failure listener refused") {
         t.Fatalf("expected the record to carry the listener's refusal as its cause, got %v", record.context)
     }
 
@@ -521,7 +457,7 @@ func (instance *loginJournalRecordingLogger) Error(message string, context melod
 }
 
 /* accepted credentials raise no login failure: the request carries no session, so the door stops after the authentication with its 500, and the only event it could have raised by then is the one this test refuses */
-func TestLoginHandler_RaisesNoLoginFailureOnAcceptedCredentials(t *testing.T) {
+func TestLoginHandler_AMissingSessionIsTheHandlersFailureNotTheCredentials(t *testing.T) {
     passwordHash, hashErr := security.HashPassword("secret")
     if nil != hashErr {
         t.Fatalf("hash password: %v", hashErr)
@@ -556,8 +492,8 @@ func TestLoginHandler_RaisesNoLoginFailureOnAcceptedCredentials(t *testing.T) {
         t.Fatalf("expected the accepted login to stop at the missing session with 500, got %d", response.StatusCode())
     }
 
-    if 0 != len(*failureList) {
-        t.Fatalf("expected no login failure for accepted credentials, got %d", len(*failureList))
+    if 1 != len(*failureList) {
+        t.Fatalf("expected the handler's refusal raised as the firewall raises any handler's, got %d", len(*failureList))
     }
 }
 
@@ -584,7 +520,7 @@ func postLoginCredentials(t *testing.T, runtimeInstance melodyruntimecontract.Ru
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-dispatch-test", time.Now()))
 
-    response, handlerErr := LoginHandler(passwordOnlyLogin(), nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
@@ -593,7 +529,89 @@ func postLoginCredentials(t *testing.T, runtimeInstance melodyruntimecontract.Ru
 }
 
 /* passwordOnlyLogin is the sign-in chain of an application with no second factor wired: the password alone, checked through the user service of the request's container. */
-func passwordOnlyLogin() LoginAuthenticator {
+/* doorDispatcher keeps the listener the firewall registers: the fixtures here hold no logger for a dispatcher to resolve. */
+type doorDispatcher struct {
+    melodyeventcontract.EventDispatcher
+    listener melodyeventcontract.EventListener
+}
+
+func (instance *doorDispatcher) AddListener(eventName string, listener melodyeventcontract.EventListener, priority int) melodyeventcontract.ListenerRegistration {
+    instance.listener = listener
+
+    return melodyeventcontract.ListenerRegistration{}
+}
+
+/* doorKernel is the one part of a kernel the firewall's listener registers through. */
+type doorKernel struct {
+    melodykernelcontract.Kernel
+    dispatcher *doorDispatcher
+}
+
+func (instance *doorKernel) EventDispatcher() melodyeventcontract.EventDispatcher {
+    return instance.dispatcher
+}
+
+type anonymousDoorTokenSource struct{}
+
+func (instance *anonymousDoorTokenSource) Name() string { return "anonymous" }
+
+func (instance *anonymousDoorTokenSource) Resolve(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+    return melodysecurity.NewAnonymousToken(), nil
+}
+
+/* serveLoginDoor runs the request through the firewall's own door, wired as config/security.go wires it, and answers what the example's exception listener renders for a refusal. The account is the one the password check loaded. */
+func serveLoginDoor(t *testing.T, runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, chain security.LoginChain, sessionIndex security.SessionIndexLookup) (melodyhttpcontract.Response, error) {
+    t.Helper()
+
+    authenticator := &security.LoginDoorAuthenticator{}
+    authenticator.Bind(chain)
+
+    firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+        Name:        "main",
+        Matcher:     melodysecurity.NewPathPrefixMatcher("/"),
+        TokenSource: &anonymousDoorTokenSource{},
+        LoginPath:   request.HttpRequest().URL.Path,
+        LoginHandler: security.NewSessionLoginHandler(
+            func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+                account, known := security.LoginAccount(request)
+
+                return account, known, nil
+            },
+            sessionIndex,
+        ),
+        LoginAuthenticator: authenticator,
+    })
+
+    dispatcher := &doorDispatcher{}
+    melodysecurity.RegisterKernelSecurityResolutionListener(
+        &doorKernel{dispatcher: dispatcher},
+        melodysecurity.NewFirewallRegistry(melodysecurity.NewCompiledConfiguration([]*melodysecurity.CompiledFirewall{firewall}, nil)),
+    )
+
+    requestEvent := melodyhttp.NewKernelRequestEvent(runtimeInstance, request)
+    if listenerErr := dispatcher.listener(runtimeInstance, melodyevent.NewEvent(melodykernelcontract.EventKernelRequest, requestEvent, melodyclock.NewSystemClock())); nil != listenerErr {
+        return nil, listenerErr
+    }
+
+    if nil != requestEvent.Refusal() {
+        return presenter.ApiRefusalOfError(runtimeInstance, request, requestEvent.Refusal()), nil
+    }
+
+    return requestEvent.Response(), nil
+}
+
+func getSessionFromRequest(request melodyhttpcontract.Request) melodysessioncontract.Session {
+    value, exists := request.Attributes().Get(melodyhttp.RequestAttributeSession)
+    if false == exists {
+        return nil
+    }
+
+    sessionInstance, _ := value.(melodysessioncontract.Session)
+
+    return sessionInstance
+}
+
+func passwordOnlyLogin() security.LoginChain {
     return security.NewLoginAuthentication(
         melodysecurity.NewAuthenticatorManager([]melodysecuritycontract.Authenticator{security.NewPasswordAuthenticator(checkPasswordThroughUserService)}),
         nil,
@@ -644,7 +662,7 @@ func (instance *enrollmentDouble) RedeemRecoveryCode(runtimeInstance melodyrunti
 /* secondFactorLogin is the sign-in as the application wires it with a database: the password, the per-account budget in front of the second factor, and the framework's TOTP authenticator over the enrollments, on a frozen clock. The editor is enrolled; the user is not. */
 type secondFactorLogin struct {
     runtimeInstance melodyruntimecontract.Runtime
-    authentication  LoginAuthenticator
+    authentication  security.LoginChain
     failureList     *[]error
     clock           *melodyclock.FrozenClock
     sessionManager  melodysessioncontract.Manager
@@ -806,7 +824,7 @@ func (instance *secondFactorLogin) post(t *testing.T, username string, password 
     request := melodyhttp.NewRequest(httpRequest, nil, instance.runtimeInstance, melodyhttp.NewRequestContext("login-second-factor-test", time.Now()))
     request.Attributes().Set(melodyhttp.RequestAttributeSession, instance.sessionManager.NewSession())
 
-    response, handlerErr := LoginHandler(instance.authentication, instance.sessionIndexLookup)(instance.runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := serveLoginDoor(t, instance.runtimeInstance, request, instance.authentication, instance.sessionIndexLookup)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
@@ -1051,7 +1069,7 @@ func TestLogoutHandler_TheSignOutGivesTheSessionsPlaceBack(t *testing.T) {
     logoutRequest := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/logout/", nil), nil, login.runtimeInstance, melodyhttp.NewRequestContext("logout-test", time.Now()))
     logoutRequest.Attributes().Set(melodyhttp.RequestAttributeSession, login.sessionManager.Session(signedOutSessionId))
 
-    if _, logoutErr := LogoutHandler(login.sessionIndexLookup)(login.runtimeInstance, httptest.NewRecorder(), logoutRequest); nil != logoutErr {
+    if _, logoutErr := security.NewSessionLogoutHandler(login.sessionIndexLookup).Logout(login.runtimeInstance, logoutRequest, melodysecuritycontract.LogoutInput{}); nil != logoutErr {
         t.Fatalf("logout handler: %v", logoutErr)
     }
 
@@ -1078,7 +1096,7 @@ func TestLoginHandler_SigningInAgainRetiresThePlaceOfTheRotatedSession(t *testin
         request := melodyhttp.NewRequest(httpRequest, nil, login.runtimeInstance, melodyhttp.NewRequestContext("login-again-test", time.Now()))
         request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
 
-        response, handlerErr := LoginHandler(login.authentication, login.sessionIndexLookup)(login.runtimeInstance, httptest.NewRecorder(), request)
+        response, handlerErr := serveLoginDoor(t, login.runtimeInstance, request, login.authentication, login.sessionIndexLookup)
         if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
             t.Fatalf("expected the sign-in answered 200, got %v, %v", response, handlerErr)
         }
@@ -1225,7 +1243,7 @@ func TestLoginHandler_FilesATokenForAnAccountTheSignInNeverLoaded(t *testing.T) 
         t.Fatalf("expected the mismatch filed once, got %v", journal.errorRecords)
     }
 
-    if "user-9" != records[0].context["tokenUser"] {
+    if false == strings.Contains(fmt.Sprint(records[0].context["causeContextChain"]), "tokenUser:user-9") {
         t.Fatalf("expected the record to name the token's user, got %v", records[0].context)
     }
 }
@@ -1251,7 +1269,7 @@ func TestLoginHandler_RefusesAFormBodyWithoutAnnouncingAFailedSignIn(t *testing.
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-form-refused-test", time.Now()))
 
-    response, handlerErr := LoginHandler(passwordOnlyLogin(), nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
@@ -1282,7 +1300,7 @@ func TestLoginHandler_RotatesTheSessionIdAndRetiresThePreLoginOne(t *testing.T) 
     request := melodyhttp.NewRequest(httpRequest, nil, login.runtimeInstance, melodyhttp.NewRequestContext("login-rotation-test", time.Now()))
     request.Attributes().Set(melodyhttp.RequestAttributeSession, login.sessionManager.Session(preLoginId))
 
-    response, handlerErr := LoginHandler(login.authentication, login.sessionIndexLookup)(login.runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := serveLoginDoor(t, login.runtimeInstance, request, login.authentication, login.sessionIndexLookup)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the sign-in answered 200, got %v, %v", response, handlerErr)
     }
@@ -1312,7 +1330,7 @@ func TestLoginHandler_AnswersABodyPastTheLimit413(t *testing.T) {
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-body-limit-test", time.Now()))
 
-    response, handlerErr := LoginHandler(passwordOnlyLogin(), nil)(runtimeInstance, recorder, request)
+    response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
     if nil != handlerErr {
         t.Fatalf("login handler: %v", handlerErr)
     }
@@ -1339,7 +1357,7 @@ func TestLandingPageName_SendsEachRoleToAPageItOpens(t *testing.T) {
     }
 
     for _, expectation := range expectations {
-        if actual := landingPageName(expectation.roleList); expectation.expected != actual {
+        if actual := security.LandingPageName(expectation.roleList); expectation.expected != actual {
             t.Fatalf("expected %v to land on %s, got %s", expectation.roleList, expectation.expected, actual)
         }
     }

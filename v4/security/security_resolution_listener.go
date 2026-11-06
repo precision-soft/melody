@@ -109,6 +109,8 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
 
             setSecurityContextOnRuntime(runtimeInstance, firewall, token)
 
+            serveFirewallDoor(runtimeInstance, requestEvent, firewall, token)
+
             return nil
         },
         KernelFirewallListenerPriority,

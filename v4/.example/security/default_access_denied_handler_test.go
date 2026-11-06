@@ -34,7 +34,7 @@ func TestDefaultAccessDeniedHandlerAnswersABrowserWithAnHtmlForbidden(t *testing
     }
 
     /* a signed-in account refused a page is offered the way out, each exit under its own label: Back, Home to the landing page and Log out, rather than left on a bare refusal */
-    for _, expected := range []string{`href="javascript:history.back()">Back<`, `href="/catalogue/">Home<`, `href="/logout/">Log out<`} {
+    for _, expected := range []string{`href="javascript:history.back()">Back<`, `href="/catalogue/">Home<`, `action="/logout/" class="d-inline"><button class="btn btn-primary" type="submit">Log out<`} {
         if false == strings.Contains(string(body), expected) {
             t.Fatalf("expected the refusal page to offer %s, got %q", expected, string(body))
         }

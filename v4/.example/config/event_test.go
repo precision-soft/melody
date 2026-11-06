@@ -19,6 +19,7 @@ import (
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
 /* the budget is per client, as its own comment and the shipped .env promise; read from the peer address it would be per proxy, so one script could spend the hour of everyone behind the balancer, and this listener runs ahead of authentication, so what it spends is everyone's ability to log in. */
@@ -286,6 +287,20 @@ func TestRegisterApiExceptionListener_AnswersTheApiPathsAndLeavesTheOthersToTheB
 
     if declined := dispatchRefusal("/products", melodyexception.NotFound("no such page")); nil != declined.Response() {
         t.Fatalf("expected an html route left to the built-in, got %#v", declined.Response())
+    }
+
+    challenge := dispatchRefusal("/login/check", melodyexception.NewHttpError(nethttp.StatusUnauthorized, melodyexception.HttpErrorConfig{Message: "second factor required", Cause: melodysecurity.ErrSecondFactorRequired}))
+    if nil == challenge.Response() || nethttp.StatusUnauthorized != challenge.Response().StatusCode() {
+        t.Fatalf("expected the sign-in door answered in the envelope, got %#v", challenge.Response())
+    }
+
+    challengeBody, challengeReadErr := io.ReadAll(challenge.Response().BodyReader())
+    if nil != challengeReadErr || false == strings.Contains(string(challengeBody), `"factor":"totp"`) {
+        t.Fatalf("expected the challenge to name the factor, got %s and %v", challengeBody, challengeReadErr)
+    }
+
+    if declined := dispatchRefusal("/login%2Fcheck", melodyexception.NotFound("no such page")); nil != declined.Response() {
+        t.Fatalf("expected an encoded separator not to alias the door, got %#v", declined.Response())
     }
 }
 

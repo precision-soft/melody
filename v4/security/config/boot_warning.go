@@ -14,6 +14,7 @@ type BootWarning = internal.BootWarning
 const (
     bootWarningShadowedFirewall   = "security.firewallShadowed"
     bootWarningPercentEncodedPath = "security.pathPercentEncoded"
+    bootWarningDoorReachUnknown   = "security.firewallDoorReachUnknown"
 )
 
 /* compileBootWarnings collects the hazards of a compiled declaration, in declaration order: the firewalls an earlier one shadows, and the declared paths that carry a percent escape */
@@ -26,6 +27,7 @@ func compileBootWarnings(compiled *security.CompiledConfiguration) []BootWarning
 
     warnings = append(warnings, shadowedFirewallWarnings(compiled.Firewalls())...)
     warnings = append(warnings, percentEncodedPathWarnings(compiled)...)
+    warnings = append(warnings, firewallDoorReachWarnings(compiled.Firewalls())...)
 
     return warnings
 }

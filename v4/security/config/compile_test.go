@@ -166,8 +166,8 @@ func TestCompile_RefusesAPartialLoginConfiguration(t *testing.T) {
     var typedNilLoginHandler *noopLoginHandler
 
     for expected, config := range map[string]FirewallConfig{
-        "security firewall logout path may not be empty": {LoginPath: "/login"},
-        "security firewall login path may not be empty":  {LoginHandler: typedNilLoginHandler},
+        "a security firewall door declares a handler": {Login: LoginConfig{Path: "/login"}},
+        "a security firewall door declares a path":    {Login: LoginConfig{Handler: typedNilLoginHandler}},
     } {
         _, err := Compile(Configuration{
             firewalls: []firewallDeclaration{

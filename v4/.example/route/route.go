@@ -4,8 +4,9 @@ const (
     LoginPageName    = "example.login.page"
     LoginPagePattern = "/login/"
 
-    LoginSubmitName    = "example.login.submit"
-    LoginSubmitPattern = "/login/"
+    /* the firewall serves the two doors on kernel.request: a door's name resolves through the manifest, and no route may claim its path (see config/security.go) */
+    LoginDoorName    = "example.login.check"
+    LoginDoorPattern = "/login/check/"
 
     LogoutName    = "example.logout"
     LogoutPattern = "/logout/"

@@ -465,6 +465,11 @@ func RedirectExternalResponse(location string, statusCode int) *Response {
 }
 
 /* isExternalRedirectLocation reads the location as a browser will: a scheme or a leading "//" leaves the origin, and so does a backslash, which several browsers fold to "/". It reads the location with the spaces and tabs net/textproto trims when it writes the field. */
+/* IsExternalRedirectLocation reports a location RedirectResponse refuses, for a declaration to refuse it at boot rather than the response panicking at request time. */
+func IsExternalRedirectLocation(location string) bool {
+    return isExternalRedirectLocation(location)
+}
+
 func isExternalRedirectLocation(location string) bool {
     emittedLocation := textproto.TrimString(location)
 

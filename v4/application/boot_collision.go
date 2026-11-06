@@ -18,6 +18,7 @@ const (
     bootCollisionKindParameter         = "parameter"
     bootCollisionKindConfiguration     = "configuration"
     bootCollisionKindCliCommand        = "cliCommand"
+    bootCollisionKindFirewallDoorRoute = "firewallDoorRoute"
 )
 
 /* bootCollision is one duplicate registration recorded during the boot window, so every collision surfaces in one report. The origin carries the registration call site, or for a collision found inside a boot phase the nearest frame outside the framework, since the stack does not show it when the report panics. */

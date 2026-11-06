@@ -36,9 +36,9 @@
                 <span class="badge rounded-pill bg-danger position-absolute top-0 start-100 translate-middle d-none"
                       id="catalogNotificationCount">0</span>
             </button>
-            <a class="btn btn-outline-secondary btn-sm" data-route="example.logout" href="#">
-                <i class="fa-solid fa-right-from-bracket me-1"></i>Logout
-            </a>
+            <form class="d-inline" method="post" action="/logout/" data-route="example.logout">
+                <button class="btn btn-outline-secondary btn-sm" type="submit"><i class="fa-solid fa-right-from-bracket me-1"></i>Logout</button>
+            </form>
         </div>
     </div>
 

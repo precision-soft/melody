@@ -120,6 +120,14 @@ func (instance *Application) registerKernelHttpListeners() {
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
 }
 
+/* installHttpMiddlewares builds the pipeline. A middleware factory runs here with the writable router, so the walk Boot made is made again over what it registered. */
+func (instance *Application) installHttpMiddlewares(httpKernel httpcontract.Kernel) {
+    httpKernel.Use(instance.httpMiddlewares.all(instance.kernel))
+
+    instance.recordFirewallDoorRouteCollisions()
+    instance.panicOnBootCollisions()
+}
+
 func (instance *Application) runHttp(
     ctx context.Context,
 ) error {
@@ -135,7 +143,7 @@ func (instance *Application) runHttp(
     }
 
     httpKernel := instance.kernel.HttpKernel()
-    httpKernel.Use(instance.httpMiddlewares.all(instance.kernel))
+    instance.installHttpMiddlewares(httpKernel)
 
     httpHandler := instance.decorateHttpHandler(httpKernel.ServeHttp(instance.kernel.ServiceContainer()))
 

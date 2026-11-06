@@ -78,7 +78,12 @@ func runThreeHostsCheck(loadBalancerUrl string, mysqlDsn string, redisAddress st
             fail("three hosts: %s answered %d on /routes/ — the vhost reaches no application", host.hostName, readiness)
         }
 
-        signInExampleHttpEditor(client, loadBalancerUrl, host.hostName)
+        major, exists := exampleMajorByNumber(host.major)
+        if false == exists {
+            fail("three hosts: %s names major %d, which the harness does not know", host.hostName, host.major)
+        }
+
+        signInExampleHttpMajorEditor(client, major, loadBalancerUrl, host.hostName)
 
         productId := createThreeHostProbe(client, loadBalancerUrl, host.hostName, host.label)
 

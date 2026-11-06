@@ -210,7 +210,16 @@ func signInExampleHttpAdmin(client *http.Client, baseUrl string) {
 }
 
 func signInExampleHttp(client *http.Client, baseUrl string, hostHeader string, username string, password string) {
-    request, requestErr := http.NewRequest("POST", strings.TrimRight(baseUrl, "/")+"/login/", strings.NewReader(exampleCredentialBody(username, password)))
+    signInExampleHttpOn(client, baseUrl, exampleLoginRoute, hostHeader, username, password)
+}
+
+/* signInExampleHttpMajorEditor signs the seeded editor in where this major's sign-in posts. */
+func signInExampleHttpMajorEditor(client *http.Client, major exampleMajor, baseUrl string, hostHeader string) {
+    signInExampleHttpOn(client, baseUrl, exampleSignInRoute(major), hostHeader, exampleHttpEditorUsername, exampleHttpEditorPassword)
+}
+
+func signInExampleHttpOn(client *http.Client, baseUrl string, route string, hostHeader string, username string, password string) {
+    request, requestErr := http.NewRequest("POST", strings.TrimRight(baseUrl, "/")+route, strings.NewReader(exampleCredentialBody(username, password)))
     if nil != requestErr {
         fail("example http: build the sign-in request: %v", requestErr)
     }

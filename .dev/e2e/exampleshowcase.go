@@ -226,7 +226,7 @@ func assertExampleGzipCompression(major exampleMajor) {
     }
 
     if false == major.showcaseProbes.apiKey {
-        signIn := client.call("POST", exampleLoginRoute, "application/json", "application/json", exampleCredentialBody(exampleEditorUsername, exampleEditorPassword))
+        signIn := client.call("POST", exampleSignInRoute(major), "application/json", "application/json", exampleCredentialBody(exampleEditorUsername, exampleEditorPassword))
         if http.StatusOK != signIn.statusCode {
             fail("[%s] the seeded editor could not sign in (%d) to read the listing compressed: %s", major.label, signIn.statusCode, exampleTruncate(signIn.body))
         }
@@ -412,7 +412,7 @@ func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *examp
     pass("[%s] a product id the cache-key grammar refuses is turned away 400 before the row lands", major.label)
 
     admin := newExampleClient(major)
-    adminSignIn := admin.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("admin", "admin"))
+    adminSignIn := admin.call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody("admin", "admin"))
     if http.StatusOK != adminSignIn.statusCode {
         fail("[%s] the seeded admin could not sign in (%d): %s", major.label, adminSignIn.statusCode, exampleTruncate(adminSignIn.body))
     }
@@ -436,13 +436,13 @@ func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *examp
     }{}
     decodeExampleData(major.label, "/users/api/create/", created.body, &createdUser)
 
-    stripped := newExampleClient(major).call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("cafe-probe", "probe-pass"))
+    stripped := newExampleClient(major).call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody("cafe-probe", "probe-pass"))
     if http.StatusUnauthorized != stripped.statusCode {
         fail("[%s] the accent-stripped spelling signed in (%d) — the lookup is riding the column collation again", major.label, stripped.statusCode)
     }
 
     properClient := newExampleClient(major)
-    proper := properClient.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("café-probe", "probe-pass"))
+    proper := properClient.call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody("café-probe", "probe-pass"))
     if http.StatusOK != proper.statusCode {
         fail("[%s] the proper accented spelling could not sign in (%d): %s", major.label, proper.statusCode, exampleTruncate(proper.body))
     }
@@ -471,12 +471,12 @@ func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *examp
         fail("[%s] renaming the probe user answered %d: %s", major.label, renamed.statusCode, exampleTruncate(renamed.body))
     }
 
-    oldSpelling := newExampleClient(major).call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("café-probe", "probe-pass"))
+    oldSpelling := newExampleClient(major).call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody("café-probe", "probe-pass"))
     if http.StatusUnauthorized != oldSpelling.statusCode {
         fail("[%s] the pre-rename spelling still signs in (%d) — the ttl-less cache entry survived the rename", major.label, oldSpelling.statusCode)
     }
 
-    newSpelling := newExampleClient(major).call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("cafe-probe-renamed", "probe-pass"))
+    newSpelling := newExampleClient(major).call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody("cafe-probe-renamed", "probe-pass"))
     if http.StatusOK != newSpelling.statusCode {
         fail("[%s] the renamed spelling could not sign in (%d): %s", major.label, newSpelling.statusCode, exampleTruncate(newSpelling.body))
     }

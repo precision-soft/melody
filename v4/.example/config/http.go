@@ -29,6 +29,7 @@ import (
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyopenapi "github.com/precision-soft/melody/v4/openapi"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     bun "github.com/uptrace/bun"
 )
 
@@ -79,18 +80,8 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     /* the logger the second-factor budget records a failure the request does not carry in, a failed release of the budget; a container without one leaves the limiter on the emergency logger */
     secondFactorBudgetLogger, _ := melodylogging.LoggerFromResolver(kernelInstance.Context(), kernelInstance.ServiceContainer())
 
-    /* login-submit and logout are exposed to the route manifest (window.melodyRoutes) because the frontend resolves their URLs by name — the login form posts to route("example.login.submit") and the nav logs out via route("example.logout"); an unexposed route would make the client throw "unknown route". */
-    /* the sign-in submit spends the same per-address budget as the nomenclature's writes: a password guessed in a loop is refused with 429 once the budget runs out, whichever replica each guess reaches */
-    router.HandleWithOptions(
-        route.LoginSubmitPattern,
-        instance.throttledWrite(handler.LoginHandler(instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard, secondFactorBudgetLogger), sessionIndexLookup)),
-        melodyhttp.RouteOptions{Name: route.LoginSubmitName, Methods: []string{"POST"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
-    )
-    router.HandleWithOptions(
-        route.LogoutPattern,
-        handler.LogoutHandler(sessionIndexLookup),
-        melodyhttp.RouteOptions{Name: route.LogoutName, Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
-    )
+    /* the sign-in door is declared in RegisterSecurity, before the kernel-built parts of its chain exist, so they are handed over here */
+    instance.loginDoorAuthenticator.Bind(instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard, secondFactorBudgetLogger))
 
     router.HandleWithOptions(route.RoutesPattern, handler.RoutesHandler(), frontendRoute(route.RoutesName, "GET"))
     router.HandleWithOptions(route.CataloguePagePattern, handler.CataloguePageHandler(), frontendRoute(route.CataloguePageName, "GET"))
@@ -189,6 +180,8 @@ func (instance *Module) buildCatalogWriteThrottle() {
         KeyPrefix: redisRateLimitKeyPrefix,
     })
 
+    instance.loginDoorLimiter.bind(limiter)
+
     instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(limiter, melodyhttpmiddleware.RateLimitConfig{
         ClientIpResolver: instance.trustedProxyResolver.Resolve,
     })
@@ -203,12 +196,14 @@ func (instance *Module) buildInProcessCatalogWriteThrottle(clockInstance melodyc
         Clock:   clockInstance,
     })
 
+    instance.loginDoorLimiter.bind(limiter)
+
     instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(limiter, melodyhttpmiddleware.RateLimitConfig{
         ClientIpResolver: instance.trustedProxyResolver.Resolve,
     })
 }
 
-/* throttledWrite puts an endpoint that changes the nomenclature, signs a caller in, or spends a backend this process does not own (the message bus, the outbox, the object store, the event hub), behind the per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage. The budget counts in redis when the example has one and in this process otherwise; a route registered before the budget is built is returned untouched. */
+/* throttledWrite puts an endpoint that changes the nomenclature, or spends a backend this process does not own (the message bus, the outbox, the object store, the event hub), behind the per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage. The budget counts in redis when the example has one and in this process otherwise; a route registered before the budget is built is returned untouched. */
 func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
     if nil == instance.catalogWriteThrottle {
         return next
@@ -216,3 +211,30 @@ func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyht
 
     return instance.catalogWriteThrottle(next)
 }
+
+/* lateBoundRateLimiter is the write budget as the sign-in door holds it: the door is declared before the budget is built, and it charges the same counter as the routes behind throttledWrite. */
+type lateBoundRateLimiter struct {
+    limiter melodyhttpcontract.RateLimiter
+}
+
+func (instance *lateBoundRateLimiter) bind(limiter melodyhttpcontract.RateLimiter) {
+    instance.limiter = limiter
+}
+
+func (instance *lateBoundRateLimiter) Allow(key string) bool {
+    return instance.limiter.Allow(key)
+}
+
+func (instance *lateBoundRateLimiter) Reset(key string) {
+    instance.limiter.Reset(key)
+}
+
+func (instance *lateBoundRateLimiter) AllowWithRuntime(runtimeInstance melodyruntimecontract.Runtime, key string) (bool, error) {
+    if runtimeLimiter, isRuntimeLimiter := instance.limiter.(melodyhttpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
+        return runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
+    }
+
+    return instance.limiter.Allow(key), nil
+}
+
+var _ melodyhttpcontract.RuntimeRateLimiter = (*lateBoundRateLimiter)(nil)

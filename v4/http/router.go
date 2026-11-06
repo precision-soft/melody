@@ -108,6 +108,84 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         )
     }
 
+    routeValue := buildRouteValue(pattern, handler, options)
+
+    routeStored := instance.routeRegistry.registerRoute(routeValue)
+
+    /* a route the registry declined is not put in the matching tree, whose entries must name their own stored route */
+    if false == routeStored {
+        return
+    }
+
+    routeIndex := len(instance.routeRegistry.routesInternal()) - 1
+
+    if nil == instance.routeTreeRoot {
+        instance.routeTreeRoot = &routeTreeNode{segment: ""}
+    }
+
+    patternSegments := routeValue.parts
+    if 1 <= len(patternSegments) {
+        patternSegments = patternSegments[1:]
+    }
+
+    instance.registerRouteInTree(instance.routeTreeRoot, patternSegments, routeIndex)
+}
+
+/* DeclareRouteDefinition publishes a named definition no handler answers, for a door a kernel.request listener serves: the url generator, the route manifest and the introspection read it, the matching tree never holds it, and Match names it on its own path and methods so the request carries the route name and leaves no no-route record. */
+func (instance *Router) DeclareRouteDefinition(pattern string, options httpcontract.RouteOptions) {
+    instance.refuseRegistrationWhileServing(pattern)
+
+    routeValue := buildRouteValue(pattern, nil, options)
+
+    if false == instance.routeRegistry.registerRoute(routeValue) {
+        return
+    }
+
+    instance.routeRegistry.registerDefinitionOnly(routeValue)
+}
+
+/* RoutesClaimingPath answers the routes a request on this path could reach, literal, parametrized or catch-all, whatever its method, host or scheme; a definition no handler answers is not one of them. */
+func (instance *Router) RoutesClaimingPath(path string) []httpcontract.RouteDefinition {
+    pathParts := splitRequestPath(path)
+
+    pathSegments := pathParts
+    if 1 <= len(pathSegments) {
+        pathSegments = pathSegments[1:]
+    }
+
+    definitions := make([]httpcontract.RouteDefinition, 0)
+
+    for _, index := range instance.findRouteCandidates(pathSegments) {
+        routes := instance.routeRegistry.routesInternal()
+        if 0 > index || len(routes) <= index {
+            continue
+        }
+
+        routeValue := routes[index]
+
+        params, matched := matchPath(routeValue, pathParts)
+        if false == matched {
+            continue
+        }
+
+        for key, defaultValue := range routeValue.defaults {
+            if _, exists := params[key]; false == exists {
+                params[key] = defaultValue
+            }
+        }
+
+        if false == matchesLocale(routeValue.locales, params) {
+            continue
+        }
+
+        definitions = append(definitions, mapRouteToDefinition(routeValue))
+    }
+
+    return definitions
+}
+
+/* buildRouteValue validates a declaration and renders the route the registry stores. */
+func buildRouteValue(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) route {
     /* an empty pattern, which JoinPaths produces under a root group, splits as "/" does and registers the root route */
     parts := splitPath(pattern)
     normalizedPattern := strings.Join(parts, "/")
@@ -186,41 +264,21 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
         attributes[RouteAttributeLocales] = append([]string{}, options.Locales...)
     }
 
-    routeStored := instance.routeRegistry.registerRoute(
-        route{
-            name:               options.Name,
-            pattern:            normalizedPattern,
-            parts:              parts,
-            handler:            handler,
-            methods:            append([]string{}, options.Methods...),
-            host:               options.Host,
-            schemes:            append([]string{}, options.Schemes...),
-            requirements:       requirements,
-            requirementSources: requirementSources,
-            defaults:           defaults,
-            locales:            append([]string{}, options.Locales...),
-            priority:           options.Priority,
-            attributes:         attributes,
-        },
-    )
-
-    /* a route the registry declined is not put in the matching tree, whose entries must name their own stored route */
-    if false == routeStored {
-        return
+    return route{
+        name:               options.Name,
+        pattern:            normalizedPattern,
+        parts:              parts,
+        handler:            handler,
+        methods:            append([]string{}, options.Methods...),
+        host:               options.Host,
+        schemes:            append([]string{}, options.Schemes...),
+        requirements:       requirements,
+        requirementSources: requirementSources,
+        defaults:           defaults,
+        locales:            append([]string{}, options.Locales...),
+        priority:           options.Priority,
+        attributes:         attributes,
     }
-
-    routeIndex := len(instance.routeRegistry.routesInternal()) - 1
-
-    if nil == instance.routeTreeRoot {
-        instance.routeTreeRoot = &routeTreeNode{segment: ""}
-    }
-
-    patternSegments := parts
-    if 1 <= len(patternSegments) {
-        patternSegments = patternSegments[1:]
-    }
-
-    instance.registerRouteInTree(instance.routeTreeRoot, patternSegments, routeIndex)
 }
 
 /* rejectDuplicateParameterName refuses a pattern that names one parameter twice, since the handler could read only one of the two values, and a parameter with no name, which would bind nothing. */

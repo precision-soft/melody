@@ -35,7 +35,7 @@ func assertExampleCreatesConcurrentlyWithDistinctIdentifiers(major exampleMajor,
     rateLimitPrefix := exampleMajorRateLimitPrefix(major)
 
     client := newExampleClient(major)
-    signedIn := client.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody(exampleAdminUsername, exampleAdminPassword))
+    signedIn := client.call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody(exampleAdminUsername, exampleAdminPassword))
     if http.StatusOK != signedIn.statusCode {
         fail("%s: the seeded admin could not sign in (%d): %s", label, signedIn.statusCode, exampleTruncate(signedIn.body))
     }

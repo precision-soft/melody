@@ -79,7 +79,7 @@ Session ids are always 32-character lowercase hex strings. Incoming cookies that
 
 Rotation lives on the `Manager` rather than on the `Session` because only the manager holds the storage the candidate id is probed against and the previous entry is deleted from; a `Session` keeps no storage reference.
 
-Place the rotation **before** the handler writes the authenticated identity, and reach for [`http.RegenerateRequestSession`](../../http/session.go) rather than the manager: it rotates and republishes in one call, so the two halves cannot be half-done.
+A firewall's [sign-in door](SECURITY.md#sign-in-and-sign-out-doors) with an `Authenticator` rotates before its handler runs and hands it `LoginInput.PreviousSessionId`; a handler behind a door without one rotates itself. Place the rotation **before** the handler writes the authenticated identity, and reach for [`http.RegenerateRequestSession`](../../http/session.go) rather than the manager: it rotates and republishes in one call, so the two halves cannot be half-done.
 
 ```go
 rotated, rotateErr := melodyhttp.RegenerateRequestSession(request)

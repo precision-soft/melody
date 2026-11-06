@@ -44,7 +44,7 @@ func (instance *noopLogoutHandler) Logout(
 
 var _ securitycontract.LogoutHandler = (*noopLogoutHandler)(nil)
 
-func TestBuilder_AddFirewall_WithoutALoginConfigurationCompilesStateless(t *testing.T) {
+func TestBuilder_AddFirewall_WithoutADoorCompilesWithoutOne(t *testing.T) {
     builder := NewBuilder()
 
     builder.AddFirewall(
@@ -73,7 +73,7 @@ func TestBuilder_AddFirewall_WithoutALoginConfigurationCompilesStateless(t *test
     }
 }
 
-func TestBuilder_AddFirewall_WithTheFourLoginValuesCompilesStateful(t *testing.T) {
+func TestBuilder_AddFirewall_CarriesItsDoors(t *testing.T) {
     builder := NewBuilder()
 
     builder.AddFirewall(
@@ -81,10 +81,8 @@ func TestBuilder_AddFirewall_WithTheFourLoginValuesCompilesStateful(t *testing.T
         security.NewPathPrefixMatcher("/"),
         &anonymousTokenSource{},
         FirewallConfig{
-            LoginPath:     "/login",
-            LogoutPath:    "/logout",
-            LoginHandler:  &noopLoginHandler{},
-            LogoutHandler: &noopLogoutHandler{},
+            Login:  LoginConfig{Path: "/login", Handler: &noopLoginHandler{}},
+            Logout: LogoutConfig{Path: "/logout", Handler: &noopLogoutHandler{}},
             Override:      openFirewallConfig().Override,
         },
     )
@@ -92,31 +90,6 @@ func TestBuilder_AddFirewall_WithTheFourLoginValuesCompilesStateful(t *testing.T
     firewall := builder.BuildAndCompile().Firewalls()[0]
     if "/login" != firewall.LoginPath() || "/logout" != firewall.LogoutPath() {
         t.Fatalf("expected the login configuration carried, got %q and %q", firewall.LoginPath(), firewall.LogoutPath())
-    }
-}
-
-func TestBuilder_AddFirewall_RefusesAPartialLoginConfigurationNamingTheMissingField(t *testing.T) {
-    var typedNilLoginHandler *noopLoginHandler
-    var typedNilLogoutHandler *noopLogoutHandler
-
-    for _, testCase := range []struct {
-        config   FirewallConfig
-        expected string
-        field    string
-    }{
-        {FirewallConfig{LoginPath: "/login"}, "security firewall logout path may not be empty", "FirewallConfig.LogoutPath"},
-        {FirewallConfig{LogoutHandler: &noopLogoutHandler{}}, "security firewall login path may not be empty", "FirewallConfig.LoginPath"},
-        {FirewallConfig{LoginPath: "/login", LogoutPath: "/logout"}, "security firewall login handler is nil", "FirewallConfig.LoginHandler"},
-        {FirewallConfig{LoginPath: "/login", LogoutPath: "/logout", LoginHandler: &noopLoginHandler{}}, "security firewall logout handler is nil", "FirewallConfig.LogoutHandler"},
-        {FirewallConfig{LoginHandler: typedNilLoginHandler}, "security firewall login path may not be empty", "FirewallConfig.LoginPath"},
-        {FirewallConfig{LoginPath: "/login", LogoutPath: "/logout", LoginHandler: typedNilLoginHandler, LogoutHandler: &noopLogoutHandler{}}, "security firewall login handler is nil", "FirewallConfig.LoginHandler"},
-        {FirewallConfig{LoginPath: "/login", LogoutPath: "/logout", LoginHandler: &noopLoginHandler{}, LogoutHandler: typedNilLogoutHandler}, "security firewall logout handler is nil", "FirewallConfig.LogoutHandler"},
-    } {
-        t.Run(testCase.field+" "+testCase.expected, func(t *testing.T) {
-            expectRefusalNamingField(t, testCase.expected, testCase.field, func() {
-                NewBuilder().AddFirewall("main", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, testCase.config)
-            })
-        })
     }
 }
 

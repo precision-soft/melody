@@ -5,14 +5,14 @@ import (
     nethttp "net/http"
     "strings"
 
-    handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
-    "github.com/precision-soft/melody/v4/.example/wiring"
-
     minio "github.com/minio/minio-go/v7"
     melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
     melodybunorm "github.com/precision-soft/melody/integrations/bunorm/v4"
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v4/encrypt"
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
+    handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
+    "github.com/precision-soft/melody/v4/.example/security"
+    "github.com/precision-soft/melody/v4/.example/wiring"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -74,6 +74,10 @@ type Module struct {
 
     /* catalogWriteThrottle counts in redis when the environment gives the example one, shared by every replica, and in this process otherwise; it is nil only until the routes are registered */
     catalogWriteThrottle melodyhttpcontract.Middleware
+
+    /* the sign-in door's chain and budget, declared with the firewall and bound when the routes register */
+    loginDoorAuthenticator security.LoginDoorAuthenticator
+    loginDoorLimiter       lateBoundRateLimiter
 
     storageClient *minio.Client
     storageBucket string

@@ -425,7 +425,7 @@ func (instance *servedSecurityEnvironmentSource) Load() (map[string]string, erro
     return map[string]string{config.EnvKey: config.EnvProduction}, nil
 }
 
-func serveSecurityRequest(t *testing.T, kernelInstance *testKernel, path string) *httptest.ResponseRecorder {
+func servedSecurityContainer(t *testing.T, kernelInstance *testKernel, logger loggingcontract.Logger) containercontract.Container {
     t.Helper()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -433,7 +433,7 @@ func serveSecurityRequest(t *testing.T, kernelInstance *testKernel, path string)
     serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            return logging.NewNopLogger(), nil
+            return logger, nil
         },
         container.RegisterOptions{},
     )
@@ -463,6 +463,14 @@ func serveSecurityRequest(t *testing.T, kernelInstance *testKernel, path string)
         },
         container.RegisterOptions{},
     )
+
+    return serviceContainer
+}
+
+func serveSecurityRequest(t *testing.T, kernelInstance *testKernel, path string) *httptest.ResponseRecorder {
+    t.Helper()
+
+    serviceContainer := servedSecurityContainer(t, kernelInstance, logging.NewNopLogger())
 
     kernelInstance.httpRouter.Handle(
         nethttp.MethodGet,

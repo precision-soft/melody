@@ -56,7 +56,7 @@ func accessDeniedPage(homePath string, logoutPath string) string {
                     <div class="d-flex flex-wrap gap-2">
                         <a class="btn btn-outline-secondary" href="javascript:history.back()">Back</a>
                         <a class="btn btn-outline-secondary" href="` + html.EscapeString(homePath) + `">Home</a>
-                        <a class="btn btn-primary" href="` + html.EscapeString(logoutPath) + `">Log out</a>
+                        <form method="post" action="` + html.EscapeString(logoutPath) + `" class="d-inline"><button class="btn btn-primary" type="submit">Log out</button></form>
                     </div>
                 </div>
             </div>

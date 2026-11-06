@@ -1,12 +1,12 @@
 package config
 
 import (
-    nethttp "net/http"
     "strconv"
     "strings"
     "time"
 
     "github.com/precision-soft/melody/v4/.example/presenter"
+    "github.com/precision-soft/melody/v4/.example/route"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/subscriber"
     "github.com/precision-soft/melody/v4/.example/twofactor"
@@ -19,6 +19,7 @@ import (
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -160,7 +161,7 @@ func (instance *Module) registerRequiredRequestContextListener(eventDispatcher m
     }
 }
 
-/* registerApiExceptionListener answers an error under the api paths with the example's json envelope, the refusals of the security chain included; declining leaves every other path to the framework's built-in listener. */
+/* registerApiExceptionListener answers an error under the api paths and on the sign-in door, which the page reads as json, with the example's json envelope, the refusals of the security chain included; declining leaves every other path to the framework's built-in listener. */
 func (instance *Module) registerApiExceptionListener(eventDispatcher melodyeventcontract.EventDispatcher) {
     eventDispatcher.AddListener(
         melodykernelcontract.EventKernelException,
@@ -170,18 +171,12 @@ func (instance *Module) registerApiExceptionListener(eventDispatcher melodyevent
                 return nil
             }
 
-            if false == strings.Contains(exceptionEvent.Request().HttpRequest().URL.Path, apiPathSegment) {
+            requestUrl := exceptionEvent.Request().HttpRequest().URL
+            if false == strings.Contains(requestUrl.Path, apiPathSegment) && melodysecurity.FirewallDoorPathForm(route.LoginDoorPattern) != melodysecurity.FirewallDoorPathForm(melodyhttp.RequestPathAsRouted(requestUrl.EscapedPath())) {
                 return nil
             }
 
-            statusCode := nethttp.StatusInternalServerError
-            message := "internal server error"
-            if httpException := melodyexception.AsHttpException(exceptionEvent.Err()); nil != httpException {
-                statusCode = httpException.StatusCode()
-                message = httpException.Message()
-            }
-
-            exceptionEvent.SetResponse(presenter.ApiError(runtimeInstance, exceptionEvent.Request(), statusCode, message))
+            exceptionEvent.SetResponse(presenter.ApiRefusalOfError(runtimeInstance, exceptionEvent.Request(), exceptionEvent.Err()))
 
             return nil
         },

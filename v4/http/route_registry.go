@@ -14,6 +14,7 @@ func NewRouteRegistry() *RouteRegistry {
         routes:                  make([]route, 0),
         routeByName:             make(map[string]route),
         routeByDispatchIdentity: make(map[string]struct{}),
+        definitionOnlyByPath:    make(map[string][]route),
     }
 }
 
@@ -29,6 +30,8 @@ type RouteRegistry struct {
     routeByName map[string]route
     /* keyed by everything the matcher discriminates on, so two routes behind one key could never both be selected */
     routeByDispatchIdentity map[string]struct{}
+    /* the definitions no handler answers, keyed by their segments, so an encoded separator cannot alias one */
+    definitionOnlyByPath map[string][]route
     /* armed only for the boot window, by the application that owns the aggregated collision report */
     bootCollisionRecorder func(kind string, name string)
 }
@@ -167,6 +170,23 @@ func routeDispatchIdentity(routeValue route) string {
     }
 
     return strings.Join(identityParts, "\x00")
+}
+
+func (instance *RouteRegistry) registerDefinitionOnly(routeValue route) {
+    pathKey := strings.Join(routeValue.parts, "\x00")
+
+    instance.definitionOnlyByPath[pathKey] = append(instance.definitionOnlyByPath[pathKey], routeValue)
+}
+
+/* definitionOnlyFor answers the definition no handler answers declared on these path segments for this method. */
+func (instance *RouteRegistry) definitionOnlyFor(method string, pathSegments []string) (route, bool) {
+    for _, routeValue := range instance.definitionOnlyByPath[strings.Join(pathSegments, "\x00")] {
+        if true == matchesMethod(routeValue.methods, method) {
+            return routeValue, true
+        }
+    }
+
+    return route{}, false
 }
 
 func (instance *RouteRegistry) routeByNameInternal(routeName string) (route, bool) {

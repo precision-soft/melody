@@ -222,10 +222,8 @@ func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Bu
         matcher,
         tokenSource,
         securityconfig.FirewallConfig{
-            LoginPath:     "/login",
-            LogoutPath:    "/logout",
-            LoginHandler:  &apiKeyLoginHandler{},
-            LogoutHandler: &apiKeyLogoutHandler{},
+            Login:  securityconfig.LoginConfig{Path: "/login", Handler: &apiKeyLoginHandler{}},
+            Logout: securityconfig.LogoutConfig{Path: "/logout", Handler: &apiKeyLogoutHandler{}},
         },
     )
 }
@@ -233,7 +231,29 @@ func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Bu
 var _ applicationcontract.HttpModule = (*adminSecurityModule)(nil)
 ```
 
-The firewall above is stateful because its `FirewallConfig` declares all four of `LoginPath`, `LogoutPath`, `LoginHandler` and `LogoutHandler`; a firewall that declares none of them is stateless, and one that declares some of them is refused naming the first one missing. The zero `FirewallOverride` inherits the global access control with the firewall's own rules first; a `MergeStrategy` that is none of the three named strategies is refused at `AddFirewall`, naming `FirewallConfig.Override.MergeStrategy`, and so is a typed nil among the override's dependencies, naming its field. Register one firewall per name: a second registration under a name already declared panics (`security firewall name is already declared`), while two differently named firewalls whose matchers overlap are both accepted, and a request is matched against the first one registered.
+### Sign-in and sign-out doors
+
+A firewall serves a door it declares itself, on `kernel.request`, once its token source resolved and before access control: `POST /login` under the firewall above reaches `apiKeyLoginHandler.Login` with no route and no access rule involved. A firewall that declares no door behaves as if the path were any other.
+
+- **Declaration.** [`LoginConfig`](../../security/config/login_config.go) and [`LogoutConfig`](../../security/config/login_config.go) are declared by `Path` and `Handler` together; each refusal below panics at boot naming the field. The path is literal and canonical, `"/"` first, read as the router reads it, so `/login/` and `/login` are one door. `Methods` is `POST` when left out and refuses a safe method, since a state change on one is forgeable by a link. `TargetPath` is `/` when left out and refuses anything but a path within the application.
+- **No route stands on a door's path.** Every route a request on that path could reach, literal, parametrized or catch-all, whatever its method, host or scheme, is reported at boot. A `GET` on the path answers what any path with no route answers, so the sign-in page lives elsewhere: page `/login`, door `/login/check`.
+- **The door is named.** `Name` is `security.<firewall>.login` or `.logout` when left out, and the door is a route definition no handler answers: the url generator, the route manifest, `debug:router` and openapi read it, `Attributes` such as `ExposedRouteAttributes` included, and `Router.Match` answers no handler for it, only its name and attributes on the door's own path and methods.
+- **Reach.** A door its own firewall's prefix does not claim, or one an earlier firewall's prefix claims, is refused at boot, since the first matching firewall wins. Over any other matcher the reach is not known and the boot warning `security.firewallDoorReachUnknown` says so; a request the door did not serve is an ordinary 404.
+- **Order at the login door.** `Limiter`, if any, meters the door's own requests through the same decision as [`RegisterRateLimitRequestListener`](../../http/middleware/rate_limit_listener.go); the cross-site check; `Authenticator`, if any; the session rotation; `Handler`; the token it returns published on the security context; the answer.
+- **The authenticator.** With an [`Authenticator`](../../security/contract/authenticator.go) the door reads the credentials, rotates the session id before `Handler` writes the identity and hands the retired id over as `LoginInput.PreviousSessionId`. Without one `Handler` receives the token source's token and rotates itself, through [`http.RegenerateRequestSession`](../../http/session.go). `Supports` answering false and an unauthenticated token are refused credentials: `401 invalid credentials` and `security.login.failure`. A second factor refused is the same. A second factor not presented, a [`TwoFactorPending`](../../security/contract/two_factor.go) token, is `401` with [`ErrSecondFactorRequired`](../../security/login_door_listener.go) as its cause and no event, since nothing failed. An authenticator's error is refused as it stands and raises no event, so an outage counts as no failed attempt; report refused credentials as an unauthenticated token, never as an error.
+- **The logout door.** `Handler` runs with the request's token, anonymous when nobody signed in, which is served too. Once it returned the door ends the request's session, whether or not the handler did, and publishes the anonymous token. A handler's error keeps the session; a `security.logout.success` listener's failure does not, since the sign-out stood, and answers its error.
+- **The answer.** A `Response` from the handler is served. With none, an html client is redirected to `TargetPath`, and any other gets `200 {"authenticated":true}` at the login door and `204` at the logout door. No request parameter chooses the redirect: a handler that wants one validates it and answers its own [`RedirectResponse`](../../http/response.go), which refuses an external target by panic.
+- **Refusals.** A refusal goes through [`KernelRequestEvent.Refuse`](../../http/kernel_event.go), so an application's `kernel.exception` listener renders it, and access control stands aside; a limiter's `OnLimitExceeded` that answers a response is served as it is. A refused sign-in behind an `Authenticator` ends the session the door rotated.
+- **Cross-site requests.** `CrossSite` is `CrossSiteRefuse` when left out: `403` when `Sec-Fetch-Site` is present and neither `same-origin` nor `none`, so a sibling subdomain is refused, else when `Origin` is present and its scheme or host differs from the request's, the scheme as the forwarded-headers policy resolved it. The host is the `Host` the application received, so behind a proxy that rewrites it a browser sending no `Sec-Fetch-Site` is refused; such a proxy keeps the `Host` or the door admits. A request with neither is admitted, as a non-browser client's. `CrossSiteAdmit` is for a sign-in an api calls across origins under its CORS policy. This is no synchronizer token; the framework ships none.
+
+| Symfony (from memory, not checked against its source) | Here |
+|---|---|
+| `form_login.check_path`, `login_path` | `Login.Path`; the page is an ordinary route |
+| the authenticator of the firewall | `Login.Authenticator` |
+| the success handler, `default_target_path` | `Login.Handler`, `Login.TargetPath`; no `_target_path` |
+| `session_fixation_strategy: migrate` | the door rotates when it authenticated |
+| `logout: { path, target, invalidate_session }` | `Logout{Path, TargetPath}`, the session always ended |
+| `enable_csrf` | the cross-site check; no synchronizer token |
 
 ### Token authentication (stateless Bearer)
 
@@ -547,7 +567,9 @@ A configuration whose hazard has no legitimate reading is refused where it is co
     - [`(*Builder).BootWarnings() []BootWarning`](../../security/config/security_module.go) — the hazards the last `BuildAndCompile` found, see [Boot warnings](#boot-warnings); [`BootWarning`](../../security/config/boot_warning.go) carries `Name`, `Message` and `Context`
 - Configuration structs:
     - [`type GlobalConfig`](../../security/config/security_module.go) — `AccessControl`, `RoleHierarchy`, `AccessDecisionManager`, `EntryPoint`, `AccessDeniedHandler`
-    - [`type FirewallConfig`](../../security/config/security_module.go) — `Rules`, `LoginPath`, `LogoutPath`, `LoginHandler`, `LogoutHandler`, `Override`
+    - [`type FirewallConfig`](../../security/config/security_module.go) — `Rules`, `Login`, `Logout`, `Override`
+    - [`type LoginConfig`](../../security/config/login_config.go) — `Path`, `Handler`, `Name`, `Attributes`, `Authenticator`, `Methods`, `TargetPath`, `CrossSite`, `Limiter`, `LimiterConfig`
+    - [`type LogoutConfig`](../../security/config/login_config.go) — `Path`, `Handler`, `Name`, `Attributes`, `Methods`, `TargetPath`, `CrossSite`
     - [`type FirewallOverride`](../../security/config/security_module.go) — `GlobalAccessControlDisabled`, `MergeStrategy`, `AccessControl`, `RoleHierarchy`, `AccessDecisionManager`, `EntryPoint`, `AccessDeniedHandler`
 - Access control builder: [`NewAccessControlBuilder()` / `(*AccessControlBuilder).Require(pathPrefix, []string)` / `(*AccessControlBuilder).AllowAnonymous(...)` / `(*AccessControlBuilder).Build()`](../../security/config/access_control_builder.go)
 - Compile: [`Compile(configuration)`](../../security/config/compile.go)

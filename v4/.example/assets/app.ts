@@ -225,12 +225,22 @@ const initAuthHeader = async (options?: { loginSelector?: string; logoutSelector
     logoutNode.off("click").on("click", (event: any) => {
         event.preventDefault();
 
-        try {
-            window.location.href = route("example.logout");
-        } catch (err) {
-            window.location.href = "/logout";
-        }
+        submitLogout();
     });
+};
+
+/* the sign-out is a door that serves POST alone, so the header button submits a form */
+const submitLogout = (): void => {
+    const form = document.createElement("form");
+    form.method = "post";
+    try {
+        form.action = route("example.logout");
+    } catch (err) {
+        form.action = "/logout/";
+    }
+
+    document.body.appendChild(form);
+    form.submit();
 };
 
 window.melodyExample = window.melodyExample ?? {};

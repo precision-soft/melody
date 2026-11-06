@@ -122,6 +122,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.bootCli()
 
+    instance.recordFirewallDoorRouteCollisions()
+
     instance.panicOnBootCollisions()
 
     instance.disarmRouteCollisionRecorder()

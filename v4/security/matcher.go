@@ -43,6 +43,11 @@ func (instance *PathPrefixMatcher) Matches(request httpcontract.Request) bool {
         return false
     }
 
+    return instance.ClaimsPath(path)
+}
+
+/* ClaimsPath reports whether the matcher selects this path as the router spells it, which is what a firewall door's reach is checked against at boot. */
+func (instance *PathPrefixMatcher) ClaimsPath(path string) bool {
     if "" == instance.prefix {
         return true
     }
@@ -107,6 +112,11 @@ func (instance *SegmentPrefixMatcher) Matches(request httpcontract.Request) bool
         return false
     }
 
+    return instance.ClaimsPath(path)
+}
+
+/* ClaimsPath reports whether the matcher selects this path as the router spells it, which is what a firewall door's reach is checked against at boot. */
+func (instance *SegmentPrefixMatcher) ClaimsPath(path string) bool {
     return true == segmentPrefixClaims(instance.prefix, path)
 }
 

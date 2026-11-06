@@ -43,14 +43,12 @@ type FirewallOverride struct {
     AccessDeniedHandler   securitycontract.AccessDeniedHandler
 }
 
-/* FirewallConfig is what a firewall declares beyond its name, its matcher and its token source. A firewall with no login configuration is stateless; one with all four of LoginPath, LogoutPath, LoginHandler and LogoutHandler is stateful; one with some of the four is refused naming the missing field. */
+/* FirewallConfig is what a firewall declares beyond its name, its matcher and its token source: its rules, the sign-in and sign-out doors it serves, and what it overrides of the global configuration. */
 type FirewallConfig struct {
     Rules []securitycontract.Rule
 
-    LoginPath     string
-    LogoutPath    string
-    LoginHandler  securitycontract.LoginHandler
-    LogoutHandler securitycontract.LogoutHandler
+    Login  LoginConfig
+    Logout LogoutConfig
 
     Override FirewallOverride
 }
@@ -225,43 +223,7 @@ func validateFirewallDeclaration(declaration firewallDeclaration) error {
         )
     }
 
-    if false == declaresLoginConfiguration(declaration.config) {
-        return nil
-    }
-
-    missing := []struct {
-        absent  bool
-        message string
-        field   string
-    }{
-        {"" == declaration.config.LoginPath, "security firewall login path may not be empty", "FirewallConfig.LoginPath"},
-        {"" == declaration.config.LogoutPath, "security firewall logout path may not be empty", "FirewallConfig.LogoutPath"},
-        {true == internal.IsNilInterface(declaration.config.LoginHandler), "security firewall login handler is nil", "FirewallConfig.LoginHandler"},
-        {true == internal.IsNilInterface(declaration.config.LogoutHandler), "security firewall logout handler is nil", "FirewallConfig.LogoutHandler"},
-    }
-
-    for _, value := range missing {
-        if true == value.absent {
-            return exception.NewError(
-                value.message,
-                exceptioncontract.Context{
-                    "firewallName": declaration.name,
-                    "field":        value.field,
-                },
-                nil,
-            )
-        }
-    }
-
-    return nil
-}
-
-/* a typed-nil handler counts as declared, so the missing-field check names it instead of the firewall compiling stateless */
-func declaresLoginConfiguration(config FirewallConfig) bool {
-    return "" != config.LoginPath ||
-        "" != config.LogoutPath ||
-        nil != config.LoginHandler ||
-        nil != config.LogoutHandler
+    return validateFirewallDoors(declaration)
 }
 
 /* refuseTypedNilGlobalDependency refuses a dependency the caller declared that holds a typed nil; a plain nil is the ordinary "not declared". */

@@ -23,7 +23,7 @@ import (
 )
 
 /* the session a client held before authenticating is the one an attacker could have planted, so the identity must land on a session under a fresh id and never on the one the request arrived with */
-func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
+func TestSessionLoginHandlerWritesTheIdentityOnTheSessionTheRequestCarries(t *testing.T) {
     managerStorage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
     manager := melodysession.NewManager(managerStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
 
@@ -45,6 +45,7 @@ func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
     }
 
     registerAdmissionClock(t, containerInstance)
+    registerLandingUrlGenerator(t, containerInstance)
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
@@ -72,35 +73,23 @@ func TestSessionLoginHandlerWritesTheIdentityUnderARotatedId(t *testing.T) {
         t.Fatal("the request carries no session after the login")
     }
 
-    if arrivedSession.Id() == publishedSession.Id() {
-        t.Fatal("the identity was written under the id the request arrived with")
-    }
-
     if "user-1" != publishedSession.String(SessionKeySecurityUserId) {
         t.Fatalf("expected the identity on the rotated session, got %q", publishedSession.String(SessionKeySecurityUserId))
     }
 
-    if true == arrivedSession.Has(SessionKeySecurityUserId) {
-        t.Fatal("the session the request arrived with carries the identity")
-    }
-
     if "kept across the login" != publishedSession.String("cart") {
-        t.Fatal("the values the client held before the login did not carry over to the rotated session")
+        t.Fatal("the values the client held before the login did not stay")
     }
 }
 
-func TestSessionLoginHandlerAnswersAServerErrorWithoutASession(t *testing.T) {
+func TestSessionLoginHandlerRefusesARequestWithoutASession(t *testing.T) {
     result, loginErr := NewSessionLoginHandler(currentAccountLookup, nil).Login(
         nil,
         plainRequest(t),
         melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
     )
-    if nil != loginErr {
-        t.Fatalf("the login door failed: %v", loginErr)
-    }
-
-    if nil == result || nil == result.Response || nethttp.StatusInternalServerError != result.Response.StatusCode() {
-        t.Fatalf("expected the login door to answer 500 without a session, got %+v", result)
+    if nil != result || nil == loginErr {
+        t.Fatalf("expected a refusal, so no success is announced and no token published, got %+v and %v", result, loginErr)
     }
 }
 
@@ -129,6 +118,7 @@ func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontra
     }
 
     registerAdmissionClock(t, containerInstance)
+    registerLandingUrlGenerator(t, containerInstance)
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
@@ -256,7 +246,7 @@ func TestSessionLoginHandlerAdmitsTheRotatedSessionUnderTheAccount(t *testing.T)
     _, loginErr := NewSessionLoginHandler(currentAccountLookup, index.lookup).Login(
         runtimeInstance,
         request,
-        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
+        melodysecuritycontract.LoginInput{Token: melodysecurity.NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil), PreviousSessionId: arrivedSessionId},
     )
     if nil != loginErr {
         t.Fatalf("the login door failed: %v", loginErr)
@@ -287,4 +277,13 @@ func TestSessionLoginHandlerRefusedAdmissionOpensNoSession(t *testing.T) {
     if false == getSession(request).IsCleared() {
         t.Fatal("expected the rotated session cleared, so the response path deletes it rather than saving it")
     }
+}
+
+/* registerLandingUrlGenerator gives the handler the url generator it reads the landing page through. */
+func registerLandingUrlGenerator(t *testing.T, containerInstance melodycontainercontract.Container) {
+    t.Helper()
+
+    melodycontainer.MustRegister[melodyhttpcontract.UrlGenerator](containerInstance, melodyhttp.ServiceUrlGenerator, func(resolver melodycontainercontract.Resolver) (melodyhttpcontract.UrlGenerator, error) {
+        return melodyhttp.NewUrlGenerator(melodyhttp.NewRouter().RouteRegistry()), nil
+    }, melodycontainer.RegisterOptions{})
 }

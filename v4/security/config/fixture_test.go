@@ -50,3 +50,11 @@ func expectRefusalNamingField(t *testing.T, message string, field string, callba
 func openFirewallConfig() FirewallConfig {
     return FirewallConfig{Override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}}
 }
+
+type noopAuthenticator struct{}
+
+func (instance *noopAuthenticator) Supports(request httpcontract.Request) bool { return false }
+
+func (instance *noopAuthenticator) Authenticate(request httpcontract.Request) (securitycontract.Token, error) {
+    return nil, nil
+}

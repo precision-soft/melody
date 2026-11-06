@@ -9,6 +9,8 @@ import (
 
 const (
     RouteAttributeName    = "_route"
+    /* set by Match on the path and methods of a definition no handler answers; an unserved request there is still a 404 */
+    RouteAttributeDefinitionOnly = "_definitionOnly"
     RouteAttributePattern = "_pattern"
     RouteAttributeMethods = "_methods"
     RouteAttributeHost    = "_host"

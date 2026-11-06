@@ -19,6 +19,7 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodyserializer "github.com/precision-soft/melody/v4/serializer"
     melodyvalidation "github.com/precision-soft/melody/v4/validation"
 )
@@ -68,6 +69,26 @@ func ApiError(
             Context: buildErrorContext(request, statusCode, nil, debugMode(runtimeInstance)),
         },
     )
+}
+
+/* ApiRefusalOfError renders an error the kernel raised: a refusal keeps its status and public message, its cause travels under the development environment alone, anything else answers 500 and says nothing of itself. The second-factor challenge names the factor the client must present. */
+func ApiRefusalOfError(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    refusalErr error,
+) melodyhttpcontract.Response {
+    if true == errors.Is(refusalErr, melodysecurity.ErrSecondFactorRequired) {
+        return ApiErrorWithPayload(runtimeInstance, request, nethttp.StatusUnauthorized, map[string]any{"factor": "totp"}, melodysecurity.ErrSecondFactorRequired.Error())
+    }
+
+    statusCode := nethttp.StatusInternalServerError
+    message := "internal server error"
+    if httpException := melodyexception.AsHttpException(refusalErr); nil != httpException {
+        statusCode = httpException.StatusCode()
+        message = httpException.Message()
+    }
+
+    return ApiErrorWithErr(runtimeInstance, request, statusCode, message, refusalErr)
 }
 
 /* ApiErrorWithPayload renders a refusal that tells the client how to go on: the payload names what the client must present next, beside the public message. */

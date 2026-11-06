@@ -22,7 +22,7 @@ func RegisterRateLimitRequestListener(
     config RateLimitConfig,
 ) {
     /* a typed-nil limiter is refused, as the middleware door refuses it */
-    settings := resolveRateLimitConfig(limiter, config, "limiter is required for rate limit request listener", "RegisterRateLimitRequestListener")
+    gate := newRateLimitGate(limiter, config, "limiter is required for rate limit request listener", "RegisterRateLimitRequestListener")
 
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -36,36 +36,54 @@ func RegisterRateLimitRequestListener(
                 return nil
             }
 
-            request := requestEvent.Request()
-
-            allowed := allowRequestUnderLimit(settings, runtimeInstance, request)
-
-            if true == allowed {
-                return nil
-            }
-
-            response, limitErr := settings.onLimitExceeded(request)
-
-            if false == internal.IsNilInterface(limitErr) {
-                http.CloseDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
-
-                requestEvent.Refuse(limitErr)
-
-                return nil
-            }
-
-            /* IsNilInterface, since the application's handler may answer a typed-nil response, which would leave the refused request served */
-            if false == internal.IsNilInterface(response) {
-                requestEvent.SetResponse(response)
-
-                return nil
-            }
-
-            /* a limit handler that answered neither response nor error still refused the request */
-            requestEvent.SetResponse(http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests"))
+            gate.Apply(runtimeInstance, requestEvent)
 
             return nil
         },
         RateLimitRequestListenerPriority,
     )
+}
+
+/* NewRateLimitGate is the request listener's decision for a door that meters only its own requests on kernel.request. A nil or typed-nil limiter is refused. */
+func NewRateLimitGate(limiter httpcontract.RateLimiter, config RateLimitConfig) *RateLimitGate {
+    return newRateLimitGate(limiter, config, "limiter is required for rate limit gate", "NewRateLimitGate")
+}
+
+func newRateLimitGate(limiter httpcontract.RateLimiter, config RateLimitConfig, refusalMessage string, door string) *RateLimitGate {
+    return &RateLimitGate{settings: resolveRateLimitConfig(limiter, config, refusalMessage, door)}
+}
+
+type RateLimitGate struct {
+    settings rateLimitSettings
+}
+
+/* Apply charges the request and reports whether it was over budget, in which case the event already carries the answer or the refusal. */
+func (instance *RateLimitGate) Apply(runtimeInstance runtimecontract.Runtime, requestEvent *http.KernelRequestEvent) bool {
+    request := requestEvent.Request()
+
+    if true == allowRequestUnderLimit(instance.settings, runtimeInstance, request) {
+        return false
+    }
+
+    response, limitErr := instance.settings.onLimitExceeded(request)
+
+    if false == internal.IsNilInterface(limitErr) {
+        http.CloseDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
+
+        requestEvent.Refuse(limitErr)
+
+        return true
+    }
+
+    /* IsNilInterface, since the application's handler may answer a typed-nil response, which would leave the refused request served */
+    if false == internal.IsNilInterface(response) {
+        requestEvent.SetResponse(response)
+
+        return true
+    }
+
+    /* a limit handler that answered neither response nor error still refused the request */
+    requestEvent.SetResponse(http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests"))
+
+    return true
 }

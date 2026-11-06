@@ -365,7 +365,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     "routeName": routeName,
                 },
             )
-        } else if false == pathRefused {
+        } else if _, definitionOnly := routeAttributes[RouteAttributeDefinitionOnly]; false == pathRefused && false == definitionOnly {
             allowedMethodsValue, exists := routeAttributes[RouteAttributeMethods]
             if true == exists {
                 allowedMethods, ok := allowedMethodsValue.([]string)

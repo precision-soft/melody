@@ -98,7 +98,7 @@ func TestRegisterSecurity_ThePublicRulesAreTheClosedListTheReadmeStates(t *testi
         }
     }
 
-    expected := []string{"/", "/index.html", "/login", "/logout", "/routes", "^/assets", "^/favicon", "^/(en|ro|ro-RO)/i18n(/|$)", "/health", "/metrics", "/openapi.json", "/encrypt/roundtrip"}
+    expected := []string{"/", "/index.html", "/login", "/login/check", "/logout", "/routes", "^/assets", "^/favicon", "^/(en|ro|ro-RO)/i18n(/|$)", "/health", "/metrics", "/openapi.json", "/encrypt/roundtrip"}
 
     if len(expected) != len(public) {
         t.Fatalf("expected %d public rules, got %d: %s", len(expected), len(public), strings.Join(public, ", "))

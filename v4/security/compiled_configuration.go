@@ -6,8 +6,11 @@ import (
     "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    httpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/logging"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -30,6 +33,20 @@ type CompiledFirewallConfig struct {
     LogoutPath    string
     LoginHandler  securitycontract.LoginHandler
     LogoutHandler securitycontract.LogoutHandler
+
+    LoginName          string
+    LoginAttributes    map[string]any
+    LoginAuthenticator securitycontract.Authenticator
+    LoginMethods       []string
+    LoginTargetPath    string
+    LoginCrossSite     CrossSitePolicy
+    LoginRateLimit     *httpmiddleware.RateLimitGate
+
+    LogoutName       string
+    LogoutAttributes map[string]any
+    LogoutMethods    []string
+    LogoutTargetPath string
+    LogoutCrossSite  CrossSitePolicy
 
     RoleHierarchySource         Source
     AccessDecisionManagerSource Source
@@ -92,6 +109,22 @@ func NewCompiledFirewall(config CompiledFirewallConfig) *CompiledFirewall {
         logoutPath:                  config.LogoutPath,
         loginHandler:                config.LoginHandler,
         logoutHandler:               config.LogoutHandler,
+        loginDoor: firewallDoorSettings{
+            name:       config.LoginName,
+            attributes: internal.CopyAnyMap(config.LoginAttributes),
+            methods:    doorMethodsOrDefault(config.LoginMethods),
+            targetPath: doorTargetPathOrDefault(config.LoginTargetPath),
+            crossSite:  config.LoginCrossSite,
+        },
+        logoutDoor: firewallDoorSettings{
+            name:       config.LogoutName,
+            attributes: internal.CopyAnyMap(config.LogoutAttributes),
+            methods:    doorMethodsOrDefault(config.LogoutMethods),
+            targetPath: doorTargetPathOrDefault(config.LogoutTargetPath),
+            crossSite:  config.LogoutCrossSite,
+        },
+        loginAuthenticator: config.LoginAuthenticator,
+        loginRateLimit:     config.LoginRateLimit,
         roleHierarchySource:         sourceOrNone(config.RoleHierarchySource),
         accessDecisionManagerSource: sourceOrNone(config.AccessDecisionManagerSource),
         accessControlSource:         sourceOrNone(config.AccessControlSource),
@@ -121,6 +154,10 @@ type CompiledFirewall struct {
     accessDeniedHandler   securitycontract.AccessDeniedHandler
     loginHandler          securitycontract.LoginHandler
     logoutHandler         securitycontract.LogoutHandler
+    loginAuthenticator    securitycontract.Authenticator
+    loginRateLimit        *httpmiddleware.RateLimitGate
+    loginDoor             firewallDoorSettings
+    logoutDoor            firewallDoorSettings
 
     rules                       []securitycontract.Rule
     firewall                    *Firewall
@@ -181,7 +218,7 @@ func (instance *CompiledFirewall) LogoutPath() string {
     return instance.logoutPath
 }
 
-/* Login runs the firewall's login handler and leaves the session id as it was: the handler that writes an identity into the session rotates the id itself, through http.RegenerateRequestSession, since only it knows when the privilege changes; a login that does not rotate is open to session fixation. */
+/* Login runs the firewall's login handler and leaves the session id as it was: the door rotates it first when it authenticated the credentials, and a handler behind a door with no authenticator that writes an identity into the session rotates the id itself, through http.RegenerateRequestSession, since only it knows when the privilege changes; a login that does not rotate is open to session fixation. */
 func (instance *CompiledFirewall) Login(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -238,12 +275,15 @@ func (instance *CompiledFirewall) Login(
 
     dispatchErr := instance.dispatchLoginSuccess(runtimeInstance, request, result.Token)
     if nil != dispatchErr {
+        http.CloseDiscardedResponseBody(result.Response, logging.LoggerFromRuntime(runtimeInstance))
+
         return nil, dispatchErr
     }
 
     return result, nil
 }
 
+/* Logout runs the firewall's logout handler. A result beside an error means the handler succeeded and security.logout.success could not be dispatched: the sign-out stands. */
 func (instance *CompiledFirewall) Logout(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -278,7 +318,7 @@ func (instance *CompiledFirewall) Logout(
     }
 
     if nil == result {
-        /* a nil result fails closed as in Login, since the caller dereferences result.Response */
+        /* a nil result fails closed as in Login, since the door dereferences result.Response */
         return nil, exception.NewError(
             "firewall logout handler returned nil result",
             exceptioncontract.Context{
@@ -290,7 +330,7 @@ func (instance *CompiledFirewall) Logout(
 
     dispatchErr := instance.dispatchLogoutSuccess(runtimeInstance, request)
     if nil != dispatchErr {
-        return nil, dispatchErr
+        return result, dispatchErr
     }
 
     return result, nil

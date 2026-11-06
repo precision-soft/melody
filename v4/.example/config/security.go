@@ -13,7 +13,9 @@ import (
     melodyapplication "github.com/precision-soft/melody/v4/application"
     "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodyaccesscontrol "github.com/precision-soft/melody/v4/security/accesscontrol"
     melodysecurityconfig "github.com/precision-soft/melody/v4/security/config"
@@ -30,6 +32,10 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
         melodyaccesscontrol.NewExactRule(route.LoginPagePattern, melodyaccesscontrol.RuleConfig{
+            Attributes: []string{melodysecuritycontract.AttributePublicAccess},
+        }),
+        /* the firewall serves the doors ahead of these rules; they keep a GET on a door's path an ordinary 404 rather than a sign-in redirect */
+        melodyaccesscontrol.NewExactRule(route.LoginDoorPattern, melodyaccesscontrol.RuleConfig{
             Attributes: []string{melodysecuritycontract.AttributePublicAccess},
         }),
         melodyaccesscontrol.NewExactRule(route.LogoutPattern, melodyaccesscontrol.RuleConfig{
@@ -217,10 +223,26 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewPathPrefixMatcher("/"),
         melodysecurity.NewResolverTokenSource(security.SessionTokenResolver(sessionUserLookup)),
         melodysecurityconfig.FirewallConfig{
-            LoginPath:     route.LoginPagePattern,
-            LogoutPath:    route.LogoutPattern,
-            LoginHandler:  security.NewSessionLoginHandler(sessionUserLookup, sessionIndexLookup),
-            LogoutHandler: security.NewSessionLogoutHandler(sessionIndexLookup),
+            /* the sign-in spends the same per-address budget as the nomenclature's writes: a password guessed in a loop is refused with 429 once the budget runs out, whichever replica each guess reaches. Both doors are exposed to the route manifest, since the frontend resolves their urls by name. */
+            Login: melodysecurityconfig.LoginConfig{
+                Path:          route.LoginDoorPattern,
+                Name:          route.LoginDoorName,
+                Attributes:    melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic),
+                Handler:       security.NewSessionLoginHandler(sessionUserLookup, sessionIndexLookup),
+                Authenticator: &instance.loginDoorAuthenticator,
+                Limiter:       &instance.loginDoorLimiter,
+                LimiterConfig: melodyhttpmiddleware.RateLimitConfig{
+                    ClientIpResolver: func(request melodyhttpcontract.Request) string {
+                        return instance.trustedProxyResolver.Resolve(request)
+                    },
+                },
+            },
+            Logout: melodysecurityconfig.LogoutConfig{
+                Path:       route.LogoutPattern,
+                Name:       route.LogoutName,
+                Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic),
+                Handler:    security.NewSessionLogoutHandler(sessionIndexLookup),
+            },
         },
     )
 }

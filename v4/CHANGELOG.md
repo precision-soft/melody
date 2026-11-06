@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- security: a firewall serves the doors it declares: `LoginConfig` and `LogoutConfig` on `FirewallConfig`, `CrossSitePolicy`, `FirewallDoor`, `CompiledFirewall.Doors`, `FirewallDoorPathForm`, `ErrSecondFactorRequired`, `LoginInput.PreviousSessionId`, `LogoutInput.Token`, `PathPrefixMatcher.ClaimsPath` and `SegmentPrefixMatcher.ClaimsPath`, and the boot warning `security.firewallDoorReachUnknown`.
+- http: `Router.DeclareRouteDefinition`, a named definition no handler answers, `Router.RoutesClaimingPath`, `RouteAttributeDefinitionOnly`, `IsExternalRedirectLocation`, and `NewRateLimitGate`, the request listener's decision for a door that meters its own requests.
 - http: `RenderExceptionResponse` and `ExceptionRenderConfig`, the framework's error body for a listener to delegate to, `BuiltInExceptionListenerPriority`, the floor of `kernel.exception`, and `CloseDiscardedResponseBody`, for a listener handed a response beside an error.
 - event: `PropagationStopper`, a payload that reports its own stop, and `PriorityFloorRegistrar.InstallFloorListener`, which registers the listener that answers last and refuses a later one at or below its priority.
 - config: `ConfigFromContainer` answers the configuration or the resolution's error.
@@ -56,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- security: **Breaking**: the four login values of `FirewallConfig`, validated and consumed by nothing in the third major, become the `Login` and `Logout` blocks, and the firewall serves them on `kernel.request` before access control; a route that claims a door's path, a door its prefix does not claim and one an earlier firewall claims are refused at boot.
 - http: **Breaking**: one error mechanism: `kernel.exception` listeners on priorities, a built-in listener at the lowest priority that `ServeHttp` installs, `KernelExceptionEvent.SetResponse` ending the dispatch so the first responder wins, and a final step that renders the error with its own status when a listener fails or none answers, dropping a response a failing listener had set and journaling its status and `Content-Type`.
 - http: **Breaking**: `KernelRequestEvent.Refuse` and `Refusal`: a `kernel.request` listener ends the request with an error the kernel raises through `kernel.exception`, with the record filed before the dispatch; a listener that both answers and refuses, or refuses with a nil error, panics by name and the request gets the fail-closed 500.
 - security: **Breaking**: the firewall check, the token source, the entry point's failure and silence, the missing decision manager, the denied decision and the 401 for a missing security context or token are refusals, so an application's `kernel.exception` listener renders them; the three 401 are negotiated by the renderer and file a warning record, and the entry point's and the denied handler's own answers stay responses. The rate-limit listener refuses the same way when `OnLimitExceeded` returns an error.

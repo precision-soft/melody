@@ -172,10 +172,22 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
                     RoleHierarchy:               effectiveRoleHierarchy,
                     EntryPoint:                  effectiveEntryPoint,
                     AccessDeniedHandler:         effectiveDeniedHandler,
-                    LoginPath:                   firewall.config.LoginPath,
-                    LogoutPath:                  firewall.config.LogoutPath,
-                    LoginHandler:                firewall.config.LoginHandler,
-                    LogoutHandler:               firewall.config.LogoutHandler,
+                    LoginPath:                   firewall.config.Login.Path,
+                    LogoutPath:                  firewall.config.Logout.Path,
+                    LoginHandler:                firewall.config.Login.Handler,
+                    LogoutHandler:               firewall.config.Logout.Handler,
+                    LoginName:                   firewallDoorName(firewall.config.Login.Name, firewall.config.Login.Path, firewall.name, "login"),
+                    LoginAttributes:             firewall.config.Login.Attributes,
+                    LoginAuthenticator:          firewall.config.Login.Authenticator,
+                    LoginMethods:                normalizeFirewallDoorMethods(firewall.config.Login.Methods),
+                    LoginTargetPath:             firewall.config.Login.TargetPath,
+                    LoginCrossSite:              firewall.config.Login.CrossSite,
+                    LoginRateLimit:              firewallDoorRateLimit(firewall.config.Login),
+                    LogoutName:                  firewallDoorName(firewall.config.Logout.Name, firewall.config.Logout.Path, firewall.name, "logout"),
+                    LogoutAttributes:            firewall.config.Logout.Attributes,
+                    LogoutMethods:               normalizeFirewallDoorMethods(firewall.config.Logout.Methods),
+                    LogoutTargetPath:            firewall.config.Logout.TargetPath,
+                    LogoutCrossSite:             firewall.config.Logout.CrossSite,
                     RoleHierarchySource:         roleHierarchySource,
                     AccessDecisionManagerSource: decisionManagerSource,
                     AccessControlSource:         accessControlSource,
@@ -184,6 +196,10 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
                 },
             ),
         )
+    }
+
+    if reachErr := refuseUnreachableFirewallDoors(compiledFirewalls); nil != reachErr {
+        return nil, reachErr
     }
 
     return security.NewCompiledConfiguration(
