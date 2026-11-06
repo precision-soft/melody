@@ -186,11 +186,11 @@ func TestPathPrefixMatcher_APathWithoutItsLeadingSlashIsReadWithIt(t *testing.T)
 }
 
 func TestNewPathPrefixMatcher_RefusesAPrefixNoRequestPathCanCarry(t *testing.T) {
-    for _, prefix := range []string{"api", " /api", "/api//users", "/api/../users", "/api/./users", "/api/./"} {
+    for _, prefix := range []string{"api", " /api", "/api//users", "/api/../users", "/api/./users", "/api/./", "/billing//", "/billing///", "//", "///"} {
         expectPanicNamingField(t, "NewPathPrefixMatcher.prefix", func() { NewPathPrefixMatcher(prefix) })
     }
 
-    for _, prefix := range []string{"/reports", "/billing/", "/", "", "/api/.", "/files/..", "/billing//"} {
+    for _, prefix := range []string{"/reports", "/billing/", "/", "", "/api/.", "/files/.."} {
         if prefix != NewPathPrefixMatcher(prefix).Prefix() {
             t.Fatalf("expected %q admitted as declared", prefix)
         }

@@ -57,7 +57,7 @@ Register the S3 backend under the core `storage.ServiceStorage` service name in 
 awss3.RegisterStorageService(registrar, client, "documents", awss3.StorageConfig{})
 ```
 
-Or bundle it as a self-registering application module — one `RegisterModule` call registers the storage service (skipped when the client is nil; a configured client with an empty bucket or a limit outside its rule is refused at boot):
+Or bundle it as a self-registering application module — one `RegisterModule` call registers the storage service (an empty `ModuleConfig{}` registers nothing; a bucket or a storage configuration with no client, or a configured client with an empty bucket or a limit outside its rule is refused at boot):
 
 ```go
 app.RegisterModule(awss3.NewModule(awss3.ModuleConfig{Client: client, Bucket: "documents"}))

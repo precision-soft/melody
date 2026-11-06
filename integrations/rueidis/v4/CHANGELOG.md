@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `module.go`: **Behavioural change**: `RegisterServices` refuses `AsLocker` or `AsTokenStore` with no client, and `Locker` or `TokenStore` set with its flag off, naming the field, where it registered nothing.
 - `cache/backend.go`: **Behavioural change**: the context-less `Clear` and `ClearByPrefix` spend `BackendConfig.CommandTimeout` on each `SCAN` and `DEL` round trip, so the size of a namespace is not capped by it, as the third major's optional timeout capped it over the whole walk; the `Ctx` doors keep the caller's one context over the walk.
 - `lock.go`: **Behavioural change**: `Locker` declares `lockcontract.LeaseLocker`, so `NewLeaderGate` refuses an unlimited ttl over it at construction.
 - **Breaking** — `service_resolver.go`: `ClientMustFromResolver`, `ClientMustFromContainer`, `TokenStoreMustFromResolver`, `TokenStoreMustFromContainer` and `EpochRevocableTokenStoreMustFromResolver` take a `context.Context` first, the fourth major's resolver form; a provider passes `container.ContextOf(resolver)`.

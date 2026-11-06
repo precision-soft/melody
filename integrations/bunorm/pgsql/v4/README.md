@@ -116,7 +116,7 @@ Publish the locker under the core locker service name, so handlers resolve it th
 pgsql.RegisterLockerService(registrar, database, pgsql.LockerConfig{})
 ```
 
-The configuration is resolved at the call, so a refused `ReleaseTimeout` panics at the wiring, not at the first lock. Or bundle it as a self-registering application module — one `RegisterModule` call registers the locker (opt-in via `AsLocker`, skipped when the database is nil), configured by `ModuleConfig.Locker`:
+The configuration is resolved at the call, so a refused `ReleaseTimeout` panics at the wiring, not at the first lock. Or bundle it as a self-registering application module — one `RegisterModule` call registers the locker (opt-in via `AsLocker`, refused at boot when the database is nil), configured by `ModuleConfig.Locker`:
 
 ```go
 app.RegisterModule(pgsql.NewModule(pgsql.ModuleConfig{Database: database, AsLocker: true}))

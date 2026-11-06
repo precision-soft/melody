@@ -17,6 +17,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    "github.com/precision-soft/melody/v4/session"
 )
 
 /* maxConsecutiveEmptyPeekReads bounds the (0, nil) reads the peek loop accepts before declaring the reader stuck, the bound bufio uses. */
@@ -38,6 +39,9 @@ type CompressionConfig struct {
 
     /* ExcludedPaths are the request path prefixes never compressed; nil or empty excludes none. */
     ExcludedPaths []string
+
+    /* CompressAuthenticatedResponses compresses the answer to a request carrying the session cookie or an Authorization header, left out by default: the length of a compressed body beside a per-user secret and reflected input leaks that secret (BREACH). The session cookie means any session holder, logged in or not. A token source reading another cookie or header, HmacTokenSource and ImpersonationTokenSource among them, is not seen, and excludes its paths through ExcludedPaths. */
+    CompressAuthenticatedResponses bool
 }
 
 var compressionMinSizeRule = bound.Rule[int]{
@@ -51,6 +55,8 @@ type compressionSettings struct {
     minSize              int
     excludedContentTypes []string
     excludedPaths        []string
+
+    compressAuthenticatedResponses bool
 }
 
 func defaultExcludedContentTypes() []string {
@@ -101,7 +107,19 @@ func resolveCompressionConfig(config CompressionConfig) compressionSettings {
         minSize:              minSize.Value,
         excludedContentTypes: excludedContentTypes,
         excludedPaths:        append([]string{}, config.ExcludedPaths...),
+
+        compressAuthenticatedResponses: config.CompressAuthenticatedResponses,
     }
+}
+
+func requestCarriesCredentials(httpRequest *nethttp.Request) bool {
+    if "" != httpRequest.Header.Get("Authorization") {
+        return true
+    }
+
+    _, cookieErr := httpRequest.Cookie(session.SessionCookieName)
+
+    return nil == cookieErr
 }
 
 /* CompressionMiddleware gzips a response the client accepts, past the threshold and outside the exclusions; the configuration is resolved when the middleware is built. */
@@ -139,6 +157,10 @@ func CompressionMiddleware(config CompressionConfig) httpcontract.Middleware {
                 if "" != excludedPath && true == strings.HasPrefix(requestPath, excludedPath) {
                     return response, nil
                 }
+            }
+
+            if false == settings.compressAuthenticatedResponses && true == requestCarriesCredentials(httpRequest) {
+                return response, nil
             }
 
             if nil == response.BodyReader() {

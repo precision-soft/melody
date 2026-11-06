@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- http: `CompressionConfig.CompressAuthenticatedResponses`.
+- logging: `ReopenableFileWriter.CloseWithContext`, so the teardown admits the writer as a service.
 - exception: `ChainIs`, what `errors.Is` answers, with a bound and a recover, on a chain whose `Unwrap` reaches itself.
 - lock: `lockcontract.ErrUnlimitedTtlRefused`, the cause of a lease lock's refusal of an unlimited ttl, and `lockcontract.LeaseLocker`, the mark `InMemoryLocker` declares.
 - session: `InMemoryStorageConfig.MaxSessions`, `FileStorageConfig.MaxSessions` and `DefaultMaxSessions`, 100,000 when left out, at least 1, unlimited admitted.
@@ -51,6 +53,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- http: **Breaking**: `RouteOptions.Attributes` refuses a key beginning with `_` at registration, as its contract already said.
+- http: **Behavioural change**: `CompressionMiddleware` leaves the answer to a request carrying the session cookie or an `Authorization` header uncompressed unless `CompressAuthenticatedResponses` is set.
+- security: **Behavioural change**: `NewPathPrefixMatcher` refuses more than one trailing slash, where `/admin//` selected `/admin` alone and left its tree outside the firewall.
 - lock: **Behavioural change**: `NewLeaderGate` and `NewExclusiveCommand` panic on an unlimited ttl over a `LeaseLocker`, and `Run` reports the refusal once and ends with it over a locker it could not read, where the gate campaigned for the life of the process, never led, and returned nil at shutdown.
 - session: **Behavioural change**: at `MaxSessions`, once the lapsed sessions are swept, the in-memory and file storages refuse a `Save` of a new id, where every cookie-less request writing to a session on a public route held one more entry for the session's whole ttl.
 - container: **Breaking**: `CloseWithContext` is declared on the `Container` and `Scope` contracts, and `config/contract.KernelConfiguration` declares `ScopeTeardownTimeout`.

@@ -250,12 +250,26 @@ func assertExampleGzipCompression(major exampleMajor) {
     if http.StatusOK != compressed.statusCode {
         fail("[%s] %s answered %d to the gzip read, wanted 200", major.label, exampleProductListRoute, compressed.statusCode)
     }
-    if "gzip" != compressed.headerList.Get("Content-Encoding") {
-        fail("[%s] the gzip read answered Content-Encoding %q, wanted gzip", major.label, compressed.headerList.Get("Content-Encoding"))
-    }
     /* the cors response listener adds its own Vary: Origin line, so the field is read whole rather than as its first line */
     if false == strings.Contains(strings.Join(compressed.headerList.Values("Vary"), ", "), "Accept-Encoding") {
         fail("[%s] the compressed answer does not vary on Accept-Encoding, so a shared cache may hand gzip to an identity client", major.label)
+    }
+
+    /* the fourth major leaves an answer to a session holder uncompressed unless the application opts in, against the BREACH class */
+    if 4 <= major.number {
+        if "" != compressed.headerList.Get("Content-Encoding") {
+            fail("[%s] the read under a session answered Content-Encoding %q, wanted none", major.label, compressed.headerList.Get("Content-Encoding"))
+        }
+        if compressed.body != identity.body {
+            fail("[%s] the read under a session differs from the identity read", major.label)
+        }
+        pass("[%s] the listing read under a session travels uncompressed", major.label)
+
+        return
+    }
+
+    if "gzip" != compressed.headerList.Get("Content-Encoding") {
+        fail("[%s] the gzip read answered Content-Encoding %q, wanted gzip", major.label, compressed.headerList.Get("Content-Encoding"))
     }
 
     gzipReader, gzipErr := gzip.NewReader(strings.NewReader(compressed.body))

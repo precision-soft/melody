@@ -22,6 +22,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    "github.com/precision-soft/melody/v4/session"
 )
 
 type failingReader struct {
@@ -1689,5 +1690,66 @@ func TestCompressionMiddleware_TheSniffReadKeepsTheMinSizeThreshold(t *testing.T
 
     if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
         t.Fatalf("expected a %d-byte body over MinSize compressed, got Content-Encoding %q", len(body), resultResponse.Headers().Get("Content-Encoding"))
+    }
+}
+
+func compressedForRequest(t *testing.T, config CompressionConfig, prepare func(request *nethttp.Request)) bool {
+    t.Helper()
+
+    config.MinSize = bound.Of(10)
+
+    handler := CompressionMiddleware(config)(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            response := &http.Response{}
+            response.SetStatusCode(200)
+            responseHeaders := make(nethttp.Header)
+            responseHeaders.Set("Content-Type", "text/plain")
+            response.SetHeaders(responseHeaders)
+            response.SetBodyReader(bytes.NewReader([]byte(strings.Repeat("hello world ", 200))))
+
+            return response, nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+    prepare(request)
+
+    response, handlerErr := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != handlerErr {
+        t.Fatalf("unexpected handler error: %v", handlerErr)
+    }
+
+    return "gzip" == response.Headers().Get("Content-Encoding")
+}
+
+func TestCompressionMiddleware_LeavesAnAuthenticatedResponseUncompressedUnlessAskedTo(t *testing.T) {
+    credentials := map[string]func(request *nethttp.Request){
+        "the session cookie": func(request *nethttp.Request) {
+            request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "abc"})
+        },
+        "an authorization header": func(request *nethttp.Request) {
+            request.Header.Set("Authorization", "Bearer abc")
+        },
+    }
+
+    for name, prepare := range credentials {
+        if true == compressedForRequest(t, CompressionConfig{}, prepare) {
+            t.Fatalf("%s: expected the response left uncompressed by default", name)
+        }
+
+        if false == compressedForRequest(t, CompressionConfig{CompressAuthenticatedResponses: true}, prepare) {
+            t.Fatalf("%s: expected the response compressed when asked to", name)
+        }
+    }
+}
+
+func TestCompressionMiddleware_CompressesAnAnonymousResponse(t *testing.T) {
+    anonymous := func(request *nethttp.Request) {
+        request.AddCookie(&nethttp.Cookie{Name: "analytics", Value: "abc"})
+    }
+
+    if false == compressedForRequest(t, CompressionConfig{}, anonymous) {
+        t.Fatalf("expected an anonymous response compressed, another cookie beside it")
     }
 }

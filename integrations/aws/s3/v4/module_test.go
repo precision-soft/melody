@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
     melodystorage "github.com/precision-soft/melody/v4/storage"
 )
 
@@ -62,4 +63,22 @@ func TestModule_TheStorageConfigReachesTheRegistration(t *testing.T) {
     }()
 
     NewModule(ModuleConfig{Client: &minio.Client{}, Bucket: "bucket", Storage: StorageConfig{PutSpoolLimit: bound.UnlimitedCount()}}).RegisterServices(&spyServiceRegistrar{})
+}
+
+func TestModule_ABucketOrAStorageWithNoClientIsRefusedNamingIt(t *testing.T) {
+    for field, config := range map[string]ModuleConfig{
+        "ModuleConfig.Bucket":  {Bucket: "documents"},
+        "ModuleConfig.Storage": {Storage: StorageConfig{PutSpoolLimit: bound.Of(1024)}},
+    } {
+        func() {
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError || field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                    t.Fatalf("expected a refusal naming %s, got %v", field, recoveredErr)
+                }
+            }()
+
+            NewModule(config).RegisterServices(&spyServiceRegistrar{})
+        }()
+    }
 }

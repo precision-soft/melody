@@ -41,13 +41,55 @@ func (instance *Module) Description() string {
     return "registers the redis client and optionally the connection owner, the locker and the revocable token store services"
 }
 
+/* clientIsNil reads a typed nil as nil, which a bare comparison on the interface takes for a live client. */
+func clientIsNil(client rueidis.Client) bool {
+    if nil == client {
+        return true
+    }
+
+    value := reflect.ValueOf(client)
+
+    return reflect.Pointer == value.Kind() && true == value.IsNil()
+}
+
+/* refuseARoleTheModuleCannotServe fails the boot on a role asked of a module with no client, and on a role's configuration handed with the role off, where neither would register anything and the service would be missed only at its first resolve. */
+func refuseARoleTheModuleCannotServe(config ModuleConfig, hasClient bool) {
+    for _, role := range []struct {
+        flagField   string
+        flag        bool
+        configField string
+        isZero      bool
+    }{
+        {"ModuleConfig.AsLocker", config.AsLocker, "ModuleConfig.Locker", reflect.ValueOf(config.Locker).IsZero()},
+        {"ModuleConfig.AsTokenStore", config.AsTokenStore, "ModuleConfig.TokenStore", reflect.ValueOf(config.TokenStore).IsZero()},
+    } {
+        if true == role.flag && false == hasClient {
+            exception.Panic(exception.NewError(
+                "the rueidis module is asked for a role and has no client",
+                map[string]any{"field": role.flagField, "requires": "ModuleConfig.Client"},
+                nil,
+            ))
+        }
+
+        if false == role.flag && false == role.isZero {
+            exception.Panic(exception.NewError(
+                "the rueidis module is handed a role's configuration with the role off",
+                map[string]any{"field": role.configField, "enabledBy": role.flagField},
+                nil,
+            ))
+        }
+    }
+}
+
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
     client := instance.config.Client
-    if nil == client && nil != instance.config.Connection {
+    if true == clientIsNil(client) && nil != instance.config.Connection {
         client = instance.config.Connection.Client()
     }
 
-    if nil == client {
+    refuseARoleTheModuleCannotServe(instance.config, false == clientIsNil(client))
+
+    if true == clientIsNil(client) {
         return
     }
 

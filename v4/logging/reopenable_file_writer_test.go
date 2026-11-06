@@ -1,6 +1,7 @@
 package logging
 
 import (
+    "context"
     "errors"
     "fmt"
     "os"
@@ -10,6 +11,9 @@ import (
     "syscall"
     "testing"
     "time"
+
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 func TestReopenableFileWriter_WritesToTheFileItOpened(t *testing.T) {
@@ -382,5 +386,66 @@ func TestReopenableFileWriter_WritesStayWholeWhileReopenSwapsTheDescriptor(t *te
         if fmt.Sprintf("record-%04d", index) != line {
             t.Fatalf("expected record %d whole and in order, got %q", index, line)
         }
+    }
+}
+
+func TestReopenableFileWriter_TheContainerClosesItThroughItsContextDoor(t *testing.T) {
+    writer, writerErr := NewReopenableFileWriter(filepath.Join(t.TempDir(), "app.log"))
+    if nil != writerErr {
+        t.Fatalf("unexpected writer error: %v", writerErr)
+    }
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    container.MustRegister[*ReopenableFileWriter](
+        serviceContainer,
+        "app.log.writer",
+        func(resolver containercontract.Resolver) (*ReopenableFileWriter, error) {
+            return writer, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    container.MustFromResolver[*ReopenableFileWriter](context.Background(), serviceContainer, "app.log.writer")
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if _, writeErr := writer.Write([]byte("late")); nil == writeErr {
+        t.Fatalf("expected the writer closed by the teardown")
+    }
+}
+
+func TestReopenableFileWriter_CloseWithContextEndsAtItsDeadlineWhenTheCloseIsStuck(t *testing.T) {
+    writer, writerErr := NewReopenableFileWriter(filepath.Join(t.TempDir(), "app.log"))
+    if nil != writerErr {
+        t.Fatalf("unexpected writer error: %v", writerErr)
+    }
+
+    /* the mutex a Reopen on a stuck filesystem would hold */
+    writer.mutex.Lock()
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+    defer cancel()
+
+    closeErr := writer.CloseWithContext(closeContext)
+
+    writer.mutex.Unlock()
+
+    if false == errors.Is(closeErr, context.DeadlineExceeded) {
+        t.Fatalf("expected the deadline, got %v", closeErr)
+    }
+}
+
+func TestReopenableFileWriter_CloseWithContextRefusesANilContext(t *testing.T) {
+    writer, writerErr := NewReopenableFileWriter(filepath.Join(t.TempDir(), "app.log"))
+    if nil != writerErr {
+        t.Fatalf("unexpected writer error: %v", writerErr)
+    }
+    defer func() { _ = writer.Close() }()
+
+    //nolint:staticcheck // the nil context is the input under test
+    if closeErr := writer.CloseWithContext(nil); nil == closeErr || "the close context is nil" != closeErr.Error() {
+        t.Fatalf("expected the nil context refused, got %v", closeErr)
     }
 }

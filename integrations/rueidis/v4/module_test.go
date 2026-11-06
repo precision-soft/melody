@@ -58,12 +58,44 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-func TestModule_RegisterServicesNoClient(t *testing.T) {
+func TestModule_AnEmptyConfigRegistersNothing(t *testing.T) {
     registrar := &spyServiceRegistrar{}
-    NewModule(ModuleConfig{AsLocker: true, AsTokenStore: true}).RegisterServices(registrar)
+    NewModule(ModuleConfig{}).RegisterServices(registrar)
     if 0 != len(registrar.names) {
-        t.Fatalf("expected no services without a client, got %v", registrar.names)
+        t.Fatalf("expected no services from an empty module, got %v", registrar.names)
     }
+}
+
+func TestModule_ARoleWithNoClientIsRefusedNamingIt(t *testing.T) {
+    expectPanicNamingField(t, "ModuleConfig.AsLocker", func() {
+        NewModule(ModuleConfig{AsLocker: true}).RegisterServices(&spyServiceRegistrar{})
+    })
+
+    expectPanicNamingField(t, "ModuleConfig.AsTokenStore", func() {
+        NewModule(ModuleConfig{AsTokenStore: true}).RegisterServices(&spyServiceRegistrar{})
+    })
+}
+
+type typedNilModuleClient struct {
+    rueidis.Client
+}
+
+func TestModule_ATypedNilClientIsNoClient(t *testing.T) {
+    var client *typedNilModuleClient
+
+    expectPanicNamingField(t, "ModuleConfig.AsLocker", func() {
+        NewModule(ModuleConfig{Client: client, AsLocker: true}).RegisterServices(&spyServiceRegistrar{})
+    })
+}
+
+func TestModule_ARolesConfigurationWithTheRoleOffIsRefusedNamingIt(t *testing.T) {
+    expectPanicNamingField(t, "ModuleConfig.Locker", func() {
+        NewModule(ModuleConfig{Locker: LockerConfig{CallTimeout: bound.Of(time.Second)}}).RegisterServices(&spyServiceRegistrar{})
+    })
+
+    expectPanicNamingField(t, "ModuleConfig.TokenStore", func() {
+        NewModule(ModuleConfig{TokenStore: TokenStoreConfig{Prefix: "app:"}}).RegisterServices(&spyServiceRegistrar{})
+    })
 }
 
 func TestModule_RegisterServicesClientOnly(t *testing.T) {

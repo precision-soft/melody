@@ -153,6 +153,46 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** `DeclareTeardownDependency("app.bus", []string{"app.transports"})`, and declare the slice in the asserted interface.
 
+### Http: a route attribute beginning with an underscore is refused at registration
+
+**What changed.** [`RouteOptions.Attributes`](../http/contract/route_option.go) refuses a key beginning with `_`, the prefix of the framework's route and request attributes, naming `RouteOptions.Attributes` and the key. The third major copied every key, so a route could publish a spoofed `_route`.
+
+**Symptom.** Registering such a route panics with `route attribute key is reserved by the framework`.
+
+**Remedy.** Rename the key. A route name, a host, a method or a locale goes in its own `RouteOptions` field.
+
+### Http: the compression middleware leaves an authenticated response uncompressed
+
+**What changed.** [`CompressionMiddleware`](../http/middleware/compression.go) sends the answer to a request carrying the session cookie or an `Authorization` header as it is, unless [`CompressionConfig.CompressAuthenticatedResponses`](../http/middleware/compression.go) is set: the length of a compressed body beside a per-user secret and reflected input leaks that secret (BREACH). The third major compressed every eligible response.
+
+**Symptom.** An authenticated response no longer carries `Content-Encoding: gzip`, and takes more bytes on the wire.
+
+**Remedy.** An application whose authenticated pages reflect no input beside a secret sets `CompressAuthenticatedResponses: true`. The decision reads the session cookie, so any session holder counts, logged in or not. A token source reading another cookie or header, `HmacTokenSource` and `ImpersonationTokenSource` among them, is not seen, and excludes its paths through `ExcludedPaths`. `Vary` still names `Accept-Encoding` alone, so a shared cache must not store an authenticated response.
+
+### Security: a path prefix matcher with more than one trailing slash is refused
+
+**What changed.** [`NewPathPrefixMatcher`](../security/matcher.go) panics on `/admin//`, naming `NewPathPrefixMatcher.prefix`. The form was admitted, and selected `/admin` alone, so `/admin/users` ran without that firewall's token source and rules.
+
+**Symptom.** The constructor panics at boot on such a prefix.
+
+**Remedy.** `/admin/` or `/admin`, as the reach you meant.
+
+### Integrations: a module asked for a role it cannot serve is refused at boot
+
+**What changed.** The rueidis, bunorm mysql, bunorm pgsql and aws s3 modules panic at `RegisterServices`, naming the field, on a role with no dependency (`AsLocker` or `AsTokenStore` with no client, `AsLocker` with no database, a `Bucket` or a `Storage` with no client) and on a role's configuration with the role off (`Locker` or `TokenStore` set with its flag false). The third major registered nothing, and the service was missed at its first resolve. An empty `ModuleConfig{}` still registers nothing.
+
+**Symptom.** A boot that passed now panics naming `ModuleConfig.AsLocker`, `ModuleConfig.Locker` or their twins.
+
+**Remedy.** Hand the dependency, or leave the module out when there is none, as `if nil != client { app.RegisterModule(...) }`.
+
+### Logging: the reopenable file writer can be a container service
+
+**What changed.** [`ReopenableFileWriter`](../logging/reopenable_file_writer.go) carries `CloseWithContext` beside `Close`, so the teardown no longer refuses it as a service, and a close stuck on the watcher ends at the teardown's deadline.
+
+**Symptom.** None; registering it no longer fails.
+
+**Remedy.** None needed.
+
 ### Lock: a leader gate or an exclusive command with an unlimited ttl over a lease locker is refused
 
 **What changed.** [`NewLeaderGate`](../lock/leader_gate.go) and [`NewExclusiveCommand`](../lock/exclusive_command.go) panic on an unlimited ttl when the locker declares [`lockcontract.LeaseLocker`](../lock/contract/lock.go), the in-memory and rueidis lockers among them. A locker they cannot read, `NewLazyLocker` included, makes the gate's `Run` report the refusal once, end at once and return it, with `lockcontract.ErrUnlimitedTtlRefused` as its cause, where the gate retried it as a store outage for the life of the process. In the third major the in-memory locker admitted the same configuration as a session-style lock, so the gate led there.

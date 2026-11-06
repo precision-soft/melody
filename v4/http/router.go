@@ -158,6 +158,7 @@ func (instance *Router) addRoute(pattern string, handler httpcontract.Handler, o
     rejectForeignParameterSyntax(parts, normalizedPattern)
     rejectIncoherentLocaleDeclaration(parts, normalizedPattern, options.Locales, defaults)
     rejectMalformedExposureAttributes(options.Attributes, options.Name, normalizedPattern)
+    rejectReservedAttributes(options.Attributes, normalizedPattern)
 
     attributes := map[string]any{}
     for key, value := range options.Attributes {
@@ -348,6 +349,25 @@ func rejectIncoherentLocaleDeclaration(
                 nil,
             ),
         )
+    }
+}
+
+/* rejectReservedAttributes refuses the "_" prefix the framework's route and request attributes live under, so a route cannot publish a spoofed name or lose a value the kernel writes over it. */
+func rejectReservedAttributes(attributes map[string]any, normalizedPattern string) {
+    for key := range attributes {
+        if true == strings.HasPrefix(key, "_") {
+            exception.Panic(
+                exception.NewError(
+                    "route attribute key is reserved by the framework",
+                    map[string]any{
+                        "field":   "RouteOptions.Attributes",
+                        "key":     key,
+                        "pattern": normalizedPattern,
+                    },
+                    nil,
+                ),
+            )
+        }
     }
 }
 

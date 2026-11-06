@@ -214,7 +214,7 @@ rueidiscache.RegisterBackendService(registrar, client, rueidiscache.BackendConfi
 
 `RegisterClientService`, `RegisterLockerService` and `RegisterTokenStoreService` live in [`service_resolver.go`](./service_resolver.go); the locker and token store doors take their config and resolve it at the call, so a value outside its rule, or a nil client, fails the boot rather than the first resolve; [`RegisterBackendService`](./cache/service_resolver.go) lives in [`cache/service_resolver.go`](./cache/service_resolver.go) and resolves its `BackendConfig` at the call the same way, and the [`cache.ModuleConfig.Backend`](./cache/module.go) field hands the config through the module, as [`ModuleConfig.Locker`](./module.go) and [`ModuleConfig.TokenStore`](./module.go) hand theirs.
 
-Or bundle them as self-registering application modules — `RegisterModule` registers the client service and, opt-in, the locker and revocable token store (and the cache backend), instead of calling each helper by hand:
+Or bundle them as self-registering application modules — `RegisterModule` registers the client service and, opt-in, the locker and revocable token store (and the cache backend), instead of calling each helper by hand. A role with no client, or a role's configuration with the role off, is refused at boot naming the field:
 
 ```go
 app.RegisterModule(rueidis.NewModule(rueidis.ModuleConfig{Client: client, AsLocker: true, AsTokenStore: true}))

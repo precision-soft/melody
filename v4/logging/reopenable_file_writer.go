@@ -1,6 +1,7 @@
 package logging
 
 import (
+    "context"
     "errors"
     "fmt"
     "os"
@@ -163,6 +164,25 @@ func (instance *ReopenableFileWriter) watchReopenSignals() {
                 }
             }
         }
+    }
+}
+
+/* CloseWithContext is Close under the caller's deadline, the door a container closes the writer through: Close waits for the watcher, which may be inside a reopen on a stuck filesystem, and goes on finishing in the background when the context ends first. */
+func (instance *ReopenableFileWriter) CloseWithContext(closeContext context.Context) error {
+    if nil == closeContext {
+        return exception.NewError("the close context is nil", nil, nil)
+    }
+
+    closed := make(chan error, 1)
+    go func() {
+        closed <- instance.Close()
+    }()
+
+    select {
+    case closeErr := <-closed:
+        return closeErr
+    case <-closeContext.Done():
+        return closeContext.Err()
     }
 }
 

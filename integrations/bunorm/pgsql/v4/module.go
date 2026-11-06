@@ -1,7 +1,10 @@
 package pgsql
 
 import (
+    "reflect"
+
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/uptrace/bun"
 )
 
@@ -28,9 +31,25 @@ func (instance *Module) Description() string {
     return "registers the locker service backed by postgresql session advisory locks"
 }
 
-/* RegisterServices publishes nothing unless the application asked for the locker AND handed a database to take it on. Either half missing publishes nothing, silently, rather than a default: a module registered without a database would publish a provider whose NewLocker panics when the locker is first resolved, and one that registered the locker unasked would silently take the framework's locker name away from whatever backend the application meant to use. */
+/* RegisterServices publishes the locker when asked; asked with no database, or handed the locker's configuration with the locker off, it fails the boot rather than publish nothing. */
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
-    if false == instance.config.AsLocker || nil == instance.config.Database {
+    if true == instance.config.AsLocker && nil == instance.config.Database {
+        exception.Panic(exception.NewError(
+            "the pgsql module is asked for the locker and has no database",
+            map[string]any{"field": "ModuleConfig.AsLocker", "requires": "ModuleConfig.Database"},
+            nil,
+        ))
+    }
+
+    if false == instance.config.AsLocker {
+        if false == reflect.ValueOf(instance.config.Locker).IsZero() {
+            exception.Panic(exception.NewError(
+                "the pgsql module is handed the locker's configuration with the locker off",
+                map[string]any{"field": "ModuleConfig.Locker", "enabledBy": "ModuleConfig.AsLocker"},
+                nil,
+            ))
+        }
+
         return
     }
 

@@ -1660,10 +1660,8 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
             Name:    "owned",
             Methods: []string{nethttp.MethodGet},
             Attributes: map[string]any{
-                "scheme":                "spoofed",
-                "session":               "spoofed",
-                RequestAttributeScheme:  "spoofed",
-                RequestAttributeSession: "spoofed",
+                "scheme":  "spoofed",
+                "session": "spoofed",
             },
         },
     )

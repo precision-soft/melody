@@ -1066,3 +1066,24 @@ func TestRouter_RegistrationGuardReadsTheServingFlagRaisedByAnotherGoroutine(t *
     router.freezeForServing()
     done.Wait()
 }
+
+func TestRouter_RefusesAReservedAttributeKeyAtRegistration(t *testing.T) {
+    for _, key := range []string{RouteAttributeName, RouteAttributePattern, RouteAttributeMethods, RouteAttributeHost, RouteAttributeSchemes, RouteAttributeLocales, RouteAttributeLocale, RequestAttributeSession, RequestAttributeScheme, "_anything"} {
+        func() {
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError || "route attribute key is reserved by the framework" != recoveredErr.Error() {
+                    t.Fatalf("%s: expected the key refused, got %v", key, recoveredErr)
+                }
+
+                if key != exception.LogContext(recoveredErr, exception.LogContextConfig{})["key"] {
+                    t.Fatalf("%s: expected the refusal to name the key, got %v", key, exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+                }
+            }()
+
+            NewRouter().HandleWithOptions("/attributes", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return nil, nil
+            }, httpcontract.RouteOptions{Attributes: map[string]any{key: "value"}})
+        }()
+    }
+}

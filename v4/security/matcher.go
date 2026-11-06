@@ -162,13 +162,18 @@ func matchedRequestPath(request httpcontract.Request) (string, bool) {
     return path, true
 }
 
-/* firewallPrefixIsUnreachable reports a raw prefix no canonical request path can begin with. "" and "/" claim every path. The matcher also selects the bare spelling of a prefix written with trailing slashes, so they are dropped; a prefix without one is a string prefix, so its last segment may still grow into a canonical one ("/api/." claims "/api/.well-known") and is judged extended. */
+/* firewallPrefixIsUnreachable reports a raw prefix no canonical request path can begin with. "" and "/" claim every path. The matcher also selects the bare spelling of a prefix written with one trailing slash, so it is dropped; a prefix without one is a string prefix, so its last segment may still grow into a canonical one ("/api/." claims "/api/.well-known") and is judged extended. */
 func firewallPrefixIsUnreachable(prefix string) bool {
     if "" == prefix || "/" == prefix {
         return false
     }
 
     if false == strings.HasPrefix(prefix, "/") {
+        return true
+    }
+
+    /* more than one trailing slash is an empty segment no canonical path carries, and the fold would leave the prefix selecting its bare spelling alone */
+    if true == strings.HasSuffix(prefix, "//") {
         return true
     }
 

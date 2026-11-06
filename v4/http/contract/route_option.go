@@ -26,6 +26,6 @@ type RouteOptions struct {
     /* Priority decides among routes that all match a request, the higher first; equal priorities keep registration order. */
     Priority int
 
-    /* Attributes travel with the match into the request; the keys the framework reserves are refused at registration. */
+    /* Attributes travel with the match into the request; a key beginning with "_", the framework's prefix, is refused at registration. */
     Attributes map[string]any
 }
