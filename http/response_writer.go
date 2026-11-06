@@ -2,7 +2,6 @@ package http
 
 import (
     "bufio"
-    "errors"
     "io"
     "net"
     nethttp "net/http"
@@ -146,7 +145,7 @@ func (instance *recordingResponseWriter) Write(data []byte) (int, error) {
 func (instance *recordingResponseWriter) Flush() {
     /* a flush that reached a flusher has committed the header even when the write under it failed, so the commit is recorded and the recovery does not write a 500 over it; only ErrNotSupported means nothing was flushed. */
     flushErr := nethttp.NewResponseController(instance.ResponseWriter).Flush()
-    if false == errors.Is(flushErr, nethttp.ErrNotSupported) {
+    if false == exception.ChainIs(flushErr, nethttp.ErrNotSupported) {
         instance.recordImplicitCommit()
     }
 }

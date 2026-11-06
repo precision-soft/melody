@@ -170,7 +170,7 @@ func (instance *RateLimiter) allow(parentContext context.Context, callContext co
     count, resultErr := result.AsInt64()
     if nil != resultErr {
         /* the caller's own cancellation is not a store failure: a client that disconnected mid-round-trip surfaces as the context's cancellation and is named so, not as a redis outage. The failure-mode answer applies either way; the call-timeout deadline stays a store failure, since that budget exists to catch a slow store. */
-        if true == errors.Is(resultErr, context.Canceled) {
+        if true == exception.ChainIs(resultErr, context.Canceled) {
             return FailureModeOpen == instance.failureMode, exception.NewError(
                 "redis rate limiter call cancelled by the caller",
                 map[string]any{"key": key, "failureMode": string(instance.failureMode)},
@@ -179,7 +179,7 @@ func (instance *RateLimiter) allow(parentContext context.Context, callContext co
         }
 
         /* the caller's own deadline, tighter than the call timeout, ends the round trip with DeadlineExceeded too; the parent context says whose it was, and it is not a store failure */
-        if true == errors.Is(resultErr, context.DeadlineExceeded) && nil != parentContext.Err() {
+        if true == exception.ChainIs(resultErr, context.DeadlineExceeded) && nil != parentContext.Err() {
             return FailureModeOpen == instance.failureMode, exception.NewError(
                 "redis rate limiter call ended by the caller's deadline",
                 map[string]any{"key": key, "failureMode": string(instance.failureMode)},
@@ -217,9 +217,9 @@ func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err erro
     /* the key and the failure mode already travel in the error's own context, put there where the call was made */
     recordContext := exception.LogContext(err)
 
-    if true == errors.Is(err, errCallerDeadline) {
+    if true == exception.ChainIs(err, errCallerDeadline) {
         logger.Warning("rate limiter call ended by the caller's deadline", recordContext)
-    } else if true == errors.Is(err, context.Canceled) {
+    } else if true == exception.ChainIs(err, context.Canceled) {
         logger.Warning("rate limiter call cancelled", recordContext)
     } else {
         logger.Error("rate limiter store failure", recordContext)

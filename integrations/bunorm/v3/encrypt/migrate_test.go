@@ -12,6 +12,7 @@ import (
     "strings"
     "sync"
     "testing"
+    "time"
 
     _ "github.com/go-sql-driver/mysql"
     "github.com/uptrace/bun"
@@ -1735,4 +1736,47 @@ func TestEncryptMigrate_SealsALatin1ColumnAndMeasuresItInConnectionBytes(t *test
             t.Fatalf("%s: expected the stored seal to decrypt to the value, got %q (%v)", charset, plaintext, decryptErr)
         }
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestClassifyRunError_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        if nil == (&Migrator{}).classifyRunError(TableSpec{Table: "account"}, 0, "failed", newCyclicChainError()) {
+            t.Error("expected the failure")
+        }
+    })
 }

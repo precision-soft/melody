@@ -2,7 +2,6 @@ package rueidis
 
 import (
     "context"
-    "errors"
     "net"
     "strings"
     "time"
@@ -141,18 +140,20 @@ func (instance *Provider) openWithRetry(params ConnectionParameters) (rueidis.Cl
     }
 }
 
+const transientErrorLinkLimit = 64
+
 func (instance *Provider) isTransientError(inputErr error) bool {
     if nil == inputErr {
         return false
     }
 
     var dnsErr *net.DNSError
-    if true == errors.As(inputErr, &dnsErr) {
+    if true == exception.ChainAs(inputErr, &dnsErr) {
         return true
     }
 
     var netErr net.Error
-    if true == errors.As(inputErr, &netErr) {
+    if true == exception.ChainAs(inputErr, &netErr) {
         if true == netErr.Timeout() {
             return true
         }
@@ -177,17 +178,15 @@ func (instance *Provider) isTransientError(inputErr error) bool {
         "loading",
     }
 
-    currentErr := inputErr
-    for nil != currentErr {
-        message := strings.ToLower(currentErr.Error())
+    /* an open failure can come from the application, a hook or a verifier, and its chain may reach itself; each pointer link is read once */
+    for _, link := range exception.BuildCauseChain(inputErr, transientErrorLinkLimit) {
+        message := strings.ToLower(link)
 
         for _, marker := range transientMarkers {
             if true == strings.Contains(message, marker) {
                 return true
             }
         }
-
-        currentErr = errors.Unwrap(currentErr)
     }
 
     return false

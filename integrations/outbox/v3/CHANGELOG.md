@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- relay: a batch failure whose `Unwrap` chain reaches itself no longer holds the relay command that classifies it during a shutdown.
+
 ### Documentation
 
 - readme: the delivery semantics state that a failed `Acquire` of the optional `Locker` ends the run before it claims a row, so an outage of the lease store stops delivery, and how a wrapped `Locker` delivers through it.

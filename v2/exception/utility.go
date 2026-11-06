@@ -1,7 +1,6 @@
 package exception
 
 import (
-    "errors"
     "fmt"
     "reflect"
 
@@ -52,7 +51,7 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
     }
 
     var provider exceptioncontract.ContextProvider
-    if true == errors.As(err, &provider) && false == isNilInterfaceValue(provider) {
+    if true == ChainAs(err, &provider) && false == isNilInterfaceValue(provider) {
         errorContext := renderedContextOf(provider)
         for key, value := range errorContext {
             if "error" == key {
@@ -118,7 +117,7 @@ func FromError(err error) *Error {
     var context exceptioncontract.Context
 
     var provider exceptioncontract.ContextProvider
-    if true == errors.As(err, &provider) && false == isNilInterfaceValue(provider) {
+    if true == ChainAs(err, &provider) && false == isNilInterfaceValue(provider) {
         context = renderedContextOf(provider)
     }
 
@@ -134,7 +133,7 @@ func FromErrorWithLevel(err error, level loggingcontract.Level) *Error {
     var context exceptioncontract.Context
 
     var provider exceptioncontract.ContextProvider
-    if true == errors.As(err, &provider) && false == isNilInterfaceValue(provider) {
+    if true == ChainAs(err, &provider) && false == isNilInterfaceValue(provider) {
         context = renderedContextOf(provider)
     }
 
@@ -149,7 +148,7 @@ func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, contex
     mergedContext := make(exceptioncontract.Context)
 
     var provider exceptioncontract.ContextProvider
-    if true == errors.As(err, &provider) && false == isNilInterfaceValue(provider) {
+    if true == ChainAs(err, &provider) && false == isNilInterfaceValue(provider) {
         for key, value := range renderedContextOf(provider) {
             mergedContext[key] = value
         }
@@ -199,7 +198,7 @@ func MarkLogged(err error) error {
     }
 
     var alreadyLoggedValue exceptioncontract.AlreadyLogged
-    if true == errors.As(err, &alreadyLoggedValue) && false == isNilInterfaceValue(alreadyLoggedValue) {
+    if true == ChainAs(err, &alreadyLoggedValue) && false == isNilInterfaceValue(alreadyLoggedValue) {
         alreadyLoggedValue.MarkAsLogged()
     }
 
@@ -228,7 +227,7 @@ func IsAlreadyLogged(err error) bool {
     }
 
     var alreadyLoggedValue exceptioncontract.AlreadyLogged
-    if false == errors.As(err, &alreadyLoggedValue) || true == isNilInterfaceValue(alreadyLoggedValue) {
+    if false == ChainAs(err, &alreadyLoggedValue) || true == isNilInterfaceValue(alreadyLoggedValue) {
         return false
     }
 
@@ -316,13 +315,14 @@ func buildCauseChainFromRoots(roots []error, maxDepth int) []string {
 
     /* the walk is breadth-first over both unwrap shapes, so a chain of single wraps reads link by link and a join contributes its branches side by side; maxDepth bounds the number of links rendered, not the depth of the tree */
     pending := append([]error{}, roots...)
+    links := newChainLinkSet()
 
     for 0 < len(pending) && len(chain) < maxDepth {
         current := pending[0]
         pending = pending[1:]
 
         /* a typed-nil link contributes nothing */
-        if nil == current || true == isNilInterfaceValue(current) {
+        if nil == current || true == isNilInterfaceValue(current) || true == links.seen(current) {
             continue
         }
 
@@ -357,13 +357,14 @@ func buildCauseContextChainFromRoots(roots []error, maxDepth int) []map[string]a
 
     /* the same breadth-first walk BuildCauseChain performs, so the two chains stay index-aligned: an operator reading causeChain[2] finds its context at causeContextChain[2] whether the failure below was one wrap or a join of several */
     pending := append([]error{}, roots...)
+    links := newChainLinkSet()
 
     for 0 < len(pending) && len(chain) < maxDepth {
         current := pending[0]
         pending = pending[1:]
 
         /* a typed-nil link is the nil its producer meant and contributes nothing */
-        if nil == current || true == isNilInterfaceValue(current) {
+        if nil == current || true == isNilInterfaceValue(current) || true == links.seen(current) {
             continue
         }
 

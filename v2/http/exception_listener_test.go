@@ -905,3 +905,13 @@ func TestExceptionListener_StandsAsideForAnInstalledErrorHandler(t *testing.T) {
         }
     }
 }
+
+func TestExceptionListener_TheOccurrenceDoorsReturnOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        attachRequestContextToError(newCyclicChainError(), "request-id", "GET", "/cycle")
+
+        if nil == withOccurrenceCoordinates(map[string]any{"key": "value"}, newCyclicChainError()) {
+            t.Error("expected the context back")
+        }
+    })
+}

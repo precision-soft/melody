@@ -4,6 +4,7 @@ import (
     "errors"
     "fmt"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v3/exception"
 )
@@ -105,4 +106,47 @@ func TestIsDuplicateKey_ReadsTheSqlStateTheOtherDriversReport(t *testing.T) {
     if true == IsDuplicateKey(&fakeSqlStateReporter{sqlState: "42601"}) {
         t.Fatal("expected a SQLState() syntax error not to be a duplicate key")
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestIsDuplicateKey_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        if true == IsDuplicateKey(newCyclicChainError()) {
+            t.Error("expected a chain without a state to read as another failure")
+        }
+    })
 }

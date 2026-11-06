@@ -8,6 +8,7 @@ import (
     "net/http/httptest"
     "strings"
     "testing"
+    "time"
 
     "github.com/prometheus/client_golang/prometheus"
 
@@ -360,4 +361,47 @@ func TestMetricsMiddleware_ACommittedStatusWinsOverWhatTheHandlerReturnsAfterIt(
             }
         })
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestStatusCodeForError_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        if 500 != statusCodeForError(newCyclicChainError()) {
+            t.Error("expected a cyclic chain to read as a server failure")
+        }
+    })
 }

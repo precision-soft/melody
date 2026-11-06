@@ -355,3 +355,63 @@ func TestWithReplicaRetryInterval_RefusesANegativeIntervalAndKeepsTheDefaultForZ
 
     WithReplicaRetryInterval(-time.Second)
 }
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type cyclicSplitProvider struct{}
+
+func (instance *cyclicSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return nil, newCyclicChainError()
+}
+
+func TestReadWriteSplitter_ReaderReturnsOnACyclicChainFromAProvider(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "replica", Provider: &cyclicSplitProvider{}},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    splitter := NewReadWriteSplitter(registry, "primary", "replica")
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, readerErr := splitter.Reader(); nil == readerErr {
+            t.Error("expected the provider's refusal")
+        }
+    })
+}

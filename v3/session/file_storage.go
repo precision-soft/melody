@@ -184,7 +184,7 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
     flushErr := instance.flushLocked()
     if nil != flushErr {
         /* the entry is rolled back on a flush failure, so a failed Save is not visible to a later Load, unless the failure struck after the new document was written */
-        if false == errors.Is(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
+        if false == exception.ChainIs(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
             if true == hadPrevious {
                 instance.sessionById[sessionId] = previousEntry
             } else {
@@ -220,7 +220,7 @@ func (instance *FileStorage) Delete(sessionId string) error {
     flushErr := instance.flushLocked()
     if nil != flushErr {
         /* the entry is restored on a flush failure, unless the failure struck after the new document was written */
-        if false == errors.Is(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
+        if false == exception.ChainIs(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
             instance.sessionById[sessionId] = previousEntry
         }
 

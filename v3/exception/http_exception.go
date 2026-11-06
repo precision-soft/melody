@@ -140,7 +140,7 @@ func AsHttpException(err error) *HttpException {
     }
 
     var httpExceptionInstance *HttpException
-    if true == chainHolds(err, &httpExceptionInstance) && nil != httpExceptionInstance {
+    if true == ChainAs(err, &httpExceptionInstance) && nil != httpExceptionInstance {
         return httpExceptionInstance
     }
 

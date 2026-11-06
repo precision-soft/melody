@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- rate limit: a store failure whose `Unwrap` chain reaches itself no longer holds the limiter that classifies it. The provider's open returns on such a failure too, from a TLS verifier for one.
+
 ## [v3.6.0] - 2026-10-19 - Bounded Round Trips on Every Door, Revocation Epochs, Clock-Skew Window and Serialised Lock Doors
 
 ### Added

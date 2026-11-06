@@ -350,3 +350,25 @@ func TestRegisterRateLimitRequestListener_AnIpv6ClientSharesOneBudgetAcrossItsSl
         }
     }
 }
+
+func TestRegisterRateLimitRequestListener_ACyclicChainFromTheLimiterIsRecordedAsAFailure(t *testing.T) {
+    capture := &rateLimitCaptureLogger{Logger: logging.NewNopLogger()}
+
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    RegisterRateLimitRequestListener(dispatcher, NewRateLimitConfig(&cyclicRuntimeLimiter{}, nil, nil))
+
+    requestEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+
+    assertReturnsOnACyclicChain(t, func() {
+        _, _ = dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent)
+    })
+
+    if 0 != capture.warningCalls || 1 != capture.errorCalls {
+        t.Fatalf("expected one error and no warning, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
+    }
+}

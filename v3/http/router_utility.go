@@ -4,7 +4,6 @@ import (
     "context"
     "crypto/sha256"
     "encoding/hex"
-    "errors"
     "io"
     "io/fs"
     "net"
@@ -390,12 +389,12 @@ func writeResponse(
                 }
             } else {
                 err := sessionManager.SaveSession(sessionInstance)
-                if true == errors.Is(err, session.ErrSessionRotated) {
+                if true == exception.ChainIs(err, session.ErrSessionRotated) {
                     /* another request rotated this id away: the write is refused so the retired id is not re-created, and the cookie is left alone, since the rotating request hands the client the new id */
                     sessionPersistFailed = true
 
                     logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelWarning, "session was rotated away while the request was in flight", err, sessionInstance.Id(), request)
-                } else if true == errors.Is(err, session.ErrSessionDeleted) {
+                } else if true == exception.ChainIs(err, session.ErrSessionDeleted) {
                     /* another request ended the session: the write is refused so it is not re-created, the cookie is expired, and the handler's response is served unchanged */
                     sessionPersistFailed = true
 
@@ -486,7 +485,7 @@ func closeResponseBodySafely(closer io.Closer) (closeErr error) {
 
 /* isClientAbortWriteError classifies a response-write failure the client caused rather than the server: the broken-pipe and connection-reset errors a write to a gone peer answers with, and the plain cancellation net/http applies to the request context the moment the peer disconnects, read through its cause. A deadline or a cause-carrying cancellation the application set on the context is not the client's doing, so a write failure after it stays a server-side one. */
 func isClientAbortWriteError(request httpcontract.Request, err error) bool {
-    if true == errors.Is(err, syscall.EPIPE) || true == errors.Is(err, syscall.ECONNRESET) {
+    if true == exception.ChainIs(err, syscall.EPIPE) || true == exception.ChainIs(err, syscall.ECONNRESET) {
         return true
     }
 
@@ -781,7 +780,7 @@ func closeDiscardedResponseBody(response httpcontract.Response, logger loggingco
     }
 
     /* the writer's own deferred Close may have closed the body already; a second close of an os.File reports it and is not logged */
-    if true == errors.Is(closeErr, fs.ErrClosed) {
+    if true == exception.ChainIs(closeErr, fs.ErrClosed) {
         return
     }
 

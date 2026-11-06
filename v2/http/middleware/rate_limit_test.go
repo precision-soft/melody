@@ -1441,3 +1441,78 @@ func TestRateLimitConfig_ClientIpResolver_AnIpv6AddressItResolvesKeysOnItsSlash6
         t.Fatalf("expected the forwarded IPv6 client to key on its /64, got %q", key)
     }
 }
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type cyclicRuntimeLimiter struct{}
+
+func (instance *cyclicRuntimeLimiter) Allow(key string) bool {
+    return true
+}
+
+func (instance *cyclicRuntimeLimiter) Reset(key string) {
+}
+
+func (instance *cyclicRuntimeLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
+    return true, newCyclicChainError()
+}
+
+func TestRateLimitMiddleware_ACyclicChainFromTheLimiterIsRecordedAsAFailure(t *testing.T) {
+    capture := &rateLimitCaptureLogger{Logger: logging.NewNopLogger()}
+
+    serviceContainer := container.NewContainer()
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture)
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    handler := RateLimitMiddleware(NewRateLimitConfig(&cyclicRuntimeLimiter{}, nil, nil))(
+        func(
+            innerRuntime runtimecontract.Runtime,
+            writer nethttp.ResponseWriter,
+            request httpcontract.Request,
+        ) (httpcontract.Response, error) {
+            return nil, nil
+        },
+    )
+
+    assertReturnsOnACyclicChain(t, func() {
+        _, _ = handler(runtimeInstance, httptest.NewRecorder(), testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited"))
+    })
+
+    if 0 != capture.warningCalls || 1 != capture.errorCalls {
+        t.Fatalf("expected one error and no warning, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
+    }
+}

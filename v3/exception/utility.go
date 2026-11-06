@@ -1,7 +1,6 @@
 package exception
 
 import (
-    "errors"
     "fmt"
     "reflect"
 
@@ -52,7 +51,7 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
     }
 
     var provider exceptioncontract.ContextProvider
-    if true == chainHolds(err, &provider) && false == isNilInterfaceValue(provider) {
+    if true == ChainAs(err, &provider) && false == isNilInterfaceValue(provider) {
         errorContext := renderedContextOf(provider)
         for key, value := range errorContext {
             if "error" == key {
@@ -118,7 +117,7 @@ func FromError(err error) *Error {
     var context exceptioncontract.Context
 
     var provider exceptioncontract.ContextProvider
-    if true == chainHolds(err, &provider) && false == isNilInterfaceValue(provider) {
+    if true == ChainAs(err, &provider) && false == isNilInterfaceValue(provider) {
         context = renderedContextOf(provider)
     }
 
@@ -134,7 +133,7 @@ func FromErrorWithLevel(err error, level loggingcontract.Level) *Error {
     var context exceptioncontract.Context
 
     var provider exceptioncontract.ContextProvider
-    if true == chainHolds(err, &provider) && false == isNilInterfaceValue(provider) {
+    if true == ChainAs(err, &provider) && false == isNilInterfaceValue(provider) {
         context = renderedContextOf(provider)
     }
 
@@ -149,7 +148,7 @@ func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, contex
     mergedContext := make(exceptioncontract.Context)
 
     var provider exceptioncontract.ContextProvider
-    if true == chainHolds(err, &provider) && false == isNilInterfaceValue(provider) {
+    if true == ChainAs(err, &provider) && false == isNilInterfaceValue(provider) {
         for key, value := range renderedContextOf(provider) {
             mergedContext[key] = value
         }
@@ -199,7 +198,7 @@ func MarkLogged(err error) error {
     }
 
     var alreadyLoggedValue exceptioncontract.AlreadyLogged
-    if true == chainHolds(err, &alreadyLoggedValue) && false == isNilInterfaceValue(alreadyLoggedValue) {
+    if true == ChainAs(err, &alreadyLoggedValue) && false == isNilInterfaceValue(alreadyLoggedValue) {
         markContained(alreadyLoggedValue)
     }
 
@@ -237,7 +236,7 @@ func IsAlreadyLogged(err error) bool {
     }
 
     var alreadyLoggedValue exceptioncontract.AlreadyLogged
-    if false == chainHolds(err, &alreadyLoggedValue) || true == isNilInterfaceValue(alreadyLoggedValue) {
+    if false == ChainAs(err, &alreadyLoggedValue) || true == isNilInterfaceValue(alreadyLoggedValue) {
         return false
     }
 
@@ -253,17 +252,6 @@ func reportsAlreadyLogged(alreadyLoggedValue exceptioncontract.AlreadyLogged) (a
     }()
 
     return alreadyLoggedValue.AlreadyLogged()
-}
-
-/* chainHolds is errors.As under a recover, the one door through which this package searches a chain; a chain that cannot be searched answers that it holds nothing. */
-func chainHolds(err error, target any) (found bool) {
-    defer func() {
-        if nil != recover() {
-            found = false
-        }
-    }()
-
-    return errors.As(err, target)
 }
 
 /* unwrapPanicked stands in a rendered chain for the causes of an Unwrap that panicked, and never reaches the error a caller holds. */
@@ -361,13 +349,14 @@ func BuildCauseChain(causeErr error, maxDepth int) []string {
 func walkCauseChain(roots []error, maxDepth int, visit func(link error)) {
     pending := append([]error{}, roots...)
     visited := 0
+    links := newChainLinkSet()
 
     for 0 < len(pending) && visited < maxDepth {
         current := pending[0]
         pending = pending[1:]
 
         /* a typed-nil link contributes nothing */
-        if true == isNilInterfaceValue(current) {
+        if true == isNilInterfaceValue(current) || true == links.seen(current) {
             continue
         }
 

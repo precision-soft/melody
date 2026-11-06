@@ -43,7 +43,12 @@
 # Every row landed unclassified except the two on the message bus transport's Close, adjudicated before
 # this band existed. The rows were the work list of the step that cut from v3 what was not backwards
 # compatible before v3.14.0; every one was decided, and the release of v3.14.0 and of the integrations'
-# tags after it moved every module's comparison past them, so the file holds no row now. A new row is
+# tags after it moved every module's comparison past them. A new row is
 # a change against the latest tag that needs a decision before the next release.
 # ------------------------------------------------------------------------------------------------------
-
+. ~ compatible ~ ./exception.ChainAs ~ added ~ keep ~ ChainAs and ChainIs, the repair of the hang on an error chain whose Unwrap reaches itself, added on a patch release by the owner's decision so the integration modules share one search instead of each copying it
+. ~ compatible ~ ./exception.ChainIs ~ added ~ keep ~ ChainAs and ChainIs, the repair of the hang on an error chain whose Unwrap reaches itself, added on a patch release by the owner's decision so the integration modules share one search instead of each copying it
+v2 ~ compatible ~ ./exception.ChainAs ~ added ~ keep ~ ChainAs and ChainIs, the repair of the hang on an error chain whose Unwrap reaches itself, added on a patch release by the owner's decision so the integration modules share one search instead of each copying it
+v2 ~ compatible ~ ./exception.ChainIs ~ added ~ keep ~ ChainAs and ChainIs, the repair of the hang on an error chain whose Unwrap reaches itself, added on a patch release by the owner's decision so the integration modules share one search instead of each copying it
+v3 ~ compatible ~ ./exception.ChainAs ~ added ~ keep ~ ChainAs and ChainIs, the repair of the hang on an error chain whose Unwrap reaches itself, added on a patch release by the owner's decision so the integration modules share one search instead of each copying it
+v3 ~ compatible ~ ./exception.ChainIs ~ added ~ keep ~ ChainAs and ChainIs, the repair of the hang on an error chain whose Unwrap reaches itself, added on a patch release by the owner's decision so the integration modules share one search instead of each copying it

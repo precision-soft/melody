@@ -287,3 +287,15 @@ func TestProvider_CloseWithContextAnswersTheClientsOwnTimeoutWhenNoShutdownIsInP
         t.Fatalf("expected the client's own answer to an unanswered close, got %v", closeErr)
     }
 }
+
+func TestRedactDialError_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        if nil == redactDialError(newCyclicChainError()) {
+            t.Error("expected the dial error back")
+        }
+
+        if nil == redactUrlCause(newCyclicChainError()) {
+            t.Error("expected the fixed text")
+        }
+    })
+}

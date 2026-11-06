@@ -6,6 +6,7 @@ import (
     "math"
     "strings"
     "testing"
+    "time"
 
     exceptioncontract "github.com/precision-soft/melody/v3/exception/contract"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
@@ -1408,4 +1409,96 @@ func TestContextDoors_ReadATypedNilProviderAsNoContextAndAPanickingOneAsPanicked
             t.Fatalf("%s: expected a panicking provider read as panicked, got %s", name, rendered)
         }
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type cyclicContextChainError struct {
+    cyclicChainError
+}
+
+func (instance *cyclicContextChainError) Context() exceptioncontract.Context {
+    return exceptioncontract.Context{"link": "cyclic"}
+}
+
+func TestChainDoors_ReturnOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        chain := newCyclicChainError()
+
+        if true == IsAlreadyLogged(chain) {
+            t.Error("expected a chain nothing marked to read as not logged")
+        }
+
+        if nil == MarkLogged(chain) {
+            t.Error("expected the marked error")
+        }
+
+        if nil == LogContext(chain) {
+            t.Error("expected the context of the chain")
+        }
+
+        if nil == FromError(chain) {
+            t.Error("expected the error of the chain")
+        }
+
+    })
+}
+
+func TestCauseChains_RenderEachLinkOfACyclicChainOnce(t *testing.T) {
+    if chain := BuildCauseChain(newCyclicChainError(), 8); 2 != len(chain) {
+        t.Fatalf("expected the two links once each, got %#v", chain)
+    }
+
+    first := &cyclicContextChainError{}
+    first.next = &cyclicContextChainError{cyclicChainError: cyclicChainError{next: first}}
+
+    if chain := BuildCauseContextChain(first, 8); 2 != len(chain) {
+        t.Fatalf("expected the two contexts once each, got %#v", chain)
+    }
+}
+
+func TestChainAs_FindsTheLinkOfAJoinOnACyclicChain(t *testing.T) {
+    target := NewError("target", nil, nil)
+    chain := newCyclicChainError()
+    chain.next.(*cyclicChainError).next = errors.Join(chain, target)
+
+    var found *Error
+    assertReturnsOnACyclicChain(t, func() {
+        if false == ChainAs(chain, &found) || target != found {
+            t.Errorf("expected the link behind the cycle, got %v", found)
+        }
+    })
 }

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- output: a migration's error whose `Unwrap` chain reaches itself no longer holds the command that renders it.
+
 ## [v2.3.1] - 2026-10-19 - Truthful Lock Refusals, Failure Reports and Machine Documents
 
 ### Changed

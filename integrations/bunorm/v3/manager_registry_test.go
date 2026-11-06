@@ -3101,3 +3101,55 @@ func TestManagerRegistry_CloseMigrationDatabaseClosesOnlyWhenTheLastHolderReleas
         t.Fatal("the last release did not close the connection")
     }
 }
+
+type cyclicRefusalAfterCloseProvider struct {
+    entered chan struct{}
+    release chan struct{}
+    once    sync.Once
+}
+
+func (instance *cyclicRefusalAfterCloseProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.once.Do(func() {
+        close(instance.entered)
+    })
+
+    <-instance.release
+
+    return nil, newCyclicChainError()
+}
+
+func TestManagerRegistry_AnOpenRefusedOnACyclicChainAfterTheCloseAnswersItsWaiter(t *testing.T) {
+    provider := &cyclicRefusalAfterCloseProvider{entered: make(chan struct{}), release: make(chan struct{})}
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "x", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    opened := make(chan error, 1)
+    go func() {
+        _, openErr := registry.Database("x")
+        opened <- openErr
+    }()
+
+    select {
+    case <-provider.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the provider was never reached; there is no open in flight")
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+    defer cancel()
+
+    _ = registry.CloseWithContext(closeContext)
+
+    close(provider.release)
+
+    assertReturnsOnACyclicChain(t, func() {
+        if openErr := <-opened; nil == openErr {
+            t.Error("expected the provider's refusal")
+        }
+    })
+}

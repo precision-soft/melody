@@ -1048,7 +1048,7 @@ func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling e
     siblingContext := map[string]any{}
 
     var provider exceptioncontract.ContextProvider
-    if true == errors.As(sibling, &provider) && false == isNilInterface(provider) {
+    if true == exception.ChainAs(sibling, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             siblingContext[key] = value
         }
@@ -1056,13 +1056,9 @@ func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling e
 
     merged[prefix+"Context"] = siblingContext
 
-    causeChain := []string{}
-    for current := errors.Unwrap(sibling); false == isNilInterface(current); current = errors.Unwrap(current) {
-        causeChain = append(causeChain, current.Error())
-
-        if 8 <= len(causeChain) {
-            break
-        }
+    causeChain := exception.BuildCauseChain(errors.Unwrap(sibling), 8)
+    if nil == causeChain {
+        causeChain = []string{}
     }
 
     merged[prefix+"CauseChain"] = causeChain
@@ -1114,7 +1110,7 @@ func isShutdownCancellation(runtimeInstance runtimecontract.Runtime, invokeErr e
         return false
     }
 
-    return true == errors.Is(invokeErr, context.Canceled) && false == errors.Is(invokeErr, context.DeadlineExceeded)
+    return true == exception.ChainIs(invokeErr, context.Canceled) && false == exception.ChainIs(invokeErr, context.DeadlineExceeded)
 }
 
 /* resolveAbandonedRun answers a run whose abandon window lapsed. It reads the completion channel once more before announcing the kill, because select picks at random between two ready cases and a command that returned as the timer fired has already done its work; being a function lets a test hand it a channel that already carries the answer. */

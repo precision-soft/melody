@@ -411,3 +411,37 @@ func TestRateLimiter_AGivenObserverReplacesTheRecordAndLeavesTheErrorUnmarked(t 
         t.Fatal("a failure handed to the application's own observer must not be marked as journalled")
     }
 }
+
+func TestRateLimiter_ReportErrorReturnsOnACyclicChain(t *testing.T) {
+    first := &rateLimiterCyclicError{}
+    first.next = &rateLimiterCyclicError{next: first}
+
+    limiter := &RateLimiter{}
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+
+        if nil == limiter.reportError(nil, first) {
+            t.Error("expected the failure back")
+        }
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type rateLimiterCyclicError struct {
+    next error
+}
+
+func (instance *rateLimiterCyclicError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *rateLimiterCyclicError) Unwrap() error {
+    return instance.next
+}

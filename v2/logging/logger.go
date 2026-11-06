@@ -1,7 +1,6 @@
 package logging
 
 import (
-    "errors"
     "log"
     "strings"
 
@@ -30,7 +29,7 @@ func LogError(logger loggingcontract.Logger, err error) {
     }
 
     var alreadyLoggedValue exceptioncontract.AlreadyLogged
-    if true == errors.As(err, &alreadyLoggedValue) && false == internal.IsNilInterface(alreadyLoggedValue) {
+    if true == exception.ChainAs(err, &alreadyLoggedValue) && false == internal.IsNilInterface(alreadyLoggedValue) {
         if true == alreadyLoggedValue.AlreadyLogged() {
             return
         }

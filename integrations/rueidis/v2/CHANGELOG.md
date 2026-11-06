@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- rate limit: a store failure whose `Unwrap` chain reaches itself no longer holds the limiter that classifies it.
+
 ## [v2.2.1] - 2026-10-19 - Documented Timeout Defaults
 
 ### Fixed

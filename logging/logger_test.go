@@ -8,6 +8,7 @@ import (
     "log"
     "strings"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/exception"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
@@ -636,4 +637,45 @@ func TestLogError_NilLogger_RendersACyclicWrappedContextWithTheCycleMarker(t *te
     if false == strings.Contains(buffer.String(), "k:map[self:<cycle>]") || false == strings.Contains(buffer.String(), "context=map[") {
         t.Fatalf("expected the wrapped error's context rendered with the cycle marker, got %q", buffer.String())
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestLogError_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        LogError(NewNopLogger(), newCyclicChainError())
+    })
 }

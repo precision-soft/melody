@@ -1401,3 +1401,15 @@ func TestTlsServerNameOf_DropsTheBracketsAndTheZoneOfAnIpv6Literal(t *testing.T)
         }
     }
 }
+
+func TestProvider_OpenReturnsOnACyclicChainFromAPostBuildHook(t *testing.T) {
+    provider := newTestProvider(WithPostBuildHook(func(_ context.Context, _ containercontract.Resolver, _ *pgdriver.Connector) error {
+        return newCyclicChainError()
+    })).WithRetryConfig(NewRetryConfig(1, time.Millisecond, time.Millisecond, 1))
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, openErr := provider.Open(newStubResolver("unused", "5432", "db", "user", "password")); nil == openErr {
+            t.Error("expected the hook's refusal")
+        }
+    })
+}

@@ -4,6 +4,7 @@ import (
     "context"
     "crypto/tls"
     "errors"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "reflect"
@@ -2445,5 +2446,59 @@ func TestWrapControllerWithContainer_SignatureRefusalsCarryTheSignature(t *testi
 
             _ = wrapControllerWithContainer(signatureCase.controller)
         })
+    }
+}
+
+type cyclicClosingBody struct{}
+
+func (instance *cyclicClosingBody) Read(buffer []byte) (int, error) {
+    return 0, io.EOF
+}
+
+func (instance *cyclicClosingBody) Close() error {
+    return newCyclicChainError()
+}
+
+func TestIsClientAbortWriteError_ReturnsOnACyclicChain(t *testing.T) {
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
+
+    assertReturnsOnACyclicChain(t, func() {
+        if true == isClientAbortWriteError(request, newCyclicChainError()) {
+            t.Error("expected a cyclic chain not to read as a client abort")
+        }
+    })
+}
+
+func TestCloseDiscardedResponseBody_ReturnsOnACyclicChain(t *testing.T) {
+    response := TextResponse(nethttp.StatusOK, "discarded")
+    response.SetBodyReader(&cyclicClosingBody{})
+
+    assertReturnsOnACyclicChain(t, func() {
+        closeDiscardedResponseBody(response, logging.NewNopLogger())
+    })
+}
+
+func TestWriteResponse_ACyclicChainFromTheSessionSaveIsAnsweredWithAFiveHundred(t *testing.T) {
+    netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
+    netRequest.RemoteAddr = "127.0.0.1:1234"
+
+    melodyRequest := NewRequest(netRequest, nil, nil, nil)
+    writer := httptest.NewRecorder()
+
+    assertReturnsOnACyclicChain(t, func() {
+        writeResponse(
+            nil,
+            melodyRequest,
+            writer,
+            TextResponse(nethttp.StatusOK, "welcome"),
+            &stubSessionManager{saveErr: newCyclicChainError()},
+            &stubSession{id: "session-123", isModified: true},
+            httpcontract.ForwardedHeadersPolicy{},
+            httpcontract.SessionCookiePolicy{Path: "/"},
+        )
+    })
+
+    if nethttp.StatusInternalServerError != writer.Result().StatusCode {
+        t.Fatalf("expected 500, got %d", writer.Result().StatusCode)
     }
 }

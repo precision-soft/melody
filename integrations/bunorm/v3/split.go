@@ -1,7 +1,6 @@
 package bunorm
 
 import (
-    "errors"
     "sync"
     "sync/atomic"
     "time"
@@ -125,7 +124,7 @@ func (instance *ReadWriteSplitter) Reader() (*bun.DB, error) {
         return database, nil
     }
 
-    if false == errors.Is(databaseErr, ErrDatabaseUnreachable) {
+    if false == exception.ChainIs(databaseErr, ErrDatabaseUnreachable) {
         return nil, databaseErr
     }
 

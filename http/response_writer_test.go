@@ -469,3 +469,17 @@ func TestRecordingResponseWriter_AStatusWrittenAfterSwitchingProtocolsKeepsTheSw
         t.Fatalf("expected the committed 101, got %d", writer.CommittedStatusCode())
     }
 }
+
+type cyclicFlushWriter struct {
+    nethttp.ResponseWriter
+}
+
+func (instance *cyclicFlushWriter) FlushError() error {
+    return newCyclicChainError()
+}
+
+func TestRecordingResponseWriter_FlushReturnsOnACyclicChain(t *testing.T) {
+    writer := newRecordingResponseWriter(&cyclicFlushWriter{ResponseWriter: httptest.NewRecorder()})
+
+    assertReturnsOnACyclicChain(t, writer.Flush)
+}

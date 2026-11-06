@@ -1,7 +1,6 @@
 package static
 
 import (
-    "errors"
     "fmt"
     "io"
     "io/fs"
@@ -789,13 +788,13 @@ func logOpenFailure(logger loggingcontract.Logger, relativePath string, openErr 
 
     /* the containment guards answer the bare fs.ErrPermission, the operating system a *fs.PathError carrying it */
     var pathErr *fs.PathError
-    if true == errors.As(openErr, &pathErr) && true == errors.Is(openErr, fs.ErrPermission) {
+    if true == exception.ChainAs(openErr, &pathErr) && true == exception.ChainIs(openErr, fs.ErrPermission) {
         logger.Warning("static serve could not open a path the operating system refused", logContext)
 
         return
     }
 
-    if true == errors.Is(openErr, fs.ErrPermission) {
+    if true == exception.ChainIs(openErr, fs.ErrPermission) {
         logger.Warning("static serve refused a path that resolves outside the served directory", logContext)
 
         return

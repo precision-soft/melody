@@ -258,3 +258,11 @@ func TestHttpException_EveryAccessorAnswersTheNilReceiver(t *testing.T) {
     typedNil.SetContextValue("key", "value")
     typedNil.MarkAsLogged()
 }
+
+func TestAsHttpException_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        if nil != AsHttpException(newCyclicChainError()) {
+            t.Error("expected a cyclic chain holding no http exception to answer nil")
+        }
+    })
+}

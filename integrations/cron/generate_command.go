@@ -1355,7 +1355,7 @@ func errorDetailsOf(runErr error) map[string]any {
 
     var provider exceptioncontract.ContextProvider
     /* a typed-nil link in the chain satisfies As and passes a plain nil comparison, and Context() on the nil receiver would panic inside the report */
-    if true == errors.As(runErr, &provider) && false == isNilInterface(provider) {
+    if true == exception.ChainAs(runErr, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             details[key] = value
         }

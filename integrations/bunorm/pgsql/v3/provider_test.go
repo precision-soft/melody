@@ -1555,3 +1555,15 @@ func TestOpenContext_AnAlreadyCancelledOpenLeavesBunDiagnosticsWhereTheLastRouti
         t.Fatal("a refused open moved bun's diagnostics away from the journal the last routing put them in")
     }
 }
+
+func TestProvider_OpenReturnsOnACyclicChainFromAPostBuildHook(t *testing.T) {
+    provider := NewProvider(WithPostBuildHook(func(_ context.Context, _ *pgdriver.Connector) error {
+        return newCyclicChainError()
+    }), WithRetryConfig(NewRetryConfig(1, time.Millisecond, time.Millisecond, 1)))
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, openErr := provider.Open(newTestParams("unused", "5432", "db", "user", "password"), nil); nil == openErr {
+            t.Error("expected the hook's refusal")
+        }
+    })
+}

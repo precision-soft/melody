@@ -1,8 +1,6 @@
 package cache
 
 import (
-    "errors"
-
     "github.com/precision-soft/melody/v2/exception"
     exceptioncontract "github.com/precision-soft/melody/v2/exception/contract"
 )
@@ -35,5 +33,5 @@ func (instance *DeserializationError) Unwrap() error {
 func IsDeserializationError(err error) bool {
     var deserializationErr *DeserializationError
 
-    return errors.As(err, &deserializationErr)
+    return exception.ChainAs(err, &deserializationErr)
 }
