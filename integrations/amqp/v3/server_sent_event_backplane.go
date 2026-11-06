@@ -22,10 +22,10 @@ const defaultServerSentEventBackplaneExchange = "melody.sse"
 /* defaultServerSentEventBackplaneCallTimeout bounds each of the two stretches one Publish spends time in, the wait for its turn and the write, with the budget the redis backplane gives one round trip: the caller's context typically carries no deadline, and the amqp client discards it anyway. */
 const defaultServerSentEventBackplaneCallTimeout = time.Second
 
-/* sentinel matched with errors.Is when the connection is gone and no dialer is configured, which the listen loop treats as terminal instead of backing off forever. It is a plain sentinel wrapped in a fresh melody error at the return site, because a package-level *exception.Error carries the already-logged mark and one logged occurrence would silence every later one process-wide. */
+/* sentinel matched with exception.ChainIs when the connection is gone and no dialer is configured, which the listen loop treats as terminal instead of backing off forever. It is a plain sentinel wrapped in a fresh melody error at the return site, because a package-level *exception.Error carries the already-logged mark and one logged occurrence would silence every later one process-wide. */
 var errServerSentEventBackplaneConnectionGone = errors.New("amqp sse backplane connection is closed and no dialer is configured")
 
-/* sentinel matched with errors.Is when a publish did not return inside the call timeout, its write or its wait for a turn. Publish retries neither and keeps the channel on both: a retry after a timed-out write would first close the channel that write still holds, and after a timed-out turn it would queue behind the same broadcasts. The message says which of the two it was; plain and wrapped fresh at the return site, for the reason above. */
+/* sentinel matched with exception.ChainIs when a publish did not return inside the call timeout, its write or its wait for a turn. Publish retries neither and keeps the channel on both: a retry after a timed-out write would first close the channel that write still holds, and after a timed-out turn it would queue behind the same broadcasts. The message says which of the two it was; plain and wrapped fresh at the return site, for the reason above. */
 var errServerSentEventBackplanePublishTimedOut = errors.New("amqp sse backplane publish did not return within the call timeout")
 
 type serverSentEventWireEvent struct {

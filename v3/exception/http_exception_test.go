@@ -269,3 +269,11 @@ func TestAsHttpException_AChainWhoseSearchPanicsHoldsNone(t *testing.T) {
         t.Fatalf("expected a chain that cannot be searched to hold no http exception")
     }
 }
+
+func TestAsHttpException_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        if nil != AsHttpException(newCyclicChainError()) {
+            t.Error("expected a cyclic chain holding no http exception to answer nil")
+        }
+    })
+}

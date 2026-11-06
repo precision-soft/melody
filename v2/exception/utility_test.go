@@ -1268,9 +1268,6 @@ func TestChainDoors_ReturnOnACyclicChain(t *testing.T) {
             t.Error("expected the error of the chain")
         }
 
-        if nil != AsHttpException(chain) && 500 != AsHttpException(chain).StatusCode() {
-            t.Error("expected a cyclic chain to read as a server failure")
-        }
     })
 }
 

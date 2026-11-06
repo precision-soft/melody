@@ -45,7 +45,7 @@ const (
 /* errReconnectInProgress is a plain sentinel matched with errors.Is, and every return wraps it in a fresh melody error: a package-level *exception.Error carries the already-logged mark and a mutable context map, so a shared one, once logged, would silence every later occurrence process-wide and race on its context. */
 var errReconnectInProgress = errors.New("amqp reconnect already in progress")
 
-/* errPublishTimedOut is matched with errors.Is when a publish write did not return inside the publish timeout; plain and wrapped fresh at the return site, for the reason above. */
+/* errPublishTimedOut is matched with exception.ChainIs when a publish write did not return inside the publish timeout; plain and wrapped fresh at the return site, for the reason above. */
 var errPublishTimedOut = errors.New("amqp publish did not return within the publish timeout")
 
 func NewTransport(config TransportConfig) *Transport {
@@ -330,7 +330,7 @@ func (instance *Transport) CloseWithContext(closeContext context.Context) error 
 }
 
 func ignoringAlreadyClosed(closeErr error) error {
-    if true == errors.Is(closeErr, amqp091.ErrClosed) {
+    if true == exception.ChainIs(closeErr, amqp091.ErrClosed) {
         return nil
     }
 

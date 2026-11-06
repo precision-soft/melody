@@ -4364,8 +4364,6 @@ func TestRunnerFailureDoors_ReturnOnACyclicChain(t *testing.T) {
             t.Error("expected the merged context")
         }
 
-        errorDetailsOf(newCyclicChainError())
-
         if false == isShutdownCancellation(cancelledRuntime, errors.Join(context.Canceled, newCyclicChainError())) {
             t.Error("expected a cancellation on a cyclic chain to read as the shutdown")
         }

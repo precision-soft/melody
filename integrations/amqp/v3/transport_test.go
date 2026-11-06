@@ -3724,3 +3724,17 @@ func TestTransport_SendReturnsOnACyclicChainFromTheDialer(t *testing.T) {
         }
     })
 }
+
+func TestIgnoringAlreadyClosed_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        chain := newCyclicChainError()
+
+        if closeErr := ignoringAlreadyClosed(chain); chain != closeErr {
+            t.Errorf("expected the failure kept, got: %v", closeErr)
+        }
+
+        if closeErr := ignoringAlreadyClosed(errors.Join(amqp091.ErrClosed, chain)); nil != closeErr {
+            t.Errorf("expected the already closed connection ignored, got: %v", closeErr)
+        }
+    })
+}

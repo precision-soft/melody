@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- transport: a dialer's error whose `Unwrap` chain reaches itself no longer holds the `Send` or the server-sent event backplane that classifies it.
+- transport: a dialer's error whose `Unwrap` chain reaches itself no longer holds the `Send` or the server-sent event backplane that classifies it, and a close error on such a chain no longer holds `Close`.
 
 ### Documentation
 

@@ -525,10 +525,22 @@ func TestTracker_AStorageErrorOfANonComparableTypeIsReportedNotPanicked(t *testi
     }
 }
 
+type nonComparableCyclicStorageError struct {
+    parts []string
+}
+
+func (instance nonComparableCyclicStorageError) Error() string {
+    return "non comparable cyclic storage failure"
+}
+
+func (instance nonComparableCyclicStorageError) Unwrap() error {
+    return instance
+}
+
 func TestTracker_AStorageErrorOnACyclicChainIsReported(t *testing.T) {
     scripted := &scriptedDatabase{}
     database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
-    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{failWith: newCyclicChainError()}, nil))
+    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{failWith: nonComparableCyclicStorageError{parts: []string{"storage"}}}, nil))
 
     insertReturned := make(chan error, 1)
     go func() {
