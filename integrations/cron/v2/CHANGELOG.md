@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.7.2] - 2026-11-06 - Bounded Error Chain Search
+
 ### Fixed
 
 - runner: a sibling failure's cause chain renders each pointer link once, breadth-first, as the framework's chain does, where a chain reaching itself repeated its links up to the bound of eight.
@@ -164,7 +166,9 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v2`; dependency pinned to `github.com/precision-soft/melody/v2`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.7.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.7.2...HEAD
+
+[v2.7.2]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.7.1...integrations/cron/v2.7.2
 
 [v2.7.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v2.7.0...integrations/cron/v2.7.1
 

@@ -10,6 +10,12 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v2.13.4] - 2026-11-06 - Build Version Matches the Release
+
+### Fixed
+
+- version: `BuildVersion()` and the command envelope's `meta.version.melody` answer this release, where a build without `-ldflags` answered `v2.13.1` on every release since.
+
 ## [v2.13.3] - 2026-11-06 - Bounded Error Chain Search
 
 ### Added
@@ -1269,7 +1275,9 @@ The example application inside this major keeps no changelog: it is not a projec
 
 - `go.mod` — introduce Melody v2 module (`github.com/precision-soft/melody/v2`)
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v2.13.3...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v2.13.4...HEAD
+
+[v2.13.4]: https://github.com/precision-soft/melody/compare/v2.13.3...v2.13.4
 
 [v2.13.3]: https://github.com/precision-soft/melody/compare/v2.13.2...v2.13.3
 

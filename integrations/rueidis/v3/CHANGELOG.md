@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.1] - 2026-11-06 - Bounded Error Chain Search
+
 ### Fixed
 
 - rate limit: a store failure whose `Unwrap` chain reaches itself no longer holds the limiter that classifies it. The provider's open returns on such a failure too, from a TLS verifier for one.
@@ -162,7 +164,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `v3/connection_params.go` — `ConnectionConfig` renamed to `ConnectionParams` with value semantics
 - Dependencies pinned to `github.com/precision-soft/melody/v3 v3.0.0`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.6.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.6.1...HEAD
+
+[v3.6.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.6.0...integrations/rueidis/v3.6.1
 
 [v3.6.0]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v3.5.1...integrations/rueidis/v3.6.0
 
