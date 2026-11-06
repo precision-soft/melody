@@ -4,12 +4,11 @@ import (
     "reflect"
 )
 
-/* chainLinkLimit bounds a search whose links carry no pointer identity to recognise a cycle by, and a chain that grows a new link on every Unwrap. */
 const chainLinkLimit = 65536
 
 var chainErrorType = reflect.TypeOf((*error)(nil)).Elem()
 
-/* ChainAs answers what errors.As answers and returns on a chain whose Unwrap reaches itself, on which errors.As never returns. A link met twice is read once, and a search stops after 65,536 links; a link that panics while it is read ends the search answering false. It panics on a target errors.As panics on. */
+/* ChainAs is errors.As that returns on a chain whose Unwrap reaches itself; a link that panics answers false */
 func ChainAs(err error, target any) bool {
     if nil == err {
         return false
@@ -39,7 +38,7 @@ func ChainAs(err error, target any) bool {
     })
 }
 
-/* ChainIs answers what errors.Is answers and returns on a chain whose Unwrap reaches itself, on which errors.Is never returns. A link met twice is read once, and a search stops after 65,536 links; a link that panics while it is read ends the search answering false. */
+/* ChainIs is errors.Is that returns on a chain whose Unwrap reaches itself; a link that panics answers false */
 func ChainIs(err error, target error) bool {
     if nil == target {
         return nil == err
@@ -56,7 +55,6 @@ func ChainIs(err error, target error) bool {
     })
 }
 
-/* chainSearch walks depth first, in the order errors.As and errors.Is read a chain; a chain that panics while it is read answers that it holds nothing. */
 func chainSearch(err error, matches func(link error) bool) (found bool) {
     defer func() {
         if nil != recover() {
@@ -94,7 +92,7 @@ func chainSearch(err error, matches func(link error) bool) (found bool) {
     return false
 }
 
-/* chainLinkSet recognises the links of a chain a walk already met. It holds each link itself, not its address, so a link the walk has passed cannot be collected and its address handed to a new link. */
+/* holds each link, not its address, so a passed link cannot be collected and its address handed to a new link */
 type chainLinkSet struct {
     links map[error]struct{}
 }
@@ -103,7 +101,6 @@ func newChainLinkSet() *chainLinkSet {
     return &chainLinkSet{links: map[error]struct{}{}}
 }
 
-/* seen records a pointer link and answers whether it was met before; a value link has no identity and answers false. */
 func (instance *chainLinkSet) seen(link error) bool {
     reflected := reflect.ValueOf(link)
     if reflect.Pointer != reflected.Kind() || true == reflected.IsNil() {

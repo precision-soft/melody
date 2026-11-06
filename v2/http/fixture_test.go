@@ -1,4 +1,4 @@
-/* The shared test material of this package: the doubles every test file of it reaches for, the helpers that build them, and — where a contract spans every source rather than any one of them — the test that asserts it. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed to exist without a matching source, which is what keeps every other one honest. A test provable from a single source belongs in that source's own mirror, not here. */
+/* the one test file of this package allowed to exist without a matching source */
 package http
 
 import (
@@ -114,7 +114,6 @@ type closeRecordingScope struct {
     containercontract.Scope
     failOverride bool
     closed       bool
-    /* onClose runs at the moment the scope-close defer runs. That defer is registered first, so it runs last: whatever a test reads here has already been decided by every defer above it, which is how the ordering between the early recovery guard and the scope close is asserted rather than assumed. */
     onClose func()
 }
 
@@ -185,14 +184,12 @@ func (instance *countingSessionStorage) Save(sessionId string, data map[string]a
     return instance.Storage.Save(sessionId, data, ttl)
 }
 
-/* capturedRecord is one record a recordsCaptureLogger received */
 type capturedRecord struct {
     level   loggingcontract.Level
     message string
     context loggingcontract.Context
 }
 
-/* recordsCaptureLogger keeps every record, under a lock, so a test served over several requests can count the records each one filed */
 type recordsCaptureLogger struct {
     mutex   sync.Mutex
     records []capturedRecord
@@ -225,7 +222,6 @@ func (instance *recordsCaptureLogger) Emergency(message string, context loggingc
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* failureRecords answers the records at warning, error or emergency, the ones a failure files */
 func (instance *recordsCaptureLogger) failureRecords() []capturedRecord {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

@@ -22,7 +22,6 @@ import (
 const (
     defaultPollInterval = 1 * time.Second
 
-    /* defaultMaxErrorBackoff caps the doubling delay between RunOnce retries after consecutive failures, so a persistent repository outage neither tight-loops the relay nor pushes the retry horizon out indefinitely. */
     defaultMaxErrorBackoff = 1 * time.Minute
 )
 
@@ -34,7 +33,7 @@ func NewRelayCommand(relay *Relay) *RelayCommand {
     return &RelayCommand{relay: relay}
 }
 
-/* NewRelayCommandFromResolver builds the command against a lazily-resolved relay: the registered service.outbox.relay is resolved on the first batch rather than in the composition root, so a multi-database app can register the module with a resolver-backed relay factory and still get the built-in command without opening a database at boot. */
+/* NewRelayCommandFromResolver resolves service.outbox.relay on the first batch, opening no database at boot */
 func NewRelayCommandFromResolver(resolver containercontract.Resolver) *RelayCommand {
     if nil == resolver {
         exception.Panic(exception.NewError("outbox relay command resolver is nil", nil, nil))
@@ -48,7 +47,7 @@ type RelayCommand struct {
     relayLazy *container.LazyService[*Relay]
 }
 
-/* resolveRelay returns the prebuilt relay, or resolves the lazy one — a successful resolution is memoized, a failed one is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting. The nil-yield guard mirrors lazyRepository.resolveStore: LazyService.Resolve passes a nil yield through with a nil error, and the run loop would then dereference it and panic the relay process on what should have been one more retried failure. */
+/* resolveRelay guards a nil yield: LazyService.Resolve passes it with a nil error and the run loop would panic */
 func (instance *RelayCommand) resolveRelay() (*Relay, error) {
     if nil != instance.relayLazy {
         relay, resolveErr := instance.relayLazy.Resolve()
@@ -108,7 +107,6 @@ func (instance *RelayCommand) Run(
 
     limit := commandContext.Int("limit")
 
-    /* stop on SIGINT/SIGTERM: the cancelled context aborts an in-flight batch mid-drain (RunOnce threads it through every repository and transport call), and whatever stayed claimed re-surfaces once its VisibilityTimeout lapses; a signal that lands between batches exits before the next claim. */
     runContext, stop := signal.NotifyContext(runtimeInstance.Context(), os.Interrupt, syscall.SIGTERM)
     defer stop()
 
@@ -120,7 +118,6 @@ func (instance *RelayCommand) Run(
     errorBackoff := interval
 
     for {
-        /* the relay is resolved inside the loop: with a lazy relay a store outage at start-up surfaces here as an error that follows the same backoff-and-retry path as a failed batch, and a later successful resolution proceeds normally. */
         published := 0
         relay, runErr := instance.resolveRelay()
         if nil == runErr {
@@ -131,7 +128,7 @@ func (instance *RelayCommand) Run(
 
         if nil != runErr {
             if nil != runContext.Err() {
-                /* a cancellation interrupted the batch mid-drain and the visibility timeout re-surfaces what stayed claimed, so the command exits cleanly; only an error the cancellation explains is swallowed, so a repository failure that coincides with a lapsing deadline is still reported */
+                /* only an error the cancellation explains is swallowed; a repository failure at a lapsing deadline is reported */
                 if true == exception.ChainIs(runErr, context.Canceled) || true == exception.ChainIs(runErr, context.DeadlineExceeded) {
                     return nil
                 }
@@ -145,7 +142,6 @@ func (instance *RelayCommand) Run(
 
             instance.logRunError(logger, runErr, published)
 
-            /* double the delay on consecutive failures so a persistent outage does not tight-loop, clamped to the cap; any successful run resets it below. */
             if false == sleepInterruptible(runContext, errorBackoff) {
                 return nil
             }
@@ -164,7 +160,6 @@ func (instance *RelayCommand) Run(
             return nil
         }
 
-        /* a full drain suggests more rows are due: poll again after the interval; an empty batch waits the idle backoff instead. */
         delay := interval
         if 0 == published {
             delay = idleBackoff

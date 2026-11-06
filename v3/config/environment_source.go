@@ -15,7 +15,7 @@ import (
 )
 
 const (
-    /* the two markers stand in for a dollar while the file goes through godotenv, which would otherwise expand it against that one file's keys; wrapped in NUL, no typed value collides with them, and with no dollar, backslash or quote in them godotenv passes them through */
+    /* the markers stand in for a dollar while the file goes through godotenv, which would expand it against one file's keys */
     dollarReferenceMarker = "\x00melodyDotEnvReference\x00"
     dollarLiteralMarker   = "\x00melodyDotEnvLiteralDollar\x00"
 )
@@ -33,7 +33,7 @@ func NewEnvironmentSource(
 type EnvironmentSource struct {
     fileSystem fs.FS
     baseDir    string
-    /* the keys each .env value was assembled from through ${KEY}, filled by Load, so a secret marking reaches a value no template names; held behind a pointer so the source stays comparable */
+    /* held behind a pointer so the source stays comparable */
     provenance *dotEnvProvenance
 }
 
@@ -82,7 +82,6 @@ func (instance *EnvironmentSource) loadDotEnvFiles(values map[string]string) (st
         return EnvDevelopment, nil
     }
 
-    /* the environment name picks the next two files to load, so a reference inside it is resolved now, against the two files already read; the whole set is resolved again once every file is merged */
     environmentValue, expandErr := expandDotEnvValue(
         EnvKey,
         values,
@@ -91,7 +90,6 @@ func (instance *EnvironmentSource) loadDotEnvFiles(values map[string]string) (st
         nil,
     )
     if nil != expandErr {
-        /* a reference in MELODY_ENV can see only .env and .env.local, since the value picks which .env.<name> files load next; the error says so */
         return "", exception.NewError(
             "could not resolve the MELODY_ENV value against .env and .env.local; the environment name selects the .env.<name> files, so a reference in it can only read keys those two files define",
             nil,
@@ -170,10 +168,10 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
         )
     }
 
-    /* the parser is handed content that ends with a newline, as a file does: the preprocessor joins its lines without one, and the parser read a last line without a separator as the value of an empty key, whether the file ended with a newline or not, where on every other line it is the error it is, so the line vanished */
+    /* the parser needs the final newline: without it, a last line with no separator is read as the value of an empty key */
     parsed, parseErr := godotenv.Parse(strings.NewReader(preprocessed + "\n"))
     if nil != parseErr {
-        /* the parser's error is not the cause: godotenv quotes the file content it choked on, where the credentials live; only a content-free description travels, and the path names the file */
+        /* the parser's error is not the cause: godotenv quotes the file content, where the credentials live */
         return exception.NewError(
             "failed to parse env file",
             exceptioncontract.Context{
@@ -196,7 +194,7 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
     return nil
 }
 
-/* sanitizeDotEnvParseFailure keeps the failure's shape and drops the file content it quotes. The unterminated-value failure is read by its prefix before the " near " cut, since godotenv appends the value's first line to it raw; the malformed-name failure carries " near " ahead of the content it quotes. */
+/* the unterminated-value failure is read by its prefix, since godotenv appends the value's first line to it raw */
 func sanitizeDotEnvParseFailure(parseErr error) string {
     message := parseErr.Error()
 
@@ -219,7 +217,6 @@ func (instance *EnvironmentSource) dotEnvAssembledFrom() map[string][]string {
     return instance.provenance.assembledFrom
 }
 
-/* expandDotEnvReferences resolves the ${KEY} and $KEY references of every loaded .env artifact over the merged set, since the parser alone resolves them per file and a reference across files would become the empty string. A reference that names no key fails the boot, as %env(KEY)% does; a dollar escaped with a backslash is data. */
 func expandDotEnvReferences(values map[string]string) (map[string][]string, error) {
     assembledFrom := make(map[string][]string)
     resolved := make(map[string]string, len(values))
@@ -230,7 +227,6 @@ func expandDotEnvReferences(values map[string]string) (map[string][]string, erro
         keys = append(keys, key)
     }
 
-    /* sorted, so the boot fails on the same reference every time */
     sort.Strings(keys)
 
     for _, key := range keys {
@@ -247,7 +243,7 @@ func expandDotEnvReferences(values map[string]string) (map[string][]string, erro
     return assembledFrom, nil
 }
 
-/* expandDotEnvValue resolves one key's references and memoizes the result. A referenced value is spliced in as data, never rescanned, so a password holding a dollar survives. The resolving set turns a key that reads itself, or a ring of keys, into a named error. */
+/* a referenced value is spliced in as data, never rescanned, so a password holding a dollar survives */
 func expandDotEnvValue(
     key string,
     values map[string]string,
@@ -301,7 +297,7 @@ func expandDotEnvValue(
 
         referencedKey, consumedLength, malformedBracedReference := parseDotEnvReference(fragment)
         if 0 == consumedLength {
-            /* the braced content is not reported: it may hold a pasted credential, and the enclosing key is enough to find it */
+            /* the braced content is not reported: it may hold a pasted credential */
             if true == malformedBracedReference {
                 return "", exception.NewError(
                     "malformed reference in env file value; ${...} must name a key of upper case letters, digits and underscores, and a literal dollar is written as \\$",
@@ -312,7 +308,6 @@ func expandDotEnvValue(
                 )
             }
 
-            /* nothing name-shaped follows, so the dollar is data */
             builder.WriteByte('$')
 
             remaining = fragment
@@ -342,7 +337,7 @@ func expandDotEnvValue(
         }
 
         if _, referencedExists := values[referencedKey]; false == referencedExists {
-            /* the value is not reported: it commonly holds an inline credential, and the two keys are enough to find it */
+            /* the value is not reported: it commonly holds an inline credential */
             return "", exception.NewError(
                 "undefined key referenced in env file; write a literal dollar as \\$",
                 exceptioncontract.Context{
@@ -373,7 +368,6 @@ func expandDotEnvValue(
     return value, nil
 }
 
-/* parseDotEnvReference reads the key name a reference marker opens, braced or bare, and reports how much of the fragment it consumed. Zero means the dollar is data, except for a braced form closed over a name outside the key grammar, which raises the malformed flag and is refused as a misspelled %env(...)% is. An unclosed brace stays data. */
 func parseDotEnvReference(fragment string) (string, int, bool) {
     if 0 == len(fragment) {
         return "", 0, false
@@ -428,7 +422,7 @@ func isDotEnvKeyName(name string) bool {
     return true
 }
 
-/* the name a reference may carry is exactly what godotenv expands, [A-Z0-9_]: this decides whether a dollar in a value opens a reference at all, so `DB_PASSWORD=pa$sword` and `LABEL=$1.50` stay the data godotenv reads them as. */
+/* a reference name is exactly what godotenv expands, [A-Z0-9_], so `DB_PASSWORD=pa$sword` and `LABEL=$1.50` stay data */
 func isDotEnvKeyNameStartCharacter(character byte) bool {
     return ('A' <= character && 'Z' >= character) || '_' == character
 }
@@ -438,7 +432,6 @@ func isDotEnvKeyNameCharacter(character byte) bool {
 }
 
 func preprocessDotEnvContent(content string) (string, error) {
-    /* an editor saving UTF-8 with a byte order mark puts U+FEFF before the first key; it is not whitespace, and godotenv would reject the line */
     content = strings.TrimPrefix(content, "\ufeff")
 
     scanner := bufio.NewScanner(strings.NewReader(content))
@@ -449,20 +442,19 @@ func preprocessDotEnvContent(content string) (string, error) {
 
     lines := make([]string, 0)
 
-    /* the quote state spans lines, as godotenv accepts a quoted value over several of them, so a '#' or a blank line inside such a value stays data */
     inQuotes := false
     var quoteChar byte = 0
 
     for scanner.Scan() {
         line := scanner.Text()
 
-        /* the line is walked byte by byte, never through runes: a rune round-trip would rewrite bytes that are not valid UTF-8, a Latin-1 password among them. The line is collected into a slice, so the dollar handling below can take back a backslash that escaped the dollar. */
+        /* walked byte by byte, never through runes: a rune round-trip would rewrite bytes that are not valid UTF-8 */
         output := make([]byte, 0, len(line))
 
         openedInQuotes := inQuotes
         var previousChar byte = 0
 
-        /* godotenv opens a quoted value only when the quote is the first non-space byte after the separator; a quote elsewhere is data and must not flip the cross-line state */
+        /* godotenv opens a quoted value only on the first non-space byte after the separator; a quote elsewhere is data */
         sawSeparator := openedInQuotes
         valueStarted := openedInQuotes
 
@@ -471,7 +463,6 @@ func preprocessDotEnvContent(content string) (string, error) {
 
             if '"' == character || '\'' == character {
                 if true == inQuotes {
-                    /* godotenv skips a quote preceded by a backslash, so an escaped quote does not terminate the value */
                     if quoteChar == character && '\\' != previousChar {
                         inQuotes = false
                         quoteChar = 0
@@ -488,7 +479,7 @@ func preprocessDotEnvContent(content string) (string, error) {
             }
 
             if false == inQuotes {
-                /* a comment before any separator comments the whole line out; after it, godotenv's own countback decides where the value ends, except for an empty value, whose leading '#' the countback skips. That one is cut here, under the same rule, a '#' preceded by a space or by nothing, so "KEY=#glued" stays data. */
+                /* ahead of any separator '#' comments the line out; after it godotenv decides, except for an empty value's leading '#' */
                 if '#' == character && (false == sawSeparator || false == valueStarted) {
                     if 0 == previousChar || true == isDotEnvSpaceByte(previousChar) {
                         break
@@ -504,7 +495,7 @@ func preprocessDotEnvContent(content string) (string, error) {
                 }
             }
 
-            /* every dollar in a value leaves here as a marker, so godotenv expands nothing and the references are resolved over the merged files; a single-quoted value is left alone, as godotenv leaves it, and an escaped dollar becomes the literal marker */
+            /* every dollar in a value leaves here as a marker, so godotenv expands nothing; references resolve over the merged files */
             if '$' == character && true == sawSeparator {
                 singleQuotedValue := true == inQuotes && '\'' == quoteChar
 
@@ -527,7 +518,6 @@ func preprocessDotEnvContent(content string) (string, error) {
 
         processed := string(output)
 
-        /* inside an unterminated quoted value trailing whitespace and blank lines are data */
         if false == inQuotes {
             processed = strings.TrimRightFunc(processed, unicode.IsSpace)
         }

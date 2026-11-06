@@ -20,7 +20,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/v2/runtime/contract"
 )
 
-/* the scope is closed when the TEST ends, not when this constructor returns, so every assertion about scope reporting and the action's teardown half runs against an open scope; the two runtimes the package writes by hand omit that defer on purpose */
+/* the scope closes when the test ends, not when this constructor returns, so assertions run against an open scope */
 func newTestRuntime(t *testing.T) *testRuntime {
     t.Helper()
 
@@ -232,7 +232,6 @@ func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
     }, "cli command name already registered")
 }
 
-/* the duplicate scan walks a list the caller owns, and urfave admits a nil entry into it: read without the guard, the very next registration dereferences that nil while looking for a name clash — a boot that dies inside the framework over a hole somebody else punched in the list */
 func TestRegister_SkipsANilEntryWhenScanningForADuplicateName(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
     rootCommand := NewCommandContext("app", "desc")
@@ -260,7 +259,6 @@ func TestRegister_SkipsANilEntryWhenScanningForADuplicateName(t *testing.T) {
     }
 }
 
-/* the scope close is weighed beside the container close, so a scoped service whose teardown failed, a transaction left unfinished or a file left unflushed, never ends a command that reports success */
 type closeCountingScope struct {
     containercontract.Scope
     closeCalls int
@@ -272,7 +270,6 @@ func (instance *closeCountingScope) Close() error {
     return instance.Scope.Close()
 }
 
-/* the positive half of the action's teardown: on a fixture that hands the action an open scope, the close is made */
 func TestRegister_ActionClosesTheScopeOnce(t *testing.T) {
     serviceContainer := container.NewContainer()
     scope := &closeCountingScope{Scope: serviceContainer.NewScope()}
@@ -343,7 +340,6 @@ func TestRegister_ActionReportsAFailingScopeClose(t *testing.T) {
     }
 }
 
-/* a close error filed under no name is dropped rather than reported as an anonymous failure: the name is the only thing telling an operator which teardown broke, and "" beside a message is a report that cannot be acted on */
 func TestAggregateCliErrors_DropsAnUnnamedFailure(t *testing.T) {
     runErr := errors.New("command failed")
 
@@ -354,7 +350,6 @@ func TestAggregateCliErrors_DropsAnUnnamedFailure(t *testing.T) {
     }
 }
 
-/* a name registered with a nil error is not a failure: reported as one it would reach Error() on a nil error while building the report */
 func TestAggregateCliErrors_DropsANamedNilFailure(t *testing.T) {
     runErr := errors.New("command failed")
 
@@ -365,7 +360,6 @@ func TestAggregateCliErrors_DropsANamedNilFailure(t *testing.T) {
     }
 }
 
-/* a command that failed WITHOUT an exit code hands back the aggregate itself: wrapping it in an exit error regardless would invent a code the command never chose, and answering the command error alone would drop the shutdown failures that exist nowhere else */
 func TestAggregateCliErrors_AnswersThePlainAggregateWhenTheCommandCarriesNoExitCode(t *testing.T) {
     runErr := errors.New("command failed")
 
@@ -545,7 +539,6 @@ func runRegisteredStandardFlagsCommand(
     return buffer.String()
 }
 
-/* quiet is the documented governor of decoration and the banner is decoration: StandardFlags defaults it to true, so a scripted invocation reads the command's own output alone, and the frame comes back with one explicit --quiet=false */
 func TestRegister_ActionHonoursQuietForTheBanner(t *testing.T) {
     written := runRegisteredStandardFlagsCommand(t, nil)
 
@@ -623,7 +616,6 @@ func runRegisteredCommandWithRuntime(
     return written + errorWritten, runErr
 }
 
-/* runRegisteredCommandOnTwoStreams answers the output stream and the error stream apart, as a shell redirecting one of them sees them */
 func runRegisteredCommandOnTwoStreams(
     runtimeInstance runtimecontract.Runtime,
     command clicontract.Command,
@@ -778,7 +770,6 @@ func TestRegister_ActionLeavesTheContainerOpenWhenTheCommandSucceeds(t *testing.
     }
 }
 
-/* a panic in the command prints the failed banner and is re-raised unchanged, so the recover handler that owns the process boundary still sees it */
 func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -825,7 +816,6 @@ func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *
     }
 }
 
-/* the closes are deliberately left to the outer layers on the panic path: closing the container here would hand the recover handler that resolves the exit logger a closed container, downgrading the fatal record to the emergency fallback */
 func TestRegister_ActionLeavesTheContainerOpenOnThePanicPath(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -870,7 +860,6 @@ func (instance *typedNilErrorCommandFailure) Error() string {
     return instance.message
 }
 
-/* a command that returns its error through a concrete typed pointer hands over a non-nil interface around a nil value, which reads as the success it means rather than reaching Error() on a nil receiver while the status is printed */
 func TestRegister_ActionReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -912,7 +901,6 @@ func (instance *failingCloseService) Close() error {
     return errors.New("the backend connection refused to close")
 }
 
-/* asking before closing mirrors the application teardown: a repeated Close answers the first teardown's memoized error, so a command that already closed the container itself — and folded the failure into its own result — would have that one failure presented again as a fresh shutdown incident */
 func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlreadyClosed(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -935,7 +923,6 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
         runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
             _ = runtimeInstance.Container().MustGet("test.failing-close")
 
-            /* the command takes the teardown failure into its own hands: the close error is its to fold into the result */
             closeErr := runtimeInstance.Container().Close()
             if nil == closeErr {
                 t.Fatalf("expected the container close to fail through the registered service")
@@ -956,7 +943,6 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
     }
 }
 
-/* a --no-color run redirected into a file carries no escape codes in its banner */
 func TestRegister_ActionPrintsThePlainBannerUnderNoColor(t *testing.T) {
     written := runRegisteredCommand(t, []string{"--no-color"})
 
@@ -968,7 +954,6 @@ func TestRegister_ActionPrintsThePlainBannerUnderNoColor(t *testing.T) {
     }
 }
 
-/* the colored banner is the default: the no-color branch must not take the ansi sequences away from the run that never asked for that */
 func TestRegister_ActionKeepsTheColoredBannerByDefault(t *testing.T) {
     written := runRegisteredCommand(t, nil)
 
@@ -977,7 +962,6 @@ func TestRegister_ActionKeepsTheColoredBannerByDefault(t *testing.T) {
     }
 }
 
-/* chainedCliError carries a cause the way a wrapped command failure does, so errors.As can be walked onto a typed-nil link */
 type chainedCliError struct {
     cause error
 }
@@ -990,7 +974,6 @@ func (instance *chainedCliError) Unwrap() error {
     return instance.cause
 }
 
-/* errors.As matches *ExitError on a typed-nil link and answers code 0, which NewExitError refuses with a panic — after the container was already closed, so the record would reach stderr alone */
 func TestAggregateCliErrors_ATypedNilExitLinkKeepsTheAggregateUnwrapped(t *testing.T) {
     var typedNilExitError *exception.ExitError
     var cause error = typedNilExitError
@@ -1033,7 +1016,6 @@ func TestAggregateCliErrors_ARealExitLinkKeepsItsCode(t *testing.T) {
     }
 }
 
-/* the no-color run is the clean proof, because the colored branch writes the framework's own ansi codes around the data: under --no-color every escape byte in the output can only have come from the data, and the flag's comment promises a redirected file free of them. The negative assertions are what the eye cannot check — a raw \r and a raw escape byte render invisibly. */
 func TestRegister_ActionEscapesTheCommandErrorInTheStatusLine(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
 
@@ -1095,7 +1077,6 @@ func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
     }
 }
 
-/* the finish banner colours the verdict red on failure after the escaping that keeps client-derived text from repainting the line, so its sequence reaches the terminal raw rather than as the literal text \x1b[31m, and a control character in the data around it, here the command's own name, is still spelled visibly. */
 func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing.T) {
     command := &testCommand{
         nameValue:        "bo\rom",
@@ -1124,7 +1105,6 @@ func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing
     }
 }
 
-/* the no-color banner prints the plain verdict, byte for byte */
 func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
     command := &testCommand{
         nameValue:        "boom",
@@ -1211,7 +1191,6 @@ func TestRegister_AFailingCommandWritesItsErrorLineWhateverQuietSays(t *testing.
     }
 }
 
-/* the error line goes to the error stream, so a command whose output is a document never ends it with the line, in text and in json */
 func TestRegister_AFailingCommandWritesItsErrorLineOnTheErrorStream(t *testing.T) {
     for _, formatArgument := range []string{"", "--format=json"} {
         outputBuffer := &bytes.Buffer{}

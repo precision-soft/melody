@@ -8,7 +8,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/logging/contract"
 )
 
-/* isNilInterfaceValue duplicates internal.IsNilInterface, since that package imports this one. */
+/* isNilInterfaceValue duplicates internal.IsNilInterface, since that package imports this one */
 func isNilInterfaceValue(value any) bool {
     if nil == value {
         return true
@@ -24,7 +24,6 @@ func isNilInterfaceValue(value any) bool {
     }
 }
 
-/* LogContext assembles the loggable context of an error: its message under "error", the context of the nearest ContextProvider in its chain, the cause chain walked from the error's own wrap link, and every extra map merged on top in order, later entries winning. */
 func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract.Context {
     if nil == err || true == isNilInterfaceValue(err) {
         mergedContext := (exceptioncontract.Context)(nil)
@@ -62,7 +61,6 @@ func LogContext(err error, extra ...exceptioncontract.Context) exceptioncontract
         }
     }
 
-    /* anchored on the top error's own wrap links, all of them for a joined error, so no link's context above the nearest *Error is dropped */
     causeErrs := causesOf(err)
     if 0 < len(causeErrs) {
         _, hasCause := context["cause"]
@@ -121,7 +119,6 @@ func FromError(err error) *Error {
         context = renderedContextOf(provider)
     }
 
-    /* rendered under a recover: these doors run inside the kernel's recovery defers, where a second panic would unwind past the 500 */
     return NewError(renderErrorText(err), context, err)
 }
 
@@ -161,7 +158,6 @@ func FromErrorWithLevelAndContext(err error, level loggingcontract.Level, contex
     return newWithLevel(renderErrorText(err), mergedContext, err, level)
 }
 
-/* renderedContextOf reads a provider's context under a recover, since LogContext runs inside recovery defers; a panicking Context costs the context alone, with the panic value in its place. */
 func renderedContextOf(provider exceptioncontract.ContextProvider) (context exceptioncontract.Context) {
     defer func() {
         recoveredValue := recover()
@@ -177,7 +173,7 @@ func renderedContextOf(provider exceptioncontract.ContextProvider) (context exce
     return provider.Context()
 }
 
-/* renderErrorText renders an error's text under a recover, since LogContext runs inside recovery defers where a panicking Error would unwind past the recovery reporting the first failure. */
+/* rendered under a recover: LogContext runs inside recovery defers, where a panicking Error would unwind past the recovery */
 func renderErrorText(err error) (text string) {
     defer func() {
         recoveredValue := recover()
@@ -191,7 +187,6 @@ func renderErrorText(err error) (text string) {
     return err.Error()
 }
 
-/* MarkLogged marks the nearest AlreadyLogged implementer in the chain, the depth IsAlreadyLogged reads, and returns the error unchanged. Every reader sharing that implementer sees the mark. */
 func MarkLogged(err error) error {
     if nil == err || true == isNilInterfaceValue(err) {
         return err
@@ -205,7 +200,7 @@ func MarkLogged(err error) error {
     return err
 }
 
-/* Logged answers an error that reports itself already logged. A chain carrying an AlreadyLogged implementer is marked in place and returned unchanged; one carrying none is wrapped in a marked melody error that keeps it as its cause. The wrap happens only when the chain's nearest AlreadyLogged implementer does not report the mark, which a melody HttpException standing nearest always does; the wrap keeps the chain as its cause, so the resolved status cannot change either way. */
+/* Logged marks the chain's AlreadyLogged implementer in place; a chain carrying none is wrapped in a marked melody error. */
 func Logged(err error) error {
     if nil == err || true == isNilInterfaceValue(err) {
         return err
@@ -220,7 +215,6 @@ func Logged(err error) error {
     return MarkLogged(FromError(err))
 }
 
-/* IsAlreadyLogged reads the mark at the depth MarkLogged writes it, and is its single reader. */
 func IsAlreadyLogged(err error) bool {
     if nil == err || true == isNilInterfaceValue(err) {
         return false
@@ -234,7 +228,6 @@ func IsAlreadyLogged(err error) bool {
     return alreadyLoggedValue.AlreadyLogged()
 }
 
-/* PanicCause answers a recovered panic value as the cause of the error a recovery boundary fabricates, so its context and cause chain reach the record. A typed nil and a value that is not an error answer no cause. */
 func PanicCause(recoveredValue any) error {
     recoveredErr, isRecoveredError := recoveredValue.(error)
     if false == isRecoveredError || true == isNilInterfaceValue(recoveredErr) {
@@ -258,10 +251,9 @@ func copyStringMap[T any](input map[string]T) map[string]T {
     return copied
 }
 
-/* causeChainCapacityHint bounds the pre-allocated capacity of the cause-chain builders; maxDepth still bounds the walk. */
 const causeChainCapacityHint = 8
 
-/* causesOf answers the links below an error in both standard shapes, the Unwrap() error of a wrap and the Unwrap() []error of a join, dropping nil and typed-nil links. The single form is tried first, so a link carrying both is read by its own Unwrap, as errors.Is and errors.As read it. */
+/* the single form is tried first, so a link carrying both is read by its own Unwrap, as errors.Is and errors.As read it */
 func causesOf(err error) []error {
     if singleUnwrapper, isSingleUnwrapper := err.(interface{ Unwrap() error }); true == isSingleUnwrapper {
         causeErr := singleUnwrapper.Unwrap()
@@ -313,7 +305,6 @@ func buildCauseChainFromRoots(roots []error, maxDepth int) []string {
 
     chain := make([]string, 0, capacity)
 
-    /* the walk is breadth-first over both unwrap shapes, so a chain of single wraps reads link by link and a join contributes its branches side by side; maxDepth bounds the number of links rendered, not the depth of the tree */
     pending := append([]error{}, roots...)
     links := newChainLinkSet()
 
@@ -321,7 +312,6 @@ func buildCauseChainFromRoots(roots []error, maxDepth int) []string {
         current := pending[0]
         pending = pending[1:]
 
-        /* a typed-nil link contributes nothing */
         if nil == current || true == isNilInterfaceValue(current) || true == links.seen(current) {
             continue
         }
@@ -355,7 +345,7 @@ func buildCauseContextChainFromRoots(roots []error, maxDepth int) []map[string]a
     chain := make([]map[string]any, 0, capacity)
     hasAnyContext := false
 
-    /* the same breadth-first walk BuildCauseChain performs, so the two chains stay index-aligned: an operator reading causeChain[2] finds its context at causeContextChain[2] whether the failure below was one wrap or a join of several */
+    /* the same breadth-first walk BuildCauseChain performs, so the two chains stay index-aligned */
     pending := append([]error{}, roots...)
     links := newChainLinkSet()
 
@@ -363,12 +353,10 @@ func buildCauseContextChainFromRoots(roots []error, maxDepth int) []map[string]a
         current := pending[0]
         pending = pending[1:]
 
-        /* a typed-nil link is the nil its producer meant and contributes nothing */
         if nil == current || true == isNilInterfaceValue(current) || true == links.seen(current) {
             continue
         }
 
-        /* the immediate node is asserted rather than searched, so a provider's context is not repeated once per intervening wrapper */
         causeProvider, isProvider := current.(exceptioncontract.ContextProvider)
         if true == isProvider {
             causeContext := renderedContextOf(causeProvider)

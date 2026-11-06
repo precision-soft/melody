@@ -98,7 +98,6 @@ func TestServerSentEventWriter_CarriageReturnDataCannotInjectControlLine(t *test
 
     body := recorder.Body.String()
 
-    /* the injection vector is the carriage return itself, and a reader that splits on "\n" alone never sees it start a line: the assertion below is satisfied identically with the sanitisation in place and with it gone. A client splits on CR, LF and CRLF alike, so the wire must carry no CR at all. */
     if true == strings.Contains(body, "\r") {
         t.Fatalf("expected no carriage return to survive onto the wire, got %q", body)
     }
@@ -206,7 +205,6 @@ func TestServerSentEventWriter_StripsNulFromId(t *testing.T) {
     }
 }
 
-/* nonFlushingResponseWriter is the shared fixture in fixture_test.go */
 func TestNewServerSentEventWriter_RefusesADelegateThatCannotFlushThroughTheRecordingWriter(t *testing.T) {
     delegate := &nonFlushingResponseWriter{}
     recorder := newRecordingResponseWriter(delegate)
@@ -252,7 +250,6 @@ func TestServerSentEventWriter_RefusesAnEventNameWithNoData(t *testing.T) {
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    /* the grammar returns from dispatch the moment the data buffer is empty, so the listener the caller named would never have fired and the caller had no way to find out */
     sendErr := writer.Send(ServerSentEvent{Event: "heartbeat"})
     if nil == sendErr {
         t.Fatalf("expected an event name with no data to be refused")
@@ -285,7 +282,6 @@ func TestServerSentEventWriter_RefusesAnIdThatIsEmptyOnceItsControlBytesAreRemov
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    /* emitted, "id: " with an empty value resets the client's resume cursor on the next reconnect */
     sendErr := writer.Send(ServerSentEvent{Id: "\n", Data: "payload"})
     if nil == sendErr {
         t.Fatalf("expected an id that sanitizes to empty to be refused")
@@ -298,7 +294,6 @@ func TestServerSentEventWriter_RefusesAnEventNameThatIsEmptyOnceItsControlBytesA
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    /* emitted, "event: " with an empty value makes the browser fire the DEFAULT message type instead of the one the caller named */
     sendErr := writer.Send(ServerSentEvent{Event: "\r", Data: "payload"})
     if nil == sendErr {
         t.Fatalf("expected an event name that sanitizes to empty to be refused")
@@ -317,13 +312,11 @@ func TestServerSentEventWriter_CommentEndsTheFrameSoAKeepaliveIsObservable(t *te
         t.Fatalf("comment: %v", commentErr)
     }
 
-    /* the blank line is what makes a comment-only keepalive observable to a client reading frame by frame — the preamble a stream flushes at subscription time exists precisely so a client can tell a live stream from a hung one. Send composes every frame whole under the lock, so a comment can never dispatch a half-built event */
     if ": keepalive\n\n" != recorder.Body.String() {
         t.Fatalf("unexpected comment bytes: %q", recorder.Body.String())
     }
 }
 
-/* a failing writer that has already put bytes on the wire */
 type partialFailingResponseWriter struct {
     header nethttp.Header
 }
@@ -359,7 +352,6 @@ func TestServerSentEventWriter_RefusesEveryFrameAfterAPartialWrite(t *testing.T)
         t.Fatalf("expected the partial write to surface")
     }
 
-    /* the torn frame is on the wire and no later frame can repair it; a well-formed frame appended onto it is read by the client as one corrupt event */
     secondErr := writer.Send(ServerSentEvent{Data: "two"})
     if nil == secondErr {
         t.Fatalf("expected the writer to refuse after a partial write")
@@ -378,7 +370,6 @@ func TestServerSentEventWriter_SerializesConcurrentFrames(t *testing.T) {
         t.Fatalf("new sse writer: %v", writerErr)
     }
 
-    /* the documented shape of a stream is a handler emitting events beside a ticker emitting keepalives; a net/http ResponseWriter is not safe for concurrent use, so unsynchronized frames interleave into one corrupt frame with no error anywhere */
     var waitGroup sync.WaitGroup
     for index := 0; index < 32; index++ {
         waitGroup.Add(2)
@@ -423,7 +414,6 @@ func TestServerSentEventWriter_SerializesConcurrentFrames(t *testing.T) {
         t.Fatalf("interleaved frame line: %q", line)
     }
 
-    /* the walk above only refuses a line it does not recognise, so a writer that emitted nothing at all walks zero lines and reports success; the counts are what say all sixty-four frames arrived whole */
     if 32 != dataFrames || 32 != pingFrames {
         t.Fatalf("expected every frame to arrive whole, got %d data and %d keepalive frames", dataFrames, pingFrames)
     }
@@ -437,7 +427,6 @@ func TestServerSentEventWriter_ZeroValueRefusesInsteadOfDereferencingNothing(t *
     }
 }
 
-/* the frames are flushed through the outermost writer so every wrapper records the commit it exists to record, and that flush has to reach the connection: with a wrapper between the kernel's recorder and the connection that carries Unwrap but no Flush, the capability probe answered yes and every flush was a silent no-op — the handler subscribed, wrote its events, and the client received nothing until the response ended */
 func TestNewServerSentEventWriter_FlushesThroughAnIntermediateWrapper(t *testing.T) {
     connection := &flushCountingResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
     writer := newRecordingResponseWriter(&intermediateResponseWriterWrapper{ResponseWriter: connection})
@@ -462,12 +451,9 @@ func TestNewServerSentEventWriter_FlushesThroughAnIntermediateWrapper(t *testing
     }
 }
 
-/* deadlineRecordingConnection is a connection that records every write deadline set on it, the way a real
-   net/http connection honours ResponseController.SetWriteDeadline */
 type deadlineRecordingConnection struct {
     *httptest.ResponseRecorder
     deadlineList []time.Time
-    /* the order of deadlines and writes, as the connection saw them: a deadline armed AFTER the bytes it was meant to bound is a deadline on the next frame */
     sequence []string
 }
 
@@ -484,10 +470,6 @@ func (instance *deadlineRecordingConnection) Write(bytes []byte) (int, error) {
     return instance.ResponseRecorder.Write(bytes)
 }
 
-/* net/http arms the server's write deadline once, from the request line; a stream that lives past it loses
-   the first frame after it. With a budget every frame moves the deadline to now plus the budget, through the
-   kernel's recording writer and an intermediate wrapper alike, so the deadline means "budget after the last
-   frame" rather than "budget after the request". */
 func TestServerSentEventWriter_RearmsTheWriteDeadlinePerFrameUnderABudget(t *testing.T) {
     connection := &deadlineRecordingConnection{ResponseRecorder: httptest.NewRecorder()}
     writer := newRecordingResponseWriter(&intermediateResponseWriterWrapper{ResponseWriter: connection})
@@ -525,7 +507,6 @@ func TestServerSentEventWriter_RearmsTheWriteDeadlinePerFrameUnderABudget(t *tes
         t.Errorf("the second frame armed %s, wanted its own instant plus the budget", connection.deadlineList[1])
     }
 
-    /* each deadline is armed BEFORE the bytes it bounds: armed after them it would bound the next frame, and the first frame past the server's own deadline would be lost exactly as before */
     if "deadline,write,deadline,write" != strings.Join(connection.sequence, ",") {
         t.Errorf("the connection saw %v, wanted the deadline armed before each frame's bytes", connection.sequence)
     }
@@ -550,8 +531,6 @@ func TestServerSentEventWriter_LeavesTheDeadlineAloneWithoutABudget(t *testing.T
     }
 }
 
-/* a connection the controller cannot set a deadline on — the recorder — takes the frame as before: the
-   re-arming is a capability of the connection, not a condition of the stream */
 func TestServerSentEventWriter_WritesTheFrameWhenTheDeadlineCannotBeSet(t *testing.T) {
     recorder := httptest.NewRecorder()
 
@@ -579,9 +558,7 @@ func (instance *frozenServerSentEventClock) Now() time.Time {
     return instance.instant
 }
 
-/* discardingFlushWriter is a stream the frames leave through and nothing is kept of: the allocations a frame
-   costs are then the writer's own, with no buffer growing underneath to smear them. It cannot be unwrapped to a
-   connection and takes no deadline, which is the writer a budget can do nothing for. */
+/* discardingFlushWriter keeps nothing, so the allocations a frame costs are the writer's own, and takes no deadline */
 type discardingFlushWriter struct {
     header nethttp.Header
 }
@@ -602,7 +579,6 @@ func (instance *discardingFlushWriter) WriteHeader(statusCode int) {}
 
 func (instance *discardingFlushWriter) Flush() {}
 
-/* what a frame keeps is its own: for a comment its text and the byte conversion a writer without WriteString costs, for an event the builder's growth, the split lines and the same conversion */
 func TestServerSentEventWriter_AFrameAllocatesOnlyItsText(t *testing.T) {
     writer, writerErr := NewServerSentEventWriter(&discardingFlushWriter{})
     if nil != writerErr {

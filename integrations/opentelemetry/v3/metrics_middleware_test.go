@@ -176,7 +176,7 @@ func TestMetricsMiddleware_AnEarlyHintDoesNotHideTheFinalStatus(t *testing.T) {
     }
 }
 
-/* typedNilProneResponse exists so a test can hand the middleware the typed-nil shape a userland error branch produces. Its accessors DEREFERENCE the receiver, like every real response's do: a method body that ignores the receiver would run happily on a nil pointer, and the guard's mutant would survive against a fixture that cannot reproduce the panic it guards against. */
+/* typedNilProneResponse accessors dereference the receiver on purpose: a body ignoring it would run on a nil pointer */
 type typedNilProneResponse struct {
     statusCode int
     headers    nethttp.Header
@@ -324,7 +324,6 @@ func TestCompletedStatusCode_ACommittedStatusDecidesThenTheErrorThenTheResponseT
     }
 }
 
-/* a handler that committed a status and then returned something else has already answered the client: the committed status is the one graphed, over a returned response as over a returned error */
 func TestMetricsMiddleware_ACommittedStatusWinsOverWhatTheHandlerReturnsAfterIt(t *testing.T) {
     for name, returned := range map[string]func() (httpcontract.Response, error){
         "a returned response": func() (httpcontract.Response, error) {

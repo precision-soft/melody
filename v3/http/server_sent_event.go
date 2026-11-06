@@ -18,7 +18,7 @@ type ServerSentEvent struct {
     Retry int
 }
 
-/* NewServerSentEventWriter commits the event-stream headers and returns the writer that emits frames onto them. It refuses a response already committed and a connection that cannot flush, read through the wrappers to the connection, since after the commit nothing can be answered. The writer is safe for concurrent use and must not outlive the handler. */
+/* NewServerSentEventWriter refuses a committed response or an unflushable connection; it must not outlive the handler */
 func NewServerSentEventWriter(writer nethttp.ResponseWriter) (*ServerSentEventWriter, error) {
     if nil == writer {
         return nil, exception.NewError("response writer may not be nil", nil, nil)
@@ -50,7 +50,7 @@ func NewServerSentEventWriter(writer nethttp.ResponseWriter) (*ServerSentEventWr
     }, nil
 }
 
-/* streamingFlusherOf finds the flusher that reaches the connection, unwrapping the writer chain as http.ResponseController does, since the kernel's recording writer carries a Flush that may flush nothing. */
+/* streamingFlusherOf finds the flusher reaching the connection: the kernel's recording writer may flush nothing */
 func streamingFlusherOf(writer nethttp.ResponseWriter) (nethttp.Flusher, bool) {
     current := writer
 
@@ -88,11 +88,10 @@ type ServerSentEventWriter struct {
     broken      bool
     writeBudget time.Duration
     clock       serverSentEventClock
-    /* set once the writer answered ErrNotSupported to a deadline, a property of the writer, so later frames do not ask again */
     deadlineUnsupported bool
 }
 
-/* serverSentEventClock is the instant a frame's deadline is counted from; an interface rather than a func value, so the writer stays comparable. */
+/* serverSentEventClock is an interface rather than a func value, so the writer stays comparable */
 type serverSentEventClock interface {
     Now() time.Time
 }
@@ -103,7 +102,7 @@ func (instance systemServerSentEventClock) Now() time.Time {
     return time.Now()
 }
 
-/* WithWriteBudget makes every frame re-arm the connection's write deadline to budget from the moment it is written, and hands the same writer back; net/http otherwise arms WriteTimeout once for the whole stream. The deadline bounds a write, not the stream's life, which is the handler's to bound. The budget is typically the server's own WriteTimeout, and zero leaves the deadline as the server armed it. A writer that cannot reach the connection writes every frame as without a budget. */
+/* WithWriteBudget re-arms the write deadline to budget on every frame; zero leaves the deadline the server armed */
 func (instance *ServerSentEventWriter) WithWriteBudget(budget time.Duration) *ServerSentEventWriter {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -117,7 +116,7 @@ func (instance *ServerSentEventWriter) WithWriteBudget(budget time.Duration) *Se
     return instance
 }
 
-/* Send emits one event frame. An event name with no data is refused, since the grammar dispatches nothing for it, as is a frame carrying no field at all; an id or a retry alone takes effect and is written. A field value that collapses to empty once its control bytes are removed is refused too, since an empty id resets the client's resume cursor. After a frame fails part way, every later call is refused. */
+/* Send refuses an event name with no data, a frame with no field and, after a frame fails part way, every later call */
 func (instance *ServerSentEventWriter) Send(event ServerSentEvent) error {
     if refusalErr := validateServerSentEvent(event); nil != refusalErr {
         return refusalErr
@@ -157,7 +156,6 @@ func (instance *ServerSentEventWriter) Send(event ServerSentEvent) error {
     return instance.writeFrame(builder.String())
 }
 
-/* validateServerSentEvent refuses the shapes the grammar reads as something other than what the caller wrote. A negative retry is refused; zero means unset. */
 func validateServerSentEvent(event ServerSentEvent) error {
     if 0 > event.Retry {
         return exception.NewError(
@@ -177,7 +175,7 @@ func validateServerSentEvent(event ServerSentEvent) error {
         return exception.NewError("server sent event name is empty once its control bytes are removed", nil, nil)
     }
 
-    /* an event name with no data is refused, since dispatch never fires the named listener; an id or a retry with no data takes effect and is allowed */
+    /* dispatch never fires a named listener with no data; an id or a retry with no data takes effect and is allowed */
     if "" == event.Data && "" != event.Event {
         return exception.NewError(
             "server sent event carries an event name and no data, so it would dispatch nothing",
@@ -223,7 +221,6 @@ func (instance *ServerSentEventWriter) writeFrame(frame string) error {
     return nil
 }
 
-/* rearmWriteDeadlineLocked moves the write deadline to now plus the budget before a frame is written. Without a budget, or on a writer that answered ErrNotSupported once, it does nothing. */
 func (instance *ServerSentEventWriter) rearmWriteDeadlineLocked() {
     if 0 >= instance.writeBudget || true == instance.deadlineUnsupported {
         return
@@ -240,13 +237,11 @@ func (instance *ServerSentEventWriter) rearmWriteDeadlineLocked() {
     }
 }
 
-/* a comment ends the frame, not the line, so a comment-only keepalive is observable to a client reading frame by frame; Send writes every frame whole under the lock, so a keepalive never lands inside a half-built event */
 const (
     serverSentEventLineTerminator  = "\n"
     serverSentEventFrameTerminator = "\n\n"
 )
 
-/* built once: a strings.Replacer is safe for concurrent use and costly to build */
 var (
     serverSentEventControlByteReplacer = strings.NewReplacer("\r", "", "\n", "", "\x00", "")
     serverSentEventLineEndingReplacer  = strings.NewReplacer("\r\n", "\n", "\r", "\n")
@@ -260,7 +255,7 @@ func sanitizeServerSentEventId(value string) string {
     return serverSentEventControlByteReplacer.Replace(value)
 }
 
-/* Comment writes one comment frame, ended by the blank line that terminates a frame, so a keepalive is observable to a client reading frame by frame. */
+/* Comment writes one comment frame ended by a blank line, so a keepalive is observable frame by frame */
 func (instance *ServerSentEventWriter) Comment(text string) error {
     return instance.writeFrame(": " + sanitizeServerSentEventField(text) + serverSentEventFrameTerminator)
 }

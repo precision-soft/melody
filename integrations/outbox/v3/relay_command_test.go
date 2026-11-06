@@ -230,7 +230,6 @@ func TestNewRelayCommandFromResolver_DefersResolution(t *testing.T) {
     }
 }
 
-/* nilYieldingResolver models a userland decorating resolver that answers nil with no error — the shape the container's own door refuses, which is exactly why the command carries its own guard as latent defense, mirroring lazyRepository.resolveStore. */
 type nilYieldingResolver struct{}
 
 func (instance nilYieldingResolver) Get(serviceName string) (any, error) {
@@ -290,7 +289,6 @@ func TestRelayCommand_ACancellationExplainedErrorStillExitsClean(t *testing.T) {
     }
 }
 
-/* cancellationEchoRepository answers the claim with the context's own cancellation, the way a driver does mid-drain. */
 type cancellationEchoRepository struct {
     fakeRepository
 }
@@ -303,7 +301,6 @@ func (instance *cancellationEchoRepository) ClaimDueMessages(ctx context.Context
     return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
 }
 
-/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
 type capturingCommand struct {
     clicontract.Command
     runtimeInstance runtimecontract.Runtime
@@ -336,7 +333,6 @@ func TestRelayCommand_ADeadlineExplainedErrorStillExitsClean(t *testing.T) {
     }
 }
 
-/* the `--limit` flag parses in base ten, as the standard integer flags do: with the engine's inferred base --limit=010 would read as eight and --limit=08 would be refused */
 func TestRelayCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
     for _, flagName := range []string{"limit"} {
         for spelling, expected := range map[string]int{"010": 10, "08": 8} {

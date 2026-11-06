@@ -36,7 +36,7 @@ func applicationBootRouteHandler() httpcontract.Handler {
     }
 }
 
-/* dynamicRouteModule registers a parameterized route that would shadow the root's static one if the module registered first */
+/* registers a parameterized route that would shadow the root's static one if the module registered first */
 type dynamicRouteModule struct {
     fakeModule
 }
@@ -45,7 +45,6 @@ func (instance dynamicRouteModule) RegisterHttpRoutes(kernelInstance kernelcontr
     kernelInstance.HttpRouter().Handle(nethttp.MethodGet, "/users/:id", applicationBootRouteHandler())
 }
 
-/* the application's own routes register before any module's: /users/me written by the composition root is dispatched as itself, not as the module's /users/:id with id="me", because the router breaks a priority tie on registration order */
 func TestBoot_TheRootsRoutesRegisterBeforeAnyModules(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),
@@ -67,7 +66,6 @@ func TestBoot_TheRootsRoutesRegisterBeforeAnyModules(t *testing.T) {
     }
 }
 
-/* servingProbeApplicationCommand reports what the configuration answers while the command is running, which is the only moment the question means anything: the marker is set between boot and dispatch and nothing else in the process observes the transition. */
 type servingProbeApplicationCommand struct {
     ran        bool
     resolveErr error
@@ -97,7 +95,6 @@ func (instance *servingProbeApplicationCommand) Run(
     return nil
 }
 
-/* Run must tell the configuration the wiring phase is over before it dispatches anything, or a late Resolve silently rewrites parameters under services that already read them. The config package tests what MarkServing does; this drives the real Run in cli mode and asks the configuration from inside the command, so the call itself is pinned. */
 func TestRun_MarksTheConfigurationServingBeforeItDispatches(t *testing.T) {
     originalArguments := os.Args
     os.Args = []string{"probe", "probe:serving"}
@@ -126,7 +123,6 @@ func TestRun_MarksTheConfigurationServingBeforeItDispatches(t *testing.T) {
     }
 }
 
-/* failingCloser is a container service whose Close always fails, so the test controls which call discovers the teardown failure */
 type failingCloser struct{}
 
 func (instance *failingCloser) Close() error {
@@ -145,13 +141,11 @@ func newFailingCloseApplication(t *testing.T) *Application {
         },
     )
 
-    /* resolving builds the instance, so the teardown has something whose Close fails */
     container.MustFromResolver[*failingCloser](applicationInstance.kernel.ServiceContainer(), "service.test.failing.closer")
 
     return applicationInstance
 }
 
-/* the container memoizes its close error, so a repeated Close re-receives a failure somebody else already discovered and folded into their own report; close must only report the failure it was first to see. */
 func TestClose_DoesNotRereportAFailureSomebodyElseDiscovered(t *testing.T) {
     applicationInstance := newFailingCloseApplication(t)
 
@@ -178,7 +172,6 @@ func TestClose_ReportsTheFailureItDiscoveredItself(t *testing.T) {
     }
 }
 
-/* a teardown failure on the non-panic return of Run turns into a non-zero exit, symmetric with the cli path that folds close failures into the command result, so a failed flush is not reported to the supervisor as a clean exit. */
 func TestCloseAndExitOnFailure_ExitsNonZeroOnATeardownFailureItDiscovered(t *testing.T) {
     exitedWith := -1
     originalExit := applicationExit
@@ -209,7 +202,6 @@ func TestCloseAndExitOnFailure_StaysSilentOnACleanTeardown(t *testing.T) {
     }
 }
 
-/* the exit logger must refuse a container logger the teardown already closed: a closed file-backed logger silently drops every write, and preferring it loses the one record that explains the exit. */
 func TestResolveExitLogger_PrefersTheContainerLoggerWhileItWrites(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -262,7 +254,6 @@ func TestResolveExitLogger_FallsBackWhenTheContainerLoggerIsClosed(t *testing.T)
     }
 }
 
-/* the recover handler is the one place that must not panic: an Application assembled without NewApplication has a nil kernel, and the handler answers with the emergency logger instead of dereferencing it. */
 func TestResolveExitLogger_SurvivesANilKernel(t *testing.T) {
     applicationInstance := &Application{}
 
@@ -271,7 +262,6 @@ func TestResolveExitLogger_SurvivesANilKernel(t *testing.T) {
     }
 }
 
-/* the secret front door differs from the ordinary one only in the marking, and the marking is the whole point: it is what keeps the value, and every parameter whose template reads it, out of the rendered configuration. */
 func TestRegisterSecretParameter_MarksTheRegistrationAsHoldingACredential(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -298,7 +288,6 @@ func TestRegisterSecretParameter_MarksTheRegistrationAsHoldingACredential(t *tes
     }
 }
 
-/* marking an existing parameter takes effect at once; a name that matches nothing is queued rather than refused, because an environment key is legitimately undefined in some environments and the boot retries the queue before the configuration resolves. */
 func TestMarkParameterSecret_MarksWhatExistsAndQueuesWhatDoesNot(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -317,7 +306,6 @@ func TestMarkParameterSecret_MarksWhatExistsAndQueuesWhatDoesNot(t *testing.T) {
     }
 }
 
-/* after the boot the wiring is done and the parameters have been read: a marking arriving here would redact nothing that has not already been rendered, so it is refused loudly rather than accepted as a no-op. */
 func TestMarkParameterSecret_RefusesAfterBoot(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
     applicationInstance.booted = true
@@ -327,7 +315,6 @@ func TestMarkParameterSecret_RefusesAfterBoot(t *testing.T) {
     }, "cannot mark a parameter secret after application boot")
 }
 
-/* the retry is what makes a marking declared before the module that registers the parameter work at all, and it must run before the resolve or the marking never travels into the templates that read the secret. What still matches nothing stays queued for the warning at the end of the boot. */
 func TestApplyUnappliedSecretMarks_AppliesWhatALaterRegistrationMadeReal(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -338,7 +325,6 @@ func TestApplyUnappliedSecretMarks_AppliesWhatALaterRegistrationMadeReal(t *test
         t.Fatalf("expected both markings to be queued, got %#v", applicationInstance.unappliedSecretMarks)
     }
 
-    /* the module that owns the parameter registers it after the marking was declared */
     applicationInstance.RegisterParameter("app.late", "sk_live_51H")
 
     applicationInstance.applyUnappliedSecretMarks()
@@ -353,7 +339,6 @@ func TestApplyUnappliedSecretMarks_AppliesWhatALaterRegistrationMadeReal(t *test
     }
 }
 
-/* the warning at the end of the boot is what keeps a misspelled name from silently redacting nothing: every phase that can register a parameter has run by then, so a marking still matching nothing names something that does not exist. A name a late phase did make real is applied here instead, without a warning, and the queue is emptied either way. */
 func TestWarnUnappliedSecretMarks_WarnsOnlyAboutWhatStillMatchesNothing(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -390,7 +375,6 @@ func TestWarnUnappliedSecretMarks_WarnsOnlyAboutWhatStillMatchesNothing(t *testi
     }
 }
 
-/* ProcessRole is what wiring code asks to decide whether this process registers its background runners: the explicit --role flag wins, and an unset role widens to all rather than to nothing. */
 func TestProcessRole_AnswersTheResolvedRole(t *testing.T) {
     applicationInstance := &Application{
         runtimeFlags: NewRuntimeFlagsWithRole(config.ModeCli, config.RoleWorker),
@@ -430,7 +414,6 @@ func newEnvironmentRefusalApplication(t *testing.T, mode string, environmentValu
     }
 }
 
-/* every built-in parameter has a development default, so an http process whose .env artifacts contributed nothing would serve as dev with debug tooling, announced by one warning; the refusal is the same direction the empty CORS allow list took. */
 func TestRefuseHttpBootWithoutEnvironment_RefusesAnHttpBootOnZeroKeys(t *testing.T) {
     applicationInstance := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{})
 
@@ -451,7 +434,6 @@ func TestRefuseHttpBootWithoutEnvironment_LeavesTheCliPermissive(t *testing.T) {
     applicationInstance.refuseHttpBootWithoutEnvironment()
 }
 
-/* the configuration registry accepts exactly one name in this major; any other name is unreadable by construction, so storing it would tell the operator a configuration is active while nothing can ever consult it. */
 func TestRegisterConfiguration_RefusesANameNothingConsumes(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -460,7 +442,6 @@ func TestRegisterConfiguration_RefusesANameNothingConsumes(t *testing.T) {
     }, "unknown configuration name")
 }
 
-/* the marker tells a re-executed test binary that it is the child that must take the fatal exit rather than the parent that watches it; its value is the project directory whose log file the parent reads back */
 const runPanicPathProbeMarker = "MELODY_TEST_RUN_PANIC_PATH_PROBE"
 
 type panickingProbeApplicationCommand struct{}
@@ -486,7 +467,6 @@ func (instance *panickingProbeApplicationCommand) Run(
     return nil
 }
 
-/* the one proof that the fatal record survives the teardown ordering: the record must land in the configured file logger BEFORE Close runs, because the teardown closes that logger and a closed file logger silently drops every write. The child re-execution is required — the handler ends in os.Exit — and a teardown ordered first leaves the log file without the record. */
 func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *testing.T) {
     projectDirectory := os.Getenv(runPanicPathProbeMarker)
 
@@ -573,7 +553,6 @@ func (instance *typedNilProbeExitLogger) Closed() bool {
     return instance.closedFlag
 }
 
-/* a factory handing back a typed nil is refused by the container with an error, and the resolver answers with the emergency logger — the pin covers the whole path; the resolver's own typed-nil clause stays as latent defense for a resolution path without the container's refusal */
 func TestResolveExitLogger_RefusesATypedNilContainerLogger(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
 
@@ -595,17 +574,14 @@ func TestResolveExitLogger_RefusesATypedNilContainerLogger(t *testing.T) {
     }
 }
 
-/* the exit handler runs Close as its before-exit hook, and a boot that died before the kernel was assembled reaches it with a nil kernel: the close must be the no-op it means, not a dereference */
 func TestClose_SurvivesANilKernel(t *testing.T) {
     applicationInstance := &Application{}
 
     applicationInstance.Close()
 }
 
-/* the marker tells a re-executed test binary that it is the child whose Boot must die and take the teardown hook with it rather than the parent that watches */
 const bootPanicTeardownProbeMarker = "MELODY_TEST_BOOT_PANIC_TEARDOWN_PROBE"
 
-/* the proof that a boot panic tears the container down before the exit: the child's container holds a built service whose Close fails, so the teardown leaves a visible trace — the emergency record naming the failed container close — that an exit with the container never closed could not produce. The boot dies on a command-name collision, which panics inside Boot under Boot's own handler. */
 func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
     projectDirectory := os.Getenv(bootPanicTeardownProbeMarker)
 
@@ -670,7 +646,6 @@ func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
     }
 }
 
-/* chainedError carries a cause the way a wrapped run failure does, so errors.As can be walked onto a typed-nil link. */
 type chainedError struct {
     cause error
 }
@@ -702,7 +677,6 @@ func TestResolveCliExitError_AnswersNothingForAChainWithoutOne(t *testing.T) {
     }
 }
 
-/* errors.As matches *ExitError on a typed-nil link and reports success; answering it would hand Exit a nil it refuses and discard the run's own error */
 func TestResolveCliExitError_AnswersNothingForATypedNilLink(t *testing.T) {
     var typedNilExitError *exception.ExitError
     var cause error = typedNilExitError
@@ -712,7 +686,6 @@ func TestResolveCliExitError_AnswersNothingForATypedNilLink(t *testing.T) {
     }
 }
 
-/* resolveExitLogger is evaluated as an argument, so it runs before the exit handler's own per-step shield begins: a nil receiver here would replace the panic being reported with a bare traceback that runs neither the teardown nor os.Exit */
 func TestResolveExitLogger_AnswersTheEmergencyLoggerForATypedNilKernel(t *testing.T) {
     applicationInstance := &Application{
         kernel:       (*testKernel)(nil),
@@ -730,7 +703,7 @@ func TestResolveExitLogger_FallsBackToTheConfiguredDestinationWhenTheContainerCa
         testhelper.NewEmbeddedStaticFs(),
     )
 
-    /* deliberately unbooted: the logger service does not exist yet, which is the window every boot failure dies in */
+    /* deliberately unbooted: the logger service does not exist yet, the window every boot failure dies in */
     logger := applicationInstance.resolveExitLogger()
 
     if logging.EmergencyLogger() == logger {
@@ -765,7 +738,6 @@ func TestResolveExitLogger_AnswersTheEmergencyLoggerWhenNothingIsConfigured(t *t
     }
 }
 
-/* the kernel's default listeners belong to Boot, in every process shape: the console's dispatcher answers introspection with the set the serving process runs */
 func TestBoot_RegistersTheKernelListenersInEveryProcessShape(t *testing.T) {
     applicationInstance := NewApplication(
         testhelper.NewEmbeddedEnvFs(),
@@ -797,7 +769,6 @@ func TestBoot_RegistersTheKernelListenersInEveryProcessShape(t *testing.T) {
     }
 }
 
-/* TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero pins the clean shutdown against the exit-step shield. The teardown loop is strictly sequential with no budget of its own, so one Close that never returns — a pooled connection draining to a peer that is gone — would park every service behind it and the process with them. A teardown that had to be abandoned is not a clean shutdown and does not report one. */
 func TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero(t *testing.T) {
     originalStep := shieldedCloseStep
     originalExit := applicationExit
@@ -830,7 +801,6 @@ func TestCloseAndExitOnFailure_AnAbandonedTeardownExitsNonZero(t *testing.T) {
     }
 }
 
-/* a teardown that finished cleanly still exits zero: the shield must not turn every shutdown into a failure */
 func TestCloseAndExitOnFailure_ACompletedTeardownExitsZero(t *testing.T) {
     originalStep := shieldedCloseStep
     originalExit := applicationExit

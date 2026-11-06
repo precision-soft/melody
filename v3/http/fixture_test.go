@@ -1,4 +1,4 @@
-/* The shared test material of this package: the doubles every test file of it reaches for, the helpers that build them, and — where a contract spans every source rather than any one of them — the test that asserts it. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed to exist without a matching source, which is what keeps every other one honest. A test provable from a single source belongs in that source's own mirror, not here. */
+/* the one test file of this package allowed to exist without a matching source */
 package http
 
 import (
@@ -121,7 +121,6 @@ type closeRecordingScope struct {
     containercontract.Scope
     failOverride bool
     closed       bool
-    /* onClose runs at the moment the scope-close defer runs. That defer is registered first, so it runs last: whatever a test reads here has already been decided by every defer above it, which is how the ordering between the early recovery guard and the scope close is asserted rather than assumed. */
     onClose func()
 }
 
@@ -243,7 +242,6 @@ func newExceptionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) ru
     return runtime.New(context.Background(), scope, serviceContainer)
 }
 
-/* errorContextRecordingLogger captures every Error call with its context, so a test can assert not just that something was logged but what the record carries. Two recovery boundaries of the package file such a record — the kernel's error-handler containment and the json handler's responder containment — so the double belongs to the package rather than to either mirror. */
 type errorContextRecordingLogger struct {
     mutex         sync.Mutex
     errorMessages []string
@@ -286,7 +284,6 @@ func (instance *errorContextRecordingLogger) errorContextFor(message string) (lo
 
 var _ loggingcontract.Logger = (*errorContextRecordingLogger)(nil)
 
-/* the shared containers of the package: a nop logger, a configuration built from the given environment values, the session manager, and the exception listener an application registers at boot. Most of the package's tests build on them, so they live here rather than in the test file that happened to write them first. */
 func newHttpTestContainer() containercontract.Container {
     return newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage())
 }
@@ -370,14 +367,12 @@ func routeRegistryTestHandler() httpcontract.Handler {
     }
 }
 
-/* capturedRecord is one record a recordsCaptureLogger received */
 type capturedRecord struct {
     level   loggingcontract.Level
     message string
     context loggingcontract.Context
 }
 
-/* recordsCaptureLogger keeps every record, under a lock, so a test served over several requests can count the records each one filed */
 type recordsCaptureLogger struct {
     mutex   sync.Mutex
     records []capturedRecord
@@ -410,7 +405,6 @@ func (instance *recordsCaptureLogger) Emergency(message string, context loggingc
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* failureRecords answers the records at warning, error or emergency, the ones a failure files */
 func (instance *recordsCaptureLogger) failureRecords() []capturedRecord {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

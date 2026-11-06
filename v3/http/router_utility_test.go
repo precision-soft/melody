@@ -102,7 +102,6 @@ func TestIsRequestFromTrustedProxy_MatchesIpAndCidr(t *testing.T) {
     }
 }
 
-/* A peer whose RemoteAddr arrives in IPv4-mapped IPv6 form (::ffff:172.18.0.2 from a PROXY-protocol listener or a custom net.Conn) is the IPv4 address it names, so an IPv4 CIDR or an unmapped literal in the trusted proxy list must still match it. isRequestFromTrustedProxy mirrors the per-address check in http/middleware/client_ip.go, which unmaps both sides before comparing. */
 func TestIsRequestFromTrustedProxy_UnmapsIpv4MappedIpv6Peer(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "[::ffff:172.18.0.2]:5555"
@@ -119,7 +118,6 @@ func TestIsRequestFromTrustedProxy_UnmapsIpv4MappedIpv6Peer(t *testing.T) {
     }
 }
 
-/* detectSchemeWithForwardedHeadersPolicy must trust a mapped IPv4-in-IPv6 proxy peer so it honours X-Forwarded-Proto: without the Unmap the trusted-proxy check fails, the scheme collapses to http, and the session cookie is set with Secure=false behind a TLS-terminating proxy. */
 func TestDetectSchemeWithForwardedHeadersPolicy_TrustsIpv4MappedIpv6Peer(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "[::ffff:172.18.0.2]:5555"
@@ -138,7 +136,6 @@ func TestDetectSchemeWithForwardedHeadersPolicy_TrustsIpv4MappedIpv6Peer(t *test
     }
 }
 
-/* A trusted proxy entry written in IPv4-mapped IPv6 CIDR form (::ffff:10.0.0.0/104) names the IPv4 range it embeds, so an unmapped IPv4 peer inside that range must still be trusted. Without rewriting the mapped prefix to its 10.0.0.0/8 equivalent, netip.Prefix.Contains rejects the IPv4 peer across address families, the proxy reads as untrusted, X-Forwarded-Proto is discarded and the scheme collapses to http — which sets the session cookie with Secure=false behind a TLS-terminating proxy. */
 func TestDetectSchemeWithForwardedHeadersPolicy_TrustsMappedFormCidr(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "10.0.0.5:5555"
@@ -1011,7 +1008,6 @@ func TestWrapControllerWithContainer_PanicsWhenDependencyIsNilFromScope(t *testi
     _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
 }
 
-/* A chain of proxies appends to X-Forwarded-Proto rather than replacing it, so the header arrives as "https, http". The client-facing hop is the leftmost entry; returning the whole list yields a scheme equal to neither "http" nor "https", which quietly drops the Secure attribute from every cookie the response sets. */
 func TestDetectSchemeWithForwardedHeadersPolicy_UsesTheClientFacingProtoOfAChain(t *testing.T) {
     for _, headerValue := range []string{"https, http", "https,http", " https , http "} {
         netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
@@ -1086,7 +1082,6 @@ func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T
     }
 }
 
-/* A typed nil session must not reach the persistence block. The session manager is a replaceable service, and one that reports "not found" by returning a nil pointer of its own session type hands back an interface that is not equal to nil — a `nil !=` test takes it for a live session and IsCleared below dereferences it. This call happens inside the kernel's recovery defer, where recover has already run, so that panic escapes ServeHttp and the client is served nothing at all. */
 func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1126,7 +1121,6 @@ func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
     }
 }
 
-/* The same applies to a typed nil manager: the persistence block must test both with IsNilInterface. */
 func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1162,7 +1156,6 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     }
 }
 
-/* A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id the storage does not hold, and the handler's own response is served unchanged. */
 func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1204,7 +1197,6 @@ func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *tes
     }
 }
 
-/* an expiring session cookie addresses one client as much as a live one does: replayed out of a shared cache it logs the next client out, so the response that carries it is marked private at every door that writes it, not only at the save */
 func TestWriteResponse_AnExpiringSessionCookieMarksTheResponsePrivate(t *testing.T) {
     arms := []struct {
         name            string
@@ -1258,7 +1250,6 @@ func TestWriteResponse_AnExpiringSessionCookieMarksTheResponsePrivate(t *testing
     }
 }
 
-/* A session ROTATED away while the request was running is refused the same write and answered differently: the identity did not end, it moved to a fresh id the rotating request is handing the client in its own Set-Cookie, so expiring the browser cookie here would race that header and log the user out immediately after the login that rotated the session. The write is still refused, the refusal is still logged, and the handler's own response is still served — only the clearing cookie is gone. */
 func TestWriteResponse_ARotatedAwaySessionKeepsTheCookieAndTheResponse(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1299,7 +1290,6 @@ func TestWriteResponse_ARotatedAwaySessionKeepsTheCookieAndTheResponse(t *testin
     }
 }
 
-/* A storage outage on the save path answers 500 rather than the response the handler produced: the handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored — and the client cannot tell the difference. The cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
 func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1336,7 +1326,6 @@ func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T)
     }
 }
 
-/* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a typed nil dereferenced on BodyReader is a second panic after recover has already run and ServeHttp answers nothing at all. */
 func TestCloseDiscardedResponseBody_ReadsATypedNilResponseAsAbsent(t *testing.T) {
     var unassignedResponse *Response
 
@@ -1423,7 +1412,6 @@ func TestWriteResponse_ReturnsTheCallersResponseWhenNothingReplacedIt(t *testing
     }
 }
 
-/* the divergent fake constructs the interleaving instead of awaiting it: its Snapshot answers a cleared session while the individual accessors still answer a live one, exactly the state a Clear landing mid-decision produces. The branch must follow the snapshot. */
 type snapshotDivergentSession struct {
     stubSession
 }
@@ -1526,7 +1514,6 @@ func TestWriteResponse_RefusesTheOutOfRangeCodeBeforeTheDelegate(t *testing.T) {
     }
 }
 
-/* the write-failure record's severity turns on who caused it: the request context net/http cancels on disconnect, and the broken-pipe family a write to a gone peer answers with, classify as the client's abort; everything else stays a server-side failure. */
 func TestIsClientAbortWriteError_ClassifiesTheBrokenPipeAndTheCancelledRequest(t *testing.T) {
     liveRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
 
@@ -1551,7 +1538,6 @@ func TestIsClientAbortWriteError_ClassifiesTheBrokenPipeAndTheCancelledRequest(t
     }
 }
 
-/* a deadline or a cause-carrying cancellation the application set on the request context is not a client disconnect: a write failure under either stays the server's, while a broken pipe under the same expired deadline is still the client's. */
 func TestIsClientAbortWriteError_KeepsAFailureUnderAnApplicationDeadlineOrCauseServerSide(t *testing.T) {
     expiredContext, cancelExpired := context.WithDeadline(context.Background(), time.Unix(0, 0))
     defer cancelExpired()
@@ -1574,7 +1560,6 @@ func TestIsClientAbortWriteError_KeepsAFailureUnderAnApplicationDeadlineOrCauseS
     }
 }
 
-/* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a body whose Close panics would raise a second panic past the recovery and reset the connection: the panic is contained into the error the caller already reports. */
 func TestCloseResponseBodySafely_ContainsAPanickingClose(t *testing.T) {
     closeErr := closeResponseBodySafely(&panickingCloser{})
     if nil == closeErr {
@@ -1592,7 +1577,6 @@ func (instance *panickingCloser) Close() error {
     panic("close died on the state the panic invalidated")
 }
 
-/* the response writeResponse returns feeds the terminate event and the access log; for a stream the handler committed itself, the truth lives on the connection — the journal recorded 204 for every streamed 200 and a rendered-but-never-written 500 for a panic mid-stream. */
 func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/stream", nil)
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
@@ -1617,7 +1601,6 @@ func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T)
     }
 }
 
-/* a hijacked connection records no status; the substitute stays, because inventing one would be a worse lie than the synthetic response. */
 func TestWriteResponse_AHijackedConnectionKeepsTheSubstituteStatus(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/upgrade", nil)
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
@@ -1709,7 +1692,6 @@ func writeResponseWithSessionOutcome(
     )
 }
 
-/* a session another request ended under this one is the session ending, not a storage outage — the contract says so in as many words. At error it read exactly like a redis that had fallen over, so a user who logged out in a second tab paged the operator once per concurrent request. */
 func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinates(t *testing.T) {
     capture := &sessionPersistenceCaptureLogger{}
 
@@ -1740,7 +1722,6 @@ func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinat
         t.Fatalf("unexpected message: %q", record.message)
     }
 
-    /* the record names the session through a one-way reference, never the raw id */
     if nil != record.context["sessionId"] {
         t.Fatalf("the raw session id must not reach the log, got %v", record.context["sessionId"])
     }
@@ -1752,7 +1733,6 @@ func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinat
     }
 }
 
-/* a storage outage keeps the error level it deserves, and it too names the session — through a one-way reference, never the raw id — and the route. */
 func TestWriteResponse_ASaveOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t *testing.T) {
     capture := &sessionPersistenceCaptureLogger{}
 
@@ -1788,7 +1768,6 @@ func TestWriteResponse_ASaveOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t *t
     }
 }
 
-/* the delete-path outage is the third of the family and carries the same coordinates. */
 func TestWriteResponse_ADeleteOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t *testing.T) {
     capture := &sessionPersistenceCaptureLogger{}
 
@@ -1835,7 +1814,6 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/admin//",
         "/.well-known/acme-challenge/token",
         "/assets/app.css",
-        /* whitespace INSIDE the path is a spelling the router and the matcher read alike — neither trims it — so it is not refused */
         "/public /",
         "/a b/c",
     }
@@ -1846,7 +1824,6 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         }
     }
 
-    /* the folds the router does not apply but the access-control matcher does: each must be refused here, before the two can disagree about which rule answers the request. The whitespace spellings are the decoded forms of "/public%20", "/public%09" and "/public%C2%A0": the router keeps the whitespace and the matcher trims it */
     foldedPaths := []string{
         "/admin/x/../../login",
         "/admin/..",
@@ -1861,7 +1838,6 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/public\t",
         "/public\u00a0",
         "/ ",
-        /* the LEADING form: a handler in front of the kernel that rewrites the path, the standard library's StripPrefix on "/api%20/public", hands the kernel " /public", which the router routed as a segment of its own while the matcher trimmed it to "/public" */
         " /public",
         "\t/public",
         "\u00a0/public",
@@ -1876,7 +1852,6 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
 }
 
 func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
-    /* the asterisk-form of OPTIONS and an authority-form CONNECT do not begin with "/" and are not path-routed, so the fold guard must not answer for them */
     for _, target := range []string{"*", "example.com:443", ""} {
         if false == requestPathIsCanonical(target) {
             t.Fatalf("expected non-path target %q to be left to the router", target)
@@ -1885,7 +1860,6 @@ func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
 }
 
 func TestRequestPathIsCanonical_JudgesASlashLessPathAsTheMatchersReadIt(t *testing.T) {
-    /* a handler in front of the kernel that strips a prefix hands the path on without its leading slash; the matchers read it with the "/" prepended and the access-control matcher folds it, so a fold is refused as it is with the slash */
     for _, foldedPath := range []string{"admin/../public", "admin/./x", "admin//x", "./admin", "admin ", "..", "../public"} {
         if true == requestPathIsCanonical(foldedPath) {
             t.Fatalf("expected slash-less path %q that folds to be refused", foldedPath)
@@ -1926,7 +1900,6 @@ func TestRequestPathAsRouted_KeepsAnEncodedSeparatorInsideItsSegmentAndDecodesTh
     }
 }
 
-/* the routed spelling is the router's own reading joined back: each segment is the one splitRequestPath binds, with a separator the segment carries put back as "%2F" — a plus sign is not a space here, and a malformed escape is left as sent, exactly as the router leaves it */
 func TestRequestPathAsRouted_AgreesWithTheRoutersOwnSegments(t *testing.T) {
     for _, escapedPath := range []string{"/caf%C3%A9", "/a%20b/c", "/a+b", "/a%zz/b", "/files/a%2Fb/c", "/public%252F", "/x/%2E%2E/y", "/a%00b"} {
         routedSegments := strings.Split(RequestPathAsRouted(escapedPath), "/")
@@ -1944,7 +1917,6 @@ func TestRequestPathAsRouted_AgreesWithTheRoutersOwnSegments(t *testing.T) {
     }
 }
 
-/* the session cookie names one client, so a response carrying it must not be stored by a shared cache under its url and replayed to another; the guard drops a public token and adds private, keeps an already-restrictive directive, and marks an undirected response private. */
 func TestMarkResponsePrivateForSessionCookie(t *testing.T) {
     for _, testCase := range []struct {
         name     string
@@ -2004,7 +1976,6 @@ func TestMatchesHost_ComparesThePortWhenTheRouteDeclaredOne(t *testing.T) {
 }
 
 func TestMatchesHost_ReachesABracketedIpv6RouteBehindAPort(t *testing.T) {
-    /* the colons of a bracketed literal are the address's own: read as a declared port they made every route bound to one unreachable behind any port, which is every developer machine and every ipv6 deployment that does not answer on 443 */
     if false == matchesHost("[::1]", "[::1]:8080") {
         t.Fatalf("expected a route bound to a bracketed ipv6 literal to be reachable behind a port")
     }
@@ -2109,7 +2080,6 @@ func (instance *closeTrackingResponseBodyReader) Close() error {
     return nil
 }
 
-/* the response being replaced owns whatever its body reader holds, and nothing downstream will ever read it: a file response would leave its *os.File open for the life of the process, one descriptor per request whose status lands outside the range net/http accepts */
 func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T) {
     bodyReader := &closeTrackingResponseBodyReader{reader: strings.NewReader("file bytes")}
 
@@ -2130,7 +2100,6 @@ func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T
     }
 }
 
-/* Cache-Control is a list header a response may carry on several field lines, and its directives may carry quoted field-name lists. Reading only the first line loses every directive on the ones behind it, and splitting on a bare comma cuts through the quotes — both rewrite a header the guard was only supposed to add "private" to. */
 func TestMarkResponsePrivateForSessionCookie_KeepsEveryFieldLineAndQuotedList(t *testing.T) {
     t.Run("directives on a second field line survive", func(t *testing.T) {
         response := NewResponse(nethttp.StatusOK, nil)
@@ -2202,7 +2171,6 @@ func TestWriteResponse_AnEarlyHintLeavesTheReturnedResponseToBeWritten(t *testin
     }
 }
 
-/* a cleared session the request's cookie does not name was never stored: the kernel minted it for an unknown or absent cookie, so nothing is deleted and the cookie is still expired */
 func TestWriteResponse_AClearedSessionTheRequestDoesNotNameIsNotDeleted(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/logout", nil)
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "fedcba9876543210fedcba9876543210"})
@@ -2231,7 +2199,6 @@ func TestWriteResponse_AClearedSessionTheRequestDoesNotNameIsNotDeleted(t *testi
     }
 }
 
-/* deleteCountingSessionStorage counts the removals the session manager asks of the storage */
 type deleteCountingSessionStorage struct {
     inner   *session.InMemoryStorage
     deletes int
@@ -2281,7 +2248,6 @@ func serveALogout(t *testing.T, storage *deleteCountingSessionStorage, cookieVal
     return recorder
 }
 
-/* a logout presenting a cookie no stored session answers to reaches no storage removal and leaves no record: the kernel minted a fresh session for it */
 func TestKernel_ALogoutWhoseCookieNamesNoStoredSessionDeletesNothing(t *testing.T) {
     storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage()}
 
@@ -2297,7 +2263,6 @@ func TestKernel_ALogoutWhoseCookieNamesNoStoredSessionDeletesNothing(t *testing.
     }
 }
 
-/* the control: a logout presenting the cookie of a stored session removes it */
 func TestKernel_ALogoutWhoseCookieNamesAStoredSessionDeletesIt(t *testing.T) {
     storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage()}
 
@@ -2384,7 +2349,6 @@ func TestMarkResponsePrivateForSessionCookie_ABalancedQuoteKeepsItsMembers(t *te
     }
 }
 
-/* every signature refusal past the function check carries the controller's signature under `type`; the argument-count and result-count refusals count what they refuse. */
 func TestWrapControllerWithContainer_SignatureRefusalsCarryTheSignature(t *testing.T) {
     t.Run("first argument", func(t *testing.T) {
         defer func() {
