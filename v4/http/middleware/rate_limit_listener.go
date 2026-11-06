@@ -8,6 +8,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/logging"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
@@ -31,7 +32,7 @@ func RegisterRateLimitRequestListener(
                 return nil
             }
 
-            if nil != requestEvent.Response() {
+            if nil != requestEvent.Response() || nil != requestEvent.Refusal() {
                 return nil
             }
 
@@ -45,21 +46,10 @@ func RegisterRateLimitRequestListener(
 
             response, limitErr := settings.onLimitExceeded(request)
 
-            /* the listener dispatches kernel.exception itself, since returning the error would abort the kernel.request dispatch onto its fail-closed 500 */
-            if nil != limitErr {
-                exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, request, limitErr)
+            if false == internal.IsNilInterface(limitErr) {
+                http.CloseDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
 
-                _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-                if nil != dispatchErr {
-                    return dispatchErr
-                }
-
-                exceptionResponse := exceptionEvent.Response()
-                if nil == exceptionResponse {
-                    exceptionResponse = http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests")
-                }
-
-                requestEvent.SetResponse(exceptionResponse)
+                requestEvent.Refuse(limitErr)
 
                 return nil
             }

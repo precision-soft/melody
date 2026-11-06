@@ -92,7 +92,7 @@ func (instance *Application) bootCli() {
             debugCommands,
             &debug.ContainerCommand{},
             &debug.ParameterCommand{},
-            debug.NewEventCommand(instance.securityDeferredListeners),
+            debug.NewEventCommand(instance.servingProcessListeners),
             debug.NewMiddlewareCommand(
                 func() ([]middlewarepipeline.MiddlewareDescription, *middlewarepipeline.MiddlewareBuildReport, error) {
                     return instance.httpMiddlewares.describe(instance.kernel)
@@ -139,32 +139,42 @@ func (instance *Application) registerCoreCliCommandIfAbsent(command clicontract.
     instance.RegisterCliCommand(command)
 }
 
-/* securityDeferredListeners feeds debug:events with the security pair only the serving process wires, so a console dispatcher names it instead of rendering an absence. A process without a compiled security configuration declares nothing, and neither does the serving process, where the pair is registered for real. */
-func (instance *Application) securityDeferredListeners() []debug.DeferredListener {
-    if nil == instance.securityConfiguration {
-        return nil
-    }
-
+/* servingProcessListeners feeds debug:events with the listeners only the serving process wires, so a console dispatcher names them instead of rendering an absence: the http kernel's built-in exception listener, and the security pair when a security configuration is compiled. The serving process declares nothing, since it has them registered for real. */
+func (instance *Application) servingProcessListeners() []debug.DeferredListener {
     if config.ModeHttp == instance.runtimeFlags.Mode() {
         return nil
     }
 
     deferredNote := "registered only in the http serving process"
 
-    return []debug.DeferredListener{
+    deferredListeners := []debug.DeferredListener{
         {
+            EventName:    kernelcontract.EventKernelException,
+            Priority:     http.BuiltInExceptionListenerPriority,
+            ListenerName: "built-in exception listener",
+            Note:         deferredNote,
+        },
+    }
+
+    if nil == instance.securityConfiguration {
+        return deferredListeners
+    }
+
+    return append(
+        deferredListeners,
+        debug.DeferredListener{
             EventName:    kernelcontract.EventKernelRequest,
             Priority:     security.KernelFirewallListenerPriority,
             ListenerName: "security resolution listener",
             Note:         deferredNote,
         },
-        {
+        debug.DeferredListener{
             EventName:    kernelcontract.EventKernelRequest,
             Priority:     security.KernelAccessControlListenerPriority,
             ListenerName: "security access control listener",
             Note:         deferredNote,
         },
-    }
+    )
 }
 
 func (instance *Application) runCli() error {

@@ -1,6 +1,7 @@
 package http
 
 import (
+    "context"
     "encoding/json"
     "errors"
     "fmt"
@@ -11,12 +12,18 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/config"
+    "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/event"
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/logging"
+    "github.com/precision-soft/melody/v4/runtime"
+    "github.com/precision-soft/melody/v4/session"
     "github.com/precision-soft/melody/v4/validation"
 )
 
@@ -25,7 +32,7 @@ func TestExceptionListener_HtmlResponse_EscapesXss(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     xssPayload := "<script>alert(1)</script>"
     httpErr := exception.NewHttpException(500, xssPayload)
@@ -62,7 +69,7 @@ func TestExceptionListener_JsonResponse_ContainsMessage(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     httpErr := exception.NewHttpException(400, "bad request input")
 
@@ -98,7 +105,7 @@ func TestExceptionListener_DebugModeOff_GenericMessage(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     genericErr := errors.New("sensitive internal details")
 
@@ -135,9 +142,9 @@ func TestExceptionListener_DebugModeOff_GenericMessage(t *testing.T) {
 func TestExceptionListener_DebugModeOn_ShowsErrorMessage(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newDebugTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, true)
+    installBuiltInExceptionListener(dispatcher)
 
     genericErr := errors.New("detailed debug info here")
 
@@ -167,9 +174,9 @@ func TestExceptionListener_DebugModeOn_ShowsErrorMessage(t *testing.T) {
 func TestExceptionListener_DebugModeOn_HtmlEscapesMessage(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newDebugTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, true)
+    installBuiltInExceptionListener(dispatcher)
 
     genericErr := errors.New("<img src=x onerror=alert(1)>")
 
@@ -204,7 +211,7 @@ func TestExceptionListener_NilErr_NoResponse(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     request := httptest.NewRequest("GET", "/test", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
@@ -227,7 +234,7 @@ func TestExceptionListener_ResponseAlreadySet_Skips(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     request := httptest.NewRequest("GET", "/test", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
@@ -252,7 +259,7 @@ func TestExceptionListener_SetsRequestIdHeader(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     httpErr := exception.NewHttpException(404, "not found")
 
@@ -284,7 +291,7 @@ func TestExceptionListener_HttpExceptionStatusCode(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     httpErr := exception.NewHttpException(403, "forbidden")
 
@@ -332,7 +339,7 @@ func TestExceptionListener_ValidationErrorsContextReachesTheJsonBody(t *testing.
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     httpErr := exception.BadRequest("validation failed")
     httpErr.SetContext(map[string]any{
@@ -373,7 +380,7 @@ func TestExceptionListener_ContextWithoutValidationErrorsKeyStaysPrivate(t *test
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     httpErr := exception.BadRequest("bad request")
     httpErr.SetContext(map[string]any{
@@ -413,7 +420,7 @@ func TestExceptionListener_WritesTheEnvelopeWithTheRequestId(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     request := httptest.NewRequest("GET", "/orders/7", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
@@ -458,7 +465,7 @@ func TestExceptionListener_CarriesTheClientFacingIdentityInsideTheErrorObject(t 
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     request := httptest.NewRequest("GET", "/orders/7", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
@@ -504,9 +511,9 @@ func TestExceptionListener_CarriesTheClientFacingIdentityInsideTheErrorObject(t 
 func TestExceptionListener_DebugContextAndCauseAreInsideTheErrorObject(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newDebugTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, true)
+    installBuiltInExceptionListener(dispatcher)
 
     request := httptest.NewRequest("GET", "/orders/7", nil)
     request.Header.Set("Accept", "application/json")
@@ -551,7 +558,7 @@ func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t
     dispatcher := event.NewEventDispatcher(clockInstance)
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     var unassignedHttpException *exception.HttpException
 
@@ -581,7 +588,7 @@ func TestExceptionListener_UnmarkedError_LogsOneRecordAndMarksIt(t *testing.T) {
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     err := exception.NewError("first failure", nil, nil)
 
@@ -623,7 +630,7 @@ func TestExceptionListener_AlreadyLoggedError_WritesNoSecondRecord(t *testing.T)
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     err := exception.NewError("logged upstream", nil, nil)
     _ = exception.MarkLogged(err)
@@ -653,7 +660,7 @@ func TestExceptionListener_AlreadyLoggedError_AttachesRequestCoordinatesWithoutO
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     err := exception.NewError(
         "logged upstream",
@@ -695,7 +702,7 @@ func TestExceptionListener_AlreadyLoggedErrorWithoutARequest_AttachesNoEmptyCoor
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     err := exception.NewError("logged upstream", nil, nil)
     _ = exception.MarkLogged(err)
@@ -722,7 +729,7 @@ func TestExceptionListener_ADeliberate4xxIsRecordedAtWarning(t *testing.T) {
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     request := httptest.NewRequest("GET", "/orders/7", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
@@ -745,7 +752,7 @@ func TestExceptionListener_A5xxKeepsTheErrorLevel(t *testing.T) {
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     request := httptest.NewRequest("GET", "/orders/7", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
@@ -768,7 +775,7 @@ func TestExceptionListener_AValidationWiringFaultIsRecordedAtErrorRatherThanAsAR
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     httpException := exception.BadRequest("validation failed")
     httpException.SetContext(map[string]any{
@@ -796,7 +803,7 @@ func TestExceptionListener_AGenuineFieldRefusalStaysAWarning(t *testing.T) {
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     httpException := exception.BadRequest("validation failed")
     httpException.SetContext(map[string]any{
@@ -824,7 +831,7 @@ func TestExceptionListener_AWiringFaultKeepsItsContextInTheRecordAndOutOfTheResp
     capture := &exceptionListenerCaptureLogger{}
     runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
     httpException := exception.BadRequest("validation failed")
     httpException.SetContext(map[string]any{
@@ -885,9 +892,9 @@ func TestExceptionListener_AForeignValidationErrorsPayloadIsHandedBackUntouched(
 func TestExceptionListener_DebugModeOn_APanickingErrorTextIsContained(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newDebugTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, true)
+    installBuiltInExceptionListener(dispatcher)
 
     request := httptest.NewRequest("GET", "/api/test", nil)
     request.Header.Set("Accept", "application/json")
@@ -916,9 +923,9 @@ func TestExceptionListener_DebugModeOn_APanickingErrorTextIsContained(t *testing
 func TestExceptionListener_DebugModeOn_APanickingCauseTextIsContained(t *testing.T) {
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
-    runtimeInstance := newTestRuntime()
+    runtimeInstance := newDebugTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, true)
+    installBuiltInExceptionListener(dispatcher)
 
     wrapped := exception.NewError("the outer failure", nil, &nilMapPanickingError{})
 
@@ -960,31 +967,68 @@ func (instance *nilMapPanickingError) Error() string {
     return "unreachable"
 }
 
-/* the kernel marks the exception it dispatches when an application error handler is installed, and the framework listener stands aside for the marked event so the kernel consults that handler; the same error on an unmarked event is answered as before */
-func TestExceptionListener_StandsAsideForAnInstalledErrorHandler(t *testing.T) {
-    clockInstance := clock.NewSystemClock()
-    dispatcher := event.NewEventDispatcher(clockInstance)
+
+func TestBuiltInExceptionListener_ABareRuntimeRendersTheProductionBody(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
     runtimeInstance := newTestRuntime()
 
-    RegisterKernelExceptionListener(dispatcher, false)
+    installBuiltInExceptionListener(dispatcher)
 
-    for _, errorHandlerInstalled := range []bool{true, false} {
-        melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(httptest.NewRequest("GET", "/missing", nil))
+    request := httptest.NewRequest("GET", "/api/test", nil)
+    request.Header.Set("Accept", "application/json")
 
-        exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(404, "no such product"))
-        exceptionEvent.errorHandlerInstalled = errorHandlerInstalled
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), errors.New("detailed debug info here"))
 
-        _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-        if nil != dispatchErr {
-            t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if body := readResponseBody(t, exceptionEvent.Response()); true == strings.Contains(body, "detailed debug info here") {
+        t.Fatalf("expected the production body on a bare runtime: %s", body)
+    }
+}
+
+func TestBuiltInExceptionListener_AProductionConfigurationRendersTheProductionBody(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), map[string]string{config.EnvKey: config.EnvProduction})
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    installBuiltInExceptionListener(dispatcher)
+
+    request := httptest.NewRequest("GET", "/api/test", nil)
+    request.Header.Set("Accept", "application/json")
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), errors.New("detailed debug info here"))
+
+    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if body := readResponseBody(t, exceptionEvent.Response()); true == strings.Contains(body, "detailed debug info here") {
+        t.Fatalf("expected the production body under a production configuration: %s", body)
+    }
+}
+
+type foreignFloorlessEventDispatcher struct {
+    eventcontract.EventDispatcher
+}
+
+func TestInstallBuiltInExceptionListener_ADispatcherWithoutTheFloorDoorGetsTheListener(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    installBuiltInExceptionListener(&foreignFloorlessEventDispatcher{EventDispatcher: dispatcher})
+
+    registeredListeners := 0
+    for _, registeredEvent := range dispatcher.RegisteredEvents() {
+        if kernelcontract.EventKernelException == registeredEvent.EventName {
+            registeredListeners = len(registeredEvent.Listeners)
         }
+    }
 
-        if true == errorHandlerInstalled && nil != exceptionEvent.Response() {
-            t.Fatalf("expected the listener to stand aside for an installed error handler")
-        }
-
-        if false == errorHandlerInstalled && nil == exceptionEvent.Response() {
-            t.Fatalf("expected the listener to answer an event with no error handler installed")
-        }
+    if 1 != registeredListeners {
+        t.Fatalf("expected the built-in listener registered, got %d", registeredListeners)
     }
 }

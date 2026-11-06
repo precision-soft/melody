@@ -3,6 +3,7 @@ package security
 import (
     "errors"
     "io"
+    nethttp "net/http"
     "os"
     "strings"
     "testing"
@@ -11,6 +12,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     httpPkg "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
@@ -267,8 +269,12 @@ func TestAccessControlListener_WhenNoSecurityContext_EmitsAuthorizationDeniedAnd
         t.Fatalf("expected one authorization denied event")
     }
 
-    if nil == requestEvent.Response() {
-        t.Fatalf("expected response to be set")
+    if httpException := exception.AsHttpException(requestEvent.Refusal()); nil == httpException || 401 != httpException.StatusCode() {
+        t.Fatalf("expected a 401 refusal, got %v", requestEvent.Refusal())
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected the refusal to leave the rendering to the kernel, got a response")
     }
 }
 
@@ -317,8 +323,8 @@ func TestAccessControlListener_ReadsThePathTheRouterRoutes(t *testing.T) {
             t.Fatalf("expected %q to be denied: %v, got %d denials", path, denied, deniedCount)
         }
 
-        if denied != (nil != requestEvent.Response()) {
-            t.Fatalf("expected %q to carry a refusal response: %v", path, denied)
+        if denied != (nil != requestEvent.Refusal()) {
+            t.Fatalf("expected %q to carry a refusal: %v", path, denied)
         }
     }
 }
@@ -436,8 +442,12 @@ func TestAccessControlListener_WhenSecurityContextHasNilToken_EmitsAuthorization
         t.Fatalf("expected the nil-token branch to answer, got reason %q", deniedReason)
     }
 
-    if nil == requestEvent.Response() {
-        t.Fatalf("expected response to be set")
+    if httpException := exception.AsHttpException(requestEvent.Refusal()); nil == httpException || 401 != httpException.StatusCode() {
+        t.Fatalf("expected a 401 refusal, got %v", requestEvent.Refusal())
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected the refusal to leave the rendering to the kernel, got a response")
     }
 }
 
@@ -597,7 +607,7 @@ func TestAccessControlListener_KeepsTheRegexRuleThatDecidedOnTheSecurityContext(
     }
 }
 
-func TestAccessControlListener_WhenDecisionDenied_EmitsAuthorizationDeniedAndSetsExceptionResponse(t *testing.T) {
+func TestAccessControlListener_WhenDecisionDenied_EmitsAuthorizationDeniedAndRefuses(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
@@ -631,7 +641,6 @@ func TestAccessControlListener_WhenDecisionDenied_EmitsAuthorizationDeniedAndSet
         0,
     )
 
-    registerTestKernelExceptionListener(kernel)
     RegisterKernelAccessControlListener(kernel, registry)
 
     request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
@@ -649,8 +658,8 @@ func TestAccessControlListener_WhenDecisionDenied_EmitsAuthorizationDeniedAndSet
     if 1 != deniedCount {
         t.Fatalf("expected one authorization denied event")
     }
-    if nil == requestEvent.Response() {
-        t.Fatalf("expected response to be set")
+    if nil == requestEvent.Refusal() {
+        t.Fatalf("expected the denial raised as a refusal")
     }
 }
 
@@ -658,7 +667,6 @@ func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *te
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
-    /* an entry point that answers no response must not let the request through: the listener falls through to a fail-closed 401 rather than leaving the response nil, which the kernel reads as "no decision" and proceeds to the handler */
     entryPoint := &accessControlListenerTestEntryPoint{
         response: nil,
         err:      nil,
@@ -693,12 +701,11 @@ func TestAccessControlListener_WhenEntryPointReturnsNoResponse_FailsClosed(t *te
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if nil == requestEvent.Response() {
-        t.Fatalf("expected a fail-closed response when the entry point answered none, got nil (the request would reach its handler unauthorized)")
+    if httpException := exception.AsHttpException(requestEvent.Refusal()); nil == httpException || 401 != httpException.StatusCode() || "entry_point_answered_nothing" != httpException.Context()["reason"] {
+        t.Fatalf("expected a 401 refusal when the entry point answered none, got %v (the request would reach its handler unauthorized)", requestEvent.Refusal())
     }
 }
 
-/* the entry point is the application's, so a typed nil of a concrete response type is the shape a hand-written "no response" takes; carried through a bare nil check it is normalized back to nil by SetResponse and the unauthenticated request is served — the guard must read it through IsNilInterface and fall through to the fail-closed 401 */
 func TestAccessControlListener_WhenTheEntryPointAnswersATypedNilResponse_FailsClosed(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
@@ -737,8 +744,8 @@ func TestAccessControlListener_WhenTheEntryPointAnswersATypedNilResponse_FailsCl
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if nil == requestEvent.Response() || 401 != requestEvent.Response().StatusCode() {
-        t.Fatalf("expected the typed-nil entry point response to fail closed with 401, got %#v", requestEvent.Response())
+    if httpException := exception.AsHttpException(requestEvent.Refusal()); nil == httpException || 401 != httpException.StatusCode() {
+        t.Fatalf("expected the typed-nil entry point response to fail closed with a 401 refusal, got %v", requestEvent.Refusal())
     }
 }
 
@@ -776,12 +783,12 @@ func TestAccessControlListener_ADeniedHandlerAnsweringATypedNilIsRefusedNotServe
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if nil == requestEvent.Response() {
-        t.Fatalf("expected the typed-nil handler answer to be refused with a fail-closed response, got nil (the denied request would be served)")
+    if nil == requestEvent.Refusal() {
+        t.Fatalf("expected the typed-nil handler answer to be refused, got no decision (the denied request would be served)")
     }
 }
 
-func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *testing.T) {
+func TestAccessControlListener_AMissingDecisionManagerIsRefused(t *testing.T) {
     kernel := newTestKernel()
     runtimeInstance := newTestRuntime()
 
@@ -804,7 +811,6 @@ func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *te
     registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
     RegisterKernelAccessControlListener(kernel, registry)
 
-    /* no kernel.exception listener produces a response, so exceptionEvent.Response() is nil: the listener must write a fail-closed response rather than the nil the kernel reads as "no decision" */
     request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
     requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, request)
 
@@ -813,8 +819,8 @@ func TestAccessControlListener_WhenExceptionProducesNoResponse_FailsClosed(t *te
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if nil == requestEvent.Response() {
-        t.Fatalf("expected a fail-closed response when the exception dispatch produced none, got nil")
+    if nil == requestEvent.Refusal() {
+        t.Fatalf("expected a refusal for the missing decision manager, got no decision")
     }
 }
 
@@ -979,20 +985,6 @@ func TestAccessControlListener_AFailedDeniedHandlerKeepsItsErrorBesideTheDecisio
 
     kernel := newTestKernel()
 
-    var exceptionErr error
-    kernel.EventDispatcher().AddListener(
-        "kernel.exception",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
-            if exceptionEvent, ok := eventValue.Payload().(*httpPkg.KernelExceptionEvent); true == ok {
-                exceptionErr = exceptionEvent.Err()
-            }
-
-            return nil
-        },
-        100,
-    )
-    httpPkg.RegisterKernelExceptionListener(kernel.EventDispatcher(), false)
-
     SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil)))
     RegisterKernelAccessControlListener(kernel, NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil)))
 
@@ -1001,11 +993,266 @@ func TestAccessControlListener_AFailedDeniedHandlerKeepsItsErrorBesideTheDecisio
         t.Fatalf("unexpected error: %v", dispatchErr)
     }
 
-    if false == errors.Is(exceptionErr, handlerErr) {
-        t.Fatalf("expected the handler's own error kept beside the decision, got %v", exceptionErr)
+    if false == errors.Is(requestEvent.Refusal(), handlerErr) {
+        t.Fatalf("expected the handler's own error kept beside the decision, got %v", requestEvent.Refusal())
     }
 
-    if nil == requestEvent.Response() || 403 != requestEvent.Response().StatusCode() {
-        t.Fatalf("expected the denial still answered 403")
+    if httpException := exception.AsHttpException(requestEvent.Refusal()); nil == httpException || 403 != httpException.StatusCode() {
+        t.Fatalf("expected the denial still a 403, got %v", requestEvent.Refusal())
+    }
+}
+
+func newRefusalSiteFirewall(config CompiledFirewallConfig) *CompiledFirewall {
+    config.Name = "main"
+    config.Matcher = NewPathPrefixMatcher("/")
+    config.MatcherDescription = "m"
+    config.RoleHierarchySource = SourceFirewall
+    config.AccessDecisionManagerSource = SourceFirewall
+    config.AccessControlSource = SourceFirewall
+
+    return NewCompiledFirewall(config)
+}
+
+func newRefusalSiteAccessControl() *AccessControl {
+    return NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})})
+}
+
+func TestSecurityRefusals_ReachAnApplicationListenerAndKeepTheirStatus(t *testing.T) {
+    failure := exception.Conflict("the site's own failure")
+    authenticated := &resolutionListenerTestTokenSource{resolveToken: NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil)}
+    anonymous := &resolutionListenerTestTokenSource{resolveToken: NewAnonymousToken()}
+
+    for name, testCase := range map[string]struct {
+        firewall       *CompiledFirewall
+        expectedErr    error
+        expectedStatus int
+    }{
+        "firewall check": {
+            firewall:       newRefusalSiteFirewall(CompiledFirewallConfig{Rules: []securitycontract.Rule{&resolutionListenerTestRule{err: failure}}, TokenSource: anonymous}),
+            expectedErr:    failure,
+            expectedStatus: nethttp.StatusConflict,
+        },
+        "token source": {
+            firewall:       newRefusalSiteFirewall(CompiledFirewallConfig{TokenSource: &resolutionListenerTestTokenSource{resolveErr: failure}}),
+            expectedErr:    failure,
+            expectedStatus: nethttp.StatusConflict,
+        },
+        "entry point start": {
+            firewall:       newRefusalSiteFirewall(CompiledFirewallConfig{TokenSource: anonymous, AccessControl: newRefusalSiteAccessControl(), EntryPoint: &accessControlListenerTestEntryPoint{err: failure}}),
+            expectedErr:    failure,
+            expectedStatus: nethttp.StatusConflict,
+        },
+        "entry point silent": {
+            firewall:       newRefusalSiteFirewall(CompiledFirewallConfig{TokenSource: anonymous, AccessControl: newRefusalSiteAccessControl()}),
+            expectedStatus: nethttp.StatusUnauthorized,
+        },
+        "missing decision manager": {
+            firewall:       newRefusalSiteFirewall(CompiledFirewallConfig{TokenSource: authenticated, AccessControl: newRefusalSiteAccessControl()}),
+            expectedStatus: nethttp.StatusInternalServerError,
+        },
+        "decision": {
+            firewall:       newRefusalSiteFirewall(CompiledFirewallConfig{TokenSource: authenticated, AccessControl: newRefusalSiteAccessControl(), AccessDecisionManager: &accessControlListenerTestAccessDecisionManager{decideAllErr: failure}}),
+            expectedErr:    failure,
+            expectedStatus: nethttp.StatusConflict,
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            newRegisteredKernel := func() *testKernel {
+                kernel := newTestKernel()
+                registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{testCase.firewall}, nil))
+                RegisterKernelSecurityResolutionListener(kernel, registry)
+                RegisterKernelAccessControlListener(kernel, registry)
+
+                return kernel
+            }
+
+            unanswered := serveSecurityRequest(t, newRegisteredKernel(), "/admin")
+            if testCase.expectedStatus != unanswered.Code {
+                t.Fatalf("expected %d with no application listener, got %d: %s", testCase.expectedStatus, unanswered.Code, unanswered.Body.String())
+            }
+
+            kernel := newRegisteredKernel()
+
+            var observedErr error
+            kernel.EventDispatcher().AddListener(
+                kernelcontract.EventKernelException,
+                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    exceptionEvent := eventValue.Payload().(*httpPkg.KernelExceptionEvent)
+                    observedErr = exceptionEvent.Err()
+                    exceptionEvent.SetResponse(httpPkg.TextResponse(nethttp.StatusTeapot, "application body"))
+
+                    return nil
+                },
+                0,
+            )
+
+            answered := serveSecurityRequest(t, kernel, "/admin")
+            if nethttp.StatusTeapot != answered.Code || "application body" != answered.Body.String() {
+                t.Fatalf("expected the application's answer, got %d: %s", answered.Code, answered.Body.String())
+            }
+
+            if nil == observedErr {
+                t.Fatalf("expected the listener to see the refusal")
+            }
+
+            if nil != testCase.expectedErr && false == errors.Is(observedErr, testCase.expectedErr) {
+                t.Fatalf("expected the site's own failure, got %v", observedErr)
+            }
+        })
+    }
+}
+
+func TestAccessControlListener_AnAnonymousRefusalReachesAnApplicationListener(t *testing.T) {
+    kernel := newTestKernel()
+    RegisterKernelAccessControlListener(kernel, NewFirewallRegistry(NewCompiledConfiguration(nil, newRefusalSiteAccessControl())))
+
+    var observedErr error
+    kernel.EventDispatcher().AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            observedErr = eventValue.Payload().(*httpPkg.KernelExceptionEvent).Err()
+
+            return nil
+        },
+        0,
+    )
+
+    recorder := serveSecurityRequest(t, kernel, "/admin")
+
+    if nethttp.StatusUnauthorized != recorder.Code {
+        t.Fatalf("expected the 401, got %d", recorder.Code)
+    }
+
+    if httpException := exception.AsHttpException(observedErr); nil == httpException || "missing_security_context" != httpException.Context()["reason"] {
+        t.Fatalf("expected the listener to see the refusal with its reason, got %v", observedErr)
+    }
+}
+
+func TestAccessControlListener_StandsAsideAfterAResolutionRefusal(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    decisionManager := &accessControlListenerTestAccessDecisionManager{}
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{
+        newRefusalSiteFirewall(CompiledFirewallConfig{TokenSource: &resolutionListenerTestTokenSource{resolveErr: errors.New("token backend down")}, AccessControl: newRefusalSiteAccessControl(), AccessDecisionManager: decisionManager}),
+    }, nil))
+    RegisterKernelSecurityResolutionListener(kernel, registry)
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, newSecurityTestRequest("GET", "/admin", nil, runtimeInstance))
+    if _, dispatchErr := kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
+        t.Fatalf("expected no required-listener refusal, got %v", dispatchErr)
+    }
+
+    if "" != decisionManager.calledMethod {
+        t.Fatalf("expected the decision manager not consulted on a refused request, got %q", decisionManager.calledMethod)
+    }
+
+    if nil == requestEvent.Refusal() {
+        t.Fatalf("expected the resolution refusal to stand")
+    }
+}
+
+func TestSecurityListeners_StandAsideOnAnEarlierRefusal(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{
+        newRefusalSiteFirewall(CompiledFirewallConfig{TokenSource: &resolutionListenerTestTokenSource{resolveErr: errors.New("token backend down")}}),
+    }, newRefusalSiteAccessControl()))
+    RegisterKernelSecurityResolutionListener(kernel, registry)
+    RegisterKernelAccessControlListener(kernel, registry)
+
+    deniedCount := 0
+    kernel.EventDispatcher().AddListener(
+        securitycontract.EventSecurityAuthorizationDenied,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            deniedCount++
+
+            return nil
+        },
+        0,
+    )
+
+    earlier := exception.Forbidden("refused earlier")
+
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, newSecurityTestRequest("GET", "/admin", nil, runtimeInstance))
+    requestEvent.Refuse(earlier)
+
+    if _, dispatchErr := kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if _, exists := SecurityContextFromRuntime(runtimeInstance); true == exists {
+        t.Fatalf("expected the resolution listener to stand aside, it published a security context")
+    }
+
+    if 0 != deniedCount {
+        t.Fatalf("expected access control to stand aside, it denied %d times", deniedCount)
+    }
+
+    if earlier != requestEvent.Refusal() {
+        t.Fatalf("expected the earlier refusal to stand, got %v", requestEvent.Refusal())
+    }
+}
+
+type closeCountingBody struct {
+    closed int
+}
+
+func (instance *closeCountingBody) Read(buffer []byte) (int, error) { return 0, io.EOF }
+
+func (instance *closeCountingBody) Close() error {
+    instance.closed++
+
+    return nil
+}
+
+func TestAccessControlListener_AResponseBesideAFirewallAnswerersErrorIsClosed(t *testing.T) {
+    newResponse := func(body *closeCountingBody) httpcontract.Response {
+        response := httpPkg.EmptyResponse(nethttp.StatusTeapot)
+        response.SetBodyReader(body)
+
+        return response
+    }
+
+    entryPointBody := &closeCountingBody{}
+    deniedHandlerBody := &closeCountingBody{}
+
+    for name, testCase := range map[string]struct {
+        firewall *CompiledFirewall
+        token    securitycontract.Token
+        body     *closeCountingBody
+    }{
+        "entry point": {
+            firewall: newRefusalSiteFirewall(CompiledFirewallConfig{AccessControl: newRefusalSiteAccessControl(), EntryPoint: &accessControlListenerTestEntryPoint{response: newResponse(entryPointBody), err: errors.New("start failed")}}),
+            token:    NewAnonymousToken(),
+            body:     entryPointBody,
+        },
+        "denied handler": {
+            firewall: newRefusalSiteFirewall(CompiledFirewallConfig{AccessControl: newRefusalSiteAccessControl(), AccessDecisionManager: &accessControlListenerTestAccessDecisionManager{decideAllErr: errors.New("denied")}, AccessDeniedHandler: &accessControlListenerTestAccessDeniedHandler{response: newResponse(deniedHandlerBody), err: errors.New("handler failed")}, AccessDeniedHandlerSource: SourceFirewall}),
+            token:    NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil),
+            body:     deniedHandlerBody,
+        },
+    } {
+        kernel := newTestKernel()
+        runtimeInstance := newTestRuntime()
+
+        SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(testCase.firewall, testCase.token))
+        RegisterKernelAccessControlListener(kernel, NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{testCase.firewall}, nil)))
+
+        requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, newSecurityTestRequest("GET", "/admin", nil, runtimeInstance))
+        if _, dispatchErr := kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
+            t.Fatalf("%s: unexpected dispatch error: %v", name, dispatchErr)
+        }
+
+        if 1 != testCase.body.closed {
+            t.Fatalf("%s: expected the discarded body closed once, got %d", name, testCase.body.closed)
+        }
+
+        if nil == requestEvent.Refusal() {
+            t.Fatalf("%s: expected the refusal to stand", name)
+        }
     }
 }

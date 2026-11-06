@@ -95,6 +95,14 @@ A listener that means to serve the request without authorization running should 
 
 `debug:events --verbose` renders a `required` column, so whether the guarantee is armed can be read off the running application rather than inferred from the wiring code.
 
+## A payload that ends the dispatch
+
+A listener receives the event and writes to its payload, and the payload has no reference back to the event wrapping it. A payload that implements [`PropagationStopper`](../../event/contract/event.go) reports its own stop: the dispatcher reads it before each listener and after the last, beside the event's own stop, so a required listener behind it is refused the same way. `http.KernelExceptionEvent` is one: its `SetResponse` ends the dispatch.
+
+## The floor of an event
+
+[`PriorityFloorRegistrar`](../../event/contract/event_dispatcher.go) gives the bottom of one event's order to the listener that answers last. `InstallFloorListener` registers it and reserves its priority in one step, and from then on `AddListener` refuses by name, on that event, a listener at or below that priority, which could never run; a subscriber's listener goes through the same door. A listener registered before the floor stands and keeps its place, and a second installation adds nothing and answers false. The http kernel installs its built-in `kernel.exception` listener this way; a dispatcher without the door gets the listener through `AddListener` and a warning on the emergency channel, and `EventDispatcherAdapter` refuses a wrapped dispatcher without it, as it does for the required marks.
+
 ## Footguns & caveats
 
 - Event names are validated for the empty string only. Whitespace-only names are not normalized by design.
@@ -121,6 +129,8 @@ A listener that means to serve the request without authorization running should 
 - [`type SubscriberRegistration`](../../event/contract/event_dispatcher.go)
 - [`type EventDispatcher`](../../event/contract/event_dispatcher.go)
 - [`type RequiredListenerRegistrar`](../../event/contract/event_dispatcher.go)
+- [`type PriorityFloorRegistrar`](../../event/contract/event_dispatcher.go)
+- [`type PropagationStopper`](../../event/contract/event.go)
 - [`type EventDispatcherInspector`](../../event/contract/event_dispatcher_inspector.go)
 - [`type RegisteredEvent`](../../event/contract/event_dispatcher_inspector.go)
 - [`type RegisteredListener`](../../event/contract/event_dispatcher_inspector.go)
@@ -142,6 +152,7 @@ A listener that means to serve the request without authorization running should 
     - [`(*EventDispatcher).Dispatch(runtimeInstance runtimecontract.Runtime, event eventcontract.Event) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).DispatchName(runtimeInstance runtimecontract.Runtime, eventName string, payload any) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).RegisteredEvents() []eventcontract.RegisteredEvent`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).InstallFloorListener(eventName string, listener eventcontract.EventListener, priority int) (eventcontract.ListenerRegistration, bool)`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).MarkListenerRequired(registration eventcontract.ListenerRegistration)`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).MarkListenerMaySkipRequiredListeners(registration eventcontract.ListenerRegistration)`](../../event/event_dispatcher.go)
 - [`type EventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)

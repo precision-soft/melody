@@ -1,8 +1,9 @@
 package middleware
 
 import (
-    "context"
+    "errors"
     "io"
+    "context"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
@@ -60,12 +61,11 @@ func TestRegisterRateLimitRequestListener_AnswersTooManyRequestsOnceTheBudgetIsG
     secondEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
     _, secondErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, secondEvent)
     if nil != secondErr {
-        t.Fatalf("expected the refusal to be a response rather than a dispatch error, got %v", secondErr)
+        t.Fatalf("expected the refusal rather than a dispatch error, got %v", secondErr)
     }
 
-    response := secondEvent.Response()
-    if nil == response || nethttp.StatusTooManyRequests != response.StatusCode() {
-        t.Fatalf("expected the exhausted budget to answer 429, got %#v", response)
+    if httpException := exception.AsHttpException(secondEvent.Refusal()); nil == httpException || nethttp.StatusTooManyRequests != httpException.StatusCode() {
+        t.Fatalf("expected the exhausted budget to refuse 429, got %v", secondEvent.Refusal())
     }
 }
 
@@ -154,8 +154,7 @@ func TestRegisterRateLimitRequestListener_ChargesTheBudgetBeforeTheSecurityChain
                 return nil
             }
 
-            /* the real token-resolution listener declines an answered request the same way */
-            if nil != requestEvent.Response() {
+            if nil != requestEvent.Response() || nil != requestEvent.Refusal() {
                 return nil
             }
 
@@ -180,8 +179,8 @@ func TestRegisterRateLimitRequestListener_ChargesTheBudgetBeforeTheSecurityChain
         t.Fatalf("unexpected dispatch error: %v", secondErr)
     }
 
-    if nil == secondEvent.Response() || nethttp.StatusTooManyRequests != secondEvent.Response().StatusCode() {
-        t.Fatalf("expected the second request refused 429, got %#v", secondEvent.Response())
+    if httpException := exception.AsHttpException(secondEvent.Refusal()); nil == httpException || nethttp.StatusTooManyRequests != httpException.StatusCode() {
+        t.Fatalf("expected the second request refused 429, got %v", secondEvent.Refusal())
     }
 
     if 1 != authenticatorPaidRounds {
@@ -258,31 +257,17 @@ func TestRegisterRateLimitRequestListener_ATypedNilRequestIsLeftAlone(t *testing
     }
 }
 
-/* the refusal is rendered through kernel.exception rather than returned to the caller, because returning it would abort the kernel.request dispatch onto the fail-closed 500 page and a deliberate 429 would come out a 500. Every other probe here reaches the hardcoded fallback below that dispatch, so the half the comment is written for — an application's exception listener answering the refusal — is the one nothing exercises: with the dispatch removed the fallback answers 429 all the same and every one of them stays green. */
-func TestRegisterRateLimitRequestListener_TheRefusalIsRenderedThroughTheExceptionEvent(t *testing.T) {
+func TestRegisterRateLimitRequestListener_TheRefusalCarriesTheLimitHandlersError(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
-    dispatcher.AddListener(
-        kernelcontract.EventKernelException,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
-            exceptionEvent, ok := eventValue.Payload().(*http.KernelExceptionEvent)
-            if false == ok {
-                return nil
-            }
-
-            exceptionEvent.SetResponse(http.TextResponse(nethttp.StatusTooManyRequests, "rendered by the application"))
-
-            return nil
-        },
-        0,
-    )
+    limitErr := exception.TooManyRequests("slow down")
 
     RegisterRateLimitRequestListener(
         dispatcher,
         NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}),
         RateLimitConfig{
             OnLimitExceeded: func(request httpcontract.Request) (httpcontract.Response, error) {
-                return nil, exception.TooManyRequests("slow down")
+                return nil, limitErr
             },
         },
     )
@@ -296,22 +281,68 @@ func TestRegisterRateLimitRequestListener_TheRefusalIsRenderedThroughTheExceptio
 
     secondEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
     if _, secondErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, secondEvent); nil != secondErr {
-        t.Fatalf("expected the refusal to be a response rather than a dispatch error, got %v", secondErr)
+        t.Fatalf("expected the refusal rather than a dispatch error, got %v", secondErr)
     }
 
-    response := secondEvent.Response()
-    if nil == response {
-        t.Fatalf("expected the exhausted budget to be answered")
+    if false == errors.Is(secondEvent.Refusal(), limitErr) || nil != secondEvent.Response() {
+        t.Fatalf("expected the limit handler's error as the refusal, got %v, %#v", secondEvent.Refusal(), secondEvent.Response())
+    }
+}
+
+func TestRegisterRateLimitRequestListener_ATypedNilLimitErrorFallsBackTo429(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    RegisterRateLimitRequestListener(
+        dispatcher,
+        NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}),
+        RateLimitConfig{
+            OnLimitExceeded: func(request httpcontract.Request) (httpcontract.Response, error) {
+                return nil, (*exception.HttpException)(nil)
+            },
+        },
+    )
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+
+    firstEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+    if _, firstErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, firstEvent); nil != firstErr {
+        t.Fatalf("unexpected dispatch error: %v", firstErr)
     }
 
-    body, readErr := io.ReadAll(response.BodyReader())
-    if nil != readErr {
-        t.Fatalf("read body: %v", readErr)
+    secondEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+    if _, secondErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, secondEvent); nil != secondErr {
+        t.Fatalf("unexpected dispatch error: %v", secondErr)
     }
 
-    /* the fallback below the dispatch answers 429 too, so the status alone cannot say which of the two produced this — the body names the listener */
-    if "rendered by the application" != string(body) {
-        t.Fatalf("expected the exception listener to render the refusal, got %q", string(body))
+    if nil == secondEvent.Response() || nethttp.StatusTooManyRequests != secondEvent.Response().StatusCode() {
+        t.Fatalf("expected the 429 fallback, got %#v", secondEvent.Response())
+    }
+}
+
+func TestRegisterRateLimitRequestListener_StandsAsideOnARefusal(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    limiter := NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute})
+    RegisterRateLimitRequestListener(dispatcher, limiter, RateLimitConfig{})
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+
+    for range 2 {
+        refusedEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+        refusedEvent.Refuse(exception.Forbidden("refused earlier"))
+
+        if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, refusedEvent); nil != dispatchErr {
+            t.Fatalf("expected the refused request left alone, got %v", dispatchErr)
+        }
+    }
+
+    freshEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, freshEvent); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil != freshEvent.Refusal() || nil != freshEvent.Response() {
+        t.Fatalf("expected the budget untouched by refused requests, got %v, %#v", freshEvent.Refusal(), freshEvent.Response())
     }
 }
 
@@ -346,8 +377,51 @@ func TestRegisterRateLimitRequestListener_AnIpv6ClientSharesOneBudgetAcrossItsSl
             t.Fatalf("unexpected dispatch error: %v", dispatchErr)
         }
 
-        if testCase.refused != (nil != requestEvent.Response()) {
-            t.Fatalf("expected %q refused=%v, got response %#v", testCase.remoteAddress, testCase.refused, requestEvent.Response())
+        if testCase.refused != (nil != requestEvent.Refusal()) {
+            t.Fatalf("expected %q refused=%v, got %v", testCase.remoteAddress, testCase.refused, requestEvent.Refusal())
         }
+    }
+}
+
+type closeCountingBody struct {
+    closed int
+}
+
+func (instance *closeCountingBody) Read(buffer []byte) (int, error) { return 0, io.EOF }
+
+func (instance *closeCountingBody) Close() error {
+    instance.closed++
+
+    return nil
+}
+
+func TestRegisterRateLimitRequestListener_AResponseBesideALimitErrorIsClosed(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    body := &closeCountingBody{}
+
+    RegisterRateLimitRequestListener(
+        dispatcher,
+        NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}),
+        RateLimitConfig{
+            OnLimitExceeded: func(request httpcontract.Request) (httpcontract.Response, error) {
+                response := http.EmptyResponse(nethttp.StatusTeapot)
+                response.SetBodyReader(body)
+
+                return response, exception.TooManyRequests("slow down")
+            },
+        },
+    )
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+
+    for range 2 {
+        requestEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+        if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
+            t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+        }
+    }
+
+    if 1 != body.closed {
+        t.Fatalf("expected the discarded body closed once, got %d", body.closed)
     }
 }

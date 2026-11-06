@@ -41,8 +41,6 @@ type Kernel interface {
 
     SetNotFoundHandler(handler Handler)
 
-    SetErrorHandler(handler ErrorHandler)
-
     SetForwardedHeadersPolicy(policy ForwardedHeadersPolicy)
 
     SetSessionCookiePolicy(policy SessionCookiePolicy)

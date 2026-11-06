@@ -5,6 +5,7 @@ import (
     "errors"
     "fmt"
     "io"
+    "math"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -1829,9 +1830,22 @@ func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
     }
 }
 
-/* the error handler is application code invoked while the failed response's body is still open and held only in a local the recovery defer cannot see: a panic escaping it must not leak that body — the kernel recovers it, logs it with its stack, and serves the default error response with every close still running */
 
-func TestKernel_ErrorHandlerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *testing.T) {
+func newContainerWithPanickingExceptionListener(t *testing.T, serviceContainer containercontract.Container) containercontract.Container {
+    t.Helper()
+
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            panic("listener exploded")
+        },
+        0,
+    )
+
+    return serviceContainer
+}
+
+func TestKernel_AListenerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *testing.T) {
     bodyReader := &closeTrackingReader{}
 
     router := NewRouter()
@@ -1850,13 +1864,7 @@ func TestKernel_ErrorHandlerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *t
     )
 
     kernel := NewKernel(router, KernelConfig{})
-    kernel.SetErrorHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
-            panic("error handler exploded")
-        },
-    )
-
-    handler := kernel.ServeHttp(newHttpTestContainer())
+    handler := kernel.ServeHttp(newContainerWithPanickingExceptionListener(t, newHttpTestContainer()))
 
     request := httptest.NewRequest(nethttp.MethodGet, "/fail-with-open-body", nil)
     recorder := httptest.NewRecorder()
@@ -1864,15 +1872,15 @@ func TestKernel_ErrorHandlerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *t
     handler.ServeHTTP(recorder, request)
 
     if nethttp.StatusInternalServerError != recorder.Code {
-        t.Fatalf("expected the default 500 despite the error-handler panic, got %d", recorder.Code)
+        t.Fatalf("expected the default 500 despite the listener panic, got %d", recorder.Code)
     }
 
     if false == bodyReader.closed.Load() {
-        t.Fatalf("expected the failed handler's response body to be closed despite the error-handler panic")
+        t.Fatalf("expected the failed handler's response body to be closed despite the listener panic")
     }
 }
 
-func TestKernel_ErrorHandlerPanicOnNotFoundPathClosesBodyAndDelivers500(t *testing.T) {
+func TestKernel_AListenerPanicOnNotFoundPathClosesBodyAndDelivers500(t *testing.T) {
     bodyReader := &closeTrackingReader{}
 
     kernel := NewKernel(NewRouter(), KernelConfig{})
@@ -1887,13 +1895,7 @@ func TestKernel_ErrorHandlerPanicOnNotFoundPathClosesBodyAndDelivers500(t *testi
             return response, exception.NewError("not found handler failed after opening the body", nil, nil)
         },
     )
-    kernel.SetErrorHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
-            panic("error handler exploded")
-        },
-    )
-
-    handler := kernel.ServeHttp(newHttpTestContainer())
+    handler := kernel.ServeHttp(newContainerWithPanickingExceptionListener(t, newHttpTestContainer()))
 
     request := httptest.NewRequest(nethttp.MethodGet, "/no-such-route", nil)
     recorder := httptest.NewRecorder()
@@ -1901,15 +1903,15 @@ func TestKernel_ErrorHandlerPanicOnNotFoundPathClosesBodyAndDelivers500(t *testi
     handler.ServeHTTP(recorder, request)
 
     if nethttp.StatusInternalServerError != recorder.Code {
-        t.Fatalf("expected the default 500 despite the error-handler panic, got %d", recorder.Code)
+        t.Fatalf("expected the default 500 despite the listener panic, got %d", recorder.Code)
     }
 
     if false == bodyReader.closed.Load() {
-        t.Fatalf("expected the failed not-found response body to be closed despite the error-handler panic")
+        t.Fatalf("expected the failed not-found response body to be closed despite the listener panic")
     }
 }
 
-func TestKernel_ErrorHandlerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testing.T) {
+func TestKernel_AListenerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testing.T) {
     bodyReader := &closeTrackingReader{}
 
     router := NewRouter()
@@ -1932,14 +1934,8 @@ func TestKernel_ErrorHandlerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testi
     )
 
     kernel := NewKernel(router, KernelConfig{})
-    kernel.SetErrorHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
-            panic("error handler exploded")
-        },
-    )
-
     sessionStorage := &panicOnceSessionStorage{}
-    handler := kernel.ServeHttp(newHttpTestContainerWithSessionStorage(sessionStorage))
+    handler := kernel.ServeHttp(newContainerWithPanickingExceptionListener(t, newHttpTestContainerWithSessionStorage(sessionStorage)))
 
     request := httptest.NewRequest(nethttp.MethodGet, "/session-write-then-file", nil)
     recorder := httptest.NewRecorder()
@@ -1947,11 +1943,11 @@ func TestKernel_ErrorHandlerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testi
     handler.ServeHTTP(recorder, request)
 
     if nethttp.StatusInternalServerError != recorder.Code {
-        t.Fatalf("expected the recovered 500 despite the error-handler panic on the recovery path, got %d", recorder.Code)
+        t.Fatalf("expected the recovered 500 despite the listener panic on the recovery path, got %d", recorder.Code)
     }
 
     if false == bodyReader.closed.Load() {
-        t.Fatalf("expected the in-flight response body to be closed despite the error-handler panic on the recovery path")
+        t.Fatalf("expected the in-flight response body to be closed despite the listener panic on the recovery path")
     }
 }
 
@@ -2581,24 +2577,6 @@ func TestKernel_AnOuterMiddlewarePanicAfterNextClosesTheChainResponse(t *testing
     }
 }
 
-func TestKernel_HasErrorHandlerReportsInstallation(t *testing.T) {
-    kernel := NewKernel(NewRouter(), KernelConfig{})
-
-    if true == kernel.HasErrorHandler() {
-        t.Fatalf("expected no error handler on a fresh kernel")
-    }
-
-    kernel.SetErrorHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
-            return nil
-        },
-    )
-
-    if false == kernel.HasErrorHandler() {
-        t.Fatalf("expected the installed error handler to be reported")
-    }
-}
-
 func TestKernel_ErrorResponseCarriesTheRequestIdOnce(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2617,8 +2595,6 @@ func TestKernel_ErrorResponseCarriesTheRequestIdOnce(t *testing.T) {
     )
 
     serviceContainer := newHttpTestContainer()
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(t.Context(), serviceContainer), false)
-
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     errorRecorder := httptest.NewRecorder()
@@ -2800,8 +2776,6 @@ func serveAndCountErrorRecords(t *testing.T, handler httpcontract.Handler) *reco
 
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(t.Context(), serviceContainer), false)
-
     NewKernel(router, KernelConfig{}).
         ServeHttp(serviceContainer).
         ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/subject", nil))
@@ -3276,7 +3250,6 @@ func TestKernel_RefusesEveryConfigurationDoorOnceItStartedServing(t *testing.T) 
             kernel.Use([]httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler { return next }})
         }},
         {"SetNotFoundHandler", func(kernel *Kernel) { kernel.SetNotFoundHandler(nil) }},
-        {"SetErrorHandler", func(kernel *Kernel) { kernel.SetErrorHandler(nil) }},
         {"SetForwardedHeadersPolicy", func(kernel *Kernel) {
             kernel.SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{})
         }},
@@ -3714,8 +3687,6 @@ func servedLoggedMarkKernel(handler httpcontract.Handler) (nethttp.Handler, *rec
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(context.Background(), serviceContainer), false)
-
     router := NewRouter()
     router.Handle(nethttp.MethodGet, "/fail", handler)
 
@@ -3918,8 +3889,6 @@ func TestKernel_TheDebugPayloadShowsTheCoordinatesOfTheOccurrence(t *testing.T) 
     sharedErr := exception.NewError("the shared failure in debug", map[string]any{"detail": "kept"}, nil)
 
     serviceContainer := newHttpTestContainer()
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(t.Context(), serviceContainer), true)
-
     router := NewRouter()
     router.Handle(
         nethttp.MethodGet,
@@ -4002,12 +3971,6 @@ func TestKernel_AnErrorTheApplicationErrorHandlerDeclinesKeepsItsOwnStatus(t *te
         )
 
         kernel := NewKernel(router, KernelConfig{})
-        kernel.SetErrorHandler(
-            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
-                return nil
-            },
-        )
-
         recorder := httptest.NewRecorder()
         kernel.ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/declined", nil))
 
@@ -4017,7 +3980,7 @@ func TestKernel_AnErrorTheApplicationErrorHandlerDeclinesKeepsItsOwnStatus(t *te
     }
 }
 
-func TestKernel_APanicCarryingAnHttpExceptionTheErrorHandlerDeclinesKeepsItsStatus(t *testing.T) {
+func TestKernel_APanicCarryingAnHttpExceptionNoListenerAnswersKeepsItsStatus(t *testing.T) {
     router := NewRouter()
     router.Handle(
         nethttp.MethodGet,
@@ -4028,12 +3991,6 @@ func TestKernel_APanicCarryingAnHttpExceptionTheErrorHandlerDeclinesKeepsItsStat
     )
 
     kernel := NewKernel(router, KernelConfig{})
-    kernel.SetErrorHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
-            return nil
-        },
-    )
-
     recorder := httptest.NewRecorder()
     kernel.ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/panics", nil))
 
@@ -4042,19 +3999,13 @@ func TestKernel_APanicCarryingAnHttpExceptionTheErrorHandlerDeclinesKeepsItsStat
     }
 }
 
-func TestKernel_ANotFoundHandlerErrorTheErrorHandlerDeclinesKeepsItsStatus(t *testing.T) {
+func TestKernel_ANotFoundHandlerErrorNoListenerAnswersKeepsItsStatus(t *testing.T) {
     kernel := NewKernel(NewRouter(), KernelConfig{})
     kernel.SetNotFoundHandler(
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, exception.Forbidden("hidden")
         },
     )
-    kernel.SetErrorHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
-            return nil
-        },
-    )
-
     recorder := httptest.NewRecorder()
     kernel.ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/no-such-route", nil))
 
@@ -4240,9 +4191,6 @@ func TestNewKernel_TheConfigFieldsReachTheKernel(t *testing.T) {
             NotFoundHandler: func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return TextResponse(nethttp.StatusTeapot, "not here"), nil
             },
-            ErrorHandler: func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request, err error) httpcontract.Response {
-                return nil
-            },
         },
     )
 
@@ -4254,10 +4202,6 @@ func TestNewKernel_TheConfigFieldsReachTheKernel(t *testing.T) {
 
     if "/app" != kernelInstance.policies.sessionCookiePolicy.Path {
         t.Fatalf("expected the session cookie policy installed, got %+v", kernelInstance.policies.sessionCookiePolicy)
-    }
-
-    if false == kernelInstance.HasErrorHandler() {
-        t.Fatalf("expected the error handler installed")
     }
 
     recorder := serveKernelConfigTestRequest(kernelInstance, nethttp.MethodGet, "/missing")
@@ -4306,5 +4250,681 @@ func TestNewKernel_AppliesTheMiddlewaresInOrder(t *testing.T) {
 
     if 2 != len(order) || "first" != order[0] || "second" != order[1] {
         t.Fatalf("expected the middlewares run in their order, got %v", order)
+    }
+}
+
+func newFailingKernelTestRouter(failure error) *Router {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/fail",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, failure
+        },
+    )
+
+    return router
+}
+
+func TestKernel_ABuiltInListenerAnswersWhenNoApplicationListenerDid(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    observed := 0
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            observed++
+
+            return nil
+        },
+        0,
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(newFailingKernelTestRouter(exception.NotFound("no such article")), KernelConfig{}).
+        ServeHttp(serviceContainer).
+        ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    if nethttp.StatusNotFound != recorder.Code || false == strings.Contains(recorder.Body.String(), "no such article") {
+        t.Fatalf("expected the renderer's 404, got %d: %s", recorder.Code, recorder.Body.String())
+    }
+
+    if 1 != observed {
+        t.Fatalf("expected the observer to run once, ran %d times", observed)
+    }
+}
+
+func TestKernel_AnObserverAtAHigherPrioritySeesTheErrorBeforeTheBuiltInAnswers(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    failure := exception.Conflict("taken")
+    observedResponseSet := true
+    var observedErr error
+
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            exceptionEvent := eventValue.Payload().(*KernelExceptionEvent)
+            observedErr = exceptionEvent.Err()
+            observedResponseSet = nil != exceptionEvent.Response()
+
+            return nil
+        },
+        BuiltInExceptionListenerPriority+1,
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(newFailingKernelTestRouter(failure), KernelConfig{}).
+        ServeHttp(serviceContainer).
+        ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    if false == errors.Is(observedErr, failure) || true == observedResponseSet {
+        t.Fatalf("expected the observer to see the error with no response yet, got %v, %v", observedErr, observedResponseSet)
+    }
+
+    if nethttp.StatusConflict != recorder.Code {
+        t.Fatalf("expected the built-in's 409, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_AnApplicationListenerAnswersAheadOfTheBuiltIn(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.Payload().(*KernelExceptionEvent).SetResponse(TextResponse(nethttp.StatusTeapot, "application body"))
+
+            return nil
+        },
+        0,
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(newFailingKernelTestRouter(exception.NotFound("no such article")), KernelConfig{}).
+        ServeHttp(serviceContainer).
+        ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    if nethttp.StatusTeapot != recorder.Code || "application body" != recorder.Body.String() {
+        t.Fatalf("expected the application's answer, got %d: %s", recorder.Code, recorder.Body.String())
+    }
+}
+
+func TestKernel_AListenerThatPanicsAfterSettingAResponseDoesNotGetItServed(t *testing.T) {
+    capture := &recordsCaptureLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
+
+    bodyReader := &closeTrackingReader{}
+
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            response := &Response{
+                statusCode: nethttp.StatusTeapot,
+                headers:    nethttp.Header{"Content-Type": []string{"application/secret"}},
+                bodyReader: bodyReader,
+            }
+
+            eventValue.Payload().(*KernelExceptionEvent).SetResponse(response)
+
+            panic("listener exploded")
+        },
+        0,
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(newFailingKernelTestRouter(exception.NotFound("no such article")), KernelConfig{}).
+        ServeHttp(serviceContainer).
+        ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    if nethttp.StatusNotFound != recorder.Code {
+        t.Fatalf("expected the original 404, got %d", recorder.Code)
+    }
+
+    if false == bodyReader.closed.Load() {
+        t.Fatalf("expected the dropped response's body closed")
+    }
+
+    found := false
+    for _, record := range capture.failureRecords() {
+        if "the kernel.exception dispatch failed after a listener set a response, which is dropped" != record.message {
+            continue
+        }
+
+        found = true
+
+        if nethttp.StatusTeapot != record.context["droppedResponseStatus"] || "application/secret" != record.context["droppedResponseContentType"] {
+            t.Fatalf("expected the record to name the status and the type, got %v", record.context)
+        }
+
+        for key := range record.context {
+            if "droppedResponseStatus" != key && "droppedResponseContentType" != key && "requestId" != key {
+                t.Fatalf("expected the record to carry nothing else of the response, got %v", record.context)
+            }
+        }
+    }
+
+    if false == found {
+        t.Fatalf("expected a record of the dropped response, got %v", capture.failureRecords())
+    }
+}
+
+func TestKernel_APanickingListenerLeavesTheOriginalStatus(t *testing.T) {
+    capture := &recordsCaptureLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
+
+    recorder := httptest.NewRecorder()
+    NewKernel(newFailingKernelTestRouter(exception.NotFound("no such article")), KernelConfig{}).
+        ServeHttp(newContainerWithPanickingExceptionListener(t, serviceContainer)).
+        ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    if nethttp.StatusNotFound != recorder.Code || false == strings.Contains(recorder.Body.String(), "no such article") {
+        t.Fatalf("expected the renderer's 404, got %d: %s", recorder.Code, recorder.Body.String())
+    }
+
+    for _, record := range capture.failureRecords() {
+        if true == strings.Contains(record.message, "which is dropped") {
+            t.Fatalf("expected no dropped-response record, got %v", record)
+        }
+    }
+}
+
+func TestKernel_APropagationStopWithoutAResponseIsRenderedByTheKernel(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.StopPropagation()
+
+            return nil
+        },
+        0,
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(newFailingKernelTestRouter(exception.NotFound("no such article")), KernelConfig{}).
+        ServeHttp(serviceContainer).
+        ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    if nethttp.StatusNotFound != recorder.Code {
+        t.Fatalf("expected the kernel to render the 404, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_ARequiredListenerSkippedByTheResponderDropsTheAnswer(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.Payload().(*KernelExceptionEvent).SetResponse(TextResponse(nethttp.StatusTeapot, "application body"))
+
+            return nil
+        },
+        10,
+    )
+    eventDispatcher.(eventcontract.RequiredListenerRegistrar).MarkListenerRequired(
+        eventDispatcher.AddListener(
+            kernelcontract.EventKernelException,
+            func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                return nil
+            },
+            0,
+        ),
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(newFailingKernelTestRouter(exception.NotFound("no such article")), KernelConfig{}).
+        ServeHttp(serviceContainer).
+        ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    if nethttp.StatusNotFound != recorder.Code {
+        t.Fatalf("expected the original 404, got %d: %s", recorder.Code, recorder.Body.String())
+    }
+}
+
+type panickingMarshalParameter struct{}
+
+func (instance panickingMarshalParameter) MarshalJSON() ([]byte, error) {
+    panic("the parameter cannot be rendered")
+}
+
+func TestRenderExceptionSafely_ARendererThatPanicsAnswersTheStatic500(t *testing.T) {
+    capture := &recordsCaptureLogger{}
+
+    failure := exception.NewHttpError(
+        nethttp.StatusConflict,
+        exception.HttpErrorConfig{Message: "taken", Parameters: map[string]any{"poison": panickingMarshalParameter{}}},
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/fail", nil)
+    request.Header.Set("Accept", "application/json")
+
+    response := renderExceptionSafely(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(request), failure, capture, false)
+
+    if nethttp.StatusInternalServerError != response.StatusCode() {
+        t.Fatalf("expected the static 500, got %d", response.StatusCode())
+    }
+
+    if body := readResponseBody(t, response); false == strings.Contains(body, "internal server error") {
+        t.Fatalf("expected the static body, got %s", body)
+    }
+
+    if records := capture.failureRecords(); 1 != len(records) || "the exception renderer panicked" != records[0].message {
+        t.Fatalf("expected the renderer's panic on the journal, got %v", records)
+    }
+}
+
+func TestKernel_ServeHttpInstallsTheBuiltInListenerOnce(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+
+    kernelInstance := NewKernel(NewRouter(), KernelConfig{})
+    kernelInstance.ServeHttp(serviceContainer)
+    kernelInstance.ServeHttp(serviceContainer)
+
+    NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer)
+
+    inspector := eventDispatcher.(eventcontract.EventDispatcherInspector)
+    for _, registeredEvent := range inspector.RegisteredEvents() {
+        if kernelcontract.EventKernelException != registeredEvent.EventName {
+            continue
+        }
+
+        if 1 != len(registeredEvent.Listeners) || math.MinInt != registeredEvent.Listeners[0].Priority {
+            t.Fatalf("expected one listener at the lowest priority, got %+v", registeredEvent.Listeners)
+        }
+
+        return
+    }
+
+    t.Fatalf("expected the built-in listener on the dispatcher")
+}
+
+func TestKernel_ServeHttpReservesTheExceptionFloor(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer)
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() {
+            event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+                kernelcontract.EventKernelException,
+                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    return nil
+                },
+                BuiltInExceptionListenerPriority,
+            )
+        },
+        "an event listener at or below the event's reserved priority can never run, so it is refused; register it above that priority",
+    )
+}
+
+func newRefusingKernelRequestListener(refusal error) eventcontract.EventListener {
+    return func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        eventValue.Payload().(*KernelRequestEvent).Refuse(refusal)
+
+        return nil
+    }
+}
+
+func TestKernel_ARefusedRequestNeverReachesItsHandler(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelRequest,
+        newRefusingKernelRequestListener(exception.Forbidden("not you")),
+        0,
+    )
+
+    handlerRan := 0
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/guarded",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handlerRan++
+
+            return TextResponse(nethttp.StatusOK, "served"), nil
+        },
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
+
+    if 0 != handlerRan {
+        t.Fatalf("expected the handler not to run, it ran %d times", handlerRan)
+    }
+
+    if nethttp.StatusForbidden != recorder.Code || false == strings.Contains(recorder.Body.String(), "not you") {
+        t.Fatalf("expected the built-in's 403, got %d: %s", recorder.Code, recorder.Body.String())
+    }
+}
+
+func TestKernel_ARefusalIsRenderedThroughTheExceptionListeners(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+    refusal := exception.Forbidden("not you")
+
+    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), 0)
+
+    var observedErr error
+
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            exceptionEvent := eventValue.Payload().(*KernelExceptionEvent)
+            observedErr = exceptionEvent.Err()
+            exceptionEvent.SetResponse(TextResponse(nethttp.StatusTeapot, "application body"))
+
+            return nil
+        },
+        0,
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
+
+    if nethttp.StatusTeapot != recorder.Code || "application body" != recorder.Body.String() {
+        t.Fatalf("expected the application's answer, got %d: %s", recorder.Code, recorder.Body.String())
+    }
+
+    if false == errors.Is(observedErr, refusal) {
+        t.Fatalf("expected the listener to see the refusal, got %v", observedErr)
+    }
+}
+
+func TestKernel_ARefusalIsRecordedEvenWhenAnApplicationListenerAnswersFirst(t *testing.T) {
+    capture := &recordsCaptureLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
+
+    refusal := exception.Forbidden("not you")
+
+    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), 0)
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.Payload().(*KernelExceptionEvent).SetResponse(TextResponse(nethttp.StatusTeapot, "application body"))
+
+            return nil
+        },
+        0,
+    )
+
+    handler := NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer)
+
+    for served := 1; served <= 2; served++ {
+        handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
+
+        recorded := 0
+        for _, record := range capture.failureRecords() {
+            if "unhandled exception" == record.message && loggingcontract.LevelWarning == record.level {
+                recorded++
+            }
+        }
+
+        if served != recorded {
+            t.Fatalf("expected one warning record per request, got %d after %d requests", recorded, served)
+        }
+    }
+}
+
+func TestKernel_ARefusalAlreadyLoggedIsNotFiledAgain(t *testing.T) {
+    capture := &recordsCaptureLogger{}
+
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
+
+    refusal := exception.NewError("already filed", nil, nil)
+    _ = exception.MarkLogged(refusal)
+
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), 0)
+
+    NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
+
+    for _, record := range capture.failureRecords() {
+        if "unhandled exception" == record.message {
+            t.Fatalf("expected no second record, got %v", record)
+        }
+    }
+}
+
+func TestKernel_ARefusalStandsOverALaterListenersFailure(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(exception.Forbidden("not you")), 10)
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return errors.New("a later listener failed")
+        },
+        0,
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
+
+    if nethttp.StatusForbidden != recorder.Code {
+        t.Fatalf("expected the refusal's 403, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_ARefusalBesideASkippedRequiredListenerFailsClosed(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.Payload().(*KernelRequestEvent).Refuse(exception.Forbidden("not you"))
+            eventValue.StopPropagation()
+
+            return nil
+        },
+        10,
+    )
+    eventDispatcher.(eventcontract.RequiredListenerRegistrar).MarkListenerRequired(
+        eventDispatcher.AddListener(
+            kernelcontract.EventKernelRequest,
+            func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                return nil
+            },
+            0,
+        ),
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the fail-closed 500, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_AListenerThatAnswersAndRefusesFailsClosed(t *testing.T) {
+    for name, listener := range map[string]eventcontract.EventListener{
+        "response then refusal": func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requestEvent := eventValue.Payload().(*KernelRequestEvent)
+            requestEvent.SetResponse(TextResponse(nethttp.StatusTeapot, "answered"))
+            requestEvent.Refuse(exception.Forbidden("refused"))
+
+            return nil
+        },
+        "refusal then response": func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requestEvent := eventValue.Payload().(*KernelRequestEvent)
+            requestEvent.Refuse(exception.Forbidden("refused"))
+            requestEvent.SetResponse(TextResponse(nethttp.StatusTeapot, "answered"))
+
+            return nil
+        },
+    } {
+        serviceContainer := newHttpTestContainer()
+
+        event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(kernelcontract.EventKernelRequest, listener, 0)
+
+        recorder := httptest.NewRecorder()
+        NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
+
+        if nethttp.StatusInternalServerError != recorder.Code {
+            t.Fatalf("%s: expected the fail-closed 500, got %d", name, recorder.Code)
+        }
+    }
+}
+
+func TestKernel_AListenerThatRecoversTheRefusalOfASecondDecisionFailsClosed(t *testing.T) {
+    for name, decide := range map[string]func(requestEvent *KernelRequestEvent){
+        "a nil refusal":          func(requestEvent *KernelRequestEvent) { requestEvent.Refuse(nil) },
+        "a response then refuse": func(requestEvent *KernelRequestEvent) { requestEvent.SetResponse(TextResponse(nethttp.StatusTeapot, "x")); requestEvent.Refuse(exception.Forbidden("y")) },
+    } {
+        serviceContainer := newHttpTestContainer()
+
+        event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+            kernelcontract.EventKernelRequest,
+            func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                defer func() { _ = recover() }()
+
+                decide(eventValue.Payload().(*KernelRequestEvent))
+
+                return nil
+            },
+            0,
+        )
+
+        handlerRan := 0
+
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/guarded",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                handlerRan++
+
+                return TextResponse(nethttp.StatusOK, "served"), nil
+            },
+        )
+
+        recorder := httptest.NewRecorder()
+        NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
+
+        if 0 != handlerRan || nethttp.StatusInternalServerError != recorder.Code {
+            t.Fatalf("%s: expected the fail-closed 500 with the handler not run, got %d and %d runs", name, recorder.Code, handlerRan)
+        }
+    }
+}
+
+func TestKernel_AListenerThatAnswersAndRefusesHasTheResponseClosed(t *testing.T) {
+    for name, decide := range map[string]func(requestEvent *KernelRequestEvent, response httpcontract.Response){
+        "response then refusal": func(requestEvent *KernelRequestEvent, response httpcontract.Response) {
+            requestEvent.SetResponse(response)
+            requestEvent.Refuse(exception.Forbidden("refused"))
+        },
+        "refusal then response": func(requestEvent *KernelRequestEvent, response httpcontract.Response) {
+            requestEvent.Refuse(exception.Forbidden("refused"))
+            requestEvent.SetResponse(response)
+        },
+    } {
+        serviceContainer := newHttpTestContainer()
+        bodyReader := &closeTrackingReader{}
+
+        event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+            kernelcontract.EventKernelRequest,
+            func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                decide(eventValue.Payload().(*KernelRequestEvent), &Response{statusCode: nethttp.StatusTeapot, headers: make(nethttp.Header), bodyReader: bodyReader})
+
+                return nil
+            },
+            0,
+        )
+
+        NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
+
+        if false == bodyReader.closed.Load() {
+            t.Fatalf("%s: expected the response's body closed", name)
+        }
+    }
+}
+
+func TestKernel_ServeHttpOverAContainerWithoutADispatcherLeavesTheKernelConfigurable(t *testing.T) {
+    kernelInstance := NewKernel(NewRouter(), KernelConfig{})
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatalf("expected a container without a dispatcher to be refused")
+            }
+        }()
+
+        kernelInstance.ServeHttp(container.NewContainer(container.ContainerConfig{}))
+    }()
+
+    kernelInstance.SetMethodPolicy(MethodPolicy{})
+}
+
+type panickingContentTypeSerializer struct {
+    serializercontract.Serializer
+}
+
+func (instance *panickingContentTypeSerializer) ContentType() string {
+    panic("the serializer cannot name its type")
+}
+
+func TestKernel_ARendererBrokenByItsSerializerStillAnswersThroughTheResponsePath(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+    container.MustRegister[*serializer.SerializerManager](
+        serviceContainer,
+        serializer.ServiceSerializerManager,
+        func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
+            return serializer.NewSerializerManager(map[string]serializercontract.Serializer{"application/json": &panickingContentTypeSerializer{}})
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    responseDispatches := 0
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelResponse,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            responseDispatches++
+
+            return nil
+        },
+        0,
+    )
+
+    bodyReader := &closeTrackingReader{}
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/fail",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return &Response{statusCode: nethttp.StatusOK, headers: make(nethttp.Header), bodyReader: bodyReader}, exception.NotFound("no such article")
+        },
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the static 500, got %d", recorder.Code)
+    }
+
+    if 1 != responseDispatches {
+        t.Fatalf("expected kernel.response dispatched once, got %d", responseDispatches)
+    }
+
+    if false == bodyReader.closed.Load() {
+        t.Fatalf("expected the handler's response body closed")
     }
 }

@@ -27,6 +27,8 @@ The [`security`](../../security) package provides Melody’s HTTP security build
     - security context resolution (`RegisterKernelSecurityResolutionListener`)
     - access control enforcement (`RegisterKernelAccessControlListener`) — registered as a **required** `kernel.request` listener (via the event package's [`RequiredListenerRegistrar`](../../event/contract/event_dispatcher.go)), so if another listener stops event propagation before it runs, the kernel fails closed rather than letting the request reach the handler with access control silently skipped.
 
+Both listeners end a request with `KernelRequestEvent.Refuse`: a failed firewall check, a token source error, a failing or silent entry point, a missing decision manager, a denied decision, a missing security context or token. The kernel raises the refusal through `kernel.exception`, so an application's listener renders it like any other error (see [HTTP](HTTP.md#the-error-decision)), and with none answering it keeps its status. The answers of the firewall's own entry point and access denied handler stay responses: that rendering is the firewall's. A listener answering 200 to a refusal is fail-open by the application's own hand, and one that must not touch them inspects the status and declines.
+
 ## Configuration
 
 ### Compiled configuration

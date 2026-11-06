@@ -3,12 +3,12 @@ package security
 import (
     "errors"
     "fmt"
+    nethttp "net/http"
 
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
-    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -17,14 +17,11 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* exceptionResponseOrFailClosed returns the response the kernel.exception dispatch produced, or a generic fail-closed response when no listener produced one: a nil response written back to the request event is read by the kernel as "no decision" and the request would reach the handler despite being refused. */
-func exceptionResponseOrFailClosed(exceptionEvent *http.KernelExceptionEvent) httpcontract.Response {
-    response := exceptionEvent.Response()
-    if nil == response {
-        return http.JsonErrorResponse(500, "internal_server_error")
-    }
+func newAnonymousRefusal(reason string) error {
+    refusal := exception.NewHttpException(nethttp.StatusUnauthorized, "unauthorized")
+    refusal.SetContextValue("reason", reason)
 
-    return response
+    return refusal
 }
 
 func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, registry *FirewallRegistry) {
@@ -49,7 +46,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return nil
             }
 
-            if nil != requestEvent.Response() {
+            if nil != requestEvent.Response() || nil != requestEvent.Refusal() {
                 return nil
             }
 
@@ -131,12 +128,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                     return eventSecurityAuthorizationDeniedErr
                 }
 
-                requestEvent.SetResponse(
-                    http.JsonErrorResponse(
-                        401,
-                        "unauthorized",
-                    ),
-                )
+                requestEvent.Refuse(newAnonymousRefusal("missing_security_context"))
 
                 return nil
             }
@@ -164,12 +156,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                     return eventSecurityAuthorizationDeniedErr
                 }
 
-                requestEvent.SetResponse(
-                    http.JsonErrorResponse(
-                        401,
-                        "unauthorized",
-                    ),
-                )
+                requestEvent.Refuse(newAnonymousRefusal("missing_token"))
 
                 return nil
             }
@@ -198,47 +185,27 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 if false == internal.IsNilInterface(entryPoint) {
                     response, startErr := entryPoint.Start(runtimeInstance, requestEvent.Request())
                     if nil != startErr {
-                        exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), startErr)
+                        http.CloseDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
 
-                        _, eventSecurityAuthorizationDeniedErr = eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-                        if nil != eventSecurityAuthorizationDeniedErr {
-                            return eventSecurityAuthorizationDeniedErr
-                        }
+                        requestEvent.Refuse(startErr)
 
-                        requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                         return nil
                     }
 
-                    /* an entry point that produced no response falls through to the fail-closed 401, since the kernel reads a nil response as "no decision"; IsNilInterface catches the typed nil SetResponse would normalize to nil */
+                    /* an entry point that produced no response falls through to the refusal below, since the kernel reads a nil response as "no decision"; IsNilInterface catches the typed nil SetResponse would normalize to nil */
                     if false == internal.IsNilInterface(response) {
                         requestEvent.SetResponse(response)
                         return nil
                     }
                 }
 
-                requestEvent.SetResponse(
-                    http.JsonErrorResponse(
-                        401,
-                        "unauthorized",
-                    ),
-                )
+                requestEvent.Refuse(newAnonymousRefusal("entry_point_answered_nothing"))
 
                 return nil
             }
 
             if true == internal.IsNilInterface(accessDecisionManager) {
-                exceptionEvent := http.NewKernelExceptionEvent(
-                    runtimeInstance,
-                    requestEvent.Request(),
-                    exception.NewError("security access decision manager is missing", nil, nil),
-                )
-
-                _, eventKernelExceptionErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-                if nil != eventKernelExceptionErr {
-                    return eventKernelExceptionErr
-                }
-
-                requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
+                requestEvent.Refuse(exception.NewError("security access decision manager is missing", nil, nil))
 
                 return nil
             }
@@ -277,7 +244,9 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 }
 
                 if nil != handlerErr {
-                    /* both errors are the cause, the authorization decision first, so the exception listener resolves the denial status through the chain and the handler's own error stays reachable; the handler error alone would turn a 403 into a 500 */
+                    http.CloseDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
+
+                    /* both errors are the cause, the authorization decision first, so the renderer resolves the denial status through the chain and the handler's own error stays reachable; the handler error alone would turn a 403 into a 500 */
                     decisionErr = exception.NewError(
                         "access denied handler failed",
                         exceptioncontract.Context{
@@ -302,14 +271,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return eventSecurityAuthorizationDeniedErr
             }
 
-            exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), decisionErr)
-
-            _, eventKernelExceptionErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-            if nil != eventKernelExceptionErr {
-                return eventKernelExceptionErr
-            }
-
-            requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
+            requestEvent.Refuse(decisionErr)
 
             return nil
         },

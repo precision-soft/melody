@@ -830,3 +830,43 @@ func TestEventDispatcherAdapter_RemoveListener_DropsAnEmptiedInstallation(t *tes
         t.Fatalf("expected the registration of the emptied installation to remove nothing")
     }
 }
+
+func TestEventDispatcherAdapter_InstallFloorListener_ForwardsAndRecordsOneInstallation(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    adapter := NewEventDispatcherAdapter(dispatcher)
+
+    if _, installed := adapter.InstallFloorListener("floor.event", testNoopEventListener, -100); false == installed {
+        t.Fatalf("expected the first installation to install")
+    }
+
+    if _, installed := adapter.InstallFloorListener("floor.event", testNoopEventListener, -100); true == installed {
+        t.Fatalf("expected the second installation to add nothing")
+    }
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { dispatcher.AddListener("floor.event", testNoopEventListener, -100) },
+        "an event listener at or below the event's reserved priority can never run, so it is refused; register it above that priority",
+    )
+
+    recordedListeners := 0
+    for _, registeredEvent := range adapter.RegisteredEvents() {
+        if "floor.event" == registeredEvent.EventName {
+            recordedListeners = len(registeredEvent.Listeners)
+        }
+    }
+
+    if 1 != recordedListeners {
+        t.Fatalf("expected the adapter to record one listener, got %d", recordedListeners)
+    }
+}
+
+func TestEventDispatcherAdapter_InstallFloorListener_RefusesADispatcherWithoutTheDoor(t *testing.T) {
+    adapter := NewEventDispatcherAdapter(&testPlainEventDispatcher{})
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { adapter.InstallFloorListener("floor.event", testNoopEventListener, -100) },
+        "the wrapped event dispatcher cannot install a floor listener",
+    )
+}

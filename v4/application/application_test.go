@@ -1004,8 +1004,8 @@ func TestBoot_RegistersTheKernelListenersInEveryProcessShape(t *testing.T) {
         listenerCountByEvent[registeredEvent.EventName] = len(registeredEvent.Listeners)
     }
 
-    if 0 == listenerCountByEvent[kernelcontract.EventKernelException] {
-        t.Fatal("expected the exception listener after boot")
+    if 0 != listenerCountByEvent[kernelcontract.EventKernelException] {
+        t.Fatal("expected the built-in exception listener to wait for the http kernel, not for boot")
     }
 
     if 0 == listenerCountByEvent[kernelcontract.EventKernelResponse] {

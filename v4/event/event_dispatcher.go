@@ -27,9 +27,10 @@ func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
     }
 
     return &EventDispatcher{
-        listeners:   make(map[string][]listenerWithPriority),
-        subscribers: newSubscriberBookkeeping[subscriberRegistration](),
-        clock:       clock,
+        listeners:      make(map[string][]listenerWithPriority),
+        subscribers:    newSubscriberBookkeeping[subscriberRegistration](),
+        clock:          clock,
+        priorityFloors: make(map[string]int),
     }
 }
 
@@ -40,6 +41,8 @@ type EventDispatcher struct {
     subscribers    *subscriberBookkeeping[subscriberRegistration]
     clock          clockcontract.Clock
     nextListenerId uint64
+    /* eventName -> the priority InstallFloorListener reserved; read and written under mutex */
+    priorityFloors map[string]int
 }
 
 func (instance *EventDispatcher) AddListener(
@@ -66,6 +69,35 @@ func (instance *EventDispatcher) AddListener(
     }
 
     instance.mutex.Lock()
+
+    if reservedPriority, reserved := instance.priorityFloors[eventName]; true == reserved && priority <= reservedPriority {
+        instance.mutex.Unlock()
+
+        exception.Panic(
+            exception.NewError(
+                "an event listener at or below the event's reserved priority can never run, so it is refused; register it above that priority",
+                exceptioncontract.Context{
+                    "eventName":        eventName,
+                    "priority":         priority,
+                    "reservedPriority": reservedPriority,
+                },
+                nil,
+            ),
+        )
+    }
+
+    registration := instance.appendListenerLocked(eventName, listener, priority)
+
+    instance.mutex.Unlock()
+
+    return registration
+}
+
+func (instance *EventDispatcher) appendListenerLocked(
+    eventName string,
+    listener eventcontract.EventListener,
+    priority int,
+) eventcontract.ListenerRegistration {
     instance.nextListenerId++
     listenerId := instance.nextListenerId
 
@@ -89,12 +121,48 @@ func (instance *EventDispatcher) AddListener(
         },
     )
 
-    instance.mutex.Unlock()
-
     return eventcontract.ListenerRegistration{
         EventName:  eventName,
         ListenerId: listenerId,
     }
+}
+
+/* InstallFloorListener registers the listener and refuses every later registration on the event at or below its priority, under one lock, so nothing registers between the two. An event already holding a floor keeps it, and the listener is not added. */
+func (instance *EventDispatcher) InstallFloorListener(
+    eventName string,
+    listener eventcontract.EventListener,
+    priority int,
+) (eventcontract.ListenerRegistration, bool) {
+    if "" == eventName {
+        exception.Panic(
+            exception.NewError("event name is required to install a floor listener", nil, nil),
+        )
+    }
+
+    if nil == listener {
+        exception.Panic(
+            exception.NewError(
+                "event listener is required to install a floor listener",
+                exceptioncontract.Context{
+                    "eventName": eventName,
+                },
+                nil,
+            ),
+        )
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if _, reserved := instance.priorityFloors[eventName]; true == reserved {
+        return eventcontract.ListenerRegistration{}, false
+    }
+
+    registration := instance.appendListenerLocked(eventName, listener, priority)
+
+    instance.priorityFloors[eventName] = priority
+
+    return registration, true
 }
 
 /* MarkListenerRequired flags the registered listener so that, if another listener stops propagation before it runs, dispatch returns a RequiredListenerSkippedError and the caller can fail closed. An unknown registration is refused. The mark follows the registration, so a dispatch between the two sees the listener unmarked; register at boot, or do not dispatch the event until the mark is applied. */
@@ -197,7 +265,7 @@ func (instance *EventDispatcher) RemoveListener(registration eventcontract.Liste
 
 /* AddSubscriber installs every listener the subscriber declares and answers the registration that owns them, the only handle on that installation. Installing one subscriber twice produces two independent installations, and a value subscriber is installable, since the installation is filed under an id the dispatcher issues. A nil subscriber is refused. */
 func (instance *EventDispatcher) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
-    return instance.subscribers.addSubscriber(subscriber, instance.installSubscriberListener)
+    return instance.subscribers.addSubscriber(subscriber, instance.installSubscriberListener, instance.removeSubscriberListener)
 }
 
 /* RemoveSubscriber removes the listeners one AddSubscriber call installed and answers how many. An unknown registration, one already removed or the zero value, removes nothing and answers zero. */
@@ -415,7 +483,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
 
     for listenerIndex = 0; listenerIndex < len(listenerList); listenerIndex++ {
         /* propagation is tested before each listener runs, so an event that arrives already stopped runs none of them */
-        if true == eventValue.IsPropagationStopped() {
+        if true == isEventPropagationStopped(eventValue) {
             break
         }
 
@@ -454,7 +522,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
                 false,
             )
             if nil != requiredErr {
-                if true == eventValue.IsPropagationStopped() {
+                if true == isEventPropagationStopped(eventValue) {
                     return eventValue, NewRequiredListenerSkippedError(eventName, listenerName, err)
                 }
 
@@ -469,7 +537,7 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
         stoppedByListenerMaySkip = entry.maySkipRequiredListeners
     }
 
-    if true == eventValue.IsPropagationStopped() {
+    if true == isEventPropagationStopped(eventValue) {
         requiredErr := refuseSkippedRequiredListeners(
             eventName,
             listenerList[listenerIndex:],
@@ -504,6 +572,16 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
 }
 
 /* listenerNameOf answers the qualified function name of a listener, and the dash for one the runtime cannot name or for nil. It is called only where the name is used, since the reflection behind it runs per listener per dispatch. */
+func isEventPropagationStopped(eventValue eventcontract.Event) bool {
+    if true == eventValue.IsPropagationStopped() {
+        return true
+    }
+
+    stopper, isStopper := eventValue.Payload().(eventcontract.PropagationStopper)
+
+    return true == isStopper && false == internal.IsNilInterface(stopper) && true == stopper.IsPropagationStopped()
+}
+
 func listenerNameOf(listener eventcontract.EventListener) string {
     if nil == listener {
         return "-"
@@ -699,6 +777,7 @@ type subscriberRegistration struct {
 var _ eventcontract.EventDispatcher = (*EventDispatcher)(nil)
 var _ eventcontract.EventDispatcherInspector = (*EventDispatcher)(nil)
 var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcher)(nil)
+var _ eventcontract.PriorityFloorRegistrar = (*EventDispatcher)(nil)
 
 /* requireEventSubscriber refuses a subscriber that cannot be installed and answers the type name its installation is filed under, for inspection. The nil test reads through the interface, since SubscribedEvents would dereference a typed nil. A value subscriber is installable, since the installation is filed under an id the dispatcher issues. */
 func requireEventSubscriber(

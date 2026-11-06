@@ -12,9 +12,3 @@ type Handler func(
     request Request,
 ) (Response, error)
 
-type ErrorHandler func(
-    runtime runtimecontract.Runtime,
-    writer nethttp.ResponseWriter,
-    request Request,
-    err error,
-) Response

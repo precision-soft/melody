@@ -21,6 +21,11 @@ type RequiredListenerRegistrar interface {
     MarkListenerMaySkipRequiredListeners(registration ListenerRegistration)
 }
 
+/* PriorityFloorRegistrar is an optional interface an EventDispatcher may implement to give the bottom of one event's order to the listener that answers last, registered and reserved as one step: a later registration on that event at or below the priority could never run, so it is refused by name. A registration made before stands, and the order is not changed. A second installation on an event already holding a floor adds nothing and answers false, so kernels sharing a dispatcher install one listener. */
+type PriorityFloorRegistrar interface {
+    InstallFloorListener(eventName string, listener EventListener, priority int) (ListenerRegistration, bool)
+}
+
 type EventDispatcher interface {
     AddListener(eventName string, listener EventListener, priority int) ListenerRegistration
 

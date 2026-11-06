@@ -36,7 +36,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 return nil
             }
 
-            if nil != requestEvent.Response() {
+            if nil != requestEvent.Response() || nil != requestEvent.Refusal() {
                 return nil
             }
 
@@ -50,14 +50,8 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 if nil != checkErr {
                     setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
 
-                    exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), checkErr)
+                    requestEvent.Refuse(checkErr)
 
-                    _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-                    if nil != dispatchErr {
-                        return dispatchErr
-                    }
-
-                    requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                     return nil
                 }
             }
@@ -67,7 +61,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
             if nil != resolveErr {
                 setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
 
-                /* normalized before the record is written, so the logged mark sticks to the error and the kernel exception listener does not file the same failure again */
+                /* normalized before the record is written, so the logged mark sticks to the error and the kernel does not file the same failure again */
                 resolveErr = exception.FromError(resolveErr)
 
                 logger := logging.LoggerFromRuntime(runtimeInstance)
@@ -103,14 +97,8 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                     _ = exception.MarkLogged(resolveErr)
                 }
 
-                exceptionEvent := http.NewKernelExceptionEvent(runtimeInstance, requestEvent.Request(), resolveErr)
+                requestEvent.Refuse(resolveErr)
 
-                _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-                if nil != dispatchErr {
-                    return dispatchErr
-                }
-
-                requestEvent.SetResponse(exceptionResponseOrFailClosed(exceptionEvent))
                 return nil
             }
 

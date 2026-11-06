@@ -1,7 +1,6 @@
 package http
 
 import (
-    "context"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -9,7 +8,6 @@ import (
 
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -151,8 +149,6 @@ func newHttpTestContainerWithValidator() containercontract.Container {
         },
         containercontract.RegisterOptions{},
     )
-
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(context.Background(), serviceContainer), false)
 
     return serviceContainer
 }

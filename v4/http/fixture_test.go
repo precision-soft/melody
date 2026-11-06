@@ -39,6 +39,15 @@ func newTestRuntime() runtimecontract.Runtime {
     return runtime.New(context.Background(), scope, serviceContainer)
 }
 
+func newDebugTestRuntime() runtimecontract.Runtime {
+    serviceContainer := newHttpTestContainer()
+    scope := serviceContainer.NewScope()
+
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
+
+    return runtime.New(context.Background(), scope, serviceContainer)
+}
+
 type writeHeaderCountingResponseWriter struct {
     nethttp.ResponseWriter
     writeHeaderCount int

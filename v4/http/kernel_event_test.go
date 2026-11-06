@@ -5,8 +5,13 @@ import (
     "net/http/httptest"
     "testing"
 
+    "github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/event"
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* the four kernel events are how every listener in the framework and in an application reaches the request, the runtime and the response: an event that hands back the wrong one of its three fields would send a listener the request of one hop and the response of another, and nothing in the dispatch would notice. Each event is asserted to report the very instances it is constructed with. */
@@ -138,5 +143,115 @@ func TestKernelEvents_SetResponseStoresTheNilATypedNilMeans(t *testing.T) {
     terminateEvent := NewKernelTerminateEvent(runtimeInstance, request, unassignedResponse)
     if nil != terminateEvent.Response() {
         t.Fatalf("expected the terminate event constructor to store the nil a typed nil means")
+    }
+}
+
+func TestKernelExceptionEvent_SetResponseStopsPropagation(t *testing.T) {
+    runtimeInstance := newTestRuntime()
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    secondRan := 0
+
+    dispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.Payload().(*KernelExceptionEvent).SetResponse(TextResponse(nethttp.StatusTeapot, "first"))
+
+            return nil
+        },
+        10,
+    )
+    dispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            secondRan++
+
+            return nil
+        },
+        0,
+    )
+
+    request := testhelper.NewHttpTestRequestFromHttpRequest(httptest.NewRequest(nethttp.MethodGet, "/articles", nil))
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, exception.NotFound("gone"))
+
+    if true == exceptionEvent.IsPropagationStopped() {
+        t.Fatalf("expected a fresh event to report propagation live")
+    }
+
+    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 0 != secondRan {
+        t.Fatalf("expected the first responder to win, the second listener ran %d times", secondRan)
+    }
+
+    if false == exceptionEvent.IsPropagationStopped() {
+        t.Fatalf("expected the answered event to report its stop")
+    }
+}
+
+func newKernelRequestEventForTest() *KernelRequestEvent {
+    return NewKernelRequestEvent(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(httptest.NewRequest(nethttp.MethodGet, "/articles", nil)))
+}
+
+func TestKernelRequestEvent_RefuseKeepsTheFirstRefusal(t *testing.T) {
+    requestEvent := newKernelRequestEventForTest()
+
+    if nil != requestEvent.Refusal() {
+        t.Fatalf("expected a fresh event to carry no refusal")
+    }
+
+    first := exception.Forbidden("first")
+
+    requestEvent.Refuse(first)
+    requestEvent.Refuse(exception.Conflict("second"))
+
+    if first != requestEvent.Refusal() {
+        t.Fatalf("expected the first refusal kept, got %v", requestEvent.Refusal())
+    }
+}
+
+func TestKernelRequestEvent_RefuseRefusesANilAndATypedNilError(t *testing.T) {
+    for _, err := range []error{nil, (*exception.HttpException)(nil)} {
+        requestEvent := newKernelRequestEventForTest()
+
+        testhelper.AssertPanicsWithError(
+            t,
+            func() { requestEvent.Refuse(err) },
+            "a kernel.request listener refused a request with no error",
+        )
+
+        if false == requestEvent.decisionRefused {
+            t.Fatalf("expected the kernel to be told the decision was refused")
+        }
+    }
+}
+
+func TestKernelRequestEvent_AResponseAndARefusalAreRefusedInEitherOrder(t *testing.T) {
+    answered := newKernelRequestEventForTest()
+    answered.SetResponse(TextResponse(nethttp.StatusTeapot, "answered"))
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { answered.Refuse(exception.Forbidden("refused")) },
+        "a kernel.request listener refused a request that already has a response; a listener answers or refuses, and stands aside once Response is set",
+    )
+
+    if false == answered.decisionRefused {
+        t.Fatalf("expected the second decision marked")
+    }
+
+    refused := newKernelRequestEventForTest()
+    refused.Refuse(exception.Forbidden("refused"))
+
+    testhelper.AssertPanicsWithError(
+        t,
+        func() { refused.SetResponse(TextResponse(nethttp.StatusTeapot, "answered")) },
+        "a kernel.request listener set a response on a refused request; a listener answers or refuses, and stands aside once Refusal is set",
+    )
+
+    if false == refused.decisionRefused {
+        t.Fatalf("expected the second decision marked")
     }
 }

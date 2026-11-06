@@ -29,8 +29,8 @@ func newSubscriberBookkeeping[R any]() *subscriberBookkeeping[R] {
     }
 }
 
-/* addSubscriber files the installation under an id this bookkeeping issues and answers the registration, the only handle on it. Every subscribed event is validated before a single listener is installed, so a malformed subscriber is never half-installed. */
-func (instance *subscriberBookkeeping[R]) addSubscriber(subscriber eventcontract.EventSubscriber, install subscriberListenerInstaller[R]) eventcontract.SubscriberRegistration {
+/* addSubscriber files the installation under an id this bookkeeping issues and answers the registration, the only handle on it. Every subscribed event is validated before a single listener is installed, so a malformed subscriber is never half-installed; a listener the dispatcher refuses on installing, one below an event's floor, takes the ones installed before it back out, since the panic leaves the caller no handle to remove them. */
+func (instance *subscriberBookkeeping[R]) addSubscriber(subscriber eventcontract.EventSubscriber, install subscriberListenerInstaller[R], remove subscriberListenerRemover[R]) eventcontract.SubscriberRegistration {
     subscriberType := requireEventSubscriber(
         subscriber,
         "add a subscriber",
@@ -41,7 +41,7 @@ func (instance *subscriberBookkeeping[R]) addSubscriber(subscriber eventcontract
     instance.subscriberMutex.Lock()
     defer instance.subscriberMutex.Unlock()
 
-    subscriberId := instance.install(plannedList, subscriberType, install)
+    subscriberId := instance.install(plannedList, subscriberType, install, remove)
 
     return eventcontract.SubscriberRegistration{SubscriberId: subscriberId}
 }
@@ -59,11 +59,19 @@ func (instance *subscriberBookkeeping[R]) install(
     plannedList []plannedSubscriberRegistration,
     subscriberType string,
     install subscriberListenerInstaller[R],
+    remove subscriberListenerRemover[R],
 ) uint64 {
     instance.mutex.Lock()
     instance.nextId++
     subscriberId := instance.nextId
     instance.mutex.Unlock()
+
+    installed := false
+    defer func() {
+        if false == installed {
+            instance.uninstall(subscriberId, remove)
+        }
+    }()
 
     for _, planned := range plannedList {
         record := install(planned, subscriberType)
@@ -72,6 +80,8 @@ func (instance *subscriberBookkeeping[R]) install(
         instance.registrations[subscriberId] = append(instance.registrations[subscriberId], record)
         instance.mutex.Unlock()
     }
+
+    installed = true
 
     return subscriberId
 }

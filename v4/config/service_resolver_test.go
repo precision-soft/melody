@@ -50,3 +50,29 @@ func TestConfigMustFromResolver_PanicsWhenTheConfigurationIsNotRegistered(t *tes
 
     _ = ConfigMustFromResolver(t.Context(), serviceContainer)
 }
+
+func TestConfigFromContainer_AnswersTheConfigurationAndAnAbsenceAsAnError(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+    if _, absentErr := ConfigFromContainer(t.Context(), serviceContainer); nil == absentErr {
+        t.Fatalf("expected an absent configuration to answer an error")
+    }
+
+    configuration, newConfigurationErr := NewConfiguration(&Environment{values: map[string]string{}}, "/srv/app")
+    if nil != newConfigurationErr {
+        t.Fatalf("unexpected configuration error: %v", newConfigurationErr)
+    }
+
+    serviceContainer.MustRegister(
+        ServiceConfig,
+        func(resolver containercontract.Resolver) (*Configuration, error) {
+            return configuration, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    resolved, resolveErr := ConfigFromContainer(t.Context(), serviceContainer)
+    if nil != resolveErr || configuration != resolved {
+        t.Fatalf("expected the registered configuration, got %v, %v", resolved, resolveErr)
+    }
+}

@@ -1,6 +1,9 @@
 package http
 
 import (
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -26,10 +29,13 @@ func NewKernelRequestEvent(
     }
 }
 
+/* KernelRequestEvent is how a kernel.request listener ends a request before its handler: with a response, its own rendering, or with a refusal, which the kernel renders through kernel.exception so an application's listener decides its body. A listener that does both is a bug, refused by name at the second door, and the kernel answers it fail-closed. */
 type KernelRequestEvent struct {
     runtimeInstance runtimecontract.Runtime
     request         httpcontract.Request
     response        httpcontract.Response
+    refusal         error
+    decisionRefused bool
 }
 
 func (instance *KernelRequestEvent) Runtime() runtimecontract.Runtime {
@@ -45,6 +51,68 @@ func (instance *KernelRequestEvent) Response() httpcontract.Response {
 }
 
 func (instance *KernelRequestEvent) SetResponse(response httpcontract.Response) {
+    if nil != instance.refusal {
+        /* kept so the kernel's fail-closed step closes its body, which nothing else holds */
+        instance.response = normalizedEventResponse(response)
+        instance.decisionRefused = true
+
+        exception.Panic(
+            exception.NewError(
+                "a kernel.request listener set a response on a refused request; a listener answers or refuses, and stands aside once Refusal is set",
+                exceptioncontract.Context{
+                    "door": "KernelRequestEvent.SetResponse",
+                },
+                nil,
+            ),
+        )
+    }
+
+    instance.response = normalizedEventResponse(response)
+}
+
+/* Refuse ends the request with the error: the handler never runs and the kernel raises the error through kernel.exception. The first refusal is the decision, so a later one is ignored. A nil or typed-nil error is refused by name, since reading it as no refusal would serve a request the caller meant to refuse. */
+func (instance *KernelRequestEvent) Refuse(err error) {
+    if true == internal.IsNilInterface(err) {
+        instance.decisionRefused = true
+
+        exception.Panic(
+            exception.NewError(
+                "a kernel.request listener refused a request with no error",
+                exceptioncontract.Context{
+                    "door": "KernelRequestEvent.Refuse",
+                },
+                nil,
+            ),
+        )
+    }
+
+    if nil != instance.response {
+        instance.decisionRefused = true
+
+        exception.Panic(
+            exception.NewError(
+                "a kernel.request listener refused a request that already has a response; a listener answers or refuses, and stands aside once Response is set",
+                exceptioncontract.Context{
+                    "door": "KernelRequestEvent.Refuse",
+                },
+                nil,
+            ),
+        )
+    }
+
+    if nil != instance.refusal {
+        return
+    }
+
+    instance.refusal = err
+}
+
+func (instance *KernelRequestEvent) Refusal() error {
+    return instance.refusal
+}
+
+func (instance *KernelRequestEvent) failClosed(response httpcontract.Response) {
+    instance.refusal = nil
     instance.response = normalizedEventResponse(response)
 }
 
@@ -153,9 +221,6 @@ type KernelExceptionEvent struct {
     request  httpcontract.Request
     err      error
     response httpcontract.Response
-
-    /* set by the kernel when an application error handler is installed at the moment of the dispatch, and read by the framework exception listener to stand aside for it; an event built outside the kernel leaves it unset */
-    errorHandlerInstalled bool
 }
 
 func (instance *KernelExceptionEvent) Runtime() runtimecontract.Runtime {
@@ -174,6 +239,13 @@ func (instance *KernelExceptionEvent) Response() httpcontract.Response {
     return instance.response
 }
 
+/* SetResponse answers the event and ends the dispatch: the first responder wins, and a listener that must see every error sits at a higher priority. */
 func (instance *KernelExceptionEvent) SetResponse(response httpcontract.Response) {
     instance.response = normalizedEventResponse(response)
 }
+
+func (instance *KernelExceptionEvent) IsPropagationStopped() bool {
+    return nil != instance.response
+}
+
+var _ eventcontract.PropagationStopper = (*KernelExceptionEvent)(nil)

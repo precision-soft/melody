@@ -16,6 +16,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
@@ -409,4 +410,21 @@ func TestRegisterListeners_RefuseANilService(t *testing.T) {
     assertPanicsWithContext(t, func() { RegisterListeners(dispatcher, nil) }, "the cors service is nil", "door", "cors.RegisterListeners")
     assertPanicsWithContext(t, func() { RegisterRequestListener(dispatcher, nil) }, "the cors service is nil", "door", "cors.RegisterRequestListener")
     assertPanicsWithContext(t, func() { RegisterResponseListener(dispatcher, nil) }, "the cors service is nil", "door", "cors.RegisterResponseListener")
+}
+
+func TestRegisterRequestListener_LeavesARefusedPreflightToTheKernel(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+
+    RegisterRequestListener(dispatcher, RestrictiveService([]string{"https://app.example.com"}))
+
+    requestEvent := http.NewKernelRequestEvent(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/api/item")))
+    requestEvent.Refuse(exception.TooManyRequests("slow down"))
+
+    if _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelRequest, requestEvent); nil != err {
+        t.Fatalf("expected the refused preflight left alone, got %v", err)
+    }
+
+    if nil != requestEvent.Response() {
+        t.Fatalf("expected no response on a refused preflight, got %#v", requestEvent.Response())
+    }
 }

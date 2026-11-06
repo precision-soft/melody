@@ -31,7 +31,7 @@ import (
 /* MethodPolicy is the contract's type under this package's name, the one httpcontract.Kernel.SetMethodPolicy takes. */
 type MethodPolicy = httpcontract.MethodPolicy
 
-/* KernelConfig is what the http kernel is built with. The zero value is the default: HEAD falls back to GET and OPTIONS is answered, no forwarded header is believed, the session cookie is sent for "/" with SameSite=Lax and Secure derived from the scheme, no middleware, and the framework's not-found and error rendering. Every field has a boot-time door on the kernel a module installs through, the setter of the same name or Use for the middlewares; the struct is the application's form. */
+/* KernelConfig is what the http kernel is built with. The zero value is the default: HEAD falls back to GET and OPTIONS is answered, no forwarded header is believed, the session cookie is sent for "/" with SameSite=Lax and Secure derived from the scheme, no middleware, and the framework's not-found rendering. Every field has a boot-time door on the kernel a module installs through, the setter of the same name or Use for the middlewares; the struct is the application's form. */
 type KernelConfig struct {
     MethodPolicy MethodPolicy
 
@@ -44,8 +44,6 @@ type KernelConfig struct {
     Middlewares []httpcontract.Middleware
 
     NotFoundHandler httpcontract.Handler
-
-    ErrorHandler httpcontract.ErrorHandler
 }
 
 type kernelPolicies struct {
@@ -66,7 +64,6 @@ func NewKernel(router httpcontract.Router, kernelConfig KernelConfig) *Kernel {
     kernel.SetSessionCookiePolicy(kernelConfig.SessionCookiePolicy)
     kernel.Use(kernelConfig.Middlewares)
     kernel.SetNotFoundHandler(kernelConfig.NotFoundHandler)
-    kernel.SetErrorHandler(kernelConfig.ErrorHandler)
 
     return kernel
 }
@@ -75,7 +72,6 @@ type Kernel struct {
     router          httpcontract.Router
     middlewares     []httpcontract.Middleware
     notFoundHandler httpcontract.Handler
-    errorHandler    httpcontract.ErrorHandler
     policies        kernelPolicies
     /* request scopes opened and not yet closed: the shutdown's only measure of a hijacked connection, which net/http's Shutdown does not wait for. Written by every serving goroutine, read by the shutdown one. */
     openRequestScopes atomic.Int64
@@ -116,18 +112,6 @@ func (instance *Kernel) SetNotFoundHandler(handler httpcontract.Handler) {
     instance.refuseMutationWhileServing("SetNotFoundHandler")
 
     instance.notFoundHandler = handler
-}
-
-/* SetErrorHandler installs the application's own error rendering for the errors the kernel itself raises: a handler's error, the not-found handler's error, a recovered panic. The kernel marks the kernel.exception event it builds with whether a handler is installed, and the framework exception listener stands aside for it, so the handler takes over negotiation, the response's own copy of the request-id header — the connection header the kernel writes for every request stays — and the validation payload whether it was installed before or after Boot, and whatever serves the kernel. When it returns nil, the kernel's default rendering answers. A refusal a kernel.request listener dispatches itself — the security firewall's and access control's — is rendered by the framework exception listener, not by this handler. */
-func (instance *Kernel) SetErrorHandler(handler httpcontract.ErrorHandler) {
-    instance.refuseMutationWhileServing("SetErrorHandler")
-
-    instance.errorHandler = handler
-}
-
-/* HasErrorHandler reports whether the application installed an error handler. */
-func (instance *Kernel) HasErrorHandler() bool {
-    return nil != instance.errorHandler
 }
 
 /* SetForwardedHeadersPolicy installs the policy every forwarded-header reader consults; it is boot-only. A trusted-proxy entry that parses as neither a CIDR prefix nor an address is refused by name, and the list is copied, since it decides on every request whether X-Forwarded-Proto is believed. */
@@ -178,6 +162,9 @@ func copyStringList(values []string) []string {
 }
 
 func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
+    /* in the kernel rather than at boot, so an application serving Boot's kernel with its own server and a bare kernel answer alike; ahead of the freeze, so a container without a dispatcher leaves the kernel configurable */
+    installBuiltInExceptionListener(event.EventDispatcherMustFromContainer(context.Background(), serviceContainer))
+
     /* the freeze is raised when the handler is built, and refuses every mutator that begins after it; it is not a lock, so a mutator already past its check is not caught. The router is frozen through a package-private door; a router from outside this package keeps only the written contract. */
     instance.serving.Store(true)
     freezeRouterForServing(instance.router)
@@ -517,34 +504,16 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 reportedErr = newLoggedOccurrence(recoveredErr)
             }
 
-            exceptionEvent := instance.newKernelExceptionEvent(runtimeInstance, melodyRequest, reportedErr)
-            _, eventKernelExceptionErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
-            instance.logEventDispatchError(requestLogger, "kernel exception error", eventKernelExceptionErr)
-
-            if nil == exceptionEvent.Response() {
-                if nil != instance.errorHandler {
-                    customResponse := instance.invokeErrorHandlerSafely(runtimeInstance, writer, melodyRequest, recoveredErr, requestLogger)
-                    if nil != customResponse {
-                        exceptionEvent.SetResponse(customResponse)
-                    }
-                }
-            }
-
-            /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
-            if nil == exceptionEvent.Response() {
-                exceptionEvent.SetResponse(
-                    exceptionResponseFor(runtimeInstance, melodyRequest, exceptionEvent.Err(), debugMode),
-                )
-            }
+            exceptionResponse := instance.raiseException(runtimeInstance, melodyRequest, reportedErr, requestLogger, eventDispatcher, debugMode)
 
             /* the response built before the panic may own an open file, so it is handed to the write step, which closes it only once it knows what is written: a listener of the re-published kernel.response may answer with that same response */
 
             /* a middleware that panicked after its next() returned leaves the chain's response held only by the recording shim, so it is closed here; where finalResponse was assigned the write step owns the close, since a wrapping middleware may share the body with the response served */
-            if nil == panickedResponse && nil != chainResponse && chainResponse != exceptionEvent.Response() {
+            if nil == panickedResponse && nil != chainResponse && chainResponse != exceptionResponse {
                 closeDiscardedResponseBody(chainResponse, requestLogger)
             }
 
-            finalResponse = exceptionEvent.Response()
+            finalResponse = exceptionResponse
 
             instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, panickedResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
         }()
@@ -616,22 +585,38 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelRequestErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, kernelRequestEvent)
         instance.logEventDispatchError(requestLogger, "kernel request error", eventKernelRequestErr)
 
-        /* the kernel.request dispatch fails closed: an error with no response means listeners behind the failing one, access control among them, never ran; a dispatch that skipped a required listener is refused too, and its response dropped for the error page. The error is judged on itself, not its cause chain. */
+        /* the kernel.request dispatch fails closed: an error with no decision means listeners behind the failing one, access control among them, never ran; a dispatch that skipped a required listener is refused too, its decision dropped for the error page, and so is a listener that both answered and refused. A refusal an earlier listener made is a decision, and it stands over a later listener's failure. The error is judged on itself, not its cause chain. */
         _, requiredListenerSkipped := eventKernelRequestErr.(*event.RequiredListenerSkippedError)
 
-        if nil != eventKernelRequestErr && (true == requiredListenerSkipped || nil == kernelRequestEvent.Response()) {
+        /* the mark is read on its own, since a listener that recovers its own panic leaves the dispatch clean */
+        if true == kernelRequestEvent.decisionRefused || (nil != eventKernelRequestErr && (true == requiredListenerSkipped || (nil == kernelRequestEvent.Response() && nil == kernelRequestEvent.Refusal()))) {
             statusCode := nethttp.StatusInternalServerError
             message := "internal server error"
-            if true == debugMode {
+            if true == debugMode && nil != eventKernelRequestErr {
                 message = debugErrorMessage(eventKernelRequestErr)
+            }
+
+            if nil == eventKernelRequestErr {
+                requestLogger.Error("a kernel.request listener recovered the refusal of a second decision", nil)
             }
 
             /* the stopping listener's response is replaced below and reaches no writer, so it is closed here */
             closeDiscardedResponseBody(kernelRequestEvent.Response(), requestLogger)
 
-            kernelRequestEvent.SetResponse(
+            kernelRequestEvent.failClosed(
                 renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil),
             )
+        }
+
+        /* a refusal is filed here, before the dispatch, so its record does not depend on which listener answers */
+        if nil != kernelRequestEvent.Refusal() {
+            reportedErr := recordExceptionOccurrence(requestLogger, melodyRequest, kernelRequestEvent.Refusal())
+
+            finalResponse = instance.raiseException(runtimeInstance, melodyRequest, reportedErr, requestLogger, eventDispatcher, debugMode)
+
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+
+            return
         }
 
         if nil != kernelRequestEvent.Response() {
@@ -713,30 +698,13 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                     if nil != err {
                         reportedErr := logHandlerError(requestLogger, "not found handler error", err, request.HttpRequest())
 
-                        kernelExceptionEvent := instance.newKernelExceptionEvent(runtimeInstance, request, reportedErr)
-                        instance.dispatchEventKernelException(kernelExceptionEvent, runtimeInstance, requestLogger, eventDispatcher)
+                        exceptionResponse := instance.raiseException(runtimeInstance, request, reportedErr, requestLogger, eventDispatcher, debugMode)
 
-                        if nil == kernelExceptionEvent.Response() {
-                            if nil != instance.errorHandler {
-                                customResponse := instance.invokeErrorHandlerSafely(runtimeInstance, writer, request, err, requestLogger)
-                                if nil != customResponse {
-                                    kernelExceptionEvent.SetResponse(customResponse)
-                                }
-                            }
-                        }
-
-                        /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
-                        if nil == kernelExceptionEvent.Response() {
-                            kernelExceptionEvent.SetResponse(
-                                exceptionResponseFor(runtimeInstance, request, kernelExceptionEvent.Err(), debugMode),
-                            )
-                        }
-
-                        if nil != response && response != kernelExceptionEvent.Response() {
+                        if nil != response && response != exceptionResponse {
                             closeDiscardedResponseBody(response, requestLogger)
                         }
 
-                        return kernelExceptionEvent.Response(), nil
+                        return exceptionResponse, nil
                     }
 
                     return response, nil
@@ -794,30 +762,13 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != finalHandlerErr {
             reportedErr := logHandlerError(requestLogger, "controller handler error", finalHandlerErr, request)
 
-            kernelExceptionEvent := instance.newKernelExceptionEvent(runtimeInstance, melodyRequest, reportedErr)
-            instance.dispatchEventKernelException(kernelExceptionEvent, runtimeInstance, requestLogger, eventDispatcher)
+            exceptionResponse := instance.raiseException(runtimeInstance, melodyRequest, reportedErr, requestLogger, eventDispatcher, debugMode)
 
-            if nil == kernelExceptionEvent.Response() {
-                if nil != instance.errorHandler {
-                    customResponse := instance.invokeErrorHandlerSafely(runtimeInstance, writer, melodyRequest, finalHandlerErr, requestLogger)
-                    if nil != customResponse {
-                        kernelExceptionEvent.SetResponse(customResponse)
-                    }
-                }
-            }
-
-            /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
-            if nil == kernelExceptionEvent.Response() {
-                kernelExceptionEvent.SetResponse(
-                    exceptionResponseFor(runtimeInstance, melodyRequest, kernelExceptionEvent.Err(), debugMode),
-                )
-            }
-
-            if nil != response && response != kernelExceptionEvent.Response() {
+            if nil != response && response != exceptionResponse {
                 closeDiscardedResponseBody(response, requestLogger)
             }
 
-            response = kernelExceptionEvent.Response()
+            response = exceptionResponse
         }
 
         /* a nil response becomes an empty 204 here, so kernel.response is dispatched for it and its listeners decorate it like any other response */
@@ -828,38 +779,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         finalResponse = response
         instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
     })
-}
-
-/* invokeErrorHandlerSafely runs the application's error handler under the kernel's own recovery, since the failed response's body is still open and held only by the caller. A panic, net/http's abort sentinel included, is logged with its stack and answered by the default error response. */
-func (instance *Kernel) invokeErrorHandlerSafely(
-    runtimeInstance runtimecontract.Runtime,
-    writer nethttp.ResponseWriter,
-    request httpcontract.Request,
-    handlerErr error,
-    requestLogger loggingcontract.Logger,
-) (errorHandlerResponse httpcontract.Response) {
-    defer func() {
-        recoveredValue := recover()
-        if nil == recoveredValue {
-            return
-        }
-
-        errorHandlerResponse = nil
-
-        requestLogger.Error(
-            "error handler panicked",
-            exception.LogContext(
-                RecoverToError(recoveredValue),
-                exception.LogContextConfig{
-                    Extra: exceptioncontract.Context{
-                        "panicStack": string(debug.Stack()),
-                    },
-                },
-            ),
-        )
-    }()
-
-    return instance.errorHandler(runtimeInstance, writer, request, handlerErr)
 }
 
 /* dispatchResponseAndWrite is the one exit of every request path through ServeHttp: it publishes kernel.response, writes the response the listeners answered with, and closes the body of the one they swapped out. The response is written back through the pointer at every step, since the caller's variable is what the recovery reads when the write panics; discardCandidate is a response the caller is about to lose, closed unless this step writes it and only after the publish, since a listener may answer with it. */
@@ -912,26 +831,72 @@ func (instance *Kernel) dispatchResponseAndWrite(
     )
 }
 
-/* newKernelExceptionEvent builds the kernel.exception payload marked with whether an application error handler is installed now, so the framework exception listener stands aside for a handler installed at any point before the error, whatever serves the kernel. */
-func (instance *Kernel) newKernelExceptionEvent(
+/* raiseException is the one path of an error through kernel.exception: the listeners answer in priority order and the first responder wins. A failed dispatch answers nothing whatever the event carries, since a response set by a listener that then panicked is half made and one that skipped a required listener was not allowed to end the dispatch, and it is closed with a record of what was dropped, never its body, which may hold personal data or be a stream. With no answer the final step renders the error. */
+func (instance *Kernel) raiseException(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
     err error,
-) *KernelExceptionEvent {
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, err)
-    exceptionEvent.errorHandlerInstalled = nil != instance.errorHandler
-
-    return exceptionEvent
-}
-
-func (instance *Kernel) dispatchEventKernelException(
-    kernelExceptionEvent *KernelExceptionEvent,
-    runtimeInstance runtimecontract.Runtime,
     requestLogger loggingcontract.Logger,
     eventDispatcher eventcontract.EventDispatcher,
-) {
-    _, eventKernelExceptionErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, kernelExceptionEvent)
-    instance.logEventDispatchError(requestLogger, "kernel exception error", eventKernelExceptionErr)
+    debugMode bool,
+) httpcontract.Response {
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, err)
+
+    _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
+    instance.logEventDispatchError(requestLogger, "kernel exception error", dispatchErr)
+
+    answered := exceptionEvent.Response()
+
+    if nil == dispatchErr && nil != answered {
+        return answered
+    }
+
+    if nil != answered {
+        requestLogger.Error(
+            "the kernel.exception dispatch failed after a listener set a response, which is dropped",
+            loggingcontract.Context{
+                "droppedResponseStatus":      answered.StatusCode(),
+                "droppedResponseContentType": internal.BoundDiagnosticText(answered.Headers().Get("Content-Type")),
+            },
+        )
+
+        closeDiscardedResponseBody(answered, requestLogger)
+    }
+
+    return renderExceptionSafely(runtimeInstance, request, exceptionEvent.Err(), requestLogger, debugMode)
+}
+
+/* renderExceptionSafely is the kernel's final step: the error keeps its own status when a listener failed or none answered, and only a renderer that panics too turns it into the static 500. */
+func renderExceptionSafely(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    err error,
+    requestLogger loggingcontract.Logger,
+    debugMode bool,
+) (rendered httpcontract.Response) {
+    defer func() {
+        recoveredValue := recover()
+        if nil == recoveredValue {
+            return
+        }
+
+        requestLogger.Error(
+            "the exception renderer panicked",
+            exception.LogContext(
+                RecoverToError(recoveredValue),
+                exception.LogContextConfig{
+                    Extra: exceptioncontract.Context{
+                        "panicStack": string(debug.Stack()),
+                    },
+                },
+            ),
+        )
+
+        /* built without the negotiation, which is what may have panicked */
+        rendered = JsonErrorResponse(nethttp.StatusInternalServerError, "internal server error")
+    }()
+
+    return RenderExceptionResponse(runtimeInstance, request, err, ExceptionRenderConfig{DebugMode: debugMode})
 }
 
 func (instance *Kernel) requestIdLogger(

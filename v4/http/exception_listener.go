@@ -2,8 +2,11 @@ package http
 
 import (
     "errors"
+    "fmt"
+    "math"
     nethttp "net/http"
 
+    "github.com/precision-soft/melody/v4/config"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -11,100 +14,135 @@ import (
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/validation"
 )
 
-const (
-    KernelExceptionListenerPriority = -1000
-)
+/* BuiltInExceptionListenerPriority is the floor of kernel.exception: the kernel's built-in listener answers there, and a listener registered at it once the kernel serves is refused, since it could never run. */
+const BuiltInExceptionListenerPriority = math.MinInt
 
-func RegisterKernelExceptionListener(eventDispatcher eventcontract.EventDispatcher, debugMode bool) {
-    eventDispatcher.AddListener(
-        kernelcontract.EventKernelException,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
-            exceptionEvent, ok := eventValue.Payload().(*KernelExceptionEvent)
-            if false == ok {
-                return nil
-            }
+/* installBuiltInExceptionListener registers the default answer of kernel.exception on the floor of the event. A dispatcher without the door gets the listener on each installation, the later ones never running, and a listener at the floor stays silently dead there, which is reported on the emergency channel because this runs before a request's logger exists. */
+func installBuiltInExceptionListener(eventDispatcher eventcontract.EventDispatcher) {
+    registrar, ok := eventDispatcher.(eventcontract.PriorityFloorRegistrar)
+    if true == ok {
+        registrar.InstallFloorListener(kernelcontract.EventKernelException, builtInExceptionListener, BuiltInExceptionListenerPriority)
 
-            if nil == exceptionEvent {
-                return nil
-            }
+        return
+    }
 
-            if nil != exceptionEvent.Response() {
-                return nil
-            }
+    eventDispatcher.AddListener(kernelcontract.EventKernelException, builtInExceptionListener, BuiltInExceptionListenerPriority)
 
-            /* an application error handler takes the listener's place: the kernel consults it once the listener leaves the event unanswered, whenever the handler was installed and whatever serves the kernel */
-            if true == exceptionEvent.errorHandlerInstalled {
-                return nil
-            }
-
-            if nil == exceptionEvent.Err() {
-                return nil
-            }
-
-            /* the search goes through the exception package's door, which refuses a typed nil errors.As would match */
-            httpException := exception.AsHttpException(exceptionEvent.Err())
-
-            if nil != runtimeInstance {
-                loggerInstance := logging.LoggerFromRuntime(runtimeInstance)
-                if nil != loggerInstance {
-                    requestId := ""
-                    path := ""
-                    method := ""
-
-                    if false == internal.IsNilInterface(exceptionEvent.Request()) && nil != exceptionEvent.Request().RequestContext() {
-                        requestId = exceptionEvent.Request().RequestContext().RequestId()
-                    }
-
-                    if false == internal.IsNilInterface(exceptionEvent.Request()) && nil != exceptionEvent.Request().HttpRequest() {
-                        method = internal.BoundDiagnosticText(exceptionEvent.Request().HttpRequest().Method)
-                        if nil != exceptionEvent.Request().HttpRequest().URL {
-                            path = internal.BoundDiagnosticText(exceptionEvent.Request().HttpRequest().URL.Path)
-                        }
-                    }
-
-                    /* an error already logged is not filed again: the request coordinates are attached to its occurrence instead. Through the kernel every producer logs before it dispatches; this branch journals the dispatches made by hand, such as the rate-limit listener's, and marks the event's own occurrence, never the error value, which another request can share. */
-                    if true == exception.IsAlreadyLogged(exceptionEvent.Err()) {
-                        attachRequestContextToError(exceptionEvent.Err(), requestId, method, path)
-                    } else {
-                        exceptionEvent.err = newLoggedOccurrence(exceptionEvent.Err())
-                        attachRequestContextToError(exceptionEvent.err, requestId, method, path)
-
-                        recordContext := exception.LogContext(
-                            exceptionEvent.Err(),
-                            exception.LogContextConfig{
-                                Extra: exceptioncontract.Context{
-                                    "requestId": requestId,
-                                    "method":    method,
-                                    "path":      path,
-                                },
-                            },
-                        )
-
-                        if true == isDeliberateClientFault(httpException) {
-                            loggerInstance.Warning("unhandled exception", recordContext)
-                        } else {
-                            loggerInstance.Error("unhandled exception", recordContext)
-                        }
-                    }
-                }
-            }
-
-            exceptionEvent.SetResponse(
-                exceptionResponseFor(runtimeInstance, exceptionEvent.Request(), exceptionEvent.Err(), debugMode),
-            )
-
-            return nil
+    logging.EmergencyLogger().Warning(
+        "the event dispatcher cannot reserve the priority of the built-in exception listener",
+        loggingcontract.Context{
+            "dispatcherType": fmt.Sprintf("%T", eventDispatcher),
+            "consequence":    "a kernel.exception listener registered at that priority is never run and never refused",
         },
-        KernelExceptionListenerPriority,
     )
 }
 
-/* exceptionResponseFor renders the answer an error earns when no listener and no error handler answered it: the status and message of the http exception its chain carries, its client-facing code, key and parameters, its validation errors projected for the client, and in debug mode the context and cause of the nearest melody error; any other error is a 500. The exception listener answers with it, and so does the kernel when an installed error handler declines. */
-func exceptionResponseFor(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, err error, debugMode bool) httpcontract.Response {
+/* builtInExceptionListener journals an error no producer filed and answers with RenderExceptionResponse. Debug mode is read per dispatch from the runtime's configuration; a runtime without one renders the production body. */
+func builtInExceptionListener(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    exceptionEvent, ok := eventValue.Payload().(*KernelExceptionEvent)
+    if false == ok {
+        return nil
+    }
+
+    if nil == exceptionEvent {
+        return nil
+    }
+
+    if nil != exceptionEvent.Response() {
+        return nil
+    }
+
+    if nil == exceptionEvent.Err() {
+        return nil
+    }
+
+    if nil != runtimeInstance {
+        if loggerInstance := logging.LoggerFromRuntime(runtimeInstance); nil != loggerInstance {
+            exceptionEvent.err = recordExceptionOccurrence(loggerInstance, exceptionEvent.Request(), exceptionEvent.Err())
+        }
+    }
+
+    exceptionEvent.SetResponse(
+        RenderExceptionResponse(runtimeInstance, exceptionEvent.Request(), exceptionEvent.Err(), ExceptionRenderConfig{DebugMode: exceptionListenerDebugMode(runtimeInstance)}),
+    )
+
+    return nil
+}
+
+/* recordExceptionOccurrence files the one record of an error and answers the error to carry on: an error already logged is not filed again, the request coordinates are attached to its occurrence instead, and a new one is marked on a carrier of this occurrence, never on the error value, which another request can share. A deliberate 4xx is a warning. Through the kernel every producer logs before it dispatches; the built-in listener files what a dispatch made by hand left unfiled. */
+func recordExceptionOccurrence(loggerInstance loggingcontract.Logger, request httpcontract.Request, err error) error {
+    requestId := ""
+    path := ""
+    method := ""
+
+    if false == internal.IsNilInterface(request) && nil != request.RequestContext() {
+        requestId = request.RequestContext().RequestId()
+    }
+
+    if false == internal.IsNilInterface(request) && nil != request.HttpRequest() {
+        method = internal.BoundDiagnosticText(request.HttpRequest().Method)
+        if nil != request.HttpRequest().URL {
+            path = internal.BoundDiagnosticText(request.HttpRequest().URL.Path)
+        }
+    }
+
+    if true == exception.IsAlreadyLogged(err) {
+        attachRequestContextToError(err, requestId, method, path)
+
+        return err
+    }
+
+    occurrence := newLoggedOccurrence(err)
+    attachRequestContextToError(occurrence, requestId, method, path)
+
+    recordContext := exception.LogContext(
+        occurrence,
+        exception.LogContextConfig{
+            Extra: exceptioncontract.Context{
+                "requestId": requestId,
+                "method":    method,
+                "path":      path,
+            },
+        },
+    )
+
+    /* the search goes through the exception package's door, which refuses a typed nil errors.As would match */
+    if true == isDeliberateClientFault(exception.AsHttpException(err)) {
+        loggerInstance.Warning("unhandled exception", recordContext)
+    } else {
+        loggerInstance.Error("unhandled exception", recordContext)
+    }
+
+    return occurrence
+}
+
+func exceptionListenerDebugMode(runtimeInstance runtimecontract.Runtime) bool {
+    if true == internal.IsNilInterface(runtimeInstance) {
+        return false
+    }
+
+    configuration, configurationErr := config.ConfigFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    if nil != configurationErr {
+        return false
+    }
+
+    return config.EnvDevelopment == configuration.Kernel().Env()
+}
+
+type ExceptionRenderConfig struct {
+    /* DebugMode adds the context and cause of the nearest melody error, and shows a plain error's own text. */
+    DebugMode bool
+}
+
+/* RenderExceptionResponse renders the answer an error earns: the status and message of the http exception its chain carries, its client-facing code, key and parameters, its validation errors projected for the client, and in debug mode the context and cause of the nearest melody error; any other error is a 500. The built-in listener answers with it and the kernel's final step renders with it; an application listener that wants the framework body for some errors calls it. */
+func RenderExceptionResponse(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, err error, renderConfig ExceptionRenderConfig) httpcontract.Response {
+    debugMode := renderConfig.DebugMode
+
     httpException := exception.AsHttpException(err)
 
     statusCode := nethttp.StatusInternalServerError

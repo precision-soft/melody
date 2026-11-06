@@ -7,7 +7,6 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/container"
-    eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpPkg "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -92,7 +91,6 @@ func TestSecurityResolutionListener_SetsSecurityContextOnRuntime_OnSuccess(t *te
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
     )
 
-    registerTestKernelExceptionListener(kernel)
     RegisterKernelSecurityResolutionListener(kernel, registry)
 
     request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
@@ -151,7 +149,6 @@ func TestSecurityResolutionListener_WhenFirewallRuleFails_SetsSecurityContextWit
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
     )
 
-    registerTestKernelExceptionListener(kernel)
     RegisterKernelSecurityResolutionListener(kernel, registry)
 
     request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
@@ -166,8 +163,8 @@ func TestSecurityResolutionListener_WhenFirewallRuleFails_SetsSecurityContextWit
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if nil == requestEvent.Response() {
-        t.Fatalf("expected response to be set on request event")
+    if nil == requestEvent.Refusal() {
+        t.Fatalf("expected a refusal on the request event")
     }
 
     securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
@@ -202,7 +199,6 @@ func TestSecurityResolutionListener_WhenTokenSourceErrors_SetsSecurityContextWit
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
     )
 
-    registerTestKernelExceptionListener(kernel)
     RegisterKernelSecurityResolutionListener(kernel, registry)
 
     request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
@@ -217,8 +213,8 @@ func TestSecurityResolutionListener_WhenTokenSourceErrors_SetsSecurityContextWit
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if nil == requestEvent.Response() {
-        t.Fatalf("expected response to be set on request event")
+    if nil == requestEvent.Refusal() {
+        t.Fatalf("expected a refusal on the request event")
     }
 
     securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
@@ -250,7 +246,6 @@ func TestSecurityResolutionListener_WhenTokenSourcePanics_SetsSecurityContextWit
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
     )
 
-    registerTestKernelExceptionListener(kernel)
     RegisterKernelSecurityResolutionListener(kernel, registry)
 
     request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
@@ -265,8 +260,8 @@ func TestSecurityResolutionListener_WhenTokenSourcePanics_SetsSecurityContextWit
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if nil == requestEvent.Response() {
-        t.Fatalf("expected response to be set on request event")
+    if nil == requestEvent.Refusal() {
+        t.Fatalf("expected a refusal on the request event")
     }
 
     securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
@@ -301,7 +296,6 @@ func TestSecurityResolutionListener_WhenTokenSourceReturnsNilToken_SetsAnonymous
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
     )
 
-    registerTestKernelExceptionListener(kernel)
     RegisterKernelSecurityResolutionListener(kernel, registry)
 
     request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
@@ -448,7 +442,6 @@ func dispatchResolutionFailureWithSourceAtPath(t *testing.T, tokenSourceErr erro
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
     )
 
-    httpPkg.RegisterKernelExceptionListener(kernel.EventDispatcher(), false)
     RegisterKernelSecurityResolutionListener(kernel, registry)
 
     request := newSecurityTestRequest("GET", path, nil, runtimeInstance)
@@ -520,21 +513,6 @@ func TestSecurityResolutionListener_MarksTheRecordItWrites(t *testing.T) {
     capture := &resolutionListenerCaptureLogger{}
     runtimeInstance := newResolutionListenerTestRuntimeWithLogger(capture)
 
-    var observedErr error
-
-    kernel.EventDispatcher().AddListener(
-        "kernel.exception",
-        func(listenerRuntime runtimecontract.Runtime, eventValue eventcontract.Event) error {
-            exceptionEvent, ok := eventValue.Payload().(*httpPkg.KernelExceptionEvent)
-            if true == ok && nil != exceptionEvent {
-                observedErr = exceptionEvent.Err()
-            }
-
-            return nil
-        },
-        0,
-    )
-
     firewall := NewCompiledFirewall(CompiledFirewallConfig{
         Name:               "main",
         Matcher:            &resolutionListenerTestMatcher{matches: true},
@@ -579,12 +557,12 @@ func TestSecurityResolutionListener_MarksTheRecordItWrites(t *testing.T) {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if nil == observedErr {
-        t.Fatalf("expected the exception event to carry the resolution failure")
+    if nil == requestEvent.Refusal() {
+        t.Fatalf("expected the refusal to carry the resolution failure")
     }
 
-    if false == exception.IsAlreadyLogged(observedErr) {
-        t.Fatalf("expected the resolution failure to carry the logged mark when it reaches the exception event")
+    if false == exception.IsAlreadyLogged(requestEvent.Refusal()) {
+        t.Fatalf("expected the resolution failure to carry the logged mark when it reaches the refusal")
     }
 }
 
@@ -611,7 +589,6 @@ func TestSecurityResolutionListener_WhenTokenSourceReturnsATypedNilToken_SetsAno
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
     )
 
-    registerTestKernelExceptionListener(kernel)
     RegisterKernelSecurityResolutionListener(kernel, registry)
 
     request := newSecurityTestRequest("GET", "/admin", nil, runtimeInstance)
@@ -673,7 +650,6 @@ func TestSecurityResolutionListener_AnAbsoluteFormTargetIsResolvedByTheRootFirew
         NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
     )
 
-    registerTestKernelExceptionListener(kernel)
     RegisterKernelSecurityResolutionListener(kernel, registry)
 
     request := newSecurityTestRequest("GET", "", nil, runtimeInstance)
@@ -746,8 +722,7 @@ func TestSecurityResolutionListener_AnAsteriskFormTargetIsResolvedByTheRootFirew
             NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil),
         )
 
-        registerTestKernelExceptionListener(kernel)
-        RegisterKernelSecurityResolutionListener(kernel, registry)
+            RegisterKernelSecurityResolutionListener(kernel, registry)
 
         request := newSecurityTestRequest("GET", "", nil, runtimeInstance)
         request.HttpRequest().URL.Path = path

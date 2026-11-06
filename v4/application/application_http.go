@@ -108,7 +108,7 @@ func (instance *Application) bootHttp() {
     }
 }
 
-/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot in every process shape: they are inert in a console, whose dispatcher then shows the set the serving process runs. The exception listener is among them unconditionally: it stands aside at each dispatch for an error handler installed on the kernel, so a handler installed after Boot is consulted, and an application that serves Boot's kernel with its own server gets the framework rendering without calling Run. */
+/* registerKernelHttpListeners wires the kernel's default listeners at the end of Boot in every process shape: they are inert in a console, whose dispatcher then shows the set the serving process runs. The built-in exception listener is not among them: the http kernel installs it when it builds its handler, and a console declares it among the serving-process listeners. */
 func (instance *Application) registerKernelHttpListeners() {
     eventDispatcher := instance.kernel.EventDispatcher()
 
@@ -118,8 +118,6 @@ func (instance *Application) registerKernelHttpListeners() {
 
     http.RegisterKernelResponseNormalizerListener(eventDispatcher)
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
-
-    http.RegisterKernelExceptionListener(eventDispatcher, instance.kernel.DebugMode())
 }
 
 func (instance *Application) runHttp(

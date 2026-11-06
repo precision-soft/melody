@@ -15,7 +15,6 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -716,8 +715,6 @@ func TestConfinedFileResponse_AServedRefusalAnswers404WithNoServerPathInTheBody(
 
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), containercontract.OverrideOptions{})
-    RegisterKernelExceptionListener(event.EventDispatcherMustFromContainer(t.Context(), serviceContainer), false)
-
     for _, name := range []string{"missing.txt", "../etc/passwd", "/etc/passwd"} {
         recorder := httptest.NewRecorder()
         NewKernel(router, KernelConfig{}).

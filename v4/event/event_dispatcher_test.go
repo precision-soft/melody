@@ -2359,3 +2359,259 @@ func TestEventDispatcher_RefusalsOfASubscriberAndOfAnEmptyNameCarryTheType(t *te
         _, _ = dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), &emptyNameTestEvent{})
     })
 }
+
+type testStoppingPayload struct {
+    stopped bool
+}
+
+func (instance *testStoppingPayload) IsPropagationStopped() bool {
+    return instance.stopped
+}
+
+func TestEventDispatcher_APayloadThatReportsItsStopEndsTheDispatch(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    runtimeInstance := testRuntimeWithLogger(t, logging.NewNopLogger())
+
+    secondRan := 0
+
+    dispatcher.AddListener(
+        "payload.stop",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.Payload().(*testStoppingPayload).stopped = true
+
+            return nil
+        },
+        10,
+    )
+    dispatcher.AddListener(
+        "payload.stop",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            secondRan++
+
+            return nil
+        },
+        0,
+    )
+
+    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, "payload.stop", &testStoppingPayload{}); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 0 != secondRan {
+        t.Fatalf("expected the payload's stop to end the dispatch, the second listener ran %d times", secondRan)
+    }
+
+    if _, dispatchErr := dispatcher.Dispatch(runtimeInstance, NewEvent("payload.stop", &testStoppingPayload{}, clock.NewSystemClock())); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 0 != secondRan {
+        t.Fatalf("expected the payload's stop to end Dispatch too, the second listener ran %d times", secondRan)
+    }
+}
+
+func TestEventDispatcher_APayloadStopBeforeARequiredListenerIsRefused(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    runtimeInstance := testRuntimeWithLogger(t, logging.NewNopLogger())
+
+    dispatcher.AddListener(
+        "payload.required",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            eventValue.Payload().(*testStoppingPayload).stopped = true
+
+            return nil
+        },
+        10,
+    )
+    dispatcher.MarkListenerRequired(
+        dispatcher.AddListener(
+            "payload.required",
+            func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                return nil
+            },
+            0,
+        ),
+    )
+
+    _, dispatchErr := dispatcher.DispatchName(runtimeInstance, "payload.required", &testStoppingPayload{})
+    if _, isRefusal := dispatchErr.(*RequiredListenerSkippedError); false == isRefusal {
+        t.Fatalf("expected the required listener's refusal, got %v", dispatchErr)
+    }
+}
+
+func TestEventDispatcher_ATypedNilPayloadDoesNotStopTheDispatch(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    runtimeInstance := testRuntimeWithLogger(t, logging.NewNopLogger())
+
+    ran := 0
+
+    dispatcher.AddListener(
+        "payload.nil",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            ran++
+
+            return nil
+        },
+        0,
+    )
+
+    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, "payload.nil", (*testStoppingPayload)(nil)); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != ran {
+        t.Fatalf("expected the listener to run over a typed-nil payload, it ran %d times", ran)
+    }
+}
+
+func testNoopEventListener(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    return nil
+}
+
+func TestEventDispatcher_AListenerAtOrBelowAFloorIsRefusedByName(t *testing.T) {
+    for _, priority := range []int{-100, -101} {
+        dispatcher, _ := testNewEventDispatcher()
+
+        dispatcher.InstallFloorListener("floor.event", testNoopEventListener, -100)
+
+        var recovered any
+        func() {
+            defer func() { recovered = recover() }()
+
+            dispatcher.AddListener("floor.event", testNoopEventListener, priority)
+        }()
+
+        var melodyError *exception.Error
+        recoveredErr, isError := recovered.(error)
+        if false == isError || false == errors.As(recoveredErr, &melodyError) {
+            t.Fatalf("expected a melody error for priority %d, got %v", priority, recovered)
+        }
+
+        if "floor.event" != melodyError.Context()["eventName"] || priority != melodyError.Context()["priority"] || -100 != melodyError.Context()["reservedPriority"] {
+            t.Fatalf("expected the refusal to name the event and the priorities, got %v", melodyError.Context())
+        }
+    }
+}
+
+func TestEventDispatcher_AFloorLeavesAHigherListenerAndOtherEventsAlone(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    dispatcher.InstallFloorListener("floor.event", testNoopEventListener, -100)
+
+    func() {
+        defer func() { _ = recover() }()
+
+        dispatcher.AddListener("floor.event", testNoopEventListener, -100)
+    }()
+
+    dispatcher.AddListener("floor.event", testNoopEventListener, -99)
+    dispatcher.AddListener("other.event", testNoopEventListener, -100)
+}
+
+func TestEventDispatcher_AListenerRegisteredBeforeTheFloorStands(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+    runtimeInstance := testRuntimeWithLogger(t, logging.NewNopLogger())
+
+    order := make([]string, 0, 2)
+
+    dispatcher.AddListener(
+        "floor.event",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            order = append(order, "earlier")
+
+            return nil
+        },
+        -100,
+    )
+
+    registration, installed := dispatcher.InstallFloorListener(
+        "floor.event",
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            order = append(order, "floor")
+
+            return nil
+        },
+        -100,
+    )
+    if false == installed || "floor.event" != registration.EventName {
+        t.Fatalf("expected the floor listener installed, got %+v, %v", registration, installed)
+    }
+
+    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, "floor.event", nil); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if false == reflect.DeepEqual([]string{"earlier", "floor"}, order) {
+        t.Fatalf("expected the earlier listener first, got %v", order)
+    }
+}
+
+func TestEventDispatcher_ASecondFloorInstallationAddsNothing(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    if _, installed := dispatcher.InstallFloorListener("floor.event", testNoopEventListener, -100); false == installed {
+        t.Fatalf("expected the first installation to install")
+    }
+
+    if _, installed := dispatcher.InstallFloorListener("floor.event", testNoopEventListener, -100); true == installed {
+        t.Fatalf("expected the second installation to add nothing")
+    }
+
+    registeredListeners := 0
+    for _, registeredEvent := range dispatcher.RegisteredEvents() {
+        if "floor.event" == registeredEvent.EventName {
+            registeredListeners = len(registeredEvent.Listeners)
+        }
+    }
+
+    if 1 != registeredListeners {
+        t.Fatalf("expected one listener, got %d", registeredListeners)
+    }
+}
+
+func TestEventDispatcher_InstallFloorListener_RefusesAnEmptyNameAndANilListener(t *testing.T) {
+    dispatcher, _ := testNewEventDispatcher()
+
+    testhelper.AssertPanicsWithError(t, func() { dispatcher.InstallFloorListener("", testNoopEventListener, 0) }, "event name is required to install a floor listener")
+    testhelper.AssertPanicsWithError(t, func() { dispatcher.InstallFloorListener("floor.event", nil, 0) }, "event listener is required to install a floor listener")
+}
+
+type testFloorStraddlingSubscriber struct{}
+
+func (instance testFloorStraddlingSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
+    return map[string][]eventcontract.SubscribedEvent{
+        "floor.event": {
+            NewSubscribedEvent(testNoopEventListener, 10),
+            NewSubscribedEvent(testNoopEventListener, -100),
+        },
+    }
+}
+
+func TestEventDispatcher_ASubscriberRefusedByAFloorIsNotHalfInstalled(t *testing.T) {
+    for name, install := range map[string]func(dispatcher *EventDispatcher) func(){
+        "dispatcher": func(dispatcher *EventDispatcher) func() {
+            return func() { dispatcher.AddSubscriber(testFloorStraddlingSubscriber{}) }
+        },
+        "adapter": func(dispatcher *EventDispatcher) func() {
+            adapter := NewEventDispatcherAdapter(dispatcher)
+
+            return func() { adapter.AddSubscriber(testFloorStraddlingSubscriber{}) }
+        },
+    } {
+        dispatcher, _ := testNewEventDispatcher()
+
+        dispatcher.InstallFloorListener("floor.event", testNoopEventListener, -100)
+
+        testhelper.AssertPanicsWithError(
+            t,
+            install(dispatcher),
+            "an event listener at or below the event's reserved priority can never run, so it is refused; register it above that priority",
+        )
+
+        for _, registeredEvent := range dispatcher.RegisteredEvents() {
+            if "floor.event" == registeredEvent.EventName && 1 != len(registeredEvent.Listeners) {
+                t.Fatalf("%s: expected only the floor listener left, got %d", name, len(registeredEvent.Listeners))
+            }
+        }
+    }
+}

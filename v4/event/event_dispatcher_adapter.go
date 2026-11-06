@@ -101,7 +101,7 @@ func (instance *EventDispatcherAdapter) RemoveListener(registration eventcontrac
 
 /* AddSubscriber installs every listener the subscriber declares and answers the registration that owns them, this bookkeeping's, the one RemoveSubscriber takes; as on EventDispatcher, a value subscriber and a second installation of one subscriber are installable, and a nil subscriber is refused. */
 func (instance *EventDispatcherAdapter) AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration {
-    return instance.subscribers.addSubscriber(subscriber, instance.installSubscriberListener)
+    return instance.subscribers.addSubscriber(subscriber, instance.installSubscriberListener, instance.removeSubscriberListener)
 }
 
 /* RemoveSubscriber removes the listeners one AddSubscriber call installed and answers how many; an unknown registration removes nothing and answers zero. */
@@ -159,6 +159,35 @@ func (instance *EventDispatcherAdapter) MarkListenerMaySkipRequiredListeners(reg
             entry.maySkipRequiredListeners = true
         },
     )
+}
+
+/* InstallFloorListener forwards to the wrapped dispatcher, which holds the order, and records what it installed for inspection, refusing a wrapped dispatcher without the door for the reason MarkListenerRequired gives. */
+func (instance *EventDispatcherAdapter) InstallFloorListener(
+    eventName string,
+    listener eventcontract.EventListener,
+    priority int,
+) (eventcontract.ListenerRegistration, bool) {
+    registrar, ok := instance.eventDispatcher.(eventcontract.PriorityFloorRegistrar)
+    if false == ok {
+        exception.Panic(
+            exception.NewError(
+                "the wrapped event dispatcher cannot install a floor listener",
+                exceptioncontract.Context{
+                    "eventDispatcherType": internal.StringifyType(instance.eventDispatcher),
+                },
+                nil,
+            ),
+        )
+    }
+
+    registration, installed := registrar.InstallFloorListener(eventName, listener, priority)
+    if false == installed {
+        return registration, false
+    }
+
+    instance.recordListenerRegistration(eventName, registration, listener, priority, eventcontract.RegisteredListenerSourceListener, "-")
+
+    return registration, true
 }
 
 func (instance *EventDispatcherAdapter) requireRegistrar() eventcontract.RequiredListenerRegistrar {
@@ -271,8 +300,6 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
     source string,
     owner string,
 ) eventcontract.ListenerRegistration {
-    listenerProgramCounter := reflect.ValueOf(listener).Pointer()
-
     /* the listener itself is registered, so the dispatcher's records name its function and it receives the dispatched event as from the plain dispatcher; the adapter keeps the inspection metadata beside it */
     registration := instance.eventDispatcher.AddListener(
         eventName,
@@ -280,7 +307,22 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
         priority,
     )
 
+    instance.recordListenerRegistration(eventName, registration, listener, priority, source, owner)
+
+    return registration
+}
+
+func (instance *EventDispatcherAdapter) recordListenerRegistration(
+    eventName string,
+    registration eventcontract.ListenerRegistration,
+    listener eventcontract.EventListener,
+    priority int,
+    source string,
+    owner string,
+) {
     instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
     instance.listenerRegistrations[eventName] = append(
         instance.listenerRegistrations[eventName],
         adapterListenerRegistration{
@@ -288,12 +330,9 @@ func (instance *EventDispatcherAdapter) addListenerRegistration(
             priority:               priority,
             source:                 source,
             owner:                  owner,
-            listenerProgramCounter: listenerProgramCounter,
+            listenerProgramCounter: reflect.ValueOf(listener).Pointer(),
         },
     )
-    instance.mutex.Unlock()
-
-    return registration
 }
 
 type adapterListenerRegistration struct {
@@ -309,3 +348,4 @@ type adapterListenerRegistration struct {
 var _ eventcontract.EventDispatcher = (*EventDispatcherAdapter)(nil)
 var _ eventcontract.EventDispatcherInspector = (*EventDispatcherAdapter)(nil)
 var _ eventcontract.RequiredListenerRegistrar = (*EventDispatcherAdapter)(nil)
+var _ eventcontract.PriorityFloorRegistrar = (*EventDispatcherAdapter)(nil)

@@ -115,7 +115,7 @@ func jsonHandlerError(
     return response, nil
 }
 
-/* invokeJsonHandlerErrorResponderSafely runs the responder under the kernel's containment, as invokeErrorHandlerSafely does: a panic is recorded with the stack of the recovering site, and the refusal the responder was asked to render stands. */
+/* invokeJsonHandlerErrorResponderSafely runs the responder under the kernel's containment, as the kernel's final step does: a panic is recorded with the stack of the recovering site, and the refusal the responder was asked to render stands. */
 func invokeJsonHandlerErrorResponderSafely(
     responder JsonHandlerErrorResponder,
     runtimeInstance runtimecontract.Runtime,

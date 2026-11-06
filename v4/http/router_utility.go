@@ -759,6 +759,11 @@ func sessionIdLogReference(sessionId string) string {
     return hex.EncodeToString(digest[:])[:16]
 }
 
+/* CloseDiscardedResponseBody closes the body of a response that will not be served, for a listener that received one beside an error; a body with no closer, a nil response and a second close are nothing to report, and a failed close goes to the logger, which may be nil. */
+func CloseDiscardedResponseBody(response httpcontract.Response, logger loggingcontract.Logger) {
+    closeDiscardedResponseBody(response, logger)
+}
+
 func closeDiscardedResponseBody(response httpcontract.Response, logger loggingcontract.Logger) {
     /* the interface is read through, not compared: a typed nil dereferenced here, inside the recovery defer, would panic past recover */
     if true == internal.IsNilInterface(response) {

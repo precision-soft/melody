@@ -645,7 +645,6 @@ func TestHmacTokenSource_EndToEndResolvesServiceWithActorThroughFirewall(t *test
     }
 
     kernel := newTestKernel()
-    registerTestKernelExceptionListener(kernel)
     RegisterKernelSecurityResolutionListener(kernel, hmacE2EFirewall(source))
 
     /* first dispatch: the signed envelope resolves to the service principal carrying the actor */

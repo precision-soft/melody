@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -28,6 +29,8 @@ import (
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
+    "github.com/precision-soft/melody/v4/session"
+    sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
 var strictLeeway = bound.Of(time.Duration(0))
@@ -380,32 +383,6 @@ func newTestRuntime() runtimecontract.Runtime {
     return runtime.New(context.Background(), scope, serviceContainer)
 }
 
-func registerTestKernelExceptionListener(kernelInstance *testKernel) {
-    kernelInstance.EventDispatcher().AddListener(
-        kernelcontract.EventKernelException,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
-            exceptionEvent, ok := eventValue.Payload().(*http.KernelExceptionEvent)
-            if false == ok || nil == exceptionEvent {
-                return nil
-            }
-
-            if nil != exceptionEvent.Response() {
-                return nil
-            }
-
-            exceptionEvent.SetResponse(
-                http.JsonErrorResponse(
-                    500,
-                    "internal_server_error",
-                ),
-            )
-
-            return nil
-        },
-        0,
-    )
-}
-
 func testRuntime() runtimecontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
@@ -440,4 +417,66 @@ func newTestCompiledFirewallWithRoleHierarchy(name string, roleHierarchy *RoleHi
         MatcherDescription: "prefix /",
         RoleHierarchy:      roleHierarchy,
     })
+}
+
+type servedSecurityEnvironmentSource struct{}
+
+func (instance *servedSecurityEnvironmentSource) Load() (map[string]string, error) {
+    return map[string]string{config.EnvKey: config.EnvProduction}, nil
+}
+
+func serveSecurityRequest(t *testing.T, kernelInstance *testKernel, path string) *httptest.ResponseRecorder {
+    t.Helper()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+    serviceContainer.MustRegister(
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logging.NewNopLogger(), nil
+        },
+        container.RegisterOptions{},
+    )
+    serviceContainer.MustRegister(
+        config.ServiceConfig,
+        func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            environment, environmentErr := config.NewEnvironment(&servedSecurityEnvironmentSource{})
+            if nil != environmentErr {
+                return nil, environmentErr
+            }
+
+            return config.NewConfiguration(environment, t.TempDir())
+        },
+        container.RegisterOptions{},
+    )
+    serviceContainer.MustRegister(
+        session.ServiceSessionManager,
+        func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
+            return session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30*time.Minute)}), nil
+        },
+        container.RegisterOptions{},
+    )
+    serviceContainer.MustRegister(
+        event.ServiceEventDispatcher,
+        func(resolver containercontract.Resolver) (eventcontract.EventDispatcher, error) {
+            return kernelInstance.eventDispatcher, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    kernelInstance.httpRouter.Handle(
+        nethttp.MethodGet,
+        path,
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return http.TextResponse(nethttp.StatusOK, "served"), nil
+        },
+    )
+
+    request := httptest.NewRequest(nethttp.MethodGet, path, nil)
+    request.Header.Set("Accept", "application/json")
+
+    recorder := httptest.NewRecorder()
+    kernelInstance.httpKernel.ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    return recorder
 }

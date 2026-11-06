@@ -46,6 +46,11 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
                 return nil
             }
 
+            /* a refused preflight has no response to decorate yet; the kernel's rendering passes kernel.response, whose listener decorates it */
+            if nil != requestEvent.Refusal() {
+                return nil
+            }
+
             /* an earlier listener, the rate limiter among them, answered the preflight: its refusal is decorated so the browser can read it, and its status is left untouched */
             if existingResponse := requestEvent.Response(); nil != existingResponse {
                 if nil == existingResponse.Headers() {

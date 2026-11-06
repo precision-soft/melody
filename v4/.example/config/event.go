@@ -1,10 +1,12 @@
 package config
 
 import (
+    nethttp "net/http"
     "strconv"
     "strings"
     "time"
 
+    "github.com/precision-soft/melody/v4/.example/presenter"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/subscriber"
     "github.com/precision-soft/melody/v4/.example/twofactor"
@@ -20,6 +22,8 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
+const apiPathSegment = "/api/"
+
 func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcontract.Kernel) {
     instance.registerSubscribers(kernelInstance.EventDispatcher())
 }
@@ -27,6 +31,7 @@ func (instance *Module) RegisterEventSubscribers(kernelInstance melodykernelcont
 /* registerSubscribers installs the application's subscribers on the dispatcher; a door of its own so what the composition root INSTALLS can be read off a dispatcher, not only what each subscriber does once installed. */
 func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.EventDispatcher) {
     instance.registerRequiredRequestContextListener(eventDispatcher)
+    instance.registerApiExceptionListener(eventDispatcher)
 
     /* these subscribers live for the process, so the registrations AddSubscriber answers are not kept; an application that removes a subscriber at runtime keeps its registration and hands it to RemoveSubscriber. */
     eventDispatcher.AddSubscriber(
@@ -153,6 +158,35 @@ func (instance *Module) registerRequiredRequestContextListener(eventDispatcher m
     if registrar, ok := eventDispatcher.(melodyeventcontract.RequiredListenerRegistrar); true == ok {
         registrar.MarkListenerRequired(registration)
     }
+}
+
+/* registerApiExceptionListener answers an error under the api paths with the example's json envelope, the refusals of the security chain included; declining leaves every other path to the framework's built-in listener. */
+func (instance *Module) registerApiExceptionListener(eventDispatcher melodyeventcontract.EventDispatcher) {
+    eventDispatcher.AddListener(
+        melodykernelcontract.EventKernelException,
+        func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+            exceptionEvent, ok := eventValue.Payload().(*melodyhttp.KernelExceptionEvent)
+            if false == ok || nil == exceptionEvent || nil == exceptionEvent.Request() {
+                return nil
+            }
+
+            if false == strings.Contains(exceptionEvent.Request().HttpRequest().URL.Path, apiPathSegment) {
+                return nil
+            }
+
+            statusCode := nethttp.StatusInternalServerError
+            message := "internal server error"
+            if httpException := melodyexception.AsHttpException(exceptionEvent.Err()); nil != httpException {
+                statusCode = httpException.StatusCode()
+                message = httpException.Message()
+            }
+
+            exceptionEvent.SetResponse(presenter.ApiError(runtimeInstance, exceptionEvent.Request(), statusCode, message))
+
+            return nil
+        },
+        0,
+    )
 }
 
 var _ melodyapplicationcontract.EventModule = (*Module)(nil)

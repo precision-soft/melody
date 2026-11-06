@@ -3,6 +3,7 @@ package config
 import (
     "context"
     "fmt"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -13,6 +14,7 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodyevent "github.com/precision-soft/melody/v4/event"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
@@ -173,7 +175,8 @@ func TestRegisterRateLimitRequestListener_TheArmedDoorRefusesTheRequestPastTheSw
             t.Fatalf("unexpected dispatch error on request %d: %v", request, dispatchErr)
         }
 
-        refused := nil != requestEvent.Response() && nethttp.StatusTooManyRequests == requestEvent.Response().StatusCode()
+        refusal := melodyexception.AsHttpException(requestEvent.Refusal())
+        refused := nil != refusal && nethttp.StatusTooManyRequests == refusal.StatusCode()
         if (3 == request) != refused {
             t.Fatalf("expected only the third request of a budget of 2 refused, request %d refused: %t", request, refused)
         }
@@ -240,4 +243,61 @@ func TestRequestBudgetLimiter_BoundsTheAddressesItTracksByEvictingTheOldest(t *t
     if false == limiter.Allow("address-0") {
         t.Fatal("expected the address used longest ago evicted and back with a full budget")
     }
+}
+
+func TestRegisterApiExceptionListener_AnswersTheApiPathsAndLeavesTheOthersToTheBuiltIn(t *testing.T) {
+    eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+    moduleWithEnvironment(t, map[string]string{}).registerApiExceptionListener(eventDispatcher)
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    scope := containerInstance.NewScope()
+    scope.MustOverrideProtectedInstance(melodylogging.ServiceLogger, melodylogging.NewNopLogger(), melodycontainer.OverrideOptions{})
+    runtimeInstance := melodyruntime.New(context.Background(), scope, containerInstance)
+
+    dispatchRefusal := func(path string, refusal error) *melodyhttp.KernelExceptionEvent {
+        request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, path, nil), nil, runtimeInstance, melodyhttp.NewRequestContext("api-test", time.Now()))
+        exceptionEvent := melodyhttp.NewKernelExceptionEvent(runtimeInstance, request, refusal)
+
+        if _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, melodykernelcontract.EventKernelException, exceptionEvent); nil != dispatchErr {
+            t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+        }
+
+        return exceptionEvent
+    }
+
+    answered := dispatchRefusal("/products/api/read/", melodyexception.Unauthorized("unauthorized"))
+    if nil == answered.Response() || nethttp.StatusUnauthorized != answered.Response().StatusCode() {
+        t.Fatalf("expected the envelope's 401 under the api paths, got %#v", answered.Response())
+    }
+
+    body, readErr := io.ReadAll(answered.Response().BodyReader())
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    if false == strings.Contains(string(body), `"success":false`) || false == strings.Contains(string(body), "unauthorized") {
+        t.Fatalf("expected the example's envelope, got %s", body)
+    }
+
+    plain := dispatchRefusal("/products/api/read/", fmt.Errorf("a store failed"))
+    if nil == plain.Response() || nethttp.StatusInternalServerError != plain.Response().StatusCode() {
+        t.Fatalf("expected a plain error to be a 500 under the api paths, got %#v", plain.Response())
+    }
+
+    if declined := dispatchRefusal("/products", melodyexception.NotFound("no such page")); nil != declined.Response() {
+        t.Fatalf("expected an html route left to the built-in, got %#v", declined.Response())
+    }
+}
+
+func TestRegisterSubscribers_InstallsTheApiExceptionListener(t *testing.T) {
+    eventDispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+    moduleWithEnvironment(t, map[string]string{}).registerSubscribers(eventDispatcher)
+
+    for _, registered := range eventDispatcher.RegisteredEvents() {
+        if melodykernelcontract.EventKernelException == registered.EventName && 1 == len(registered.Listeners) {
+            return
+        }
+    }
+
+    t.Fatalf("expected the composition root to install the api exception listener")
 }

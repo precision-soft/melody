@@ -46,7 +46,7 @@ This package covers the HTTP runtime behavior inside Melody:
 
 - Kernel orchestration:
     - [`Kernel`](../../http/kernel.go) / [`NewKernel`](../../http/kernel.go)
-    - The kernel's configuration via [`KernelConfig`](../../http/kernel.go), `MethodPolicy`, `ForwardedHeadersPolicy`, `SessionCookiePolicy`, `Middlewares`, `NotFoundHandler` and `ErrorHandler`; its zero value is the default, and every field has a boot-time door a module installs through, the setter of the same name or `Use` for the middlewares
+    - The kernel's configuration via [`KernelConfig`](../../http/kernel.go), `MethodPolicy`, `ForwardedHeadersPolicy`, `SessionCookiePolicy`, `Middlewares` and `NotFoundHandler`; its zero value is the default, and every field has a boot-time door a module installs through, the setter of the same name or `Use` for the middlewares
     - The method policy — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header — is installed with [`Kernel.SetMethodPolicy`](../../http/kernel.go), which takes the [`MethodPolicy`](../../http/contract/kernel.go) of the contract and is declared on [`Kernel`](../../http/contract/kernel.go); the zero policy keeps both halves on, which is what the framework has always done. An api that must answer `405` to `OPTIONS` sets `AutomaticOptionsDisabled`, and one that must not serve `HEAD` from the `GET` route sets `HeadFallbackDisabled`.
     - Kernel lifecycle events in [`kernel_event.go`](../../http/kernel_event.go)
 
@@ -100,7 +100,7 @@ The [`http/cors`](../../http/cors) subpackage provides a dedicated CORS layer:
 - [`Middleware`](../../http/cors/middleware.go) — takes the service, a nil one refused, and answers a preflight with `204` and applies CORS headers on the happy path. A preflight is an `OPTIONS` carrying an `Access-Control-Request-Method` ([`Service.IsPreflight`](../../http/cors/service.go)), and the middleware answers it only for an allowed `Origin`; a plain `OPTIONS`, or a preflight from an origin that is not allowed, reaches the router instead. `Vary: Origin` is added to every response the chain produces, including one produced for a rejected origin or for a request carrying no `Origin` at all, so a shared cache cannot hand an origin-less body to an allowed cross-origin requester.
 - [`RegisterRequestListener`](../../http/cors/listener.go) — subscribes to `kernel.request` with [`RequestListenerPriority`](../../http/cors/listener.go) (`100`), ahead of the security resolution listener ([`security.KernelFirewallListenerPriority`](../../security/listener_priority.go), `50`) and access control ([`security.KernelAccessControlListenerPriority`](../../security/listener_priority.go), `20`), and answers a well-formed preflight from an allowed origin there — which is what makes a preflight to a protected path answerable, since a preflight carries no credential. A disallowed origin and a bare `OPTIONS` fall through to the security chain untouched. An already-answered preflight from an allowed origin — a `429` from the rate limiter at priority `200` is the case — keeps the status that earlier listener chose, but is decorated with the cross-origin headers: a browser reads a preflight refusal only if it carries them, and an opaque one reaches the page as a bare network failure
   it cannot tell apart from a rate limit.
-- [`RegisterResponseListener`](../../http/cors/listener.go) — subscribes to `kernel.response` with [`ResponseListenerPriority`](../../http/cors/listener.go) (`-100`) so CORS headers reach browsers even when error handlers replace the controller response. It writes into the response and nothing else, so a handler that commits its own headers to the writer before returning — a Server-Sent Events stream, a long poll — is past its reach: a streaming route needs the `Middleware`, which writes the headers to the writer before the handler runs.
+- [`RegisterResponseListener`](../../http/cors/listener.go) — subscribes to `kernel.response` with [`ResponseListenerPriority`](../../http/cors/listener.go) (`-100`) so CORS headers reach browsers even when an exception listener replaces the controller response. It writes into the response and nothing else, so a handler that commits its own headers to the writer before returning — a Server-Sent Events stream, a long poll — is past its reach: a streaming route needs the `Middleware`, which writes the headers to the writer before the handler runs.
 - [`RegisterListeners`](../../http/cors/listener.go) — wires both doors, the preflight answer and the response headers, in one call. The middleware decorates the handler path only.
 
 An allowlist entry is matched by [`OriginAllowed`](../../http/cors/service.go) in this order: `*` allows every origin; an entry that spells a scheme is compared whole, port included (`https://app.example.com`, or the subdomain form `https://*.example.com`, which matches only that scheme); an entry that spells **no** scheme — `example.com`, `*.example.com` — is compared against the request origin's **host with its port**. A scheme-less entry therefore allows that host under **any** scheme, `http://example.com` included, but only on the port it names: `example.com` matches the portless origin alone, and an entry meaning to admit a port writes it (`example.com:8443`). The port is significant because two ports of one host are two origins to a browser, and a grant that spanned them would extend to anything an attacker can get served from another port of an allowed host — with the credentials [`RestrictiveService`](../../http/cors/service.go) pairs with its list. The scheme-agnosticism
@@ -172,7 +172,7 @@ A request target that is not a path is not path-routed at all. net/http hands th
 
 ### Registration is boot-only
 
-Every registration door — `Handle`, `HandleNamed`, `HandleController`, `HandleNamedController`, `HandleWithOptions`, and the same set on a [`RouteGroup`](../../http/router_group.go) — is **boot-only**, and refuses by name once [`Kernel.ServeHttp`](../../http/kernel.go) has built the handler. The same holds for the kernel's own configuration doors: `Use`, `SetNotFoundHandler`, `SetErrorHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy` and `SetMethodPolicy`.
+Every registration door — `Handle`, `HandleNamed`, `HandleController`, `HandleNamedController`, `HandleWithOptions`, and the same set on a [`RouteGroup`](../../http/router_group.go) — is **boot-only**, and refuses by name once [`Kernel.ServeHttp`](../../http/kernel.go) has built the handler. The same holds for the kernel's own configuration doors: `Use`, `SetNotFoundHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy` and `SetMethodPolicy`.
 
 The route table is a tree of plain maps that every request goroutine reads, so writing to it while requests are in flight is an unrecoverable fatal error rather than a torn read; the kernel's fields are an unsynchronized read on every request. Configuration is compiled once and then served. The **reading** doors are untouched and stay open for the life of the process — [`RouteDefinitions`](../../http/router_introspection.go), `RouteDefinition`, `RouteRegistry` and the introspection surface are read from inside handlers, which is how the openapi document and the route manifest are served.
 
@@ -215,7 +215,7 @@ The responder runs under the kernel's containment discipline, and cannot turn a 
 
 ## The error body
 
-Every error the framework renders answers with one body, whichever path rendered it — the kernel exception listener, each of the kernel's own fallback paths, and [`JsonErrorResponse`](../../http/response.go), which the security entry points answer through. The json body is the error envelope: the status, the moment under `time` and an `error` object carrying the message ([`ErrorResponsePayload`](../../http/response.go)):
+Every error the framework renders answers with one body, whichever path rendered it — the built-in `kernel.exception` listener, the kernel's final step, and [`JsonErrorResponse`](../../http/response.go), which the security entry points answer through. The json body is the error envelope: the status, the moment under `time` and an `error` object carrying the message ([`ErrorResponsePayload`](../../http/response.go)):
 
 ```json
 {
@@ -240,6 +240,16 @@ The body is negotiated the way the success path negotiates: a client that prefer
 handed the body through the plain-text serializer, which has no shape for a map: the renderer writes it as lines, the status and the message first, then the request id where the body carries one, the time and the remaining entries in key order, the error object's own entries among them, a map indented beneath its key and a list one item per line. Any serializer whose content type has the `text/plain` media type takes that door. The kernel's own refusals take the same renderer: the `405` of a method the matched path does not declare, which keeps its `Allow` header, and the `404` answered when no not-found handler is set.
 
 The success half of the standardization — a data envelope over handler results — deliberately ships with the feature train; nothing about successful responses is enveloped today.
+
+## The error decision
+
+One mechanism decides what an error answers: `kernel.exception` listeners, in priority order. The kernel raises an error it meets, a handler's, the not-found handler's or a recovered panic's, through that one path:
+
+- **The first responder wins.** `KernelExceptionEvent.SetResponse` ends the dispatch, so a listener below the one that answered never runs. A listener that must see every error sits at a higher priority, and one that needs the final response listens on `kernel.response`, which every error response passes through. A listener that does not call `SetResponse` declines, and the next one decides.
+- **The built-in listener answers last.** The kernel installs it when `ServeHttp` builds the handler, at [`BuiltInExceptionListenerPriority`](../../http/exception_listener.go), the lowest priority there is, and it journals an error no producer filed and answers with [`RenderExceptionResponse`](../../http/exception_listener.go), reading debug mode from the runtime's configuration on each dispatch. An application listener that wants the framework body for some errors calls that renderer, and leaves the others alone. Kernels sharing one dispatcher install one listener. A console builds no handler, so the listener is not on its dispatcher, and `debug:events` names it among the serving-process listeners; nothing on the cli path raises `kernel.exception`.
+- **The floor is reserved.** A `kernel.exception` listener registered at that priority once the built-in is installed could never run, so `AddListener` refuses it by name; one registered before keeps running first.
+- **A `kernel.request` listener refuses.** [`KernelRequestEvent.Refuse`](../../http/kernel_event.go) ends the request before its handler and raises the error on this same path, with the record filed before the dispatch, so it does not depend on who answers; the first refusal is the decision, and `Refusal` reads it. A listener answers or refuses: doing both panics by name, in either order, and the request gets the kernel's fail-closed 500, as `Refuse` with a nil error does. A listener that answers stands aside on `nil != Refusal()`. The security listeners and the rate limiter refuse this way.
+- **The final step covers the rest.** When the dispatch failed, a listener returned an error or panicked, or propagation stopped with no response, the kernel renders the error itself, so it keeps its own status: a panicking observer does not turn a 404 into a 500. A response a listener set before it failed is half made: it is closed and not served, and the record names its status and `Content-Type`, never its body. Only a renderer that panics too answers the static 500.
 
 ## Usage
 
@@ -557,6 +567,8 @@ Where the list itself comes from is the application's business — a constant as
 
 ## Footguns & caveats
 
+- A `kernel.exception` listener answering 200 to a refusal lets the client read a security decision as a success; the handler still does not run, but a listener that means to handle only some errors inspects the status and declines the others.
+- A `kernel.exception` listener marked required behind a listener that answers makes the dispatch fail, which drops the answer for the final step's rendering. Nothing in the framework marks one; a listener that must see every error belongs above the responders instead.
 - Server-Sent Events handlers must return `(nil, nil)` after streaming; returning a non-nil response would make the kernel write a second header/body.
 - [`ServerSentEventHub.Broadcast`](../../http/server_sent_event_hub.go) is non-blocking and drops events for subscribers whose buffer is full; delivery is **at-most-once**. Size the subscribe buffer for the expected burst, or treat the stream as best-effort. [`ServerSentEventHub.DroppedEventCount`](../../http/server_sent_event_hub.go) returns the cumulative number of dropped events so the loss can be surfaced as a metric.
 - Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
@@ -589,7 +601,6 @@ Where the list itself comes from is the application's business — a constant as
 ### Contracts (`http/contract`)
 
 - [`type Handler`](../../http/contract/handler.go)
-- [`type ErrorHandler`](../../http/contract/handler.go)
 - [`type Request`](../../http/contract/request.go)
 - [`type Response`](../../http/contract/response.go)
 - [`type Router`](../../http/contract/router.go)
@@ -612,6 +623,13 @@ Where the list itself comes from is the application's business — a constant as
 
 ### Core types and helpers (`http`)
 
+- [`RenderExceptionResponse(runtimeInstance, request, err, ExceptionRenderConfig) httpcontract.Response`](../../http/exception_listener.go)
+- [`type ExceptionRenderConfig`](../../http/exception_listener.go)
+- [`const BuiltInExceptionListenerPriority`](../../http/exception_listener.go)
+- [`(*KernelExceptionEvent).IsPropagationStopped() bool`](../../http/kernel_event.go)
+- [`CloseDiscardedResponseBody(response, logger)`](../../http/router_utility.go)
+- [`(*KernelRequestEvent).Refuse(err error)`](../../http/kernel_event.go)
+- [`(*KernelRequestEvent).Refusal() error`](../../http/kernel_event.go)
 - Router and registry:
     - [`NewRouter()`](../../http/router.go)
     - [`NewRouterWithRouteRegistry(httpcontract.RouteRegistry)`](../../http/router.go)

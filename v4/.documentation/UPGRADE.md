@@ -22,6 +22,30 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Http: one error mechanism, `kernel.exception` listeners; the error handler slot is gone
+
+**What changed.** `Kernel.SetErrorHandler`, `Kernel.HasErrorHandler`, `KernelConfig.ErrorHandler`, `httpcontract.ErrorHandler`, `http.RegisterKernelExceptionListener` and `http.KernelExceptionListenerPriority` are removed. The kernel installs a built-in `kernel.exception` listener when `ServeHttp` builds the handler, at `http.BuiltInExceptionListenerPriority`, the lowest priority; `KernelExceptionEvent.SetResponse` ends the dispatch, so the first responder wins; a listener registered at that priority once the built-in is installed is refused by name. When a listener fails or panics, the kernel renders the error with its own status and does not serve a response the listener had set, which it closes and journals by status and `Content-Type`. `ServeHttp` resolves the event dispatcher when it builds the handler, not on the first request, so a container without one panics there.
+
+**Symptom.** A call of a removed door no longer compiles. A `kernel.exception` listener below one that answers no longer runs, where it used to run and could overwrite the response. A listener at `math.MinInt` registered after the handler was built panics. An out-of-tree implementation of `httpcontract.Kernel` no longer needs `SetErrorHandler`.
+
+**Remedy.** Register a listener with `AddListener(kernelcontract.EventKernelException, listener, 0)` that calls `SetResponse`, or declines by not calling it; call [`RenderExceptionResponse`](../http/exception_listener.go) to delegate to the framework's body. An observer sits at a higher priority than any responder. The handler's `writer` argument has no replacement: a listener answers with a `Response` the kernel writes, whose body may be a stream through `SetBodyReader`, and an error path that needs the raw connection has to act in the handler that failed.
+
+### Http: a `kernel.request` listener refuses through `KernelRequestEvent.Refuse`
+
+**What changed.** `KernelRequestEvent` gains `Refuse(err)` and `Refusal()`: the handler never runs and the kernel raises the error through `kernel.exception`, filing its record before the dispatch, so the record does not depend on who answers. The first refusal is the decision; a refusal stands over a later listener's failure, and a skipped required listener still ends in the fail-closed 500. A listener that both answers and refuses, in either order, panics by name and the request gets that 500, and `Refuse` with a nil or typed-nil error panics by name too. The rate-limit listener refuses through it when `OnLimitExceeded` returns an error; a limit handler that answers a response keeps its response.
+
+**Symptom.** A `kernel.request` listener that calls `SetResponse` without reading `Refusal()` answers a 500 for a request an earlier listener refused. A rate-limit error reaches `kernel.exception` listeners through the kernel instead of a dispatch of the listener's own, and a refused preflight is decorated by the cors response listener only.
+
+**Remedy.** A `kernel.request` listener that answers stands aside on `nil != Refusal()` as it does on `nil != Response()`. A listener that dispatched `kernel.exception` by hand calls `Refuse` instead.
+
+### Security: the firewall's and access control's refusals reach the application's `kernel.exception` listeners
+
+**What changed.** A failed firewall check, a token source error, a failing entry point, a missing decision manager, a denied decision, and the 401 for a missing security context, a missing token or a silent entry point are refusals: the listeners call `Refuse`, so an application's `kernel.exception` listener sees and may answer them. The answers of the firewall's own entry point and access denied handler stay responses, and the listeners read a refusal as they read a response and stand aside. The three 401 are rendered by the built-in listener where they were a hand-written json body: the status is the same, the body is negotiated, so a client preferring html gets the html page, and each now files a warning record carrying its `reason`, as every other deliberate 4xx does.
+
+**Symptom.** A `kernel.exception` listener that answers every error now answers the security refusals too, where they were rendered past it; a listener answering 200 to one is fail-open by its own hand. A journal reading gains one warning per anonymous request refused without an entry point's answer. A test dispatching `kernel.request` by hand reads `Refusal()`, where it read `Response()`.
+
+**Remedy.** A listener that must not touch them inspects the error's status and declines by not calling `SetResponse`.
+
 ### Httpclient: a client is built from one configuration struct, and stays as built
 
 **What changed.** [`NewHttpClient`](../httpclient/http_client.go) takes an [`HttpClientConfig`](../httpclient/http_client_config.go) struct, `BaseUrl`, `Timeout`, `Headers`, `Transport`, `RedirectsDisabled` and `MaxRedirects`, and answers the client with an error; the third major took the `*HttpClientConfig` that `NewHttpClientConfig(baseUrl, timeout, headers)` built, chained `WithoutRedirects` and `WithTransport` onto it, and panicked on a refused base url or header map. `Timeout` is a [`bound.Duration`](../bound/limit.go): left out it is 30s, a value is at least 1ms, and `bound.UnlimitedDuration()` is no deadline, where a non-positive timeout read as the default. `MaxRedirects`, a `bound.Count` left out at 10, bounds the requests an exchange makes while it follows redirects, the first included as net/http counts its own cap, and is refused beside `RedirectsDisabled`. `HttpClient.SetBaseUrl` and `HttpClient.SetTimeout` are removed, and so are `DefaultTransportConfig`,
@@ -82,7 +106,7 @@ when it is cancelled, the body read included, and a nil context is refused by na
 
 ### Http: the kernel is built from one configuration struct whose zero value is the default
 
-**What changed.** [`NewKernel`](../http/kernel.go) takes the router and a [`KernelConfig`](../http/kernel.go) struct, `MethodPolicy`, `ForwardedHeadersPolicy`, `SessionCookiePolicy`, `Middlewares`, `NotFoundHandler` and `ErrorHandler`, whose zero value is the framework's default: HEAD falls back to GET and an unrouted OPTIONS is answered, no forwarded header is believed, the session cookie is sent for `/` with SameSite=Lax, no middleware, the framework's not-found and error rendering. [`MethodPolicy`](../http/contract/kernel.go) reads `HeadFallbackDisabled` and `AutomaticOptionsDisabled`, so its zero value keeps both halves on, where the third major's `HeadFallbackToGet` and `AutomaticOptions` read the zero value as both off and a kernel started from `DefaultKernelOptions`. `KernelOptions` and `DefaultKernelOptions` are removed. The boot-time setters stay as the door a module installs through, and `Kernel.Use` takes the middlewares as a slice.
+**What changed.** [`NewKernel`](../http/kernel.go) takes the router and a [`KernelConfig`](../http/kernel.go) struct, `MethodPolicy`, `ForwardedHeadersPolicy`, `SessionCookiePolicy`, `Middlewares` and `NotFoundHandler`, whose zero value is the framework's default: HEAD falls back to GET and an unrouted OPTIONS is answered, no forwarded header is believed, the session cookie is sent for `/` with SameSite=Lax, no middleware, the framework's not-found and error rendering. [`MethodPolicy`](../http/contract/kernel.go) reads `HeadFallbackDisabled` and `AutomaticOptionsDisabled`, so its zero value keeps both halves on, where the third major's `HeadFallbackToGet` and `AutomaticOptions` read the zero value as both off and a kernel started from `DefaultKernelOptions`. `KernelOptions` and `DefaultKernelOptions` are removed. The boot-time setters stay as the door a module installs through, and `Kernel.Use` takes the middlewares as a slice.
 
 **Symptom.** `http.NewKernel(router)`, `http.DefaultKernelOptions()`, `MethodPolicy{HeadFallbackToGet: true}` and `kernel.Use(first, second)` no longer compile.
 
@@ -941,14 +965,13 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Remedy.** None for a listener that audits or counts failures. One that assumed the event always carries an authenticator's error reads `LoginFailureEvent.Error()` as a description only.
 
-### Application: the error handler is consulted, and the shutdown drain runs whatever failed before it
+### Application: the shutdown drain runs whatever failed before it
 
-**What changed.** An error handler installed after `Application.Boot` returned now takes the framework exception listener's place, as one installed before boot-end already did. The framework listener answers every `kernel.exception` dispatch and the kernel consults the handler only when the dispatch produced no response, so a registered listener takes the handler's place entirely — and the decision was frozen at the end of Boot. The decision is now taken at each dispatch: the kernel marks the `kernel.exception` event with whether a handler is installed at that moment, and the framework listener, registered at boot-end in every process shape, stands aside for it. An application that serves `Boot`'s kernel with its own `net/http.Server` without calling `Run` keeps the framework rendering. The handler renders the errors the kernel raises; a refusal of the security firewall or of access control is rendered by the framework listener, where an application with a handler installed used to
-receive it as a 500. Separately, the http wind-down no longer returns on its first failing phase: the serve result, the server shutdown and the request-scope drain each run, and each failing one contributes its cause.
+**What changed.** The http wind-down no longer returns on its first failing phase: the serve result, the server shutdown and the request-scope drain each run, and each failing one contributes its cause.
 
-**Symptom.** An error handler wired between `Boot` and `Run` starts rendering, where it used to be accepted and never called. A shutdown whose serve or server-shutdown phase failed starts reporting the open request scopes as well, joined with the earlier cause; a run that failed for one reason alone reads exactly as it did.
+**Symptom.** A shutdown whose serve or server-shutdown phase failed starts reporting the open request scopes as well, joined with the earlier cause; a run that failed for one reason alone reads exactly as it did.
 
-**Remedy.** None. An application that installed its handler before boot-end is unaffected; one that installed it later gets the behaviour its own wiring asked for. Code matching on the run error by string should read it with `errors.Is`, which traverses the join.
+**Remedy.** None. Code matching on the run error by string should read it with `errors.Is`, which traverses the join.
 
 ### Http: the session-cookie cache guard keeps the rest of `Cache-Control`
 
@@ -1413,7 +1436,7 @@ debug.NewMiddlewareCommand(
 
 ### Http: the kernel and router configuration doors are boot-only and refuse after serving starts
 
-**What changed.** `Kernel.Use`, `SetNotFoundHandler`, `SetErrorHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy`, `SetMethodPolicy` and every route registration door refuse by name once `Kernel.ServeHttp` has built the handler. The contract sentence is written on `httpcontract.Kernel`, `httpcontract.Router` and `httpcontract.RouteHandler`.
+**What changed.** `Kernel.Use`, `SetNotFoundHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy`, `SetMethodPolicy` and every route registration door refuse by name once `Kernel.ServeHttp` has built the handler. The contract sentence is written on `httpcontract.Kernel`, `httpcontract.Router` and `httpcontract.RouteHandler`.
 
 **Symptom.** An application that registers a route or installs a middleware lazily — from inside a handler, from a goroutine started after boot, from a hot-reload path — panics with `may not register a route after the http kernel started serving` or `may not configure the http kernel after it started serving`, naming the door.
 
@@ -2673,9 +2696,9 @@ grammar is refused rather than surviving as literal text — nobody types `${...
 
 ### Application: the boot order puts the application's routes first and the kernel listeners last
 
-**What changed.** `bootHttp` runs before the module phases, so the application's own routes register before any module's and win the router's registration-order tie-break; the duplicate-route refusals are collected into the aggregated boot report rather than panicking one at a time. The kernel's default listeners are wired at the end of `Boot` in every process shape, so a console process's dispatcher answers with the same set the serving process runs, and the framework exception listener steps aside when the application installed its own error handler.
+**What changed.** `bootHttp` runs before the module phases, so the application's own routes register before any module's and win the router's registration-order tie-break; the duplicate-route refusals are collected into the aggregated boot report rather than panicking one at a time. The kernel's default listeners are wired at the end of `Boot` in every process shape, so a console process's dispatcher answers with the same set the serving process runs, the http kernel's built-in exception listener apart, which `debug:events` declares.
 
-**Symptom.** Where an application route and a module route shared a pattern, the application's now wins where the module's used to. A boot with several duplicate routes reports them together instead of stopping at the first. An error handler installed at boot, which could never run, now runs. `debug:events` in a console process no longer reports an empty dispatcher.
+**Symptom.** Where an application route and a module route shared a pattern, the application's now wins where the module's used to. A boot with several duplicate routes reports them together instead of stopping at the first. `debug:events` in a console process no longer reports an empty dispatcher.
 
 **Remedy.** Nothing, unless a deployment relied on a module route shadowing an application route on the same pattern — declare the intended one and remove the other.
 

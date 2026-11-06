@@ -180,7 +180,7 @@ func AsHttpException(err error) *HttpException {
 func ValidationFailed(validationErrors any) *HttpException {
     httpException := NewHttpException(nethttp.StatusUnprocessableEntity, "validation failed")
 
-    /* the kernel exception listener serves this key to the client */
+    /* RenderExceptionResponse serves this key to the client */
     httpException.SetContextValue("validationErrors", validationErrors)
 
     return httpException
