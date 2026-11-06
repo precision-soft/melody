@@ -2,7 +2,6 @@ package audit
 
 import (
     "context"
-    "errors"
     "fmt"
     "reflect"
     "strings"
@@ -61,8 +60,8 @@ func (instance *Tracker) runInTx(ctx context.Context, entity string, operation s
         return nil
     }
 
-    /* the closure's own failure is already named and travels unchanged; only an error the closure did not produce is one of the two margins. errors.Is, not ==: a storage error of a non-comparable type, a struct carrying a slice, makes == panic */
-    if nil != unitErr && true == errors.Is(txErr, unitErr) {
+    /* the closure's own failure is already named and travels unchanged; only an error the closure did not produce is one of the two margins. A search, not ==: a storage error of a non-comparable type, a struct carrying a slice, makes == panic */
+    if nil != unitErr && true == exception.ChainIs(txErr, unitErr) {
         return txErr
     }
 

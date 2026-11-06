@@ -4928,3 +4928,74 @@ func TestKernel_ARendererBrokenByItsSerializerStillAnswersThroughTheResponsePath
         t.Fatalf("expected the handler's response body closed")
     }
 }
+
+func TestKernel_ACyclicChainFromAHandlerIsAnsweredWithAFiveHundred(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/cycle",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, newCyclicChainError()
+        },
+    )
+
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    assertReturnsOnACyclicChain(t, func() {
+        handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/cycle", nil))
+    })
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected 500, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_ACyclicChainFromAStreamedHandlerAfterItsHeaderIsAnswered(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/cycle",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            writer.WriteHeader(nethttp.StatusAccepted)
+
+            return nil, newCyclicChainError()
+        },
+    )
+
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
+
+    recorder := httptest.NewRecorder()
+    assertReturnsOnACyclicChain(t, func() {
+        handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/cycle", nil))
+    })
+
+    if nethttp.StatusAccepted != recorder.Code {
+        t.Fatalf("expected the committed status, got %d", recorder.Code)
+    }
+}
+
+func TestKernel_ACyclicChainFromTheRequestBodyIsAnsweredWithABadRequest(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/cycle",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "served"), nil
+        },
+    )
+
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
+
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "/cycle", &cyclicBodyReader{})
+    netRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+    recorder := httptest.NewRecorder()
+    assertReturnsOnACyclicChain(t, func() {
+        handler.ServeHTTP(recorder, netRequest)
+    })
+
+    if nethttp.StatusBadRequest != recorder.Code {
+        t.Fatalf("expected 400, got %d", recorder.Code)
+    }
+}

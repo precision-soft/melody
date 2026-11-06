@@ -1592,3 +1592,18 @@ func TestOpenContext_AZeroIdleCapBootsOnThePingConnectionAndKeepsNoIdleConnectio
         t.Fatalf("expected the configured zero idle cap after the boot, got %d idle connections", idle)
     }
 }
+
+func TestProvider_OpenReturnsOnACyclicChainFromAPostBuildHook(t *testing.T) {
+    provider := newTestProvider(ProviderConfig{
+        PostBuildHook: func(_ context.Context, _ *driver.Config) error {
+            return newCyclicChainError()
+        },
+        Retry: RetryConfig{MaxAttempts: bound.Of(1)},
+    })
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, openErr := provider.Open(newTestParams("unused", "3306", "db", "user", "password"), nil); nil == openErr {
+            t.Error("expected the hook's refusal")
+        }
+    })
+}

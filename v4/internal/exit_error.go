@@ -1,8 +1,6 @@
 package internal
 
 import (
-    "errors"
-
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -19,7 +17,7 @@ func RecoveredExitError(recoveredValue any) (*exception.ExitError, bool) {
 /* ExitErrorInChain answers the outermost exit error on an error's chain; a typed-nil match is answered as absent. */
 func ExitErrorInChain(err error) (*exception.ExitError, bool) {
     var exitError *exception.ExitError
-    if false == errors.As(err, &exitError) || nil == exitError {
+    if false == exception.ChainAs(err, &exitError) || nil == exitError {
         return nil, false
     }
 

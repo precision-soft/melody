@@ -2,7 +2,6 @@ package outbox
 
 import (
     "context"
-    "errors"
     "os"
     "os/signal"
     "syscall"
@@ -152,7 +151,7 @@ func (instance *RelayCommand) Run(
         if nil != runErr {
             if nil != runContext.Err() {
                 /* a cancellation interrupted the batch mid-drain and the visibility timeout re-surfaces what stayed claimed, so the command exits cleanly; only an error the cancellation explains is swallowed, so a repository failure that coincides with a lapsing deadline is still reported */
-                if true == errors.Is(runErr, context.Canceled) || true == errors.Is(runErr, context.DeadlineExceeded) {
+                if true == exception.ChainIs(runErr, context.Canceled) || true == exception.ChainIs(runErr, context.DeadlineExceeded) {
                     return nil
                 }
 

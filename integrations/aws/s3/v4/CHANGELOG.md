@@ -17,3 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.
 - **Breaking** — `provider.go`: `Config.Secure` is replaced by `Config.Insecure`, so a configuration that names neither dials https where it dialed plaintext http; the refusals of an empty endpoint or credential name the field.
 - **Breaking** — `provider.go`, `storage.go`, `service_resolver.go`: `EnsureBucket` takes an `EnsureBucketConfig` after the bucket where it took the region, `NewStorage` a `StorageConfig` after the bucket, refused naming the field, and `RegisterStorageService` a `StorageConfig` resolved at the call, so a refused value fails the registration.
+
+### Fixed
+
+- storage: an upload body's read error whose `Unwrap` chain reaches itself no longer holds the goroutine that checks the body's end.
+

@@ -27,3 +27,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - `lock.go`: `Release` ends at the earlier of the locker's `ReleaseTimeout` and the deadline of the runtime it is handed while that one is still ahead, on that runtime's context without its cancellation, where it released on a detached budget of its own, so a `RunExclusive` or `LeaderGate` release budget shorter than the locker's was a stall of the locker's; a release cut by either deadline ends the session, which frees the lock server-side, and names `releaseTimeout` and `deadline`.
+- provider: a post-build hook's error whose `Unwrap` chain reaches itself no longer holds the open that classifies it.
+- mysql: `IsDuplicateKey` returns on an error whose `Unwrap` chain reaches itself.
+

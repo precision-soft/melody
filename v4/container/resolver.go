@@ -2,7 +2,6 @@ package container
 
 import (
     "context"
-    "errors"
     "reflect"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -38,7 +37,7 @@ func FromResolver[T any](ctx context.Context, resolver containercontract.Resolve
         var zero T
 
         var melodyErr *exception.Error
-        isMelodyErr := errors.As(getErr, &melodyErr)
+        isMelodyErr := exception.ChainAs(getErr, &melodyErr)
 
         /* the original error travels out whole; the service name is written into its context only where none is named yet, so a nested failure keeps the name of the service that failed, and an error value a provider returns again keeps the name it was first resolved under rather than each resolution's */
         if true == isMelodyErr && nil != melodyErr {
@@ -127,7 +126,7 @@ func FromResolverByType[T any](ctx context.Context, resolver containercontract.R
         var zero T
 
         var melodyErr *exception.Error
-        isMelodyErr := errors.As(getByTypeErr, &melodyErr)
+        isMelodyErr := exception.ChainAs(getByTypeErr, &melodyErr)
 
         /* dressed as the name-keyed twin dresses it: the type written into the context only where none is named yet, so a nested failure keeps the type of the service that failed */
         if true == isMelodyErr && nil != melodyErr {

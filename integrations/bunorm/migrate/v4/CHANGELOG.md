@@ -21,3 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Behavioural change** — `migrate.go`: `RunnerOption{}` prints as the running command prints, a nil `Writer` the command's writer, `NoColor` false the command's colour, where a zero option handed to the `WithOption` doors forced colour under `--no-color`; `NoColor: true` still prints plain.
 
 - `output.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
+
+### Fixed
+
+- output: a migration's error whose `Unwrap` chain reaches itself no longer holds the command that renders it.
+

@@ -1546,52 +1546,6 @@ func TestChainDoors_ReturnOnAChainThatReachesItself(t *testing.T) {
     }
 }
 
-func TestChainHolds_FindsWhatErrorsAsFindsDepthFirst(t *testing.T) {
-    target := &cyclicChainLink{next: errors.New("end")}
-    joined := errors.Join(errors.New("first"), fmt.Errorf("wrapped: %w", target))
-
-    var found *cyclicChainLink
-    if false == chainHolds(joined, &found) || target != found {
-        t.Fatalf("expected the wrapped link through the join, got %v", found)
-    }
-
-    var absent *Error
-    if true == chainHolds(joined, &absent) {
-        t.Fatal("expected nothing of a type the chain does not hold")
-    }
-
-    if true == chainHolds(nil, &absent) {
-        t.Fatal("expected a nil error to hold nothing")
-    }
-}
-
-type selfUnwrappingValue struct{}
-
-func (instance selfUnwrappingValue) Error() string {
-    return "self unwrapping value"
-}
-
-func (instance selfUnwrappingValue) Unwrap() error {
-    return instance
-}
-
-func TestChainHolds_BoundsAChainWithoutPointerIdentity(t *testing.T) {
-    done := make(chan bool, 1)
-    go func() {
-        var absent *Error
-        done <- chainHolds(selfUnwrappingValue{}, &absent)
-    }()
-
-    select {
-    case found := <-done:
-        if true == found {
-            t.Fatal("expected nothing of a type the chain does not hold")
-        }
-    case <-time.After(5 * time.Second):
-        t.Fatal("the search must end on a chain it cannot recognise a cycle in")
-    }
-}
-
 type chainIsSelfReachingError struct{}
 
 func (instance *chainIsSelfReachingError) Error() string {
@@ -1642,4 +1596,96 @@ func TestChainIs_AnswersWhatErrorsIsAnswers(t *testing.T) {
             t.Fatalf("%s: expected %v, got %v", name, testCase.expected, actual)
         }
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type cyclicContextChainError struct {
+    cyclicChainError
+}
+
+func (instance *cyclicContextChainError) Context() exceptioncontract.Context {
+    return exceptioncontract.Context{"link": "cyclic"}
+}
+
+func TestChainDoors_ReturnOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        chain := newCyclicChainError()
+
+        if true == IsAlreadyLogged(chain) {
+            t.Error("expected a chain nothing marked to read as not logged")
+        }
+
+        if nil == MarkLogged(chain) {
+            t.Error("expected the marked error")
+        }
+
+        if nil == LogContext(chain, LogContextConfig{}) {
+            t.Error("expected the context of the chain")
+        }
+
+        if nil == FromError(chain) {
+            t.Error("expected the error of the chain")
+        }
+
+    })
+}
+
+func TestCauseChains_RenderEachLinkOfACyclicChainOnce(t *testing.T) {
+    if chain := BuildCauseChain(newCyclicChainError(), 8); 2 != len(chain) {
+        t.Fatalf("expected the two links once each, got %#v", chain)
+    }
+
+    first := &cyclicContextChainError{}
+    first.next = &cyclicContextChainError{cyclicChainError: cyclicChainError{next: first}}
+
+    if chain := BuildCauseContextChain(first, 8); 2 != len(chain) {
+        t.Fatalf("expected the two contexts once each, got %#v", chain)
+    }
+}
+
+func TestChainAs_FindsTheLinkOfAJoinOnACyclicChain(t *testing.T) {
+    target := NewError("target", nil, nil)
+    chain := newCyclicChainError()
+    chain.next.(*cyclicChainError).next = errors.Join(chain, target)
+
+    var found *Error
+    assertReturnsOnACyclicChain(t, func() {
+        if false == ChainAs(chain, &found) || target != found {
+            t.Errorf("expected the link behind the cycle, got %v", found)
+        }
+    })
 }

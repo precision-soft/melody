@@ -1,7 +1,6 @@
 package http
 
 import (
-    "errors"
     "fmt"
     "math"
     nethttp "net/http"
@@ -180,7 +179,7 @@ func RenderExceptionResponse(runtimeInstance runtimecontract.Runtime, request ht
 
     if true == debugMode {
         var melodyError *exception.Error
-        melodyErrorFound := errors.As(err, &melodyError)
+        melodyErrorFound := exception.ChainAs(err, &melodyError)
         if true == melodyErrorFound && nil != melodyError {
             payloadExtras[errorResponseKeyContext] = withOccurrenceCoordinates(melodyError.Context(), err)
 
@@ -197,7 +196,7 @@ func RenderExceptionResponse(runtimeInstance runtimecontract.Runtime, request ht
 /* attachRequestContextToError carries the request coordinates onto an already-logged error: onto the occurrence the kernel marked when the chain holds one, so a value several requests share keeps no request's coordinates, and onto the nearest melody error otherwise, the error a lower layer filed itself. A key already held is kept, and an empty coordinate is not written. */
 func attachRequestContextToError(err error, requestId string, method string, path string) {
     var occurrence *loggedOccurrence
-    if true == errors.As(err, &occurrence) && nil != occurrence {
+    if true == exception.ChainAs(err, &occurrence) && nil != occurrence {
         for key, value := range map[string]string{
             "requestId": requestId,
             "method":    method,
@@ -218,7 +217,7 @@ func attachRequestContextToError(err error, requestId string, method string, pat
     }
 
     var melodyError *exception.Error
-    if false == errors.As(err, &melodyError) || nil == melodyError {
+    if false == exception.ChainAs(err, &melodyError) || nil == melodyError {
         return
     }
 
@@ -278,7 +277,7 @@ func clientVisibleValidationErrors(errorsValue any) any {
 /* withOccurrenceCoordinates answers the context of the debug payload: the error's own context, with the coordinates of the occurrence the kernel marked under the keys the context does not hold. The error's context is copied, never written. */
 func withOccurrenceCoordinates(context exceptioncontract.Context, err error) exceptioncontract.Context {
     var occurrence *loggedOccurrence
-    if false == errors.As(err, &occurrence) || nil == occurrence || 0 == len(occurrence.coordinates) {
+    if false == exception.ChainAs(err, &occurrence) || nil == occurrence || 0 == len(occurrence.coordinates) {
         return context
     }
 

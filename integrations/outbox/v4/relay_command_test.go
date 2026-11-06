@@ -411,3 +411,60 @@ func TestRelayCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
         }
     }
 }
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type cyclicClaimRepository struct {
+    fakeRepository
+}
+
+func (instance *cyclicClaimRepository) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
+    return nil, newCyclicChainError()
+}
+
+func TestRelayCommand_ReturnsOnACyclicChainFromTheRepository(t *testing.T) {
+    parentContext, cancelParent := context.WithCancel(context.Background())
+    cancelParent()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+
+    relay := NewRelay(RelayConfig{Repository: &cyclicClaimRepository{}, Transport: &fakeTransport{}, Codec: &stringCodec{}})
+
+    assertReturnsOnACyclicChain(t, func() {
+        _ = runRelayCommand(t, runtimeInstance, relay, []string{"--limit", "1"})
+    })
+}

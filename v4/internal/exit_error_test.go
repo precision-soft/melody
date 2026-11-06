@@ -3,6 +3,7 @@ package internal
 import (
     "fmt"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v4/exception"
 )
@@ -50,4 +51,47 @@ func TestExitErrorInChain_AnswersAChainWithoutOneAsAbsent(t *testing.T) {
     if _, isExit := ExitErrorInChain(exception.NewError("plain", nil, nil)); true == isExit {
         t.Fatalf("expected a chain without an exit error answered as absent")
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestExitErrorInChain_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        if _, isExit := ExitErrorInChain(newCyclicChainError()); true == isExit {
+            t.Error("expected a chain without an exit error to read as absent")
+        }
+    })
 }

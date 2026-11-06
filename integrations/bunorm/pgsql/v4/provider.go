@@ -4,7 +4,6 @@ import (
     "context"
     "crypto/tls"
     "database/sql"
-    "errors"
     "math"
     "net"
     "reflect"
@@ -110,7 +109,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
         }
 
         /* the caller's own cancellation is not an outage: it is recorded at warning under its own name and not retried. Whether the caller is done is read off its context, not the failure's class, since the ping budget's own DeadlineExceeded can be the database and is retried; a refusal the server gave just before the caller's deadline landed is journaled here too, with the refusal still returned */
-        if nil != ctx.Err() || true == errors.Is(openErr, context.Canceled) {
+        if nil != ctx.Err() || true == exception.ChainIs(openErr, context.Canceled) {
             cancelledErr := exception.FromError(openErr)
             logger.Warning(
                 "database open cancelled by the caller's context",
@@ -381,6 +380,8 @@ func unreachable(openErr error) *exception.Error {
 }
 
 /* isTransientError answers whether an open failure is worth another attempt and, on the last attempt, whether it is filed as unreachable. A failure carrying the server's identity is classified on that identity before any message is read, since the server quotes operands such as a database named "timeout" in its message; without one, the net.Error checks and the markers decide. */
+const transientErrorLinkLimit = 64
+
 func (instance *Provider) isTransientError(inputErr error) bool {
     if nil == inputErr {
         return false
@@ -391,12 +392,12 @@ func (instance *Provider) isTransientError(inputErr error) bool {
     }
 
     var dnsErr *net.DNSError
-    if true == errors.As(inputErr, &dnsErr) {
+    if true == exception.ChainAs(inputErr, &dnsErr) {
         return true
     }
 
     var netErr net.Error
-    if true == errors.As(inputErr, &netErr) {
+    if true == exception.ChainAs(inputErr, &netErr) {
         if true == netErr.Timeout() {
             return true
         }
@@ -424,9 +425,9 @@ func (instance *Provider) isTransientError(inputErr error) bool {
         "the database system is",
     }
 
-    currentErr := inputErr
-    for nil != currentErr {
-        message := strings.ToLower(currentErr.Error())
+    /* an open failure can come from the application, a hook or a verifier, and its chain may reach itself; each pointer link is read once */
+    for _, link := range exception.BuildCauseChain(inputErr, transientErrorLinkLimit) {
+        message := strings.ToLower(link)
 
         for _, marker := range transientMarkers {
             if "" == marker {
@@ -437,8 +438,6 @@ func (instance *Provider) isTransientError(inputErr error) bool {
                 return true
             }
         }
-
-        currentErr = errors.Unwrap(currentErr)
     }
 
     return false

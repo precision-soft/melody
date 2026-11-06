@@ -45,3 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `token_store.go`: `RedisTokenStore.PutWithTtl`, folded into `Put`, and `WithTokenStoreContext`, since every door bounds its round trip by the call timeout and the context-less doors derive from the background context.
 - **Breaking** — `rate_limit.go`, `server_sent_event_backplane.go`, `reconnect_config.go`: `RateLimiterOption` and the five `WithRateLimiter` options, folded into `RateLimiterConfig`; `ServerSentEventBackplaneOption` and the four `WithServerSentEventBackplane` options, folded into `ServerSentEventBackplaneConfig`; `DefaultReconnectConfig` and `NewReconnectConfig`, the `ReconnectConfig` literal being the door.
 - **Breaking** — `cache/backend.go`, `cache/service_resolver.go`, `cache/module.go`: `BackendOption`, `WithMaxKeyLength` and `WithCommandTimeout`, folded into `BackendConfig`, and `RegisterBackendServiceWithOptions`, folded into `RegisterBackendService`.
+
+### Fixed
+
+- rate limit: a store failure whose `Unwrap` chain reaches itself no longer holds the limiter that classifies it. The provider's open returns on such a failure too, from a TLS verifier for one.
+

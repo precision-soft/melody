@@ -2,7 +2,6 @@ package http
 
 import (
     "encoding/json"
-    "errors"
     "io"
     "math"
     nethttp "net/http"
@@ -41,7 +40,7 @@ func bindJsonBody(instance httpcontract.Request, target any) error {
     bodyBytes, err := io.ReadAll(limitedReader)
     if nil != err {
         var maxBytesError *nethttp.MaxBytesError
-        if true == errors.As(err, &maxBytesError) {
+        if true == exception.ChainAs(err, &maxBytesError) {
             return exception.NewHttpException(nethttp.StatusRequestEntityTooLarge, "payload too large")
         }
 

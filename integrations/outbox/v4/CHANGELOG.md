@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `VisibilityTimeout`.
   Once the broker is back, the held rows wait out the failed row's current backoff, at most `MaxBackoff`, and a message the broker refuses holds the rows behind it for its own backoff each time it is due. When the failed send dead-letters its row, the held rows still wait the backoff that row would have had, `MaxBackoff` at the default settings.
 - `relay.go` — carried from the third major (v3.2.1): a failed send writes one `outbox message send failed` ERROR record with the row's id, its type, the attempt it was charged, `MaxAttempts`, when it is tried again or that it was dead-lettered, and the transport's cause, written once the row's reschedule or dead-letter write succeeded, where a rescheduled row left no trace in the process log, `RunOnce` answering no error for it and the cause reaching only `last_error`; the batch ends at the failed send, so a pass writes at most one such record, and a contained send panic keeps its own `outbox delivery panicked` record instead.
+- relay: a batch failure whose `Unwrap` chain reaches itself no longer holds the relay command that classifies it during a shutdown.
 
 ### Documentation
 

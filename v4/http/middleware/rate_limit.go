@@ -3,7 +3,6 @@ package middleware
 import (
     "container/list"
     "context"
-    "errors"
     "fmt"
     "math"
     "net"
@@ -693,7 +692,7 @@ func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance runtimec
     if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
-            if true == errors.Is(allowErr, context.Canceled) {
+            if true == exception.ChainIs(allowErr, context.Canceled) {
                 logger.Warning(
                     "rate limiter call cancelled",
                     exception.LogContext(allowErr, exception.LogContextConfig{Extra: exceptioncontract.Context{"key": key}}),

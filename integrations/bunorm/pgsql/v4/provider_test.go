@@ -1482,3 +1482,18 @@ func TestOpenWithRetry_ASingleAttemptDialsOnceAndFilesTheOutageAsUnreachable(t *
 
     t.Fatalf("expected the terminal record of the single attempt, got %v", logger.entries)
 }
+
+func TestProvider_OpenReturnsOnACyclicChainFromAPostBuildHook(t *testing.T) {
+    provider := NewProvider(ProviderConfig{
+        PostBuildHook: func(_ context.Context, _ *pgdriver.Connector) error {
+            return newCyclicChainError()
+        },
+        Retry: RetryConfig{MaxAttempts: bound.Of(1)},
+    })
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, openErr := provider.Open(newTestParams("unused", "5432", "db", "user", "password"), nil); nil == openErr {
+            t.Error("expected the hook's refusal")
+        }
+    })
+}

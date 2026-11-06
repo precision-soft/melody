@@ -1,7 +1,10 @@
 package rueidis
 
 import (
+    "crypto/tls"
     "errors"
+    nethttp "net/http"
+    "net/http/httptest"
     "os"
     "strings"
     "testing"
@@ -370,5 +373,44 @@ func TestProvider_Ping_IsBoundedByTheCommandTimeout(t *testing.T) {
 
     if elapsed := time.Since(started); 2*time.Second < elapsed {
         t.Fatalf("expected the 100ms command timeout to end the ping, it took %s", elapsed)
+    }
+}
+
+func TestProvider_OpenReturnsOnACyclicChainFromATlsVerifier(t *testing.T) {
+    server := httptest.NewTLSServer(nethttp.HandlerFunc(func(nethttp.ResponseWriter, *nethttp.Request) {}))
+    defer server.Close()
+
+    first := &rateLimiterCyclicError{}
+    first.next = &rateLimiterCyclicError{next: first}
+
+    provider := NewProvider(ProviderConfig{
+        Client: ClientConfig{
+            TlsConfig: &tls.Config{
+                InsecureSkipVerify: true,
+                VerifyConnection: func(tls.ConnectionState) error {
+                    return first
+                },
+            },
+        },
+        Retry: RetryConfig{MaxAttempts: bound.Of(1)},
+    })
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+
+        if _, openErr := provider.Open(ConnectionParameters{Address: server.Listener.Addr().String()}); nil == openErr {
+            t.Error("expected the verifier's refusal")
+        }
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the open to return on an error chain that reaches itself")
+    }
+
+    if true == provider.isTransientError(first) {
+        t.Fatal("expected a chain with no transient text not to read as transient")
     }
 }

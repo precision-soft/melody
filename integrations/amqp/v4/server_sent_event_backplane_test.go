@@ -1551,3 +1551,53 @@ func TestServerSentEventBackplane_APanickingDialerIsAnsweredAsADialFailure(t *te
         t.Fatalf("expected the dialer's panic as the cause, got %v", cause)
     }
 }
+
+func TestServerSentEventBackplane_PublishReturnsOnACyclicChainFromTheDialer(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    instance := &ServerSentEventBackplane{
+        ctx:    ctx,
+        cancel: cancel,
+        dialer: func() (*amqp091.Connection, error) {
+            return nil, newCyclicChainError()
+        },
+    }
+
+    assertReturnsOnACyclicChain(t, func() {
+        if publishErr := instance.Publish("topic", melodyhttp.ServerSentEvent{}); nil == publishErr {
+            t.Error("expected the dialer's refusal")
+        }
+    })
+}
+
+func TestServerSentEventBackplane_ListenReturnsOnACyclicChainFromTheDialer(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    dialed := make(chan struct{}, 1)
+    instance := &ServerSentEventBackplane{
+        reconnect: defaultReconnect,
+        ctx:       ctx,
+        cancel:    cancel,
+        dialer: func() (*amqp091.Connection, error) {
+            select {
+            case dialed <- struct{}{}:
+            default:
+            }
+
+            return nil, newCyclicChainError()
+        },
+    }
+
+    instance.wait.Add(1)
+
+    assertReturnsOnACyclicChain(t, func() {
+        go func() {
+            <-dialed
+            cancel()
+        }()
+
+        instance.listen()
+    })
+}

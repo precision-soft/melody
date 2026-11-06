@@ -1032,3 +1032,13 @@ func TestInstallBuiltInExceptionListener_ADispatcherWithoutTheFloorDoorGetsTheLi
         t.Fatalf("expected the built-in listener registered, got %d", registeredListeners)
     }
 }
+
+func TestExceptionListener_TheOccurrenceDoorsReturnOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        attachRequestContextToError(newCyclicChainError(), "request-id", "GET", "/cycle")
+
+        if nil == withOccurrenceCoordinates(map[string]any{"key": "value"}, newCyclicChainError()) {
+            t.Error("expected the context back")
+        }
+    })
+}

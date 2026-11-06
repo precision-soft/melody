@@ -32,7 +32,8 @@ Melody uses this package to:
     - [`MarkLogged`](../../exception/utility.go)
     - [`Logged`](../../exception/utility.go)
     - [`IsAlreadyLogged`](../../exception/utility.go)
-    - [`ChainIs`](../../exception/utility.go)
+    - [`ChainAs`](../../exception/chain.go) — what `errors.As` answers, returning on a chain whose `Unwrap` reaches itself: a link met twice is read once and a search stops after 65,536 links, answering false; a link that panics while it is read ends the search answering false
+    - [`ChainIs`](../../exception/chain.go) — the same search for what `errors.Is` answers
     - [`PanicCause`](../../exception/utility.go)
 - Fail-fast helpers:
     - [`Panic`](../../exception/panic.go)
@@ -152,7 +153,7 @@ func readFile(path string) []byte {
     - [`NewInfo`](../../exception/error_new.go) — `LevelInfo`
 - Error utilities:
     - [`LogContext(err error, config LogContextConfig) Context`](../../exception/utility.go) — the loggable context of an error; [`LogContextConfig`](../../exception/utility.go) holds `Extra`, merged on top with its keys winning and nil adding nothing, and `CauseChainDepth`, the links of the cause chain and of the cause context chain written, 8 when left out, at least 1, a negative one refused with a panic naming it before the error is read; a nil or typed-nil error answers a copy of `Extra`
-    - [`BuildCauseChain(causeErr error, maxDepth int) []string`](../../exception/utility.go) — the `causeChain` value a log record carries: every wrap link rendered as text, breadth-first and bounded by `maxDepth` links visited in total (not by the tree's depth), with a joined error contributing each of its branches
+    - [`BuildCauseChain(causeErr error, maxDepth int) []string`](../../exception/utility.go) — the `causeChain` value a log record carries: every wrap link rendered as text, a pointer link once, breadth-first and bounded by `maxDepth` links visited in total (not by the tree's depth), with a joined error contributing each of its branches
     - [`BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any`](../../exception/utility.go) — the `causeContextChain` counterpart, one context map per link that implements `ContextProvider`
     - [`FromError`](../../exception/utility.go)
     - [`FromErrorAs(err error, config FromErrorConfig) *Error`](../../exception/utility.go) — `FromError` at [`FromErrorConfig`](../../exception/utility.go)'s `Level`, error when left out, with its `Context` merged over the context of the nearest `ContextProvider`, its keys winning; the zero config answers exactly what `FromError` answers

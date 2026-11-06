@@ -4536,3 +4536,11 @@ func TestRunWarnsOfALogDirectoryLeftRootsForAUserTheHostDoesNotKnow(t *testing.T
         t.Fatalf("expected the warning naming the directory, got %q", stdout)
     }
 }
+
+func TestErrorDetailsOf_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        if details := errorDetailsOf(newCyclicChainError()); 0 != len(details) {
+            t.Errorf("expected no details from a chain carrying no context, got: %v", details)
+        }
+    })
+}

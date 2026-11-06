@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
@@ -69,4 +70,47 @@ func TestJournaledThrough_ALoggerWithoutIdentityIsNeverTheSameOne(t *testing.T) 
     if true == journaledThrough(refusal, &capturingLogger{}) {
         t.Fatal("expected a logger with identity not to match a journal without one")
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestJournaledThrough_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        if true == journaledThrough(newCyclicChainError(), nil) {
+            t.Error("expected a chain without a refusal to read as not journaled")
+        }
+    })
 }

@@ -1186,3 +1186,59 @@ func TestForGoroutine_AContainerProvidersViewReadsOnlyTheContainerUnderAScope(t 
         t.Fatalf("expected the goroutine's view refused as the provider's own resolver is, got %v and %v", ownErr, goroutineErr)
     }
 }
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestFromResolver_ReturnsOnACyclicChainFromAProvider(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    serviceContainer.MustRegister(
+        "service.cyclic",
+        func(resolver containercontract.Resolver) (*resolverTestService, error) {
+            return nil, newCyclicChainError()
+        },
+        RegisterOptions{},
+    )
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, nameErr := FromResolver[*resolverTestService](t.Context(), serviceContainer, "service.cyclic"); nil == nameErr {
+            t.Error("expected the provider's failure by name")
+        }
+
+        if _, typeErr := FromResolverByType[*resolverTestService](t.Context(), serviceContainer); nil == typeErr {
+            t.Error("expected the provider's failure by type")
+        }
+    })
+}

@@ -467,3 +467,15 @@ func TestProvider_CloseWithContextReturnsWithinTheProvidersCloseTimeout(t *testi
         t.Fatalf("expected the close bounded by the provider's 200ms close timeout and a grace, it took %s", elapsed)
     }
 }
+
+func TestRedactDialError_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        if nil == redactDialError(newCyclicChainError()) {
+            t.Error("expected the dial error back")
+        }
+
+        if nil == redactUrlCause(newCyclicChainError()) {
+            t.Error("expected the fixed text")
+        }
+    })
+}

@@ -4,6 +4,7 @@ import (
     "errors"
     "reflect"
 
+    "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
@@ -30,7 +31,7 @@ func (instance *journaledRefusal) Is(target error) bool {
 /* journaledThrough answers whether a refusal was already dead-lettered through the given logger. Identity is asked only of loggers whose dynamic type can carry one — a comparison of two interface values holding a slice or a map is a runtime panic — and a logger without identity is read as a different journal, so the entry is journaled by both rather than by neither. */
 func journaledThrough(saveErr error, logger loggingcontract.Logger) bool {
     var refusal *journaledRefusal
-    if false == errors.As(saveErr, &refusal) {
+    if false == exception.ChainAs(saveErr, &refusal) {
         return false
     }
 

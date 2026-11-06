@@ -675,3 +675,24 @@ func TestServerSentEventWriter_StopsAskingAWriterThatCannotTakeADeadline(t *test
         t.Errorf("a frame under a budget the writer cannot take allocated %v times against %v without one, wanted the budget to cost nothing", withBudget, withoutBudget)
     }
 }
+
+type cyclicDeadlineWriter struct {
+    *httptest.ResponseRecorder
+}
+
+func (instance *cyclicDeadlineWriter) SetWriteDeadline(deadline time.Time) error {
+    return newCyclicChainError()
+}
+
+func TestServerSentEventWriter_SendReturnsOnACyclicChainFromTheDeadline(t *testing.T) {
+    eventWriter, writerErr := NewServerSentEventWriter(&cyclicDeadlineWriter{ResponseRecorder: httptest.NewRecorder()}, ServerSentEventWriterConfig{WriteBudget: bound.Of(5 * time.Second)})
+    if nil != writerErr {
+        t.Fatalf("expected the stream to be accepted, got %v", writerErr)
+    }
+
+    assertReturnsOnACyclicChain(t, func() {
+        if sendErr := eventWriter.Send(ServerSentEvent{Data: "hello"}); nil != sendErr {
+            t.Errorf("expected the frame written, got %v", sendErr)
+        }
+    })
+}

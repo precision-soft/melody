@@ -1,7 +1,6 @@
 package opentelemetry
 
 import (
-    "errors"
     nethttp "net/http"
     "reflect"
     "strconv"
@@ -100,7 +99,7 @@ func statusCodeForError(handlerErr error) int {
     }
 
     var maxBytesError *nethttp.MaxBytesError
-    if true == errors.As(handlerErr, &maxBytesError) {
+    if true == exception.ChainAs(handlerErr, &maxBytesError) {
         return nethttp.StatusRequestEntityTooLarge
     }
 

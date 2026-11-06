@@ -1,14 +1,14 @@
 package mysql
 
 import (
-    "errors"
-
     driver "github.com/go-sql-driver/mysql"
+
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 func IsDuplicateKey(err error) bool {
     var mysqlError *driver.MySQLError
-    if false == errors.As(err, &mysqlError) {
+    if false == exception.ChainAs(err, &mysqlError) {
         return false
     }
 

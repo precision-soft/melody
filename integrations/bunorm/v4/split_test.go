@@ -400,3 +400,66 @@ func TestNewReadWriteSplitter_RefusesAReplicaRetryIntervalOutsideItsRuleNamingTh
         t.Fatalf("expected the 1ms minimum admitted, got %s", splitter.replicaRetryInterval)
     }
 }
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type cyclicSplitProvider struct{}
+
+func (instance *cyclicSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return nil, newCyclicChainError()
+}
+
+func TestReadWriteSplitter_ReaderReturnsOnACyclicChainFromAProvider(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        context.Background(),
+        &fakeLogger{},
+        []ProviderDefinition{
+            {Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            {Name: "replica", Provider: &cyclicSplitProvider{}, Params: testConnectionParameters},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}})
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, readerErr := splitter.Reader(); nil == readerErr {
+            t.Error("expected the provider's refusal")
+        }
+    })
+}
