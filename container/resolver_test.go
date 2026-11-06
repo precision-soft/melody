@@ -5,6 +5,7 @@ import (
     "reflect"
     "strings"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/container/contract"
     alpha "github.com/precision-soft/melody/container/internal/collisionalpha/contract"
@@ -229,7 +230,6 @@ func TestFromResolverByType_TypeMismatch(t *testing.T) {
 func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
     serviceContainer := NewContainer()
 
-    /* an unqualified recover accepts any panic at all, including one thrown by an unrelated guard in the same call; the message is what names the refusal under test */
     testhelper.AssertPanicsWithError(
         t,
         func() {
@@ -249,7 +249,6 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
     }, WithTypeRegistration(true))
 
     MustRegister(serviceContainer, "bus.alpha", func(resolver containercontract.Resolver) (*alpha.Bus, error) {
-        /* the alpha provider resolves the beta bus by type: both nodes key on "contract.Bus" through String(), so a shared key would flag a false cycle here */
         betaBus, betaErr := FromResolverByType[*beta.Bus](resolver)
         if nil != betaErr {
             return nil, betaErr
@@ -479,7 +478,6 @@ func TestLazy_NilResolverSurfacesAsAnErrorAtFirstUse(t *testing.T) {
     }
 }
 
-/* the type-keyed door dresses its failure the way the name-keyed twin does: a melody error travels out whole with the type written into its context in place, and a foreign error is wrapped naming the type, so the operator reading either record learns which resolution failed. */
 func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T) {
     melodyErr := exception.NewError("service creation failed", nil, nil)
 
@@ -511,7 +509,6 @@ func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T)
     }
 }
 
-/* a failure that already names a service — the nested resolution that failed — keeps that name through the outer resolution: the outer name would point the reader at a service that is registered */
 func TestFromResolver_KeepsTheServiceNameANestedFailureCarries(t *testing.T) {
     nestedErr := exception.NewError(
         "service is not registered",
@@ -529,4 +526,59 @@ func TestFromResolver_KeepsTheServiceNameANestedFailureCarries(t *testing.T) {
     if "service.nested" != typedError.Context()["serviceName"] {
         t.Fatalf("expected the nested failure to keep the name of the service that failed, got %v", typedError.Context()["serviceName"])
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestFromResolver_ReturnsOnACyclicChainFromAProvider(t *testing.T) {
+    serviceContainer := NewContainer()
+    serviceContainer.MustRegister(
+        "service.cyclic",
+        func(resolver containercontract.Resolver) (*resolverTestService, error) {
+            return nil, newCyclicChainError()
+        },
+    )
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, nameErr := FromResolver[*resolverTestService](serviceContainer, "service.cyclic"); nil == nameErr {
+            t.Error("expected the provider's failure by name")
+        }
+
+        if _, typeErr := FromResolverByType[*resolverTestService](serviceContainer); nil == typeErr {
+            t.Error("expected the provider's failure by type")
+        }
+    })
 }

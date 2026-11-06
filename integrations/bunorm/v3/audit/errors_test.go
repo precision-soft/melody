@@ -4,12 +4,12 @@ import (
     "context"
     "errors"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v3/exception"
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* valueLoggerWithoutIdentity is a Logger held by value whose type carries a slice, so two interface values holding it cannot be compared with ==: the shape an integrator's adapter takes, and the one a bare comparison panics on. */
 type valueLoggerWithoutIdentity struct {
     records []string
 }
@@ -24,7 +24,6 @@ func (instance valueLoggerWithoutIdentity) Error(message string, context logging
 func (instance valueLoggerWithoutIdentity) Emergency(message string, context loggingcontract.Context) {
 }
 
-/* the refusal is a cause under the storage's exception and renders the sentinel alone: a dead-letter record, or a caller's log of Save, reads the sentinel once where an extra link read the message twice and put the message where the sentinel stood. */
 func TestJournaledRefusal_RendersTheSentinelOnceInTheCauseChain(t *testing.T) {
     delegate := newRecordingStorage()
     close(delegate.release)
@@ -56,7 +55,6 @@ func TestJournaledRefusal_RendersTheSentinelOnceInTheCauseChain(t *testing.T) {
     }
 }
 
-/* two loggers whose dynamic type carries a slice have no identity to compare: the question is answered false without the panic a bare comparison raises, so a recorder holding such a logger journals the loss itself rather than crashing the request that reported it. */
 func TestJournaledThrough_ALoggerWithoutIdentityIsNeverTheSameOne(t *testing.T) {
     logger := valueLoggerWithoutIdentity{records: []string{}}
     refusal := exception.NewError("refused", nil, &journaledRefusal{sentinel: ErrAsyncStorageQueueFull, journal: logger})
@@ -68,4 +66,47 @@ func TestJournaledThrough_ALoggerWithoutIdentityIsNeverTheSameOne(t *testing.T) 
     if true == journaledThrough(refusal, &capturingLogger{}) {
         t.Fatal("expected a logger with identity not to match a journal without one")
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestJournaledThrough_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        if true == journaledThrough(newCyclicChainError(), nil) {
+            t.Error("expected a chain without a refusal to read as not journaled")
+        }
+    })
 }

@@ -52,7 +52,6 @@ type fakeProvider struct {
 func (instance *fakeProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     instance.openCount = instance.openCount + 1
 
-    /* a real stub database: the registry refuses a provider answering neither a database nor an error */
     database, _ := newCloseRaceDatabase()
 
     return database, nil
@@ -67,7 +66,6 @@ func (instance *blockingProvider) Open(params ConnectionParameters, logger loggi
     close(instance.openStarted)
     <-instance.releaseOpen
 
-    /* a real stub database: the registry refuses a provider answering neither a database nor an error */
     database, _ := newCloseRaceDatabase()
 
     return database, nil
@@ -250,7 +248,6 @@ func TestManagerRegistry_OpenOfOneManagerDoesNotBlockCacheHitsForAnother(t *test
     close(releaseOpen)
 }
 
-/* A panic inside Provider.Open must still delete the in-flight entry and close its done channel, so that a caller that coalesced onto the same open is released with an error instead of blocking forever on a done channel that is never closed. */
 func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
     logger := &fakeLogger{}
 
@@ -283,7 +280,6 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
         t.Fatalf("the provider open never started")
     }
 
-    /* the in-flight entry the open registered before it dialled is the thing a waiter coalesces onto, so the test takes it and reads the answer from it. Sleeping until the second caller was presumed to have found it decided the test by scheduling: a lost interleaving made that caller a fresh opener, the provider panicked again on a goroutine with no recover above it, and the whole test binary died where one assertion should have failed. The second caller stays as the liveness half of the claim, with a recover of its own for the same reason. */
     registry.lock.Lock()
     pendingOpen := registry.pendingOpenByName["x"]
     registry.lock.Unlock()
@@ -315,13 +311,11 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
 
     select {
     case <-secondResult:
-        /* the answer is read from the entry, not from the call: Manager hands a waiter back exactly pendingOpen.manager and pendingOpen.openError, so this is the value every coalesced caller receives, and reading it here does not depend on which goroutine the scheduler favoured */
         secondErr := pendingOpen.openError
         if nil == secondErr {
             t.Fatalf("expected the coalesced caller to receive an error after the open panicked")
         }
 
-        /* the panic value must ride the waiter's error: the re-raised panic unwinds only the opening goroutine, so without it the waiter's log names the definition but not the refusal that produced it */
         var exceptionErr *exception.Error
         if false == errors.As(secondErr, &exceptionErr) {
             t.Fatalf("expected an exception error for the coalesced caller, got %v", secondErr)
@@ -342,7 +336,6 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
     <-firstDone
 }
 
-/* The in-flight entry is what a second caller coalesces onto, and it has to be registered before the provider is dialed: registered after, a caller arriving during the dial would find neither the cache nor the entry and dial the same name again, opening a pool the publish immediately overwrites and leaks. */
 func TestManagerRegistry_AnInFlightOpenIsRegisteredBeforeTheDial(t *testing.T) {
     logger := &fakeLogger{}
 
@@ -384,7 +377,6 @@ func TestManagerRegistry_AnInFlightOpenIsRegisteredBeforeTheDial(t *testing.T) {
     }
 }
 
-/* A caller that finds an in-flight open must wait on it rather than dial. The pending entry is installed by hand, so the caller is a waiter by construction and no scheduling window decides what the test observes: the provider counts every dial, and the manager published on the entry is the one the waiter has to answer with. */
 func TestManagerRegistry_ACallerFindingAnInFlightOpenWaitsInsteadOfDialing(t *testing.T) {
     logger := &fakeLogger{}
     provider := &fakeProvider{}
@@ -439,7 +431,6 @@ func TestManagerRegistry_ACallerFindingAnInFlightOpenWaitsInsteadOfDialing(t *te
     }
 }
 
-/* closeRaceDialect is a minimal bun dialect assembled only from packages that already ship inside the bun core module, so a real *bun.DB can be built for the close-during-open regression without pulling in a database driver dependency. */
 type closeRaceDialect struct {
     schema.BaseDialect
 
@@ -487,7 +478,6 @@ func (instance *closeRaceDialect) DefaultSchema() string {
     return "main"
 }
 
-/* closeRaceConnector signals its closeSignal channel exactly once when the *sql.DB it backs is closed. database/sql invokes connector.Close from DB.Close when the connector implements io.Closer, which lets the test observe that the registry closed the freshly opened database rather than leaking its pool. */
 type closeRaceConnector struct {
     closeSignal chan struct{}
     closeOnce   sync.Once
@@ -517,7 +507,6 @@ func (instance *closeRaceDriver) Open(name string) (driver.Conn, error) {
     return nil, errors.New("open by data source name is not supported by the close-race driver")
 }
 
-/* newCloseRaceDatabase returns a real *bun.DB whose Close is observable through the returned channel, which is closed the moment the underlying database is closed. */
 func newCloseRaceDatabase() (*bun.DB, chan struct{}) {
     closeSignal := make(chan struct{})
     connector := &closeRaceConnector{closeSignal: closeSignal}
@@ -545,7 +534,6 @@ var (
     _ Provider         = (*closeRaceProvider)(nil)
 )
 
-/* A Close that lands while a Provider.Open is still in flight must not leak the connection pool of the database that open is about to return. The registry has to close that freshly opened database and refuse to memoize it, handing the caller ErrManagerRegistryClosed instead of a live manager. */
 func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *testing.T) {
     logger := &fakeLogger{}
 
@@ -591,7 +579,6 @@ func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *test
         closeReturned <- registry.Close()
     }()
 
-    /* the flag is OBSERVED rather than waited out. Close publishes it under the lock before it tears any pool down, and from that instant every door answers ErrManagerRegistryClosed for any name — so a probe for a name the registry never had says exactly when the parked open may be released, where a fixed sleep only guessed that Close had got that far and decided the test by scheduling. */
     closePublishedDeadline := time.Now().Add(2 * time.Second)
     for {
         if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
@@ -657,7 +644,6 @@ func (instance *migrationCapableProvider) OpenForMigration(params ConnectionPara
 
 var _ MigrationProvider = (*migrationCapableProvider)(nil)
 
-/* migrationContextRecordingProvider carries both migration doors, so a test can tell which one the registry reached */
 type migrationContextRecordingProvider struct {
     observed          context.Context
     plainOpenReached  bool
@@ -686,7 +672,6 @@ func (instance *migrationContextRecordingProvider) OpenForMigrationContext(
 
 var _ MigrationContextOpener = (*migrationContextRecordingProvider)(nil)
 
-/* the registry's bound context has to reach the MIGRATION open too: it reached the ordinary one alone, so a db:migrate cancelled by a supervisor slept out the whole retry budget against a down database instead of refusing at the first cancellable step */
 func TestManagerRegistry_MigrationDatabasePrefersTheContextOpenerWithTheConstructionContext(t *testing.T) {
     migrationDatabase, _ := newCloseRaceDatabase()
 
@@ -728,7 +713,6 @@ func TestManagerRegistry_MigrationDatabasePrefersTheContextOpenerWithTheConstruc
     }
 }
 
-/* a provider carrying only the context-less capability is unaffected: the door is optional, and the three implementers written before it must keep working */
 func TestManagerRegistry_MigrationDatabaseFallsBackToTheContextLessCapability(t *testing.T) {
     ordinaryDatabase, _ := newCloseRaceDatabase()
     migrationDatabase, _ := newCloseRaceDatabase()
@@ -961,7 +945,6 @@ func TestManagerRegistry_ClosesTheDatabaseAProviderReturnsBesideAnError(t *testi
     }
 }
 
-/* failClosingConnector backs a real *bun.DB whose Close fails with the given error, so the aggregation of teardown failures can be observed per database name. */
 type failClosingConnector struct {
     closeErr error
 }
@@ -1059,7 +1042,6 @@ func TestManagerRegistry_CloseKeepsALoneCloseFailureUntouched(t *testing.T) {
     }
 }
 
-/* configurableMigrationProvider answers OpenForMigration with whatever pair the test pinned, optionally parking mid-open on its channels so a Close can land while the migration open is in flight. */
 type configurableMigrationProvider struct {
     migrationDatabase *bun.DB
     migrationErr      error
@@ -1170,7 +1152,6 @@ func TestManagerRegistry_CloseDuringInFlightMigrationOpenClosesDatabaseAndRefuse
         closeReturned <- registry.Close()
     }()
 
-    /* the flag is OBSERVED rather than waited out. Close publishes it under the lock before it tears any pool down, and from that instant every door answers ErrManagerRegistryClosed for any name — so a probe for a name the registry never had says exactly when the parked open may be released, where a fixed sleep only guessed that Close had got that far and decided the test by scheduling. */
     closePublishedDeadline := time.Now().Add(2 * time.Second)
     for {
         if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
@@ -1433,7 +1414,6 @@ func (instance *idiomaticPanickingProvider) Open(params ConnectionParameters, lo
     panic(instance.panicValue)
 }
 
-/* the coalesced waiter receives the same diagnosis the re-raised panic carries to its own boundary: the panic value as the cause and the stack of the goroutine that raised it. Stringified into the context alone, the waiter's error named the definition and the bare message and nothing else — the same failure told two ways, decided only by which goroutine the caller happened to be on. */
 func TestManagerRegistry_APanickingOpenHandsItsCauseAndItsStackToTheWaiter(t *testing.T) {
     logger := &fakeLogger{}
 
@@ -1472,7 +1452,6 @@ func TestManagerRegistry_APanickingOpenHandsItsCauseAndItsStackToTheWaiter(t *te
         t.Fatalf("the provider open never started")
     }
 
-    /* the in-flight entry the open registered before it dialled is the thing a waiter coalesces onto, so the test takes it and reads the answer from it. Sleeping until the second caller was presumed to have found it decided the test by scheduling: a lost interleaving made that caller a fresh opener, the provider panicked again on a goroutine with no recover above it, and the whole test binary died where one assertion should have failed. The second caller stays as the liveness half of the claim, with a recover of its own for the same reason. */
     registry.lock.Lock()
     pendingOpen := registry.pendingOpenByName["x"]
     registry.lock.Unlock()
@@ -1504,7 +1483,6 @@ func TestManagerRegistry_APanickingOpenHandsItsCauseAndItsStackToTheWaiter(t *te
 
     select {
     case <-secondResult:
-        /* the answer is read from the entry, not from the call: Manager hands a waiter back exactly pendingOpen.manager and pendingOpen.openError, so this is the value every coalesced caller receives, and reading it here does not depend on which goroutine the scheduler favoured */
         secondErr := pendingOpen.openError
         if nil == secondErr {
             t.Fatal("expected the coalesced caller to receive an error after the open panicked")
@@ -1534,7 +1512,6 @@ func TestManagerRegistry_APanickingOpenHandsItsCauseAndItsStackToTheWaiter(t *te
     <-firstDone
 }
 
-/* a typed-nil panic value must not reach the cause slot: its Error() dereferences a nil receiver, and the waiter rendering its own error would die of the very failure the boundary exists to report. */
 func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
     logger := &fakeLogger{}
 
@@ -1573,7 +1550,6 @@ func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) 
         t.Fatalf("the provider open never started")
     }
 
-    /* the in-flight entry the open registered before it dialled is the thing a waiter coalesces onto, so the test takes it and reads the answer from it. Sleeping until the second caller was presumed to have found it decided the test by scheduling: a lost interleaving made that caller a fresh opener, the provider panicked again on a goroutine with no recover above it, and the whole test binary died where one assertion should have failed. The second caller stays as the liveness half of the claim, with a recover of its own for the same reason. */
     registry.lock.Lock()
     pendingOpen := registry.pendingOpenByName["x"]
     registry.lock.Unlock()
@@ -1605,7 +1581,6 @@ func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) 
 
     select {
     case <-secondResult:
-        /* the answer is read from the entry, not from the call: Manager hands a waiter back exactly pendingOpen.manager and pendingOpen.openError, so this is the value every coalesced caller receives, and reading it here does not depend on which goroutine the scheduler favoured */
         secondErr := pendingOpen.openError
         if nil == secondErr {
             t.Fatal("expected the coalesced caller to receive an error after the open panicked")
@@ -1620,7 +1595,6 @@ func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) 
             t.Fatalf("expected a typed nil to answer no cause, got %v", exceptionErr.CauseErr())
         }
 
-        /* the message renders, which is what a cause holding the typed nil would have taken away */
         if false == strings.Contains(secondErr.Error(), "bunorm manager provider panicked while opening") {
             t.Fatalf("unexpected message: %q", secondErr.Error())
         }
@@ -1695,7 +1669,7 @@ func TestManagerRegistry_AnUnknownMigrationDefinitionNamesTheRequestedAndTheRegi
     }
 }
 
-/* blockingCloseConnector parks the close of the *sql.DB it backs until the test releases it. That is the shape a partitioned peer produces at shutdown, where the driver waits on a COM_QUIT nobody answers and the migration connection has its write deadlines deliberately lifted. */
+/* blockingCloseConnector parks the close as a partitioned peer does: the driver waits on a COM_QUIT nobody answers */
 type blockingCloseConnector struct {
     closeEntered chan struct{}
     releaseClose chan struct{}
@@ -1820,7 +1794,6 @@ func TestNewManagerRegistry_AConstructionRefusalNamesTheDefinitionItIsAbout(t *t
     assertConstructionRefusalNames(t, duplicateErr, ErrProviderDefinitionNameMustBeUnique, 1, "reports")
 }
 
-/* assertConstructionRefusalNames is the shared shape of the three construction refusals: the sentinel stays the cause, so errors.Is keeps answering, and the record says which definition of the set is the broken one — the thing a bare sentinel cannot say when a configuration carries three. */
 func assertConstructionRefusalNames(t *testing.T, refusalErr error, sentinel error, position int, name string) {
     t.Helper()
 
@@ -1859,7 +1832,7 @@ func (instance *goexitProvider) Open(params ConnectionParameters, logger logging
 
     <-instance.releaseOpen
 
-    /* what a t.Fatalf inside a provider does, and the reason the recovery boundary must not call it a panic: the goroutine unwinds running its defers with recover() answering nil */
+    /* what a t.Fatalf inside a provider does: the goroutine unwinds running its defers with recover() answering nil */
     runtime.Goexit()
 
     return nil, nil
@@ -1917,7 +1890,6 @@ func TestManagerRegistry_AProviderThatExitsItsGoroutineIsNotReportedAsAPanic(t *
         t.Fatalf("expected a melody error, got %T", pendingOpen.openError)
     }
 
-    /* the "panic" key is what carried the literal text "<nil>" to every waiter of an open that never panicked */
     if _, hasPanicValue := melodyErr.Context()["panic"]; true == hasPanicValue {
         t.Fatalf("expected no panic value where nothing panicked, got %v", melodyErr.Context()["panic"])
     }
@@ -1939,7 +1911,6 @@ func (instance *errorBesideAPanickingCloseProvider) Open(params ConnectionParame
 
     <-instance.releaseOpen
 
-    /* the Provider contract allows a database beside an error, and the publish closes it — which is where the panic below is raised, one stage past the provider */
     return instance.database, errors.New("the provider refused the dial")
 }
 
@@ -2014,7 +1985,6 @@ func TestManagerRegistry_APanicInThePublishIsNotBlamedOnTheProvider(t *testing.T
         t.Fatal("expected the waiters to receive a refusal after the publish panicked")
     }
 
-    /* the provider returned before this panic was raised, so naming it sends whoever reads the record to code that did nothing wrong */
     if true == strings.Contains(pendingOpen.openError.Error(), "provider panicked") {
         t.Fatalf("a panic raised by the registry's own publish must not be attributed to the provider: %v", pendingOpen.openError)
     }
@@ -2024,7 +1994,6 @@ func TestManagerRegistry_APanicInThePublishIsNotBlamedOnTheProvider(t *testing.T
     }
 }
 
-/* TestManagerRegistry_CloseWaitsForAnInFlightOpen guards the window after the refusal is published: a dial started before it is still in the air, and Close must wait for it, so a caller that exits on its answer leaves no connection outstanding. The assertion is NEGATIVE and given a real window: Close must still not have returned while the open is parked, since a bare non-blocking probe would pass against a Close that simply had not been scheduled yet. */
 func TestManagerRegistry_CloseWaitsForAnInFlightOpen(t *testing.T) {
     database, _ := newCloseRaceDatabase()
 
@@ -2061,7 +2030,6 @@ func TestManagerRegistry_CloseWaitsForAnInFlightOpen(t *testing.T) {
         closeReturned <- registry.Close()
     }()
 
-    /* the flag is OBSERVED rather than waited out, exactly as the sibling test does it: from the instant Close publishes it, every door answers the refusal, so a probe for a name the registry never had says when Close has passed the publication and is into the teardown proper. */
     closePublishedDeadline := time.Now().Add(2 * time.Second)
     for {
         if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
@@ -2095,7 +2063,6 @@ func TestManagerRegistry_CloseWaitsForAnInFlightOpen(t *testing.T) {
     }
 }
 
-/* TestManagerRegistry_CloseWaitsForAnInFlightMigrationOpen is the same guard on the migration door. It needs its own probe because that door keeps no coalescing record — migrations run from a sequential command, so nobody waits for another caller's dial — and a teardown still has to. Without the announcement the migration open makes before it releases the lock, this window has nothing for Close to wait on at all. */
 func TestManagerRegistry_CloseWaitsForAnInFlightMigrationOpen(t *testing.T) {
     migrationDatabase, _ := newCloseRaceDatabase()
 
@@ -2165,7 +2132,6 @@ func TestManagerRegistry_CloseWaitsForAnInFlightMigrationOpen(t *testing.T) {
     }
 }
 
-/* TestManagerRegistry_CloseMigrationDatabaseEndsThePoolAndForgetsIt pins both halves of the door: the connection is really closed, and the memo is really dropped, so the next call opens a fresh one rather than handing back a pool over a dead connection. Forgetting without closing would leak; closing without forgetting would hand the next caller a closed pool with a nil error. */
 func TestManagerRegistry_CloseMigrationDatabaseEndsThePoolAndForgetsIt(t *testing.T) {
     migrationDatabase, migrationDatabaseClosed := newCloseRaceDatabase()
 
@@ -2204,7 +2170,6 @@ func TestManagerRegistry_CloseMigrationDatabaseEndsThePoolAndForgetsIt(t *testin
     }
 }
 
-/* an empty name selects the default definition, exactly as MigrationDatabase reads it — a command that never names a manager must reach the same connection through both doors. */
 func TestManagerRegistry_CloseMigrationDatabaseReadsAnEmptyNameAsTheDefault(t *testing.T) {
     migrationDatabase, migrationDatabaseClosed := newCloseRaceDatabase()
 
@@ -2235,7 +2200,6 @@ func TestManagerRegistry_CloseMigrationDatabaseReadsAnEmptyNameAsTheDefault(t *t
     }
 }
 
-/* a name that never opened a migration connection — and one already ended here — closes nothing and is not an error: the commands call this on their way out, including the ones that never reached the migration door. */
 func TestManagerRegistry_CloseMigrationDatabaseIsSilentForANameThatHasNone(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeLogger{},
@@ -2254,7 +2218,6 @@ func TestManagerRegistry_CloseMigrationDatabaseIsSilentForANameThatHasNone(t *te
     }
 }
 
-/* a closed registry refuses the door rather than answering success: there is nothing left to end, and a nil error would say this call ended the pool when Close already had. */
 func TestManagerRegistry_CloseMigrationDatabaseRefusesAClosedRegistry(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeLogger{},
@@ -2273,7 +2236,6 @@ func TestManagerRegistry_CloseMigrationDatabaseRefusesAClosedRegistry(t *testing
     }
 }
 
-/* loggerRecordingProvider keeps every logger the registry hands it, so a replacement can be proven on what the provider ACTUALLY receives rather than on the field it was written into. */
 type loggerRecordingProvider struct {
     mutex   sync.Mutex
     loggers []loggingcontract.Logger
@@ -2298,9 +2260,6 @@ func (instance *loggerRecordingProvider) received() []loggingcontract.Logger {
 
 var _ Provider = (*loggerRecordingProvider)(nil)
 
-/* TestManagerRegistry_SetLoggerReachesTheNextOpen pins the door on what the provider is handed, not on the field behind it. A registry built during module wiring has no application logger to be given — the framework's own does not exist that early — so it is constructed on the emergency logger, and without this door every later open, retry warning and terminal connection failure would keep bypassing the journal for the life of the process.
-
-   Two definitions are opened, one before the replacement and one after, so the probe separates "the registry took a new logger" from "the registry was built with this one all along". */
 func TestManagerRegistry_SetLoggerReachesTheNextOpen(t *testing.T) {
     provider := &loggerRecordingProvider{}
     wiringLogger := &fakeLogger{}
@@ -2333,7 +2292,6 @@ func TestManagerRegistry_SetLoggerReachesTheNextOpen(t *testing.T) {
         t.Fatalf("expected two opens, got %d", len(received))
     }
 
-    /* a provider receives the registry's logger, which wraps the application's */
     first, firstIsOwned := received[0].(*registryLogger)
     if false == firstIsOwned || loggingcontract.Logger(wiringLogger) != first.Logger {
         t.Fatalf("the first open did not get the wiring logger")
@@ -2345,7 +2303,6 @@ func TestManagerRegistry_SetLoggerReachesTheNextOpen(t *testing.T) {
     }
 }
 
-/* the replacement takes bun's diagnostic channel with it, so the registry's journal and bun's own cannot drift apart: one call gives both the same destination. */
 func TestManagerRegistry_SetLoggerTakesBunsDiagnosticChannelWithIt(t *testing.T) {
     applicationLogger := &capturingDiagnosticLogger{}
 
@@ -2369,7 +2326,6 @@ func TestManagerRegistry_SetLoggerTakesBunsDiagnosticChannelWithIt(t *testing.T)
     }
 }
 
-/* a logger held by value with a func inside has no identity, so the Close could not recognise the destination it had routed and left bun's channel on the closed registry's logger; the registry keeps the destination SetLogger routed and hands exactly that one back */
 func TestManagerRegistry_CloseHandsBackTheDestinationItRoutedForALoggerWithoutIdentity(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
@@ -2399,7 +2355,6 @@ func TestManagerRegistry_CloseHandsBackTheDestinationItRoutedForALoggerWithoutId
     }
 }
 
-/* funcCarryingLogger is a logger held by value whose dynamic type carries a func — not comparable, and not equal to itself by content either, since a func is deeply equal to nothing but nil */
 type funcCarryingLogger struct {
     sink func(string)
 }
@@ -2454,7 +2409,6 @@ func TestManagerRegistry_SetLoggerOnAClosedRegistryIsRefusedAndLeavesBunsChannel
     }
 }
 
-/* a nil logger, and a typed nil holding no value, are refused: they are the absence this package reads as a wiring mistake everywhere else, and installing one would silence the registry's only channel. */
 func TestManagerRegistry_SetLoggerRefusesTheAbsentLogger(t *testing.T) {
     provider := &loggerRecordingProvider{}
 
@@ -2486,7 +2440,6 @@ func TestManagerRegistry_SetLoggerRefusesTheAbsentLogger(t *testing.T) {
     }
 }
 
-/* the registry hands bun's channel back from its own Close, while the logger it routed to is still alive — the container closes the registry before the logging service, because the registry resolves it. */
 func TestManagerRegistry_CloseHandsBunsDiagnosticChannelBack(t *testing.T) {
     applicationLogger := &capturingDiagnosticLogger{}
 
@@ -2514,7 +2467,6 @@ func TestManagerRegistry_CloseHandsBunsDiagnosticChannelBack(t *testing.T) {
     }
 }
 
-/* two registries in one process, each routed to its own logger: the first to close hands back only what is its own, and the second keeps its channel through that teardown */
 func TestManagerRegistry_CloseLeavesAnotherRegistrysDiagnosticChannelAlone(t *testing.T) {
     firstLogger := &capturingDiagnosticLogger{}
     secondLogger := &capturingDiagnosticLogger{}
@@ -2554,7 +2506,6 @@ func TestManagerRegistry_CloseLeavesAnotherRegistrysDiagnosticChannelAlone(t *te
     }
 }
 
-/* the wait for opens still in flight ends with the caller's deadline instead of with the dial: a dial against a host that is black-holing packets ends when its own driver gives up, which outlives any teardown, and a teardown that waited it out would hold the process past whatever grace its supervisor allows. What is abandoned is only the wait — the open still ends its own database against the closed flag — so the answer names the outstanding session rather than having ended it. */
 func TestManagerRegistry_CloseWithContext_StopsWaitingForOpensStillInFlight(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeLogger{},
@@ -2594,7 +2545,7 @@ func TestManagerRegistry_CloseWithContext_StopsWaitingForOpensStillInFlight(t *t
     close(pendingOpen.done)
 }
 
-/* an open that FINISHED is never counted abandoned, whatever the deadline says: under a budget already spent both channels of the wait are ready and a select picks at random, so the finished open must not be reported as still in flight, an error the container would file as a failed close. A thousand closes over an open that ended before them report nothing */
+/* under a spent budget both channels are ready and a select picks at random, so the probe closes a thousand times */
 func TestManagerRegistry_CloseWithContext_AnOpenThatEndedIsNotCountedAbandonedUnderASpentDeadline(t *testing.T) {
     for round := 0; round < 1000; round = round + 1 {
         registry, registryErr := NewManagerRegistry(
@@ -2621,7 +2572,6 @@ func TestManagerRegistry_CloseWithContext_AnOpenThatEndedIsNotCountedAbandonedUn
     }
 }
 
-/* contextWatchingProvider parks its open until the context the registry hands it is cancelled, and records what ended it — the shape of a retry loop sleeping through its budget against a host that is down */
 type contextWatchingProvider struct {
     entered chan struct{}
     once    sync.Once
@@ -2643,7 +2593,6 @@ func (instance *contextWatchingProvider) OpenContext(ctx context.Context, params
     return nil, ctx.Err()
 }
 
-/* the registry ends an open still in flight when it closes: left to itself the open went on retrying under the registry's own context after the teardown — each attempt routing bun's diagnostics back onto the logger the teardown had handed back and the container then closed — and the close either waited it out or reported it abandoned. The open now ends with the refusal, so the close of a registry built on the plain constructor has nothing to abandon */
 func TestManagerRegistry_CloseEndsAnOpenStillInFlightInsteadOfAbandoningIt(t *testing.T) {
     provider := &contextWatchingProvider{entered: make(chan struct{})}
     registry, registryErr := NewManagerRegistry(
@@ -2679,7 +2628,6 @@ func TestManagerRegistry_CloseEndsAnOpenStillInFlightInsteadOfAbandoningIt(t *te
             t.Fatalf("expected the open ended by the registry's cancellation, got: %v", openErr)
         }
 
-        /* the waiter is told the REGISTRY ended its open — the provider's refusal alone blamed a cancellation the caller never issued */
         if false == errors.Is(openErr, ErrManagerRegistryClosed) {
             t.Fatalf("expected the waiter's refusal to carry the registry's closed class, got: %v", openErr)
         }
@@ -2692,7 +2640,6 @@ func TestManagerRegistry_CloseEndsAnOpenStillInFlightInsteadOfAbandoningIt(t *te
     }
 }
 
-/* ownRefusalAfterCloseProvider never reads its context: it waits to be released and then refuses on grounds of its own, the way a provider whose server turned the password down after the registry closed would. */
 type ownRefusalAfterCloseProvider struct {
     entered chan struct{}
     release chan struct{}
@@ -2740,7 +2687,6 @@ func TestManagerRegistry_AnOpenRefusedOnTheProvidersOwnGroundsAfterTheCloseKeeps
     closeContext, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
     defer cancel()
 
-    /* the provider ignores its cancellation, so the close reports the open it stopped waiting for; the refusal the waiter then gets is the provider's own */
     _ = registry.CloseWithContext(closeContext)
 
     close(provider.release)
@@ -2783,7 +2729,6 @@ func TestManagerRegistry_HasProviderDefinitionAnswersWithoutOpening(t *testing.T
     }
 }
 
-/* the nil guards of this package read a value through isNilInterface alone: it answers true for the nil interface itself, so no `nil ==` needs to stand beside it, and true for a typed nil, which `nil ==` cannot see */
 func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
     if false == isNilInterface(nil) {
         t.Fatalf("expected the nil interface to be read as nil")
@@ -2799,7 +2744,6 @@ func TestIsNilInterface_AnswersTheNilInterfaceAndTheTypedNil(t *testing.T) {
     }
 }
 
-/* an open still in flight when its registry closed routes bun's channel late, with the logger it received: the registry retired that logger at its close, so the late routing takes nothing from the destination the application routed after */
 func TestManagerRegistry_DelayedProviderCannotRouteAfterClose(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
@@ -2839,7 +2783,6 @@ func TestManagerRegistry_DelayedProviderCannotRouteAfterClose(t *testing.T) {
     }
 }
 
-/* the same for a replacement: an open still in flight when SetLogger replaced the logger routes late with the one it received, which the replacement retired, so the channel stays on the new logger */
 func TestManagerRegistry_DelayedProviderCannotRouteAfterSetLogger(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
@@ -2874,7 +2817,6 @@ func TestManagerRegistry_DelayedProviderCannotRouteAfterSetLogger(t *testing.T) 
     }
 }
 
-/* a logger held by value has no identity of its own, so a registry's close could not recognise the channel its provider routed through it: the registry's own logger carries the identity, and the close hands the channel back, for a logger given to the constructor as for one given to SetLogger */
 func TestManagerRegistry_CloseHandsBackTheChannelItsProviderRoutedForAValueLogger(t *testing.T) {
     for name, build := range map[string]func(t *testing.T, logger loggingcontract.Logger) *ManagerRegistry{
         "constructor": func(t *testing.T, logger loggingcontract.Logger) *ManagerRegistry {
@@ -2922,7 +2864,6 @@ func TestManagerRegistry_CloseHandsBackTheChannelItsProviderRoutedForAValueLogge
     }
 }
 
-/* two registries holding loggers of equal content are two owners: the close of one hands back only the channel its own provider routed */
 func TestManagerRegistry_CloseLeavesTheChannelAnotherRegistryOfAnEqualValueLoggerRouted(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
@@ -2956,7 +2897,6 @@ func TestManagerRegistry_CloseLeavesTheChannelAnotherRegistryOfAnEqualValueLogge
     }
 }
 
-/* a requested name past the bound is carried cut on a rune boundary with its full length beside it, so a caller-supplied name cannot carry a megabyte into the error; a short name stays whole */
 func TestManagerRegistry_AnUnknownNameIsRefusedWithTheSortedListAndACutName(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeLogger{},
@@ -2999,7 +2939,6 @@ func TestManagerRegistry_AnUnknownNameIsRefusedWithTheSortedListAndACutName(t *t
     }
 }
 
-/* journalingContextWatchingProvider ends like contextWatchingProvider, but journals its refusal and marks it logged first, as the providers' terminal branches do */
 type journalingContextWatchingProvider struct {
     contextWatchingProvider
 }
@@ -3014,7 +2953,6 @@ func (instance *journalingContextWatchingProvider) OpenContext(ctx context.Conte
     return nil, exception.MarkLogged(exception.NewError("database open cancelled", nil, openErr))
 }
 
-/* the registry's refusal over an open the provider already journaled stays marked logged, so the kernel or the console does not file it a second time; over an unmarked failure the refusal stays unmarked */
 func TestManagerRegistry_ARefusalOverAJournaledOpenFailureStaysMarkedLogged(t *testing.T) {
     for _, journaled := range []bool{true, false} {
         var provider Provider
@@ -3059,7 +2997,6 @@ func TestManagerRegistry_ARefusalOverAJournaledOpenFailureStaysMarkedLogged(t *t
     }
 }
 
-/* two migration commands in one process share the dedicated connection: the first to release leaves it open under the second, and the last release closes it */
 func TestManagerRegistry_CloseMigrationDatabaseClosesOnlyWhenTheLastHolderReleases(t *testing.T) {
     migrationDatabase, migrationDatabaseClosed := newCloseRaceDatabase()
 
@@ -3100,4 +3037,56 @@ func TestManagerRegistry_CloseMigrationDatabaseClosesOnlyWhenTheLastHolderReleas
     case <-time.After(2 * time.Second):
         t.Fatal("the last release did not close the connection")
     }
+}
+
+type cyclicRefusalAfterCloseProvider struct {
+    entered chan struct{}
+    release chan struct{}
+    once    sync.Once
+}
+
+func (instance *cyclicRefusalAfterCloseProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.once.Do(func() {
+        close(instance.entered)
+    })
+
+    <-instance.release
+
+    return nil, newCyclicChainError()
+}
+
+func TestManagerRegistry_AnOpenRefusedOnACyclicChainAfterTheCloseAnswersItsWaiter(t *testing.T) {
+    provider := &cyclicRefusalAfterCloseProvider{entered: make(chan struct{}), release: make(chan struct{})}
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "x", Provider: provider, IsDefault: true},
+    )
+    if nil != registryErr {
+        t.Fatalf("unexpected error: %v", registryErr)
+    }
+
+    opened := make(chan error, 1)
+    go func() {
+        _, openErr := registry.Database("x")
+        opened <- openErr
+    }()
+
+    select {
+    case <-provider.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the provider was never reached; there is no open in flight")
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+    defer cancel()
+
+    _ = registry.CloseWithContext(closeContext)
+
+    close(provider.release)
+
+    assertReturnsOnACyclicChain(t, func() {
+        if openErr := <-opened; nil == openErr {
+            t.Error("expected the provider's refusal")
+        }
+    })
 }

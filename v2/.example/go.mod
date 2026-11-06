@@ -9,7 +9,7 @@ require (
 	github.com/precision-soft/melody/integrations/bunorm/v2 v2.2.0
 	github.com/precision-soft/melody/integrations/cron/v2 v2.7.1
 	github.com/precision-soft/melody/integrations/rueidis/v2 v2.2.1
-	github.com/precision-soft/melody/v2 v2.13.1
+	github.com/precision-soft/melody/v2 v2.13.3
 	github.com/redis/rueidis v1.0.71
 	github.com/uptrace/bun v1.2.17
 	github.com/uptrace/bun/dialect/mysqldialect v1.2.17

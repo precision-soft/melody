@@ -1,7 +1,6 @@
 package bunorm
 
 import (
-    "errors"
     "sync"
     "sync/atomic"
     "time"
@@ -11,12 +10,11 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* NewReadWriteSplitter routes writes to the primary and reads round-robin over the replicas, with the defaults of NewReadWriteSplitterWithOptions. */
+/* NewReadWriteSplitter routes writes to the primary and reads round-robin over the replicas. */
 func NewReadWriteSplitter(registry *ManagerRegistry, primaryName string, replicaNames ...string) *ReadWriteSplitter {
     return NewReadWriteSplitterWithOptions(registry, primaryName, replicaNames)
 }
 
-/* NewReadWriteSplitterWithOptions is NewReadWriteSplitter configured by options: WithReplicaRetryInterval sets how long an unreachable replica is remembered before it is dialled again. */
 func NewReadWriteSplitterWithOptions(registry *ManagerRegistry, primaryName string, replicaNames []string, options ...ReadWriteSplitterOption) *ReadWriteSplitter {
     if nil == registry {
         exception.Panic(exception.NewError("read/write splitter registry is nil", nil, nil))
@@ -26,7 +24,7 @@ func NewReadWriteSplitterWithOptions(registry *ManagerRegistry, primaryName stri
         exception.Panic(exception.NewError("read/write splitter primary name is empty", nil, nil))
     }
 
-    /* an empty replica name would fail every resolution it is picked for, and the fallback below would route that share of the reads to the primary forever with no signal; it is a wiring error and is refused where it is written */
+    /* an empty replica name is a wiring error: the fallback would route its reads to the primary forever, with no signal */
     for index, replicaName := range replicaNames {
         if "" == replicaName {
             exception.Panic(exception.NewError("read/write splitter replica name is empty", map[string]any{"index": index}, nil))
@@ -51,13 +49,11 @@ func NewReadWriteSplitterWithOptions(registry *ManagerRegistry, primaryName stri
     return splitter
 }
 
-/* ReadWriteSplitterOption configures a splitter built through NewReadWriteSplitterWithOptions. */
 type ReadWriteSplitterOption func(splitter *ReadWriteSplitter)
 
-/* defaultReplicaRetryInterval is how long an unreachable replica is remembered by default: long enough that a dead replica does not cost every read a connect timeout, short enough that a recovered one takes reads back promptly. */
 const defaultReplicaRetryInterval = 5 * time.Second
 
-/* WithReplicaRetryInterval sets how long a replica whose open failed as unreachable is remembered: inside the interval its reads go to the primary without dialling it, and the first read after the interval dials it again. A zero interval keeps the default of five seconds, and a negative one is a wiring error, refused where it is written. */
+/* WithReplicaRetryInterval: a zero interval keeps the default of five seconds; a negative one is a wiring error. */
 func WithReplicaRetryInterval(interval time.Duration) ReadWriteSplitterOption {
     if 0 > interval {
         exception.Panic(exception.NewError("read/write splitter replica retry interval is negative", map[string]any{"interval": interval.String()}, nil))
@@ -79,7 +75,6 @@ type ReadWriteSplitter struct {
     replicaRetryInterval time.Duration
     now                  func() time.Time
 
-    /* the replicas whose last open failed as unreachable, read and written under unreachableMutex; an entry is the instant of the failure and the failure itself */
     unreachableMutex    sync.Mutex
     unreachableReplicas map[string]unreachableReplica
 }
@@ -106,7 +101,7 @@ func (instance *ReadWriteSplitter) Writer() (*bun.DB, error) {
     return instance.registry.Database(instance.WriterName())
 }
 
-/* Reader answers the round-robin replica, and falls back to the primary only when the replica is unreachable, an open failure filed under ErrDatabaseUnreachable. Every other failure, a wiring error or a teardown in progress, is refused, so a dead replica configuration is never served silently from the primary. An unreachable replica is remembered for the retry interval, so its reads go to the primary without dialling it again, and the change is journaled once each way: a warning when reads move to the primary, an info when the replica takes them back. When the primary fails too, the answer carries its failure as the cause and names the replica failure beside it. */
+/* Reader falls back to the primary only for an unreachable replica; every other failure is refused. */
 func (instance *ReadWriteSplitter) Reader() (*bun.DB, error) {
     readerName := instance.ReaderName()
 
@@ -125,7 +120,7 @@ func (instance *ReadWriteSplitter) Reader() (*bun.DB, error) {
         return database, nil
     }
 
-    if false == errors.Is(databaseErr, ErrDatabaseUnreachable) {
+    if false == exception.ChainIs(databaseErr, ErrDatabaseUnreachable) {
         return nil, databaseErr
     }
 
@@ -155,7 +150,6 @@ func (instance *ReadWriteSplitter) primaryInPlaceOf(readerName string, replicaEr
     return primary, nil
 }
 
-/* rememberedUnreachable answers the failure of a replica still inside its retry interval, and nil for a replica to dial */
 func (instance *ReadWriteSplitter) rememberedUnreachable(replicaName string) error {
     instance.unreachableMutex.Lock()
     defer instance.unreachableMutex.Unlock()
@@ -168,7 +162,6 @@ func (instance *ReadWriteSplitter) rememberedUnreachable(replicaName string) err
     return remembered.err
 }
 
-/* rememberUnreachable records the replica's failure and journals the move of its reads to the primary when it was not already remembered */
 func (instance *ReadWriteSplitter) rememberUnreachable(replicaName string, replicaErr error) {
     instance.unreachableMutex.Lock()
     _, wasRemembered := instance.unreachableReplicas[replicaName]
@@ -190,7 +183,6 @@ func (instance *ReadWriteSplitter) rememberUnreachable(replicaName string, repli
     )
 }
 
-/* forgetUnreachable drops a replica that answered again and journals that it takes its reads back */
 func (instance *ReadWriteSplitter) forgetUnreachable(replicaName string) {
     instance.unreachableMutex.Lock()
     _, wasRemembered := instance.unreachableReplicas[replicaName]

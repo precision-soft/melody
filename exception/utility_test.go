@@ -6,6 +6,7 @@ import (
     "math"
     "strings"
     "testing"
+    "time"
 
     exceptioncontract "github.com/precision-soft/melody/exception/contract"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
@@ -330,7 +331,6 @@ func TestLogContext_TypedNilErrorWithExtra_ReturnsMergedExtras(t *testing.T) {
     }
 }
 
-/* nilProviderWrapper unwraps to a typed-nil provider, the shape errors.As matches and then hands over as a nil receiver */
 type nilProviderWrapper struct {
 }
 
@@ -407,7 +407,6 @@ func TestFromError_TypedNil_ReturnsNil(t *testing.T) {
         t.Fatalf("expected nil for a typed-nil *Error")
     }
 
-    /* the http exception variant fails the assertion to *Error, so the walk reaches err.Error() through the nil receiver */
     typedNilHttpException := (*HttpException)(nil)
 
     if nil != FromError(typedNilHttpException) {
@@ -527,7 +526,6 @@ func TestBuildCauseContextChain_ProviderWithEmptyContext_KeepsItsPositionAsNil(t
     }
 }
 
-/* valueError is an error whose concrete type is a struct value, not a pointer: it cannot be nil, and the typed-nil detection has to answer that from the kind alone instead of asking a value that has no IsNil */
 type valueError struct {
     message string
 }
@@ -813,7 +811,6 @@ func TestIsAlreadyLogged_TypedNilCarriesNoMarkAndDoesNotPanic(t *testing.T) {
         t.Fatalf("expected a nil error to carry no mark")
     }
 
-    /* an *Error is matched by errors.As at the top node, so the post-search guard answers it and the entry guard is never the only thing standing. An *ExitError implements no AlreadyLogged, so the search has to walk it through Unwrap, which reads a field off the nil receiver. */
     var typedNilExit *ExitError
 
     var exitAsError error = typedNilExit
@@ -823,7 +820,6 @@ func TestIsAlreadyLogged_TypedNilCarriesNoMarkAndDoesNotPanic(t *testing.T) {
     }
 }
 
-/* LogContext runs inside recovery defers: a value whose Error() panics — often on the very nil field that made it panic-worthy — must cost its text, never the record or the connection. */
 func TestLogContext_ContainsAPanickingErrorMessage(t *testing.T) {
     logContext := LogContext(&panickingTextError{})
 
@@ -837,7 +833,6 @@ func TestLogContext_ContainsAPanickingErrorMessage(t *testing.T) {
     }
 }
 
-/* the cause chain renders every link's text under the same containment, so a panicking cause buried in the chain costs its text, never the record the recovery is writing. */
 func TestBuildCauseChain_ContainsAPanickingLink(t *testing.T) {
     chain := BuildCauseChain(&panickingTextError{}, 8)
 
@@ -906,7 +901,6 @@ func TestLogged_AnHttpExceptionKeepsItsStatusThroughTheCarrier(t *testing.T) {
     }
 }
 
-/* the wrapped shape is what the early return is for: on a bare melody error FromError is the identity, so only a foreign wrapper around a marked error can tell a return from a rewrap — and that is the shape a second writer meets, every writer between it and the failure having added its own context */
 func TestLogged_AnAlreadyLoggedErrorIsNotWrappedAgain(t *testing.T) {
     original := MarkLogged(NewError("melody failure", nil, nil))
 
@@ -927,7 +921,6 @@ func TestLogged_ANilErrorStaysNil(t *testing.T) {
     }
 }
 
-/* an error-shaped panic value belongs in the cause slot: kept only in a context slot it collapses to its bare message at the render boundary, so the context and the cause chain of the very error that was raised reach no record. */
 func TestPanicCause_AnErrorShapedPanicTravelsAsTheCause(t *testing.T) {
     rootCause := errors.New("connection refused")
     panicValue := NewError("config parameter is not defined", nil, rootCause)
@@ -942,7 +935,6 @@ func TestPanicCause_AnErrorShapedPanicTravelsAsTheCause(t *testing.T) {
     }
 }
 
-/* a typed nil answers no cause: its Error() dereferences a nil receiver, so a cause slot holding it would detonate at the first render of the record the boundary exists to write. */
 func TestPanicCause_ATypedNilAnswersNoCause(t *testing.T) {
     var typedNil *Error
 
@@ -951,7 +943,6 @@ func TestPanicCause_ATypedNilAnswersNoCause(t *testing.T) {
     }
 }
 
-/* a panic value that is not an error has no cause to give; the recovery boundary still renders it into the context. */
 func TestPanicCause_ANonErrorPanicAnswersNoCause(t *testing.T) {
     if nil != PanicCause("scheduled command panicked on purpose") {
         t.Fatal("expected a non-error panic value to answer no cause")
@@ -962,7 +953,6 @@ func TestPanicCause_ANonErrorPanicAnswersNoCause(t *testing.T) {
     }
 }
 
-/* TestLogContext_AJoinedCauseReachesTheRecord pins the readers against the second unwrap shape the standard library defines: errors.Unwrap answers nothing for an errors.Join, so a reader anchored on it would render a failure that gathered what several replicas had to say as one flattened line, with the context of every branch, the host that refused and the destination that timed out, reaching no record. A join can arrive from any dependency and from any application. */
 func TestLogContext_AJoinedCauseReachesTheRecord(t *testing.T) {
     firstCause := NewError(
         "the primary replica refused the write",
@@ -1010,7 +1000,6 @@ func TestLogContext_AJoinedCauseReachesTheRecord(t *testing.T) {
     }
 }
 
-/* a join handed straight to the reader, with nothing wrapping it, is the shape an application produces when it gathers failures and returns them as they are */
 func TestLogContext_ABareJoinIsWalkedAsItsBranches(t *testing.T) {
     joined := errors.Join(
         NewError("the first destination refused", exceptioncontract.Context{"destination": "a"}, nil),
@@ -1034,7 +1023,6 @@ func TestLogContext_ABareJoinIsWalkedAsItsBranches(t *testing.T) {
     }
 }
 
-/* the depth budget counts LINKS, not levels: a join of many branches must not cost more than a deep chain of the same length */
 func TestBuildCauseChain_TheDepthBudgetBoundsAWideJoin(t *testing.T) {
     branches := make([]error, 0, 12)
     for index := 0; index < 12; index++ {
@@ -1048,7 +1036,6 @@ func TestBuildCauseChain_TheDepthBudgetBoundsAWideJoin(t *testing.T) {
     }
 }
 
-/* a single-wrap chain reads link by link, the same sequence the breadth-first walk gives it */
 func TestBuildCauseChain_ASingleWrapChainIsUnchanged(t *testing.T) {
     deepest := NewError("deepest", nil, nil)
     middle := NewError("middle", nil, deepest)
@@ -1071,7 +1058,6 @@ func (instance *contextPanicProviderError) Context() exceptioncontract.Context {
     panic("context rendering gave up")
 }
 
-/* a foreign Context() is read under the same containment renderErrorText gives a panicking Error(), at the top provider, in the cause-context walk and in the From* constructors that run on the same recovery paths, so the record survives with the panic value in the context's place instead of the process unwinding on a second panic. */
 func TestLogContext_AProviderWhoseContextPanicsIsContained(t *testing.T) {
     foreignErr := &contextPanicProviderError{}
 
@@ -1110,7 +1096,6 @@ func (panickingMessageError) Error() string {
     panic("Error() panics")
 }
 
-/* FromError runs inside the kernel's recovery defers, where an Error() that panics would raise a second panic through the defer reporting the first, so the message is rendered the way LogContext renders it */
 func TestFromError_AnErrorWhoseMessagePanicsIsStillWrapped(t *testing.T) {
     wrapped := FromError(panickingMessageError{})
 
@@ -1139,7 +1124,6 @@ func TestFromErrorWithLevelAndContext_AnErrorWhoseMessagePanicsIsStillWrapped(t 
     }
 }
 
-/* Logged is what the kernel's recovery defers return; the mark on the result is what separates it from FromError alone */
 func TestLogged_AnErrorWhoseMessagePanicsIsMarkedAndReturned(t *testing.T) {
     logged := Logged(panickingMessageError{})
 
@@ -1202,4 +1186,96 @@ func TestContextDoors_ReadATypedNilProviderAsNoContextAndAPanickingOneAsPanicked
             t.Fatalf("%s: expected a panicking provider read as panicked, got %s", name, rendered)
         }
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type cyclicContextChainError struct {
+    cyclicChainError
+}
+
+func (instance *cyclicContextChainError) Context() exceptioncontract.Context {
+    return exceptioncontract.Context{"link": "cyclic"}
+}
+
+func TestChainDoors_ReturnOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        chain := newCyclicChainError()
+
+        if true == IsAlreadyLogged(chain) {
+            t.Error("expected a chain nothing marked to read as not logged")
+        }
+
+        if nil == MarkLogged(chain) {
+            t.Error("expected the marked error")
+        }
+
+        if nil == LogContext(chain) {
+            t.Error("expected the context of the chain")
+        }
+
+        if nil == FromError(chain) {
+            t.Error("expected the error of the chain")
+        }
+
+    })
+}
+
+func TestCauseChains_RenderEachLinkOfACyclicChainOnce(t *testing.T) {
+    if chain := BuildCauseChain(newCyclicChainError(), 8); 2 != len(chain) {
+        t.Fatalf("expected the two links once each, got %#v", chain)
+    }
+
+    first := &cyclicContextChainError{}
+    first.next = &cyclicContextChainError{cyclicChainError: cyclicChainError{next: first}}
+
+    if chain := BuildCauseContextChain(first, 8); 2 != len(chain) {
+        t.Fatalf("expected the two contexts once each, got %#v", chain)
+    }
+}
+
+func TestChainAs_FindsTheLinkOfAJoinOnACyclicChain(t *testing.T) {
+    target := NewError("target", nil, nil)
+    chain := newCyclicChainError()
+    chain.next.(*cyclicChainError).next = errors.Join(chain, target)
+
+    var found *Error
+    assertReturnsOnACyclicChain(t, func() {
+        if false == ChainAs(chain, &found) || target != found {
+            t.Errorf("expected the link behind the cycle, got %v", found)
+        }
+    })
 }

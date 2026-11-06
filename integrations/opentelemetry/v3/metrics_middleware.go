@@ -1,7 +1,6 @@
 package opentelemetry
 
 import (
-    "errors"
     nethttp "net/http"
     "reflect"
     "strconv"
@@ -16,7 +15,6 @@ import (
 )
 
 func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
-    /* a nil meter is refused at construction rather than panicking on the first meter.Int64Counter call, as NewHandlerDecorator requires a non-nil Meter */
     if nil == meter {
         return nil, exception.NewError("metrics middleware meter is nil", nil, nil)
     }
@@ -42,7 +40,6 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             startedAt := time.Now()
 
-            /* the wrapped writer captures the status a handler commits directly, the nil-response streaming or proxy shape MetricsRouteHandler and the websocket bridge use, so the per-route instruments record what the handler wrote rather than a default 200 */
             recorder := &statusRecordingResponseWriter{ResponseWriter: writer, statusCode: nethttp.StatusOK}
 
             var response httpcontract.Response
@@ -75,7 +72,7 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
     }, nil
 }
 
-/* completedStatusCode answers the status of a handler that returned: a status the handler already committed to the writer is the one the connection carries, whatever it returned afterwards; otherwise the handler's error decides first and the response it returned next, in the order the kernel answers them, and a handler that returned neither is read off the writer */
+/* completedStatusCode: a committed status wins; then the handler's error, then its response, in the kernel's order */
 func completedStatusCode(handlerErr error, response httpcontract.Response, recorder *statusRecordingResponseWriter) int {
     if true == recorder.wroteHeader {
         return recorder.observedStatusCode()
@@ -92,7 +89,6 @@ func completedStatusCode(handlerErr error, response httpcontract.Response, recor
     return recorder.observedStatusCode()
 }
 
-/* statusCodeForError maps a handler error to the status the client receives, as the kernel does: an HttpException is sent at its own status, a 502 as a 502, a body past its limit as 413, and anything else is a server error. */
 func statusCodeForError(handlerErr error) int {
     httpException := exception.AsHttpException(handlerErr)
     if nil != httpException && 100 <= httpException.StatusCode() && 599 >= httpException.StatusCode() {
@@ -100,14 +96,14 @@ func statusCodeForError(handlerErr error) int {
     }
 
     var maxBytesError *nethttp.MaxBytesError
-    if true == errors.As(handlerErr, &maxBytesError) {
+    if true == exception.ChainAs(handlerErr, &maxBytesError) {
         return nethttp.StatusRequestEntityTooLarge
     }
 
     return nethttp.StatusInternalServerError
 }
 
-/* isNilResponse answers true for a nil interface and for a typed-nil concrete response, since `nil != response` alone lets `var resp *SomeResponse; return resp, nil` through and the StatusCode() dereference would panic, charging the handler's defect to the observability layer. */
+/* isNilResponse also answers true for a typed nil, on which the StatusCode() dereference would panic */
 func isNilResponse(response httpcontract.Response) bool {
     if nil == response {
         return true

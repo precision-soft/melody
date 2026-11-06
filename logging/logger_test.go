@@ -8,6 +8,7 @@ import (
     "log"
     "strings"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/exception"
     loggingcontract "github.com/precision-soft/melody/logging/contract"
@@ -385,7 +386,6 @@ func TestLogError_ForeignErrorCarriesTheCauseContextChain(t *testing.T) {
     }
 }
 
-/* the capturing double stands in for the logger this file mirrors, so it lives here; the recover and request-logger tests reach it from the package. */
 type captureLogger struct {
     lastLevel   loggingcontract.Level
     lastMessage string
@@ -536,7 +536,6 @@ func TestLogError_KeepsCallerSetCauseKeysOnAForeignError(t *testing.T) {
     }
 }
 
-/* LevelEnabled is the single door onto the capability, and its answer for a logger that does not carry it is TRUE: the fallback is the reporting floor, so a site that spelled it the other way would stop recording against most loggers there are. Every caller asks through here rather than writing its own assertion, which is what keeps the rule in one place. */
 func TestLevelEnabled_AnswersTrueForALoggerThatCannotBeAsked(t *testing.T) {
     if false == LevelEnabled(&captureLogger{}, loggingcontract.LevelDebug) {
         t.Fatalf("expected a logger without the capability to be reported enabled")
@@ -555,7 +554,6 @@ func TestLevelEnabled_AnswersTrueForALoggerThatCannotBeAsked(t *testing.T) {
     }
 }
 
-/* an errors.Join answers nothing at all to errors.Unwrap, so a record assembled from the single wrap link would carry no cause, no chain, and the context of only whichever branch errors.As reached first — exactly where the failure gathered what several replicas, destinations or rules had to say. */
 func TestLogError_AJoinedErrorCarriesEveryBranchIntoTheRecord(t *testing.T) {
     buffer := &bytes.Buffer{}
     logger := NewJsonLogger(buffer, loggingcontract.LevelDebug)
@@ -574,7 +572,6 @@ func TestLogError_AJoinedErrorCarriesEveryBranchIntoTheRecord(t *testing.T) {
     }
 }
 
-/* LogError is reached from inside the recovery handlers, where the error is whatever a panic carried: an Error() that dereferences the very nil field that made it panic-worthy would take down the one record written to explain the failure. */
 func TestLogError_AnErrorWhoseMessagePanicsStillProducesARecord(t *testing.T) {
     buffer := &bytes.Buffer{}
     logger := NewJsonLogger(buffer, loggingcontract.LevelDebug)
@@ -590,7 +587,6 @@ func TestLogError_AnErrorWhoseMessagePanicsStillProducesARecord(t *testing.T) {
     }
 }
 
-/* panickingMessageError is the shape the recovery handlers meet: an error whose own Error() raises */
 type panickingMessageError struct {
 }
 
@@ -636,4 +632,45 @@ func TestLogError_NilLogger_RendersACyclicWrappedContextWithTheCycleMarker(t *te
     if false == strings.Contains(buffer.String(), "k:map[self:<cycle>]") || false == strings.Contains(buffer.String(), "context=map[") {
         t.Fatalf("expected the wrapped error's context rendered with the cycle marker, got %q", buffer.String())
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestLogError_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        LogError(NewNopLogger(), newCyclicChainError())
+    })
 }

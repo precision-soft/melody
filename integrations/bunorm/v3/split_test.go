@@ -13,14 +13,12 @@ import (
     loggingcontract "github.com/precision-soft/melody/v3/logging/contract"
 )
 
-/* unreachableSplitProvider fails the way a provider fails on an outage it could not get past: filed under ErrDatabaseUnreachable, the one class the splitter absorbs */
 type unreachableSplitProvider struct{}
 
 func (instance *unreachableSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("replica is down")))
 }
 
-/* refusingSplitProvider fails the way a provider refuses by name — a parameter left empty, a password the server refused — or the way a provider that files nothing under the class fails: a plain error, terminal by nature */
 type refusingSplitProvider struct{}
 
 func (instance *refusingSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
@@ -155,7 +153,6 @@ func (instance *noDatabaseSplitProvider) Open(params ConnectionParameters, logge
     return nil, nil
 }
 
-/* a provider answering neither a database nor an error is the wiring mistake the registry refuses by name; folded into the fallback it routed every read of that replica to the primary forever, with no signal that the replica was dead */
 func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeLogger{},
@@ -179,7 +176,6 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(
     }
 }
 
-/* a replica whose provider REFUSED — a parameter left empty, a password the server refused, a database that does not exist, or a provider that files nothing under the unreachable class — is refused with the provider's own answer, not served from the primary: the denylist of registry sentinels this replaced let every refusal it did not name fall to the primary, silently and for the life of the process */
 func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.T) {
     registry, registryErr := NewManagerRegistry(
         &fakeLogger{},
@@ -207,14 +203,12 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.
     }
 }
 
-/* journaledUnreachableSplitProvider fails as unreachableSplitProvider does after journaling the failure and marking it logged, as the providers' terminal branches do */
 type journaledUnreachableSplitProvider struct{}
 
 func (instance *journaledUnreachableSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     return nil, exception.MarkLogged(exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("primary is down"))))
 }
 
-/* the double failure over a primary the provider already journaled stays marked logged, so it is not filed a second time; over an unmarked primary failure it stays unmarked */
 func TestReadWriteSplitter_ADoubleFailureOverAJournaledPrimaryStaysMarkedLogged(t *testing.T) {
     for _, journaled := range []bool{true, false} {
         var primaryProvider Provider = &unreachableSplitProvider{}
@@ -242,7 +236,6 @@ func TestReadWriteSplitter_ADoubleFailureOverAJournaledPrimaryStaysMarkedLogged(
     }
 }
 
-/* switchableSplitProvider fails as unreachable while down is set and opens otherwise, counting every open */
 type switchableSplitProvider struct {
     down      bool
     openCount int
@@ -259,7 +252,6 @@ func (instance *switchableSplitProvider) Open(params ConnectionParameters, logge
     return database, nil
 }
 
-/* inside the retry interval an unreachable replica's reads go to the primary without dialling it, so a dead replica does not cost every read a connect timeout; past the interval it is dialled again */
 func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *testing.T) {
     replica := &switchableSplitProvider{down: true}
     registry, registryErr := NewManagerRegistry(
@@ -295,7 +287,6 @@ func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *tes
     }
 }
 
-/* the move of the reads to the primary is journaled once, however many failures follow, and the replica taking them back once more */
 func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
     logger := &capturingDiagnosticLogger{}
     replica := &switchableSplitProvider{down: true}
@@ -336,7 +327,6 @@ func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
     }
 }
 
-/* the option refuses a negative interval where it is written, and a zero one keeps the default */
 func TestWithReplicaRetryInterval_RefusesANegativeIntervalAndKeepsTheDefaultForZero(t *testing.T) {
     registry, registryErr := NewManagerRegistry(&fakeLogger{}, ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true})
     if nil != registryErr {
@@ -354,4 +344,64 @@ func TestWithReplicaRetryInterval_RefusesANegativeIntervalAndKeepsTheDefaultForZ
     }()
 
     WithReplicaRetryInterval(-time.Second)
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type cyclicSplitProvider struct{}
+
+func (instance *cyclicSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return nil, newCyclicChainError()
+}
+
+func TestReadWriteSplitter_ReaderReturnsOnACyclicChainFromAProvider(t *testing.T) {
+    registry, registryErr := NewManagerRegistry(
+        &fakeLogger{},
+        ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, IsDefault: true},
+        ProviderDefinition{Name: "replica", Provider: &cyclicSplitProvider{}},
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    splitter := NewReadWriteSplitter(registry, "primary", "replica")
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, readerErr := splitter.Reader(); nil == readerErr {
+            t.Error("expected the provider's refusal")
+        }
+    })
 }

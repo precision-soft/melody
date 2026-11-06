@@ -13,7 +13,7 @@
 # the head of the block instead of into the one already there, and a reader looking for the fixes of a
 # cycle found the half that was written last.
 #
-# Six dimensions are asserted:
+# Seven dimensions are asserted:
 #
 #   duplicate    — the same `### <section>` opened twice inside one `## ` block. A reader who finds the
 #                  first one has no way to know a second exists, so half the block is written for nobody.
@@ -38,6 +38,9 @@
 #                  block. The marked entries are counted and the count is printed on every run, so the
 #                  compression of the changelogs can carry the same number through every merge; the count
 #                  is information, not a verdict — none left once v4 has absorbed them is the expected end.
+#   build-version— the `buildVersion` of a module carrying `version/version.go` against the newest released
+#                  block of its changelog. A release that forgets it answers the previous version from
+#                  `BuildVersion()` on a tag no later commit can change. Never excused, as cross-major is not.
 #
 # What this band deliberately does NOT do, written here rather than left to be read as coverage: it does
 # not decide which section an entry BELONGS under. That judgement needs the code behind the entry — whether
@@ -89,7 +92,8 @@
 # dimension must fail; move one shared entry on one major alone and the cross-major dimension must fail;
 # add a baseline row for a block that is clean and the run must call it stale; write `C→v4` into an entry
 # of a released v3 block, or of a v2 changelog, and the cut-marker dimension must fail; write it into an
-# entry of v3's `[Unreleased]` and the run must stay green with the count one higher.
+# entry of v3's `[Unreleased]` and the run must stay green with the count one higher; change one
+# `buildVersion` and the build-version dimension must fail.
 #
 # Needs no container: it reads the tree.
 
@@ -318,6 +322,8 @@ BLOCK_COUNT_INTEGER=0
 SECTION_COUNT_INTEGER=0
 ENTRY_COUNT_INTEGER=0
 CUT_MARKER_COUNT_INTEGER=0
+BUILD_VERSION_CHECKED_COUNT_INTEGER=0
+BUILD_VERSION_FINDING_COUNT_INTEGER=0
 
 for CHANGELOG_PATH_STRING in "${CHANGELOG_PATH_STRING_LIST[@]}"; do
     MAJOR_STRING="$(major_of_changelog "${CHANGELOG_PATH_STRING}")"
@@ -430,7 +436,32 @@ for CHANGELOG_PATH_STRING in "${CHANGELOG_PATH_STRING_LIST[@]}"; do
     if [[ 0 -eq ${FILE_ENTRY_COUNT_INTEGER} ]]; then
         fail "the reader took no entry out of ${CHANGELOG_PATH_STRING}, and a changelog with nothing in it is the reader being broken rather than the file being empty — NO VERDICT was produced"
     fi
+
+    VERSION_SOURCE_PATH_STRING="$(dirname "${CHANGELOG_PATH_STRING}")/version/version.go"
+
+    if [[ -f "${VERSION_SOURCE_PATH_STRING}" && "" != "${NEWEST_RELEASED_BLOCK_TITLE_STRING}" ]]; then
+        BUILD_VERSION_STRING="$(sed -n 's/^var buildVersion = "\(.*\)"$/\1/p' "${VERSION_SOURCE_PATH_STRING}")"
+
+        if [[ "" = "${BUILD_VERSION_STRING}" ]]; then
+            fail "the reader found no buildVersion in ${VERSION_SOURCE_PATH_STRING} — NO VERDICT was produced"
+        fi
+
+        if [[ ! "${NEWEST_RELEASED_BLOCK_TITLE_STRING}" =~ ^\[(v[^]]+)\] ]]; then
+            fail "the reader found no version in the block ${NEWEST_RELEASED_BLOCK_TITLE_STRING} of ${CHANGELOG_PATH_STRING} — NO VERDICT was produced"
+        fi
+
+        BUILD_VERSION_CHECKED_COUNT_INTEGER=$((BUILD_VERSION_CHECKED_COUNT_INTEGER + 1))
+
+        if [[ "${BASH_REMATCH[1]}" != "${BUILD_VERSION_STRING}" ]]; then
+            println "  build-version  ${VERSION_SOURCE_PATH_STRING} says ${BUILD_VERSION_STRING} and the newest release of ${CHANGELOG_PATH_STRING} is ${BASH_REMATCH[1]}"
+            BUILD_VERSION_FINDING_COUNT_INTEGER=$((BUILD_VERSION_FINDING_COUNT_INTEGER + 1))
+        fi
+    fi
 done
+
+if [[ 0 -eq ${BUILD_VERSION_CHECKED_COUNT_INTEGER} ]]; then
+    fail "the reader compared no buildVersion with a changelog, which is the pairing being broken rather than the tree being clean — NO VERDICT was produced"
+fi
 
 # ------------------------------------------------------------------------------------------------------
 # cross-major: the same sentence, filed under two different sections
@@ -657,8 +688,12 @@ if [[ 0 -lt ${CROSS_MAJOR_COUNT_INTEGER} ]]; then
     fail "${CROSS_MAJOR_COUNT_INTEGER} entr(ies) common to v1 and v2 are filed under different sections, which no baseline row may excuse"
 fi
 
+if [[ 0 -lt ${BUILD_VERSION_FINDING_COUNT_INTEGER} ]]; then
+    fail "${BUILD_VERSION_FINDING_COUNT_INTEGER} buildVersion value(s) differ from the newest release of their changelog, which no baseline row may excuse"
+fi
+
 if [[ 0 -lt ${UNRECORDED_COUNT_INTEGER} || 0 -lt ${STALE_COUNT_INTEGER} ]]; then
     fail "${UNRECORDED_COUNT_INTEGER} unrecorded finding(s) and ${STALE_COUNT_INTEGER} stale baseline entr(ies)"
 fi
 
-success "every changelog block opens each of its sections once, in the declared order, and the two published majors file every shared entry alike"
+success "every changelog block opens each of its sections once, in the declared order, the two published majors file every shared entry alike, and every buildVersion is its newest release"

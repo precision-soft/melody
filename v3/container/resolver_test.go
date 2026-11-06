@@ -5,6 +5,7 @@ import (
     "reflect"
     "strings"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/v3/container/contract"
     alpha "github.com/precision-soft/melody/v3/container/internal/collisionalpha/contract"
@@ -118,7 +119,6 @@ func TestFromResolver_MissingService_ReturnsError(t *testing.T) {
     }
 }
 
-/* the double's refusal is a foreign error, the shape a provider handing back its driver's error raw takes: it is kept as the cause under the title of the resolution, and the title does not call the service unregistered — the twin door by type dresses it the same way */
 func TestFromResolver_AForeignProviderErrorKeepsItsCauseUnderTheResolutionTitle(t *testing.T) {
     cause := errors.New("dial tcp: connection refused")
 
@@ -280,7 +280,6 @@ func TestFromResolverByType_TypeMismatch(t *testing.T) {
 func TestContainer_MustFromResolver_PanicsWhenMissing(t *testing.T) {
     serviceContainer := NewContainer()
 
-    /* an unqualified recover accepts any panic at all, including one thrown by an unrelated guard in the same call; the message is what names the refusal under test */
     testhelper.AssertPanicsWithError(
         t,
         func() {
@@ -300,7 +299,6 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
     }, WithTypeRegistration(true))
 
     MustRegister(serviceContainer, "bus.alpha", func(resolver containercontract.Resolver) (*alpha.Bus, error) {
-        /* the alpha provider resolves the beta bus by type: both nodes key on "contract.Bus" through String(), so a shared key would flag a false cycle here */
         betaBus, betaErr := FromResolverByType[*beta.Bus](resolver)
         if nil != betaErr {
             return nil, betaErr
@@ -530,7 +528,6 @@ func TestLazy_NilResolverSurfacesAsAnErrorAtFirstUse(t *testing.T) {
     }
 }
 
-/* the type-keyed door dresses its failure the way the name-keyed twin does: a melody error travels out whole with the type written into its context in place, and a foreign error is wrapped naming the type, so the operator reading either record learns which resolution failed. */
 func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T) {
     melodyErr := exception.NewError("service creation failed", nil, nil)
 
@@ -562,7 +559,6 @@ func TestFromResolverByType_EnrichesTheFailureLikeTheNameKeyedTwin(t *testing.T)
     }
 }
 
-/* a failure that already names a service — the nested resolution that failed — keeps that name through the outer resolution: the outer name would point the reader at a service that is registered */
 func TestFromResolver_KeepsTheServiceNameANestedFailureCarries(t *testing.T) {
     nestedErr := exception.NewError(
         "service is not registered",
@@ -582,7 +578,6 @@ func TestFromResolver_KeepsTheServiceNameANestedFailureCarries(t *testing.T) {
     }
 }
 
-/* the type-keyed twin keeps a nested failure's type as the name-keyed twin keeps a nested name: written only where none is named yet. */
 func TestFromResolverByType_KeepsTheServiceTypeANestedFailureCarries(t *testing.T) {
     nestedErr := exception.NewError(
         "service type is not registered",
@@ -600,7 +595,6 @@ func TestFromResolverByType_KeepsTheServiceTypeANestedFailureCarries(t *testing.
     }
 }
 
-/* a type the door asks for directly and the container does not register is refused naming it under `type`; the door still writes its own key, `serviceType`, the same type, since the failure is its own and not a nested one. */
 func TestFromResolverByType_NamesItsOwnUnregisteredTypeUnderItsKey(t *testing.T) {
     serviceContainer := NewContainer()
 
@@ -617,7 +611,6 @@ func TestFromResolverByType_NamesItsOwnUnregisteredTypeUnderItsKey(t *testing.T)
     }
 }
 
-/* a nested failure that names its type under the other door's key, `type`, is kept as named: the outer type is not written beside it. */
 func TestFromResolverByType_KeepsTheTypeANestedFailureNamesUnderTheOtherKey(t *testing.T) {
     nestedErr := exception.NewError(
         "service type is not registered",
@@ -635,7 +628,6 @@ func TestFromResolverByType_KeepsTheTypeANestedFailureNamesUnderTheOtherKey(t *t
     }
 }
 
-/* a value type requested where its pointer is registered is resolved under the canonical pointer type and refused by the assertion on the value type: the refusal names the type that was asked for beside the canonical one it resolved, so the two read apart. */
 func TestFromResolverByType_MismatchNamesTheRequestedTypeBesideTheCanonical(t *testing.T) {
     serviceContainer := NewContainer()
     serviceContainer.MustRegister(
@@ -655,4 +647,59 @@ func TestFromResolverByType_MismatchNamesTheRequestedTypeBesideTheCanonical(t *t
     if "container.resolverTestService" != context["expectedType"] || "*container.resolverTestService" != context["canonicalType"] || "*container.resolverTestService" != context["actualType"] {
         t.Fatalf("expected the requested, canonical and actual types to be told apart, got %v", context)
     }
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+func TestFromResolver_ReturnsOnACyclicChainFromAProvider(t *testing.T) {
+    serviceContainer := NewContainer()
+    serviceContainer.MustRegister(
+        "service.cyclic",
+        func(resolver containercontract.Resolver) (*resolverTestService, error) {
+            return nil, newCyclicChainError()
+        },
+    )
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, nameErr := FromResolver[*resolverTestService](serviceContainer, "service.cyclic"); nil == nameErr {
+            t.Error("expected the provider's failure by name")
+        }
+
+        if _, typeErr := FromResolverByType[*resolverTestService](serviceContainer); nil == typeErr {
+            t.Error("expected the provider's failure by type")
+        }
+    })
 }

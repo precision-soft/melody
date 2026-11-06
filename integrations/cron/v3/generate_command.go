@@ -62,7 +62,7 @@ func NewGenerateCommand(configuration *Configuration) *GenerateCommand {
     return command
 }
 
-/* RegisterTemplate installs the template under its name, silently replacing an existing one: replacement by name is how an application overrides a builtin dialect, so a caller that must not replace anything checks the name first. */
+/* RegisterTemplate silently replaces an existing template of that name: this is how a builtin dialect is overridden. */
 func (instance *GenerateCommand) RegisterTemplate(template Template) {
     instance.templates[template.Name()] = template
 }
@@ -79,7 +79,7 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(output.StandardFlags(), instance.ownFlags())
 }
 
-/* ownFlags keeps the generator's flags apart from the standard set, since the framework rewrites -v/-vv into --verbosity for every command and a command without the standard flags fails with "flag provided but not defined". */
+/* ownFlags stays apart from the standard set: a command without those fails with "flag provided but not defined" */
 func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
     return []clicontract.Flag{
         &clicontract.StringFlag{
@@ -168,7 +168,6 @@ func (instance *GenerateCommand) resolveTemplate(name string) (Template, error) 
 }
 
 type runOptions struct {
-    /* logDirectoryOwnership collects, for the run, the log directories created for an entry whose user the generating host does not know */
     logDirectoryOwnership *logDirectoryOwnership
     template              Template
     outputPath            string
@@ -190,7 +189,6 @@ func (instance *runOptions) rendersK8s() bool {
     return TemplateNameK8s == instance.template.Name()
 }
 
-/* reportWarning is a non-fatal finding the run wants in its report on both branches: a warning line in text mode, an envelope warning under --format=json. */
 type reportWarning struct {
     code    string
     message string
@@ -208,7 +206,7 @@ func (instance *GenerateCommand) runWithConfiguration(
     emptyMessage := ""
     warnings := ([]reportWarning)(nil)
 
-    /* the report is a defer so that no failure path leaves the run without a document: the cli silences the command's own error line under --format=json, so an early return would hand a consumer an empty stream */
+    /* a defer so no failure path leaves the run without a document: the cli silences the error line under --format=json */
     defer func() {
         runErr = instance.reportWrites(commandContext, option, startedAt, writes, pruned, emptyMessage, warnings, runErr)
     }()
@@ -218,7 +216,6 @@ func (instance *GenerateCommand) runWithConfiguration(
         return resolveErr
     }
 
-    /* the k8s template ignores the heartbeat, so an explicitly requested one is reported as dropped rather than swallowed or refused */
     if true == options.heartbeatEnabled && true == options.rendersK8s() {
         warnings = append(warnings, reportWarning{
             code:    "cron.heartbeatIgnored",
@@ -266,14 +263,12 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.applicationName = applicationName
 
-    /* one template owned by this application renders and sweeps, so the ownership line every destination carries and the line the sweep asks for come from the same object */
+    /* one template renders and sweeps, so the line every destination carries and the line the sweep asks for are one */
     template = templateOwnedBy(template, applicationName)
     options.template = template
 
-    /* the k8s template ignores the heartbeat, so no heartbeat path is derived for it; an explicitly requested one still flows through so the run can warn that it is dropped */
     isK8s := options.rendersK8s()
 
-    /* a dialect that renders no user column never needs a user to place the heartbeat line */
     rendersUserColumn := templateRendersUserColumn(template)
 
     outputPath := resolveDefaultPath(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
@@ -310,7 +305,6 @@ func (instance *GenerateCommand) resolveRunOptions(
         }
         logsDir = absoluteLogsDir
 
-        /* the logs directory is created before anything is rendered, because under system cron a shell whose redirection cannot create its file aborts the command; creating it is idempotent, so a run that fails later leaves it behind */
         if mkdirErr := os.MkdirAll(logsDir, 0o755); nil != mkdirErr {
             return nil, exception.NewError(
                 "cron: could not create the logs directory",
@@ -321,7 +315,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.logsDir = logsDir
 
-    /* a relative melody.cron.binary is anchored under the project like its three sibling paths, while a relative --binary keeps the shell's convention */
+    /* a relative melody.cron.binary is anchored under the project, while a relative --binary keeps the shell's convention */
     options.binary = resolveDefaultPath(commandContext, configuration, flagNameBinary, ParameterBinary)
     options.defaultUserName = resolveDefault(commandContext, configuration, flagNameDefaultUser, ParameterUser)
 
@@ -332,7 +326,7 @@ func (instance *GenerateCommand) resolveRunOptions(
             return nil, autoEnabledErr
         }
 
-        /* a malformed heartbeat opt-in fails under every template, while the derived path stays crontab-only so the k8s template never arms the dropped-heartbeat warning on a setting nobody made */
+        /* the derived path stays crontab-only, so k8s never arms the dropped-heartbeat warning on a setting nobody made */
         if true == autoEnabled && false == isK8s {
             heartbeatPath = filepath.Join(logsDir, "heartbeat.crontab")
         }
@@ -402,7 +396,6 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
     }
     options.binary = binary
 
-    /* only the crontab template redirects output to a log file; the k8s template logs to stdout, so it does not inherit the logs-dir requirement */
     requiresLogPath := false == options.rendersK8s()
 
     entries := make([]Entry, 0, len(scheduledCommands))
@@ -429,12 +422,11 @@ type destinationWrite struct {
     HeartbeatOnly bool   `json:"heartbeatOnly"`
 }
 
-/* writeDestinations answers what it wrote, what there was to say about an empty run and what stopped it, and leaves the report to the caller's defer: destinations are written one by one with no rollback, so the writes before a failure tell the consumer what a partial run left on disk. */
 func (instance *GenerateCommand) writeDestinations(
     options *runOptions,
     entries []Entry,
 ) ([]destinationWrite, []string, string, error) {
-    /* the k8s namespace is a single global option, so resource-name collisions span every destination file; catch them across the whole set before any manifest is rendered or written */
+    /* the k8s namespace is global, so resource-name collisions span every destination: catch them before any is rendered */
     if true == options.rendersK8s() {
         if uniqueErr := ensureK8sNamesUnique(entries); nil != uniqueErr {
             return nil, nil, "", uniqueErr
@@ -446,7 +438,7 @@ func (instance *GenerateCommand) writeDestinations(
         return nil, nil, "", groupErr
     }
 
-    /* an empty configuration still sweeps, since every destination an earlier configuration wrote is then stale; it stays a success */
+    /* an empty configuration still sweeps: every destination an earlier configuration wrote is then stale */
     if 0 == len(entriesByDestination) && false == options.heartbeatEnabled {
         pruned, pruneErr := pruneStaleDestinations(options, nil)
 
@@ -454,7 +446,6 @@ func (instance *GenerateCommand) writeDestinations(
     }
 
     if 0 == len(entriesByDestination) && true == options.heartbeatEnabled {
-        /* the k8s template renders no heartbeat, so an empty configuration leaves nothing to render, but the sweep still runs */
         if true == options.rendersK8s() {
             pruned, pruneErr := pruneStaleDestinations(options, nil)
 
@@ -470,7 +461,7 @@ func (instance *GenerateCommand) writeDestinations(
     }
     sort.Strings(destinationPaths)
 
-    /* the k8s template ignores heartbeat options, so the requested heartbeat destinations are dropped for it rather than resolved against the written destinations and refused */
+    /* the k8s template ignores heartbeat options, so requested destinations are dropped here rather than refused */
     heartbeatRequested := options.heartbeatRequested
     if true == options.rendersK8s() {
         heartbeatRequested = nil
@@ -536,13 +527,13 @@ func (instance *GenerateCommand) writeDestinations(
     return writes, pruned, "", pruneErr
 }
 
-/* pruneStaleDestinations empties the destinations this generator wrote earlier that this run does not produce, so a retired or moved entry does not keep running under crond. Because emptying is irreversible it is opt-in, reads only the output directory without recursing or following an absolute destination, and empties only a file whose leading lines carry, as an exact line, the ownership line of the template generating now for this application; a run with no application name cannot sweep. Emptying renders the template with no entries, so the file keeps its header and marker and stays recognisable to the next run. */
+/* pruneStaleDestinations is opt-in, emptying being irreversible, and empties only a file with this application's line */
 func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]string, error) {
     if false == options.prune {
         return nil, nil
     }
 
-    /* without a name no line separates this application's destinations from another's, so the sweep is refused before the directory is read */
+    /* without a name no line separates this application's destinations from another's */
     if "" == options.applicationName {
         return nil, exception.NewError(
             "cron: --prune needs the name the application runs under to tell its own destinations from another application's, and the cli configuration carries none",
@@ -561,7 +552,7 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
         return nil, nil
     }
 
-    /* the sweep runs only on a line that names this application: a template the generator could not hand the name to, such as a custom dialect embedding a builtin, answers the bare prefix another application writes as well, so for it the destination is written and the sweep is refused, naming the line */
+    /* the sweep runs only on a line naming this application: the bare prefix is one another application writes as well */
     if false == strings.HasSuffix(marker, " for "+options.applicationName) {
         return nil, exception.NewError(
             "cron: --prune sweeps only on an ownership line that names this application, and the template's line does not; give the dialect a line ending in \" for \" and the application's cli name, or generate without --prune",
@@ -598,7 +589,7 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
     pruned := make([]string, 0)
 
     for _, directoryEntry := range directoryEntries {
-        /* only a regular file is a candidate: opening a fifo with no writer blocks forever, and a device, socket or symlink is not something this generator wrote */
+        /* only a regular file is a candidate: opening a fifo with no writer blocks forever */
         if false == directoryEntry.Type().IsRegular() {
             continue
         }
@@ -608,7 +599,7 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
             continue
         }
 
-        /* a temporary file a generator writes beside its destination carries the marker too; a young one may belong to a run still in flight, which would rename the emptied file over its live destination */
+        /* a young temporary file may belong to a run in flight, which would rename the emptied file over its live destination */
         if true == isGeneratorTemporaryFile(directoryEntry.Name()) {
             info, infoErr := directoryEntry.Info()
             if nil != infoErr || time.Since(info.ModTime()) < pruneTemporaryFileGrace {
@@ -635,21 +626,18 @@ func pruneStaleDestinations(options *runOptions, writes []destinationWrite) ([]s
     return pruned, nil
 }
 
-/* pruneTemporaryFileGrace is how old a generator's temporary file must be before a prune treats it as a leftover: a run writes and renames within seconds, so one younger than this may still be in flight */
 const pruneTemporaryFileGrace = 5 * time.Minute
 
-/* isGeneratorTemporaryFile answers whether a name is one atomicWriteFile creates beside a destination */
 func isGeneratorTemporaryFile(name string) bool {
     return true == strings.HasPrefix(name, ".melody-cron-") && true == strings.HasSuffix(name, ".tmp")
 }
 
-/* ownershipMarkerReadLimit bounds what is read to decide ownership: the marker rides in the header block every rendered destination opens with, and a file large enough to push it past this is not one this generator wrote. */
 const ownershipMarkerReadLimit = 8 * 1024
 
-/* ownershipMarkerLineLimit bounds where in that head the marker may stand: every builtin template renders it inside the leading comment block, so a file that merely quotes the marker further down is not emptied. */
+/* ownershipMarkerLineLimit: a file that merely quotes the marker further down is not emptied */
 const ownershipMarkerLineLimit = 10
 
-/* fileCarriesOwnershipMarker recognises ownership by an exact marker line among the file's leading lines. Exactness keeps apart a marker that extends another, a custom dialect suffixing the builtin marker, one application's line and another's, and the bare prefix of a line that names no application. */
+/* ownership is an exact marker line: it keeps apart a marker extending another and the lines of two applications */
 func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
     fileInstance, openErr := os.Open(path)
     if nil != openErr {
@@ -689,7 +677,7 @@ func fileCarriesOwnershipMarker(path string, marker string) (bool, error) {
     return false, nil
 }
 
-/* reportWrites is the generator's one report door, reached from the run's defer on every path: text lines, or the single machine-readable document under --format=json carrying the failure beside what was already written. The summary is the command's whole result, so --quiet does not silence it. The run's failure stays the returned verdict; a rendering failure becomes one only when the run succeeded, and in text mode the failure travels alone for the cli entry point to print. */
+/* reportWrites ignores --quiet: the summary is the command's whole result */
 func (instance *GenerateCommand) reportWrites(
     commandContext *clicontract.CommandContext,
     option output.Option,
@@ -708,7 +696,7 @@ func (instance *GenerateCommand) reportWrites(
             writes = []destinationWrite{}
         }
 
-        /* pruned is an empty list rather than null when nothing was swept, so the field keeps its json type on every outcome */
+        /* an empty list rather than null, so the field keeps its json type */
         if nil == pruned {
             pruned = []string{}
         }
@@ -724,7 +712,6 @@ func (instance *GenerateCommand) reportWrites(
         }
 
         if nil != runErr {
-            /* the envelope carries the failure's details and cause, and details stays an object when the failure carries no context, so the field keeps its json type on every failure */
             envelope.SetError(
                 "cron.generateFailed",
                 "the cron manifest generation failed",
@@ -745,7 +732,7 @@ func (instance *GenerateCommand) reportWrites(
         _, _ = fmt.Fprintln(commandContext.Writer, warning.message)
     }
 
-    /* a run that fails part way still prints what it wrote and pruned, since emptying is irreversible and the operator needs to know which manifests were blanked */
+    /* a run that fails part way still prints what it wrote and pruned: emptying is irreversible */
     if nil != runErr {
         printDestinationWrites(commandContext, writes)
         printPrunedDestinations(commandContext, pruned)
@@ -784,9 +771,9 @@ func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned 
     }
 }
 
-/* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it sees. The mode applies to a new destination; an existing one keeps its permission bits, without setuid, setgid and sticky, so a crontab narrowed to 0600 is not widened. A process killed before the rename leaves the temporary file carrying the ownership marker, which a later --prune empties and reports. */
+/* atomicWriteFile keeps an existing destination's permission bits, so a crontab narrowed to 0600 is not widened */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
-    /* the temp name does not carry the destination's basename, which may fill the 255 bytes of a path component on its own */
+    /* the temp name omits the destination's basename, which may fill the 255 bytes of a path component on its own */
     tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), ".melody-cron-*.tmp")
     if nil != createErr {
         return exception.NewError(
@@ -830,7 +817,6 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
         )
     }
 
-    /* the mode applied is the existing destination's own bits where it exists, the new-file mode otherwise; the refusal carries the one that was applied */
     appliedMode := destinationFileMode(destination, mode)
     if chmodErr := os.Chmod(tmpPath, appliedMode); nil != chmodErr {
         return exception.NewError(
@@ -864,7 +850,6 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
     return nil
 }
 
-/* destinationFileMode answers the permission bits the destination already carries, without setuid, setgid and sticky, or the caller's mode for a new file. */
 func destinationFileMode(destination string, newFileMode os.FileMode) os.FileMode {
     info, statErr := os.Stat(destination)
     if nil != statErr {
@@ -983,7 +968,7 @@ func resolveEntryDestination(entryDestination string, defaultDestination string,
     return joined, nil
 }
 
-/* isWithinDir answers on the cleaned names deliberately: it refuses a DestinationFile that walks out of dir(--out) with "..", while a symbolic link inside the directory is the operator's layout and is allowed, as an absolute path is. */
+/* isWithinDir answers on the cleaned names deliberately: a symbolic link inside the directory is the operator's layout */
 func isWithinDir(candidate string, parent string) bool {
     if candidate == parent {
         return true
@@ -1077,7 +1062,6 @@ func expandEntriesForCommand(
         instances = 1
     }
 
-    /* a user column runs the entry as that user, so the log directories created for it are that user's */
     logDirectoryOwner := ""
     if nil != ownership && true == ownership.rendersUserColumn {
         logDirectoryOwner = user
@@ -1094,7 +1078,7 @@ func expandEntriesForCommand(
             ownership.unowned = append(ownership.unowned, unownedLogDirectory{command: commandName, directory: unownedDirectory, user: logDirectoryOwner})
         }
 
-        /* every entry carries its own schedule copy: Render is userland and Schedule.Defaults mutates in place, so a template calling it would otherwise rewrite the schedule of every sibling entry */
+        /* every entry carries its own schedule copy: Render is userland and Schedule.Defaults mutates in place */
         entry := Entry{
             Name:            commandName,
             User:            user,
@@ -1115,7 +1099,7 @@ func expandEntriesForCommand(
                 )
             }
 
-            /* the entry's own arguments come after the instance flags, so the manifest line runs the command line the in-process runner hands the child */
+            /* the entry's arguments come after the instance flags: the manifest line runs what the in-process runner hands the child */
             args = append(args, config.Arguments...)
 
             entry.Binary = binary
@@ -1141,7 +1125,6 @@ func resolveEntryLogPath(
         return "", "", nil
     }
 
-    /* the active template does not redirect output to a log file (k8s), so there is no log path to resolve and no logs-dir to demand */
     if false == requiresLogPath {
         return "", "", nil
     }
@@ -1168,7 +1151,6 @@ func resolveEntryLogPath(
     }
 
     if 1 < instances {
-        /* the extension is cut from the file's own name, so a dotted subdirectory is kept whole and the instances share it */
         base, extension := splitLogFileExtension(filepath.Base(logFileName))
         logFileName = filepath.Join(filepath.Dir(logFileName), fmt.Sprintf("%s-%d%s", base, index, extension))
     }
@@ -1189,7 +1171,7 @@ func resolveEntryLogPath(
         )
     }
 
-    /* a LogFileName with a subdirectory stays within the logs dir but nothing else creates that subdirectory, and under system cron the shell aborts the command when the >> redirection cannot create its file */
+    /* nothing else creates a LogFileName subdirectory, and system cron aborts when the >> redirection cannot create its file */
     missingDirectories := missingDirectoriesBelow(filepath.Dir(joined), cleanedLogsDir)
 
     if mkdirErr := os.MkdirAll(filepath.Dir(joined), 0o755); nil != mkdirErr {
@@ -1211,7 +1193,6 @@ func resolveEntryLogPath(
     return joined, unownedDirectory, nil
 }
 
-/* logDirectoryOwnership is what a run knows of the owners of the log directories it creates: whether its template runs every entry as a user, and the directories it left root's for a user the host does not know */
 type logDirectoryOwnership struct {
     rendersUserColumn bool
     unowned           []unownedLogDirectory
@@ -1223,12 +1204,10 @@ type unownedLogDirectory struct {
     user      string
 }
 
-/* warningMessage says what the run left behind and what follows from it */
 func (instance unownedLogDirectory) warningMessage() string {
     return fmt.Sprintf("cron: the log directory %s created for %q stays owned by root: its user %q is not known on this host, so under system cron the entry may not be able to create its log file there; create the directory for that user on the host that runs it", instance.directory, instance.command, instance.user)
 }
 
-/* missingDirectoriesBelow answers the directories from directory up to, not including, root that do not exist yet, the shallowest first */
 func missingDirectoriesBelow(directory string, root string) []string {
     missing := make([]string, 0)
 
@@ -1243,14 +1222,14 @@ func missingDirectoriesBelow(directory string, root string) []string {
     return missing
 }
 
-/* the doors chownCreatedLogDirectories reads the process and the system through, so a pin drives it without running as root */
+/* the doors chownCreatedLogDirectories reads the process and the system through, so a pin drives it without root */
 var (
     logDirectoryEffectiveUserId = os.Geteuid
     logDirectoryLookupUser      = user.Lookup
     logDirectoryChown           = os.Chown
 )
 
-/* chownCreatedLogDirectories hands the log directories a run created for an entry to the user the entry runs as: a generator running as root creates them as root, and the entry's shell, running as its user, could not create its log file in them, which under system cron aborts the command. Nothing is done when the generator is not root, which cannot give a directory away, or when the entry renders no user. A user the generating host does not know, the ordinary case of a build host generating for the hosts that run the entries, leaves the directories root's and answers the shallowest of them, which the run reports as a warning; a chown that fails is refused. */
+/* a user the host does not know is the ordinary build-host case: a warning, the directories stay root's */
 func chownCreatedLogDirectories(commandName string, directories []string, owner string) (unownedDirectory string, err error) {
     if 0 == len(directories) || "" == owner || 0 != logDirectoryEffectiveUserId() {
         return "", nil
@@ -1292,7 +1271,6 @@ func chownCreatedLogDirectories(commandName string, directories []string, owner 
     return "", nil
 }
 
-/* configurationFromRuntime resolves through the run's scope with the container as the fallback, so a scope-level substitution of the configuration is honoured. */
 func configurationFromRuntime(runtimeInstance runtimecontract.Runtime) (configcontract.Configuration, error) {
     configuration, fromRuntimeErr := runtime.FromRuntime[configcontract.Configuration](runtimeInstance, melodyconfig.ServiceConfig)
     if nil != fromRuntimeErr {
@@ -1306,7 +1284,7 @@ func configurationFromRuntime(runtimeInstance runtimecontract.Runtime) (configco
     return configuration, nil
 }
 
-/* applicationIdentity answers the application's cli name, which the ownership line names. A configuration without a cli configuration answers the empty name, which the sweep refuses, and a name spanning lines is refused, since the ownership line has to be one line to be read back. */
+/* applicationIdentity refuses a name spanning lines: the ownership line has to be one line to be read back */
 func applicationIdentity(configuration configcontract.Configuration) (string, error) {
     cliConfiguration := configuration.Cli()
     if true == isNilInterface(cliConfiguration) {
@@ -1325,7 +1303,7 @@ func applicationIdentity(configuration configcontract.Configuration) (string, er
     return applicationName, nil
 }
 
-/* templateOwnedBy hands the application's name to a template that can carry it and answers the copy that renders that application's ownership line; a custom dialect is used as it is, with whatever line it declares, and an empty name leaves every template unowned. The copy is derived only for the package's own dialects by concrete type, so a wrapper that embeds a builtin keeps its own rendering; the line it answers is the builtin's bare prefix, on which pruneStaleDestinations refuses to sweep. */
+/* templateOwnedBy derives only for the package's own dialects by concrete type: an embedding wrapper keeps its rendering */
 func templateOwnedBy(template Template, applicationName string) Template {
     if "" == applicationName {
         return template
@@ -1354,7 +1332,6 @@ func resolveDefault(
     return parameterValue(configuration, parameterName)
 }
 
-/* resolveDefaultPath is resolveDefault for a path: a relative path from a parameter is anchored at the project directory, as melody anchors MELODY_LOG_PATH, kernel.logs_dir and kernel.cache_dir, while one typed as a cli flag stays relative to the working directory the shell resolves it against. */
 func resolveDefaultPath(
     commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
@@ -1368,7 +1345,7 @@ func resolveDefaultPath(
     return anchorConfiguredPath(parameterValue(configuration, parameterName), configuration)
 }
 
-/* typedFlagValue answers the value of a flag the operator typed; a flag typed empty is not an answer, so the parameter behind it still is */
+/* typedFlagValue: a flag typed empty is not an answer, so the parameter behind it still is */
 func typedFlagValue(commandContext *clicontract.CommandContext, flagName string) (string, bool) {
     if false == commandContext.IsSet(flagName) {
         return "", false
@@ -1392,7 +1369,7 @@ func parameterValue(configuration configcontract.Configuration, parameterName st
     return parameter.String()
 }
 
-/* anchorConfiguredPath carries locally the rule application/bootstrap.go applies to every other runtime path, which is unexported and in another module. A configuration that names no project directory keeps the working-directory anchoring rather than failing boot. */
+/* anchorConfiguredPath carries locally the rule of application/bootstrap.go, which is unexported and in another module */
 func anchorConfiguredPath(value string, configuration configcontract.Configuration) string {
     if "" == value {
         return value
@@ -1415,7 +1392,6 @@ func anchorConfiguredPath(value string, configuration configcontract.Configurati
     return filepath.Join(projectDirectory, value)
 }
 
-/* isHeartbeatAutoEnabled separates an unset opt-in from a malformed one, so a misspelt value is refused instead of generating a crontab without the liveness line the operator asked for. */
 func isHeartbeatAutoEnabled(configuration configcontract.Configuration) (bool, error) {
     if nil == configuration {
         return false, nil
@@ -1442,13 +1418,13 @@ func isHeartbeatAutoEnabled(configuration configcontract.Configuration) (bool, e
 
 var _ clicontract.Command = (*GenerateCommand)(nil)
 
-/* errorDetailsOf renders the failure's own context as the json envelope's details, an empty object rather than null when it carries none, so the field keeps its json type. */
+/* errorDetailsOf answers an empty object rather than null, so the field keeps its json type */
 func errorDetailsOf(runErr error) map[string]any {
     details := map[string]any{}
 
     var provider exceptioncontract.ContextProvider
-    /* a typed-nil link in the chain satisfies As and passes a plain nil comparison, and Context() on the nil receiver would panic inside the report */
-    if true == errors.As(runErr, &provider) && false == isNilInterface(provider) {
+    /* a typed-nil link satisfies As and passes a plain nil comparison; Context() on the nil receiver would panic */
+    if true == exception.ChainAs(runErr, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             details[key] = value
         }
@@ -1457,7 +1433,6 @@ func errorDetailsOf(runErr error) map[string]any {
     return details
 }
 
-/* errorCauseOf answers the failure's text with the whole chain beneath it, starting at the failure itself because the envelope's message is a fixed label and the failure's own sentence lives in the cause. */
 func errorCauseOf(runErr error) *output.ErrorCause {
     causeChain := exception.BuildCauseChain(runErr, 8)
     if 0 == len(causeChain) {

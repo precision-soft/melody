@@ -45,6 +45,5 @@
 # error` became `Close() error`, a defect repair the container's teardown needed, shipped on v3.14.0 with
 # its changelog and upgrade entries. And the source ahead of its pinned tag: modules that used a symbol
 # the framework or a sibling integration added after the tag their pin named. The release of v3.14.0 and
-# the pin waves after it raised every pin past those rows, so the file holds no row now. A new row is a
+# the pin waves after it raised every pin past those rows. A new row is a
 # fact the next release has to answer before it ships.
-

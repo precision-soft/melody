@@ -1,4 +1,4 @@
-/* The shared test material of this package: the doubles every test file of it reaches for, the helpers that build them, and — where a contract spans every source rather than any one of them — the test that asserts it. It carries no mirror of its own on purpose: it is the ONE test file of a package allowed to exist without a matching source, which is what keeps every other one honest. A test provable from a single source belongs in that source's own mirror, not here. */
+/* the one test file of this package allowed to exist without a matching source */
 package http
 
 import (
@@ -8,6 +8,7 @@ import (
     "net"
     nethttp "net/http"
     "sync"
+    "testing"
     "time"
 
     "github.com/precision-soft/melody/v2/container"
@@ -113,7 +114,6 @@ type closeRecordingScope struct {
     containercontract.Scope
     failOverride bool
     closed       bool
-    /* onClose runs at the moment the scope-close defer runs. That defer is registered first, so it runs last: whatever a test reads here has already been decided by every defer above it, which is how the ordering between the early recovery guard and the scope close is asserted rather than assumed. */
     onClose func()
 }
 
@@ -184,14 +184,12 @@ func (instance *countingSessionStorage) Save(sessionId string, data map[string]a
     return instance.Storage.Save(sessionId, data, ttl)
 }
 
-/* capturedRecord is one record a recordsCaptureLogger received */
 type capturedRecord struct {
     level   loggingcontract.Level
     message string
     context loggingcontract.Context
 }
 
-/* recordsCaptureLogger keeps every record, under a lock, so a test served over several requests can count the records each one filed */
 type recordsCaptureLogger struct {
     mutex   sync.Mutex
     records []capturedRecord
@@ -224,7 +222,6 @@ func (instance *recordsCaptureLogger) Emergency(message string, context loggingc
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* failureRecords answers the records at warning, error or emergency, the ones a failure files */
 func (instance *recordsCaptureLogger) failureRecords() []capturedRecord {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -240,3 +237,44 @@ func (instance *recordsCaptureLogger) failureRecords() []capturedRecord {
 }
 
 var _ loggingcontract.Logger = (*recordsCaptureLogger)(nil)
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type cyclicBodyReader struct{}
+
+func (instance *cyclicBodyReader) Read(buffer []byte) (int, error) {
+    return 0, newCyclicChainError()
+}

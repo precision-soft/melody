@@ -17,7 +17,6 @@ import (
     urfavecli "github.com/urfave/cli/v3"
 )
 
-/* NewCommandContext builds the root command an application registers its commands on. The engine's exit handler is replaced with an inert one: its default calls os.Exit on any error a command returns, and melody owns the process exit. */
 func NewCommandContext(applicationName string, applicationDescription string) *clicontract.CommandContext {
     commandContext := &clicontract.CommandContext{
         Name:           applicationName,
@@ -28,7 +27,7 @@ func NewCommandContext(applicationName string, applicationDescription string) *c
     return commandContext
 }
 
-/* Register appends a command to a root command. The root's streams travel with the registration, since the engine defaults each command's own separately; a stream set on the root afterwards does not reach the command, which Root.SetWriter and Root.SetErrorWriter do. A typed nil stream on the root is copied as the nil the engine defaults, so the command writes to the process's own stream rather than panicking. The command's flags are refused when one is nil, repeats a spelling, carries an empty alias or, under ValidateDefaults, declares a default its own validator refuses, and the engine is handed fresh instances of them, so a command may answer the same instances on every Flags() call. */
+/* Register copies the root's streams at registration: a stream set on the root afterwards does not reach the command */
 func Register(commandContext *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
     if nil == commandContext {
         exception.Panic(
@@ -39,7 +38,6 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
     registerCommand(commandContext, command, runtimeInstance)
 }
 
-/* registerCommand is the registration Register and Root.Register share: the command is refused when nil, unnamed or named like one already registered, and its flags as prepareCommandFlags refuses them. */
 func registerCommand(rootCommand *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
     if true == internal.IsNilInterface(command) {
         exception.Panic(
@@ -70,7 +68,6 @@ func registerCommand(rootCommand *clicontract.CommandContext, command clicontrac
         )
     }
 
-    /* a caller may append to the root's command list directly, so an entry may be nil */
     for _, existing := range rootCommand.Commands {
         if nil == existing {
             continue
@@ -108,20 +105,17 @@ func registerCommand(rootCommand *clicontract.CommandContext, command clicontrac
     )
 }
 
-/* runCommandAction is the action of every registered command: the banner framing it, the command itself, and the close of the scope it ran in, the three failures folded into the one error the tree answers. */
 func runCommandAction(
     commandContext *clicontract.CommandContext,
     command clicontract.Command,
     runtimeInstance runtimecontract.Runtime,
     commandName string,
 ) error {
-    /* the engine defaults the stream to standard output on every command it runs, so the guard is for an action invoked by hand on a context never run */
     var writer io.Writer = io.Discard
     if false == internal.IsNilInterface(commandContext.Writer) {
         writer = commandContext.Writer
     }
 
-    /* in json mode the command writes one machine-readable document to this stream, so there is no banner; output.Meta carries the command, arguments, start time and duration. The final status is the exit code, since a shutdown failure found after the document was written cannot enter it. */
     resolvedOption := output.NormalizeOption(
         output.ParseOptionFromCommand(commandContext),
     )
@@ -133,7 +127,6 @@ func runCommandAction(
     startedAt := time.Now()
     const logFiller = "======================================"
 
-    /* the banner is decoration, which quiet governs: StandardFlags defaults it to true, DebugFlags to false, and a command declaring neither reads false */
     quiet := resolvedOption.Quiet
 
     banner := commandBanner{writer: writer, noColor: resolvedOption.NoColor}
@@ -186,7 +179,7 @@ func runCommandAction(
         banner.printFullLine()
     }()
 
-    /* a panic in the command leaves the path that assigns commandErr, so the finish banner reads it here; the panic is re-raised unchanged, keeping an *exception.ExitError's code. Nothing is closed on this path: the caller's defer closes the scope, and the recover handler that owns the exit closes the container after resolving its logger. */
+    /* the panic is re-raised unchanged, keeping an *exception.ExitError's code; nothing is closed on this path */
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -204,12 +197,11 @@ func runCommandAction(
         panic(recoveredValue)
     }()
 
-    /* normalized through the interface: a command returning a concrete typed nil pointer hands over a non-nil interface; the scope's Close result, from the substitutable runtime contract, gets the same reading */
     runErr := normalizeCliError(command.Run(runtimeInstance, commandContext))
 
     closeErrorByName := map[string]error{}
 
-    /* the container is not closed here on either outcome: the recover handler that owns the exit resolves the final record's logger through it and closes it between the record and os.Exit. The scope is this action's to close and report. */
+    /* the container is not closed here: the recover handler that owns the exit closes it between the record and os.Exit */
     scopeCloseErr := normalizeCliError(runtimeInstance.Scope().Close())
     if nil != scopeCloseErr {
         closeErrorByName["scope"] = scopeCloseErr
@@ -218,7 +210,7 @@ func runCommandAction(
     aggregatedErr := aggregateCliErrors(runErr, closeErrorByName)
     if nil != aggregatedErr {
         commandErr = aggregatedErr
-        /* the error line is written whatever quiet says and whatever the format: quiet governs decoration, StandardFlags defaults it to true, and for a failing command this line is its one answer on the terminal, so it goes to the error stream, never into the document on the output stream; the error itself still returns to the exit path */
+        /* written whatever quiet says and whatever the format, to the error stream, never into the document on the output stream */
         errorBanner := commandBanner{writer: commandErrorWriter(commandContext), noColor: resolvedOption.NoColor}
         errorBanner.printStatusLine(AnsiBackgroundRed, fmt.Sprintf("[error] %s", aggregatedErr.Error()))
         return aggregatedErr
@@ -227,7 +219,6 @@ func runCommandAction(
     return nil
 }
 
-/* commandBanner prints the frame a registered command runs inside, on the stream its output goes to; under --no-color it carries no escape codes. */
 type commandBanner struct {
     writer  io.Writer
     noColor bool
@@ -251,7 +242,7 @@ func (instance commandBanner) printStatusLine(background string, text string) {
     instance.printLine(background, text, "", false, "")
 }
 
-/* printLine escapes the text on either side of the verdict as data and colours the verdict after that: the text embeds the command's error, which may echo client-derived values, so an embedded carriage return or escape sequence cannot repaint the line, and the banner's own colour is not escaped with the data. */
+/* printLine escapes the text as data, since it may echo client-derived values, and colours the verdict after that */
 func (instance commandBanner) printLine(background string, textBeforeVerdict string, verdict string, failed bool, textAfterVerdict string) {
     escapedBefore := internal.EscapeControlCharacters(textBeforeVerdict)
     escapedAfter := internal.EscapeControlCharacters(textAfterVerdict)
@@ -280,7 +271,6 @@ func (instance commandBanner) printLine(background string, textBeforeVerdict str
     )
 }
 
-/* refuseRepeatedFlagSpellings refuses a nil flag, a name or alias the command already declares, and an empty alias: the parser resolves a spelling to the first flag declaring it, silently. The engine mounts its own help flag on every command, so a flag declaring one of its spellings is refused too; a nil HelpFlag is the engine's way to mount none. MergeFlags refuses a repeated name between the standard flags and a command's own. */
 func refuseRepeatedFlagSpellings(flags []clicontract.Flag) {
     declaredBy := map[string]string{}
     if nil != urfavecli.HelpFlag {
@@ -324,11 +314,10 @@ func refuseRepeatedFlagSpellings(flags []clicontract.Flag) {
     }
 }
 
-/* inertExitHandler replaces the engine's default, which calls os.Exit on any error a command returns: melody owns the process exit, and its recover handler writes the final record and closes the container before exiting. */
+/* inertExitHandler replaces the engine's os.Exit: its recover handler writes the final record and closes the container */
 func inertExitHandler(handlerContext context.Context, handlerCommand *clicontract.CommandContext, handlerErr error) {
 }
 
-/* resolvedWriter answers a caller's stream as the engine reads it, for the places one is copied onto a command: a typed nil writer, which the engine would default no more than it could write to, is handed over as the untyped nil the engine replaces with the process's own stream. */
 func resolvedWriter(writer io.Writer) io.Writer {
     if true == internal.IsNilInterface(writer) {
         return nil
@@ -337,7 +326,6 @@ func resolvedWriter(writer io.Writer) io.Writer {
     return writer
 }
 
-/* commandErrorWriter is the stream a failure is reported on: the command's error writer, which the engine defaults to standard error on every command it runs, and standard error itself for one left nil. A failure is never written where the command's document goes. */
 func commandErrorWriter(command *clicontract.CommandContext) io.Writer {
     if false == internal.IsNilInterface(command.ErrWriter) {
         return command.ErrWriter
@@ -346,7 +334,7 @@ func commandErrorWriter(command *clicontract.CommandContext) io.Writer {
     return os.Stderr
 }
 
-/* normalizeCliError reads the error through the interface: a command or a substituted runtime declared with a concrete error type hands back a typed nil in a non-nil interface, which is not a failure. */
+/* a concrete error type hands back a typed nil in a non-nil interface, which is not a failure */
 func normalizeCliError(err error) error {
     if true == internal.IsNilInterface(err) {
         return nil
@@ -411,7 +399,7 @@ func aggregateCliErrors(runErr error, closeErrorByName map[string]error) error {
         runErr,
     )
 
-    /* errors.As matches the outermost ExitError in the chain, so the aggregate is returned wrapped and the shutdown failures it alone carries reach the log; a typed-nil link would answer code 0, which NewExitError refuses, so the aggregate is returned plainly then */
+    /* the aggregate is returned wrapped so its shutdown failures reach the log; a typed-nil link would answer code 0 */
     if exitError, isExit := internal.ExitErrorInChain(runErr); true == isExit {
         return exception.NewExitError(exitError.ExitCode(), aggregatedErr)
     }

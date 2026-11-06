@@ -28,7 +28,6 @@ func amqpDsnOrSkip(t *testing.T) string {
     return dsn
 }
 
-/* gatedConn is a net.Conn whose Write blocks once wedged — until the conn is closed or a deadline lands on it, which is what a real socket does when its peer stops reading and the kernel buffer is full. Reads pass through untouched, so the broker's frames still arrive and the amqp client's own reader, heartbeater and shutdown run exactly as they do in production. The wedge is CONSTRUCTED rather than awaited, so a test can hold the window open for as long as its assertions need. */
 type gatedConn struct {
     net.Conn
 
@@ -40,7 +39,6 @@ type gatedConn struct {
     deadlineChanged chan struct{}
     blockedWrites   atomic.Int64
 
-    /* the reply half of the gate: a frame the socket already delivered is HELD instead of being handed to the client, which is how a broker that accepts a publish and never acks it looks from inside the process. Writes keep passing, so the stretch under test is the confirmation and nothing else. */
     heldReplies atomic.Bool
     releaseOnce sync.Once
     released    chan struct{}
@@ -55,7 +53,6 @@ func newGatedConn(conn net.Conn) *gatedConn {
     }
 }
 
-/* HoldReplies stops handing the client the frames the socket delivers, so a publish is written and its confirmation never arrives. */
 func (instance *gatedConn) HoldReplies() {
     instance.heldReplies.Store(true)
 }
@@ -158,7 +155,6 @@ func (instance *gatedConn) Close() error {
     return instance.Conn.Close()
 }
 
-/* dialGated opens a broker connection over a gatedConn. The connection is released at cleanup through CloseDeadline, the one close the amqp client can complete over a wedged socket — its plain Close is an RPC that would join the wedged write. */
 func dialGated(t *testing.T, dsn string) (*amqp091.Connection, *gatedConn) {
     t.Helper()
 
@@ -188,7 +184,6 @@ func dialGated(t *testing.T, dsn string) (*amqp091.Connection, *gatedConn) {
     return connection, gated
 }
 
-/* gatedDialer counts its dials and hands the latest gated conn back, so a test can wedge the connection a transport or backplane dialed itself and then assert that the next call dialed again. */
 type gatedDialer struct {
     t     *testing.T
     dsn   string
@@ -225,7 +220,6 @@ func (instance *gatedDialer) Latest() *gatedConn {
     return instance.latest
 }
 
-/* holdPublishMutex takes a publisher's mutex on the test's behalf and hands back the one release the test calls where its assertions need the goroutine behind the mutex to take its turn AFTER them — a defer would move that release past the assertions. What the cleanup adds is the failing path: a test that fails while holding the mutex exits through Goexit before its release, and the publish goroutine it queued behind the mutex is then parked for good, so the next test that waits for no publish goroutine to be alive fails too, three seconds later, for a failure that was not its own. */
 func holdPublishMutex(t *testing.T, publishMutex *sync.Mutex) func() {
     t.Helper()
 
@@ -239,7 +233,6 @@ func holdPublishMutex(t *testing.T, publishMutex *sync.Mutex) func() {
     return releaseOnce
 }
 
-/* awaitNoPublishGoroutine returns once no goroutine carrying the named frame is alive — the write goroutine of publishOnce, on either publisher of this package. It is the moment a publish that was told to give up has either returned without writing or finished the write it should not have made, which are the two outcomes a test of the abandoned turn tells apart by what reaches the broker afterwards; the goroutine's exit is the one event both produce, and the runtime's dump is the only door that publishes it. */
 func awaitNoPublishGoroutine(t *testing.T, frame string, within time.Duration) {
     t.Helper()
 
@@ -247,7 +240,6 @@ func awaitNoPublishGoroutine(t *testing.T, frame string, within time.Duration) {
     stack := make([]byte, 1<<20)
 
     for {
-        /* a dump that fills the buffer is a dump cut short, and the frame looked for may be past the cut — read as "no such goroutine", that is the verdict the negative wants (an absence a truncated dump cannot vouch for), so the buffer grows until the whole dump fits */
         written := runtime.Stack(stack, true)
         for written == len(stack) {
             stack = make([]byte, 2*len(stack))
@@ -268,7 +260,6 @@ func awaitNoPublishGoroutine(t *testing.T, frame string, within time.Duration) {
     }
 }
 
-/* awaitOutcome reads one outcome within the bound or fails the test naming what did not return; every call that this package bounds is asserted through it, so a mutant that removes the bound fails on this timer instead of hanging the suite. */
 func awaitOutcome(t *testing.T, label string, outcome <-chan error, within time.Duration) error {
     t.Helper()
 
@@ -292,7 +283,6 @@ func refuseOutcome(t *testing.T, label string, outcome <-chan error, within time
     }
 }
 
-/* errorChainContains reads the whole cause chain: a melody error renders its own message alone, and the diagnostic a test pins is often the cause one wrap down. */
 func errorChainContains(err error, text string) bool {
     for nil != err {
         if true == strings.Contains(err.Error(), text) {
@@ -305,7 +295,6 @@ func errorChainContains(err error, text string) bool {
     return false
 }
 
-/* awaitBlockedWrites waits until the gated conn has caught the given number of writes, so a test can act while a write is provably inside the wedge. */
 func awaitBlockedWrites(t *testing.T, gated *gatedConn, count int64) {
     t.Helper()
 
@@ -328,7 +317,6 @@ func (instance *gatedConn) Deadline() time.Time {
     return instance.deadline
 }
 
-/* awaitArmedDeadline waits until a deadline has been set on the socket, which is the one thing a close over a wedged socket can do before it blocks — and the thing the plain close never does. */
 func awaitArmedDeadline(t *testing.T, gated *gatedConn) {
     t.Helper()
 
@@ -344,7 +332,6 @@ func awaitArmedDeadline(t *testing.T, gated *gatedConn) {
     t.Fatalf("no deadline was armed on the wedged socket")
 }
 
-/* writeFakeBrokerMethod writes one method frame the way a broker does: the frame header, the class and method ids ahead of the arguments, and the frame end octet. */
 func writeFakeBrokerMethod(conn net.Conn, channelId uint16, classId uint16, methodId uint16, arguments []byte) error {
     payload := binary.BigEndian.AppendUint16(nil, classId)
     payload = binary.BigEndian.AppendUint16(payload, methodId)
@@ -361,7 +348,6 @@ func writeFakeBrokerMethod(conn net.Conn, channelId uint16, classId uint16, meth
     return writeErr
 }
 
-/* readFakeBrokerMethod reads one frame the client sent and refuses it unless it is the method the handshake expects next, so a handshake that drifted fails here instead of wedging the test somewhere later. */
 func readFakeBrokerMethod(conn net.Conn, classId uint16, methodId uint16) error {
     header := make([]byte, 7)
     if _, readErr := io.ReadFull(conn, header); nil != readErr {
@@ -380,7 +366,6 @@ func readFakeBrokerMethod(conn net.Conn, classId uint16, methodId uint16) error 
     return nil
 }
 
-/* serveFakeBrokerHandshake answers the connection and channel handshake of one client by hand, with heartbeats off, and then stops reading: nothing else is needed for a publish to reach the socket, and a broker that reads nothing more is what the wedge is. */
 func serveFakeBrokerHandshake(conn net.Conn) error {
     protocolHeader := make([]byte, 8)
     if _, readErr := io.ReadFull(conn, protocolHeader); nil != readErr {
@@ -418,7 +403,6 @@ func serveFakeBrokerHandshake(conn net.Conn) error {
     return nil
 }
 
-/* fakeBrokerWedge is one publish wedged on a connection to a broker faked on a loopback listener: the client socket is a gatedConn, so the write blocks the way it does on a peer that stopped reading, and the broker side of the socket is kept so a test can drop it. */
 type fakeBrokerWedge struct {
     connection *amqp091.Connection
     channel    *amqp091.Channel
@@ -427,7 +411,6 @@ type fakeBrokerWedge struct {
     written    chan struct{}
 }
 
-/* fakeBrokerConnection is one connection to a broker faked on a loopback listener, with one channel open: the client socket is a gatedConn and the broker side of the socket is kept, so a test can drop it. After the handshake the broker answers nothing, so a close waits for a close-ok that never comes. */
 type fakeBrokerConnection struct {
     connection *amqp091.Connection
     channel    *amqp091.Channel
@@ -435,7 +418,6 @@ type fakeBrokerConnection struct {
     brokerSide net.Conn
 }
 
-/* dialFakeBroker dials the fake broker and opens a channel; the cleanup closes both sides of the socket. */
 func dialFakeBroker(t *testing.T) *fakeBrokerConnection {
     t.Helper()
 
@@ -492,7 +474,6 @@ func dialFakeBroker(t *testing.T) *fakeBrokerConnection {
     return &fakeBrokerConnection{connection: connection, channel: channel, gated: gated, brokerSide: brokerSide}
 }
 
-/* wedgeAPublishOnAFakeBroker dials the fake broker, opens a channel and wedges one publish on its socket write, which the client makes holding the channel mutex. The cleanup closes the client socket, which is the one thing that ends the write whatever the client's own state, and waits for the publish to return, so no goroutine of this test outlives it. */
 func wedgeAPublishOnAFakeBroker(t *testing.T) *fakeBrokerWedge {
     t.Helper()
 
@@ -534,7 +515,6 @@ func wedgeAPublishOnAFakeBroker(t *testing.T) *fakeBrokerWedge {
     return wedge
 }
 
-/* beginUnfreedCut starts the client's close with a deadline seconds ahead, the state a cut leaves over a conn that ignores its deadline: the client has initiated its close, so a further close returns at once without a handshake, while the wedged write still holds the channel mutex until that deadline. The initiation is a flag the client keeps to itself and sets within microseconds of the call, before its close frame queues behind the wedged write, so the helper gives it the same settling pause beginClientShutdown gives the shutdown. */
 func (instance *fakeBrokerWedge) beginUnfreedCut(t *testing.T, freedAfter time.Duration) {
     t.Helper()
 
@@ -550,7 +530,6 @@ func (instance *fakeBrokerWedge) beginUnfreedCut(t *testing.T, freedAfter time.D
     }
 }
 
-/* beginClientShutdown drops the broker side of the socket, so the client's reader fails and runs the client's own shutdown, the path a missed heartbeat takes: the shutdown marks the connection closed, takes the connection mutex and parks on the channel mutex the wedged write holds. The short sleep lets it reach that park after the mark this waits for. */
 func (instance *fakeBrokerWedge) beginClientShutdown(t *testing.T) {
     t.Helper()
 
@@ -566,4 +545,39 @@ func (instance *fakeBrokerWedge) beginClientShutdown(t *testing.T) {
     }
 
     time.Sleep(50 * time.Millisecond)
+}
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
 }

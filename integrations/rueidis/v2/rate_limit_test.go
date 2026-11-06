@@ -62,7 +62,6 @@ func TestRateLimiter_SharedLimitAcrossInstances(t *testing.T) {
 
     key := "shared:" + t.Name()
 
-    /* two limiter instances over one store: the limit is enforced across both, unlike the in-process limiters */
     first := NewRateLimiter(client, 3, time.Minute, WithRateLimiterKeyPrefix("melody:test:rate_limit:"))
     second := NewRateLimiter(client, 3, time.Minute, WithRateLimiterKeyPrefix("melody:test:rate_limit:"))
     defer first.Reset(key)
@@ -141,7 +140,6 @@ func TestRateLimiter_AllowWithRuntimeSharesTheCounter(t *testing.T) {
     }
 }
 
-/* the runtime context the http kernel hands a request carries no deadline, so the call timeout must bound AllowWithRuntime itself; a 1ns timeout must fail closed instead of riding the unbounded context */
 func TestRateLimiter_AllowWithRuntimeAppliesCallTimeout(t *testing.T) {
     client := rateLimiterTestClient(t)
     runtimeInstance := rateLimiterTestRuntime()
@@ -211,7 +209,6 @@ func TestRateLimiter_AllowWithRuntimeReportsStoreFailure(t *testing.T) {
 }
 
 func TestRateLimiter_NonPositiveCallTimeoutFallsBackToTheDefault(t *testing.T) {
-    /* a non-positive call timeout must not survive verbatim: context.WithTimeout(Background(), 0) is born cancelled, forcing every Allow/Reset onto the store-failure path forever */
     cases := map[string]time.Duration{
         "zero":     0,
         "negative": -1 * time.Second,
@@ -240,7 +237,6 @@ func TestRateLimiter_PositiveCallTimeoutIsKept(t *testing.T) {
     }
 }
 
-/* the caller's own cancellation is named apart from a store failure, so a client hanging up does not read as a redis outage against a healthy store. */
 func TestRateLimiter_TheCallersCancellationIsNotAStoreFailureAndTakesTheFailureModeVerdict(t *testing.T) {
     client := rateLimiterTestClient(t)
 
@@ -337,7 +333,6 @@ func (instance *capturingLimiterLogger) Emergency(message string, context loggin
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* with no observer the failure is recorded here, and marked, because two of the three doors return nothing at all: Allow answers a bool and Reset answers nothing, so a store outage would otherwise reach no channel. The mark lets the record be filed at the one place that knows the key and the failure mode without the http middleware writing a second copy beside it. */
 func TestRateLimiter_WithoutAnObserverTheFailureIsRecordedAndMarked(t *testing.T) {
     for _, testCase := range []struct {
         name    string
@@ -385,7 +380,6 @@ func TestRateLimiter_WithoutAnObserverTheFailureIsRecordedAndMarked(t *testing.T
     }
 }
 
-/* an observer given by the application is the application's channel: it may be a counter rather than a journal, so the failure is handed over untouched and unmarked and whatever the caller does with it stays what it was */
 func TestRateLimiter_AGivenObserverReplacesTheRecordAndLeavesTheErrorUnmarked(t *testing.T) {
     observed := make([]error, 0)
     logger := &capturingLimiterLogger{}
@@ -410,4 +404,38 @@ func TestRateLimiter_AGivenObserverReplacesTheRecordAndLeavesTheErrorUnmarked(t 
     if true == exception.IsAlreadyLogged(reported) {
         t.Fatal("a failure handed to the application's own observer must not be marked as journalled")
     }
+}
+
+func TestRateLimiter_ReportErrorReturnsOnACyclicChain(t *testing.T) {
+    first := &rateLimiterCyclicError{}
+    first.next = &rateLimiterCyclicError{next: first}
+
+    limiter := &RateLimiter{}
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+
+        if nil == limiter.reportError(nil, first) {
+            t.Error("expected the failure back")
+        }
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type rateLimiterCyclicError struct {
+    next error
+}
+
+func (instance *rateLimiterCyclicError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *rateLimiterCyclicError) Unwrap() error {
+    return instance.next
 }

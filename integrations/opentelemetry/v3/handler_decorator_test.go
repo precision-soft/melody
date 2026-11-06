@@ -31,7 +31,6 @@ func TestHandlerDecorator_TracesShortCircuitedRequest(t *testing.T) {
         t.Fatalf("unexpected decorator error: %v", decoratorErr)
     }
 
-    /* the inner handler stands in for the kernel writing a 401 short-circuit before any middleware ran — the exact request shape the middleware seam never observes */
     denied := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         writer.WriteHeader(nethttp.StatusUnauthorized)
         _, _ = writer.Write([]byte(`{"error":"unauthorized"}`))
@@ -67,7 +66,6 @@ func TestHandlerDecorator_InnerSpanParentsToLifecycleSpan(t *testing.T) {
         t.Fatalf("unexpected decorator error: %v", decoratorErr)
     }
 
-    /* the inner handler starts a child span from the request context, standing in for the routed tracing middleware */
     routed := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         _, span := tracer.Start(request.Context(), "GET /hello")
         span.End()
@@ -84,7 +82,6 @@ func TestHandlerDecorator_InnerSpanParentsToLifecycleSpan(t *testing.T) {
         t.Fatalf("expected the lifecycle span plus the routed child span, got %d", len(spans))
     }
 
-    /* Ended() lists the child first (it ends first); the child must parent to the lifecycle span */
     child := spans[0]
     lifecycle := spans[1]
 
@@ -125,7 +122,6 @@ func TestHandlerDecorator_RequiresTracer(t *testing.T) {
     }
 }
 
-/* a middleware wrapper between the recorder and the connection that forwards Unwrap alone */
 type unwrapOnlyResponseWriter struct {
     nethttp.ResponseWriter
 }
@@ -156,7 +152,6 @@ func TestStatusRecordingResponseWriter_FlushReachesThroughAWrapperThatForwardsUn
     }
 }
 
-/* the error the server's own writer answers once the client has gone: the header is already committed, and the flush reports the write that failed */
 type failingFlushResponseWriter struct {
     *httptest.ResponseRecorder
 }
@@ -176,7 +171,6 @@ func TestStatusRecordingResponseWriter_AFailedFlushKeepsTheStatusTheConnectionCa
     }
 }
 
-/* a writer with no flusher behind it is a writer the flush committed nothing on */
 type plainResponseWriter struct {
     header nethttp.Header
 }
@@ -267,7 +261,6 @@ func TestStatusRecordingResponseWriter_AnEarlyHintIsNotRecordedAsTheFinalStatus(
     }
 }
 
-/* a real server, because httptest.ResponseRecorder takes a 1xx as the final status and refuses the body written after it */
 func TestStatusRecordingResponseWriter_AWriteAfterALoneEarlyHintRecordsTheImplicitOk(t *testing.T) {
     recorded := make(chan *statusRecordingResponseWriter, 1)
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
@@ -311,4 +304,28 @@ func TestStatusRecordingResponseWriter_SwitchingProtocolsIsRecordedAsTheFinalSta
     if nethttp.StatusSwitchingProtocols != recorder.observedStatusCode() {
         t.Fatalf("expected %d to be recorded, got %d", nethttp.StatusSwitchingProtocols, recorder.observedStatusCode())
     }
+}
+
+type cyclicControlWriter struct {
+    nethttp.ResponseWriter
+}
+
+func (instance *cyclicControlWriter) FlushError() error {
+    return newCyclicChainError()
+}
+
+func (instance *cyclicControlWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+    return nil, nil, newCyclicChainError()
+}
+
+func TestStatusRecordingResponseWriter_ReturnsOnACyclicChain(t *testing.T) {
+    writer := &statusRecordingResponseWriter{ResponseWriter: &cyclicControlWriter{ResponseWriter: httptest.NewRecorder()}}
+
+    assertReturnsOnACyclicChain(t, func() {
+        writer.Flush()
+
+        if _, _, hijackErr := writer.Hijack(); nil == hijackErr {
+            t.Error("expected the hijack's failure")
+        }
+    })
 }

@@ -1,7 +1,6 @@
 package exception
 
 import (
-    "errors"
     "fmt"
     nethttp "net/http"
     "sync"
@@ -12,7 +11,7 @@ import (
 type HttpException struct {
     statusCode int
     message    string
-    /* stateMutex guards context and alreadyLogged: a memoized failure is shared across request goroutines. */
+    /* stateMutex guards context and alreadyLogged: a memoized failure is shared across request goroutines */
     stateMutex    sync.RWMutex
     context       exceptioncontract.Context
     causeErr      error
@@ -41,7 +40,7 @@ func (instance *HttpException) Unwrap() error {
     return instance.causeErr
 }
 
-/* the accessors answer a nil receiver: Message the empty string, StatusCode zero */
+/* Message answers the empty string on a nil receiver, and StatusCode zero. */
 func (instance *HttpException) Message() string {
     if nil == instance {
         return ""
@@ -80,7 +79,6 @@ func (instance *HttpException) SetContextValue(key string, value any) {
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
-    /* the zero value carries a nil map */
     if nil == instance.context {
         instance.context = make(exceptioncontract.Context)
     }
@@ -129,19 +127,17 @@ func (instance *HttpException) MarkAsLogged() {
 var _ exceptioncontract.ContextProvider = (*HttpException)(nil)
 var _ exceptioncontract.AlreadyLogged = (*HttpException)(nil)
 
-/* IsHttpException answers whether AsHttpException would find a usable exception. */
 func IsHttpException(err error) bool {
     return nil != AsHttpException(err)
 }
 
 func AsHttpException(err error) *HttpException {
-    /* a typed nil at the top is refused like a plain nil; deeper in the chain the nil-receiver Unwrap ends the walk */
     if nil == err || true == isNilInterfaceValue(err) {
         return nil
     }
 
     var httpExceptionInstance *HttpException
-    if true == errors.As(err, &httpExceptionInstance) && nil != httpExceptionInstance {
+    if true == ChainAs(err, &httpExceptionInstance) && nil != httpExceptionInstance {
         return httpExceptionInstance
     }
 
@@ -151,7 +147,6 @@ func AsHttpException(err error) *HttpException {
 func ValidationFailed(validationErrors any) *HttpException {
     httpException := NewHttpException(nethttp.StatusUnprocessableEntity, "validation failed")
 
-    /* the kernel exception listener serves this key to the client */
     httpException.SetContextValue("errors", validationErrors)
 
     return httpException

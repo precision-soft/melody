@@ -2,7 +2,6 @@ package cli
 
 import (
     "context"
-    "errors"
     "fmt"
     "io"
     "os"
@@ -94,7 +93,6 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     writer = io.Discard
                 }
 
-                /* in json mode the command writes one machine-readable document to this stream, so there is no banner; output.Meta carries the command, arguments, start time and duration. The final status is the exit code, since a shutdown failure found after the document was written cannot enter it. */
                 resolvedOption := output.NormalizeOption(
                     output.ParseOptionFromCommand(commandContext),
                 )
@@ -106,10 +104,8 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                 startedAt := time.Now()
                 const logFiller = "======================================"
 
-                /* the flag promises the absence of ansi sequences, and the banner is written to the same stream the command's own output goes to: a --no-color run redirected into a file must not carry escape codes around an output that honoured the flag */
                 noColor := resolvedOption.NoColor
 
-                /* the banner is decoration, which quiet governs: StandardFlags defaults it to true, DebugFlags to false, and a command declaring neither reads false */
                 quiet := resolvedOption.Quiet
 
                 printGreenFullLine := func(writer io.Writer) {
@@ -127,7 +123,7 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                 }
 
                 printGreenStatusLine := func(writer io.Writer, text string) {
-                    /* the text embeds the command's own error, which routinely echoes downstream and client-derived values: escaped here, an embedded carriage return or escape sequence cannot repaint the status line as another verdict, and the no-color branch keeps the promise above — no escape codes reach a redirected file through the data either */
+                    /* the text embeds client-derived values: an embedded carriage return or escape sequence must not repaint the status line */
                     text = internal.EscapeControlCharacters(text)
 
                     if true == noColor {
@@ -147,7 +143,6 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     )
                 }
 
-                /* printGreenVerdictLine is the finish form of printGreenStatusLine: the text on either side of the verdict is escaped as data and the verdict is coloured after, since a sanitiser handed an already coloured line cannot tell the author's escape sequence from the client's bytes. */
                 printGreenVerdictLine := func(writer io.Writer, textBeforeVerdict string, verdict string, failed bool, textAfterVerdict string) {
                     escapedBefore := internal.EscapeControlCharacters(textBeforeVerdict)
                     escapedAfter := internal.EscapeControlCharacters(textAfterVerdict)
@@ -244,7 +239,7 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     printGreenFullLine(writer)
                 }()
 
-                /* a panic in the command leaves the path that assigns commandErr, so the finish banner reads it here; the panic is re-raised unchanged, keeping an *exception.ExitError's code. Nothing is closed on this path: the caller's defer closes the scope, and the recover handler that owns the exit closes the container after resolving its logger. */
+                /* the panic is re-raised unchanged, keeping an *exception.ExitError's code; nothing is closed on this path */
                 defer func() {
                     recoveredValue := recover()
                     if nil == recoveredValue {
@@ -262,12 +257,11 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                     panic(recoveredValue)
                 }()
 
-                /* normalized through the interface: a command returning a concrete typed nil pointer hands over a non-nil interface; the scope's Close result, from the substitutable runtime contract, gets the same reading */
                 runErr := normalizeCliError(copied.Run(runtimeInstance, commandContext))
 
                 closeErrorByName := map[string]error{}
 
-                /* the container is not closed here on either outcome: the recover handler that owns the exit resolves the final record's logger through it and closes it between the record and os.Exit. The scope is this action's to close and report. */
+                /* the container is not closed here: the recover handler that owns the exit closes it between the record and os.Exit */
                 scopeCloseErr := normalizeCliError(runtimeInstance.Scope().Close())
                 if nil != scopeCloseErr {
                     closeErrorByName["scope"] = scopeCloseErr
@@ -276,7 +270,7 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
                 aggregatedErr := aggregateCliErrors(runErr, closeErrorByName)
                 if nil != aggregatedErr {
                     commandErr = aggregatedErr
-                    /* the error line is written whatever quiet says and whatever the format: quiet governs decoration, StandardFlags defaults it to true, and for a failing command this line is its one answer on the terminal, so it goes to the error stream, never into the document on the output stream; the error itself still returns to the exit path */
+                    /* written whatever quiet says and whatever the format, to the error stream, never into the document on the output stream */
                     printRedStatusLine(commandErrorWriter(commandContext), fmt.Sprintf("[error] %s", aggregatedErr.Error()))
                     return aggregatedErr
                 }
@@ -287,7 +281,6 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
     )
 }
 
-/* commandErrorWriter is the stream a failure is reported on: the command's error writer, which the engine defaults to standard error on every command it runs, and standard error itself for one left nil. A failure is never written where the command's document goes. */
 func commandErrorWriter(commandContext *clicontract.CommandContext) io.Writer {
     if false == internal.IsNilInterface(commandContext.ErrWriter) {
         return commandContext.ErrWriter
@@ -296,7 +289,7 @@ func commandErrorWriter(commandContext *clicontract.CommandContext) io.Writer {
     return os.Stderr
 }
 
-/* normalizeCliError reads the error through the interface: a command or a substituted runtime declared with a concrete error type hands back a typed nil in a non-nil interface, which is not a failure. */
+/* a concrete error type hands back a typed nil in a non-nil interface, which is not a failure */
 func normalizeCliError(err error) error {
     if true == internal.IsNilInterface(err) {
         return nil
@@ -361,9 +354,9 @@ func aggregateCliErrors(runErr error, closeErrorByName map[string]error) error {
         runErr,
     )
 
-    /* the exit code is resolved with errors.As, which matches the outermost ExitError in the chain: returning the aggregate unwrapped would hand the caller the command's own exit error instead, and the shutdown failures — carried only here — would never reach the log. A typed-nil link matches too and answers code 0, which NewExitError refuses with a panic, so the match is honoured only for a wrapper that carries one and the aggregate is returned plainly otherwise. */
+    /* the aggregate is wrapped: returned plain, the chain search finds the command's exit error, losing the shutdown failures */
     var exitError *exception.ExitError
-    if true == errors.As(runErr, &exitError) && nil != exitError {
+    if true == exception.ChainAs(runErr, &exitError) && nil != exitError {
         return exception.NewExitError(exitError.ExitCode(), aggregatedErr)
     }
 

@@ -1,7 +1,6 @@
 package container
 
 import (
-    "errors"
     "reflect"
 
     containercontract "github.com/precision-soft/melody/container/contract"
@@ -23,7 +22,6 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
     }
 
     value, getErr := resolver.Get(serviceName)
-    /* a resolver implemented outside this package can report success with a typed-nil error */
     if true == internal.IsNilInterface(getErr) {
         getErr = nil
     }
@@ -31,11 +29,10 @@ func FromResolver[T any](resolver containercontract.Resolver, serviceName string
         var zero T
 
         var melodyErr *exception.Error
-        isMelodyErr := errors.As(getErr, &melodyErr)
+        isMelodyErr := exception.ChainAs(getErr, &melodyErr)
 
-        /* the original error travels out whole, with the service name written into its context in place: a rebuilt copy sheds the log level, the already-logged mark, the capture stack and every wrapper above it */
+        /* the original error travels out whole: a rebuilt copy sheds the log level, the already-logged mark and the capture stack */
         if true == isMelodyErr && nil != melodyErr {
-            /* only where no service is named yet, so a nested failure keeps the name of the service that failed */
             if _, named := melodyErr.Context()["serviceName"]; false == named {
                 melodyErr.SetContextValue("serviceName", serviceName)
             }
@@ -106,7 +103,6 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
     }
 
     value, getByTypeErr := resolver.GetByType(canonicalTargetType)
-    /* a resolver implemented outside this package can report success with a typed-nil error */
     if true == internal.IsNilInterface(getByTypeErr) {
         getByTypeErr = nil
     }
@@ -114,9 +110,9 @@ func FromResolverByType[T any](resolver containercontract.Resolver) (T, error) {
         var zero T
 
         var melodyErr *exception.Error
-        isMelodyErr := errors.As(getByTypeErr, &melodyErr)
+        isMelodyErr := exception.ChainAs(getByTypeErr, &melodyErr)
 
-        /* the failure is dressed the way the name-keyed twin dresses it: the original error travels out whole with the type written into its context in place, and a foreign error is wrapped naming the type — a rebuilt copy would shed the log level, the already-logged mark, the capture stack and every wrapper above it */
+        /* the original error travels out whole: a rebuilt copy sheds the log level, the already-logged mark and the capture stack */
         if true == isMelodyErr && nil != melodyErr {
             melodyErr.SetContextValue("serviceType", canonicalTargetType.String())
 

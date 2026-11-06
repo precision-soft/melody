@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/precision-soft/melody/integrations/bunorm/v2 v2.2.0
-	github.com/precision-soft/melody/v2 v2.13.0
+	github.com/precision-soft/melody/v2 v2.13.3
 	github.com/uptrace/bun v1.2.17
 )
 

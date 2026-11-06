@@ -10,6 +10,22 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v1.19.4] - 2026-11-06 - Build Version Matches the Release
+
+### Fixed
+
+- version: `BuildVersion()` and the command envelope's `meta.version.melody` answer this release, where a build without `-ldflags` answered `v1.19.1` on every release since.
+
+## [v1.19.3] - 2026-11-06 - Bounded Error Chain Search
+
+### Added
+
+- exception: `ChainAs` and `ChainIs`, what `errors.As` and `errors.Is` answer, returning on an error chain whose `Unwrap` reaches itself. A patch release carrying public symbols is a deliberate exception to the back-port rule of `CONTRIBUTING.md`: the two exist strictly to repair the defect under Fixed, on this major and in the integration modules, which cannot reach the framework's internal packages, so that the search is not duplicated in every module.
+
+### Fixed
+
+- exception: an error whose `Unwrap` chain reaches itself no longer holds the goroutine that reads it forever, where `errors.As` and `errors.Is` never return on such a chain: `LogContext`, `IsAlreadyLogged`, `MarkLogged`, `FromError`, `AsHttpException`, `IsDeserializationError` and `LogError` return, a handler's or a session save's cyclic error is answered 500, a body read's 400, a session value's fails the file storage's save and delete with the storage mutex released, a limiter's is recorded as a store failure, a file system's is a miss of the static server and a refusal of the dotenv load, and a provider's and a command's travel out as any other failure. A search reads a link met twice once and stops after 65,536 links. `BuildCauseChain` and `BuildCauseContextChain` render each pointer link once, so a join holding one link twice reads it once.
+
 ### Documentation
 
 - documentation: the container document's scoped-services sample resolves its repository by type, where it called a bunorm helper that does not exist.
@@ -1387,7 +1403,11 @@ Lock-step release — no `v1/` changes this cycle. Tag published to keep the cor
 - `session/` — session management with file-based and in-memory storage backends
 - `validation/` — validation framework with `greaterThan`, `notEmpty`, `notBlank`, `alpha`, `alphanumeric`, `email`, `numeric`, `regex`, `minLength`, `maxLength` constraints
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v1.19.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v1.19.4...HEAD
+
+[v1.19.4]: https://github.com/precision-soft/melody/compare/v1.19.3...v1.19.4
+
+[v1.19.3]: https://github.com/precision-soft/melody/compare/v1.19.2...v1.19.3
 
 [v1.19.2]: https://github.com/precision-soft/melody/compare/v1.19.1...v1.19.2
 

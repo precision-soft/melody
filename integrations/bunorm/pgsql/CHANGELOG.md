@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v1.2.2] - 2026-11-06 - Bounded Error Chain Search
+
+### Fixed
+
+- provider: a post-build hook's error whose `Unwrap` chain reaches itself no longer holds the open that classifies it.
+- pgsql: `IsDuplicateKey` returns on an error whose `Unwrap` chain reaches itself.
+
 ## [v1.2.1] - 2026-10-19 - IPv6 Host Joining, Refused Empty Identity, Typed Duplicate-Key Reading and Backoff Floor
 
 ### Fixed
@@ -147,7 +154,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `connection_config.go` — `pgsql.ConnectionConfig` holding connection details; `SafeContext()` excludes password from logs
 - Builder methods: `Provider.WithPoolConfig()`, `WithTimeoutConfig()`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.2.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.2.2...HEAD
+
+[v1.2.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.2.1...integrations/bunorm/pgsql/v1.2.2
 
 [v1.2.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v1.2.0...integrations/bunorm/pgsql/v1.2.1
 

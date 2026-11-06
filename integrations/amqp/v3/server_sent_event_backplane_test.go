@@ -321,7 +321,6 @@ func TestBackplane_TerminalStopIsReportedThroughTheConfiguredLogger(t *testing.T
         t.Fatalf("dial: %v", dialErr)
     }
 
-    /* a static connection closed under the backplane, with no dialer: the terminal receive-death this report exists for */
     logger := &recordingBackplaneLogger{}
     hub := melodyhttp.NewServerSentEventHub()
 
@@ -343,7 +342,6 @@ func TestBackplane_TerminalStopIsReportedThroughTheConfiguredLogger(t *testing.T
     }
 }
 
-/* recordingBackplaneLogger captures error records so a test can read what the backplane reported. */
 type recordingBackplaneLogger struct {
     mutex    sync.Mutex
     messages []string
@@ -384,7 +382,6 @@ func (instance *recordingBackplaneLogger) sawTerminalStop() bool {
     return false
 }
 
-/* awaitBackplaneSubscribed waits for the listen goroutine to finish its subscribe RPCs, so a wedge set afterwards catches a publish write and not the subscription setup. */
 func awaitBackplaneSubscribed(t *testing.T, backplane *ServerSentEventBackplane) {
     t.Helper()
 
@@ -482,7 +479,6 @@ func TestServerSentEventBackplane_ATimedOutPublishOnAnOwnedConnectionRedialsOnTh
     }
 }
 
-/* the cut is decided and the owned connection let go of, with the channels that ride it, in one critical section, so the next publish and the listen loop redial instead of being handed the cut connection back while the client's shutdown is still under way */
 func TestServerSentEventBackplane_ACutOwnedConnectionIsLetGoBeforeTheAbandonReturns(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     redialed := dialFakeBroker(t)
@@ -639,7 +635,6 @@ func TestServerSentEventBackplane_HubShutdownReturnsWhileABroadcastIsWedged(t *t
     }
 }
 
-/* the socket wedges with nothing in flight, so no publish is there to cut it: Close's own deadline is the only bound */
 func TestServerSentEventBackplane_CloseReturnsWhenTheSocketWedgedWhileIdle(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     dialer := newGatedDialer(t, dsn)
@@ -720,7 +715,6 @@ func TestServerSentEventBackplane_RefusalKeepsTheChannelForATimedOutWriteAndForA
     }
 }
 
-/* the sister of the transport's guard: the Close doc promises that no amqp call runs under instance.mutex, so isClosing and the publish path stay answerable while a channel close is on a blocked socket. */
 func TestServerSentEventBackplane_IsClosingAnswersWhileAChannelCloseIsOnAWedgedSocket(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -755,7 +749,6 @@ func TestServerSentEventBackplane_IsClosingAnswersWhileAChannelCloseIsOnAWedgedS
     }
 }
 
-/* backplaneWatchQueueDeliveries is the watcher for a claim about ORDER rather than count: it consumes the queue it binds, so a test can say which events reached the exchange and in what sequence, which a count cannot. */
 func backplaneWatchQueueDeliveries(t *testing.T, connection *amqp091.Connection, exchange string) <-chan amqp091.Delivery {
     t.Helper()
 
@@ -782,7 +775,6 @@ func backplaneWatchQueueDeliveries(t *testing.T, connection *amqp091.Connection,
     return deliveries
 }
 
-/* a publish half a join could not take is BUSY, and on a hub that fans out at any rate that is the ordinary state: the mutex is taken inside the write goroutine, so broadcasts queue behind one another over a perfectly healthy socket. Teardown must not read that as a wedged write, leave both channels open on a caller-owned connection — with the fields already nil, so nothing in the process can ever close them — and name a write that does not exist. */
 func TestServerSentEventBackplane_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)
@@ -805,7 +797,6 @@ func TestServerSentEventBackplane_CloseClosesTheChannelsWhenNoWriteIsInFlight(t 
     consumeChannel := backplane.consumeChannel
     backplane.mutex.Unlock()
 
-    /* the mutex is held with nothing at all on the socket, which is what a queue of broadcasts produces */
     releaseBackplanePublish := holdPublishMutex(t, &backplane.publishMutex)
 
     closeOutcome := make(chan error, 1)
@@ -828,7 +819,6 @@ func TestServerSentEventBackplane_CloseClosesTheChannelsWhenNoWriteIsInFlight(t 
     }
 }
 
-/* a broadcast that only STOOD IN THE QUEUE says nothing about the socket: it must be told so, and it must not take the whole backplane out of service on its way out. */
 func TestServerSentEventBackplane_ABroadcastQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)
@@ -872,13 +862,11 @@ func TestServerSentEventBackplane_ABroadcastQueuedBehindAnotherIsNotReportedAsAW
         t.Fatalf("a broadcast that never reached the socket marked the whole backplane wedged, so every later broadcast is refused at once")
     }
 
-    /* the channel the turn waited behind is held by the broadcasts ahead of it: a reset here would close it under their writes */
     if publishChannelBefore != publishChannelAfter {
         t.Fatalf("a broadcast that only stood in the queue reset the publish channel the broadcasts ahead of it were writing on")
     }
 }
 
-/* the broadcast a caller was told did not go out must not go out a moment later: the goroutine takes its turn, finds the caller gone, and returns without writing — otherwise an event already counted as a hub failure lands on every other instance. */
 func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)
@@ -907,7 +895,6 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
         t.Fatalf("expected the queued broadcast to be refused")
     }
 
-    /* the goroutine now gets its turn: it must find the caller gone and write nothing. That it wrote nothing is proved by order rather than by waiting: once the goroutine has exited, a fence broadcast is published, and anything the goroutine wrote stands on the same channel before the fence, which the queue watching the exchange delivers in wire order. Its exit is the one event both the correct code and the defect produce, and the runtime's goroutine dump is the only door that publishes it. A fixed sleep proves only that the write has not landed yet, and a fence published after a mutex handshake can go out first, since the woken goroutine is not the one running */
     releaseBackplanePublish()
 
     awaitNoPublishGoroutine(t, "(*ServerSentEventBackplane).publishOnce.func", 3*time.Second)
@@ -916,7 +903,6 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
         t.Fatalf("fence publish: %v", publishErr)
     }
 
-    /* one term for the whole wait, and the closed channel named: a delivery channel the library closes answers a zero delivery at once and forever, and a timer re-armed per iteration would never fire over it */
     fenceTerm := time.After(3 * time.Second)
 
     for {
@@ -941,7 +927,6 @@ func TestServerSentEventBackplane_ABroadcastAbandonedWhileQueuedIsNeverWritten(t
     }
 }
 
-/* the channel closes of a caller-owned connection are bounded by the join timeout, as the transport bounds the same operation over the same kind of socket, and not by the call timeout: a broker that answers the close RPC late, as under a resource alarm it answers a publish late, is not a broker that did not answer, so a close answered in two seconds is not reported. */
 func TestServerSentEventBackplane_CloseWaitsForACallerOwnedChannelCloseBeyondTheCallTimeout(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -969,7 +954,6 @@ func TestServerSentEventBackplane_CloseWaitsForACallerOwnedChannelCloseBeyondThe
     }
 }
 
-/* the sibling of the transport's door, for the same reason: a write that finished in the same instant the budget expired must be answered with its own outcome, not abandoned. */
 func TestServerSentEventBackplane_ResolveExpiredWriteAnswersAWriteThatAlreadyReturned(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     dialer := newGatedDialer(t, dsn)
@@ -1011,7 +995,6 @@ func TestServerSentEventBackplane_ResolveExpiredWriteAnswersAWriteThatAlreadyRet
     }
 }
 
-/* an owned connection whose publish half is merely BUSY still gets its close handshake: the deadline is moved a call timeout ahead unless a write is genuinely in flight, so a clean shutdown behind a queue of broadcasts is not cut off mid-handshake. */
 func TestServerSentEventBackplane_CloseGivesAnOwnedConnectionItsHandshakeWhenNothingIsInFlight(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     dialer := newGatedDialer(t, dsn)
@@ -1043,7 +1026,6 @@ func TestServerSentEventBackplane_CloseGivesAnOwnedConnectionItsHandshakeWhenNot
     }
 }
 
-/* the same close reached with a cancellation and no deadline at all, which is the state a caller produces by asserting its way to CloseWithContext while holding one. The stretch is then zero, and CloseDeadline(now) would cut the closing handshake at a deadline already behind it, answering an i/o timeout over a live connection and naming this backplane for a budget somebody else spent. Read with the transport's sibling test: the two doors carry one mechanism. */
 func TestServerSentEventBackplane_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     dialer := newGatedDialer(t, dsn)
@@ -1076,7 +1058,6 @@ func TestServerSentEventBackplane_CloseWithContextClosesAnOwnedConnectionUnderAC
     }
 }
 
-/* and under a deadline that has already passed, which is what a shared teardown budget produces on its own once an earlier component has spent it. */
 func TestServerSentEventBackplane_CloseWithContextClosesAnOwnedConnectionUnderASpentDeadline(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     dialer := newGatedDialer(t, dsn)
@@ -1101,7 +1082,6 @@ func TestServerSentEventBackplane_CloseWithContextClosesAnOwnedConnectionUnderAS
     }
 }
 
-/* the arm that has to FAIL: a write this close could not join is cut on purpose, and the answer about that cut is still reported even though the budget is gone. Without it the two tests above would be indistinguishable from a close that stopped reporting its connection at all. */
 func TestServerSentEventBackplane_CloseWithContextStillReportsACutWedgedWrite(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     dialer := newGatedDialer(t, dsn)
@@ -1124,7 +1104,6 @@ func TestServerSentEventBackplane_CloseWithContextStillReportsACutWedgedWrite(t 
         t.Fatalf("the gated connection was never recorded; there is no socket to wedge")
     }
 
-    /* a healthy publish FIRST, so the publish channel is open before the socket is wedged: opening it is itself an RPC over the same socket, and wedging ahead of it blocks that RPC instead of the publish this test is about — which left the publish half free and the close with nothing to cut */
     if publishErr := backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "healthy"}); nil != publishErr {
         t.Fatalf("the healthy publish failed, so nothing below measures a wedged one: %v", publishErr)
     }
@@ -1134,7 +1113,6 @@ func TestServerSentEventBackplane_CloseWithContextStillReportsACutWedgedWrite(t 
     publishing := make(chan error, 1)
     go func() { publishing <- backplane.Publish("orders", melodyhttp.ServerSentEvent{Data: "wedged"}) }()
 
-    /* the gate is the backplane's OWN count of writes on the socket, not the socket's count of blocked ones: the connection carries heartbeats of its own, so a blocked write is not necessarily THIS publish, and waiting on the wrong one let the close run with the publish half free and nothing to cut. What the close reads is what this waits for. */
     deadline := time.Now().Add(2 * time.Second)
     for 0 == backplane.writesInFlight.Load() {
         if true == time.Now().After(deadline) {
@@ -1169,7 +1147,6 @@ func TestServerSentEventBackplane_AZeroCallTimeoutIsTheDefaultBudget(t *testing.
     }
 }
 
-/* the backplane's twin of the transport's pin: a close of an owned connection under a caller's deadline returns inside it while the client's own shutdown is stalled behind a wedged publish write, neither the client's close nor a channel close being waited for past the deadline */
 func TestServerSentEventBackplane_CloseWithContextReturnsWithinTheDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
@@ -1257,7 +1234,6 @@ func TestServerSentEventBackplane_ARedialOverAWedgedPublishChannelDoesNotHoldThe
     }
 }
 
-/* the backplane's twin of the transport's pin: a close that returned at once over a cut an earlier abandon began leaves a channel close bounded, so the backplane's close returns inside the caller's deadline while the write is still wedged */
 func TestServerSentEventBackplane_CloseWithContextReturnsWithinTheDeadlineWhenAnEarlierCutHasNotFreedTheWrite(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginUnfreedCut(t, 4*time.Second)
@@ -1294,7 +1270,6 @@ func TestServerSentEventBackplane_CloseWithContextReturnsWithinTheDeadlineWhenAn
     }
 }
 
-/* the backplane's twin of the transport's: a cut whose write did not return lets go of the connection as well, so the close finds nothing to cut or close and names the write left blocked on the connection already cut */
 func TestServerSentEventBackplane_CloseNamesTheWriteLeftBlockedOnAConnectionAnEarlierAbandonCut(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
@@ -1329,7 +1304,6 @@ func TestServerSentEventBackplane_CloseNamesTheWriteLeftBlockedOnAConnectionAnEa
     }
 }
 
-/* the backplane's twin of the transport's late-dial guard: a dial that lands after Close began is closed on a goroutine of its own under one call timeout, so the caller that asked for a connection returns before that budget runs out and the late socket is still closed */
 func TestServerSentEventBackplane_ADialThatLandsAfterCloseBeganIsClosedOffTheCallersPath(t *testing.T) {
     fake := dialFakeBroker(t)
 
@@ -1370,7 +1344,6 @@ func TestServerSentEventBackplane_ADialThatLandsAfterCloseBeganIsClosedOffTheCal
     }
 }
 
-/* a dial that lands after the backplane's context was cancelled is closed by the drain goroutine under one call timeout from its landing, where the client's plain close would join a write the broker never reads */
 func TestServerSentEventBackplane_ADialThatLandsAfterTheCancellationIsClosedWithinOneCallTimeout(t *testing.T) {
     fake := dialFakeBroker(t)
 
@@ -1415,7 +1388,6 @@ func TestServerSentEventBackplane_ADialThatLandsAfterTheCancellationIsClosedWith
     }
 }
 
-/* a backplane built with a dialer and no connection dials for the first time on its first connection: the refusal says so, where it said "reconnect" over a connection that was never held; after a connection was held the same refusal says reconnect, as the transport's does. */
 func TestServerSentEventBackplane_TheFirstDialIsNotAReconnect(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -1441,7 +1413,6 @@ func TestServerSentEventBackplane_TheFirstDialIsNotAReconnect(t *testing.T) {
     }
 }
 
-/* the application's dialer runs on the backplane's own goroutine, where a panic had no handler but the process: it is answered as the dial's failure, with the panic as its cause, as the transport answers it. */
 func TestServerSentEventBackplane_APanickingDialerIsAnsweredAsADialFailure(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -1462,4 +1433,54 @@ func TestServerSentEventBackplane_APanickingDialerIsAnsweredAsADialFailure(t *te
     if cause := errors.Unwrap(dialErr); nil == cause || "amqp sse backplane dialer panicked" != cause.Error() {
         t.Fatalf("expected the dialer's panic as the cause, got %v", cause)
     }
+}
+
+func TestServerSentEventBackplane_PublishReturnsOnACyclicChainFromTheDialer(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    instance := &ServerSentEventBackplane{
+        ctx:    ctx,
+        cancel: cancel,
+        dialer: func() (*amqp091.Connection, error) {
+            return nil, newCyclicChainError()
+        },
+    }
+
+    assertReturnsOnACyclicChain(t, func() {
+        if publishErr := instance.Publish("topic", melodyhttp.ServerSentEvent{}); nil == publishErr {
+            t.Error("expected the dialer's refusal")
+        }
+    })
+}
+
+func TestServerSentEventBackplane_ListenReturnsOnACyclicChainFromTheDialer(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    dialed := make(chan struct{}, 1)
+    instance := &ServerSentEventBackplane{
+        reconnect: resolveReconnectConfig(nil, nil),
+        ctx:       ctx,
+        cancel:    cancel,
+        dialer: func() (*amqp091.Connection, error) {
+            select {
+            case dialed <- struct{}{}:
+            default:
+            }
+
+            return nil, newCyclicChainError()
+        },
+    }
+
+    instance.wait.Add(1)
+
+    assertReturnsOnACyclicChain(t, func() {
+        go func() {
+            <-dialed
+            cancel()
+        }()
+
+        instance.listen()
+    })
 }

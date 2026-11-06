@@ -8,6 +8,7 @@ import (
     "io"
     "strings"
     "testing"
+    "time"
 
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
@@ -29,7 +30,6 @@ func (instance fakeDriver) Open(string) (driver.Conn, error) {
     return nil, errors.New("fake driver never opens")
 }
 
-/* newTestDatabase builds an offline *bun.DB whose schema parsing (table and primary-key metadata) works without a live connection; the dialect logs an undiscoverable version and moves on. */
 func newTestDatabase() *bun.DB {
     return bun.NewDB(sql.OpenDB(fakeConnector{}), mysqldialect.New())
 }
@@ -82,7 +82,6 @@ func TestEntityIdFromModel_DerivesPrimaryKey(t *testing.T) {
         t.Fatalf("single pk: got %q, want 42", got)
     }
 
-    /* A zero primary key is rendered verbatim as "0"; only a nil pointer or a missing key yields "". */
     if got := entityIdFromModel(database, &single{Id: 0, Name: "x"}); "0" != got {
         t.Fatalf("zero pk: got %q, want 0", got)
     }
@@ -135,7 +134,6 @@ type auditedAccount struct {
 
 var auditedAccountColumnList = []string{"id", "name", "email", "balance"}
 
-/* scriptedDatabase answers the statements an audited write issues over a single stored row and records them in order, so a test can assert both what was executed and what the database held. */
 type scriptedDatabase struct {
     row        *auditedAccount
     statements []string
@@ -181,7 +179,6 @@ func (instance *scriptedConnection) BeginTx(context.Context, driver.TxOptions) (
 }
 
 func (instance *scriptedConnection) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
-    /* the dialect probes the server version while bun.NewDB builds; that probe is not part of the audited work */
     if true == strings.Contains(query, "version()") {
         return &scriptedRows{columns: []string{"version"}, values: [][]driver.Value{{"8.0.0"}}}, nil
     }
@@ -279,7 +276,6 @@ func newScriptedTracker(storedRow *auditedAccount, options ...EntityOptions) (*T
     return NewTracker(database, NewRecorderWithStorage(storage, registry)), scripted, storage
 }
 
-/* the default: the caller holds the primary key and nothing else, so the delete claims nothing about the fields it never read — and charges the working database no read to write an audit row */
 func TestTracker_DeleteClaimsNothingItDidNotRead(t *testing.T) {
     tracker, scripted, storage := newScriptedTracker(&auditedAccount{
         Id:      42,
@@ -320,7 +316,6 @@ func TestTracker_DeleteClaimsNothingItDidNotRead(t *testing.T) {
     }
 }
 
-/* a delete that matched no row removed nothing, so the trail must not carry a deletion that never happened */
 func TestTracker_DeleteRecordsNothingWhenNoRowMatched(t *testing.T) {
     tracker, _, storage := newScriptedTracker(nil)
 
@@ -333,7 +328,6 @@ func TestTracker_DeleteRecordsNothingWhenNoRowMatched(t *testing.T) {
     }
 }
 
-/* the opt-in: an entity whose deleted contents must be recoverable pays a select and a row lock for them */
 func TestTracker_DeleteCapturesTheStoredRowWhenTheEntityOptsIn(t *testing.T) {
     tracker, scripted, storage := newScriptedTracker(
         &auditedAccount{Id: 42, Name: "real name", Email: "real@example.com", Balance: 9999},
@@ -363,7 +357,6 @@ func TestTracker_DeleteCapturesTheStoredRowWhenTheEntityOptsIn(t *testing.T) {
         t.Fatalf("a caller-written before-image must not reach the trail: %s", entry.Changes)
     }
 
-    /* the load runs on a clone, so the caller's own model is left as it was passed in */
     if "FABRICATED" != model.Name {
         t.Fatalf("the caller model must not be overwritten by the load, got %q", model.Name)
     }
@@ -441,7 +434,6 @@ func TestTracker_WrapsTheCommitMarginWithTheEntity(t *testing.T) {
     }
 }
 
-/* the closure's own failure must travel unchanged: wrapping it too would break every errors.Is a caller performs on the named inner errors */
 func TestTracker_LeavesTheUnitOfWorkErrorUnwrapped(t *testing.T) {
     scripted := &scriptedDatabase{}
     database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
@@ -476,7 +468,6 @@ func TestEntityIdFromModel_EscapesTheCompositeJoin(t *testing.T) {
     }
 }
 
-/* a single part cannot make the join ambiguous, so a single-column key carrying ":" or "\" is not escaped and keeps joining the trail recorded before the escaping */
 func TestEntityIdFromModel_ASingleColumnKeyCarryingAColonIsNotEscaped(t *testing.T) {
     database := newTestDatabase()
 
@@ -495,7 +486,6 @@ func TestEntityIdFromModel_ASingleColumnKeyCarryingAColonIsNotEscaped(t *testing
     }
 }
 
-/* nonComparableStorageError is an error of a type == cannot compare: comparing two interface values holding it panics */
 type nonComparableStorageError struct {
     fields []string
 }
@@ -504,7 +494,6 @@ func (instance nonComparableStorageError) Error() string {
     return "storage refused " + strings.Join(instance.fields, ",")
 }
 
-/* a storage answering an error of a non-comparable type has its failure reported, not turned into a panic inside the transaction boundary */
 func TestTracker_AStorageErrorOfANonComparableTypeIsReportedNotPanicked(t *testing.T) {
     scripted := &scriptedDatabase{}
     database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
@@ -521,5 +510,37 @@ func TestTracker_AStorageErrorOfANonComparableTypeIsReportedNotPanicked(t *testi
     var storageErr nonComparableStorageError
     if false == errors.As(insertErr, &storageErr) {
         t.Fatalf("expected the storage's failure reachable, got: %v", insertErr)
+    }
+}
+
+type nonComparableCyclicStorageError struct {
+    parts []string
+}
+
+func (instance nonComparableCyclicStorageError) Error() string {
+    return "non comparable cyclic storage failure"
+}
+
+func (instance nonComparableCyclicStorageError) Unwrap() error {
+    return instance
+}
+
+func TestTracker_AStorageErrorOnACyclicChainIsReported(t *testing.T) {
+    scripted := &scriptedDatabase{}
+    database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
+    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{failWith: nonComparableCyclicStorageError{parts: []string{"storage"}}}, nil))
+
+    insertReturned := make(chan error, 1)
+    go func() {
+        insertReturned <- tracker.Insert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1})
+    }()
+
+    select {
+    case insertErr := <-insertReturned:
+        if nil == insertErr {
+            t.Fatal("expected the storage's failure")
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the insert to return on an error chain that reaches itself")
     }
 }

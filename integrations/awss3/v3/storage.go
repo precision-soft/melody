@@ -4,7 +4,6 @@ import (
     "bufio"
     "bytes"
     "context"
-    "errors"
     "io"
     "path"
     "strings"
@@ -18,7 +17,7 @@ import (
     storagecontract "github.com/precision-soft/melody/v3/storage/contract"
 )
 
-/* normalizes a key the same way LocalStorage does (backslash to slash, "." and empty segments folded, the leading slash stripped) so a key both backends accept addresses the same object on both; LocalStorage alone also refuses a key of its reserved .melody-storage- temp namespace, which an object store keeps no temp objects in. A ".." segment is refused by name, as LocalStorage refuses it: folded, "tenant-b/../tenant-a/secret.txt" addressed the object of "tenant-a/secret.txt", crossing an application that isolates its callers by key prefix, and a presigned URL must never carry a segment the client collapses into a different signed path. */
+/* a ".." segment is refused, not folded: folding would cross an application that isolates its callers by key prefix */
 func normalizeObjectKey(key string) (string, error) {
     normalized := strings.ReplaceAll(key, "\\", "/")
 
@@ -55,7 +54,6 @@ func NewStorage(client *minio.Client, bucket string) *Storage {
 type Storage struct {
     client *minio.Client
     bucket string
-    /* plaintextEndpointWarning is written once at the first use of a door, nil over an https or a loopback endpoint */
     plaintextEndpointWarning *plaintextEndpointWarning
 }
 
@@ -73,13 +71,12 @@ func (instance *Storage) Put(
         return keyErr
     }
 
-    /* an s3 put replaces the key atomically, so a body longer than its declared size must never reach the end of its upload: minio would store it truncated to the declared size and report success, and on a bucket without versioning nothing brings the replaced object back. Neither the check nor the body is ever held in memory beyond putSpoolLimit. */
+    /* a body longer than its declared size must never finish uploading: minio would store it truncated and report success */
     body, streaming, bodyErr := validatedPutBody(runtimeInstance.Context(), key, reader, size)
     if nil != bodyErr {
         return bodyErr
     }
 
-    /* minio's single-shot putObject uploads an io.ReaderAt and io.Seeker body through ReadAt, so the body is handed over as an io.LimitReader, which takes the sequential path and consumes exactly size bytes; a negative size means unknown length and is streamed whole */
     _, putErr := instance.client.PutObject(
         runtimeInstance.Context(),
         instance.bucket,
@@ -91,7 +88,6 @@ func (instance *Storage) Put(
     if nil != putErr {
         instance.abortOrphanedMultipartUpload(runtimeInstance.Context(), normalizedKey, size)
 
-        /* the body cut the upload off itself: report the size mismatch the caller can act on, not the transport failure it surfaced as */
         if nil != streaming && true == streaming.rejected.Load() {
             return declaredSizeMismatchError(key, size)
         }
@@ -102,10 +98,9 @@ func (instance *Storage) Put(
     return nil
 }
 
-/* multipartAbortTimeout bounds the detached abort. The abort is a single DELETE preceded by one list, so a bucket that is answering at all finishes it in milliseconds; the window only has to be long enough to survive one slow round trip, and short enough that an unresponsive bucket cannot hold the caller's goroutine after the request it belonged to is already gone. */
 const multipartAbortTimeout = 10 * time.Second
 
-/* abortOrphanedMultipartUpload removes the multipart upload a failed Put leaves behind when the request context killed it: minio aborts on that same context, already cancelled, so the abort runs on a detached context under multipartAbortTimeout. Only a multipart body can leave anything behind, and a live request context needs nothing. The abort is addressed by key, since minio never hands back the upload id, so a concurrent upload of the same key is aborted too; a failed abort is not reported. */
+/* the abort runs on a detached context, since minio aborts on the request context, already cancelled */
 func (instance *Storage) abortOrphanedMultipartUpload(ctx context.Context, normalizedKey string, size int64) {
     if nil == ctx.Err() {
         return
@@ -121,10 +116,9 @@ func (instance *Storage) abortOrphanedMultipartUpload(ctx context.Context, norma
     _ = instance.client.RemoveIncompleteUpload(abortContext, instance.bucket, normalizedKey)
 }
 
-/* putSpoolLimit bounds what a Put may hold in memory, and is minio's default part size: a body at or below it goes up as one request and is spooled and sized in full first, while a larger body streams multipart and an over-read cuts the upload off for minio to abort. */
+/* putSpoolLimit is minio's default part size: a body at or below it goes up as one request, a larger one streams multipart */
 const putSpoolLimit = 16 * 1024 * 1024
 
-/* validatedPutBody prepares the body handed to minio so a declared size shorter than the body never leaves a truncated object at the key. A seekable body is sized in place and streamed; one that cannot seek is wrapped in a reader that withholds the last declared byte once it finds more behind it, drained first up to putSpoolLimit. A negative size is streamed unvalidated, and a body shorter than declared is left to minio, which refuses it. */
 func validatedPutBody(ctx context.Context, key string, reader io.Reader, size int64) (io.Reader, *sizeCheckedReader, error) {
     if 0 > size {
         return reader, nil, nil
@@ -164,10 +158,8 @@ func validatedPutBody(ctx context.Context, key string, reader io.Reader, size in
     return bytes.NewReader(spooled.Bytes()), nil, nil
 }
 
-/* sizeCheckLookahead is the smallest buffer bufio accepts and all the lookahead a size check needs: one byte past the declared size. A read larger than that buffer goes straight into the caller's buffer, so a streaming body is never copied through it. */
 const sizeCheckLookahead = 16
 
-/* maximumEmptyBodyRead bounds consecutive (0, nil) reads from a body. Such a read is legal and only means nothing happened, but a reader that returns it forever would otherwise spin a core with no bound and no deadline, so the body is declared stalled instead. */
 const maximumEmptyBodyRead = 100
 
 func newSizeCheckedReader(ctx context.Context, key string, source io.Reader, size int64) *sizeCheckedReader {
@@ -179,7 +171,7 @@ func newSizeCheckedReader(ctx context.Context, key string, source io.Reader, siz
     }
 }
 
-/* sizeCheckedReader yields exactly the declared number of bytes and stops one byte short the moment the body holds more, so the upload is short of its announced length and the bucket commits nothing at the key. Every read is bounded in size, and the context is honoured between reads; a source whose Read blocks is ended only by its own closer, so hand it a body a timeout bounds, as the server's read timeout bounds an http.Request.Body — closing an arbitrary io.Reader is not the storage's to do. */
+/* a source whose Read blocks is ended only by its own closer: hand it a body a timeout bounds */
 type sizeCheckedReader struct {
     key        string
     size       int64
@@ -230,7 +222,7 @@ func (instance *sizeCheckedReader) Read(buffer []byte) (int, error) {
     return 0, nil
 }
 
-/* guardLastByte withholds the final declared byte until the body is known to end there. Withholding it IS the atomicity mechanism: an over-read leaves the upload short of the content length it announced, so a single-shot put is refused by the bucket and a multipart upload is aborted, and nothing ever appears at the key. It reads like an off-by-one and is not one. A peek that comes up empty is the body ending early, which minio refuses on its own. */
+/* withholding the final declared byte is the atomicity mechanism: it reads like an off-by-one and is not one */
 func (instance *sizeCheckedReader) guardLastByte() error {
     peeked, peekErr := instance.source.Peek(2)
     if 1 < len(peeked) {
@@ -244,14 +236,14 @@ func (instance *sizeCheckedReader) guardLastByte() error {
     return nil
 }
 
-/* endOfBody reports the body's end, or the size mismatch when it still yields data past the declared size — the state a zero-sized declaration lands in immediately. A probe that fails with anything but a clean end is surfaced rather than folded into io.EOF: reporting EOF there would fabricate an exact-match verdict for a body whose length past the boundary is unknown, which is the one question this reader exists to answer. */
+/* a probe that fails with anything but a clean end is surfaced: io.EOF there would fabricate an exact-match verdict */
 func (instance *sizeCheckedReader) endOfBody() error {
     peeked, peekErr := instance.source.Peek(1)
     if 0 < len(peeked) {
         return instance.reject()
     }
 
-    if nil != peekErr && false == errors.Is(peekErr, io.EOF) {
+    if nil != peekErr && false == exception.ChainIs(peekErr, io.EOF) {
         return peekErr
     }
 
@@ -264,7 +256,6 @@ func (instance *sizeCheckedReader) reject() error {
     return declaredSizeMismatchError(instance.key, instance.size)
 }
 
-/* contextBoundReader stops feeding a body once the runtime context is done, so a client that stalls mid-upload cannot pin the spool or the upload past the request it belongs to. */
 type contextBoundReader struct {
     ctx    context.Context
     source io.Reader
@@ -278,7 +269,6 @@ func (instance *contextBoundReader) Read(buffer []byte) (int, error) {
     return instance.source.Read(buffer)
 }
 
-/* seekableRemainingLength measures the rest of a seekable body without reading it: capture the offset, probe the end, restore the offset. A seek that fails leaves the offset untouched, so a reader that only pretends to seek reports no length and the caller falls back to checking the size as the body is read; a failed restore is fatal instead, because the body would otherwise be uploaded from the wrong offset. */
 func seekableRemainingLength(seeker io.Seeker) (int64, bool, error) {
     current, currentErr := seeker.Seek(0, io.SeekCurrent)
     if nil != currentErr {
@@ -309,7 +299,7 @@ func declaredSizeMismatchError(key string, size int64) error {
     )
 }
 
-/* boundedPutReader wraps the body handed to minio in an io.LimitReader capped at the declared size. The wrapper is neither an io.ReaderAt nor an io.Seeker, so it defeats minio's single-shot SectionReader/ReadAt optimization and forces the sequential path, which consumes the body one part buffer at a time and lets a size-checked body cut the upload off mid-flight. The cap also bounds what minio can store at exactly `size`. A negative size means "unknown length" and is streamed whole with no cap. */
+/* the wrapper must be neither io.ReaderAt nor io.Seeker: that forces minio's sequential path, which a size check can cut */
 func boundedPutReader(reader io.Reader, size int64) io.Reader {
     if 0 <= size {
         return io.LimitReader(reader, size)

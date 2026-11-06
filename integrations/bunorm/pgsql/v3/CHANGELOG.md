@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.3.1] - 2026-11-06 - Bounded Error Chain Search
+
+### Fixed
+
+- provider: a post-build hook's error whose `Unwrap` chain reaches itself no longer holds the open that classifies it.
+- pgsql: `IsDuplicateKey` returns on an error whose `Unwrap` chain reaches itself.
+
 ## [v3.3.0] - 2026-10-19 - Named Driver Deadlines, Unlimited Bounds, Context-Aware Opens, Routed Diagnostics and Typed Duplicate-Key Reading
 
 ### Added
@@ -121,7 +128,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code duplicated into `integrations/bunorm/pgsql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.3.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.3.1...HEAD
+
+[v3.3.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.3.0...integrations/bunorm/pgsql/v3.3.1
 
 [v3.3.0]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.2.3...integrations/bunorm/pgsql/v3.3.0
 

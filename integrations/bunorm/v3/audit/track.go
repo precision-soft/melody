@@ -2,7 +2,6 @@ package audit
 
 import (
     "context"
-    "errors"
     "fmt"
     "reflect"
     "strings"
@@ -34,12 +33,11 @@ func (instance *Tracker) Insert(ctx context.Context, entity string, entityId str
             return exception.NewError("audited insert failed", map[string]any{"entity": entity}, insertErr)
         }
 
-        /* an autoincrement key is known only after the insert, so the entry's entity_id is derived from the populated model */
         return instance.recorder.RecordInsert(withTransactionForDatabase(ctx, tx, instance.database), entity, instance.resolveEntityId(entityId, model), model)
     })
 }
 
-/* runInTx is every Tracker operation's transaction boundary. It refuses a context carrying a caller-made WithDatabase binding, since a second transaction on the same pool deadlocks against the caller's own, and it wraps bun's raw BeginTx and Commit failures so they name the entity and the operation too. */
+/* refuses a caller-made WithDatabase binding: a second transaction on the same pool deadlocks against the caller's own */
 func (instance *Tracker) runInTx(ctx context.Context, entity string, operation string, unitOfWork func(ctx context.Context, tx bun.Tx) error) error {
     if bound, isBound := ctx.Value(databaseContextKey{}).(*boundDatabase); true == isBound && nil != bound && nil == bound.origin && nil != bound.handle {
         return exception.NewError(
@@ -61,8 +59,8 @@ func (instance *Tracker) runInTx(ctx context.Context, entity string, operation s
         return nil
     }
 
-    /* the closure's own failure is already named and travels unchanged; only an error the closure did not produce is one of the two margins. errors.Is, not ==: a storage error of a non-comparable type, a struct carrying a slice, makes == panic */
-    if nil != unitErr && true == errors.Is(txErr, unitErr) {
+    /* a search, not ==: a storage error of a non-comparable type, a struct carrying a slice, makes == panic */
+    if nil != unitErr && true == exception.ChainIs(txErr, unitErr) {
         return txErr
     }
 
@@ -88,7 +86,7 @@ func (instance *Tracker) Update(ctx context.Context, entity string, entityId str
     })
 }
 
-/* Delete records the identifier, the actor and the time of a delete, never the passed model's other fields, which the caller usually leaves zero. An entity whose deleted contents must be recoverable opts into CaptureDeleteBeforeImage. */
+/* Delete records the identifier, the actor and the time, never the model's other fields, unless CaptureDeleteBeforeImage. */
 func (instance *Tracker) Delete(ctx context.Context, entity string, entityId string, model any) error {
     return instance.runInTx(ctx, entity, OperationDelete, func(ctx context.Context, tx bun.Tx) error {
         var before any
@@ -111,7 +109,7 @@ func (instance *Tracker) Delete(ctx context.Context, entity string, entityId str
             return exception.NewError("audited delete failed", map[string]any{"entity": entity}, deleteErr)
         }
 
-        /* a delete that matched no row removed nothing, so recording it would put a deletion that never happened in the trail; a driver that cannot report the count is trusted rather than second-guessed */
+        /* a delete that matched no row is not recorded; a driver that cannot report the count is trusted */
         if affected, affectedErr := result.RowsAffected(); nil == affectedErr && 0 == affected {
             return nil
         }
@@ -120,7 +118,6 @@ func (instance *Tracker) Delete(ctx context.Context, entity string, entityId str
     })
 }
 
-/* resolveEntityId keeps a caller-supplied id, or derives it from the model's primary key when none was given (the common case for autoincrement keys, unknown before the insert). */
 func (instance *Tracker) resolveEntityId(entityId string, model any) string {
     if "" != entityId {
         return entityId
@@ -129,7 +126,6 @@ func (instance *Tracker) resolveEntityId(entityId string, model any) string {
     return entityIdFromModel(instance.database, model)
 }
 
-/* entityIdFromModel reads the bun primary-key value(s) off a model via its table schema; a composite key is joined with ":". Returns "" when the model is not a struct pointer, has no primary key, or a primary-key field is reached through a nil pointer. */
 func entityIdFromModel(database *bun.DB, model any) string {
     value := reflect.ValueOf(model)
     if reflect.Pointer != value.Kind() || true == value.IsNil() {
@@ -165,7 +161,7 @@ func entityIdFromModel(database *bun.DB, model any) string {
         }
 
         part := fmt.Sprintf("%v", fieldValue.Interface())
-        /* a single part cannot make the join ambiguous, so a single-column key is never escaped and a key carrying ":" or "\" keeps joining the trail recorded before the escaping */
+        /* a single-column key is never escaped, so a key carrying ":" or "\" keeps joining the existing trail */
         if 1 < len(table.PKs) {
             part = escapeEntityIdPart(part)
         }
@@ -176,7 +172,7 @@ func entityIdFromModel(database *bun.DB, model any) string {
     return strings.Join(parts, ":")
 }
 
-/* escapeEntityIdPart keeps the ":" join of a composite key unambiguous, so ("a:b","c") and ("a","b:c") derive distinct entity ids; a part carrying neither ":" nor "\" renders unchanged, so existing trails keep joining, and a single-column key is never escaped. */
+/* a part carrying neither ":" nor "\" renders unchanged, so existing trails keep joining */
 func escapeEntityIdPart(part string) string {
     part = strings.ReplaceAll(part, `\`, `\\`)
 

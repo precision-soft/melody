@@ -21,7 +21,6 @@ type commandOutput struct {
     arguments []string
     option    output.Option
 
-    /* under --format=json every print records instead of writing, and finish renders the one machine-readable document */
     messages   []string
     warnings   []string
     database   *databaseIdentity
@@ -29,24 +28,20 @@ type commandOutput struct {
     migrations map[string][]string
     files      []string
 
-    /* lostReportJournal is set by a command whose result is not its report, db:create, whose result is the file it wrote: finish records a report the writer lost there instead of failing the run, since a re-run would create a second migration. Every other command keeps the refusal. */
+    /* set by db:create, whose result is the file it wrote: a re-run would create a second migration */
     lostReportJournal loggingcontract.Logger
 
-    /* resultPath is where that command's result went — the migration file — named in the warning beside the loss, since a cut document on stdout is the one place the operator cannot read it from */
     resultPath string
 }
 
-/* resultWrittenTo names the file a command whose result is elsewhere than its report has written, so the warning of a lost report tells the operator where to look. */
 func (instance *commandOutput) resultWrittenTo(path string) {
     instance.resultPath = path
 }
 
-/* reportLostWritesTo tells finish that the command's result is elsewhere than its report, and where a report the writer lost is recorded instead of failing the run. */
 func (instance *commandOutput) reportLostWritesTo(journal loggingcontract.Logger) {
     instance.lostReportJournal = journal
 }
 
-/* lostReport answers what a report the writer lost is worth: the run's failure for a command whose report is its result, and a warning in the journal — with nil as the run's answer — for one that told finish its result is elsewhere. */
 func (instance *commandOutput) lostReport(command string, lostWrite error) error {
     lost := exception.NewError("the report could not be written in full", map[string]any{"command": command}, lostWrite)
 
@@ -63,7 +58,6 @@ func (instance *commandOutput) lostReport(command string, lostWrite error) error
     return nil
 }
 
-/* newCommandOutput takes the command's positional arguments beside its writer and flags, since the machine document carries them. */
 func newCommandOutput(writer io.Writer, arguments []string, option output.Option) *commandOutput {
     return &commandOutput{
         writer:    &errorTrackingWriter{writer: writer},
@@ -72,7 +66,6 @@ func newCommandOutput(writer io.Writer, arguments []string, option output.Option
     }
 }
 
-/* errorTrackingWriter remembers the first write failure and swallows the rest, so finish can refuse a report cut short by a full disk or a failing writer instead of exiting zero. It is shared by the per-query printer and, during the run, the process-wide fallback, so a lock keeps the remembered failure one value. */
 type errorTrackingWriter struct {
     writer   io.Writer
     mutex    sync.Mutex
@@ -95,7 +88,6 @@ func (instance *errorTrackingWriter) Write(payload []byte) (int, error) {
     return len(payload), nil
 }
 
-/* lostWrite answers the first write failure the writer remembered, under the same lock the writes take, so finish reads a settled value rather than one a late query line is still writing */
 func (instance *errorTrackingWriter) lostWrite() error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -103,7 +95,6 @@ func (instance *errorTrackingWriter) lostWrite() error {
     return instance.firstErr
 }
 
-/* runnerOptionForCommand derives the per-query printer posture from the command's parsed flags: the command's writer and colour choice in text mode, a discarded writer under json — the document is the only byte the command may emit there. */
 func runnerOptionForCommand(writer io.Writer, option output.Option) RunnerOption {
     if true == output.IsJsonFormat(option.Format) {
         return RunnerOption{Writer: io.Discard, NoColor: true}
@@ -116,7 +107,6 @@ func (instance *commandOutput) isJson() bool {
     return output.IsJsonFormat(instance.option.Format)
 }
 
-/* wantsDetail decides whether the detail blocks are collected, apart from --verbose: verbosity shapes the text, while the json document is the machine contract and always carries them. The cost is one query per json run, the database identity block. */
 func (instance *commandOutput) wantsDetail() bool {
     if true == instance.isJson() {
         return true
@@ -125,17 +115,14 @@ func (instance *commandOutput) wantsDetail() bool {
     return instance.option.Verbose
 }
 
-/* finishRun renders the command's document from the outcome the run had, a panic included, and is the door every command of this family defers to, so a run that died is never rendered as a success. recovered is passed in because recover answers only when called directly by the deferred function; the panic is re-raised unchanged once the document says what happened. */
 func (instance *commandOutput) finishRun(commandName string, startedAt time.Time, runErr error, recovered any) error {
     if nil == recovered {
         return instance.finish(commandName, startedAt, runErr)
     }
 
-    /* a run that had already failed keeps its own failure as the verdict: the panic came after it, and the reason the command failed is the one the operator needs */
     if nil == runErr {
         runErr = exception.NewError(
             commandName+" panicked",
-            /* the recovered value travels beside its type, since a panic that is not an error has no cause to carry */
             map[string]any{
                 "command":        commandName,
                 "recoveredType":  fmt.Sprintf("%T", recovered),
@@ -150,7 +137,6 @@ func (instance *commandOutput) finishRun(commandName string, startedAt time.Time
     panic(recovered)
 }
 
-/* finish is the command's one exit door: under --format=json it renders the document, the failure included, and in every mode it answers the command's error. The command's own failure stays the verdict; a lost report becomes one only when the command succeeded and its report is its result, and a command that called reportLostWritesTo has the loss journaled and its run answered nil. */
 func (instance *commandOutput) finish(command string, startedAt time.Time, runErr error) error {
     if false == instance.isJson() {
         if nil != runErr {
@@ -172,7 +158,6 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
         data["messages"] = instance.messages
     }
     if nil != instance.database {
-        /* the absent database is json null, so a consumer never confuses it with a database named literally <null> */
         currentDatabaseValue := (any)(nil)
         if nil != instance.database.CurrentDatabase {
             currentDatabaseValue = *instance.database.CurrentDatabase
@@ -210,7 +195,7 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
         )
     }
 
-    /* the document renders through the tracking writer too, which swallows the write it lost; the renderer's own answer is read first and the remembered write failure second, so a json report cut short is refused the way the text report is */
+    /* the tracking writer swallows the write it lost: read the renderer's answer first, the remembered write failure second */
     renderErr := output.Render(instance.writer, envelope, instance.option)
     if lostWrite := instance.writer.lostWrite(); nil == renderErr && nil != lostWrite {
         renderErr = instance.lostReport(command, lostWrite)
@@ -223,13 +208,13 @@ func (instance *commandOutput) finish(command string, startedAt time.Time, runEr
     return renderErr
 }
 
-/* errorDetailsOf and errorCauseOf fill the envelope's details and cause from what the error carries, its context and its cause chain. The details object is empty rather than null when the error carries no context, so the field keeps its json type. */
+/* the details object is empty rather than null when the error carries no context, so the field keeps its json type */
 func errorDetailsOf(runErr error) map[string]any {
     details := map[string]any{}
 
     var provider exceptioncontract.ContextProvider
-    /* the As target is read through the typed-nil door: bun's migrator wraps a migration error with %w after a plain nil test, so a typed-nil link can satisfy As and would panic in Context(), unwinding finish before the document is written */
-    if true == errors.As(runErr, &provider) && false == isNilInterface(provider) {
+    /* bun wraps a migration error with %w after a plain nil test, so a typed-nil link can satisfy As and panic in Context() */
+    if true == exception.ChainAs(runErr, &provider) && false == isNilInterface(provider) {
         for key, value := range provider.Context() {
             details[key] = value
         }
@@ -238,7 +223,6 @@ func errorDetailsOf(runErr error) map[string]any {
     return details
 }
 
-/* errorCauseOf answers the first link under the failure with the whole chain beneath it, and nothing when the failure has no cause. */
 func errorCauseOf(runErr error) *output.ErrorCause {
     causeChain := exception.BuildCauseChain(errors.Unwrap(runErr), 8)
     if 0 == len(causeChain) {
@@ -248,7 +232,7 @@ func errorCauseOf(runErr error) *output.ErrorCause {
     return output.NewErrorCause(causeChain[0], map[string]any{"chain": causeChain})
 }
 
-/* isNilInterface answers whether the interface value is nil outright or holds a nil pointer, map, slice, channel or function: a typed nil passes a plain nil comparison and then panics on first use, far from the wiring mistake that produced it. Duplicated from the framework's internal package, which a separate module cannot import. */
+/* duplicated from the framework's internal package, which a separate module cannot import */
 func isNilInterface(value any) bool {
     if nil == value {
         return true
@@ -264,7 +248,6 @@ func isNilInterface(value any) bool {
     }
 }
 
-/* pluralizeMigrations renders the applied count the way a log line reads it, so a single migration does not report "1 migrations" */
 func pluralizeMigrations(count int) string {
     if 1 == count {
         return "1 migration"
@@ -273,7 +256,6 @@ func pluralizeMigrations(count int) string {
     return strconv.Itoa(count) + " migrations"
 }
 
-/* printTextSuccess writes the line a person reads and leaves the machine document untouched: under json the same run already carries the applied count, the group and the migration names as structured fields, so a prose duplicate would be a second and weaker spelling of what the consumer already has. */
 func (instance *commandOutput) printTextSuccess(message string) {
     if true == instance.isJson() {
         return
@@ -282,7 +264,7 @@ func (instance *commandOutput) printTextSuccess(message string) {
     instance.printSuccess(message)
 }
 
-/* every text door of the output escapes what it did not write itself, the warning included, while the json branch hands the value to the document, whose printer escapes the C1 block */
+/* every text door escapes what it did not write itself; the json branch relies on the printer escaping the C1 block */
 func (instance *commandOutput) printSuccess(message string) {
     if true == instance.isJson() {
         instance.messages = append(instance.messages, message)
@@ -320,14 +302,14 @@ func (instance *commandOutput) printError(err error) {
         return
     }
 
-    /* under json the side-report joins the document as a warning: the main failure travels through finish, and a raw text line would make the one document unparseable from that byte on */
+    /* under json the side-report joins the document as a warning: a raw text line would make the document unparseable */
     if true == instance.isJson() {
         instance.warnings = append(instance.warnings, err.Error())
 
         return
     }
 
-    /* the message came off the wire, so its control characters are escaped before the terminal sees them; the json branch above hands it to the document, whose printer escapes the C1 block the encoder leaves raw and writes a byte that is not valid UTF-8 as U+FFFD, the encoder's documented answer */
+    /* the message came off the wire, so its control characters are escaped before the terminal sees them */
     escapedMessage := escapeControlCharacters(err.Error(), false)
 
     if false == instance.option.NoColor {
@@ -349,7 +331,7 @@ func (instance *commandOutput) printDatabaseBlock(identity *databaseIdentity) {
         currentDatabaseString = *identity.CurrentDatabase
     }
 
-    /* every value here is the server's own answer, so control characters are escaped BEFORE the cell is truncated and padded — the alignment must count the escaped spelling, not the raw bytes it replaces */
+    /* control characters are escaped before the cell is truncated and padded: the alignment counts the escaped spelling */
     _, _ = fmt.Fprintln(instance.writer, "DATABASE")
     _, _ = fmt.Fprintln(instance.writer, "| key      | value              |")
     _, _ = fmt.Fprintln(instance.writer, "| -------- | ------------------ |")
@@ -379,7 +361,6 @@ func (instance *commandOutput) printDetailsBlock(fields map[string]string) {
     }
 }
 
-/* printMigrationsBlock keys the json document apart from the display title: the key is the contract and the title is rendering, so a heading renamed for readability breaks no consumer. */
 func (instance *commandOutput) printMigrationsBlock(key string, title string, names []string) {
     if 0 == len(names) {
         return
@@ -427,7 +408,6 @@ func (instance *commandOutput) newline() {
     _, _ = fmt.Fprintln(instance.writer)
 }
 
-/* truncateString bounds the cell to maxLen runes, not bytes: the format widths in the blocks above pad by rune count, so a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune. A budget with no room for the ellipsis answers the clipped runes alone rather than slicing negative. */
 func truncateString(s string, maxLen int) string {
     if 0 >= maxLen {
         return ""

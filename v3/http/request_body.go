@@ -2,7 +2,6 @@ package http
 
 import (
     "encoding/json"
-    "errors"
     "io"
     "math"
     nethttp "net/http"
@@ -19,7 +18,6 @@ func (instance *Request) BindJson(target any) error {
     return bindJsonBody(instance, target)
 }
 
-/* bindJsonBody is the json-reading half Request.BindJson and JsonHandler share: the configured limit with its 413, the decoder's diagnosis as the refusal's cause, and the empty-body refusal. */
 func bindJsonBody(instance httpcontract.Request, target any) error {
     if nil == target {
         return exception.NewError("bind target is nil", map[string]any{}, nil)
@@ -31,7 +29,7 @@ func bindJsonBody(instance httpcontract.Request, target any) error {
 
     maxBytes := maxRequestBodyBytes(instance)
 
-    /* one byte past the limit tells an at-limit body from an oversized one; the allowance saturates at the top of the int64 range */
+    /* one byte past the limit tells an at-limit body from an oversized one */
     overLimitAllowance := int64(maxBytes)
     if overLimitAllowance < math.MaxInt64 {
         overLimitAllowance++
@@ -41,11 +39,10 @@ func bindJsonBody(instance httpcontract.Request, target any) error {
     bodyBytes, err := io.ReadAll(limitedReader)
     if nil != err {
         var maxBytesError *nethttp.MaxBytesError
-        if true == errors.As(err, &maxBytesError) {
+        if true == exception.ChainAs(err, &maxBytesError) {
             return exception.NewHttpException(nethttp.StatusRequestEntityTooLarge, "payload too large")
         }
 
-        /* the cause tells a body that stopped arriving from one that never parsed; the response is the same */
         return exception.NewHttpExceptionWithCause(nethttp.StatusBadRequest, "bad request", err)
     }
 
@@ -59,7 +56,6 @@ func bindJsonBody(instance httpcontract.Request, target any) error {
 
     err = json.Unmarshal(bodyBytes, target)
     if nil != err {
-        /* the cause carries the decoder's diagnosis: offset, field and type */
         return exception.NewHttpExceptionWithCause(400, "invalid json", err)
     }
 
@@ -72,7 +68,6 @@ func (instance *Request) BindJsonAndValidate(target any) error {
         return bindJsonErr
     }
 
-    /* a literal null leaves a nilable target's value nil, which the validator passes, so it is refused here as the typed json handler refuses it */
     if true == boundTargetIsNil(target) {
         return exception.NewHttpException(nethttp.StatusBadRequest, "empty request body")
     }
@@ -80,7 +75,6 @@ func (instance *Request) BindJsonAndValidate(target any) error {
     return validateBoundBody(instance.runtimeInstance, target)
 }
 
-/* validateBoundBody is the validation half every json-binding door shares, so each attaches the collection under the validationErrors key. */
 func validateBoundBody(runtimeInstance runtimecontract.Runtime, target any) error {
     validatorInstance := validation.ValidatorMustFromContainer(runtimeInstance.Container())
 
@@ -101,7 +95,6 @@ func validateBoundBody(runtimeInstance runtimecontract.Runtime, target any) erro
 
     httpException := exception.BadRequest("validation failed")
 
-    /* the validationErrors key is the public half of the exception's context, which the exception listener projects into the response body */
     httpException.SetContext(
         map[string]any{
             "validationErrors": validationErrors,
@@ -117,7 +110,6 @@ func maxRequestBodyBytes(request httpcontract.Request) int {
     return configuration.Http().MaxRequestBodyBytes()
 }
 
-/* boundTargetIsNil reports whether the value a json binding wrote through the target pointer is nil, every kind a json null can leave nil */
 func boundTargetIsNil(target any) bool {
     targetValue := reflect.ValueOf(target)
     if reflect.Ptr != targetValue.Kind() || true == targetValue.IsNil() {

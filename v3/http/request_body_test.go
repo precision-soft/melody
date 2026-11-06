@@ -139,7 +139,6 @@ type bindAndValidateSubject struct {
     Name  string `json:"name" validate:"notBlank,min=3"`
 }
 
-/* the exception listener is what turns an HttpException a handler returned into the status and body a client receives; an application registers it at boot, so a test asserting the response rather than the error value has to register it too. */
 func newHttpTestContainerWithValidator() containercontract.Container {
     serviceContainer := newHttpTestContainer()
 
@@ -155,7 +154,6 @@ func newHttpTestContainerWithValidator() containercontract.Container {
     return serviceContainer
 }
 
-/* bindAndValidateOutcome drives one request through the kernel and reports what BindJsonAndValidate answered inside the handler, where the body is still open — reading it after ServeHttp returned would test a closed body rather than the binding. */
 func bindAndValidateOutcome(body string) (error, int, string) {
     var bindErr error
 
@@ -256,7 +254,6 @@ func TestRequest_BindJsonAndValidateCarriesTheValidationErrorsContextKey(t *test
     }
 }
 
-/* a body of many failing elements is refused with at most the validator's error budget and its closing entry under the validationErrors context key, whatever the number of elements */
 func TestRequest_BindJsonAndValidateBoundsTheViolationsOfABodyOfManyFailingElements(t *testing.T) {
     type element struct {
         Name string `json:"name" validate:"notBlank"`
@@ -383,5 +380,34 @@ func TestRequest_BindJsonAndValidateValidatesAnEmptyObjectBoundThroughAPointer(t
     httpException := exception.AsHttpException(bindErr)
     if nil == httpException || "validation failed" != httpException.Message() {
         t.Fatalf("expected the empty object refused by validation, got %v and %d", bindErr, statusCode)
+    }
+}
+
+func TestRequest_BindJsonReturnsOnACyclicChainFromTheBody(t *testing.T) {
+    var bindErr error
+
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodPost,
+        "/bind",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            var target map[string]any
+            bindErr = request.(*Request).BindJson(&target)
+
+            return TextResponse(nethttp.StatusOK, "served"), nil
+        },
+    )
+
+    handler := NewKernel(router).ServeHttp(newHttpTestContainer())
+
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "/bind", &cyclicBodyReader{})
+    netRequest.Header.Set("Content-Type", "application/json")
+
+    assertReturnsOnACyclicChain(t, func() {
+        handler.ServeHTTP(httptest.NewRecorder(), netRequest)
+    })
+
+    if nil == bindErr {
+        t.Fatal("expected the refusal of a body that cannot be read")
     }
 }

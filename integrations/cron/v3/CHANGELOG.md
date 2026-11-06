@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.8.1] - 2026-11-06 - Bounded Error Chain Search
+
+### Fixed
+
+- runner: a sibling failure's cause chain renders each pointer link once, breadth-first, as the framework's chain does, where a chain reaching itself repeated its links up to the bound of eight.
+- runner: a scheduled command's error whose `Unwrap` chain reaches itself no longer holds the dispatch worker that classifies it, nor the command that renders it.
+
+### Documentation
+
+- documentation: the README states v3.14.3 as the framework minimum, the version this module's `go.mod` requires, where it stated v3.6.0.
+
 ## [v3.8.0] - 2026-10-19 - Runner Timezone and Deadlines, Standard Flags on Every Command, Pruned Generation and Journaled Run Output
 
 ### Added
@@ -141,7 +152,9 @@ Identical to the corresponding v1 release except: module path is `github.com/pre
 
 Identical to the corresponding v1 release except: module path is `github.com/precision-soft/melody/integrations/cron/v3`; dependency pinned to `github.com/precision-soft/melody/v3`. See the [v1 changelog](../CHANGELOG.md#v100---2026-05-16---initial-release--cron-integration) for the full change list.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.8.0...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.8.1...HEAD
+
+[v3.8.1]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.8.0...integrations/cron/v3.8.1
 
 [v3.8.0]: https://github.com/precision-soft/melody/compare/integrations/cron/v3.7.0...integrations/cron/v3.8.0
 

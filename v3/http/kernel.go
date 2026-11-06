@@ -2,7 +2,6 @@ package http
 
 import (
     "context"
-    "errors"
     nethttp "net/http"
     "runtime/debug"
     "sort"
@@ -28,7 +27,6 @@ import (
     sessioncontract "github.com/precision-soft/melody/v3/session/contract"
 )
 
-/* MethodPolicy is the contract's type under this package's name, the one httpcontract.MethodPolicySetter.SetMethodPolicy takes. */
 type MethodPolicy = httpcontract.MethodPolicy
 
 type KernelOptions struct {
@@ -71,13 +69,11 @@ type Kernel struct {
     notFoundHandler httpcontract.Handler
     errorHandler    httpcontract.ErrorHandler
     options         KernelOptions
-    /* request scopes opened and not yet closed: the shutdown's only measure of a hijacked connection, which net/http's Shutdown does not wait for. Written by every serving goroutine, read by the shutdown one. */
+    /* the shutdown's only measure of a hijacked connection, which net/http's Shutdown does not wait for */
     openRequestScopes atomic.Int64
-    /* raised when ServeHttp builds the handler; atomic, since a mutator racing the first request is what it exists to catch */
     serving atomic.Bool
 }
 
-/* sessionCookieBootWarnings names a session cookie policy every current browser defeats: SameSite=None with Secure never is written as asked and dropped by the browser, so no session sticks */
 func sessionCookieBootWarnings(policy httpcontract.SessionCookiePolicy) []internal.BootWarning {
     if nethttp.SameSiteNoneMode != resolveSessionCookieSameSite(policy) || httpcontract.SessionCookieSecureNever != policy.Secure {
         return nil
@@ -92,12 +88,11 @@ func sessionCookieBootWarnings(policy httpcontract.SessionCookiePolicy) []intern
     }
 }
 
-/* OpenRequestScopes reports how many request scopes are open, one per request being served, hijacked connections included. A shutdown reads it to tell a drained server from one that still has work inside it. */
 func (instance *Kernel) OpenRequestScopes() int64 {
     return instance.openRequestScopes.Load()
 }
 
-/* the configuration doors are boot-only: every mutator writes a field request goroutines read without synchronization, and a concurrent write to the route tree's maps is a fatal error, so after the handler is built each one refuses on the calling goroutine, naming the door. The reading doors stay open, since the openapi document is served from inside a handler. */
+/* the configuration doors write fields request goroutines read unsynchronized, so they refuse once serving */
 func (instance *Kernel) refuseMutationWhileServing(door string) {
     if false == instance.serving.Load() {
         return
@@ -114,7 +109,7 @@ func (instance *Kernel) refuseMutationWhileServing(door string) {
     )
 }
 
-/* Use appends middlewares to the chain around the matched handler. The chain decorates the handler path only: a response a listener produced is written without it, so response decoration that must reach every response belongs to kernel.response listeners. */
+/* Use decorates the handler path only: a response a listener produced is written without the chain */
 func (instance *Kernel) Use(middlewares ...httpcontract.Middleware) {
     instance.refuseMutationWhileServing("Use")
 
@@ -127,19 +122,18 @@ func (instance *Kernel) SetNotFoundHandler(handler httpcontract.Handler) {
     instance.notFoundHandler = handler
 }
 
-/* SetErrorHandler installs the application's own error rendering for the errors the kernel itself raises: a handler's error, the not-found handler's error, a recovered panic. The kernel marks the kernel.exception event it builds with whether a handler is installed, and the framework exception listener stands aside for it, so the handler takes over negotiation, the response's own copy of the request-id header — the connection header the kernel writes for every request stays — and the validation payload whether it was installed before or after Boot, and whatever serves the kernel. When it returns nil, the kernel's default rendering answers. A refusal a kernel.request listener dispatches itself — the security firewall's and access control's — is rendered by the framework exception listener, not by this handler. */
+/* SetErrorHandler renders the errors the kernel raises; a nil answer takes the default, listener refusals bypass it */
 func (instance *Kernel) SetErrorHandler(handler httpcontract.ErrorHandler) {
     instance.refuseMutationWhileServing("SetErrorHandler")
 
     instance.errorHandler = handler
 }
 
-/* HasErrorHandler reports whether the application installed an error handler. */
 func (instance *Kernel) HasErrorHandler() bool {
     return nil != instance.errorHandler
 }
 
-/* SetForwardedHeadersPolicy installs the policy every forwarded-header reader consults; it is boot-only. A trusted-proxy entry that parses as neither a CIDR prefix nor an address is refused by name, and the list is copied, since it decides on every request whether X-Forwarded-Proto is believed. */
+/* SetForwardedHeadersPolicy is boot-only, refuses an unparsable trusted-proxy entry by name and copies the list */
 func (instance *Kernel) SetForwardedHeadersPolicy(policy httpcontract.ForwardedHeadersPolicy) {
     instance.refuseMutationWhileServing("SetForwardedHeadersPolicy")
 
@@ -157,7 +151,6 @@ func (instance *Kernel) SetSessionCookiePolicy(policy httpcontract.SessionCookie
     instance.options.SessionCookiePolicy = policy
 }
 
-/* SetMethodPolicy installs the method policy the kernel reads on every request: whether HEAD falls back to the GET route and whether an unrouted OPTIONS is answered with the computed Allow header. It is boot-only. */
 func (instance *Kernel) SetMethodPolicy(policy httpcontract.MethodPolicy) {
     instance.refuseMutationWhileServing("SetMethodPolicy")
 
@@ -173,11 +166,10 @@ func copyStringList(values []string) []string {
 }
 
 func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
-    /* the freeze is raised when the handler is built, and refuses every mutator that begins after it; it is not a lock, so a mutator already past its check is not caught. The router is frozen through a package-private door; a router from outside this package keeps only the written contract. */
+    /* the freeze is not a lock: a mutator already past its check is not caught */
     instance.serving.Store(true)
     freezeRouterForServing(instance.router)
 
-    /* the kernel owns the session cookie policy and knows it serves only here; the warnings reach the configured journal through the first request's logger */
     bootWarnings := internal.NewBootWarningsOnce(sessionCookieBootWarnings(instance.options.SessionCookiePolicy))
 
     return nethttp.HandlerFunc(func(rawWriter nethttp.ResponseWriter, request *nethttp.Request) {
@@ -185,10 +177,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         scope := serviceContainer.NewScope()
 
-        /* counted when the scope exists and released in the defer that closes it, so the counter is exactly the set of scopes a teardown would find open */
         instance.openRequestScopes.Add(1)
 
-        /* the scope is closed before anything that can fail, so a panic during request-logger setup cannot leak it. A close failure falls back to the emergency logger; reading the request logger after its scope closed is safe because it is an override, which Close leaves alone. */
+        /* reading the request logger after its scope closed is safe: it is an override, which Close leaves alone */
         var requestLogger loggingcontract.Logger
         var requestId string
         defer func() {
@@ -208,14 +199,13 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             logging.EmergencyLogger().Error("failed to close service container scope", exception.LogContext(scopeCloseErr))
         }()
 
-        /* the last guard, for the window the main recovery cannot cover: from the scope opening to the main guard's installation, plus a panic raised inside the main guard itself. Registered under the scope-close defer so the response is written while the scope is open; it is inert on every request the main guard answered. It dispatches neither kernel.terminate nor kernel.exception, so its record carries the method and the path. */
+        /* last guard for the window the main recovery cannot cover; registered under the scope-close defer so the scope is open */
         defer func() {
             recoveredValue := recover()
             if nil == recoveredValue {
                 return
             }
 
-            /* the sentinel is the caller's own instruction to drop the connection without a response, and it travels by identity through every guard */
             if nethttp.ErrAbortHandler == recoveredValue {
                 panic(recoveredValue)
             }
@@ -250,7 +240,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 return
             }
 
-            /* written directly rather than through writeResponse, which resolves the logger from a runtime that does not exist in this window and persists a session this request never reached */
+            /* written directly: writeResponse resolves the logger from a runtime absent here and persists an unreached session */
             _ = WriteToHttpResponseWriter(nil, nil, writer, JsonErrorResponse(nethttp.StatusInternalServerError, "internal server error"))
         }()
 
@@ -285,19 +275,18 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         maxBodyBytes := configuration.Http().MaxRequestBodyBytes()
         if 0 < maxBodyBytes && nil != request.Body {
-            /* the raw writer is passed, not the recording wrapper: net/http detects its own response writer through an unexported-method assertion, so a wrapper loses the connection-close signal on an oversized body */
+            /* the raw writer is passed: net/http detects its own writer by an unexported-method assertion a wrapper loses */
             request.Body = nethttp.MaxBytesReader(rawWriter, request.Body, int64(maxBodyBytes))
         }
 
         scheme := detectSchemeWithForwardedHeadersPolicy(request, instance.options.ForwardedHeadersPolicy)
 
-        /* the route is matched on the path as the client spelled it, so an encoded separator stays inside its segment; splitRequestPath unescapes each segment after the split, so a parameter binds the decoded value */
+        /* the route is matched on the path as the client spelled it, so an encoded separator stays inside its segment */
         matchPath := internal.RequestPathAsSent(request.URL)
 
-        /* a stale RawPath is not matched: the canonical guard below refuses it, and a route selected on the re-escaped decoded path would be one the client never named, read by every kernel.response and kernel.terminate listener */
+        /* a stale RawPath is not matched: a route selected on the re-escaped decoded path is one the client never named */
         rawPathIsStale := internal.RequestRawPathIsStale(request.URL)
 
-        /* the refusal below is decided here, so a path it refuses leaves its one record and not a no-route record beside it */
         pathRefused := false == requestPathIsCanonical(RequestPathAsRouted(internal.RequestPathAsSent(request.URL))) || ("" != request.URL.Path && strings.TrimLeftFunc(request.URL.Path, unicode.IsSpace) != request.URL.Path) || true == rawPathIsStale
         var matchResult *httpcontract.MatchResult
         if false == rawPathIsStale {
@@ -309,7 +298,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             )
         }
 
-        /* a nil result is a valid "no match" under the contract, and dereferenced here, above the recovery defer, it would close the connection with no response */
+        /* a nil result is a valid no match, and a dereference above the recovery defer closes the connection unanswered */
         if nil == matchResult {
             matchResult = &httpcontract.MatchResult{}
         }
@@ -362,7 +351,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             melodyRequest.Attributes().Set(key, value)
         }
 
-        /* published after the route attributes so a route cannot replace what the kernel owns; the scheme is the one resolved through the forwarded-headers policy, which a listener cannot reach */
+        /* published after the route attributes so a route cannot replace what the kernel owns */
         melodyRequest.Attributes().Set(RequestAttributeScheme, scheme)
 
         routeName := melodyRequest.RouteName()
@@ -381,7 +370,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             if true == exists {
                 allowedMethods, ok := allowedMethodsValue.([]string)
                 if true == ok && 0 < len(allowedMethods) {
-                    /* an OPTIONS the method policy answers itself is served 204 with the Allow list below, so it is not a refused method */
                     if nethttp.MethodOptions == request.Method && true == instance.options.MethodPolicy.AutomaticOptions {
                         requestLogger.Debug(
                             "automatic options answered",
@@ -435,7 +423,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         finalResponse := (httpcontract.Response)(nil)
 
-        /* the last response the middleware chain had in flight, published by the recording shim; the recovery defer reads it before finalResponse is assigned */
         chainResponse := (httpcontract.Response)(nil)
 
         eventDispatcher := event.EventDispatcherMustFromContainer(serviceContainer)
@@ -458,9 +445,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 return
             }
 
-            /* net/http's abort sentinel drops the connection without a response and suppresses the log, so it is re-raised, matched by identity as net/http matches it; an error wrapping it is unaffected */
+            /* net/http's abort sentinel is re-raised, matched by identity as net/http matches it; a wrapping error is unaffected */
             if nethttp.ErrAbortHandler == recoveredValue {
-                /* the abort suppresses the response, not the ownership of what it holds: both the assigned response and the one the chain shim holds are closed before the sentinel is re-raised */
+                /* the abort suppresses the response, not its ownership: both held responses are closed before the re-raise */
                 closeDiscardedResponseBody(finalResponse, requestLogger)
 
                 if chainResponse != finalResponse {
@@ -475,13 +462,11 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 return
             }
 
-            /* the response in flight when the panic unwound; the error response replaces it below, and nothing else holds it */
             panickedResponse := finalResponse
 
-            /* the mark is read through the door that writes it, at the depth it is written, and a typed nil reads as unmarked */
             alreadyLogged := exception.IsAlreadyLogged(recoveredErr)
 
-            /* the report hands on a marked carrier of this occurrence, never a mark written into the recovered value: a runtime.Error has nowhere for the mark to live, and an error value a panic carries can be shared by other requests; the error handler and the debug message keep the recovered value itself */
+            /* the report hands on a marked carrier, never a mark in the recovered value, which other requests can share */
             reportedErr := recoveredErr
 
             if false == alreadyLogged {
@@ -495,7 +480,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
                 durationMs := time.Since(requestContext.StartedAt()).Milliseconds()
 
-                /* the stack is captured inside the recovering defer, while the panic frames are live; every recovery boundary in the framework records the same key */
                 requestLogger.Error(
                     "unhandled http error",
                     exception.LogContext(
@@ -526,16 +510,15 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 }
             }
 
-            /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
             if nil == exceptionEvent.Response() {
                 exceptionEvent.SetResponse(
                     exceptionResponseFor(runtimeInstance, melodyRequest, exceptionEvent.Err(), debugMode),
                 )
             }
 
-            /* the response built before the panic may own an open file, so it is handed to the write step, which closes it only once it knows what is written: a listener of the re-published kernel.response may answer with that same response */
+            /* the response may own an open file; the write step closes it, since a listener may answer with that same response */
 
-            /* a middleware that panicked after its next() returned leaves the chain's response held only by the recording shim, so it is closed here; where finalResponse was assigned the write step owns the close, since a wrapping middleware may share the body with the response served */
+            /* where finalResponse is assigned the write step owns the close: a wrapping middleware may share the body */
             if nil == panickedResponse && nil != chainResponse && chainResponse != exceptionEvent.Response() {
                 closeDiscardedResponseBody(chainResponse, requestLogger)
             }
@@ -545,21 +528,21 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, panickedResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
         }()
 
-        /* the session is loaded after the recovery defer is installed and must stay below it: Session and NewSession turn a storage outage into a panic, which above the guard escapes ServeHttp with no response */
+        /* the session loads below the recovery defer: Session and NewSession panic on a storage outage */
         sessionManager = session.SessionMustFromContainer(serviceContainer)
 
         cookie, _ := request.Cookie(session.SessionCookieName)
         if nil != cookie {
             sessionInstance = sessionManager.Session(cookie.Value)
         }
-        /* IsNilInterface, since a replaceable manager may answer "not found" with a typed nil, which a bare comparison takes for a live session */
+        /* a replaceable manager may answer not found with a typed nil, which a bare comparison takes for a live session */
         if true == internal.IsNilInterface(sessionInstance) {
             sessionInstance = sessionManager.NewSession()
         }
 
         melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
 
-        /* a path that folds to a different spelling is refused after the route is matched and before it is authorized or handled, so the router, the firewall matchers and the access control never disagree about the resource; it is asked of RequestPathAsRouted, the spelling the access-control matcher reads too, and requestPathIsCanonical states the boundary. The leading form of the padded path is asked of the decoded path as well, since " /public" routes as "%20/public". A stale RawPath, left by a handler in front that rewrote Path alone, does not carry the spelling the client sent, so an encoded separator would be read as a separator: it is refused, as the first and second majors refuse on the raw path. */
+        /* refused after the route is matched and before it is authorized: router, firewall and access control must agree */
         if true == pathRefused {
             requestLogger.Warning(
                 "request path refused before the handler",
@@ -577,7 +560,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             return
         }
 
-        /* a urlencoded body whose read or parse failed never populated the form, so it is refused as the json binding refuses it: 413 when the size limit stopped the read, 400 otherwise */
         if nil != melodyRequest.bodyReadErr {
             requestLogger.Warning(
                 "request body was refused before the handler",
@@ -594,7 +576,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             message := "bad request"
 
             var maxBytesError *nethttp.MaxBytesError
-            if true == errors.As(melodyRequest.bodyReadErr, &maxBytesError) {
+            if true == exception.ChainAs(melodyRequest.bodyReadErr, &maxBytesError) {
                 statusCode = nethttp.StatusRequestEntityTooLarge
                 message = "payload too large"
             }
@@ -610,7 +592,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelRequestErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelRequest, kernelRequestEvent)
         instance.logEventDispatchError(requestLogger, "kernel request error", eventKernelRequestErr)
 
-        /* the kernel.request dispatch fails closed: an error with no response means listeners behind the failing one, access control among them, never ran; a dispatch that skipped a required listener is refused too, and its response dropped for the error page. The error is judged on itself, not its cause chain. */
+        /* the dispatch fails closed: listeners behind the failing one never ran; the error is judged on itself, not its chain */
         _, requiredListenerSkipped := eventKernelRequestErr.(*event.RequiredListenerSkippedError)
 
         if nil != eventKernelRequestErr && (true == requiredListenerSkipped || nil == kernelRequestEvent.Response()) {
@@ -620,7 +602,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 message = debugErrorMessage(eventKernelRequestErr)
             }
 
-            /* the stopping listener's response is replaced below and reaches no writer, so it is closed here */
             closeDiscardedResponseBody(kernelRequestEvent.Response(), requestLogger)
 
             kernelRequestEvent.SetResponse(
@@ -675,7 +656,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             }
                         }
 
-                        /* Allow lists OPTIONS and HEAD only when the method policy honors them; a method the route declares is already added above */
                         if true == instance.options.MethodPolicy.AutomaticOptions {
                             allowedMethodsSet[nethttp.MethodOptions] = struct{}{}
                         }
@@ -719,7 +699,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                             }
                         }
 
-                        /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
                         if nil == kernelExceptionEvent.Response() {
                             kernelExceptionEvent.SetResponse(
                                 exceptionResponseFor(runtimeInstance, request, kernelExceptionEvent.Err(), debugMode),
@@ -744,7 +723,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         _, eventKernelControllerErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelController, kernelControllerEvent)
         instance.logEventDispatchError(requestLogger, "kernel controller error", eventKernelControllerErr)
 
-        /* the kernel.controller dispatch fails closed on the same terms as kernel.request: a required listener behind a failing one never ran */
+        /* kernel.controller fails closed as kernel.request does: a required listener behind a failing one never ran */
         _, controllerRequiredListenerSkipped := eventKernelControllerErr.(*event.RequiredListenerSkippedError)
 
         if nil != eventKernelControllerErr && (true == controllerRequiredListenerSkipped || nil == kernelControllerEvent.Response()) {
@@ -779,10 +758,9 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         response, finalHandlerErr := finalHandler(runtimeInstance, writer, melodyRequest)
 
-        /* a body-limit overflow a handler surfaced, from ParseMultipartForm, is answered 413 at warning like the pre-handler body paths */
         finalHandlerErr = normalizeBodyLimitError(finalHandlerErr)
 
-        /* published to the recovery defer before the error branch, since everything between here and the assignment below can panic and the defer closes only what finalResponse names */
+        /* published before the error branch: everything up to the assignment can panic and the defer closes finalResponse */
         finalResponse = response
 
         if nil != finalHandlerErr {
@@ -800,7 +778,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 }
             }
 
-            /* the application's error handler declined: the error is answered as the exception listener answers it, an http exception with its own status */
             if nil == kernelExceptionEvent.Response() {
                 kernelExceptionEvent.SetResponse(
                     exceptionResponseFor(runtimeInstance, melodyRequest, kernelExceptionEvent.Err(), debugMode),
@@ -814,7 +791,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             response = kernelExceptionEvent.Response()
         }
 
-        /* a nil response becomes an empty 204 here, so kernel.response is dispatched for it and its listeners decorate it like any other response */
         if true == internal.IsNilInterface(response) {
             response = EmptyResponse(nethttp.StatusNoContent)
         }
@@ -824,7 +800,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
     })
 }
 
-/* invokeErrorHandlerSafely runs the application's error handler under the kernel's own recovery, since the failed response's body is still open and held only by the caller. A panic, net/http's abort sentinel included, is logged with its stack and answered by the default error response. */
 func (instance *Kernel) invokeErrorHandlerSafely(
     runtimeInstance runtimecontract.Runtime,
     writer nethttp.ResponseWriter,
@@ -854,7 +829,7 @@ func (instance *Kernel) invokeErrorHandlerSafely(
     return instance.errorHandler(runtimeInstance, writer, request, handlerErr)
 }
 
-/* dispatchResponseAndWrite is the one exit of every request path through ServeHttp: it publishes kernel.response, writes the response the listeners answered with, and closes the body of the one they swapped out. The response is written back through the pointer at every step, since the caller's variable is what the recovery reads when the write panics; discardCandidate is a response the caller is about to lose, closed unless this step writes it and only after the publish, since a listener may answer with it. */
+/* dispatchResponseAndWrite writes the response back through the pointer at every step: the recovery reads it */
 func (instance *Kernel) dispatchResponseAndWrite(
     runtimeInstance runtimecontract.Runtime,
     melodyRequest httpcontract.Request,
@@ -868,7 +843,6 @@ func (instance *Kernel) dispatchResponseAndWrite(
 ) {
     kernelResponseEvent := NewKernelResponseEvent(melodyRequest, *finalResponse)
 
-    /* the dispatcher re-raises an exit error from a listener, and then nothing below runs, so the defer closes the candidate on that path; the ordinary path clears it */
     defer func() {
         if nil == discardCandidate {
             return
@@ -904,7 +878,6 @@ func (instance *Kernel) dispatchResponseAndWrite(
     )
 }
 
-/* newKernelExceptionEvent builds the kernel.exception payload marked with whether an application error handler is installed now, so the framework exception listener stands aside for a handler installed at any point before the error, whatever serves the kernel. */
 func (instance *Kernel) newKernelExceptionEvent(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -956,7 +929,6 @@ func (instance *Kernel) logEventDispatchError(
         return
     }
 
-    /* the same mark reader the writer beside it uses */
     if true == exception.IsAlreadyLogged(dispatchErr) {
         return
     }
@@ -969,7 +941,7 @@ func (instance *Kernel) logEventDispatchError(
     _ = exception.MarkLogged(dispatchErr)
 }
 
-/* logHandlerError files the one record for a handler-returned failure: an error already logged is not filed again, a deliberate 4xx is a warning, the request context's own cancellation is named as the client's, and everything else is an error. The returned error is the one the caller puts on the exception event: a marked carrier of this occurrence, so the value the handler returned is never marked and the next request that returns it files its own record. */
+/* logHandlerError returns a marked carrier: the handler's value is never marked, so its next request files a record */
 func logHandlerError(requestLogger loggingcontract.Logger, message string, handlerErr error, httpRequest *nethttp.Request) error {
     if true == exception.IsAlreadyLogged(handlerErr) {
         return handlerErr
@@ -993,7 +965,7 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
         },
     )
 
-    clientCancelled := true == errors.Is(handlerErr, context.Canceled) &&
+    clientCancelled := true == exception.ChainIs(handlerErr, context.Canceled) &&
         nil != httpRequest && context.Canceled == context.Cause(httpRequest.Context())
 
     httpException := exception.AsHttpException(handlerErr)
@@ -1009,7 +981,7 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
     return newLoggedOccurrence(handlerErr)
 }
 
-/* loggedOccurrence is the mark of one request's failure, carried beside the error instead of written into it. An application returns one error value from many requests — a package-level sentinel, a remember flight's answer to every waiter — so a mark or a coordinate written into the value would silence the records of the requests that follow and label them with the first one's coordinates. It reports itself logged at the outermost link, is read through by errors.Is and errors.As, holds the coordinates of its request for the debug payload, and is not a context provider, so the context of the error it carries is read as before. */
+/* loggedOccurrence carries the mark beside the error: one error value serves many requests, so nothing is written into it */
 type loggedOccurrence struct {
     err         error
     coordinates map[string]string
@@ -1035,19 +1007,17 @@ func (instance *loggedOccurrence) AlreadyLogged() bool {
     return true
 }
 
-/* MarkAsLogged leaves nothing to do: the carrier exists only as the mark */
 func (instance *loggedOccurrence) MarkAsLogged() {}
 
 var _ exceptioncontract.AlreadyLogged = (*loggedOccurrence)(nil)
 
-/* normalizeBodyLimitError maps a *MaxBytesError onto a 413 HttpException; any other error is returned untouched. */
 func normalizeBodyLimitError(handlerErr error) error {
     if nil == handlerErr {
         return handlerErr
     }
 
     var maxBytesError *nethttp.MaxBytesError
-    if true == errors.As(handlerErr, &maxBytesError) {
+    if true == exception.ChainAs(handlerErr, &maxBytesError) {
         return exception.NewHttpExceptionWithCause(nethttp.StatusRequestEntityTooLarge, "payload too large", handlerErr)
     }
 

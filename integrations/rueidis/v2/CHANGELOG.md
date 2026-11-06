@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v2.2.2] - 2026-11-06 - Bounded Error Chain Search
+
+### Fixed
+
+- rate limit: a store failure whose `Unwrap` chain reaches itself no longer holds the limiter that classifies it.
+
 ## [v2.2.1] - 2026-10-19 - Documented Timeout Defaults
 
 ### Fixed
@@ -97,7 +103,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `v2/README.md` — documentation examples wrapped in `package main` / `main()` functions. They read as whole programs but are illustrative fragments: the surrounding declarations and imports are the reader's to supply, and only the end-to-end registration example is complete
 - `Provider.Open()` signature unchanged in v2 (still accepts `containercontract.Resolver`) — contrast with v3 where it changes
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.2.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.2.2...HEAD
+
+[v2.2.2]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.2.1...integrations/rueidis/v2.2.2
 
 [v2.2.1]: https://github.com/precision-soft/melody/compare/integrations/rueidis/v2.2.0...integrations/rueidis/v2.2.1
 
