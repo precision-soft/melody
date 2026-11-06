@@ -18,7 +18,7 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ### Fixed
 
-- exception: an error whose `Unwrap` chain reaches itself no longer holds the goroutine that reads it forever, where `errors.As` and `errors.Is` never return on such a chain: `LogContext`, `IsAlreadyLogged`, `MarkLogged`, `FromError`, `AsHttpException`, `IsDeserializationError` and `LogError` return, a handler's or a session save's cyclic error is answered 500, a body read's 400, a limiter's is recorded as a store failure, a file system's is a miss of the static server and a refusal of the dotenv load, and a provider's and a command's travel out as any other failure. A search reads a link met twice once and stops after 65,536 links. `BuildCauseChain` and `BuildCauseContextChain` render each pointer link once, so a join holding one link twice reads it once.
+- exception: an error whose `Unwrap` chain reaches itself no longer holds the goroutine that reads it forever, where `errors.As` and `errors.Is` never return on such a chain: `LogContext`, `IsAlreadyLogged`, `MarkLogged`, `FromError`, `AsHttpException`, `IsDeserializationError` and `LogError` return, a handler's or a session save's cyclic error is answered 500, a body read's 400, a session value's fails the file storage's save and delete with the storage mutex released, a limiter's is recorded as a store failure, a file system's is a miss of the static server and a refusal of the dotenv load, and a provider's and a command's travel out as any other failure. A search reads a link met twice once and stops after 65,536 links. `BuildCauseChain` and `BuildCauseContextChain` render each pointer link once, so a join holding one link twice reads it once.
 
 ### Documentation
 

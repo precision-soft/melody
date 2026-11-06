@@ -34,8 +34,8 @@ Melody uses this package to:
     - [`Logged`](../../exception/utility.go)
     - [`IsAlreadyLogged`](../../exception/utility.go)
     - [`PanicCause`](../../exception/utility.go)
-    - [`ChainAs`](../../exception/chain.go)
-    - [`ChainIs`](../../exception/chain.go)
+    - [`ChainAs`](../../exception/chain.go) — what `errors.As` answers, returning on a chain whose `Unwrap` reaches itself: a link met twice is read once and a search stops after 65,536 links, answering false; a link that panics while it is read ends the search answering false
+    - [`ChainIs`](../../exception/chain.go) — the same search for what `errors.Is` answers
 - Fail-fast helpers:
     - [`Panic`](../../exception/panic.go)
     - [`Exit`](../../exception/panic.go)
@@ -153,7 +153,7 @@ func readFile(path string) []byte {
     - [`NewInfo`](../../exception/error_new.go) — `LevelInfo`
 - Error utilities:
     - [`LogContext`](../../exception/utility.go)
-    - [`BuildCauseChain(causeErr error, maxDepth int) []string`](../../exception/utility.go) — the `causeChain` value a log record carries: every wrap link rendered as text, breadth-first and bounded by `maxDepth` links visited in total (not by the tree's depth), with a joined error contributing each of its branches
+    - [`BuildCauseChain(causeErr error, maxDepth int) []string`](../../exception/utility.go) — the `causeChain` value a log record carries: every wrap link rendered as text, a pointer link once, breadth-first and bounded by `maxDepth` links visited in total (not by the tree's depth), with a joined error contributing each of its branches
     - [`BuildCauseContextChain(causeErr error, maxDepth int) []map[string]any`](../../exception/utility.go) — the `causeContextChain` counterpart, one context map per link that implements `ContextProvider`
     - [`FromError`](../../exception/utility.go)
     - [`FromErrorWithLevel`](../../exception/utility.go)

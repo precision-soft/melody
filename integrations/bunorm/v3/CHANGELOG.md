@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- bunorm: an error whose `Unwrap` chain reaches itself no longer holds the goroutine that reads it: a provider's in the registry's open and the read-write splitter, a storage's or a unit of work's in the audit tracker and the async storage, and a run's in the encryption migrator.
+- bunorm: an error whose `Unwrap` chain reaches itself no longer holds the goroutine that reads it: a provider's in the registry's open and the read-write splitter, a storage's or a unit of work's in the audit tracker, and a run's in the encryption migrator.
 
 ## [v3.6.3] - 2026-10-21 - Close Cause Across the Timer Race
 

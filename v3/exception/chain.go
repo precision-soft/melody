@@ -9,7 +9,7 @@ const chainLinkLimit = 65536
 
 var chainErrorType = reflect.TypeOf((*error)(nil)).Elem()
 
-/* ChainAs answers what errors.As answers and returns on a chain whose Unwrap reaches itself, on which errors.As never returns. A link met twice is read once, and a search stops after 65,536 links. It panics on a target errors.As panics on. */
+/* ChainAs answers what errors.As answers and returns on a chain whose Unwrap reaches itself, on which errors.As never returns. A link met twice is read once, and a search stops after 65,536 links; a link that panics while it is read ends the search answering false. It panics on a target errors.As panics on. */
 func ChainAs(err error, target any) bool {
     if nil == err {
         return false
@@ -17,13 +17,13 @@ func ChainAs(err error, target any) bool {
 
     targetPointer := reflect.ValueOf(target)
     if reflect.Pointer != targetPointer.Kind() || true == targetPointer.IsNil() {
-        panic("exception: ChainAs target must be a non-nil pointer")
+        Panic(NewError("the target of a chain search must be a non-nil pointer", nil, nil))
     }
 
     targetValue := targetPointer.Elem()
     targetType := targetValue.Type()
     if reflect.Interface != targetType.Kind() && false == targetType.Implements(chainErrorType) {
-        panic("exception: ChainAs target must be a pointer to an interface or to a type implementing error")
+        Panic(NewError("the target of a chain search must be a pointer to an interface or to a type implementing error", nil, nil))
     }
 
     return chainSearch(err, func(link error) bool {
@@ -39,7 +39,7 @@ func ChainAs(err error, target any) bool {
     })
 }
 
-/* ChainIs answers what errors.Is answers and returns on a chain whose Unwrap reaches itself, on which errors.Is never returns. A link met twice is read once, and a search stops after 65,536 links. */
+/* ChainIs answers what errors.Is answers and returns on a chain whose Unwrap reaches itself, on which errors.Is never returns. A link met twice is read once, and a search stops after 65,536 links; a link that panics while it is read ends the search answering false. */
 func ChainIs(err error, target error) bool {
     if nil == target {
         return nil == err

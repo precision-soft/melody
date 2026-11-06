@@ -161,7 +161,7 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
     flushErr := instance.flushLocked()
     if nil != flushErr {
         /* roll the in-memory entry back on a flush failure so a Save that returns an error is not observable through a later Load — the in-memory state must not diverge from what was persisted. The one exception is a failure that struck AFTER the new document was already written: there the disk holds the new snapshot, so keeping the in-memory entry is what matches it, and rolling back is what would diverge. */
-        if false == errors.Is(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
+        if false == exception.ChainIs(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
             if true == hadPrevious {
                 instance.sessionById[sessionId] = previousEntry
             } else {
@@ -197,7 +197,7 @@ func (instance *FileStorage) Delete(sessionId string) error {
     flushErr := instance.flushLocked()
     if nil != flushErr {
         /* restore the entry on a flush failure so a Delete that returns an error does not drop the session from the in-memory state while it is still persisted — unless the failure struck after the new document (the one without this session) was already written, where the disk already reflects the deletion and keeping it deleted in memory is what matches. */
-        if false == errors.Is(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
+        if false == exception.ChainIs(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
             instance.sessionById[sessionId] = previousEntry
         }
 

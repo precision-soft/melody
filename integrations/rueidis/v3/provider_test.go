@@ -1,7 +1,10 @@
 package rueidis
 
 import (
+    "crypto/tls"
     "errors"
+    nethttp "net/http"
+    "net/http/httptest"
     "os"
     "strings"
     "testing"
@@ -338,5 +341,45 @@ func TestProvider_WithoutALoggerTheRetryReportsReachTheEmergencyLogger(t *testin
     logger := &capturingLogger{}
     if logger != NewProvider(WithLogger(logger)).resolvedLogger() {
         t.Fatalf("expected the handed logger to be the one the retry reports in")
+    }
+}
+
+func TestProvider_OpenReturnsOnACyclicChainFromATlsVerifier(t *testing.T) {
+    server := httptest.NewTLSServer(nethttp.HandlerFunc(func(nethttp.ResponseWriter, *nethttp.Request) {}))
+    defer server.Close()
+
+    first := &rateLimiterCyclicError{}
+    first.next = &rateLimiterCyclicError{next: first}
+
+    clientConfig := DefaultClientConfig()
+    clientConfig.TlsConfig = &tls.Config{
+        InsecureSkipVerify: true,
+        VerifyConnection: func(tls.ConnectionState) error {
+            return first
+        },
+    }
+
+    provider := NewProvider(
+        WithClientConfig(clientConfig),
+        WithRetryConfig(NewRetryConfig(1, time.Millisecond, time.Millisecond, 1)),
+    )
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+
+        if _, openErr := provider.Open(ConnectionParameters{Address: server.Listener.Addr().String()}); nil == openErr {
+            t.Error("expected the verifier's refusal")
+        }
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the open to return on an error chain that reaches itself")
+    }
+
+    if true == provider.isTransientError(first) {
+        t.Fatal("expected a chain with no transient text not to read as transient")
     }
 }

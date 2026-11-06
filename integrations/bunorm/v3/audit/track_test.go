@@ -8,6 +8,7 @@ import (
     "io"
     "strings"
     "testing"
+    "time"
 
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
@@ -521,5 +522,25 @@ func TestTracker_AStorageErrorOfANonComparableTypeIsReportedNotPanicked(t *testi
     var storageErr nonComparableStorageError
     if false == errors.As(insertErr, &storageErr) {
         t.Fatalf("expected the storage's failure reachable, got: %v", insertErr)
+    }
+}
+
+func TestTracker_AStorageErrorOnACyclicChainIsReported(t *testing.T) {
+    scripted := &scriptedDatabase{}
+    database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
+    tracker := NewTracker(database, NewRecorderWithStorage(&fakeStorage{failWith: newCyclicChainError()}, nil))
+
+    insertReturned := make(chan error, 1)
+    go func() {
+        insertReturned <- tracker.Insert(context.Background(), "parityAccount", "1", &parityAccount{Id: 1})
+    }()
+
+    select {
+    case insertErr := <-insertReturned:
+        if nil == insertErr {
+            t.Fatal("expected the storage's failure")
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the insert to return on an error chain that reaches itself")
     }
 }

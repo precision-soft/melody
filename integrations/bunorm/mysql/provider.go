@@ -4,7 +4,6 @@ import (
     "context"
     "crypto/tls"
     "database/sql"
-    "errors"
     "math"
     "net"
     "strings"
@@ -288,7 +287,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, resolver containerc
         }
 
         /* the caller's own cancellation is not a database outage: the transient classifier reads messages and error types a cancellation does not carry, so it is recorded at warning under its own name and not retried. Only Canceled, never DeadlineExceeded, since the ping budget derives from the connect timeout and a deadline here can be the database itself. */
-        if true == errors.Is(openErr, context.Canceled) {
+        if true == exception.ChainIs(openErr, context.Canceled) {
             cancelledErr := exception.FromError(openErr)
             logger.Warning(
                 "database open cancelled by the caller's context",
@@ -597,18 +596,20 @@ func isWordCharacterAt(value string, index int) bool {
         '_' == character
 }
 
+const transientErrorLinkLimit = 64
+
 func (instance *Provider) isTransientError(inputErr error) bool {
     if nil == inputErr {
         return false
     }
 
     var dnsErr *net.DNSError
-    if true == errors.As(inputErr, &dnsErr) {
+    if true == exception.ChainAs(inputErr, &dnsErr) {
         return true
     }
 
     var netErr net.Error
-    if true == errors.As(inputErr, &netErr) {
+    if true == exception.ChainAs(inputErr, &netErr) {
         if true == netErr.Timeout() {
             return true
         }
@@ -636,9 +637,9 @@ func (instance *Provider) isTransientError(inputErr error) bool {
         "server shutdown in progress",
     }
 
-    currentErr := inputErr
-    for nil != currentErr {
-        message := strings.ToLower(currentErr.Error())
+    /* an open failure can come from the application, a hook or a verifier, and its chain may reach itself; each pointer link is read once */
+    for _, link := range exception.BuildCauseChain(inputErr, transientErrorLinkLimit) {
+        message := strings.ToLower(link)
 
         for _, marker := range transientMarkers {
             if "" == marker {
@@ -649,8 +650,6 @@ func (instance *Provider) isTransientError(inputErr error) bool {
                 return true
             }
         }
-
-        currentErr = errors.Unwrap(currentErr)
     }
 
     return false

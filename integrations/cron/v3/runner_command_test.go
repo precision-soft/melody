@@ -4371,3 +4371,12 @@ func TestRunnerFailureDoors_ReturnOnACyclicChain(t *testing.T) {
         }
     })
 }
+
+func TestWithSiblingFailure_RendersEachLinkOfACyclicChainOnce(t *testing.T) {
+    merged := withSiblingFailure(map[string]any{}, "close", newCyclicChainError())
+
+    causeChain, isCauseChain := merged["closeCauseChain"].([]string)
+    if false == isCauseChain || 2 != len(causeChain) {
+        t.Fatalf("expected the two links of the cycle once each, got %v", merged["closeCauseChain"])
+    }
+}

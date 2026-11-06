@@ -1056,13 +1056,9 @@ func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling e
 
     merged[prefix+"Context"] = siblingContext
 
-    causeChain := []string{}
-    for current := errors.Unwrap(sibling); false == isNilInterface(current); current = errors.Unwrap(current) {
-        causeChain = append(causeChain, current.Error())
-
-        if 8 <= len(causeChain) {
-            break
-        }
+    causeChain := exception.BuildCauseChain(errors.Unwrap(sibling), 8)
+    if nil == causeChain {
+        causeChain = []string{}
     }
 
     merged[prefix+"CauseChain"] = causeChain

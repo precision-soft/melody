@@ -119,7 +119,7 @@ func redactDsn(dsn string) string {
 /* redactDialError strips any raw dsn embedded in a dial error before it is wrapped as a cause and logged: amqp091.DialConfig surfaces a net/url parse failure as a *url.Error whose Error() quotes the entire dsn, password included. The url is replaced with redactDsn's fail-closed redaction, which yields the placeholder for a dsn that cannot parse. */
 func redactDialError(dialErr error) error {
     var urlErr *neturl.Error
-    if true == errors.As(dialErr, &urlErr) {
+    if true == exception.ChainAs(dialErr, &urlErr) {
         return &neturl.Error{
             Op:  urlErr.Op,
             URL: redactDsn(urlErr.URL),
@@ -133,12 +133,12 @@ func redactDialError(dialErr error) error {
 /* redactUrlCause keeps none of the dsn bytes net/url embeds in its parse-error values: url.EscapeError carries the offending percent-escape triple, which may be two password characters, url.InvalidHostError the offending host byte, and the plain errors quote the offending port, segment or scheme, which a password holding a reserved character turns into password bytes. Only the two typed causes are named, by a fixed text; every other cause becomes "invalid dsn". */
 func redactUrlCause(cause error) error {
     var escapeErr neturl.EscapeError
-    if true == errors.As(cause, &escapeErr) {
+    if true == exception.ChainAs(cause, &escapeErr) {
         return errors.New("invalid percent-escape in the redacted dsn")
     }
 
     var invalidHostErr neturl.InvalidHostError
-    if true == errors.As(cause, &invalidHostErr) {
+    if true == exception.ChainAs(cause, &invalidHostErr) {
         return errors.New("invalid host in the redacted dsn")
     }
 

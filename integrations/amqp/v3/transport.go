@@ -695,7 +695,7 @@ func (instance *Transport) publishOnce(
     channel, returns, channelConnection, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
         /* a refusal that names an earlier blocked write is not a channel fault, since the retry would meet the same refusal and the reset would tear down a channel this publish never reached; unlike the turn timeout, a later attempt cannot recover either, since the write blocks a connection this transport cannot cut */
-        recoverable := false == errors.Is(channelErr, errPublishTimedOut)
+        recoverable := false == exception.ChainIs(channelErr, errPublishTimedOut)
 
         return nil, publishDisposition{channelFaulted: recoverable, furtherAttemptMayRecover: recoverable}, channelErr
     }

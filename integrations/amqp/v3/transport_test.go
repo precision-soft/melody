@@ -3705,3 +3705,22 @@ func TestConnect_TheAttemptWordIsReadUnderTheMutex(t *testing.T) {
         }
     }
 }
+
+func TestTransport_SendReturnsOnACyclicChainFromTheDialer(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "test")
+
+    transport := NewTransport(TransportConfig{
+        Queue:    "q",
+        Registry: registry,
+        Dialer: func() (*amqp091.Connection, error) {
+            return nil, newCyclicChainError()
+        },
+    })
+
+    assertReturnsOnACyclicChain(t, func() {
+        if sendErr := transport.Send(newReconnectRuntime(context.Background()), melodymessagebus.NewEnvelope(testMessage{Id: 1})); nil == sendErr {
+            t.Error("expected the dialer's refusal")
+        }
+    })
+}

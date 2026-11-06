@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- provider: a post-build hook's error whose `Unwrap` chain reaches itself no longer holds the open that classifies it.
 - mysql: `IsDuplicateKey` returns on an error whose `Unwrap` chain reaches itself.
 
 ## [v3.2.0] - 2026-10-19 - Verified TLS by Default, Unlimited Bounds, Context-Aware Opens, Routed Diagnostics and Word-Matched Transient Markers

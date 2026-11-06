@@ -1546,3 +1546,83 @@ func TestFileStorage_SavesUnderABasenameThatFillsTheFilesystemComponent(t *testi
         t.Fatalf("expected only the snapshot in the directory, got %v, %v", entries, readErr)
     }
 }
+
+type cyclicChainError struct {
+    next error
+}
+
+func (instance *cyclicChainError) Error() string {
+    return "cyclic link"
+}
+
+func (instance *cyclicChainError) Unwrap() error {
+    return instance.next
+}
+
+func newCyclicChainError() *cyclicChainError {
+    first := &cyclicChainError{}
+    first.next = &cyclicChainError{next: first}
+
+    return first
+}
+
+func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
+    t.Helper()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        callback()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
+type failingMarshalValue struct {
+    failure *error
+}
+
+func (instance failingMarshalValue) MarshalJSON() ([]byte, error) {
+    return []byte("null"), *instance.failure
+}
+
+func TestFileStorage_SaveAndDeleteReturnOnACyclicChainFromAValue(t *testing.T) {
+    fileInstance, createErr := os.CreateTemp(t.TempDir(), "melody_session_cyclic_*.json")
+    if nil != createErr {
+        t.Fatalf("unexpected create temp error: %s", createErr.Error())
+    }
+
+    defer func() {
+        _ = fileInstance.Close()
+    }()
+
+    storage, storageErr := NewFileStorageFromFile(fileInstance)
+    if nil != storageErr {
+        t.Fatalf("unexpected storage error: %s", storageErr.Error())
+    }
+
+    var failure error
+    value := map[string]any{"custom": failingMarshalValue{failure: &failure}}
+
+    for _, sessionId := range []string{"kept", "deleted"} {
+        if saveErr := storage.Save(sessionId, value, time.Minute); nil != saveErr {
+            t.Fatalf("unexpected save error: %s", saveErr.Error())
+        }
+    }
+
+    failure = newCyclicChainError()
+
+    assertReturnsOnACyclicChain(t, func() {
+        if saveErr := storage.Save("refused", value, time.Minute); nil == saveErr {
+            t.Error("expected the save to carry the value's failure")
+        }
+
+        if deleteErr := storage.Delete("deleted"); nil == deleteErr {
+            t.Error("expected the delete to carry the value's failure")
+        }
+    })
+}

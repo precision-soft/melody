@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- transport: a dialer's error whose `Unwrap` chain reaches itself no longer holds the `Send` or the server-sent event backplane that classifies it.
+
 ### Documentation
 
 - readme: the dead-lettering section states the headers a replay from the dead-letter queue deletes, the retry and failure-transport counters and the broker's `x-death`, and the one it keeps, `x-message-type`.

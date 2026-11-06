@@ -17,13 +17,13 @@ func ChainAs(err error, target any) bool {
 
     targetPointer := reflect.ValueOf(target)
     if reflect.Pointer != targetPointer.Kind() || true == targetPointer.IsNil() {
-        panic("exception: ChainAs target must be a non-nil pointer")
+        Panic(NewError("the target of a chain search must be a non-nil pointer", nil, nil))
     }
 
     targetValue := targetPointer.Elem()
     targetType := targetValue.Type()
     if reflect.Interface != targetType.Kind() && false == targetType.Implements(chainErrorType) {
-        panic("exception: ChainAs target must be a pointer to an interface or to a type implementing error")
+        Panic(NewError("the target of a chain search must be a pointer to an interface or to a type implementing error", nil, nil))
     }
 
     return chainSearch(err, func(link error) bool {

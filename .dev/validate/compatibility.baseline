@@ -45,21 +45,25 @@
 # error` became `Close() error`, a defect repair the container's teardown needed, shipped on v3.14.0 with
 # its changelog and upgrade entries. And the source ahead of its pinned tag: modules that used a symbol
 # the framework or a sibling integration added after the tag their pin named. The release of v3.14.0 and
-# the pin waves after it raised every pin past those rows, so the file holds no row now. A new row is a
+# the pin waves after it raised every pin past those rows. A new row is a
 # fact the next release has to answer before it ships.
+integrations/amqp/v3 ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
 integrations/awss3/v3 ~ ahead ~ exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
 integrations/bunorm/migrate ~ ahead ~ exception.ChainAs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
 integrations/bunorm/migrate/v2 ~ ahead ~ exception.ChainAs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
 integrations/bunorm/migrate/v3 ~ ahead ~ exception.ChainAs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
-integrations/bunorm/mysql ~ ahead ~ exception.ChainAs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
-integrations/bunorm/mysql/v2 ~ ahead ~ exception.ChainAs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
-integrations/bunorm/mysql/v3 ~ ahead ~ exception.ChainAs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
-integrations/bunorm/pgsql ~ ahead ~ exception.ChainAs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
-integrations/bunorm/pgsql/v2 ~ ahead ~ exception.ChainAs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
-integrations/bunorm/pgsql/v3 ~ ahead ~ exception.ChainAs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
+integrations/bunorm/mysql ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
+integrations/bunorm/mysql/v2 ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
+integrations/bunorm/mysql/v3 ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
+integrations/bunorm/pgsql ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
+integrations/bunorm/pgsql/v2 ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
+integrations/bunorm/pgsql/v3 ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
 integrations/bunorm/v3 ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
 integrations/cron ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
 integrations/cron/v2 ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
 integrations/cron/v3 ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
 integrations/opentelemetry/v3 ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
 integrations/outbox/v3 ~ ahead ~ exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
+integrations/rueidis ~ ahead ~ exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
+integrations/rueidis/v2 ~ ahead ~ exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged
+integrations/rueidis/v3 ~ ahead ~ exception.ChainAs, exception.ChainIs ~ the module reads an application error through the doors the framework patch train adds; the pin rises once the framework is tagged

@@ -1314,3 +1314,15 @@ func TestConnectionTlsConfig_TheDefaultVerifiesAScopedLiteralWithoutItsZone(t *t
         t.Fatalf("expected the default config to verify fe80::1, got %+v", tlsConfig)
     }
 }
+
+func TestProvider_OpenReturnsOnACyclicChainFromAPostBuildHook(t *testing.T) {
+    provider := newTestProvider(WithPostBuildHook(func(_ context.Context, _ *driver.Config) error {
+        return newCyclicChainError()
+    })).WithRetryConfig(NewRetryConfig(1, time.Millisecond, time.Millisecond, 1))
+
+    assertReturnsOnACyclicChain(t, func() {
+        if _, openErr := provider.Open(newTestParams("unused", "3306", "db", "user", "password"), nil); nil == openErr {
+            t.Error("expected the hook's refusal")
+        }
+    })
+}

@@ -149,7 +149,7 @@ func (instance *ServerSentEventBackplane) refusalKeepsTheChannel(publishErr erro
         return true
     }
 
-    return errors.Is(publishErr, errServerSentEventBackplanePublishTimedOut)
+    return exception.ChainIs(publishErr, errServerSentEventBackplanePublishTimedOut)
 }
 
 /* Close is bounded on every stretch, because no amqp client RPC observes a context and all share the send locks a blocked write holds: it joins the publish half under the call timeout, cuts an owned connection with a deadline, at once over a write genuinely in flight and one call timeout ahead otherwise, closes the channels under the join timeout, except where the close could only block — an owned connection whose close did not return within its bound, a caller-owned connection with a wedged write — and joins the listen goroutine under the same bound. No amqp call runs under instance.mutex, so isClosing and the publish path stay answerable while teardown waits. A failed join is read together with the writes in flight, as publishJoin.wedgedWrite does, since a queued broadcast holds the publish half as firmly as a wedged write. */
@@ -344,7 +344,7 @@ func (instance *ServerSentEventBackplane) listen() {
         deliveries, subscribeErr := instance.subscribe()
         if nil != subscribeErr {
             /* the connection is gone and no dialer is configured, so re-subscribing can never recover and the loop stops; a transient channel loss on a live static connection does not reach here, because liveConnection still hands back the live connection */
-            if true == errors.Is(subscribeErr, errServerSentEventBackplaneConnectionGone) {
+            if true == exception.ChainIs(subscribeErr, errServerSentEventBackplaneConnectionGone) {
                 instance.logTerminal("amqp sse backplane connection lost and no dialer is configured, stopping: this node permanently stops receiving remote server-sent events", subscribeErr)
 
                 return
