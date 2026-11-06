@@ -818,3 +818,5 @@ func TestRedisLock_ARefreshTheRuleRefusesIsAnsweredBeforeTheStoreNamingIt(t *tes
         t.Fatalf("expected the refused refreshes to leave the lease held: %v", refreshErr)
     }
 }
+
+var _ lockcontract.LeaseLocker = (*Locker)(nil)

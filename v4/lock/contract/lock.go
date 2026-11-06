@@ -1,6 +1,7 @@
 package contract
 
 import (
+    "errors"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -16,6 +17,9 @@ var LockTtlRule = bound.Rule[time.Duration]{
     Minimum:           bound.TimeoutMinimum,
     UnlimitedAdmitted: true,
 }
+
+/* ErrUnlimitedTtlRefused is the cause of a lease lock's refusal of an unlimited ttl: a configuration no retry can cure, unlike a store outage. */
+var ErrUnlimitedTtlRefused = errors.New("a lease lock does not admit an unlimited ttl")
 
 /* ResolveLeaseTtl decides the ttl a lease locker writes at Acquire against LockTtlRule: absent takes the 30s default, a value below 1ms is refused, and unlimited is refused, naming the ttl, since a lease that never lapses outlives a crashed holder. */
 func ResolveLeaseTtl(ttl bound.Duration) (time.Duration, error) {
@@ -42,7 +46,7 @@ func resolveLeaseTtl(ttl bound.Duration, rule bound.Rule[time.Duration]) (time.D
             exceptioncontract.Context{
                 "field": rule.Name,
             },
-            nil,
+            ErrUnlimitedTtlRefused,
         )
     }
 
@@ -59,4 +63,11 @@ type Lock interface {
 
 type Locker interface {
     CreateLock(name string, ttl bound.Duration) Lock
+}
+
+/* LeaseLocker marks a Locker whose every lock is a lease, so an unlimited ttl can be refused where the locker is handed over rather than at the first Acquire. */
+type LeaseLocker interface {
+    Locker
+
+    LeaseOnly()
 }

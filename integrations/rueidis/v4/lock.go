@@ -63,6 +63,9 @@ type Locker struct {
     callTimeout time.Duration
 }
 
+/* LeaseOnly marks this locker's locks as leases. */
+func (instance *Locker) LeaseOnly() {}
+
 func (instance *Locker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
     return &redisLock{
         client:      instance.client,

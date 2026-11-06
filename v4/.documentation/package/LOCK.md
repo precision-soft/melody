@@ -126,7 +126,7 @@ command := lock.NewExclusiveCommand(
 
 ### Elect a leader
 
-[`NewLeaderGate`](../../lock/leader_gate.go) is the become-leader, renew-periodically, release-on-shutdown pattern for a long-running worker. `Run` blocks until the runtime context is cancelled and always returns `nil` on a clean shutdown, so start it with `go gate.Run(runtimeInstance)` and gate the work on `IsLeader()`, or hook `OnElected`/`OnLost`.
+[`NewLeaderGate`](../../lock/leader_gate.go) is the become-leader, renew-periodically, release-on-shutdown pattern for a long-running worker. `Run` blocks until the runtime context is cancelled and returns `nil` on a clean shutdown, so start it with `go gate.Run(runtimeInstance)` and gate the work on `IsLeader()`, or hook `OnElected`/`OnLost`.
 
 ```go
 gate := lock.NewLeaderGate(
@@ -146,7 +146,11 @@ gate := lock.NewLeaderGate(
     },
 )
 
-go gate.Run(runtimeInstance)
+go func() {
+    if runErr := gate.Run(runtimeInstance); nil != runErr {
+        logger.Error("leader gate stopped", exception.LogContext(runErr, exception.LogContextConfig{}))
+    }
+}()
 ```
 
 [`LeaderGateConfig`](../../lock/leader_gate.go) is everything the gate declares beyond its locker and its lock name, resolved when the gate is built; every zero value is the default, the intervals derived from the `ttl`, and a field below its minimum panics naming it. A `RefreshInterval` above half the `ttl` is refused, naming the field and the ceiling, because a cadence slower than half the lease lets the lease lapse before the first refresh and two instances would both report leadership. `ReleaseTimeout` bounds the release at the end of a term: 5s when left out, at least 1ms, unlimited refused.
@@ -169,7 +173,9 @@ The three hooks, none by default:
 
 **The lease renewal is started before `OnElected` is invoked, and keeps running for the whole time the hook runs** — so a hook that legitimately outlives the `ttl` does not lose the lease under itself. Were it the other way round, nothing would renew while the hook worked: the lease would lapse, a second instance could acquire it, and this one would still report leadership and never demote, because demotion only follows a *failed* renewal.
 
-`Run` never aborts on an `Acquire` error (a store outage): it backs off by doubling, capped at `MaxCampaignBackoff`, 1 minute by default, but never faster than `RetryInterval`, and resumes campaigning. Because such errors never abort it, they are also never returned: with no `OnCampaignError` wired, the gate logs each failed campaign through the runtime's logger — a permanent misconfiguration (for example a Redis locker handed an unlimited `ttl`, whose `Acquire` fails closed on every call) would otherwise be indistinguishable from a deployment that simply has no work to lead. A wired hook replaces the record rather than being echoed by it, and every hook runs behind a recover: a panicking hook is logged with its stack instead of unwinding the bare goroutine `Run` is documented to be started on and killing the process with the lock held. What the recover must not keep alive is the term: a panic out of `OnElected` ends the term it was leading — the lock is released, `OnLost` or the journal receives the panic as the
+An unlimited `Ttl` needs a session-style locker. [`NewLeaderGate`](../../lock/leader_gate.go) panics naming `LeaderGateConfig.Ttl` when the locker declares [`LeaseLocker`](../../lock/contract/lock.go), as the in-memory and the rueidis lockers do. A locker the constructor cannot read, `NewLazyLocker` or one of your own without the mark, is answered at the first campaign: `Run` reports the refusal once, through `OnCampaignError` when it is wired and as an error record otherwise, ends at once and returns it, with [`ErrUnlimitedTtlRefused`](../../lock/contract/lock.go) as its cause. [`NewExclusiveCommand`](../../lock/exclusive_command.go) panics the same way over a `LeaseLocker`, naming `ExclusiveCommandConfig.Ttl`.
+
+`Run` never aborts on any other `Acquire` error (a store outage): it backs off by doubling, capped at `MaxCampaignBackoff`, 1 minute by default, but never faster than `RetryInterval`, and resumes campaigning. Because such errors never abort it, they are also never returned: with no `OnCampaignError` wired, the gate logs each failed campaign through the runtime's logger — a store that stays down would otherwise be indistinguishable from a deployment that simply has no work to lead. A wired hook replaces the record rather than being echoed by it, and every hook runs behind a recover: a panicking hook is logged with its stack instead of unwinding the bare goroutine `Run` is documented to be started on and killing the process with the lock held. What the recover must not keep alive is the term: a panic out of `OnElected` ends the term it was leading — the lock is released, `OnLost` or the journal receives the panic as the
 lost cause with the hook's name, and the gate campaigns again after `RetryInterval`, where another replica may win — because a gate parked on a term whose work died would renew a lease under nothing, answer `IsLeader` and report no failure, the false leader a crashed process used to prevent by handing the work over. `OnLost` and `OnCampaignError` run outside any term, so their panics end nothing. Both `Run` and `RunExclusive` refuse, before any lock is taken, a runtime whose scope or container is a typed nil: they re-wrap the runtime through `runtime.New`, once inside the deferred release, and a refusal there kept the lock held for its whole ttl.
 
 Each campaign creates a **fresh** `Lock`: every `CreateLock` mints a new fencing token, and reusing a lock after losing it would alias tokens with whoever took it over.
@@ -195,9 +201,9 @@ A failed resolution never panics: `CreateLock` resolves nothing and always hands
 - PostgreSQL session advisory locks mirror the MySQL semantics: the backend pins a dedicated connection per held lock (released on `Release` or connection close, so a crashed process releases the lock when its connection closes) and a reentrant `Acquire` re-verifies the pinned connection still holds the lock before returning `(true, nil)`. Release always runs on a fresh context, so a cancelled request context cannot leave the advisory lock held on a connection returned to the pool. Names are FNV-1a-hashed to the 64-bit advisory key, so two distinct names can in principle collide onto the same lock.
 - `Acquire` does not block or retry; implement waiting in userland if needed — or use [`RunExclusive`](../../lock/run_exclusive.go) / [`LeaderGate`](../../lock/leader_gate.go), which campaign on a cadence rather than blocking.
 - `RunExclusive` and `LeaderGate` both **fail closed** on an acquire error: the work does not run. A store outage therefore stops the exclusive work rather than risking two instances doing it at once.
-- `LeaderGate.Run` swallows acquire errors by design and returns `nil` on a clean shutdown, so its return value carries no diagnostic. Each failed campaign and each lost term is logged through the runtime's logger unless the matching hook is wired, in which case the hook owns the record.
+- `LeaderGate.Run` swallows store outages by design and returns `nil` on a clean shutdown, so its return value carries a diagnostic only for an unlimited ttl a lease lock refuses. Each failed campaign and each lost term is logged through the runtime's logger unless the matching hook is wired, in which case the hook owns the record.
 - `ExclusiveCommand` exits **zero** when another instance holds the lock. That is what keeps a cron fleet green, but it also means "did not run" is not distinguishable from "ran successfully" by exit code alone; read the info-level skip log instead.
-- An unlimited `ttl` handed to `RunExclusive` or `LeaderGate` selects session-lock behaviour (probe instead of renew). Passing one to a *lease* backend, the Redis or the in-memory locker, is a misconfiguration, not a mode switch: its `Acquire` fails closed on every call, naming the ttl.
+- An unlimited `ttl` handed to `RunExclusive` or `LeaderGate` selects session-lock behaviour (probe instead of renew). Passing one to a *lease* backend, the Redis or the in-memory locker, is a misconfiguration, not a mode switch: `NewLeaderGate` and `NewExclusiveCommand` refuse it at construction over a `LeaseLocker`, and otherwise its `Acquire` fails closed, naming the ttl, which ends `Run` and fails `RunExclusive`.
 
 ## Userland API
 

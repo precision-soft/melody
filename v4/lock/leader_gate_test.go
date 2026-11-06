@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
+    "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
@@ -1554,7 +1555,7 @@ func TestNewLeaderGate_TheZeroConfigurationDerivesItsDefaultsFromAThirtySecondLe
 }
 
 func TestNewLeaderGate_AnUnlimitedTtlCampaignsForASessionLockProbedEveryFifteenSeconds(t *testing.T) {
-    gate := NewLeaderGate(NewInMemoryLocker(clock.NewSystemClock()), "worker:session-config", LeaderGateConfig{Ttl: bound.UnlimitedDuration()})
+    gate := NewLeaderGate(&sessionStyleLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}, "worker:session-config", LeaderGateConfig{Ttl: bound.UnlimitedDuration()})
 
     if false == gate.settings.sessionMode || false == gate.lockTtl().IsUnlimited() {
         t.Fatalf("expected session mode and an unlimited ttl handed to the locker, got %v and %s", gate.settings.sessionMode, gate.lockTtl())
@@ -1663,4 +1664,188 @@ func TestLeaderGate_HandsItsReleaseTimeoutToTheRelease(t *testing.T) {
     if remaining := <-locker.remaining; remaining > 2*time.Second || remaining <= time.Second {
         t.Fatalf("expected the release to have just under 2s left, got %s", remaining)
     }
+}
+
+func TestNewLeaderGate_RefusesAnUnlimitedTtlOverALeaseLockerNamingTheField(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError || "an unlimited leader gate ttl needs a session-style locker" != recoveredErr.Error() {
+            t.Fatalf("expected the refusal, got %v", recoveredErr)
+        }
+
+        if false == errors.Is(recoveredErr, lockcontract.ErrUnlimitedTtlRefused) {
+            t.Fatalf("expected ErrUnlimitedTtlRefused as the cause, got %v", recoveredErr)
+        }
+
+        if "LeaderGateConfig.Ttl" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        }
+    }()
+
+    NewLeaderGate(NewInMemoryLocker(clock.NewSystemClock()), "worker:refused", LeaderGateConfig{Ttl: bound.UnlimitedDuration()})
+}
+
+func TestNewLeaderGate_ALeaseLockerKeepsALeaseTtl(t *testing.T) {
+    if gate := NewLeaderGate(NewInMemoryLocker(clock.NewSystemClock()), "worker:lease", LeaderGateConfig{}); true == gate.settings.sessionMode {
+        t.Fatalf("expected a lease")
+    }
+}
+
+func TestLeaderGate_RunEndsWithTheRefusalOverALockerTheConstructorCannotRead(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    container.MustRegister[lockcontract.Locker](
+        serviceContainer,
+        ServiceLocker,
+        func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
+            return NewInMemoryLocker(clock.NewSystemClock()), nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    var campaignErrors atomic.Int32
+    gate := NewLeaderGate(NewLazyLocker(serviceContainer), "worker:lazy", LeaderGateConfig{
+        Ttl:           bound.UnlimitedDuration(),
+        RetryInterval: bound.Of(time.Millisecond),
+        OnCampaignError: func(runtimeInstance runtimecontract.Runtime, cause error) {
+            campaignErrors.Add(1)
+        },
+    })
+
+    runContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    runErr := gate.Run(runtime.New(runContext, serviceContainer.NewScope(), serviceContainer))
+    if false == errors.Is(runErr, lockcontract.ErrUnlimitedTtlRefused) {
+        t.Fatalf("expected Run to end with the refusal, got %v", runErr)
+    }
+
+    if nil != runContext.Err() {
+        t.Fatalf("expected Run to end before the context did")
+    }
+
+    if 1 != campaignErrors.Load() {
+        t.Fatalf("expected the refusal reported once through the hook, got %d", campaignErrors.Load())
+    }
+}
+
+func TestLeaderGate_RunLogsTheRefusalOnceWithNoHookWired(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    container.MustRegister[lockcontract.Locker](
+        serviceContainer,
+        ServiceLocker,
+        func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
+            return NewInMemoryLocker(clock.NewSystemClock()), nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    gate := NewLeaderGate(NewLazyLocker(serviceContainer), "worker:lazy-logged", LeaderGateConfig{Ttl: bound.UnlimitedDuration(), RetryInterval: bound.Of(time.Millisecond)})
+
+    runContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    runtimeInstance, logger := runtimeWithRecordingLogger(runContext)
+
+    if runErr := gate.Run(runtimeInstance); false == errors.Is(runErr, lockcontract.ErrUnlimitedTtlRefused) {
+        t.Fatalf("expected Run to end with the refusal, got %v", runErr)
+    }
+
+    if false == logger.hasMessageContaining("leader gate stopped: the lock refuses its unlimited ttl") {
+        t.Fatalf("expected the refusal recorded")
+    }
+}
+
+type selfReachingLockError struct{}
+
+func (instance *selfReachingLockError) Error() string {
+    return "self reaching"
+}
+
+func (instance *selfReachingLockError) Unwrap() error {
+    return instance
+}
+
+func TestLeaderGate_AnAcquireErrorWhoseChainReachesItselfDoesNotHangTheCampaign(t *testing.T) {
+    gate := NewLeaderGate(&failingAcquireLocker{err: &selfReachingLockError{}}, "worker:cycle", LeaderGateConfig{RetryInterval: bound.Of(time.Millisecond)})
+
+    runContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    finished := make(chan error, 1)
+    go func() {
+        finished <- gate.Run(runtime.New(runContext, serviceContainer.NewScope(), serviceContainer))
+    }()
+
+    select {
+    case runErr := <-finished:
+        if nil != runErr {
+            t.Fatalf("expected a clean shutdown, got %v", runErr)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatalf("expected the campaign not to hang on the cyclic chain")
+    }
+}
+
+var _ lockcontract.LeaseLocker = (*InMemoryLocker)(nil)
+
+func TestNewExclusiveCommand_RefusesAnUnlimitedTtlOverALeaseLockerNamingTheField(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError || "an unlimited exclusive command ttl needs a session-style locker" != recoveredErr.Error() {
+            t.Fatalf("expected the refusal, got %v", recoveredErr)
+        }
+
+        if "ExclusiveCommandConfig.Ttl" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        }
+    }()
+
+    NewExclusiveCommand(&recordingCommand{}, NewInMemoryLocker(clock.NewSystemClock()), ExclusiveCommandConfig{Ttl: bound.UnlimitedDuration()})
+}
+
+func TestLeaderGate_AnotherAcquireErrorStillBacksOffAndCampaignsAgain(t *testing.T) {
+    var campaignErrors atomic.Int32
+    gate := NewLeaderGate(&failingAcquireLocker{err: errors.New("store outage")}, "worker:outage", LeaderGateConfig{
+        RetryInterval: bound.Of(time.Millisecond),
+        OnCampaignError: func(runtimeInstance runtimecontract.Runtime, cause error) {
+            campaignErrors.Add(1)
+        },
+    })
+
+    runContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    if runErr := gate.Run(runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)); nil != runErr {
+        t.Fatalf("expected a clean shutdown, got %v", runErr)
+    }
+
+    if 2 > campaignErrors.Load() {
+        t.Fatalf("expected the gate to campaign again after the outage, got %d", campaignErrors.Load())
+    }
+}
+
+type failingAcquireLocker struct {
+    err error
+}
+
+func (instance *failingAcquireLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
+    return &failingAcquireLock{err: instance.err}
+}
+
+type failingAcquireLock struct {
+    err error
+}
+
+func (instance *failingAcquireLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+    return false, instance.err
+}
+
+func (instance *failingAcquireLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    return nil
+}
+
+func (instance *failingAcquireLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+    return nil
 }

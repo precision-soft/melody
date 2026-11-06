@@ -1591,3 +1591,55 @@ func TestChainHolds_BoundsAChainWithoutPointerIdentity(t *testing.T) {
         t.Fatal("the search must end on a chain it cannot recognise a cycle in")
     }
 }
+
+type chainIsSelfReachingError struct{}
+
+func (instance *chainIsSelfReachingError) Error() string {
+    return "self reaching"
+}
+
+func (instance *chainIsSelfReachingError) Unwrap() error {
+    return instance
+}
+
+type chainIsMatchingError struct {
+    target error
+}
+
+func (instance *chainIsMatchingError) Error() string {
+    return "matching"
+}
+
+func (instance *chainIsMatchingError) Is(target error) bool {
+    return instance.target == target
+}
+
+type chainIsUncomparableError struct {
+    links []string
+}
+
+func (instance chainIsUncomparableError) Error() string {
+    return "uncomparable"
+}
+
+func TestChainIs_AnswersWhatErrorsIsAnswers(t *testing.T) {
+    target := errors.New("target")
+
+    for name, testCase := range map[string]struct {
+        err      error
+        expected bool
+    }{
+        "the target itself":    {err: target, expected: true},
+        "wrapped":              {err: fmt.Errorf("wrap: %w", target), expected: true},
+        "joined":               {err: errors.Join(errors.New("other"), target), expected: true},
+        "through Is":           {err: &chainIsMatchingError{target: target}, expected: true},
+        "another error":        {err: errors.New("target"), expected: false},
+        "nil":                  {err: nil, expected: false},
+        "a chain reaching it":  {err: &chainIsSelfReachingError{}, expected: false},
+        "an uncomparable link": {err: chainIsUncomparableError{links: []string{"a"}}, expected: false},
+    } {
+        if actual := ChainIs(testCase.err, target); testCase.expected != actual {
+            t.Fatalf("%s: expected %v, got %v", name, testCase.expected, actual)
+        }
+    }
+}

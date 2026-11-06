@@ -325,6 +325,48 @@ func chainHolds(err error, target any) (found bool) {
     return false
 }
 
+/* ChainIs answers what errors.Is answers, depth first, under a recover and the bound chainHolds keeps: errors.Is never returns on a chain whose Unwrap reaches itself, and an error from an adapter is not the framework's to trust. */
+func ChainIs(err error, target error) (found bool) {
+    defer func() {
+        if nil != recover() {
+            found = false
+        }
+    }()
+
+    visited := map[chainLinkIdentity]struct{}{}
+    pending := []error{err}
+
+    for walked := 0; 0 < len(pending) && walked < chainSearchLinkLimit; {
+        current := pending[len(pending)-1]
+        pending = pending[:len(pending)-1]
+
+        if nil == current || true == chainLinkAlreadyVisited(visited, current) {
+            continue
+        }
+        walked++
+
+        if true == reflect.TypeOf(current).Comparable() && current == target {
+            return true
+        }
+
+        if searchable, isSearchable := current.(interface{ Is(error) bool }); true == isSearchable && true == searchable.Is(target) {
+            return true
+        }
+
+        switch wrapper := current.(type) {
+        case interface{ Unwrap() error }:
+            pending = append(pending, wrapper.Unwrap())
+        case interface{ Unwrap() []error }:
+            links := wrapper.Unwrap()
+            for index := len(links) - 1; 0 <= index; index-- {
+                pending = append(pending, links[index])
+            }
+        }
+    }
+
+    return false
+}
+
 /* chainSearchLinkLimit bounds a search whose links carry no pointer identity to recognise a cycle by */
 const chainSearchLinkLimit = 1024
 

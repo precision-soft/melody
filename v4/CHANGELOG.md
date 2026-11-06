@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- exception: `ChainIs`, what `errors.Is` answers, with a bound and a recover, on a chain whose `Unwrap` reaches itself.
+- lock: `lockcontract.ErrUnlimitedTtlRefused`, the cause of a lease lock's refusal of an unlimited ttl, and `lockcontract.LeaseLocker`, the mark `InMemoryLocker` declares.
 - session: `InMemoryStorageConfig.MaxSessions`, `FileStorageConfig.MaxSessions` and `DefaultMaxSessions`, 100,000 when left out, at least 1, unlimited admitted.
 - application: `ApplicationConfig.ScopeTeardownTimeout` and the key `MELODY_SCOPE_TEARDOWN_TIMEOUT` (`kernel.scope_teardown_timeout`) declare the term of a scope's close, the key winning over the field, a value below 1ms failing the boot, as does an http process whose term, the default included, does not stay strictly under `MELODY_HTTP_SHUTDOWN_TIMEOUT`; `Application.CloseWithContext` closes the application under the caller's deadline and returns the teardown failure it discovered; a nil context on that door, on the container's and on a scope's is refused with an error before the teardown is claimed.
 - container: `ContainerConfig.ScopeTeardownTimeout`, `ScopeTeardownTimeoutRule` and `DefaultScopeTeardownTimeout`, 3s when left out, at least 1ms, unlimited admitted.
@@ -49,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- lock: **Behavioural change**: `NewLeaderGate` and `NewExclusiveCommand` panic on an unlimited ttl over a `LeaseLocker`, and `Run` reports the refusal once and ends with it over a locker it could not read, where the gate campaigned for the life of the process, never led, and returned nil at shutdown.
 - session: **Behavioural change**: at `MaxSessions`, once the lapsed sessions are swept, the in-memory and file storages refuse a `Save` of a new id, where every cookie-less request writing to a session on a public route held one more entry for the session's whole ttl.
 - container: **Breaking**: `CloseWithContext` is declared on the `Container` and `Scope` contracts, and `config/contract.KernelConfiguration` declares `ScopeTeardownTimeout`.
 - container: **Behavioural change**: a scope's `Close` hands its scoped services a context ending at `ContainerConfig.ScopeTeardownTimeout`, so the close of a command's, a request's, a consumed message's or a cron run's scope ends at that term and reports the service that did not finish, where a service waiting on its context held the process or the response without limit.

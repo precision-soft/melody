@@ -153,6 +153,14 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** `DeclareTeardownDependency("app.bus", []string{"app.transports"})`, and declare the slice in the asserted interface.
 
+### Lock: a leader gate or an exclusive command with an unlimited ttl over a lease locker is refused
+
+**What changed.** [`NewLeaderGate`](../lock/leader_gate.go) and [`NewExclusiveCommand`](../lock/exclusive_command.go) panic on an unlimited ttl when the locker declares [`lockcontract.LeaseLocker`](../lock/contract/lock.go), the in-memory and rueidis lockers among them. A locker they cannot read, `NewLazyLocker` included, makes the gate's `Run` report the refusal once, end at once and return it, with `lockcontract.ErrUnlimitedTtlRefused` as its cause, where the gate retried it as a store outage for the life of the process. In the third major the in-memory locker admitted the same configuration as a session-style lock, so the gate led there.
+
+**Symptom.** `NewLeaderGate` panics with `an unlimited leader gate ttl needs a session-style locker`, `NewExclusiveCommand` with `an unlimited exclusive command ttl needs a session-style locker`, or `Run` returns `a lease lock does not admit an unlimited ttl`.
+
+**Remedy.** A lease ttl, or a session-style locker (the mysql or pgsql one). A lease locker of your own declares `LeaseOnly()` to be refused at the constructor. `go gate.Run(runtimeInstance)` discards the returned refusal, which is still reported through `OnCampaignError` or the logger; read the return value to act on it.
+
 ### Session: the in-memory and file storages hold at most 100,000 sessions
 
 **What changed.** [`InMemoryStorageConfig.MaxSessions`](../session/in_memory_storage.go) and [`FileStorageConfig.MaxSessions`](../session/file_storage.go) are `bound.Count` fields of 100,000 when left out, at least 1, unlimited admitted. At the ceiling, once the lapsed sessions are swept, a `Save` of a new id is refused and a `Save` of a stored id still lands. A value below the minimum panics in `NewInMemoryStorage` and is returned as an error by `NewFileStorage`. The third major has no ceiling, and its table grows with every session written.

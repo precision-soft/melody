@@ -29,7 +29,7 @@ var leaderGateReleaseTimeoutRule = bound.Rule[time.Duration]{
 
 /* LeaderGateConfig is what a gate declares beyond its locker and its lock name; every zero value is the default, the intervals derived from the ttl. */
 type LeaderGateConfig struct {
-    /* Ttl is the lease a term holds and renews: 30s by default, at least 2ms, unlimited selecting a session-style lock (MySQL GET_LOCK, PostgreSQL advisory), which has no lease to extend and is probed instead. */
+    /* Ttl is the lease a term holds and renews: 30s by default, at least 2ms, unlimited selecting a session-style lock (MySQL GET_LOCK, PostgreSQL advisory), which has no lease to extend and is probed instead, and refused over a lockcontract.LeaseLocker. */
     Ttl bound.Duration
 
     /* RetryInterval is the pause between failed campaigns while another instance leads: half the ttl, at least 1s, by default, 1s under a session-style lock; at least 1ms when set; unlimited refused. */
@@ -91,7 +91,7 @@ type leaderGateSettings struct {
     onCampaignError               func(runtimeInstance runtimecontract.Runtime, cause error)
 }
 
-/* NewLeaderGate builds a gate campaigning for the named lock. The configuration is resolved here, and a refusal panics naming the field. */
+/* NewLeaderGate builds a gate campaigning for the named lock. The configuration is resolved here, and a refusal panics naming the field, an unlimited ttl on a LeaseLocker included. */
 func NewLeaderGate(locker lockcontract.Locker, name string, config LeaderGateConfig) *LeaderGate {
     if true == internal.IsNilInterface(locker) {
         exception.Panic(exception.NewError("leader gate locker is nil", nil, nil))
@@ -104,6 +104,19 @@ func NewLeaderGate(locker lockcontract.Locker, name string, config LeaderGateCon
     settings, err := resolveLeaderGateConfig(config)
     if nil != err {
         exception.Panic(exception.FromError(err))
+    }
+
+    if _, isLeaseLocker := locker.(lockcontract.LeaseLocker); true == isLeaseLocker && true == settings.sessionMode {
+        exception.Panic(
+            exception.NewError(
+                "an unlimited leader gate ttl needs a session-style locker",
+                exceptioncontract.Context{
+                    "field": leaderGateTtlRule.Name,
+                    "name":  name,
+                },
+                lockcontract.ErrUnlimitedTtlRefused,
+            ),
+        )
     }
 
     return &LeaderGate{
@@ -252,7 +265,7 @@ func (instance *LeaderGate) leaveTerm() {
     instance.leaseExpiry.Store(0)
 }
 
-/* Run blocks until the runtime context is cancelled and always returns nil on a clean shutdown; start it with `go gate.Run(runtimeInstance)` for a long-running worker. Acquire errors (a store outage) never abort it — they back off doubling, capped at MaxCampaignBackoff or at RetryInterval when that is longer, and campaigning resumes. Because they never abort it, they are also never returned: each one is logged through the runtime's logger unless OnCampaignError is wired, in which case the hook owns the record. */
+/* Run blocks until the runtime context is cancelled and returns nil on a clean shutdown, or ends at once, the refusal reported once and returned with ErrUnlimitedTtlRefused as its cause, when the lock refuses the gate's unlimited ttl; start it with `go gate.Run(runtimeInstance)` for a long-running worker. Acquire errors (a store outage) never abort it — they back off doubling, capped at MaxCampaignBackoff or at RetryInterval when that is longer, and campaigning resumes. Because they never abort it, they are also never returned: each one is logged through the runtime's logger unless OnCampaignError is wired, in which case the hook owns the record. */
 func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
     if true == internal.IsNilInterface(runtimeInstance) {
         exception.Panic(exception.NewError("leader gate runtime is nil", nil, nil))
@@ -277,6 +290,13 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
             /* a shutdown cancels the context the backend is called with, so a campaign failing with the cancellation is the stop itself, not a store outage */
             if nil != runContext.Err() {
                 return nil
+            }
+
+            /* only a locker the constructor could not read gets here, a lazy one or one without the mark; no retry cures a configuration */
+            if true == exception.ChainIs(acquireErr, lockcontract.ErrUnlimitedTtlRefused) {
+                instance.reportTtlRefusal(runtimeInstance, acquireErr)
+
+                return acquireErr
             }
 
             instance.reportCampaignError(runtimeInstance, acquireErr)
@@ -340,6 +360,22 @@ func (instance *LeaderGate) reportCampaignError(runtimeInstance runtimecontract.
 
     instance.gateLogger(runtimeInstance).Warning(
         "leader gate campaign failed; backing off and campaigning again",
+        exception.LogContext(cause, exception.LogContextConfig{Extra: exceptioncontract.Context{"name": instance.name}}),
+    )
+}
+
+/* reportTtlRefusal is the record of a gate that stops, since the documented `go gate.Run` form may read no return value. */
+func (instance *LeaderGate) reportTtlRefusal(runtimeInstance runtimecontract.Runtime, cause error) {
+    if nil != instance.settings.onCampaignError {
+        instance.runHookShielded(runtimeInstance, "OnCampaignError", func() {
+            instance.settings.onCampaignError(runtimeInstance, cause)
+        })
+
+        return
+    }
+
+    instance.gateLogger(runtimeInstance).Error(
+        "leader gate stopped: the lock refuses its unlimited ttl",
         exception.LogContext(cause, exception.LogContextConfig{Extra: exceptioncontract.Context{"name": instance.name}}),
     )
 }

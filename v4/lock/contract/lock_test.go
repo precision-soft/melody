@@ -1,6 +1,7 @@
 package contract
 
 import (
+    "errors"
     "testing"
     "time"
 
@@ -52,5 +53,13 @@ func TestResolveLeaseRefreshTtl_RefusesNamingTheRefreshTtl(t *testing.T) {
 
     if ttl, err := ResolveLeaseRefreshTtl(bound.Duration{}); nil != err || 30*time.Second != ttl {
         t.Fatalf("expected an absent refresh ttl to hold for 30s, got %s and %v", ttl, err)
+    }
+}
+
+func TestResolveLeaseTtl_AnUnlimitedTtlIsRefusedWithItsCause(t *testing.T) {
+    for name, resolve := range map[string]func(bound.Duration) (time.Duration, error){"acquire": ResolveLeaseTtl, "refresh": ResolveLeaseRefreshTtl} {
+        if _, refusedErr := resolve(bound.UnlimitedDuration()); false == errors.Is(refusedErr, ErrUnlimitedTtlRefused) {
+            t.Fatalf("%s: expected ErrUnlimitedTtlRefused, got %v", name, refusedErr)
+        }
     }
 }

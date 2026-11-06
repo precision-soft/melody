@@ -6,6 +6,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -57,6 +58,18 @@ func NewExclusiveCommand(
     ttl, ttlErr := bound.Resolve(config.Ttl, exclusiveCommandTtlRule)
     if nil != ttlErr {
         exception.Panic(exception.FromError(ttlErr))
+    }
+
+    if _, isLeaseLocker := locker.(lockcontract.LeaseLocker); true == isLeaseLocker && true == ttl.Unlimited {
+        exception.Panic(
+            exception.NewError(
+                "an unlimited exclusive command ttl needs a session-style locker",
+                exceptioncontract.Context{
+                    "field": exclusiveCommandTtlRule.Name,
+                },
+                lockcontract.ErrUnlimitedTtlRefused,
+            ),
+        )
     }
 
     releaseTimeout, releaseTimeoutErr := bound.Resolve(config.ReleaseTimeout, exclusiveCommandReleaseTimeoutRule)

@@ -10,6 +10,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -417,5 +418,11 @@ func TestPgsqlLock_ANilOrTypedNilRuntimeReleasesOnTheLockersBudget(t *testing.T)
         if _, closes, releases := connector.counts(); 1 != releases || 0 != closes {
             t.Fatalf("expected one release and the session returned to the pool, got %d releases and %d closes", releases, closes)
         }
+    }
+}
+
+func TestLocker_DeclaresNoLeaseMarkSoASessionGateIsAdmitted(t *testing.T) {
+    if _, isLeaseLocker := any(&Locker{}).(lockcontract.LeaseLocker); true == isLeaseLocker {
+        t.Fatalf("expected a session-style locker not to declare the lease mark")
     }
 }
