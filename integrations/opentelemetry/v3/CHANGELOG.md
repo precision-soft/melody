@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Security
+
+- `go.mod`: `google.golang.org/grpc` v1.83.2, past the version the advisory names, which concerns the xDS server this module does not run.
+
 ## [v3.2.1] - 2026-11-06 - Bounded Error Chain Search
 
 ### Fixed

@@ -13,11 +13,11 @@ require (
 	github.com/redis/rueidis v1.0.71
 	github.com/uptrace/bun v1.2.17
 	github.com/uptrace/bun/dialect/mysqldialect v1.2.17
-	golang.org/x/crypto v0.51.0
+	golang.org/x/crypto v0.52.0
 )
 
 require (
-	filippo.io/edwards25519 v1.1.0 // indirect
+	filippo.io/edwards25519 v1.1.1 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
@@ -26,7 +26,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/mod v0.33.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 )
 
 replace github.com/precision-soft/melody/v2 => ../

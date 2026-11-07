@@ -1,9 +1,8 @@
 package migrate
 
 import (
-    "time"
-
     "errors"
+    "time"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/cli/output"

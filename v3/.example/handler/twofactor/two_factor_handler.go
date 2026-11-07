@@ -1,9 +1,8 @@
 package twofactor
 
 import (
-    "time"
-
     nethttp "net/http"
+    "time"
 
     "github.com/precision-soft/melody/v3/.example/presenter"
     examplesecurity "github.com/precision-soft/melody/v3/.example/security"

@@ -218,9 +218,9 @@ func (instance *rendezvousCommand) Run(runtimeInstance runtimecontract.Runtime, 
 }
 
 type blockingCommand struct {
-    commandName    string
-    started        chan struct{}
-    completedCount atomic.Int32
+    commandName     string
+    started         chan struct{}
+    completedCount  atomic.Int32
     completionDelay time.Duration
 }
 

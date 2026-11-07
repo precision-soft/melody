@@ -54,16 +54,16 @@ export class RouteGenerator {
             return undefined === value ? undefined : String(value);
         };
 
-        const segments = entry.pattern.split("/");
+        const segments = entry.pattern.split('/');
         const resultSegments: string[] = [];
 
         for (let index = 1; index < segments.length; index++) {
             const segment = segments[index];
 
-            if (true === segment.startsWith(":")) {
+            if (true === segment.startsWith(':')) {
                 let key = segment.slice(1);
                 let optional = false;
-                if (true === key.endsWith("?")) {
+                if (true === key.endsWith('?')) {
                     optional = true;
                     key = key.slice(0, -1);
                 }
@@ -82,27 +82,27 @@ export class RouteGenerator {
                 continue;
             }
 
-            if (true === segment.startsWith("*")) {
+            if (true === segment.startsWith('*')) {
                 let key = segment.slice(1);
                 let catchAll = index === segments.length - 1;
-                if (true === key.endsWith("...")) {
+                if (true === key.endsWith('...')) {
                     catchAll = true;
                     key = key.slice(0, -3);
                 }
 
-                const value = "" === key ? undefined : lookup(key);
-                if ("" !== key) {
+                const value = '' === key ? undefined : lookup(key);
+                if ('' !== key) {
                     consumed.add(key);
                 }
 
                 if (false === catchAll) {
-                    if ("" === key) {
+                    if ('' === key) {
                         throw new Error(`wildcard segment must be named for route "${name}"`);
                     }
                     if (undefined === value) {
                         throw new Error(`missing wildcard parameter "${key}" for route "${name}"`);
                     }
-                    if (true === value.includes("/")) {
+                    if (true === value.includes('/')) {
                         throw new Error(`wildcard parameter "${key}" cannot contain a slash for route "${name}"`);
                     }
 
@@ -115,8 +115,8 @@ export class RouteGenerator {
                     continue;
                 }
 
-                for (const part of value.split("/")) {
-                    if ("" === part) {
+                for (const part of value.split('/')) {
+                    if ('' === part) {
                         continue;
                     }
                     resultSegments.push(encodeURIComponent(part));
@@ -128,7 +128,7 @@ export class RouteGenerator {
             resultSegments.push(segment);
         }
 
-        const path = 0 === resultSegments.length ? "/" : `/${resultSegments.join("/")}`;
+        const path = 0 === resultSegments.length ? '/' : `/${resultSegments.join('/')}`;
 
         const search = new URLSearchParams();
         for (const [key, value] of Object.entries(params)) {
@@ -144,6 +144,6 @@ export class RouteGenerator {
 
         const queryString = search.toString();
 
-        return "" === queryString ? path : `${path}?${queryString}`;
+        return '' === queryString ? path : `${path}?${queryString}`;
     }
 }

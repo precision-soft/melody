@@ -34,8 +34,8 @@ type serverSentEventWireEvent struct {
 }
 
 type ServerSentEventBackplane struct {
-    connection *amqp091.Connection
-    dialer     func() (*amqp091.Connection, error)
+    connection    *amqp091.Connection
+    dialer        func() (*amqp091.Connection, error)
     connectedOnce bool
     hub           *melodyhttp.ServerSentEventHub
     exchange      string
@@ -44,8 +44,8 @@ type ServerSentEventBackplane struct {
     reconnect     ReconnectConfig
     callTimeout   time.Duration
 
-    mutex          sync.Mutex
-    publishChannel *amqp091.Channel
+    mutex             sync.Mutex
+    publishChannel    *amqp091.Channel
     publishConnection *amqp091.Connection
     consumeChannel    *amqp091.Channel
     closing           bool

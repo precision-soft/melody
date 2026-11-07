@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Security
+
+- `go.mod`: `golang.org/x/crypto` v0.52.0, `golang.org/x/net` v0.55.0 and `github.com/klauspost/compress` v1.18.7, past the versions the advisories name. None of them reached code this module calls.
+
 ## [v3.1.1] - 2026-11-06 - Bounded Error Chain Search
 
 ### Fixed

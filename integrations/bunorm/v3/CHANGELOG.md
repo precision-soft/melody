@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `encrypt/README.md`: the column capacity check measures once, so it cannot bound a longer value written during the run.
 
+### Security
+
+- `go.mod`: `filippo.io/edwards25519` v1.1.1, past the version the advisory names. It did not reach code this module calls.
+
 ## [v3.6.4] - 2026-11-06 - Bounded Error Chain Search
 
 ### Fixed

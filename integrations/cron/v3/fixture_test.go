@@ -4,10 +4,9 @@ import (
     "bytes"
     "context"
     "fmt"
+    "io"
     "sort"
     "testing"
-
-    "io"
 
     melodycli "github.com/precision-soft/melody/v3/cli"
     clicontract "github.com/precision-soft/melody/v3/cli/contract"

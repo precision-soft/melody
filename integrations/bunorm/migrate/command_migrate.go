@@ -3,10 +3,9 @@ package migrate
 import (
     "context"
     "fmt"
-    "time"
-
     "strconv"
     "strings"
+    "time"
 
     clicontract "github.com/precision-soft/melody/cli/contract"
     "github.com/precision-soft/melody/cli/output"

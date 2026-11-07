@@ -11,6 +11,7 @@ The example application inside this major keeps no changelog: it is not a projec
 ### Changed
 
 - `.documentation/package/HTTP.md`: what an error handler installed with `SetErrorHandler` replaces and what stays with the kernel.
+- `SECURITY.md`: an application that serves HTTP/2 directly must be built with Go 1.26.9 or newer for four `net/http` advisories, whatever the `go` line of the module says.
 
 ## [v3.14.4] - 2026-11-06 - Build Version Matches the Release
 
@@ -26,7 +27,8 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ### Fixed
 
-- exception: an error whose `Unwrap` chain reaches itself no longer holds the goroutine that reads it forever, where `errors.As` and `errors.Is` never return on such a chain: `LogContext`, `IsAlreadyLogged`, `MarkLogged`, `FromError`, `AsHttpException`, `IsDeserializationError`, `IsInfrastructureFailure` and `LogError` return, a handler's or a session save's cyclic error is answered 500, a body read's 400, a session value's fails the file storage's save and delete with the storage mutex released, a limiter's is recorded as a store failure, a file system's is a miss of the static server and a refusal of the dotenv load, and a provider's and a command's travel out as any other failure. A search reads a link met twice once and stops after 65,536 links. `BuildCauseChain` and `BuildCauseContextChain` render each pointer link once, so a join holding one link twice reads it once. On this major, a link whose `Unwrap`, `Is` or `As` panics reads as holding nothing at the searches of the kernel, the listener, the resolver and the rest of the framework, as it already did inside `exception`, where the panic reached the kernel's recovery.
+- exception: an error whose `Unwrap` chain reaches itself no longer holds the goroutine that reads it forever, where `errors.As` and `errors.Is` never return on such a chain: `LogContext`, `IsAlreadyLogged`, `MarkLogged`, `FromError`, `AsHttpException`, `IsDeserializationError`, `IsInfrastructureFailure` and `LogError` return, a handler's or a session save's cyclic error is answered 500, a body read's 400, a session value's fails the file storage's save and delete with the storage mutex released, a limiter's is recorded as a store failure, a file system's is a miss of the static server and a refusal of the dotenv load, and a provider's and a command's travel out as any other failure. A search reads a link met twice once and stops after 65,536 links. `BuildCauseChain` and `BuildCauseContextChain` render each pointer link once, so a join holding one link twice reads it once. On this major, a link whose `Unwrap`, `Is` or `As` panics reads as holding nothing at the searches of the kernel,
+  the listener, the resolver and the rest of the framework, as it already did inside `exception`, where the panic reached the kernel's recovery.
 
 ### Documentation
 
