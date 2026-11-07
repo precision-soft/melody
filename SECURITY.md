@@ -8,6 +8,10 @@ Melody is developed as parallel module lines. **v3 is the actively maintained ve
 
 Security fixes are applied to every line still inside its support window. Other defect fixes are back-ported to v1 and v2 when they fit a patch release; new features land on v3 only, up to v3.14.0, its last feature release, and target v4 after it (see [`CONTRIBUTING.md`](./CONTRIBUTING.md)).
 
+## The Go toolchain you build with
+
+The `go` line of a Melody module is the lowest version that compiles it, not the lowest free of advisories, and a standard-library fix reaches your binary only through the toolchain that builds it. Four `net/http` HTTP/2 advisories (GO-2026-6603, GO-2026-6611, GO-2026-6612, GO-2026-6617) are fixed from Go 1.26.9, and from 1.27.2 on the 1.27 line, so an application that serves HTTP/2 directly must be built with one of those, whatever the `go` line says. A server behind a proxy that terminates HTTP/2 is not reached by them.
+
 ## Reporting a vulnerability
 
 **Do not open a public issue, pull request, or discussion for security-sensitive reports.**

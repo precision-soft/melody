@@ -64,11 +64,11 @@ func NewKernel(router httpcontract.Router) *Kernel {
 }
 
 type Kernel struct {
-    router          httpcontract.Router
-    middlewares     []httpcontract.Middleware
-    notFoundHandler httpcontract.Handler
-    errorHandler    httpcontract.ErrorHandler
-    options         KernelOptions
+    router            httpcontract.Router
+    middlewares       []httpcontract.Middleware
+    notFoundHandler   httpcontract.Handler
+    errorHandler      httpcontract.ErrorHandler
+    options           KernelOptions
     openRequestScopes atomic.Int64
 }
 

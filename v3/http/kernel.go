@@ -71,7 +71,7 @@ type Kernel struct {
     options         KernelOptions
     /* the shutdown's only measure of a hijacked connection, which net/http's Shutdown does not wait for */
     openRequestScopes atomic.Int64
-    serving atomic.Bool
+    serving           atomic.Bool
 }
 
 func sessionCookieBootWarnings(policy httpcontract.SessionCookiePolicy) []internal.BootWarning {

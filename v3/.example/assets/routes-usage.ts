@@ -15,21 +15,21 @@
  *    (melody-routes.ts sits next to this file; app.ts bundles it for the browser).
  */
 
-import {RouteGenerator, RouteManifest} from "./melody-routes";
+import {RouteGenerator, RouteManifest} from './melody-routes';
 
-import manifestJson from "./routes.json";
+import manifestJson from './routes.json';
 
 const routes = new RouteGenerator(manifestJson as RouteManifest);
 
 /* /users/api/read/42/ */
-const userPath = routes.path("example.users.api.read", {id: 42});
+const userPath = routes.path('example.users.api.read', {id: 42});
 
 /* /users/api/read/42/?tab=orders — leftover params become query string */
-const userOrdersPath = routes.path("example.users.api.read", {id: 42, tab: "orders"});
+const userOrdersPath = routes.path('example.users.api.read', {id: 42, tab: 'orders'});
 
 /* guard before generating, e.g. for optionally-exposed routes */
-if (routes.has("example.products.api.read")) {
-    const productPath = routes.path("example.products.api.read", {id: 7});
+if (routes.has('example.products.api.read')) {
+    const productPath = routes.path('example.products.api.read', {id: 7});
     console.log(productPath);
 }
 

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Security
+
+- `go.mod`: `golang.org/x/crypto` v0.52.0 and `go.opentelemetry.io/otel` v1.41.0, past the versions the advisories name. None of them reached code this module calls.
+
 ## [v3.2.2] - 2026-11-06 - Bounded Error Chain Search
 
 ### Fixed

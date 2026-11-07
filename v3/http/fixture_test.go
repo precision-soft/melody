@@ -121,7 +121,7 @@ type closeRecordingScope struct {
     containercontract.Scope
     failOverride bool
     closed       bool
-    onClose func()
+    onClose      func()
 }
 
 func (instance *closeRecordingScope) OverrideProtectedInstance(serviceName string, value any) error {

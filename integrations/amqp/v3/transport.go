@@ -124,7 +124,7 @@ type TransportConfig struct {
 }
 
 type Transport struct {
-    connection *amqp091.Connection
+    connection    *amqp091.Connection
     connectedOnce bool
     dialer        func() (*amqp091.Connection, error)
     queue         string
@@ -140,9 +140,9 @@ type Transport struct {
     delayBuckets        []time.Duration
     publishTimeout      time.Duration
 
-    mutex          sync.Mutex
-    publishChannel *amqp091.Channel
-    publishReturns <-chan amqp091.Return
+    mutex             sync.Mutex
+    publishChannel    *amqp091.Channel
+    publishReturns    <-chan amqp091.Return
     publishConnection *amqp091.Connection
     consumeChannel    *amqp091.Channel
     consumeGeneration uint64

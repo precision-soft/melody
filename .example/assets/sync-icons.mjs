@@ -15,21 +15,21 @@
  * on its own in packaging modes C and D, where a link pointing outside it has nothing to point at.
  */
 
-import {copyFileSync, existsSync, mkdirSync} from "node:fs";
-import {dirname, join, resolve} from "node:path";
-import {fileURLToPath} from "node:url";
+import {copyFileSync, existsSync, mkdirSync} from 'node:fs';
+import {dirname, join, resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
 
 /* the mapping from source name to served name, and the only place it is written. logo.png serves as both
    the og/preview image and the apple touch icon, and logo.svg is what the pages link as the svg favicon. */
 const iconList = [
-    {source: "favicon.ico", target: join("public", "favicon.ico")},
-    {source: "logo.svg", target: join("public", "assets", "favicon.svg")},
-    {source: "logo.png", target: join("public", "assets", "logo.png")},
-    {source: "logo.png", target: join("public", "assets", "apple-touch-icon.png")},
+    {source: 'favicon.ico', target: join('public', 'favicon.ico')},
+    {source: 'logo.svg', target: join('public', 'assets', 'favicon.svg')},
+    {source: 'logo.png', target: join('public', 'assets', 'logo.png')},
+    {source: 'logo.png', target: join('public', 'assets', 'apple-touch-icon.png')},
 ];
 
 const assetsDirectory = dirname(fileURLToPath(import.meta.url));
-const exampleDirectory = resolve(assetsDirectory, "..");
+const exampleDirectory = resolve(assetsDirectory, '..');
 
 /* the repository root is found by walking up to the directory that holds .assets rather than by counting
    ".." segments, because the three examples sit at different depths and a hardcoded count is a copy of
@@ -38,7 +38,7 @@ const findSourceDirectory = () => {
     let candidate = exampleDirectory;
 
     for (; ;) {
-        const sourceDirectory = join(candidate, ".assets");
+        const sourceDirectory = join(candidate, '.assets');
         if (true === existsSync(sourceDirectory)) {
             return sourceDirectory;
         }

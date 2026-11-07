@@ -32,9 +32,9 @@ const (
 )
 
 type scheduledRunEntry struct {
-    commandName string
-    command     clicontract.Command
-    arguments   []string
+    commandName     string
+    command         clicontract.Command
+    arguments       []string
     schedule        string
     matcher         *scheduleMatcher
     fixedTime       bool

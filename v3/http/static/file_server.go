@@ -22,8 +22,8 @@ import (
 )
 
 type FileServer struct {
-    config     *FileServerConfig
-    fileSystem fs.FS
+    config      *FileServerConfig
+    fileSystem  fs.FS
     contentTags *sync.Map
 }
 
