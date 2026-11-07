@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.5] - 2026-11-07 - Dependency Advisories
+
 ### Changed
 
 - `encrypt/README.md`: the column capacity check measures once, so it cannot bound a longer value written during the run.
@@ -244,7 +246,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.4...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.5...HEAD
+
+[v3.6.5]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.4...integrations/bunorm/v3.6.5
 
 [v3.6.4]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.3...integrations/bunorm/v3.6.4
 

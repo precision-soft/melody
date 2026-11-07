@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.1.2] - 2026-11-07 - Dependency Advisories
+
 ### Security
 
 - `go.mod`: `golang.org/x/crypto` v0.52.0, `golang.org/x/net` v0.55.0 and `github.com/klauspost/compress` v1.18.7, past the versions the advisories name. None of them reached code this module calls.
@@ -69,7 +71,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `storage.go` — object keys are now normalized the same way the core `LocalStorage` backend normalizes them (backslash to forward slash, clean `.`/`..` segments, strip the leading slash) before every `Put`/`Get`/`Delete`/`Exists`/`PresignedUrl` call. Keys were passed to S3 verbatim while `LocalStorage` cleaned them, so the same key string addressed different objects depending on the backend, and `PresignedUrl("a/../f.txt")` signed a path the browser collapses before sending (yielding `SignatureDoesNotMatch`). An empty or `.`/`..`-only key is now rejected, matching the `LocalStorage` contract.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.2...HEAD
+
+[v3.1.2]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.1...integrations/awss3/v3.1.2
 
 [v3.1.1]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.0...integrations/awss3/v3.1.1
 

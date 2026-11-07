@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.2.3] - 2026-11-07 - Dependency Advisories
+
 ### Security
 
 - `go.mod`: `golang.org/x/crypto` v0.52.0 and `go.opentelemetry.io/otel` v1.41.0, past the versions the advisories name. None of them reached code this module calls.
@@ -73,7 +75,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   AMQP transport publishes as the message id, so a consumer can deduplicate the redelivery an at-least-once outbox can produce after a transport-success-then-crash. An optional core `lock/contract.Locker` (e.g. the Redis locker) additionally leases the relay so only one instance drains at a time; the lease is refreshed as the batch progresses (twice per `LockTtl`) and the run aborts if it can no longer be held, so a batch that outlives the ttl cannot be taken over and double-published mid-run. The exponential backoff is overflow-safe: a very large `MaxBackoff` and factor cannot wrap the duration negative and defeat the cap. Messages are stored and rebuilt through an application-supplied `MessageCodec`, and persistence sits behind a `Repository` interface that the `Store` implements, keeping the relay's retry/dead-letter logic unit-testable without a database. The reference design is Curatorium's `payment` outbox (15s base backoff, 12 attempts, Redis lease, dead-letter). Depends on the
   core `melody/v3` and `github.com/uptrace/bun`.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.2.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.2.3...HEAD
+
+[v3.2.3]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.2.2...integrations/outbox/v3.2.3
 
 [v3.2.2]: https://github.com/precision-soft/melody/compare/integrations/outbox/v3.2.1...integrations/outbox/v3.2.2
 
