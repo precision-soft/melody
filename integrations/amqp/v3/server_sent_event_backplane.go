@@ -668,7 +668,7 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
     instance.logger.Error(message, exception.LogContext(err))
 }
 
-/* logTerminal uses the last-resort stderr channel: with the zero-value config logError discards everything. */
+/* logTerminal falls back to the last-resort stderr channel: with the zero-value config logError discards everything. */
 func (instance *ServerSentEventBackplane) logTerminal(message string, err error) {
     if nil != instance.logger {
         instance.logger.Error(message, exception.LogContext(err))

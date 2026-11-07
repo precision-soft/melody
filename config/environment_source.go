@@ -479,7 +479,7 @@ func preprocessDotEnvContent(content string) (string, error) {
             }
 
             if false == inQuotes {
-                /* ahead of any separator '#' comments the line out; after it godotenv decides, except for an empty value's leading '#' */
+                /* a '#' at line start or after a space comments the rest out ahead of a value; past that godotenv decides */
                 if '#' == character && (false == sawSeparator || false == valueStarted) {
                     if 0 == previousChar || true == isDotEnvSpaceByte(previousChar) {
                         break
@@ -495,7 +495,7 @@ func preprocessDotEnvContent(content string) (string, error) {
                 }
             }
 
-            /* every dollar in a value leaves here as a marker, so godotenv expands nothing; references resolve over the merged files */
+            /* every dollar outside a single-quoted value leaves here as a marker; references resolve over the merged files */
             if '$' == character && true == sawSeparator {
                 singleQuotedValue := true == inQuotes && '\'' == quoteChar
 

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- `encrypt/README.md`: the column capacity check measures once, so it cannot bound a longer value written during the run.
+
 ## [v3.6.4] - 2026-11-06 - Bounded Error Chain Search
 
 ### Fixed

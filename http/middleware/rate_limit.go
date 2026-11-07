@@ -49,7 +49,7 @@ func NewFixedWindowLimiterWithClock(clockInstance clockcontract.Clock, rate int,
         )
     }
 
-    /* a non-positive window refills on every request, silently disabling the limiter; a non-positive rate denies all traffic */
+    /* clamped: unclamped, a non-positive window would disable the limiter and a non-positive rate deny all traffic */
     if 0 >= rate {
         rate = 1
     }
@@ -212,7 +212,7 @@ func NewSlidingWindowLimiterWithClock(clockInstance clockcontract.Clock, limit i
         )
     }
 
-    /* a non-positive window prunes every recorded request, silently disabling the limiter; a non-positive limit denies all */
+    /* clamped: unclamped, a non-positive window would disable the limiter and a non-positive limit deny all traffic */
     if 0 >= limit {
         limit = 1
     }

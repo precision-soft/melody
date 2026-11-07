@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- `README.md`: how `CloseWithContext` spends a deadline on the transport and the Server-Sent Events backplane, and what bounds a late dial.
+
 ## [v3.3.4] - 2026-11-06 - Bounded Error Chain Search
 
 ### Fixed

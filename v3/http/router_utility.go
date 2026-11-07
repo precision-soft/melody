@@ -322,7 +322,7 @@ func writeResponse(
         }
     }
 
-    /* a status outside [100, 999] would panic inside WriteHeader after the commit flag is raised, so it answers a 500 */
+    /* a status outside [100, 999] is answered as a 500 here: the write step would refuse it with nothing written */
     if statusCode := response.StatusCode(); 0 != statusCode && (100 > statusCode || 999 < statusCode) {
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
@@ -351,7 +351,7 @@ func writeResponse(
     if false == sessionAlreadyPersisted && false == internal.IsNilInterface(sessionManager) && false == internal.IsNilInterface(sessionInstance) {
         sessionPersistFailed := false
 
-        /* one snapshot decides both branches, so a concurrent Clear cannot land between the two flag reads */
+        /* one snapshot decides both branches; a SnapshotSession admits no Clear between the two flag reads */
         _, sessionModified, sessionCleared := session.Snapshot(sessionInstance)
 
         if true == sessionCleared {

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- `README.md`: every instance running the in-process runner dispatches every due entry, with the two ways to bound that.
+
 ## [v3.8.1] - 2026-11-06 - Bounded Error Chain Search
 
 ### Fixed

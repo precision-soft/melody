@@ -991,7 +991,7 @@ func (instance *RunnerCommand) reportScheduledOutput(
     logger.Info("cron: scheduled command output", recordContext)
 }
 
-/* withSiblingFailure avoids errors.Join: exception.LogContext anchors the cause on errors.Unwrap, so a join loses it */
+/* withSiblingFailure keeps the primary error the wrapped one; the sibling travels in the context */
 func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling error) exceptioncontract.Context {
     merged := exceptioncontract.Context{}
     for key, value := range base {
@@ -1169,7 +1169,7 @@ func runScheduledCommand(
             )
 
             if nil == runErr {
-                /* assigned rather than joined: the record's cause chain needs the single-value Unwrap */
+                /* no earlier failure, so the panic error alone is the run's outcome */
                 runErr = panicFailure
 
                 return
@@ -1192,7 +1192,7 @@ func runScheduledCommand(
     return commandContext.Run(ctx, append([]string{entry.commandName}, entry.arguments...))
 }
 
-/* a typed nil through a concrete error pointer is no failure; its Error() here would take the scheduler down */
+/* a typed nil through a concrete error pointer is no failure: reported as one, its Error() would panic */
 func normalizeScheduledRunError(err error) error {
     if true == isNilInterface(err) {
         return nil
@@ -1201,7 +1201,7 @@ func normalizeScheduledRunError(err error) error {
     return err
 }
 
-/* panicCause mirrors exception.PanicCause because this major is sealed; a typed nil answers no cause */
+/* panicCause mirrors exception.PanicCause: a typed nil answers no cause */
 func panicCause(recovered any) error {
     recoveredErr, isRecoveredError := recovered.(error)
     if false == isRecoveredError || true == isNilInterface(recoveredErr) {
