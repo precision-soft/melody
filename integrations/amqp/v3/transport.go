@@ -117,7 +117,7 @@ type TransportConfig struct {
     DeadLetter          bool
     Reconnect           *ReconnectConfig
     PublishReturnBuffer int
-    /* DelayBuckets ascend strictly, from 1ms to the 32-bit ms limit, at most maxDelayBuckets; any other list panics at build. */
+    /* DelayBuckets: empty takes the defaults, else strictly ascending, 1ms to the 32-bit ms limit, at most 8, or it panics. */
     DelayBuckets []time.Duration
     /* PublishTimeout bounds the turn, the write and the confirmation of one Send, each apart; non-positive takes the default. */
     PublishTimeout time.Duration
@@ -249,7 +249,7 @@ func (instance *Transport) Nack(
 
 const closeJoinTimeout = 30 * time.Second
 
-/* Close runs no amqp call under instance.mutex and joins the publish half first, so a confirmation is not read as a nack. */
+/* Close runs no amqp call under instance.mutex; the publish half joins ahead of the cut, so a confirmation is not a nack. */
 func (instance *Transport) Close() error {
     return instance.CloseWithContext(context.Background())
 }
@@ -674,7 +674,7 @@ func (instance *Transport) publishOnce(
 ) (*amqp091.Channel, publishDisposition, error) {
     channel, returns, channelConnection, channelErr := instance.ensurePublishChannel()
     if nil != channelErr {
-        /* not a channel fault: a retry meets the same refusal, and a reset tears down a channel this publish never reached */
+        /* a refusal naming an earlier blocked write is no channel fault: a retry meets it again, a reset hits an unrelated channel */
         recoverable := false == exception.ChainIs(channelErr, errPublishTimedOut)
 
         return nil, publishDisposition{channelFaulted: recoverable, furtherAttemptMayRecover: recoverable}, channelErr
@@ -1436,7 +1436,7 @@ func deadLetterAttemptCountFromHeader(headers amqp091.Table) int {
     return intFromHeader(headers, headerDeadLetterAttemptCount)
 }
 
-/* intFromHeader clamps high and reads a non-integer as math.MaxInt: read as zero it re-arms the budget on every redelivery */
+/* intFromHeader clamps high; text spelling no integer or a foreign type reads math.MaxInt: zero would re-arm the budget */
 func intFromHeader(headers amqp091.Table, key string) int {
     raw, exists := headers[key]
     if false == exists {

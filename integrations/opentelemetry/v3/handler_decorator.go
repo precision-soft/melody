@@ -170,7 +170,7 @@ func (instance *statusRecordingResponseWriter) ReadFrom(reader io.Reader) (int64
     return io.Copy(instance.ResponseWriter, reader)
 }
 
-/* a hijacked connection is not recorded as the default 200, which would put it in the request duration series */
+/* a hijacked connection answers 101, not the default 200, so it stays out of the 200 duration series */
 func (instance *statusRecordingResponseWriter) observedStatusCode() int {
     if true == instance.hijacked {
         return nethttp.StatusSwitchingProtocols

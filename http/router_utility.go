@@ -385,7 +385,7 @@ func writeResponse(
                         },
                     )
                 } else if nil != err {
-                    /* a storage outage on save answers 500, not the handler's response; the cookie is suppressed so no id points at nothing */
+                    /* a save outage answers 500 unless headers are committed; the cookie is suppressed so no id points at nothing */
                     sessionPersistFailed = true
 
                     logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to save session", err, sessionInstance.Id(), request)

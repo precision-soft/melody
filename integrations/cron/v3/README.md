@@ -44,6 +44,8 @@ app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
 
 `NewModule` is available for the v1, v2, and v3 bindings.
 
+The in-process runner keeps no state between instances: every instance running `melody:cron:run` dispatches every due entry, and an entry that outlives its interval overlaps itself. Wrap the command in `lock.NewExclusiveCommand` to serialise its runs, or gate the runner behind a `lock.LeaderGate` so that one instance dispatches.
+
 ## Module dependencies
 
 This module requires:

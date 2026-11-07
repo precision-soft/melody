@@ -10,6 +10,10 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Changed
+
+- `.documentation/package/HTTP.md`: what an error handler installed with `SetErrorHandler` answers and what it takes over from the exception listener.
+
 ## [v2.13.4] - 2026-11-06 - Build Version Matches the Release
 
 ### Fixed

@@ -449,6 +449,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 )
             }
 
+            /* the response built before the panic may own an open file and loses its only reference unless the handler keeps it */
             if nil != panickedResponse && panickedResponse != exceptionEvent.Response() {
                 closeDiscardedResponseBody(panickedResponse, requestLogger)
             }
@@ -936,7 +937,7 @@ func normalizeBodyLimitError(handlerErr error) error {
     return handlerErr
 }
 
-/* the error returned is a marked carrier of this occurrence; the handler's value is never marked, as requests can share it */
+/* a failure filed here returns a marked carrier; the handler's value is never marked, as requests can share it */
 func logHandlerError(requestLogger loggingcontract.Logger, message string, handlerErr error, httpRequest *nethttp.Request) error {
     if true == exception.IsAlreadyLogged(handlerErr) {
         return handlerErr

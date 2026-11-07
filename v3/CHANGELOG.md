@@ -8,6 +8,10 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Changed
+
+- `.documentation/package/HTTP.md`: what an error handler installed with `SetErrorHandler` replaces and what stays with the kernel.
+
 ## [v3.14.4] - 2026-11-06 - Build Version Matches the Release
 
 ### Fixed

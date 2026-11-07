@@ -137,7 +137,7 @@ func exceptionResponseFor(runtimeInstance runtimecontract.Runtime, request httpc
     return renderErrorResponse(runtimeInstance, request, statusCode, message, payloadExtras)
 }
 
-/* coordinates land on the occurrence the kernel marked, so a value several requests share keeps no request's coordinates */
+/* coordinates land on the kernel's occurrence, which no request shares; with none, on the nearest melody error */
 func attachRequestContextToError(err error, requestId string, method string, path string) {
     var occurrence *loggedOccurrence
     if true == exception.ChainAs(err, &occurrence) && nil != occurrence {

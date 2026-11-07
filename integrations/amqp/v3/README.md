@@ -188,6 +188,8 @@ returns, by your hand or never, and `Close` reports the write it could not end. 
 
 The publish channel runs in **publisher-confirm mode**: `Send` (and the retry re-publish) reports success only after the broker acknowledged the message, and a mandatory publish that comes back as unroutable (for example the queue was deleted) or is nacked by the broker (for example a `max-length` policy with `reject-publish`) surfaces as an error instead of being silently discarded. This also protects the retry path — a re-published message is confirmed before the original delivery is acked, so a broker-side discard can never drop a message between requeues.
 
+`Transport.CloseWithContext` is `Close` under your deadline. Its stretches are serial, so without a deadline the bound is their sum: the consume join, the publish join, then the connection and channel closes; under a deadline each stretch takes what is left of it. A dial landing after `Close` began is closed on a goroutine of its own, which outlives the call by at most one publish timeout, and a dial still in flight is bounded only by the dialer's own timeout.
+
 ## Dead-lettering and retries
 
 When `DeadLetter` is `true`, the transport declares a dead-letter exchange (`<queue>.dlx`) and queue (`<queue>.dlq`), and points the main queue at it via `x-dead-letter-exchange`.
@@ -231,6 +233,8 @@ defer backplane.Close()
 ```
 
 `NewServerSentEventBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically. `Close` tears the subscription down and closes only a connection the backplane itself dialed (never the one you passed in). The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
+
+`ServerSentEventBackplane.CloseWithContext` is `Close` under your deadline: the hub's clear waits for the broadcasts holding the backplane under it, and every stretch takes the smaller of what is left and its own ceiling. A dial landing after `Close` began is closed on a goroutine of its own, which outlives the call by at most one call timeout, and a dial still in flight is bounded only by the dialer's own timeout.
 
 ## Footguns & caveats
 
