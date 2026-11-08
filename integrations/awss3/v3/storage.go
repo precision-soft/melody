@@ -52,8 +52,8 @@ func NewStorage(client *minio.Client, bucket string) *Storage {
 }
 
 type Storage struct {
-    client *minio.Client
-    bucket string
+    client                   *minio.Client
+    bucket                   string
     plaintextEndpointWarning *plaintextEndpointWarning
 }
 

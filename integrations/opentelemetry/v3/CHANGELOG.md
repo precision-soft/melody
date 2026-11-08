@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.2.2] - 2026-11-07 - Dependency Advisories
+
+### Security
+
+- `go.mod`: `google.golang.org/grpc` v1.83.2, past the version the advisory names, which concerns the xDS server this module does not run.
+
 ## [v3.2.1] - 2026-11-06 - Bounded Error Chain Search
 
 ### Fixed
@@ -72,7 +78,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 [v3.0.0]: https://github.com/precision-soft/melody/releases/tag/integrations/opentelemetry/v3.0.0
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.2.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.2.2...HEAD
+
+[v3.2.2]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.2.1...integrations/opentelemetry/v3.2.2
 
 [v3.2.1]: https://github.com/precision-soft/melody/compare/integrations/opentelemetry/v3.2.0...integrations/opentelemetry/v3.2.1
 

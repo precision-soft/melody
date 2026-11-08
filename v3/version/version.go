@@ -1,6 +1,6 @@
 package version
 
-/* buildVersion is set at build time through -ldflags */
+/* buildVersion is the release default, bumped per release; -ldflags overrides it at build time */
 var buildVersion = "v3.14.4"
 
 func BuildVersion() string {

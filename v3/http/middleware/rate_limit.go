@@ -81,7 +81,7 @@ type FixedWindowLimiter struct {
     lastCleanupAt      time.Time
     maxKeys            int
     lastCeilingPruneAt time.Time
-    recency *keyRecency
+    recency            *keyRecency
 }
 
 /* SetEvictOldestKeyAtCeiling on gives the oldest key's bucket to an unseen key; off, the default, it is denied */
@@ -290,7 +290,7 @@ type SlidingWindowLimiter struct {
     lastCleanupAt      time.Time
     maxKeys            int
     lastCeilingPruneAt time.Time
-    recency *keyRecency
+    recency            *keyRecency
 }
 
 /* SetEvictOldestKeyAtCeiling on gives the oldest key's window to an unseen key; off, the default, it is denied */

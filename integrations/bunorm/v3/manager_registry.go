@@ -19,21 +19,21 @@ type ManagerRegistry struct {
     logger loggingcontract.Logger
     /* kept so Close hands back exactly this destination, even for a logger that has no identity to be recognised by */
     routedDiagnostics *diagnosticsTarget
-    openContext context.Context
-    openCancel  context.CancelFunc
+    openContext       context.Context
+    openCancel        context.CancelFunc
 
-    providerDefinitionByName map[string]ProviderDefinition
+    providerDefinitionByName      map[string]ProviderDefinition
     sortedProviderDefinitionNames []string
     defaultProviderDefinitionName string
 
-    lock              sync.Mutex
-    managers          map[string]*Manager
-    pendingOpenByName map[string]*managerOpen
+    lock                  sync.Mutex
+    managers              map[string]*Manager
+    pendingOpenByName     map[string]*managerOpen
     pendingMigrationOpens map[chan struct{}]struct{}
     /* a migration connection lifts the driver deadlines: it lives beside the request pools, never inside them */
     migrationDatabases map[string]*bun.DB
-    migrationHolders map[string]int
-    closed           bool
+    migrationHolders   map[string]int
+    closed             bool
 }
 
 type managerOpen struct {

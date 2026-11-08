@@ -314,7 +314,7 @@ func refuseRepeatedFlagSpellings(flags []clicontract.Flag) {
     }
 }
 
-/* inertExitHandler replaces the engine's os.Exit: its recover handler writes the final record and closes the container */
+/* inertExitHandler replaces the engine's os.Exit: melody's recover handler writes the final record and exits */
 func inertExitHandler(handlerContext context.Context, handlerCommand *clicontract.CommandContext, handlerErr error) {
 }
 

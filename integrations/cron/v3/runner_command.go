@@ -32,9 +32,9 @@ const (
 )
 
 type scheduledRunEntry struct {
-    commandName string
-    command     clicontract.Command
-    arguments   []string
+    commandName     string
+    command         clicontract.Command
+    arguments       []string
     schedule        string
     matcher         *scheduleMatcher
     fixedTime       bool
@@ -234,7 +234,7 @@ func loadLocation(name string) (*time.Location, error) {
     return location, nil
 }
 
-/* nowInZone is the one clock reading this runner makes, so the zone is applied here and nowhere else */
+/* nowInZone is the one scheduling clock reading, so the zone is applied here and nowhere else */
 func (instance *RunnerCommand) nowInZone(location *time.Location) time.Time {
     now := instance.now()
 
@@ -1005,7 +1005,7 @@ func (instance *RunnerCommand) reportScheduledOutput(
     logger.Info("cron: scheduled command output", recordContext)
 }
 
-/* withSiblingFailure avoids errors.Join: exception.LogContext would file one branch of a join and drop the other */
+/* withSiblingFailure keeps the primary error the wrapped one; the sibling travels in the context */
 func withSiblingFailure(base exceptioncontract.Context, prefix string, sibling error) exceptioncontract.Context {
     merged := exceptioncontract.Context{}
     for key, value := range base {
@@ -1180,7 +1180,7 @@ func runScheduledCommand(
             )
 
             if nil == runErr {
-                /* the panic error is the run's outcome; no join, since a join files one branch and drops the other */
+                /* no earlier failure, so the panic error alone is the run's outcome */
                 runErr = panicFailure
 
                 return

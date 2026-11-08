@@ -82,12 +82,12 @@ func streamingFlusherOf(writer nethttp.ResponseWriter) (nethttp.Flusher, bool) {
 }
 
 type ServerSentEventWriter struct {
-    mutex       sync.Mutex
-    writer      nethttp.ResponseWriter
-    flusher     nethttp.Flusher
-    broken      bool
-    writeBudget time.Duration
-    clock       serverSentEventClock
+    mutex               sync.Mutex
+    writer              nethttp.ResponseWriter
+    flusher             nethttp.Flusher
+    broken              bool
+    writeBudget         time.Duration
+    clock               serverSentEventClock
     deadlineUnsupported bool
 }
 

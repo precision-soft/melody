@@ -71,7 +71,7 @@ type Kernel struct {
     options         KernelOptions
     /* the shutdown's only measure of a hijacked connection, which net/http's Shutdown does not wait for */
     openRequestScopes atomic.Int64
-    serving atomic.Bool
+    serving           atomic.Bool
 }
 
 func sessionCookieBootWarnings(policy httpcontract.SessionCookiePolicy) []internal.BootWarning {
@@ -298,7 +298,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             )
         }
 
-        /* a nil result is a valid no match, and a dereference above the recovery defer closes the connection unanswered */
+        /* a nil result is a valid no match; a dereference here panics above the main recovery, into the last guard */
         if nil == matchResult {
             matchResult = &httpcontract.MatchResult{}
         }
@@ -516,15 +516,14 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 )
             }
 
-            /* the response may own an open file; the write step closes it, since a listener may answer with that same response */
-
-            /* where finalResponse is assigned the write step owns the close: a wrapping middleware may share the body */
+            /* with finalResponse unassigned only the recording shim holds the chain's response; else the write step owns the close */
             if nil == panickedResponse && nil != chainResponse && chainResponse != exceptionEvent.Response() {
                 closeDiscardedResponseBody(chainResponse, requestLogger)
             }
 
             finalResponse = exceptionEvent.Response()
 
+            /* the response built before the panic may own an open file; the write step closes it once it knows what is written */
             instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, panickedResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
         }()
 

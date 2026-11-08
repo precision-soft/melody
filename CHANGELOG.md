@@ -10,6 +10,11 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Changed
+
+- `.documentation/package/HTTP.md`: what an error handler installed with `SetErrorHandler` answers and what it takes over from the exception listener.
+- `SECURITY.md`: an application that serves HTTP/2 directly must be built with Go 1.26.9 or newer for four `net/http` advisories, whatever the `go` line of the module says.
+
 ## [v1.19.4] - 2026-11-06 - Build Version Matches the Release
 
 ### Fixed

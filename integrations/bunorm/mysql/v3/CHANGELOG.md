@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.2.2] - 2026-11-07 - Dependency Advisories
+
+### Security
+
+- `go.mod`: `filippo.io/edwards25519` v1.1.1, past the version the advisory names. It did not reach code this module calls.
+
 ## [v3.2.1] - 2026-11-06 - Bounded Error Chain Search
 
 ### Fixed
@@ -123,7 +129,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code duplicated into `integrations/bunorm/mysql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.2.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.2.2...HEAD
+
+[v3.2.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.2.1...integrations/bunorm/mysql/v3.2.2
 
 [v3.2.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/mysql/v3.2.0...integrations/bunorm/mysql/v3.2.1
 

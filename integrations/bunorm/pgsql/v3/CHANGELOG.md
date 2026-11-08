@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.3.2] - 2026-11-07 - Dependency Advisories
+
+### Security
+
+- `go.mod`: `golang.org/x/crypto` v0.52.0 and `go.opentelemetry.io/otel` v1.41.0, past the versions the advisories name. None of them reached code this module calls.
+
 ## [v3.3.1] - 2026-11-06 - Bounded Error Chain Search
 
 ### Fixed
@@ -128,7 +134,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Code duplicated into `integrations/bunorm/pgsql/v3/`; v2 and v3 implementations maintained in parallel
 - Dependencies pinned to `bunorm/v3` and `melody/v3`
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.3.1...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.3.2...HEAD
+
+[v3.3.2]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.3.1...integrations/bunorm/pgsql/v3.3.2
 
 [v3.3.1]: https://github.com/precision-soft/melody/compare/integrations/bunorm/pgsql/v3.3.0...integrations/bunorm/pgsql/v3.3.1
 

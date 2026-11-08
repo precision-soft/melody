@@ -24,23 +24,23 @@ import (
 type RouteRegistrar func(kernelInstance kernelcontract.Kernel)
 
 type Application struct {
-    booted bool
-    booting             bool
-    configuration       configcontract.Configuration
-    runtimeFlags        *RuntimeFlags
-    kernel              kernelcontract.Kernel
-    embeddedPublicFiles fs.FS
-    modules             []applicationcontract.Module
-    registeredModuleInstances map[applicationcontract.Module]struct{}
-    cliCommands               []clicontract.Command
-    httpRouteRegistrars       []RouteRegistrar
-    httpMiddlewares           *HttpMiddleware
-    securityConfiguration     *security.CompiledConfiguration
-    routeRegistry             httpcontract.RouteRegistry
-    moduleConfigurations      map[string]any
-    bootCollisions            []bootCollision
-    unappliedSecretMarks      []string
-    unboundedDefaultCacheBackend bool
+    booted                        bool
+    booting                       bool
+    configuration                 configcontract.Configuration
+    runtimeFlags                  *RuntimeFlags
+    kernel                        kernelcontract.Kernel
+    embeddedPublicFiles           fs.FS
+    modules                       []applicationcontract.Module
+    registeredModuleInstances     map[applicationcontract.Module]struct{}
+    cliCommands                   []clicontract.Command
+    httpRouteRegistrars           []RouteRegistrar
+    httpMiddlewares               *HttpMiddleware
+    securityConfiguration         *security.CompiledConfiguration
+    routeRegistry                 httpcontract.RouteRegistry
+    moduleConfigurations          map[string]any
+    bootCollisions                []bootCollision
+    unappliedSecretMarks          []string
+    unboundedDefaultCacheBackend  bool
     defaultInMemorySessionStorage bool
     /* claimed by the one close that performs the teardown: two concurrent closes both probe the container open */
     closePerformerClaimed atomic.Bool

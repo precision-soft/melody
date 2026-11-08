@@ -454,7 +454,7 @@ func TestNewServerSentEventWriter_FlushesThroughAnIntermediateWrapper(t *testing
 type deadlineRecordingConnection struct {
     *httptest.ResponseRecorder
     deadlineList []time.Time
-    sequence []string
+    sequence     []string
 }
 
 func (instance *deadlineRecordingConnection) SetWriteDeadline(deadline time.Time) error {

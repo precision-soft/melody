@@ -1,7 +1,6 @@
 package pgsql
 
 import (
-
     "github.com/precision-soft/melody/exception"
 )
 

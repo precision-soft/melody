@@ -34,8 +34,8 @@ type serverSentEventWireEvent struct {
 }
 
 type ServerSentEventBackplane struct {
-    connection *amqp091.Connection
-    dialer     func() (*amqp091.Connection, error)
+    connection    *amqp091.Connection
+    dialer        func() (*amqp091.Connection, error)
     connectedOnce bool
     hub           *melodyhttp.ServerSentEventHub
     exchange      string
@@ -44,8 +44,8 @@ type ServerSentEventBackplane struct {
     reconnect     ReconnectConfig
     callTimeout   time.Duration
 
-    mutex          sync.Mutex
-    publishChannel *amqp091.Channel
+    mutex             sync.Mutex
+    publishChannel    *amqp091.Channel
     publishConnection *amqp091.Connection
     consumeChannel    *amqp091.Channel
     closing           bool
@@ -668,7 +668,7 @@ func (instance *ServerSentEventBackplane) logError(message string, err error) {
     instance.logger.Error(message, exception.LogContext(err))
 }
 
-/* logTerminal uses the last-resort stderr channel: with the zero-value config logError discards everything. */
+/* logTerminal falls back to the last-resort stderr channel: with the zero-value config logError discards everything. */
 func (instance *ServerSentEventBackplane) logTerminal(message string, err error) {
     if nil != instance.logger {
         instance.logger.Error(message, exception.LogContext(err))
