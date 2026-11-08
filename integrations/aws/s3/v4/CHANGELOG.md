@@ -22,3 +22,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - storage: an upload body's read error whose `Unwrap` chain reaches itself no longer holds the goroutine that checks the body's end.
 
+### Security
+
+- `go.mod`: `golang.org/x/crypto` v0.52.0, `golang.org/x/net` v0.55.0 and `github.com/klauspost/compress` v1.18.7, past the versions the advisories name. None of them reached code this module calls.

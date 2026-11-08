@@ -44,3 +44,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `audit/async_storage.go` — carried from the third major (v3.6.3): the close that abandons a save which ignored its cancellation carries the deadline as its cause and says the deadline cut the second drain grace short also when the stretch's timer and the deadline were ready in the same instant and the wait answered on the timer, where that pick of the race answered with no cause and read "after a second drain grace"; and a close its caller cancels once it has begun, with no grace left to observe a reaction in, is answered as the caller's withdrawal after the close began, where it read that the close was cancelled before it began, the context being read at entry once, before anything waits.
 - bunorm: an error whose `Unwrap` chain reaches itself no longer holds the goroutine that reads it: a provider's in the registry's open and the read-write splitter, a storage's or a unit of work's in the audit tracker, and a run's in the encryption migrator.
 
+### Security
+
+- `go.mod`: `filippo.io/edwards25519` v1.1.1, past the version the advisory names. It did not reach code this module calls.

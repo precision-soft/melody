@@ -30,6 +30,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `relay.go` — carried from the third major (v3.2.1): a failed send writes one `outbox message send failed` ERROR record with the row's id, its type, the attempt it was charged, `MaxAttempts`, when it is tried again or that it was dead-lettered, and the transport's cause, written once the row's reschedule or dead-letter write succeeded, where a rescheduled row left no trace in the process log, `RunOnce` answering no error for it and the cause reaching only `last_error`; the batch ends at the failed send, so a pass writes at most one such record, and a contained send panic keeps its own `outbox delivery panicked` record instead.
 - relay: a batch failure whose `Unwrap` chain reaches itself no longer holds the relay command that classifies it during a shutdown.
 
+### Security
+
+- `go.mod`: `golang.org/x/crypto` v0.52.0 and `go.opentelemetry.io/otel` v1.41.0, past the versions the advisories name. None of them reached code this module calls.
+
 ### Documentation
 
 - readme: carried from the third major (unreleased): the delivery semantics state that a failed `Acquire` of the optional `Locker` ends the run before it claims a row, so an outage of the lease store stops delivery, and how a wrapped `Locker` delivers through it.

@@ -30,3 +30,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - provider: a post-build hook's error whose `Unwrap` chain reaches itself no longer holds the open that classifies it.
 - pgsql: `IsDuplicateKey` returns on an error whose `Unwrap` chain reaches itself.
 
+### Security
+
+- `go.mod`: `golang.org/x/crypto` v0.52.0 and `go.opentelemetry.io/otel` v1.41.0, past the versions the advisories name. None of them reached code this module calls.

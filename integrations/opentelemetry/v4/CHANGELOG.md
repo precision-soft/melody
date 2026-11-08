@@ -27,4 +27,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
-- `golang.org/x/net`, which the otlp exporters and grpc require, is raised to `v0.60.0`, the version that fixes GO-2026-6603, GO-2026-6611, GO-2026-6612 and GO-2026-6617, and the module's go directive to `1.26.0`, which that version requires; the third major keeps `v0.57.0` and the go 1.25 floor.
+- `golang.org/x/net`, which the otlp exporters and grpc require, is raised to `v0.60.0`, the version that fixes GO-2026-6603, GO-2026-6611, GO-2026-6612 and GO-2026-6617, and the module's go directive to `1.26.0`, which that version requires; the third major keeps `v0.58.0` and the go 1.25 floor.
+- `go.mod`: `google.golang.org/grpc` v1.83.2, past the version the advisory names, which concerns the xDS server this module does not run.

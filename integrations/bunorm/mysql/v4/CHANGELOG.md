@@ -30,3 +30,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - provider: a post-build hook's error whose `Unwrap` chain reaches itself no longer holds the open that classifies it.
 - mysql: `IsDuplicateKey` returns on an error whose `Unwrap` chain reaches itself.
 
+### Security
+
+- `go.mod`: `filippo.io/edwards25519` v1.1.1, past the version the advisory names. It did not reach code this module calls.
