@@ -11,8 +11,10 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/http/static"
+    "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
     securityconfig "github.com/precision-soft/melody/v4/security/config"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -530,37 +532,44 @@ func TestRegisterModule_AValueModuleCarryingAHashableFieldKeepsItsIdentity(t *te
     assertModuleNames(t, instance.modules, []string{"carrier"})
 }
 
-/* shadowedFirewallModule declares a firewall an earlier one claims whole, a configuration the security builder names in its boot warnings */
-type shadowedFirewallModule struct {
+type unclaimedDoorMatcher struct{}
+
+func (instance unclaimedDoorMatcher) Matches(request httpcontract.Request) bool { return true }
+
+type answeringLoginHandler struct{}
+
+func (instance answeringLoginHandler) Login(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, input securitycontract.LoginInput) (*securitycontract.LoginResult, error) {
+    return &securitycontract.LoginResult{Token: input.Token}, nil
+}
+
+type doorReachUnknownModule struct {
     fakeModule
 }
 
-func (instance *shadowedFirewallModule) RegisterSecurity(builder *securityconfig.Builder) {
+func (instance *doorReachUnknownModule) RegisterSecurity(builder *securityconfig.Builder) {
     anonymous := security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
         return security.NewAnonymousToken()
     })
 
     builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: security.NewAccessControl(nil)})
-    builder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), anonymous, securityconfig.FirewallConfig{})
-    builder.AddFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), anonymous, securityconfig.FirewallConfig{})
+    builder.AddFirewall("main", unclaimedDoorMatcher{}, anonymous, securityconfig.FirewallConfig{Login: securityconfig.LoginConfig{Path: "/login", Handler: answeringLoginHandler{}}})
 }
 
-/* the boot collects what the security builder named, for the http boot to write; a declaration that names nothing leaves the collection empty */
 func TestBootModulesPostConfigurationResolve_CollectsTheSecurityBuildersBootWarnings(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
-    applicationInstance.RegisterModule(&shadowedFirewallModule{fakeModule: fakeModule{name: "shadowed"}})
+    applicationInstance.RegisterModule(&doorReachUnknownModule{fakeModule: fakeModule{name: "doorReach"}})
 
     applicationInstance.bootModulesPostConfigurationResolve()
 
-    shadowed := 0
+    named := 0
     for _, bootWarning := range applicationInstance.bootWarnings {
-        if "security.firewallShadowed" == bootWarning.Name && "apiAdmin" == bootWarning.Context["firewall"] {
-            shadowed++
+        if internal.BootWarningNameFirewallDoorReachUnknown == bootWarning.Name && "main" == bootWarning.Context["firewall"] {
+            named++
         }
     }
 
-    if 1 != shadowed {
-        t.Fatalf("expected the shadowed firewall collected once, got %v", applicationInstance.bootWarnings)
+    if 1 != named {
+        t.Fatalf("expected the door reach warning collected once, got %v", applicationInstance.bootWarnings)
     }
 
     quietApplication := newCollisionTestApplication(t)
@@ -568,10 +577,8 @@ func TestBootModulesPostConfigurationResolve_CollectsTheSecurityBuildersBootWarn
 
     quietApplication.bootModulesPostConfigurationResolve()
 
-    for _, bootWarning := range quietApplication.bootWarnings {
-        if "security.firewallShadowed" == bootWarning.Name {
-            t.Fatalf("expected no shadowed firewall for a declaration without one, got %v", quietApplication.bootWarnings)
-        }
+    if 0 != len(quietApplication.bootWarnings) {
+        t.Fatalf("expected no boot warning for a declaration without a hazard, got %v", quietApplication.bootWarnings)
     }
 }
 

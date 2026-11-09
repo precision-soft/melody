@@ -164,7 +164,7 @@ func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
     return compiled
 }
 
-/* BootWarnings answers the hazards the last BuildAndCompile found in the declaration, each one a configuration the framework admits and does not refuse; the application writes them into the configured journal once, at the http boot */
+/* BootWarnings answers the hazards the last BuildAndCompile found in the declaration, each one a configuration the framework admits and does not refuse; the application writes them into the configured journal once, at the boot of an http process or a command */
 func (instance *Builder) BootWarnings() []BootWarning {
     return append([]BootWarning{}, instance.bootWarnings...)
 }

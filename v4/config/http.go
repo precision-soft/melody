@@ -11,6 +11,7 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 var (
@@ -38,6 +39,9 @@ const (
 /* DefaultSessionTombstoneRetention is how long a deleted session id keeps refusing a write-back when MELODY_HTTP_SESSION_TOMBSTONE_RETENTION says nothing. The window has to cover the longest a request can hold a session snapshot loaded before the delete, since nothing bounds a handler's lifetime; a deployment with slower requests raises it, at one remembered entry per deletion. The record lives in the manager, per process. */
 const DefaultSessionTombstoneRetention = 5 * time.Minute
 
+/* DefaultSessionMaxSessions is how many sessions the framework-wired in-memory storage holds at once when MELODY_HTTP_SESSION_MAX_SESSIONS says nothing; at the ceiling a new session id is refused. */
+const DefaultSessionMaxSessions = 100_000
+
 /* DefaultHttpShutdownTimeout is how long a stopping http server waits for the requests already admitted when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. It is far below the write timeout; a deployment whose supervisor grants a longer grace raises it to match. */
 const DefaultHttpShutdownTimeout = 5 * time.Second
 
@@ -52,6 +56,7 @@ func newHttpConfiguration(
     staticExcludedPaths []string,
     sessionTtl bound.Resolved[time.Duration],
     sessionTombstoneRetention bound.Resolved[time.Duration],
+    sessionMaxSessions bound.Resolved[int],
     shutdownTimeout bound.Resolved[time.Duration],
     serverLimits httpServerLimits,
 ) (*httpConfiguration, error) {
@@ -80,6 +85,7 @@ func newHttpConfiguration(
         staticExcludedPaths:       copiedStaticExcludedPaths,
         sessionTtl:                sessionTtl,
         sessionTombstoneRetention: sessionTombstoneRetention,
+        sessionMaxSessions:        sessionMaxSessions,
         shutdownTimeout:           shutdownTimeout,
         serverLimits:              serverLimits,
     }
@@ -103,6 +109,7 @@ type httpConfiguration struct {
     staticExcludedPaths       []string
     sessionTtl                bound.Resolved[time.Duration]
     sessionTombstoneRetention bound.Resolved[time.Duration]
+    sessionMaxSessions        bound.Resolved[int]
     shutdownTimeout           bound.Resolved[time.Duration]
     serverLimits              httpServerLimits
 }
@@ -158,6 +165,11 @@ func (instance *httpConfiguration) SessionTtl() bound.Resolved[time.Duration] {
 /* SessionTombstoneRetention is how long a deleted session id keeps refusing a write-back, DefaultSessionTombstoneRetention when MELODY_HTTP_SESSION_TOMBSTONE_RETENTION says nothing: a request that outlives it can save the deleted session back with the pre-logout identity. It is at least one second and never unlimited, since a shorter window would disarm the logout defence. */
 func (instance *httpConfiguration) SessionTombstoneRetention() bound.Resolved[time.Duration] {
     return instance.sessionTombstoneRetention
+}
+
+/* SessionMaxSessions is how many sessions the framework-wired in-memory storage holds at once, DefaultSessionMaxSessions when MELODY_HTTP_SESSION_MAX_SESSIONS says nothing, at least one, unlimited admitted; a storage the application registers declares its own bound. */
+func (instance *httpConfiguration) SessionMaxSessions() bound.Resolved[int] {
+    return instance.sessionMaxSessions
 }
 
 /* ShutdownTimeout is how long a stopping http server waits for the requests it has admitted before cutting them, DefaultHttpShutdownTimeout when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. Exceeding it is a shutdown failure and a non-zero exit. It is at least 1ms and never unlimited. */
@@ -315,9 +327,9 @@ func (instance *httpConfiguration) validateStaticIndexFile() error {
     return nil
 }
 
-/* an excluded path must be shaped like the beginning of a request path: an entry without a leading slash can never match, and an empty entry matches every path, taking the whole file server out of service */
+/* refused: an entry that cannot begin a request path, an empty one that excludes everything, and a percent escape other than %2F, which the decoded comparison never matches */
 func (instance *httpConfiguration) validateStaticExcludedPaths() error {
-    for _, excludedPath := range instance.staticExcludedPaths {
+    for index, excludedPath := range instance.staticExcludedPaths {
         if "" == excludedPath {
             return exception.NewError(
                 "static excluded path may not be empty",
@@ -337,13 +349,25 @@ func (instance *httpConfiguration) validateStaticExcludedPaths() error {
                 nil,
             )
         }
+
+        if true == internal.CarriesPercentEscapeOtherThanSeparator(excludedPath) {
+            return exception.NewError(
+                "static excluded path carries a percent escape: request paths are matched decoded, with %2F for a separator inside a segment, so the entry excludes only a path whose name holds the percent sign literally; write it decoded",
+                exceptioncontract.Context{
+                    "environmentKey": StaticExcludedPathsKey,
+                    "index":          index,
+                    "excludedPath":   excludedPath,
+                },
+                nil,
+            )
+        }
     }
 
     return nil
 }
 
-/* a list is one environment value separated by commas, each entry trimmed, since a request path carries no surrounding spaces; a value empty once trimmed is no list at all, not a list of one empty entry that would name everything */
-func splitHttpConfigurationList(value string) []string {
+/* a value empty once trimmed is no list, not one empty entry that would name everything */
+func splitConfigurationList(value string) []string {
     trimmedValue := strings.TrimSpace(value)
     if "" == trimmedValue {
         return []string{}

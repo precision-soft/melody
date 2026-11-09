@@ -158,8 +158,6 @@ func (instance *Application) runHttp(
 
     applyHttpServerErrorLog(httpServer, logger)
 
-    instance.warnOnUnboundedDefaultSessionStorage(logger)
-
     instance.writeBootWarnings(logger)
 
     /* net/http starts these on their own goroutines the moment Shutdown is called; each is wrapped to recover a panic through the framework logger and to be counted into shutdownHooksDone, which awaitHttpServerEnd joins */
@@ -276,13 +274,6 @@ func markHttpRunErrorLogged(err error) error {
     _ = exception.MarkLogged(wrappedErr)
 
     return wrappedErr
-}
-
-/* writeBootWarnings writes, once and from the http path alone, the boot warnings the boot collected from the declarations it compiled, so each hazard reaches the configured journal of a process that serves it */
-func (instance *Application) writeBootWarnings(logger loggingcontract.Logger) {
-    for _, bootWarning := range instance.bootWarnings {
-        internal.WriteBootWarning(logger, bootWarning)
-    }
 }
 
 /* wrapHttpShutdownHook adapts a shutdown hook for net/http's RegisterOnShutdown, which never joins the goroutine it starts: the wrapper counts the hook into hooksDone and recovers a panic through the framework logger. */
@@ -419,18 +410,35 @@ func awaitOpenRequestScopes(
     }
 }
 
-/* warnOnUnboundedDefaultSessionStorage reports once at boot the combination in which sessions grow without end: the in-process storage melody wired together with an unlimited lifetime. Melody mints a session for every request without a cookie, so one write on a public path, a csrf token or a flash message, lets an unauthenticated caller decide how many entries accumulate. It is raised from the http path alone. */
-func (instance *Application) warnOnUnboundedDefaultSessionStorage(logger loggingcontract.Logger) {
-    if false == instance.defaultInMemorySessionStorage {
+/* melody mints a session for every cookie-less request, so an unlimited ttl leaves only the count to bound the fallback storage */
+func (instance *Application) checkDefaultSessionStorageBound() {
+    if config.ModeHttp != instance.runtimeFlags.Mode() || false == instance.defaultInMemorySessionStorage {
         return
     }
 
-    if false == instance.configuration.Http().SessionTtl().Unlimited {
+    httpConfiguration := instance.configuration.Http()
+    if false == httpConfiguration.SessionTtl().Unlimited {
         return
     }
 
-    logger.Warning(
-        "the default in-memory session storage is paired with an unbounded session ttl, so every request that arrives without a session cookie can leave an entry that is kept until this process exits; set `"+config.HttpSessionTtlKey+"` to the lifetime this deployment wants in place of unlimited, or register `"+session.ServiceSessionStorage+"` with a shared storage an operator can expire",
-        nil,
-    )
+    if true == httpConfiguration.SessionMaxSessions().Unlimited {
+        exception.Panic(
+            exception.NewError(
+                "the default in-memory session storage is paired with an unbounded session ttl and an unbounded session count, so every request that arrives without a session cookie can leave an entry nothing removes until this process exits; bound `"+config.HttpSessionTtlKey+"` or `"+config.HttpSessionMaxSessionsKey+"`, or register `"+session.ServiceSessionStorage+"` with a shared storage an operator can expire",
+                exceptioncontract.Context{
+                    "environmentKeys": []string{config.HttpSessionTtlKey, config.HttpSessionMaxSessionsKey},
+                },
+                nil,
+            ),
+        )
+    }
+
+    instance.bootWarnings = append(instance.bootWarnings, internal.BootWarning{
+        Name:    internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage,
+        Message: "the default in-memory session storage is paired with an unbounded session ttl, so every request that arrives without a session cookie can leave an entry no expiry removes, and once the storage holds `" + config.HttpSessionMaxSessionsKey + "` entries a new session is refused; set `" + config.HttpSessionTtlKey + "` to the lifetime this deployment wants, or register `" + session.ServiceSessionStorage + "` with a shared storage an operator can expire",
+        Context: loggingcontract.Context{
+            "configurationKey": config.HttpSessionTtlKey,
+            "maxSessions":      httpConfiguration.SessionMaxSessions().Value,
+        },
+    })
 }

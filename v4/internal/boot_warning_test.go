@@ -32,13 +32,13 @@ func TestWriteBootWarning_WritesAtWarningWithItsNameAndLeavesTheContextItWasGive
     logger := &bootWarningRecordingLogger{}
     warningContext := loggingcontract.Context{"firewall": "api"}
 
-    WriteBootWarning(logger, BootWarning{Name: "security.firewallShadowed", Message: "shadowed", Context: warningContext})
+    WriteBootWarning(logger, BootWarning{Name: BootWarningNameFirewallDoorReachUnknown, Message: "shadowed", Context: warningContext})
 
     if 1 != len(logger.messages) || "shadowed" != logger.messages[0] {
         t.Fatalf("expected one warning record, got %v", logger.messages)
     }
 
-    if "security.firewallShadowed" != logger.contexts[0][BootWarningContextKey] || "api" != logger.contexts[0]["firewall"] {
+    if BootWarningNameFirewallDoorReachUnknown != logger.contexts[0][BootWarningContextKey] || "api" != logger.contexts[0]["firewall"] {
         t.Fatalf("expected the name under %q beside the given context, got %v", BootWarningContextKey, logger.contexts[0])
     }
 
@@ -47,4 +47,37 @@ func TestWriteBootWarning_WritesAtWarningWithItsNameAndLeavesTheContextItWasGive
     }
 
     WriteBootWarning(nil, BootWarning{Name: "x", Message: "x"})
+}
+
+func TestBootWarningRegistry_NamesEachCodeOnceAndMarksWhatACliProcessWrites(t *testing.T) {
+    seen := make(map[string]struct{}, len(bootWarningRegistry))
+    for _, registration := range bootWarningRegistry {
+        if _, duplicated := seen[registration.name]; true == duplicated {
+            t.Fatalf("expected each code registered once, %q twice", registration.name)
+        }
+        seen[registration.name] = struct{}{}
+
+        if false == IsKnownBootWarningName(registration.name) {
+            t.Fatalf("expected %q known", registration.name)
+        }
+    }
+
+    if cliNames := CliBootWarningNames(); 1 != len(cliNames) || BootWarningNameFirewallDoorReachUnknown != cliNames[0] {
+        t.Fatalf("expected the door reach code alone written by a cli process, got %v", cliNames)
+    }
+
+    for name, expected := range map[string]bool{
+        BootWarningNameFirewallDoorReachUnknown:                   true,
+        BootWarningNameEnvironmentDefaulted:                       false,
+        BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage: false,
+        "security.firewallShadowed":                               false,
+    } {
+        if expected != IsCliBootWarningName(name) {
+            t.Fatalf("expected %q written by a cli process %v", name, expected)
+        }
+    }
+
+    if true == IsKnownBootWarningName("security.firewallShadowed") {
+        t.Fatalf("expected a code the framework no longer writes unknown")
+    }
 }

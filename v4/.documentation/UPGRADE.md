@@ -227,6 +227,22 @@ The same holds for a value a module was handed and would drop, refused at the ho
 
 **Remedy.** Point the storage at a directory the process can create and open; hand a catalog for every default and fallback locale, or drop the locale; drop the blank entry, keep `AllowOriginFunc` or the list, and spell "allow everything" as `[]string{"*"}` alone; create the public directory, or unset `MELODY_PUBLIC_DIR` when the application serves no assets.
 
+### Security, static: three boot warnings become refusals, and a protected rule needs a decision manager
+
+**What changed.** `BuildAndCompile` refuses what the third major named in a boot warning: a prefix firewall an earlier one claims whole, which the first matching firewall never let run, and a rule path or a firewall prefix holding a percent escape other than `%2F`, which claims only a resource whose name holds the percent sign. It also refuses a firewall whose access control holds a rule that is not `PUBLIC_ACCESS` while no decision manager reaches it, neither its own nor the global one; every request that rule matched answered 500. A `MELODY_STATIC_EXCLUDED_PATHS` entry holding such an escape is refused when the configuration resolves, in every mode. The codes `security.firewallShadowed`, `security.pathPercentEncoded` and `http.static.excludedPathPercentEncoded` are gone.
+
+**Symptom.** The boot panics with "security firewall is never selected" (`firewallName`, `shadowedBy`), "security declared path carries a percent escape" (`field`, `entry`), "security firewall access control holds a rule that is not PUBLIC_ACCESS and no access decision manager reaches the firewall" (`firewallName`, `ruleIndex`, `rule`), or "static excluded path carries a percent escape" (`MELODY_STATIC_EXCLUDED_PATHS`, `index`).
+
+**Remedy.** Declare the narrower firewall first or bound the earlier one with `security.NewSegmentPrefixMatcher`; write the path decoded, `/café` for `/caf%C3%A9`, keeping `%2F` for a separator inside a segment; declare `GlobalConfig.AccessDecisionManager` or `FirewallConfig.Override.AccessDecisionManager`, or mark the rule `PUBLIC_ACCESS` when it protects nothing.
+
+### Application, config: a command writes the boot warnings, two cli keys filter them, and the fallback session storage takes a configured count
+
+**What changed.** A command writes the boot warnings the boot collected once, before it runs, into its configured journal, stderr when `MELODY_LOG_PATH` is empty, where only an http process wrote them; today `security.firewallDoorReachUnknown` is the code a command can write. `MELODY_CLI_BOOT_WARNINGS_IGNORED` lists codes a command leaves out, and `MELODY_CLI_BOOT_WARNINGS_DISABLED=true` writes none. Both are read by a command only. `MELODY_HTTP_SESSION_MAX_SESSIONS`, 100,000 when left out, unlimited admitted, is the count of the framework's fallback in-memory session storage. On that storage, an unlimited `MELODY_HTTP_SESSION_TTL` beside an unlimited count is refused at the http boot. Beside a bounded count it is the boot warning `http.session.unboundedTtlOnBoundedDefaultStorage`, where the third major wrote an uncoded line saying the storage grew without end. `configcontract.HttpConfiguration` declares `SessionMaxSessions()`, and `configcontract.CliConfiguration` declares `BootWarningsIgnored()` and `BootWarningsDisabled()`.
+
+**Symptom.** A command's journal, its stderr when `MELODY_LOG_PATH` is empty, carries the warning lines before its output. The configuration fails on "cli boot warning code may not be empty", "is listed twice", "names no boot warning the framework writes", "names a boot warning only an http process writes" (`MELODY_CLI_BOOT_WARNINGS_IGNORED`, `index`, `code`), or on a list beside `DISABLED=true`. An http process panics with "a cli boot warning key is set in an http process" (`environmentKey`), or on the unlimited session pair. A configuration of the application's own implementing either contract no longer compiles.
+
+**Remedy.** List the codes a command should leave out, or disable the cli journal of boot warnings, in the command's environment only. Bound the session ttl or the count, or register `session.storage` with a storage of your own. Add the three methods to your own configuration type.
+
 ### Logging: the reopenable file writer can be a container service
 
 **What changed.** [`ReopenableFileWriter`](../logging/reopenable_file_writer.go) carries `CloseWithContext` beside `Close`, so the teardown no longer refuses it as a service, and a close stuck on the watcher ends at the teardown's deadline.
@@ -249,7 +265,7 @@ The same holds for a value a module was handed and would drop, refused at the ho
 
 **Symptom.** A process at 100,000 live sessions answers a 500 with no session cookie to a request that writes to a new session, unless its response is already committed, where the refusal is only logged, with `the in-memory session storage is full` or `the session file storage is full` in its journal.
 
-**Remedy.** Register the storage with a larger `MaxSessions`, or `bound.UnlimitedCount()` for the third major's behaviour, or move to a shared storage.
+**Remedy.** Register the storage with a larger `MaxSessions`, or `bound.UnlimitedCount()` for the third major's behaviour, or move to a shared storage. The framework's fallback storage reads its count from `MELODY_HTTP_SESSION_MAX_SESSIONS`.
 
 ### Container: a scope's Close runs under a term, and the close doors are on the contracts
 

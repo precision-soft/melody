@@ -215,6 +215,7 @@ func main() {
 
 ## Footguns & caveats
 
+- A command writes the [boot warnings](SECURITY.md#boot-warnings) the application boot collected once, before it runs, into its configured journal, stderr when `MELODY_LOG_PATH` is empty. `MELODY_CLI_BOOT_WARNINGS_IGNORED` leaves listed codes out and `MELODY_CLI_BOOT_WARNINGS_DISABLED=true` writes none; see [CONFIG](CONFIG.md#cli-boot-warnings).
 - `cli.Register(...)` fails fast via the [`exception`](../../exception) package if the root, command, or runtime instance is nil.
 - Command names are normalized using `strings.TrimSpace(...)`. Empty names and duplicates are rejected.
 - `cli.NewCommandContext(...)` installs an inert exit handler on the engine: left at its default the engine ends the process itself, from inside `Run`, on any error a command returns — and Melody owns the exit, so the application's deferred `Close` and its structured error record would never run. A caller may set `ExitErrHandler` back on the returned command; `cli.Root` keeps the inert handler with no door to remove it.

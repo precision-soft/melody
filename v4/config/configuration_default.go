@@ -26,6 +26,8 @@ func (instance *Configuration) registerDefaultParameters(
 
     instance.setDefaultParameter(HttpSessionTombstoneRetentionKey, DefaultSessionTombstoneRetention.String())
 
+    instance.setDefaultParameter(HttpSessionMaxSessionsKey, DefaultSessionMaxSessions)
+
     instance.setDefaultParameter(HttpShutdownTimeoutKey, DefaultHttpShutdownTimeout.String())
 
     /* absent unless a deployment sets them, so ApplicationConfig and then the framework default fill them */
@@ -42,6 +44,9 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(CliNameKey, "melody")
 
     instance.setDefaultParameter(CliDescriptionKey, "")
+
+    instance.setDefaultParameter(CliBootWarningsIgnoredKey, "")
+    instance.setDefaultParameter(CliBootWarningsDisabledKey, "")
 
     instance.setDefaultParameter(LogPathKey, filepath.Join("%"+KernelLogsDir+"%", "%"+KernelEnv+"%.log"))
     instance.setDefaultParameter(LogLevelKey, string(loggingcontract.LevelDebug))

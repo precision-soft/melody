@@ -471,9 +471,16 @@ func (instance *Configuration) resolvePlaceholders() error {
 }
 
 func (instance *Configuration) buildCliConfiguration() error {
+    bootWarningsDisabled, bootWarningsDisabledErr := checkedParameterSwitch(instance.MustGet(KernelCliBootWarningsDisabled), CliBootWarningsDisabledKey)
+    if nil != bootWarningsDisabledErr {
+        return bootWarningsDisabledErr
+    }
+
     cliConfigurationInstance, newCliConfigurationErr := newCliConfiguration(
         instance.MustGet(CliNameKey).MustString(),
         instance.MustGet(CliDescriptionKey).MustString(),
+        splitConfigurationList(instance.MustGet(KernelCliBootWarningsIgnored).MustString()),
+        bootWarningsDisabled.Value,
     )
     if nil != newCliConfigurationErr {
         return exception.NewError("could not initialize the cli configuration", nil, newCliConfigurationErr)
@@ -555,7 +562,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         )
     }
 
-    staticExcludedPaths := splitHttpConfigurationList(instance.MustGet(KernelStaticExcludedPaths).MustString())
+    staticExcludedPaths := splitConfigurationList(instance.MustGet(KernelStaticExcludedPaths).MustString())
 
     sessionTtl, sessionTtlErr := resolveParameter(instance.MustGet(KernelHttpSessionTtl), HttpSessionTtlKey, SessionTtlRule)
     if nil != sessionTtlErr {
@@ -565,6 +572,11 @@ func (instance *Configuration) buildHttpConfiguration() error {
     sessionTombstoneRetention, sessionTombstoneRetentionErr := resolveParameter(instance.MustGet(KernelHttpSessionTombstoneRetention), HttpSessionTombstoneRetentionKey, SessionTombstoneRetentionRule)
     if nil != sessionTombstoneRetentionErr {
         return sessionTombstoneRetentionErr
+    }
+
+    sessionMaxSessions, sessionMaxSessionsErr := resolveParameter(instance.MustGet(KernelHttpSessionMaxSessions), HttpSessionMaxSessionsKey, SessionMaxSessionsRule)
+    if nil != sessionMaxSessionsErr {
+        return sessionMaxSessionsErr
     }
 
     shutdownTimeout, shutdownTimeoutErr := resolveParameter(instance.MustGet(KernelHttpShutdownTimeout), HttpShutdownTimeoutKey, ShutdownTimeoutRule)
@@ -606,6 +618,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         staticExcludedPaths,
         sessionTtl,
         sessionTombstoneRetention,
+        sessionMaxSessions,
         shutdownTimeout,
         serverLimits,
     )

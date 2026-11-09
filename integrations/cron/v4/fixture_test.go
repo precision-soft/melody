@@ -188,6 +188,14 @@ func (instance *stubCliConfiguration) Description() string {
     return "cron test application"
 }
 
+func (instance *stubCliConfiguration) BootWarningsIgnored() []string {
+    return nil
+}
+
+func (instance *stubCliConfiguration) BootWarningsDisabled() bool {
+    return false
+}
+
 type stubConfiguration struct {
     parameters map[string]configcontract.Parameter
     cli        configcontract.CliConfiguration

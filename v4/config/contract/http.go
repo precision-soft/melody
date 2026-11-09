@@ -30,6 +30,9 @@ type HttpConfiguration interface {
     /* SessionTombstoneRetention is how long a deleted session id keeps refusing a write-back; the framework's configuration defaults it to config.DefaultSessionTombstoneRetention. */
     SessionTombstoneRetention() bound.Resolved[time.Duration]
 
+    /* SessionMaxSessions is how many sessions the framework-wired in-memory storage holds at once; the framework's configuration defaults it to config.DefaultSessionMaxSessions and admits unlimited. */
+    SessionMaxSessions() bound.Resolved[int]
+
     /* ShutdownTimeout is how long a stopping http server waits for the requests it has admitted; the framework's configuration defaults it to config.DefaultHttpShutdownTimeout. */
     ShutdownTimeout() bound.Resolved[time.Duration]
 

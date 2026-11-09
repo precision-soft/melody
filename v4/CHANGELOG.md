@@ -55,9 +55,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - security: `securitycontract.RoleHierarchy` and the optional capability `securitycontract.RoleHierarchyBinder`, which `Compile` calls on a firewall's token source with its effective hierarchy.
 - security: `MatchedAccessControlRule` answers `Rule()`, `Pattern()` and `Matching()`, so the record a regex rule leaves on the security context names its pattern, where its `PathPrefix` was empty and only `RuleIndex` and `Source` pointed at it, and the mode tells an exact rule from a segment or raw prefix over the same path.
 - security: `MinimumSecretLength`, a `bound.Count` on `JwtConfig`, `HmacKeyRing`, `HmacTokenSourceConfig` and `HmacEnvelopeSignerConfig`, the fewest bytes a secret may hold: 32 when left out, the RFC 7518 floor of an HMAC-SHA256 key, at least 32, unlimited refused.
+- config: `MELODY_HTTP_SESSION_MAX_SESSIONS`, with `HttpSessionMaxSessionsKey`, `KernelHttpSessionMaxSessions`, `SessionMaxSessionsRule`, `DefaultSessionMaxSessions` and `HttpConfiguration.SessionMaxSessions()`, the count the framework's fallback in-memory session storage holds: 100,000 when left out, at least 1, unlimited admitted.
+- config: `MELODY_CLI_BOOT_WARNINGS_IGNORED`, a comma-separated list of boot warning codes a command leaves out, and `MELODY_CLI_BOOT_WARNINGS_DISABLED`, with `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, their kernel parameter names and `CliConfiguration.BootWarningsIgnored()` and `BootWarningsDisabled()`.
 
 ### Changed
 
+- security: **Breaking**: `BuildAndCompile` refuses a prefix firewall an earlier one claims whole, naming both, and a rule path or a firewall prefix holding a percent escape other than `%2F`, naming the field and the entry, where each was a boot warning.
+- security: **Breaking**: `BuildAndCompile` refuses a firewall whose access control holds a rule that is not `PUBLIC_ACCESS` while no decision manager reaches it, naming the firewall, the rule's index, the rule and the attribute, where every request the rule matched answered 500.
+- config: **Breaking**: a `MELODY_STATIC_EXCLUDED_PATHS` entry holding a percent escape other than `%2F` is refused when the configuration resolves, in every mode, naming the key and the index, where an http process wrote a boot warning.
+- application: **Breaking**: an http process on the fallback in-memory session storage panics at boot when `MELODY_HTTP_SESSION_TTL` and `MELODY_HTTP_SESSION_MAX_SESSIONS` are both unlimited; with an unlimited ttl and a bounded count, the warning is the boot warning `http.session.unboundedTtlOnBoundedDefaultStorage`, naming the count, where it was an uncoded line that said the storage grew without end.
+- application: **Breaking**: an http process that sets `MELODY_CLI_BOOT_WARNINGS_IGNORED` or `MELODY_CLI_BOOT_WARNINGS_DISABLED` panics at boot, naming the key; the configuration refuses an empty, repeated or unknown code in the list, a code only an http process writes, and a list beside `DISABLED=true`.
+- config: **Breaking**: `configcontract.HttpConfiguration` declares `SessionMaxSessions()` and `configcontract.CliConfiguration` declares `BootWarningsIgnored()` and `BootWarningsDisabled()`, so a configuration of the application's own implementing either contract implements them.
+- application: **Behavioural change**: a command writes the boot warnings the boot collected, once before it runs, into its configured journal, stderr when `MELODY_LOG_PATH` is empty, where only an http process wrote them.
 - storage: **Breaking**: `NewLocalStorage` creates and opens its base directory at construction and panics, naming `baseDirectory`, when it cannot, a file in its place or a directory it may not open, where the first `Put` failed; every operation still reopens the directory.
 - translation: **Breaking**: `NewManager`, handed at least one catalog, panics on an empty default or fallback locale and on one no catalog carries, the fallback named by its index, where the lookup skipped it and answered raw ids; `NewManager(nil, …)` is still the manager with no catalog.
 - http: **Breaking**: `cors.NewService` panics on a blank `AllowOrigins` entry, on an `AllowOrigins` list beside `AllowOriginFunc`, which answers alone, and on `"*"` beside other entries, which it leaves dead, naming the field and the index, where each was skipped or never read.
@@ -192,6 +201,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - openapi: **Breaking**: `DescribeOption`, `WithSummary`, `WithDescription`, `WithTags` and `WithResponse`.
 - security: **Breaking**: the boot warnings `security.firewallAccessControlEmpty`, `security.firewallPrefixUnreachable`, `security.jwtSecretShort` and `security.hmacSecretShort` are removed; their configurations are refused.
 - http: **Breaking**: the boot warnings `cors.credentialedOriginWithoutScheme` and `http.sessionCookie.sameSiteNoneNeverSecure` are removed; their configurations are refused.
+- security: **Breaking**: the boot warnings `security.firewallShadowed`, `security.pathPercentEncoded` and `http.static.excludedPathPercentEncoded` are removed; their configurations are refused.
 
 ### Fixed
 

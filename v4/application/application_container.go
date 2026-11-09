@@ -430,13 +430,18 @@ func (instance *Application) registerHttpSession() {
     serviceContainer := instance.kernel.ServiceContainer()
 
     if false == serviceContainer.Has(session.ServiceSessionStorage) {
-        /* the fallback storage keeps its entries in this process, where nothing outside it can expire them; its cost is reported on the http path as a warning, since a lifetime chosen here would end sessions the application never agreed to end */
+        /* nothing outside this process can expire the fallback storage, so checkDefaultSessionStorageBound reads its bound at the boot */
         instance.defaultInMemorySessionStorage = true
 
         instance.RegisterService(
             session.ServiceSessionStorage,
             func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {
-                return session.NewInMemoryStorage(session.InMemoryStorageConfig{Clock: clock.ClockMustFromResolver(container.ContextOf(resolver), resolver)}), nil
+                return session.NewInMemoryStorage(
+                    session.InMemoryStorageConfig{
+                        MaxSessions: instance.configuration.Http().SessionMaxSessions().Limit(),
+                        Clock:       clock.ClockMustFromResolver(container.ContextOf(resolver), resolver),
+                    },
+                ), nil
             },
             container.RegisterOptions{},
         )

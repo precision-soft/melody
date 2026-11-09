@@ -2,6 +2,7 @@ package config
 
 import (
     "errors"
+    "strings"
     "testing"
     "time"
 
@@ -44,6 +45,9 @@ func TestConfigurationHttpLimitsTakeTheirDefaultsWhenLeftOut(t *testing.T) {
     if (bound.Resolved[time.Duration]{Value: 5 * time.Minute}) != httpConfiguration.SessionTombstoneRetention() {
         t.Fatalf("expected a 5m tombstone retention, got %+v", httpConfiguration.SessionTombstoneRetention())
     }
+    if (bound.Resolved[int]{Value: 100_000}) != httpConfiguration.SessionMaxSessions() {
+        t.Fatalf("expected 100,000 sessions, got %+v", httpConfiguration.SessionMaxSessions())
+    }
     if (bound.Resolved[time.Duration]{Value: 5 * time.Second}) != httpConfiguration.ShutdownTimeout() {
         t.Fatalf("expected a 5s shutdown timeout, got %+v", httpConfiguration.ShutdownTimeout())
     }
@@ -55,8 +59,13 @@ func TestConfigurationHttpLimitsAreReadFromTheEnvironment(t *testing.T) {
         StaticCacheMaxAgeKey:             "0",
         HttpSessionTtlKey:                "30m",
         HttpSessionTombstoneRetentionKey: "1s",
+        HttpSessionMaxSessionsKey:        "1",
         HttpShutdownTimeoutKey:           "45s",
     }).Http()
+
+    if (bound.Resolved[int]{Value: 1}) != httpConfiguration.SessionMaxSessions() {
+        t.Fatalf("unexpected max sessions %+v", httpConfiguration.SessionMaxSessions())
+    }
 
     if (bound.Resolved[int]{Value: 2048}) != httpConfiguration.MaxRequestBodyBytes() {
         t.Fatalf("unexpected body cap %+v", httpConfiguration.MaxRequestBodyBytes())
@@ -72,6 +81,17 @@ func TestConfigurationHttpLimitsAreReadFromTheEnvironment(t *testing.T) {
     }
     if (bound.Resolved[time.Duration]{Value: 45 * time.Second}) != httpConfiguration.ShutdownTimeout() {
         t.Fatalf("unexpected shutdown timeout %+v", httpConfiguration.ShutdownTimeout())
+    }
+}
+
+func TestConfigurationHttpSessionMaxSessionsAdmitsUnlimitedAndRefusesZero(t *testing.T) {
+    if maxSessions := mustConfigurationFromValues(t, map[string]string{HttpSessionMaxSessionsKey: "unlimited"}).Http().SessionMaxSessions(); false == maxSessions.Unlimited {
+        t.Fatalf("expected unlimited sessions, got %+v", maxSessions)
+    }
+
+    _, err := newConfigurationFromValues(map[string]string{HttpSessionMaxSessionsKey: "0"})
+    if refusal, isRefusal := err.(*exception.Error); false == isRefusal || HttpSessionMaxSessionsKey != refusal.Context()["environmentKey"] {
+        t.Fatalf("expected zero sessions refused naming %s, got %v", HttpSessionMaxSessionsKey, err)
     }
 }
 
@@ -307,6 +327,42 @@ func TestConfigurationHttpStaticExcludedPathsRefuseAnEntryThatIsNotAPath(t *test
     }
 }
 
+func TestConfigurationHttpStaticExcludedPathsRefuseAnEntryHoldingAPercentEscapeOtherThanTheSeparator(t *testing.T) {
+    /* the configuration layer reads a value holding two percent signs as a parameter reference, so each refused value carries one escape */
+    for mode, value := range map[string]string{ModeHttp: "/api,/a%20b", ModeCli: "/api,/a%20b"} {
+        environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{DefaultModeKey: mode, StaticExcludedPathsKey: value}})
+        if nil != err {
+            t.Fatalf("new environment error: %v", err)
+        }
+
+        _, err = NewConfiguration(environment, "/tmp/melody")
+
+        var refusal *exception.Error
+        for current := err; nil != current; current = errors.Unwrap(current) {
+            if candidate, isRefusal := current.(*exception.Error); true == isRefusal && true == strings.HasPrefix(candidate.Message(), "static excluded path carries a percent escape") {
+                refusal = candidate
+            }
+        }
+
+        if nil == refusal {
+            t.Fatalf("%s: expected the percent-escape refusal, got %v", mode, err)
+        }
+
+        if StaticExcludedPathsKey != refusal.Context()["environmentKey"] || 1 != refusal.Context()["index"] || "/a%20b" != refusal.Context()["excludedPath"] {
+            t.Fatalf("%s: expected the key, the index and the entry named, got %v", mode, refusal.Context())
+        }
+    }
+
+    environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{StaticExcludedPathsKey: "/café,/files/a%2Fb,/100%"}})
+    if nil != err {
+        t.Fatalf("new environment error: %v", err)
+    }
+
+    if _, err = NewConfiguration(environment, "/tmp/melody"); nil != err {
+        t.Fatalf("expected a decoded entry, %%2F and a stray percent sign admitted, got %v", err)
+    }
+}
+
 func TestConfigurationHttpStaticExcludedPathsAcceptAWhitespaceOnlyValueAsNoList(t *testing.T) {
     source := &testEnvironmentSource{
         values: map[string]string{
@@ -429,6 +485,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
                 testCase.staticExcludedPaths,
                 bound.Resolved[time.Duration]{Value: DefaultSessionTtl},
                 bound.Resolved[time.Duration]{Value: DefaultSessionTombstoneRetention},
+                bound.Resolved[int]{Value: DefaultSessionMaxSessions},
                 bound.Resolved[time.Duration]{Value: DefaultHttpShutdownTimeout},
                 httpServerLimits{},
             )
@@ -460,6 +517,7 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
         []string{"/internal"},
         bound.Resolved[time.Duration]{Value: time.Minute},
         bound.Resolved[time.Duration]{Value: 11 * time.Minute},
+        bound.Resolved[int]{Value: 13},
         bound.Resolved[time.Duration]{Value: 7 * time.Second},
         httpServerLimits{readTimeout: bound.Of(time.Second)},
     )
@@ -493,6 +551,9 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
     }
     if 11*time.Minute != httpConfigurationInstance.SessionTombstoneRetention().Value {
         t.Fatalf("unexpected session tombstone retention: %+v", httpConfigurationInstance.SessionTombstoneRetention())
+    }
+    if 13 != httpConfigurationInstance.SessionMaxSessions().Value {
+        t.Fatalf("unexpected session max sessions: %+v", httpConfigurationInstance.SessionMaxSessions())
     }
     if 7*time.Second != httpConfigurationInstance.ShutdownTimeout().Value {
         t.Fatalf("unexpected shutdown timeout: %+v", httpConfigurationInstance.ShutdownTimeout())

@@ -25,6 +25,14 @@ var environmentKeyAliasMap = map[string][]string{
         CliDescriptionKey,
         KernelCliDescription,
     },
+    CliBootWarningsIgnoredKey: {
+        CliBootWarningsIgnoredKey,
+        KernelCliBootWarningsIgnored,
+    },
+    CliBootWarningsDisabledKey: {
+        CliBootWarningsDisabledKey,
+        KernelCliBootWarningsDisabled,
+    },
     LogPathKey: {
         LogPathKey,
         KernelLogPath,
@@ -68,6 +76,10 @@ var environmentKeyAliasMap = map[string][]string{
     HttpSessionTombstoneRetentionKey: {
         HttpSessionTombstoneRetentionKey,
         KernelHttpSessionTombstoneRetention,
+    },
+    HttpSessionMaxSessionsKey: {
+        HttpSessionMaxSessionsKey,
+        KernelHttpSessionMaxSessions,
     },
     HttpShutdownTimeoutKey: {
         HttpShutdownTimeoutKey,

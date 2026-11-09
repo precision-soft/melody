@@ -6,6 +6,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     httpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
+    "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/security"
 )
 
@@ -154,7 +155,7 @@ func TestBootWarnings_NameADoorWhoseReachAMatcherCannotState(t *testing.T) {
     builder.BuildAndCompile()
 
     for _, warning := range builder.BootWarnings() {
-        if bootWarningDoorReachUnknown == warning.Name {
+        if internal.BootWarningNameFirewallDoorReachUnknown == warning.Name {
             return
         }
     }
@@ -169,7 +170,7 @@ func TestBootWarnings_StaySilentOverPrefixMatchers(t *testing.T) {
     builder.BuildAndCompile()
 
     for _, warning := range builder.BootWarnings() {
-        if bootWarningDoorReachUnknown == warning.Name {
+        if internal.BootWarningNameFirewallDoorReachUnknown == warning.Name {
             t.Fatalf("expected no door reach warning, got %+v", warning)
         }
     }

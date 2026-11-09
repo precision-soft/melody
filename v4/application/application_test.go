@@ -583,25 +583,6 @@ func TestRefuseHttpBootWithoutEnvironment_LeavesTheCliPermissive(t *testing.T) {
     applicationInstance.refuseHttpBootWithoutEnvironment()
 }
 
-func TestStaticExcludedPathBootWarnings_NamesAnExclusionHoldingAPercentEscapeOtherThanTheSeparator(t *testing.T) {
-    /* the configuration layer reads a value holding two percent signs as a parameter reference, so the escaped entry carries one escape */
-    escaped := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{config.EnvKey: "dev", config.StaticExcludedPathsKey: "/api,/a%20b"})
-
-    warnings := staticExcludedPathBootWarnings(config.ModeHttp, escaped.configuration)
-    if 1 != len(warnings) || "http.static.excludedPathPercentEncoded" != warnings[0].Name || "/a%20b" != warnings[0].Context["entry"] || config.StaticExcludedPathsKey != warnings[0].Context["configurationKey"] {
-        t.Fatalf("expected the escaped exclusion named once with its entry and key, got %v", warnings)
-    }
-
-    if 0 != len(staticExcludedPathBootWarnings(config.ModeCli, escaped.configuration)) {
-        t.Fatalf("expected a console process to raise no warning")
-    }
-
-    decoded := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{config.EnvKey: "dev", config.StaticExcludedPathsKey: "/café,/files/a%2Fb"})
-    if 0 != len(staticExcludedPathBootWarnings(config.ModeHttp, decoded.configuration)) {
-        t.Fatalf("expected decoded exclusions to raise no warning")
-    }
-}
-
 func TestEnvironmentDefaultedBootWarnings_NamesAnHttpBootWhoseEnvironmentNameWasDefaulted(t *testing.T) {
     defaulted := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{"APP_NAME": "shop"})
 
@@ -894,6 +875,67 @@ func TestBoot_RefusesADeclaredTeardownDependencyNamingNoService(t *testing.T) {
 
     if false == strings.Contains(string(output), "a declared teardown dependency does not name one container service") || false == strings.Contains(string(output), "service.test.misspelled") {
         t.Fatalf("expected the refusal to name the declaration, got: %s", string(output))
+    }
+}
+
+const bootHttpRefusalProbeMarker = "MELODY_TEST_BOOT_HTTP_REFUSAL_PROBE"
+
+func bootHttpRefusalChildValues() map[string]map[string]string {
+    return map[string]map[string]string{
+        "sessionPair":  {config.HttpSessionTtlKey: "unlimited", config.HttpSessionMaxSessionsKey: "unlimited"},
+        "cliKeyInHttp": {config.CliBootWarningsDisabledKey: "true"},
+    }
+}
+
+func TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrACliBootWarningKey(t *testing.T) {
+    if probe := os.Getenv(bootHttpRefusalProbeMarker); "" != probe {
+        values := map[string]string{config.HttpAddressKey: "127.0.0.1:34523"}
+        for key, value := range bootHttpRefusalChildValues()[probe] {
+            values[key] = value
+        }
+
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
+            kernel:               newTestKernel(),
+            httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    for probe, expected := range map[string]string{
+        "sessionPair":  "an unbounded session ttl and an unbounded session count",
+        "cliKeyInHttp": "a cli boot warning key is set in an http process",
+    } {
+        child := exec.Command(os.Args[0], "-test.run=^TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrACliBootWarningKey$")
+        child.Env = append(os.Environ(), bootHttpRefusalProbeMarker+"="+probe)
+
+        output, runErr := child.CombinedOutput()
+
+        exitError, isExitError := runErr.(*exec.ExitError)
+        if false == isExitError || 1 != exitError.ExitCode() {
+            t.Fatalf("%s: expected the boot to exit 1, got err %v with output: %s", probe, runErr, string(output))
+        }
+
+        if false == strings.Contains(string(output), expected) {
+            t.Fatalf("%s: expected the refusal %q, got: %s", probe, expected, string(output))
+        }
     }
 }
 

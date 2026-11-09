@@ -205,6 +205,8 @@ func (instance *Application) runCli() error {
     /* the console counterpart of the request context the http kernel installs, so a scoped service can resolve the run's identity; the instant comes from the kernel's clock */
     scope.MustOverrideProtectedInstance(ServiceProcessContext, NewProcessContext(processId, kernelInstance.Clock().Now()), containercontract.OverrideOptions{})
 
+    instance.writeBootWarnings(loggerWithProcess)
+
     loggerWithProcess.Info("starting cli application", nil)
 
     rootCli := cli.NewRoot(configuration.Cli().Name(), configuration.Cli().Description())

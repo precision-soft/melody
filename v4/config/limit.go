@@ -38,6 +38,13 @@ var (
         Minimum: bound.TtlMinimum,
     }
 
+    SessionMaxSessionsRule = bound.Rule[int]{
+        Name:              "HttpConfiguration.SessionMaxSessions",
+        Default:           DefaultSessionMaxSessions,
+        Minimum:           1,
+        UnlimitedAdmitted: true,
+    }
+
     ShutdownTimeoutRule = bound.Rule[time.Duration]{
         Name:    "HttpConfiguration.ShutdownTimeout",
         Default: DefaultHttpShutdownTimeout,

@@ -20,6 +20,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/debug"
     "github.com/precision-soft/melody/v4/event"
@@ -229,11 +230,22 @@ func registerTestEventDispatcher(applicationInstance *Application) {
 func newCacheWarningTestApplication(t *testing.T, mode string, logger loggingcontract.Logger) *Application {
     t.Helper()
 
+    return newCacheWarningTestApplicationOver(t, mode, map[string]string{}, logger)
+}
+
+func newCacheWarningTestApplicationOver(t *testing.T, mode string, extraValues map[string]string, logger loggingcontract.Logger) *Application {
+    t.Helper()
+
+    values := map[string]string{
+        config.HttpAddressKey: "127.0.0.1:34517",
+    }
+    for key, value := range extraValues {
+        values[key] = value
+    }
+
     environment, environmentErr := config.NewEnvironment(
         &mapEnvironmentSource{
-            values: map[string]string{
-                config.HttpAddressKey: "127.0.0.1:34517",
-            },
+            values: values,
         },
     )
     if nil != environmentErr {
@@ -293,11 +305,19 @@ const unboundedSessionWarningFragment = "default in-memory session storage"
 func newSessionWarningTestApplication(t *testing.T, sessionTtl string, logger loggingcontract.Logger) *Application {
     t.Helper()
 
+    return newSessionBoundTestApplication(t, config.ModeHttp, map[string]string{config.HttpSessionTtlKey: sessionTtl}, logger)
+}
+
+func newSessionBoundTestApplication(t *testing.T, mode string, sessionValues map[string]string, logger loggingcontract.Logger) *Application {
+    t.Helper()
+
     values := map[string]string{
         config.HttpAddressKey: "127.0.0.1:34519",
     }
-    if "" != sessionTtl {
-        values[config.HttpSessionTtlKey] = sessionTtl
+    for key, value := range sessionValues {
+        if "" != value {
+            values[key] = value
+        }
     }
 
     environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
@@ -313,7 +333,7 @@ func newSessionWarningTestApplication(t *testing.T, sessionTtl string, logger lo
     applicationInstance := &Application{
         ctx:                  context.Background(),
         configuration:        configuration,
-        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode}),
         kernel:               newTestKernel(),
         httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
         moduleConfigurations: make(map[string]any),
@@ -343,6 +363,8 @@ func TestRunHttp_WarnsAboutTheDefaultSessionStorageWithAnUnboundedTtl(t *testing
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
+    applicationInstance.checkDefaultSessionStorageBound()
+
     runErr := applicationInstance.runHttp(cancelledContext)
     if nil != runErr {
         t.Fatalf("unexpected run http error: %v", runErr)
@@ -354,6 +376,63 @@ func TestRunHttp_WarnsAboutTheDefaultSessionStorageWithAnUnboundedTtl(t *testing
     }
 }
 
+func TestCheckDefaultSessionStorageBound_NamesTheCodeAndTheCountOfTheWarning(t *testing.T) {
+    applicationInstance := newSessionBoundTestApplication(t, config.ModeHttp, map[string]string{config.HttpSessionTtlKey: "unlimited", config.HttpSessionMaxSessionsKey: "7"}, &warningRecordingLogger{})
+
+    applicationInstance.checkDefaultSessionStorageBound()
+
+    if 1 != len(applicationInstance.bootWarnings) || internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage != applicationInstance.bootWarnings[0].Name || 7 != applicationInstance.bootWarnings[0].Context["maxSessions"] {
+        t.Fatalf("expected the coded session warning naming 7 sessions, got %v", applicationInstance.bootWarnings)
+    }
+}
+
+func TestCheckDefaultSessionStorageBound_RefusesAnUnboundedTtlBesideAnUnboundedCount(t *testing.T) {
+    applicationInstance := newSessionBoundTestApplication(t, config.ModeHttp, map[string]string{config.HttpSessionTtlKey: "unlimited", config.HttpSessionMaxSessionsKey: "unlimited"}, &warningRecordingLogger{})
+
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || false == strings.Contains(refusal.Message(), "an unbounded session count") {
+            t.Fatalf("expected the unbounded pair refused, got %v", refusal)
+        }
+    }()
+
+    applicationInstance.checkDefaultSessionStorageBound()
+}
+
+func TestCheckDefaultSessionStorageBound_AdmitsTheUnboundedPairWhereNoDefaultStorageServes(t *testing.T) {
+    unbounded := map[string]string{config.HttpSessionTtlKey: "unlimited", config.HttpSessionMaxSessionsKey: "unlimited"}
+
+    cliApplication := newSessionBoundTestApplication(t, config.ModeCli, unbounded, &warningRecordingLogger{})
+    cliApplication.checkDefaultSessionStorageBound()
+
+    ownStorageApplication := newSessionBoundTestApplication(t, config.ModeHttp, unbounded, &warningRecordingLogger{})
+    ownStorageApplication.defaultInMemorySessionStorage = false
+    ownStorageApplication.checkDefaultSessionStorageBound()
+
+    boundedTtlApplication := newSessionBoundTestApplication(t, config.ModeHttp, map[string]string{config.HttpSessionMaxSessionsKey: "unlimited"}, &warningRecordingLogger{})
+    boundedTtlApplication.checkDefaultSessionStorageBound()
+
+    for _, applicationInstance := range []*Application{cliApplication, ownStorageApplication, boundedTtlApplication} {
+        if 0 != len(applicationInstance.bootWarnings) {
+            t.Fatalf("expected no session warning, got %v", applicationInstance.bootWarnings)
+        }
+    }
+}
+
+func TestRegisterHttpSession_TheDefaultStorageHoldsTheConfiguredCount(t *testing.T) {
+    applicationInstance := newSessionBoundTestApplication(t, config.ModeHttp, map[string]string{config.HttpSessionMaxSessionsKey: "1"}, &warningRecordingLogger{})
+
+    storage := container.MustFromResolver[sessioncontract.Storage](context.Background(), applicationInstance.kernel.ServiceContainer(), session.ServiceSessionStorage)
+
+    if saveErr := storage.Save("first", map[string]any{"a": 1}, time.Hour); nil != saveErr {
+        t.Fatalf("unexpected first save error: %v", saveErr)
+    }
+
+    if saveErr := storage.Save("second", map[string]any{"a": 1}, time.Hour); nil == saveErr {
+        t.Fatalf("expected the second session refused at a ceiling of one")
+    }
+}
+
 func TestRunHttp_StaysSilentWhenTheSessionTtlIsBounded(t *testing.T) {
     for _, sessionTtl := range []string{"30m", ""} {
         logger := &warningRecordingLogger{}
@@ -362,6 +441,8 @@ func TestRunHttp_StaysSilentWhenTheSessionTtlIsBounded(t *testing.T) {
 
         cancelledContext, cancel := context.WithCancel(context.Background())
         cancel()
+
+        applicationInstance.checkDefaultSessionStorageBound()
 
         runErr := applicationInstance.runHttp(cancelledContext)
         if nil != runErr {
@@ -383,6 +464,8 @@ func TestRunHttp_StaysSilentWhenTheApplicationRegisteredItsSessionStorage(t *tes
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
+
+    applicationInstance.checkDefaultSessionStorageBound()
 
     runErr := applicationInstance.runHttp(cancelledContext)
     if nil != runErr {
@@ -1555,12 +1638,15 @@ func TestServeHttp_ASlashLessPathThatFoldsIsRefusedBeforeTheFirewallAndTheRouter
     }
 }
 
-/* the boot warnings the boot collected from the declarations it compiled are written once into the configured journal on the http path, and not at all by a command */
-func TestRunHttp_WritesTheCollectedBootWarningsOnceAndRunCliDoesNot(t *testing.T) {
+func TestRunHttpAndRunCli_WriteTheCollectedBootWarningsOnce(t *testing.T) {
     bootWarning := internal.BootWarning{
-        Name:    "security.firewallShadowed",
-        Message: "the firewall is never selected",
-        Context: loggingcontract.Context{"firewall": "apiAdmin"},
+        Name:    internal.BootWarningNameFirewallDoorReachUnknown,
+        Message: "a firewall door's reach is not known at boot",
+        Context: loggingcontract.Context{"firewall": "main"},
+    }
+    otherWarning := internal.BootWarning{
+        Name:    "application.other",
+        Message: "another hazard",
     }
 
     httpLogger := &warningRecordingLogger{}
@@ -1578,21 +1664,66 @@ func TestRunHttp_WritesTheCollectedBootWarningsOnceAndRunCliDoesNot(t *testing.T
         t.Fatalf("expected the boot warning written once on the http path, got %v", warnings)
     }
 
-    cliLogger := &warningRecordingLogger{}
-    cliApplication := newCacheWarningTestApplication(t, config.ModeCli, cliLogger)
-    cliApplication.bootWarnings = []internal.BootWarning{bootWarning}
-
     originalArguments := os.Args
     os.Args = []string{"melody"}
     defer func() { os.Args = originalArguments }()
 
-    if runErr := cliApplication.runCli(); nil != runErr {
-        t.Fatalf("unexpected run cli error: %v", runErr)
+    for _, testCase := range []struct {
+        name          string
+        values        map[string]string
+        expectedFirst int
+        expectedOther int
+    }{
+        {"every code", map[string]string{}, 1, 1},
+        {"one code ignored", map[string]string{config.CliBootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown}, 0, 1},
+        {"the journal disabled", map[string]string{config.CliBootWarningsDisabledKey: "true"}, 0, 0},
+    } {
+        cliLogger := &warningRecordingLogger{}
+        cliApplication := newCacheWarningTestApplicationOver(t, config.ModeCli, testCase.values, cliLogger)
+        cliApplication.bootWarnings = []internal.BootWarning{bootWarning, otherWarning}
+
+        if runErr := cliApplication.runCli(); nil != runErr {
+            t.Fatalf("%s: unexpected run cli error: %v", testCase.name, runErr)
+        }
+
+        if warnings := cliLogger.warningsContaining(bootWarning.Message); testCase.expectedFirst != len(warnings) {
+            t.Fatalf("%s: expected the door warning written %d times on a cli run, got %v", testCase.name, testCase.expectedFirst, warnings)
+        }
+
+        if warnings := cliLogger.warningsContaining(otherWarning.Message); testCase.expectedOther != len(warnings) {
+            t.Fatalf("%s: expected the other warning written %d times on a cli run, got %v", testCase.name, testCase.expectedOther, warnings)
+        }
+    }
+}
+
+func TestRefuseCliBootWarningKeysInHttp_RefusesEitherKeySetInAnHttpProcess(t *testing.T) {
+    for _, values := range []map[string]string{
+        {config.CliBootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown},
+        {config.CliBootWarningsDisabledKey: "false"},
+    } {
+        applicationInstance := newCacheWarningTestApplicationOver(t, config.ModeHttp, values, &warningRecordingLogger{})
+
+        func() {
+            defer func() {
+                refusal, isRefusal := recover().(*exception.Error)
+                if false == isRefusal || false == strings.HasPrefix(refusal.Message(), "a cli boot warning key is set in an http process") {
+                    t.Fatalf("%v: expected the key refused in http, got %v", values, refusal)
+                }
+
+                for key := range values {
+                    if key != refusal.Context()["environmentKey"] {
+                        t.Fatalf("expected %s named, got %v", key, refusal.Context())
+                    }
+                }
+            }()
+
+            applicationInstance.refuseCliBootWarningKeysInHttp()
+        }()
     }
 
-    if warnings := cliLogger.warningsContaining(bootWarning.Message); 0 != len(warnings) {
-        t.Fatalf("expected no boot warning on a cli run, got %v", warnings)
-    }
+    newCacheWarningTestApplication(t, config.ModeHttp, &warningRecordingLogger{}).refuseCliBootWarningKeysInHttp()
+    newCacheWarningTestApplicationOver(t, config.ModeHttp, map[string]string{config.CliBootWarningsIgnoredKey: "  ", config.CliBootWarningsDisabledKey: ""}, &warningRecordingLogger{}).refuseCliBootWarningKeysInHttp()
+    newCacheWarningTestApplicationOver(t, config.ModeCli, map[string]string{config.CliBootWarningsDisabledKey: "true"}, &warningRecordingLogger{}).refuseCliBootWarningKeysInHttp()
 }
 
 func TestRunHttp_RefusesAServerLimitTheApplicationConfigSetsBelowItsMinimum(t *testing.T) {

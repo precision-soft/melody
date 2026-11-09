@@ -298,7 +298,7 @@ func firewallDoorReachWarnings(firewalls []*security.CompiledFirewall) []BootWar
             }
 
             warnings = append(warnings, BootWarning{
-                Name:    bootWarningDoorReachUnknown,
+                Name:    internal.BootWarningNameFirewallDoorReachUnknown,
                 Message: "a firewall door's reach is not known at boot: a matcher that is no prefix may select another firewall for its path, and an unserved request there is a 404",
                 Context: loggingcontract.Context{
                     "firewall": firewall.Name(),

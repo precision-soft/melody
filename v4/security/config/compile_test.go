@@ -5,6 +5,7 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
@@ -210,6 +211,7 @@ func compileMergeStrategyFirewall(t *testing.T, mergeStrategy AccessControlMerge
                 accesscontrol.NewSegmentPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
                 accesscontrol.NewSegmentPrefixRule("/reports", accesscontrol.RuleConfig{Attributes: []string{"ROLE_GLOBAL"}}),
             }),
+            AccessDecisionManager: roleDecisionManager(),
         },
     )
 
@@ -391,5 +393,206 @@ func TestCompile_AnswersTheBinderRefusal(t *testing.T) {
     })
     if false == errors.Is(compileErr, source.failure) {
         t.Fatalf("expected the binder refusal answered, got %v", compileErr)
+    }
+}
+
+func TestCompile_RefusesAFirewallAnEarlierOneShadows(t *testing.T) {
+    cases := []struct {
+        name     string
+        earlier  securitycontract.Matcher
+        later    securitycontract.Matcher
+        shadowed bool
+    }{
+        {"raw prefix over a longer raw prefix", security.NewPathPrefixMatcher("/api"), security.NewPathPrefixMatcher("/api-admin"), true},
+        {"raw prefix with its slash beside a longer spelling", security.NewPathPrefixMatcher("/reports/"), security.NewPathPrefixMatcher("/reportsarchive"), false},
+        {"narrower raw prefix declared first", security.NewPathPrefixMatcher("/api-admin"), security.NewPathPrefixMatcher("/api"), false},
+        {"empty raw prefix over every later one", security.NewPathPrefixMatcher(""), security.NewPathPrefixMatcher("/admin"), true},
+        {"segment over its subtree segment", security.NewSegmentPrefixMatcher("/api"), security.NewSegmentPrefixMatcher("/api/admin"), true},
+        {"segment over the same segment", security.NewSegmentPrefixMatcher("/api/"), security.NewSegmentPrefixMatcher("/api"), true},
+        {"segment beside a sibling segment", security.NewSegmentPrefixMatcher("/api"), security.NewSegmentPrefixMatcher("/api-admin"), false},
+        {"segment over a raw prefix inside the tree", security.NewSegmentPrefixMatcher("/api"), security.NewPathPrefixMatcher("/api/admin"), true},
+        {"segment beside a raw prefix of the same spelling", security.NewSegmentPrefixMatcher("/api"), security.NewPathPrefixMatcher("/api"), false},
+        {"catch-all segment over a raw prefix", security.NewSegmentPrefixMatcher("/"), security.NewPathPrefixMatcher("/api"), true},
+        {"raw prefix over a segment its string begins", security.NewPathPrefixMatcher("/ap"), security.NewSegmentPrefixMatcher("/api"), true},
+        {"raw prefix with its slash over the bare segment", security.NewPathPrefixMatcher("/api/"), security.NewSegmentPrefixMatcher("/api"), true},
+        {"raw prefix inside the later segment", security.NewPathPrefixMatcher("/api/admin"), security.NewSegmentPrefixMatcher("/api"), false},
+        {"empty raw prefix over the catch-all segment", security.NewPathPrefixMatcher(""), security.NewSegmentPrefixMatcher("/"), true},
+        {"root raw prefix over the empty raw prefix", security.NewPathPrefixMatcher("/"), security.NewPathPrefixMatcher(""), true},
+        {"root raw prefix over the catch-all segment", security.NewPathPrefixMatcher("/"), security.NewSegmentPrefixMatcher("/"), true},
+        {"segment over a raw prefix with its slash", security.NewSegmentPrefixMatcher("/api"), security.NewPathPrefixMatcher("/api/"), true},
+        {"raw prefix with its slash beside the bare raw prefix", security.NewPathPrefixMatcher("/api/"), security.NewPathPrefixMatcher("/api"), false},
+    }
+
+    for _, testCase := range cases {
+        _, compileErr := Compile(Configuration{
+            firewalls: []firewallDeclaration{
+                {name: "earlier", matcher: testCase.earlier, tokenSource: &anonymousTokenSource{}, config: openFirewallConfig()},
+                {name: "later", matcher: testCase.later, tokenSource: &anonymousTokenSource{}, config: openFirewallConfig()},
+            },
+        })
+
+        if false == testCase.shadowed {
+            if nil != compileErr {
+                t.Fatalf("%s: expected the pair admitted, got %v", testCase.name, compileErr)
+            }
+
+            continue
+        }
+
+        refusal, isRefusal := compileErr.(*exception.Error)
+        if false == isRefusal || false == strings.HasPrefix(refusal.Message(), "security firewall is never selected") {
+            t.Fatalf("%s: expected the shadowing refusal, got %v", testCase.name, compileErr)
+        }
+
+        if "later" != refusal.Context()["firewallName"] || "earlier" != refusal.Context()["shadowedBy"] {
+            t.Fatalf("%s: expected later shadowed by earlier, got %v", testCase.name, refusal.Context())
+        }
+    }
+}
+
+func TestBuilder_RefusesAFirewallAnEarlierOneShadowsAtBuildAndCompile(t *testing.T) {
+    builder := NewBuilder()
+    builder.SetGlobal(GlobalConfig{AccessControl: security.NewAccessControl(nil)})
+    builder.AddFirewall("api", security.NewPathPrefixMatcher("/api"), &anonymousTokenSource{}, FirewallConfig{})
+    builder.AddFirewall("apiAdmin", security.NewPathPrefixMatcher("/api-admin"), &anonymousTokenSource{}, FirewallConfig{})
+
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || "apiAdmin" != refusal.Context()["firewallName"] || "/api-admin" != refusal.Context()["entry"] || "/api" != refusal.Context()["shadowedByPrefix"] {
+            t.Fatalf("expected apiAdmin refused as shadowed by /api, got %v", refusal)
+        }
+    }()
+
+    builder.BuildAndCompile()
+}
+
+func TestCompile_RefusesADeclaredPathThatCarriesAPercentEscape(t *testing.T) {
+    ruleAt := func(path string) *security.AccessControl {
+        return security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewExactRule(path, accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}})})
+    }
+
+    cases := []struct {
+        name         string
+        global       *security.AccessControl
+        firewalls    []firewallDeclaration
+        field        string
+        firewallName string
+        entry        string
+    }{
+        {
+            name:   "a global rule with no firewall",
+            global: ruleAt("/caf%C3%A9"),
+            field:  "GlobalConfig.AccessControl",
+            entry:  "/caf%C3%A9",
+        },
+        {
+            name:      "a global rule beside a firewall",
+            global:    ruleAt("/caf%C3%A9"),
+            firewalls: []firewallDeclaration{{name: "files", matcher: security.NewPathPrefixMatcher("/files"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{}}},
+            field:     "GlobalConfig.AccessControl",
+            entry:     "/caf%C3%A9",
+        },
+        {
+            name:         "a firewall prefix",
+            firewalls:    []firewallDeclaration{{name: "files", matcher: security.NewPathPrefixMatcher("/files%41"), tokenSource: &anonymousTokenSource{}, config: openFirewallConfig()}},
+            field:        "matcher",
+            firewallName: "files",
+            entry:        "/files%41",
+        },
+        {
+            name:         "a segment firewall prefix",
+            firewalls:    []firewallDeclaration{{name: "files", matcher: security.NewSegmentPrefixMatcher("/files%41"), tokenSource: &anonymousTokenSource{}, config: openFirewallConfig()}},
+            field:        "matcher",
+            firewallName: "files",
+            entry:        "/files%41",
+        },
+        {
+            name:         "a firewall rule",
+            firewalls:    []firewallDeclaration{{name: "files", matcher: security.NewPathPrefixMatcher("/files"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: ruleAt("/files/a%20b"), AccessDecisionManager: roleDecisionManager()}}}},
+            field:        "FirewallConfig.Override.AccessControl",
+            firewallName: "files",
+            entry:        "/files/a%20b",
+        },
+    }
+
+    for _, testCase := range cases {
+        _, compileErr := Compile(Configuration{global: GlobalConfig{AccessControl: testCase.global, AccessDecisionManager: roleDecisionManager()}, firewalls: testCase.firewalls})
+
+        refusal, isRefusal := compileErr.(*exception.Error)
+        if false == isRefusal || false == strings.HasPrefix(refusal.Message(), "security declared path carries a percent escape") {
+            t.Fatalf("%s: expected the percent-escape refusal, got %v", testCase.name, compileErr)
+        }
+
+        if testCase.field != refusal.Context()["field"] || testCase.entry != refusal.Context()["entry"] {
+            t.Fatalf("%s: expected %s naming %s, got %v", testCase.name, testCase.field, testCase.entry, refusal.Context())
+        }
+
+        if firewallName, named := refusal.Context()["firewallName"]; ("" == testCase.firewallName) == named || ("" != testCase.firewallName && testCase.firewallName != firewallName) {
+            t.Fatalf("%s: expected the firewall name %q, got %v", testCase.name, testCase.firewallName, refusal.Context())
+        }
+    }
+
+    admitted := security.NewAccessControl([]security.AccessControlRule{
+        accesscontrol.NewExactRule("/files/a%2Fb", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+        accesscontrol.NewExactRule("/files/100%", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+        accesscontrol.NewRegexRule("^/files%41/x$", accesscontrol.RuleConfig{Attributes: []string{"ROLE_LOCAL"}}),
+    })
+
+    if _, compileErr := Compile(Configuration{
+        global: GlobalConfig{AccessDecisionManager: roleDecisionManager()},
+        firewalls: []firewallDeclaration{
+            {name: "files", matcher: security.NewPathPrefixMatcher("/files%2F"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: FirewallOverride{AccessControl: admitted}}},
+        },
+    }); nil != compileErr {
+        t.Fatalf("expected %%2F, a stray percent sign and a regex pattern admitted, got %v", compileErr)
+    }
+}
+
+const protectedRuleWithoutDecisionManagerRefusal = "security firewall access control holds a rule that is not PUBLIC_ACCESS and no access decision manager reaches the firewall, so every request the rule matches would be refused without a decision; declare GlobalConfig.AccessDecisionManager or FirewallConfig.Override.AccessDecisionManager"
+
+func TestCompile_RefusesAProtectedRuleNoDecisionManagerReaches(t *testing.T) {
+    publicRule := accesscontrol.NewExactRule("/open", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}})
+    protectedRule := accesscontrol.NewRegexRule("^/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
+
+    for name, declaration := range map[string]struct {
+        global   GlobalConfig
+        override FirewallOverride
+    }{
+        "its own rule":       {override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, protectedRule})}},
+        "an inherited rule":  {global: GlobalConfig{AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, protectedRule})}},
+        "override-only rule": {global: GlobalConfig{AccessControl: security.NewAccessControl(nil)}, override: FirewallOverride{MergeStrategy: AccessControlMergeOverrideOnly, AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule, protectedRule})}},
+    } {
+        _, compileErr := Compile(Configuration{
+            global:    declaration.global,
+            firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: declaration.override}}},
+        })
+
+        refusal, isRefusal := compileErr.(*exception.Error)
+        if false == isRefusal || protectedRuleWithoutDecisionManagerRefusal != refusal.Message() {
+            t.Fatalf("%s: expected the missing-manager refusal, got %v", name, compileErr)
+        }
+
+        context := refusal.Context()
+        if "admin" != context["firewallName"] || 1 != context["ruleIndex"] || "^/admin" != context["rule"] || "ROLE_ADMIN" != context["attribute"] {
+            t.Fatalf("%s: expected the firewall, the rule and its attribute named, got %v", name, context)
+        }
+    }
+
+    for name, declaration := range map[string]struct {
+        global   GlobalConfig
+        override FirewallOverride
+    }{
+        "public rules only":      {override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule})}},
+        "an empty control":       {override: FirewallOverride{AccessControl: security.NewAccessControl(nil)}},
+        "the global manager":     {global: GlobalConfig{AccessDecisionManager: roleDecisionManager()}, override: FirewallOverride{AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule})}},
+        "the firewall manager":   {override: FirewallOverride{AccessDecisionManager: roleDecisionManager(), AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule})}},
+        "a disabled global rule": {global: GlobalConfig{AccessControl: security.NewAccessControl([]security.AccessControlRule{protectedRule})}, override: FirewallOverride{GlobalAccessControlDisabled: true, AccessControl: security.NewAccessControl([]security.AccessControlRule{publicRule})}},
+    } {
+        if _, compileErr := Compile(Configuration{
+            global:    declaration.global,
+            firewalls: []firewallDeclaration{{name: "admin", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: declaration.override}}},
+        }); nil != compileErr {
+            t.Fatalf("%s: expected the firewall admitted, got %v", name, compileErr)
+        }
     }
 }

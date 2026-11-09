@@ -62,6 +62,7 @@ All recognised `.env` keys and their defaults live in [`config/environment.go`](
 | `MELODY_HTTP_MAX_REQUEST_BODY_BYTES`      | `kernel.http.max_request_body_bytes`      | `1048576`                                    |
 | `MELODY_HTTP_SESSION_TTL`                 | `kernel.http.session_ttl`                 | `24h`                                        |
 | `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`                                         |
+| `MELODY_HTTP_SESSION_MAX_SESSIONS`        | `kernel.http.session_max_sessions`        | `100000`                                     |
 | `MELODY_HTTP_SHUTDOWN_TIMEOUT`            | `kernel.http.shutdown_timeout`            | `5s`                                         |
 | `MELODY_TEARDOWN_TIMEOUT`                 | `kernel.teardown_timeout`                 | `""` (the application's, then `10s`)         |
 | `MELODY_CONTAINER_CREATION_WAITERS`       | `kernel.container_creation_waiters`       | `""` (the application's, then `1024`)        |
@@ -73,6 +74,8 @@ All recognised `.env` keys and their defaults live in [`config/environment.go`](
 | `MELODY_HTTP_MAX_HEADER_BYTES`            | `kernel.http.max_header_bytes`            | `""` (the application's, then `1048576`)     |
 | `MELODY_CLI_NAME`                         | `kernel.cli_name`                         | `"melody"`                                   |
 | `MELODY_CLI_DESCRIPTION`                  | `kernel.cli_description`                  | `""`                                         |
+| `MELODY_CLI_BOOT_WARNINGS_IGNORED`        | `kernel.cli_boot_warnings_ignored`        | `""`                                         |
+| `MELODY_CLI_BOOT_WARNINGS_DISABLED`       | `kernel.cli_boot_warnings_disabled`       | `""` (`false`)                               |
 | `MELODY_LOG_PATH`                         | `kernel.log_path`                         | `%kernel.logs_dir%/%kernel.environment%.log` |
 | `MELODY_LOG_LEVEL`                        | `kernel.log_level`                        | `"debug"`                                    |
 | `MELODY_DEFAULT_LOCALE`                   | `kernel.default_locale`                   | `"en"`                                       |
@@ -92,7 +95,7 @@ Project layout defaults that are not env-overridable:
 
 ### Limit keys
 
-Every key that holds a limit or a timeout is read as a [`bound`](../../bound/limit.go) limit: the empty value is absent and takes the default, `unlimited` lifts the bound where the field admits it, and anything else is a value — a duration with its unit (`30s`, `24h`) or a count — judged against the field's minimum. A value below the minimum, an `unlimited` the field refuses and a text that is none of the three fail the boot with `invalid environment value`, naming the key, the cause naming the field. The minimums: the body cap 1 byte, the cache max age 0, the session ttl and the tombstone retention 1s, the shutdown timeout, the teardown budget, the scope teardown timeout and the four server timeouts 1ms, the header cap 4 KiB, the container creation waiters 1. Only the session ttl, the teardown budget, the scope teardown timeout and the container creation waiters admit `unlimited`.
+Every key that holds a limit or a timeout is read as a [`bound`](../../bound/limit.go) limit: the empty value is absent and takes the default, `unlimited` lifts the bound where the field admits it, and anything else is a value — a duration with its unit (`30s`, `24h`) or a count — judged against the field's minimum. A value below the minimum, an `unlimited` the field refuses and a text that is none of the three fail the boot with `invalid environment value`, naming the key, the cause naming the field. The minimums: the body cap 1 byte, the cache max age 0, the session ttl and the tombstone retention 1s, the shutdown timeout, the teardown budget, the scope teardown timeout and the four server timeouts 1ms, the header cap 4 KiB, the container creation waiters and the session count 1. Only the session ttl, the session count, the teardown budget, the scope teardown timeout and the container creation waiters admit `unlimited`.
 
 The keys marked "the application's" are absent unless the deployment sets them — the eight limit keys here, and the teardown switch described under [Container teardown order](#container-teardown-order): the application's [`ApplicationConfig`](../../application/application_new.go) states its own default for each, and the key wins over it (see the application document's [Server limits](APPLICATION.md#server-limits)). [`HttpConfiguration`](../../config/contract/http.go) answers those five server keys, and [`KernelConfiguration.TeardownTimeout()`](../../config/contract/kernel.go), [`ScopeTeardownTimeout()`](../../config/contract/kernel.go) and [`ContainerCreationWaiters()`](../../config/contract/kernel.go) the teardown, the scope teardown and the creation waiters keys, as the deployment set them; the other limits it answers resolved, a [`bound.Resolved`](../../bound/resolve.go) holding the value or `Unlimited`.
 
@@ -135,10 +138,10 @@ The value is a Go duration string, so it **must carry a unit** — `30m`, `24h`,
 
 The default is [`DefaultSessionTtl`](../../config/http.go), **24 hours**: long enough that no ordinary browsing session is cut short and short enough that abandoned entries leave. It is bounded because of what no expiry costs here specifically, and the cost does not come from anything the application wrote. Melody mints a session for every request that arrives without a session cookie, so the moment an application writes to a session on a public path — a csrf token, a flash message, a locale — every cookie-less request leaves an entry behind: a crawler, a health check, a hotlinked image. With no expiry nothing reclaims it:
 
-- [`InMemoryStorage`](../../session/in_memory_storage.go), the default store, only ever deletes entries that carry an expiry — its background cleanup skips entries with none — so the map grows without bound for the process's whole lifetime;
+- [`InMemoryStorage`](../../session/in_memory_storage.go), the default store, only ever deletes entries that carry an expiry — its background cleanup skips entries with none — so the map fills to its count, `MELODY_HTTP_SESSION_MAX_SESSIONS`, and then refuses every new session for the process's whole lifetime;
 - [`FileStorage`](../../session/file_storage.go) holds every session in one map and re-serialises **the whole map** on every write, so each save gets progressively more expensive as the file grows. Its flush does purge the entries that have lapsed, but with no expiry there are none to purge, so nothing ever leaves.
 
-Which is why the application says so at boot: an http application that is still on the framework-supplied [`InMemoryStorage`](../../session/in_memory_storage.go) **and** on an `unlimited` ttl logs a warning naming both halves. Either half alone is silent — a shared storage is the operator's to prune, and a bounded lifetime reclaims on its own.
+Which is why the application says so at boot: an http application that is still on the framework-supplied [`InMemoryStorage`](../../session/in_memory_storage.go) **and** on an `unlimited` ttl writes the boot warning `http.session.unboundedTtlOnBoundedDefaultStorage`, naming the count that holds it, and one that also sets `MELODY_HTTP_SESSION_MAX_SESSIONS=unlimited` is refused at boot, since nothing would ever remove an entry. Either half alone is silent — a shared storage is the operator's to prune, and a bounded lifetime reclaims on its own.
 
 The ttl is a **lifetime since the last write, not an idle timeout.** The expiry is stamped when the session is stored, and a session is only stored when it was modified — [`Manager.SaveSession`](../../session/manager.go) returns early otherwise, and the response path calls it under the same condition — so reading a session never refreshes it. With `MELODY_HTTP_SESSION_TTL=30m` a user who logs in and then browses read-only pages is logged out 30 minutes after the login, however active they were; this is not `gc_maxlifetime`. The choice is deliberate: refreshing on read would turn every request carrying a session into a storage write, which on [`FileStorage`](../../session/file_storage.go) re-serialises the whole map. An application that wants a true idle timeout can buy one explicitly with a `kernel.request` listener that writes to the session — a last-seen timestamp, say — accepting the one storage write per request that costs.
 
@@ -153,6 +156,16 @@ How long a deleted session id is remembered, so that a slow in-flight request st
 | `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`    |
 
 The value is a Go duration string of at least one second, and `unlimited` is refused: a shorter window, zero included, fails the boot because a window that refuses nothing disarms the logout defence. The default is [`DefaultSessionTombstoneRetention`](../../config/http.go), five minutes.
+
+### Session max sessions
+
+How many sessions the framework-wired [`InMemoryStorage`](../../session/in_memory_storage.go) holds at once. Read through [`HttpConfiguration.SessionMaxSessions()`](../../config/contract/http.go) and handed to the storage as `InMemoryStorageConfig.MaxSessions`; a storage the application registers under `session.storage` declares its own.
+
+| Environment key                    | Parameter name                     | Default  |
+|------------------------------------|------------------------------------|----------|
+| `MELODY_HTTP_SESSION_MAX_SESSIONS` | `kernel.http.session_max_sessions` | `100000` |
+
+The value is a count of at least one, and `unlimited` is admitted. At the count, once the lapsed sessions are swept, a new session id is refused and a stored one is still saved. The default is [`DefaultSessionMaxSessions`](../../config/http.go), 100,000. `unlimited` beside `MELODY_HTTP_SESSION_TTL=unlimited` is refused at the boot of an http process on the default storage, see [Session ttl](#session-ttl).
 
 ### Http shutdown timeout
 
@@ -237,7 +250,18 @@ Which path prefixes the built-in file server declines before it looks at the dis
 |--------------------------------|--------------------------------|---------|
 | `MELODY_STATIC_EXCLUDED_PATHS` | `kernel.static.excluded_paths` | `""`    |
 
-The value is a comma-separated list whose entries are trimmed of surrounding whitespace, so `/admin, /api/internal` names two prefixes while a blank or whitespace-only value names none. An entry must begin with `/` and may not be empty; validation rejects both at boot (`static excluded path must begin with a slash`, `static excluded path may not be empty`) rather than let a stray comma — which prefix-matches every path — silently take static serving out of service. See [HTTP](HTTP.md) for what a declined request goes on to do, and for why this is the lever an application pulls to serve part of the url space behind middleware of its own.
+The value is a comma-separated list whose entries are trimmed of surrounding whitespace, so `/admin, /api/internal` names two prefixes while a blank or whitespace-only value names none. An entry must begin with `/` and may not be empty; validation rejects both at boot (`static excluded path must begin with a slash`, `static excluded path may not be empty`) rather than let a stray comma — which prefix-matches every path — silently take static serving out of service. An entry holding a percent escape other than `%2F`, `/a%20b`, is refused too, naming the key and the index, in every mode: the file server compares an exclusion with the request path decoded, so such an entry would exclude only a path whose name holds the percent sign; write it decoded. See [HTTP](HTTP.md) for what a declined request goes on to do, and for why this is the lever an application pulls to serve part of the url space behind middleware of its own.
+
+### Cli boot warnings
+
+What a command writes of the [boot warnings](SECURITY.md#boot-warnings) the boot collected. Read through [`CliConfiguration`](../../config/contract/cli.go), `BootWarningsIgnored()` and `BootWarningsDisabled()`.
+
+| Environment key                     | Parameter name                      | Default        |
+|-------------------------------------|-------------------------------------|----------------|
+| `MELODY_CLI_BOOT_WARNINGS_IGNORED`  | `kernel.cli_boot_warnings_ignored`  | `""`           |
+| `MELODY_CLI_BOOT_WARNINGS_DISABLED` | `kernel.cli_boot_warnings_disabled` | `""` (`false`) |
+
+A command writes every boot warning it collected once, before its own output, into its configured journal, stderr when `MELODY_LOG_PATH` is empty. `MELODY_CLI_BOOT_WARNINGS_IGNORED` is a comma-separated list of codes a command leaves out; `MELODY_CLI_BOOT_WARNINGS_DISABLED=true` writes none. The configuration refuses, naming the key and the index, an empty or repeated code, a code the framework does not write and a code only an http process writes, since each would silence nothing; it refuses a list beside `DISABLED=true` too. The codes a command can write are those the [Boot warnings](SECURITY.md#boot-warnings) table marks for cli. Both keys belong to the command's environment: an http process that sets either is refused at boot. A warning a module writes itself, at the first use of its service, is not a boot warning and neither key reaches it.
 
 ### Typed accessors
 
@@ -377,11 +401,11 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpShutdownTimeoutKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `CliNameKey`, `CliDescriptionKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpShutdownTimeout`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelCliName`, `KernelCliDescription`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 

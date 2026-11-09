@@ -4,6 +4,8 @@ import (
     "context"
     "io/fs"
     "os"
+    "slices"
+    "strings"
     "sync"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
@@ -103,8 +105,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     }
 
     instance.refuseHttpBootWithoutEnvironment()
+    instance.refuseCliBootWarningKeysInHttp()
     instance.bootWarnings = append(instance.bootWarnings, environmentDefaultedBootWarnings(instance.runtimeFlags.Mode(), instance.configuration)...)
-    instance.bootWarnings = append(instance.bootWarnings, staticExcludedPathBootWarnings(instance.runtimeFlags.Mode(), instance.configuration)...)
 
     instance.ensureRuntimeDirectories()
 
@@ -117,6 +119,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     instance.bootModulesPostConfigurationResolve()
 
     instance.bootContainer()
+
+    instance.checkDefaultSessionStorageBound()
 
     warnIgnoredProcessEnvironment(instance.bootLogger(), configuration, os.Environ())
 
@@ -511,13 +515,60 @@ func environmentDefaultedBootWarnings(mode string, configuration configcontract.
 
     return []internal.BootWarning{
         {
-            Name:    "application.environment.defaulted",
+            Name:    internal.BootWarningNameEnvironmentDefaulted,
             Message: "MELODY_ENV is not set, so the http process boots as dev with debug tooling on; set MELODY_ENV explicitly",
             Context: loggingcontract.Context{
                 "environmentKey": config.EnvKey,
                 "environment":    config.EnvDevelopment,
             },
         },
+    }
+}
+
+/* the cli keys are refused in an http process, so the filter only ever narrows what a command writes */
+func (instance *Application) writeBootWarnings(logger loggingcontract.Logger) {
+    cliConfiguration := instance.configuration.Cli()
+    if true == cliConfiguration.BootWarningsDisabled() {
+        return
+    }
+
+    ignored := cliConfiguration.BootWarningsIgnored()
+
+    for _, bootWarning := range instance.bootWarnings {
+        if true == slices.Contains(ignored, bootWarning.Name) {
+            continue
+        }
+
+        internal.WriteBootWarning(logger, bootWarning)
+    }
+}
+
+/* an http process writes every boot warning, so a cli key set there silences nothing */
+func (instance *Application) refuseCliBootWarningKeysInHttp() {
+    if config.ModeHttp != instance.runtimeFlags.Mode() {
+        return
+    }
+
+    for _, environmentKey := range []string{config.CliBootWarningsIgnoredKey, config.CliBootWarningsDisabledKey} {
+        /* a .env shared by both processes may carry the key blank */
+        parameter := instance.configuration.Get(environmentKey)
+        if nil == parameter {
+            continue
+        }
+
+        if text, isText := parameter.Value().(string); true == isText && "" == strings.TrimSpace(text) {
+            continue
+        }
+
+        exception.Panic(
+            exception.NewError(
+                "a cli boot warning key is set in an http process, which writes every boot warning and reads the key nowhere; set it in the environment of the cli process only",
+                exceptioncontract.Context{
+                    "environmentKey": environmentKey,
+                },
+                nil,
+            ),
+        )
     }
 }
 
@@ -589,28 +640,3 @@ func markOpenApiRegistryServing(ctx context.Context, serviceContainer containerc
 
 var _ applicationcontract.ParameterRegistrar = (*Application)(nil)
 var _ applicationcontract.ConfigRegistrar = (*Application)(nil)
-
-/* staticExcludedPathBootWarnings names every static exclusion of an http process that carries a percent escape other than %2F: the file server compares the exclusion with the request path decoded, as the security rules are compared, so such an entry excludes only a path whose name holds the percent sign literally, the same hazard the security declaration's paths are named for */
-func staticExcludedPathBootWarnings(mode string, configuration configcontract.Configuration) []internal.BootWarning {
-    if config.ModeHttp != mode {
-        return nil
-    }
-
-    warnings := make([]internal.BootWarning, 0)
-    for _, excludedPath := range configuration.Http().StaticExcludedPaths() {
-        if false == internal.CarriesPercentEscapeOtherThanSeparator(excludedPath) {
-            continue
-        }
-
-        warnings = append(warnings, internal.BootWarning{
-            Name:    "http.static.excludedPathPercentEncoded",
-            Message: "a static exclusion carries a percent escape: request paths are matched decoded, with %2F for a separator inside a segment, so the entry excludes only a path whose name holds the percent sign literally; write it decoded",
-            Context: loggingcontract.Context{
-                "configurationKey": config.StaticExcludedPathsKey,
-                "entry":            excludedPath,
-            },
-        })
-    }
-
-    return warnings
-}
