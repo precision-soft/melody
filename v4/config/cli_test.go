@@ -75,8 +75,6 @@ func TestConfigurationCliBootWarningKeysRefuseWhatSilencesNothing(t *testing.T) 
     }{
         {"cli boot warning code may not be empty", map[string]string{CliBootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown + ","}},
         {"cli boot warning code is listed twice", map[string]string{CliBootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown + "," + internal.BootWarningNameFirewallDoorReachUnknown}},
-        {"cli boot warning code names no boot warning the framework writes", map[string]string{CliBootWarningsIgnoredKey: "security.firewallShadowed"}},
-        {"cli boot warning code names a boot warning only an http process writes, so a cli process never reads it", map[string]string{CliBootWarningsIgnoredKey: internal.BootWarningNameEnvironmentDefaulted}},
         {"cli boot warnings are both disabled and ignored by code: a disabled journal writes no boot warning, so the ignored codes are read by nothing; keep one of the two keys", map[string]string{CliBootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown, CliBootWarningsDisabledKey: "true"}},
         {"invalid environment value", map[string]string{CliBootWarningsDisabledKey: "maybe"}},
     } {
@@ -97,8 +95,11 @@ func TestConfigurationCliBootWarningKeysRefuseWhatSilencesNothing(t *testing.T) 
         }
     }
 
-    if _, err := newConfigurationFromValues(map[string]string{CliBootWarningsIgnoredKey: internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage}); nil == err {
-        t.Fatalf("expected the http-only session code refused")
+    /* whether a code names a warning a cli process writes is judged at boot, once the modules declared theirs */
+    for _, code := range []string{"awss3.plaintextEndpoint", internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage} {
+        if _, err := newConfigurationFromValues(map[string]string{CliBootWarningsIgnoredKey: code}); nil != err {
+            t.Fatalf("expected %q admitted when the configuration is built, got %v", code, err)
+        }
     }
 
     if _, err := newConfigurationFromValues(map[string]string{CliBootWarningsDisabledKey: "false", CliBootWarningsIgnoredKey: internal.BootWarningNameFirewallDoorReachUnknown}); nil != err {

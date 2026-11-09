@@ -12,7 +12,7 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 ## Subpackages
 
 - [`application/contract`](../../application/contract)
-  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `MiddlewareRegistration`, `MiddlewareFactory`, `HttpHandlerDecoratorModule`, `CliModule`, `EventModule`, `ConfigModule`).
+  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `MiddlewareRegistration`, `MiddlewareFactory`, `HttpHandlerDecoratorModule`, `CliModule`, `EventModule`, `ConfigModule`, `BootWarningModule`, `BootWarningRegistrar`, `BootWarning`).
 
 ## Responsibilities
 
@@ -27,7 +27,7 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 
 The application boot is split around configuration resolve:
 
-1. **Pre-resolve**: modules may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go).
+1. **Pre-resolve**: modules may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go), then declare their boot warning codes and add their boot warnings via [`BootWarningModule`](../../application/contract/boot_warning_module.go).
 2. **Resolve**: application configuration is resolved.
 3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then register security, event subscribers, HTTP middlewares, HTTP handler decorators, HTTP routes and, last, CLI commands.
 
@@ -301,6 +301,12 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
   `RegisterScopedServices(registrar)` declares services whose lifetime is one scope — one http request, one command run. What it registers is built on the first resolution through a scope and closed when that scope closes. The hook is a separate interface, so an existing module is unaffected by its arrival.
 - [`ScopedServiceRegistrar`](../../application/contract/scoped_service_module.go)\
   Shares no method with `ServiceRegistrar`: calling `RegisterService` on the scoped hook's registrar, or `RegisterScopedService` in `RegisterServices`, does not compile. Both take the provider as `any`, so matching a provider to the lifetime it was written for stays the caller's. See [CONTAINER](CONTAINER.md) for what the two lifetimes may read.
+- [`BootWarningModule`](../../application/contract/boot_warning_module.go)\
+  `RegisterBootWarnings(registrar)` runs after the parameters are registered, before the configuration resolves. A declared code is one a command may list in `MELODY_CLI_BOOT_WARNINGS_IGNORED` when it is written in cli; a warning added under it is written once with the framework's [boot warnings](SECURITY.md#boot-warnings) and honours the cli keys. The code is declared even when the module's configuration calls for no warning, so the cli keys may name it in every environment the module is registered in.
+- [`BootWarningRegistrar`](../../application/contract/boot_warning_module.go)\
+  `DeclareBootWarning(name, writtenInCli)` and `AddBootWarning(warning)`. A name the framework or another module holds, a warning under a name the module did not declare and an empty message fail the boot, naming the module.
+- [`BootWarning`](../../application/contract/boot_warning_module.go)\
+  `Name`, `Message` and `Context`; the context names the configuration and never a value that may be a secret.
 - [`HttpModule`](../../application/contract/http_module.go)
 - [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go)
 - [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go)

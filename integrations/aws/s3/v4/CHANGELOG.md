@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - This major includes every change of the third major, `integrations/awss3/v3`, up to v3.1.0; that history is in the third major's changelog.
 - `storage.go`, `provider.go`, `module.go`: `StorageConfig` of `PutSpoolLimit`, what a `Put` may hold in memory, 16 MiB when left out as the constant was, at least 1, unlimited refused, and `MultipartAbortTimeout`, the bound of the detached abort, 10s when left out as the constant was, at least 1ms, unlimited refused; `EnsureBucketConfig` of `Region`; `ModuleConfig.Storage`.
+- `module.go`, `plaintext_endpoint.go`: the module is a `BootWarningModule`: it declares `awss3.plaintextEndpoint`, exported as `PlaintextEndpointBootWarningName`, as a boot warning a command writes, and over a plaintext client off this machine adds the warning at boot, so `MELODY_CLI_BOOT_WARNINGS_IGNORED` accepts the code and both cli keys silence it; a storage built with `NewStorage` honours the two keys at its first use.
 
 ### Changed
 
@@ -20,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `plaintext_endpoint.go`: the plaintext endpoint warning names `Config.Insecure`, where it told the reader to set `Secure`, a field the fourth major no longer has.
+- `plaintext_endpoint.go`: the plaintext endpoint warning is written once per endpoint host per process, where each storage over the same client wrote its own, so an application registering the module and building a storage of its own over one client wrote it twice.
 - storage: an upload body's read error whose `Unwrap` chain reaches itself no longer holds the goroutine that checks the body's end.
 
 ### Security

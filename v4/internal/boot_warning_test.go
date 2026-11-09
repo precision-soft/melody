@@ -50,19 +50,21 @@ func TestWriteBootWarning_WritesAtWarningWithItsNameAndLeavesTheContextItWasGive
 }
 
 func TestBootWarningRegistry_NamesEachCodeOnceAndMarksWhatACliProcessWrites(t *testing.T) {
-    seen := make(map[string]struct{}, len(bootWarningRegistry))
-    for _, registration := range bootWarningRegistry {
+    registry := NewBootWarningRegistry()
+
+    seen := make(map[string]struct{}, len(registry.registrations))
+    for _, registration := range registry.registrations {
         if _, duplicated := seen[registration.name]; true == duplicated {
             t.Fatalf("expected each code registered once, %q twice", registration.name)
         }
         seen[registration.name] = struct{}{}
 
-        if false == IsKnownBootWarningName(registration.name) {
+        if false == registry.Known(registration.name) {
             t.Fatalf("expected %q known", registration.name)
         }
     }
 
-    if cliNames := CliBootWarningNames(); 1 != len(cliNames) || BootWarningNameFirewallDoorReachUnknown != cliNames[0] {
+    if cliNames := registry.CliNames(); 1 != len(cliNames) || BootWarningNameFirewallDoorReachUnknown != cliNames[0] {
         t.Fatalf("expected the door reach code alone written by a cli process, got %v", cliNames)
     }
 
@@ -72,12 +74,46 @@ func TestBootWarningRegistry_NamesEachCodeOnceAndMarksWhatACliProcessWrites(t *t
         BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage: false,
         "security.firewallShadowed":                               false,
     } {
-        if expected != IsCliBootWarningName(name) {
+        if expected != registry.WrittenInCli(name) {
             t.Fatalf("expected %q written by a cli process %v", name, expected)
         }
     }
 
-    if true == IsKnownBootWarningName("security.firewallShadowed") {
+    if true == registry.Known("security.firewallShadowed") {
         t.Fatalf("expected a code the framework no longer writes unknown")
+    }
+}
+
+func TestBootWarningRegistry_DeclareAddsACodeOnceAndKeepsEachRegistryApart(t *testing.T) {
+    registry := NewBootWarningRegistry()
+
+    if false == registry.Declare("module.cliHazard", true) || false == registry.Declare("module.httpHazard", false) {
+        t.Fatalf("expected two new codes declared")
+    }
+
+    if false == registry.Known("module.cliHazard") || false == registry.WrittenInCli("module.cliHazard") {
+        t.Fatalf("expected the cli code known and written in cli")
+    }
+
+    if false == registry.Known("module.httpHazard") || true == registry.WrittenInCli("module.httpHazard") {
+        t.Fatalf("expected the http code known and not written in cli")
+    }
+
+    if cliNames := registry.CliNames(); 2 != len(cliNames) || "module.cliHazard" != cliNames[1] {
+        t.Fatalf("expected the declared cli code after the framework's, got %v", cliNames)
+    }
+
+    for _, name := range []string{"", "module.cliHazard", BootWarningNameEnvironmentDefaulted} {
+        if true == registry.Declare(name, true) {
+            t.Fatalf("expected %q refused", name)
+        }
+    }
+
+    if true == registry.WrittenInCli(BootWarningNameEnvironmentDefaulted) {
+        t.Fatalf("expected a refused declaration to leave the framework's row as it was")
+    }
+
+    if true == NewBootWarningRegistry().Known("module.cliHazard") {
+        t.Fatalf("expected a fresh registry to hold none of another's declarations")
     }
 }

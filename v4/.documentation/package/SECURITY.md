@@ -421,8 +421,11 @@ A configuration the framework admits but that is very likely a mistake is named 
 | `security.firewallDoorReachUnknown`                | a firewall door behind a matcher that is no prefix, whose reach the boot cannot state (`firewall`, `entry`, `matcher`)                                                 | http and cli |
 | `application.environment.defaulted`                | an http process whose `MELODY_ENV` no `.env` artifact sets, so it boots as `dev` with the debug tooling on                                                             | http         |
 | `http.session.unboundedTtlOnBoundedDefaultStorage` | the default in-memory session storage beside `MELODY_HTTP_SESSION_TTL=unlimited`, held by `MELODY_HTTP_SESSION_MAX_SESSIONS` alone (`configurationKey`, `maxSessions`) | http         |
+| `awss3.plaintextEndpoint`                          | an aws/s3 client over plain http to an endpoint off this machine, declared by the aws/s3 module (`endpoint`)                                                           | http and cli |
 
-A command leaves out the codes `MELODY_CLI_BOOT_WARNINGS_IGNORED` lists, comma-separated, and writes none under `MELODY_CLI_BOOT_WARNINGS_DISABLED=true`. Both keys are read only by a command: an http process that sets either is refused at boot, and the configuration refuses an empty or repeated code, a code the framework does not write, a code only an http process writes, and a list beside `DISABLED=true`. See [CONFIG](CONFIG.md).
+A module adds codes of its own through [`BootWarningModule`](APPLICATION.md): it declares each code, and whether a command writes it, before the configuration resolves, and adds the warnings its configuration calls for, which are written beside the framework's. A code has one owner: a name the framework or another module holds, a warning under a name the module did not declare and an empty message fail the boot, naming the module. The [aws/s3 module](../../../integrations/aws/s3/v4/README.md) declares `awss3.plaintextEndpoint`, written by http and cli.
+
+A command leaves out the codes `MELODY_CLI_BOOT_WARNINGS_IGNORED` lists, comma-separated, and writes none under `MELODY_CLI_BOOT_WARNINGS_DISABLED=true`. Both keys are read only by a command: an http process that sets either is refused at boot, the configuration refuses an empty or repeated code and a list beside `DISABLED=true`, and the boot refuses a code neither the framework nor a registered module writes and a code only an http process writes. See [CONFIG](CONFIG.md).
 
 ### Refused at boot
 

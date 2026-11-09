@@ -5,6 +5,7 @@ import (
 
     "github.com/minio/minio-go/v7"
 
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -27,6 +28,67 @@ func (instance *spyServiceRegistrar) Register(serviceName string, provider any, 
 
 func (instance *spyServiceRegistrar) MustRegister(serviceName string, provider any, options containercontract.RegisterOptions) {
     instance.RegisterService(serviceName, provider, options)
+}
+
+type spyBootWarningRegistrar struct {
+    declared map[string]bool
+    warnings []applicationcontract.BootWarning
+}
+
+func (instance *spyBootWarningRegistrar) DeclareBootWarning(name string, writtenInCli bool) {
+    if nil == instance.declared {
+        instance.declared = make(map[string]bool)
+    }
+
+    instance.declared[name] = writtenInCli
+}
+
+func (instance *spyBootWarningRegistrar) AddBootWarning(warning applicationcontract.BootWarning) {
+    instance.warnings = append(instance.warnings, warning)
+}
+
+func TestModule_RegisterBootWarningsDeclaresTheCodeAndAddsTheWarningForAPlaintextEndpointOffThisMachine(t *testing.T) {
+    for _, testCase := range []struct {
+        name     string
+        client   *minio.Client
+        expected int
+    }{
+        {"no client", nil, 0},
+        {"plaintext off this machine", newClientFor(t, "s3.example.com", false), 1},
+        {"plaintext on a loopback address", newClientFor(t, "127.0.0.1:9000", false), 0},
+        {"https", newClientFor(t, "s3.example.com", true), 0},
+    } {
+        forgetJudgedPlaintextEndpoints(t)
+
+        registrar := &spyBootWarningRegistrar{}
+        NewModule(ModuleConfig{Client: testCase.client, Bucket: "bucket"}).RegisterBootWarnings(registrar)
+
+        if writtenInCli, declared := registrar.declared[PlaintextEndpointBootWarningName]; false == declared || false == writtenInCli || 1 != len(registrar.declared) {
+            t.Fatalf("%s: expected the code declared as written in cli, got %v", testCase.name, registrar.declared)
+        }
+
+        if testCase.expected != len(registrar.warnings) {
+            t.Fatalf("%s: expected %d warnings, got %v", testCase.name, testCase.expected, registrar.warnings)
+        }
+
+        if 1 == testCase.expected {
+            warning := registrar.warnings[0]
+            if PlaintextEndpointBootWarningName != warning.Name || "s3.example.com" != warning.Context["endpoint"] || 1 != len(warning.Context) || plaintextEndpointWarningMessage != warning.Message {
+                t.Fatalf("%s: expected the warning naming the endpoint alone, got %v", testCase.name, warning)
+            }
+        }
+    }
+
+    forgetJudgedPlaintextEndpoints(t)
+
+    client := newClientFor(t, "s3.example.com", false)
+    NewModule(ModuleConfig{Client: client, Bucket: "bucket"}).RegisterBootWarnings(&spyBootWarningRegistrar{})
+
+    registrar := &spyBootWarningRegistrar{}
+    NewModule(ModuleConfig{Client: client, Bucket: "other"}).RegisterBootWarnings(registrar)
+    if 0 != len(registrar.warnings) {
+        t.Fatalf("expected an endpoint already named to add nothing, got %v", registrar.warnings)
+    }
 }
 
 func TestModule_NameAndDescription(t *testing.T) {

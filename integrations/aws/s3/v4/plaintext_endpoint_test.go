@@ -2,12 +2,15 @@ package awss3
 
 import (
     "context"
+    "strings"
     "sync"
     "testing"
 
     "github.com/minio/minio-go/v7"
     "github.com/minio/minio-go/v7/pkg/credentials"
 
+    melodyconfig "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -16,10 +19,11 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* warningCapturingLogger keeps the context of every warning */
+/* warningCapturingLogger keeps the message and the context of every warning */
 type warningCapturingLogger struct {
     mutex    sync.Mutex
     warnings []loggingcontract.Context
+    messages []string
 }
 
 func (instance *warningCapturingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
@@ -34,6 +38,7 @@ func (instance *warningCapturingLogger) Warning(message string, context loggingc
     defer instance.mutex.Unlock()
 
     instance.warnings = append(instance.warnings, context)
+    instance.messages = append(instance.messages, message)
 }
 
 func (instance *warningCapturingLogger) Error(message string, context loggingcontract.Context) {}
@@ -48,12 +53,63 @@ func (instance *warningCapturingLogger) captured() []loggingcontract.Context {
 }
 
 func newRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
+    return newRuntimeOver(logger, nil)
+}
+
+/* a nil logger registers none, a nil configuration none, so each half of what the first-use writer reads can be left out */
+func newRuntimeOver(logger loggingcontract.Logger, configuration configcontract.Configuration) runtimecontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    serviceContainer.MustRegister(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-        return logger, nil
-    }, container.RegisterOptions{})
+
+    if nil != logger {
+        serviceContainer.MustRegister(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        }, container.RegisterOptions{})
+    }
+
+    if nil != configuration {
+        serviceContainer.MustRegister(melodyconfig.ServiceConfig, func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
+            return configuration, nil
+        }, container.RegisterOptions{})
+    }
 
     return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+}
+
+type testEnvironmentSource struct {
+    values map[string]string
+}
+
+func (instance *testEnvironmentSource) Load() (map[string]string, error) {
+    copied := make(map[string]string, len(instance.values))
+    for key, value := range instance.values {
+        copied[key] = value
+    }
+
+    return copied, nil
+}
+
+func newTestConfiguration(t *testing.T, values map[string]string) configcontract.Configuration {
+    t.Helper()
+
+    environment, environmentErr := melodyconfig.NewEnvironment(&testEnvironmentSource{values: values})
+    if nil != environmentErr {
+        t.Fatalf("environment: %v", environmentErr)
+    }
+
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("configuration: %v", configurationErr)
+    }
+
+    return configuration
+}
+
+/* the judged hosts live for the process, so each test starts from none */
+func forgetJudgedPlaintextEndpoints(t *testing.T) {
+    t.Helper()
+
+    judgedPlaintextEndpoints.Clear()
+    t.Cleanup(judgedPlaintextEndpoints.Clear)
 }
 
 func newClientFor(t *testing.T, endpoint string, secure bool) *minio.Client {
@@ -92,6 +148,8 @@ func TestEndpointIsLocal_OnlyLocalhostAndLoopbackStaySilent(t *testing.T) {
 }
 
 func TestNewStorage_APlaintextEndpointOffThisMachineIsNamedOnceAtTheFirstUse(t *testing.T) {
+    forgetJudgedPlaintextEndpoints(t)
+
     logger := &warningCapturingLogger{}
     runtimeInstance := newRuntimeWithLogger(logger)
 
@@ -102,7 +160,7 @@ func TestNewStorage_APlaintextEndpointOffThisMachineIsNamedOnceAtTheFirstUse(t *
     }
 
     warnings := logger.captured()
-    if 1 != len(warnings) || plaintextEndpointBootWarningName != warnings[0][bootWarningContextKey] || "s3.example.com" != warnings[0]["endpoint"] {
+    if 1 != len(warnings) || PlaintextEndpointBootWarningName != warnings[0][bootWarningContextKey] || "s3.example.com" != warnings[0]["endpoint"] {
         t.Fatalf("expected one warning naming the endpoint, got %v", warnings)
     }
 
@@ -114,6 +172,8 @@ func TestNewStorage_APlaintextEndpointOffThisMachineIsNamedOnceAtTheFirstUse(t *
 }
 
 func TestNewStorage_ALoopbackPlaintextEndpointAndAnHttpsEndpointWriteNoWarning(t *testing.T) {
+    forgetJudgedPlaintextEndpoints(t)
+
     for _, client := range []*minio.Client{newClientFor(t, "localhost:4566", false), newClientFor(t, "s3.example.com", true)} {
         logger := &warningCapturingLogger{}
 
@@ -126,6 +186,8 @@ func TestNewStorage_ALoopbackPlaintextEndpointAndAnHttpsEndpointWriteNoWarning(t
 }
 
 func TestNewStorage_ASingleLabelPlaintextEndpointWarns(t *testing.T) {
+    forgetJudgedPlaintextEndpoints(t)
+
     logger := &warningCapturingLogger{}
 
     _, _ = NewStorage(newClientFor(t, "localstack:4566", false), "bucket", StorageConfig{}).PresignedUrl(newRuntimeWithLogger(logger), "object.txt", 0)
@@ -145,5 +207,72 @@ func TestConfig_TheZeroValueBuildsAnHttpsClientAndInsecureAnHttpOne(t *testing.T
         if scheme != client.EndpointURL().Scheme {
             t.Fatalf("expected Insecure=%v to build an %s client, got %s", insecure, scheme, client.EndpointURL().Scheme)
         }
+    }
+}
+
+func TestNewStorage_TheWarningNamesTheInsecureField(t *testing.T) {
+    forgetJudgedPlaintextEndpoints(t)
+
+    logger := &warningCapturingLogger{}
+
+    _, _ = NewStorage(newClientFor(t, "s3.example.com", false), "bucket", StorageConfig{}).PresignedUrl(newRuntimeWithLogger(logger), "object.txt", 0)
+
+    if 1 != len(logger.messages) || false == strings.Contains(logger.messages[0], "Config.Insecure") || true == strings.Contains(logger.messages[0], "Secure on") {
+        t.Fatalf("expected the message to name Config.Insecure, got %v", logger.messages)
+    }
+}
+
+func TestNewStorage_TwoStoragesOverOneEndpointNameItOnceAndAUseWithNoJournalLeavesItForTheNext(t *testing.T) {
+    forgetJudgedPlaintextEndpoints(t)
+
+    client := newClientFor(t, "s3.example.com", false)
+    first := NewStorage(client, "bucket", StorageConfig{})
+    second := NewStorage(client, "other", StorageConfig{})
+
+    _, _ = first.PresignedUrl(newRuntimeOver(nil, nil), "object.txt", 0)
+
+    logger := &warningCapturingLogger{}
+    runtimeInstance := newRuntimeWithLogger(logger)
+
+    _, _ = first.PresignedUrl(runtimeInstance, "object.txt", 0)
+    _, _ = second.PresignedUrl(runtimeInstance, "object.txt", 0)
+
+    if warnings := logger.captured(); 1 != len(warnings) {
+        t.Fatalf("expected the endpoint named once across both storages, got %v", warnings)
+    }
+}
+
+func TestNewStorage_TheFirstUseHonoursTheCliBootWarningKeysAndTheModulesRecord(t *testing.T) {
+    for _, testCase := range []struct {
+        name           string
+        values         map[string]string
+        judgedByModule bool
+        expected       int
+    }{
+        {"no key", map[string]string{}, false, 1},
+        {"the code ignored", map[string]string{melodyconfig.CliBootWarningsIgnoredKey: PlaintextEndpointBootWarningName}, false, 0},
+        {"another code ignored", map[string]string{melodyconfig.CliBootWarningsIgnoredKey: "security.firewallDoorReachUnknown"}, false, 1},
+        {"the journal disabled", map[string]string{melodyconfig.CliBootWarningsDisabledKey: "true"}, false, 0},
+        {"already named by the module", map[string]string{}, true, 0},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            forgetJudgedPlaintextEndpoints(t)
+
+            client := newClientFor(t, "s3.example.com", false)
+            if true == testCase.judgedByModule {
+                NewModule(ModuleConfig{Client: client, Bucket: "bucket"}).RegisterBootWarnings(&spyBootWarningRegistrar{})
+            }
+
+            logger := &warningCapturingLogger{}
+            runtimeInstance := newRuntimeOver(logger, newTestConfiguration(t, testCase.values))
+
+            for range 2 {
+                _, _ = NewStorage(client, "bucket", StorageConfig{}).PresignedUrl(runtimeInstance, "object.txt", 0)
+            }
+
+            if warnings := logger.captured(); testCase.expected != len(warnings) {
+                t.Fatalf("expected %d warnings, got %v", testCase.expected, warnings)
+            }
+        })
     }
 }

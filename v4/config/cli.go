@@ -6,7 +6,6 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    "github.com/precision-soft/melody/v4/internal"
 )
 
 func newCliConfiguration(name string, description string, bootWarningsIgnored []string, bootWarningsDisabled bool) (*cliConfiguration, error) {
@@ -79,7 +78,7 @@ func (instance *cliConfiguration) validate() error {
     return nil
 }
 
-/* each refused code would silence nothing while the operator believes it does */
+/* each refused code would silence nothing while the operator believes it does; a code no application or module writes is refused at boot, once the modules declared theirs */
 func refuseIgnoredBootWarningCode(index int, code string, listed map[string]struct{}) error {
     context := exceptioncontract.Context{
         "environmentKey": CliBootWarningsIgnoredKey,
@@ -93,18 +92,6 @@ func refuseIgnoredBootWarningCode(index int, code string, listed map[string]stru
 
     if _, isListed := listed[code]; true == isListed {
         return exception.NewError("cli boot warning code is listed twice", context, nil)
-    }
-
-    if false == internal.IsKnownBootWarningName(code) {
-        context["cliCodes"] = internal.CliBootWarningNames()
-
-        return exception.NewError("cli boot warning code names no boot warning the framework writes", context, nil)
-    }
-
-    if false == internal.IsCliBootWarningName(code) {
-        context["cliCodes"] = internal.CliBootWarningNames()
-
-        return exception.NewError("cli boot warning code names a boot warning only an http process writes, so a cli process never reads it", context, nil)
     }
 
     return nil

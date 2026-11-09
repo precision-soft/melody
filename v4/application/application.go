@@ -48,6 +48,9 @@ type Application struct {
     httpShutdownHooks         []func()
     securityConfiguration     *security.CompiledConfiguration
     bootWarnings              []internal.BootWarning
+    bootWarningRegistry       *internal.BootWarningRegistry
+    /* the module that declared each code, so a second declaration names both owners */
+    bootWarningOwners         map[string]string
     routeRegistry             httpcontract.RouteRegistry
     moduleConfigurations      map[string]any
     bootCollisions            []bootCollision
@@ -82,6 +85,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.bootModulesPreConfigurationResolve()
 
+    instance.bootModuleBootWarnings()
+
     /* the retry runs before the resolve: the marking must be on the parameter when the templates that read it resolve */
     instance.applyUnappliedSecretMarks()
 
@@ -106,6 +111,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.refuseHttpBootWithoutEnvironment()
     instance.refuseCliBootWarningKeysInHttp()
+    instance.refuseUnknownCliBootWarningCodes()
     instance.bootWarnings = append(instance.bootWarnings, environmentDefaultedBootWarnings(instance.runtimeFlags.Mode(), instance.configuration)...)
 
     instance.ensureRuntimeDirectories()

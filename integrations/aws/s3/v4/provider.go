@@ -55,7 +55,7 @@ type Config struct {
     Endpoint  string
     AccessKey string
     SecretKey string
-    /* Insecure selects plaintext http; the zero value is https, so a configuration that names nothing crosses the network encrypted. Over plaintext, credentials and objects cross the network in clear and every presigned url is http: set it only for localhost or a loopback address, since a storage over a plaintext endpoint off this machine names it once, at WARNING, at its first use. */
+    /* Insecure selects plaintext http; the zero value is https, so a configuration that names nothing crosses the network encrypted. Over plaintext, credentials and objects cross the network in clear and every presigned url is http: set it only for localhost or a loopback address, since a plaintext endpoint off this machine is named once per process, at WARNING, as the boot warning awss3.plaintextEndpoint. */
     Insecure bool
     Region   string
 }

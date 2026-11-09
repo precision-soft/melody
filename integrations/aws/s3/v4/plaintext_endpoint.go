@@ -2,21 +2,36 @@ package awss3
 
 import (
     "net"
+    "slices"
     "strings"
     "sync"
 
     "github.com/minio/minio-go/v7"
 
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* plaintextEndpointBootWarningName names the warning in the journal under the bootWarning key, the shape every boot warning of the framework carries */
-const plaintextEndpointBootWarningName = "awss3.plaintextEndpoint"
+/* PlaintextEndpointBootWarningName is the code of the warning a storage over a plaintext endpoint off this machine writes, the code a cli process lists in MELODY_CLI_BOOT_WARNINGS_IGNORED to leave it out */
+const PlaintextEndpointBootWarningName = "awss3.plaintextEndpoint"
 
 const bootWarningContextKey = "bootWarning"
+
+const plaintextEndpointWarningMessage = "object storage endpoint is plain http off this machine: credentials and objects cross the network in clear and every presigned url is http; leave Config.Insecure unset for an https endpoint"
+
+/* the hazard is the endpoint, not the storage value: two storages over one host, or the module's boot record and a storage's first use, name it once per process */
+var judgedPlaintextEndpoints sync.Map
+
+/* markPlaintextEndpointJudged answers true for the one caller that judges the host first */
+func markPlaintextEndpointJudged(endpoint string) bool {
+    _, alreadyJudged := judgedPlaintextEndpoints.LoadOrStore(endpoint, struct{}{})
+
+    return false == alreadyJudged
+}
 
 /* endpointIsLocal answers whether a plaintext endpoint stays on this machine: localhost or a loopback address. Every other host, a private address and a single-label name included, crosses a network, where credentials and objects travel in clear. */
 func endpointIsLocal(endpoint string) bool {
@@ -36,10 +51,8 @@ func endpointIsLocal(endpoint string) bool {
     return nil != address && true == address.IsLoopback()
 }
 
-/* plaintextEndpointWarning is the warning a storage over a plaintext endpoint off this machine writes once, at its first use with a journal in reach: the storage is built by the application, outside the framework's boot, so its first use is the first moment a configured journal is in reach of it. */
+/* plaintextEndpointWarning names a plaintext endpoint off this machine. The module adds it to the boot warnings; a storage built outside the module writes it at its first use with a journal in reach, honouring the cli boot warning keys of the configuration it finds. */
 type plaintextEndpointWarning struct {
-    mutex    sync.Mutex
-    written  bool
     endpoint string
 }
 
@@ -53,16 +66,21 @@ func plaintextEndpointWarningOf(client *minio.Client) *plaintextEndpointWarning 
     return &plaintextEndpointWarning{endpoint: endpointUrl.Host}
 }
 
-/* write writes the warning the first time a logger is in reach, naming the endpoint's host and never a credential */
+/* bootWarning names the endpoint's host and never a credential */
+func (instance *plaintextEndpointWarning) bootWarning() applicationcontract.BootWarning {
+    return applicationcontract.BootWarning{
+        Name:    PlaintextEndpointBootWarningName,
+        Message: plaintextEndpointWarningMessage,
+        Context: loggingcontract.Context{"endpoint": instance.endpoint},
+    }
+}
+
 func (instance *plaintextEndpointWarning) write(runtimeInstance runtimecontract.Runtime) {
     if nil == instance {
         return
     }
 
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    if true == instance.written {
+    if _, alreadyJudged := judgedPlaintextEndpoints.Load(instance.endpoint); true == alreadyJudged {
         return
     }
 
@@ -72,13 +90,31 @@ func (instance *plaintextEndpointWarning) write(runtimeInstance runtimecontract.
         return
     }
 
-    instance.written = true
+    if false == markPlaintextEndpointJudged(instance.endpoint) {
+        return
+    }
 
-    logger.Warning(
-        "object storage endpoint is plain http off this machine: credentials and objects cross the network in clear and every presigned url is http; set Secure on the configuration",
-        loggingcontract.Context{
-            "endpoint":            instance.endpoint,
-            bootWarningContextKey: plaintextEndpointBootWarningName,
-        },
-    )
+    if true == silencedByCliBootWarningKeys(runtimeInstance) {
+        return
+    }
+
+    warning := instance.bootWarning()
+    context := loggingcontract.Context{bootWarningContextKey: warning.Name}
+    for key, value := range warning.Context {
+        context[key] = value
+    }
+
+    logger.Warning(warning.Message, context)
+}
+
+/* a storage used outside an application finds no configuration and writes; an http process refuses both keys at boot, so they only ever narrow what a command writes */
+func silencedByCliBootWarningKeys(runtimeInstance runtimecontract.Runtime) bool {
+    configuration, configurationErr := config.ConfigFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    if nil != configurationErr || nil == configuration {
+        return false
+    }
+
+    cliConfiguration := configuration.Cli()
+
+    return true == cliConfiguration.BootWarningsDisabled() || true == slices.Contains(cliConfiguration.BootWarningsIgnored(), PlaintextEndpointBootWarningName)
 }

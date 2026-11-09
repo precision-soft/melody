@@ -56,7 +56,24 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
     RegisterStorageService(registrar, instance.config.Client, instance.config.Bucket, instance.config.Storage)
 }
 
+/* the code is declared whether or not a client is handed, so a command's MELODY_CLI_BOOT_WARNINGS_IGNORED may name it in every environment the module is registered in */
+func (instance *Module) RegisterBootWarnings(registrar applicationcontract.BootWarningRegistrar) {
+    registrar.DeclareBootWarning(PlaintextEndpointBootWarningName, true)
+
+    if nil == instance.config.Client {
+        return
+    }
+
+    warning := plaintextEndpointWarningOf(instance.config.Client)
+    if nil == warning || false == markPlaintextEndpointJudged(warning.endpoint) {
+        return
+    }
+
+    registrar.AddBootWarning(warning.bootWarning())
+}
+
 var (
-    _ applicationcontract.Module        = (*Module)(nil)
-    _ applicationcontract.ServiceModule = (*Module)(nil)
+    _ applicationcontract.Module            = (*Module)(nil)
+    _ applicationcontract.ServiceModule     = (*Module)(nil)
+    _ applicationcontract.BootWarningModule = (*Module)(nil)
 )
