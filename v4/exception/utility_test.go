@@ -1661,6 +1661,13 @@ func TestChainDoors_ReturnOnACyclicChain(t *testing.T) {
             t.Error("expected the error of the chain")
         }
 
+        if nil == FromErrorAs(chain, FromErrorConfig{Level: loggingcontract.LevelWarning}) {
+            t.Error("expected the error of the chain at the config's level")
+        }
+
+        if nil == FromErrorAs(chain, FromErrorConfig{Context: exceptioncontract.Context{"orderId": 7}}) {
+            t.Error("expected the error of the chain with the config's context")
+        }
     })
 }
 

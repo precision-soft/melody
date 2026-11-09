@@ -470,6 +470,34 @@ func TestRateLimiter_ReportErrorReturnsOnACyclicChain(t *testing.T) {
     }
 }
 
+func TestRateLimiter_AllowFailureReturnsOnACyclicChainAsAStoreFailure(t *testing.T) {
+    first := &rateLimiterCyclicError{}
+    first.next = &rateLimiterCyclicError{next: first}
+
+    endedContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    limiter := &RateLimiter{failureMode: FailureModeClosed}
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+
+        for _, parentContext := range []context.Context{context.Background(), endedContext} {
+            failure := limiter.allowFailure(parentContext, "key", first)
+            if nil == failure || false == strings.Contains(failure.Error(), "redis rate limiter store failure") {
+                t.Errorf("expected a store failure, got %v", failure)
+            }
+        }
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the call to return on an error chain that reaches itself")
+    }
+}
+
 type rateLimiterCyclicError struct {
     next error
 }

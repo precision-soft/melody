@@ -302,6 +302,13 @@ func newHttpTestContainer() containercontract.Container {
     return newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
 }
 
+func newHttpTestContainerInEnvironment(environment string) containercontract.Container {
+    return newHttpTestContainerWithSessionStorageAndEnvironmentValues(
+        session.NewInMemoryStorage(session.InMemoryStorageConfig{}),
+        map[string]string{config.EnvKey: environment},
+    )
+}
+
 func newHttpTestContainerWithSessionStorage(storage sessioncontract.Storage) containercontract.Container {
     return newHttpTestContainerWithSessionStorageAndEnvironmentValues(storage, nil)
 }

@@ -696,3 +696,56 @@ func TestServerSentEventWriter_SendReturnsOnACyclicChainFromTheDeadline(t *testi
         }
     })
 }
+
+type ringResponseWriter struct {
+    *httptest.ResponseRecorder
+    next nethttp.ResponseWriter
+}
+
+func (instance *ringResponseWriter) Unwrap() nethttp.ResponseWriter {
+    return instance.next
+}
+
+func TestNewServerSentEventWriter_RefusesAWriterChainThatReachesItselfBeforeTheCommit(t *testing.T) {
+    recorder := httptest.NewRecorder()
+    first := &ringResponseWriter{ResponseRecorder: recorder}
+    first.next = &ringResponseWriter{ResponseRecorder: recorder, next: first}
+
+    var writerErr error
+    assertReturnsOnACyclicChain(t, func() {
+        _, writerErr = NewServerSentEventWriter(first, ServerSentEventWriterConfig{})
+    })
+
+    if nil == writerErr || false == strings.Contains(writerErr.Error(), "response writer chain reaches itself") {
+        t.Fatalf("expected the ring refused, got %v", writerErr)
+    }
+
+    if "" != recorder.Header().Get("Content-Type") || true == recorder.Flushed {
+        t.Fatal("expected nothing committed before the refusal")
+    }
+}
+
+func TestNewServerSentEventWriter_RefusesAWriterChainPastTheLimit(t *testing.T) {
+    recorder := httptest.NewRecorder()
+    var writer nethttp.ResponseWriter = recorder
+    for range responseWriterChainLimit {
+        writer = &ringResponseWriter{ResponseRecorder: recorder, next: writer}
+    }
+
+    _, writerErr := NewServerSentEventWriter(writer, ServerSentEventWriterConfig{})
+    if nil == writerErr || false == strings.Contains(writerErr.Error(), "response writer chain is longer than the limit") {
+        t.Fatalf("expected the chain past the limit refused, got %v", writerErr)
+    }
+}
+
+func TestNewServerSentEventWriter_AcceptsAWriterChainAtTheLimit(t *testing.T) {
+    recorder := httptest.NewRecorder()
+    var writer nethttp.ResponseWriter = recorder
+    for range responseWriterChainLimit - 1 {
+        writer = &ringResponseWriter{ResponseRecorder: recorder, next: writer}
+    }
+
+    if _, writerErr := NewServerSentEventWriter(writer, ServerSentEventWriterConfig{}); nil != writerErr {
+        t.Fatalf("expected the chain at the limit accepted, got %v", writerErr)
+    }
+}

@@ -1,8 +1,10 @@
 package http
 
 import (
+    "fmt"
     "io"
     nethttp "net/http"
+    "reflect"
     "strconv"
     "strings"
     "sync"
@@ -32,7 +34,7 @@ var serverSentEventWriteBudgetRule = bound.Rule[time.Duration]{
     UnlimitedAdmitted: true,
 }
 
-/* NewServerSentEventWriter resolves the configuration, then commits the event-stream headers and returns the writer that emits frames onto them. A refused budget, a nil writer, a response already committed and a connection that cannot flush, read through the wrappers to the connection, are answered as errors before the commit, since after it nothing can be answered. The writer is safe for concurrent use and must not outlive the handler. */
+/* NewServerSentEventWriter resolves the configuration, then commits the event-stream headers and returns the writer that emits frames onto them. A refused budget, a nil writer, a response already committed, a writer chain whose Unwrap reaches itself or runs past the limit, and a connection that cannot flush, read through the wrappers to the connection, are answered as errors before the commit, since after it nothing can be answered. The writer is safe for concurrent use and must not outlive the handler. */
 func NewServerSentEventWriter(writer nethttp.ResponseWriter, config ServerSentEventWriterConfig) (*ServerSentEventWriter, error) {
     writeBudget, writeBudgetErr := bound.Resolve(config.WriteBudget, serverSentEventWriteBudgetRule)
     if nil != writeBudgetErr {
@@ -49,7 +51,11 @@ func NewServerSentEventWriter(writer nethttp.ResponseWriter, config ServerSentEv
         }
     }
 
-    flusher, isFlusher := streamingFlusherOf(writer)
+    flusher, isFlusher, chainErr := streamingFlusherOf(writer)
+    if nil != chainErr {
+        return nil, chainErr
+    }
+
     if false == isFlusher {
         return nil, exception.NewError("response writer does not support streaming", nil, nil)
     }
@@ -71,11 +77,34 @@ func NewServerSentEventWriter(writer nethttp.ResponseWriter, config ServerSentEv
     }, nil
 }
 
-/* streamingFlusherOf finds the flusher that reaches the connection, unwrapping the writer chain as http.ResponseController does, since the kernel's recording writer carries a Flush that may flush nothing. */
-func streamingFlusherOf(writer nethttp.ResponseWriter) (nethttp.Flusher, bool) {
-    current := writer
+const responseWriterChainLimit = 65536
 
-    for {
+/* streamingFlusherOf finds the flusher that reaches the connection, unwrapping the writer chain as http.ResponseController does, since the kernel's recording writer carries a Flush that may flush nothing. A chain whose Unwrap reaches itself, or runs past the limit, is refused here, before the response controller walks the same chain without a bound. */
+func streamingFlusherOf(writer nethttp.ResponseWriter) (nethttp.Flusher, bool, error) {
+    current := writer
+    seen := map[nethttp.ResponseWriter]struct{}{}
+
+    for link := 0; ; link++ {
+        if responseWriterChainLimit <= link {
+            return nil, false, exception.NewError(
+                "response writer chain is longer than the limit",
+                map[string]any{"writerType": fmt.Sprintf("%T", writer), "limit": responseWriterChainLimit},
+                nil,
+            )
+        }
+
+        if reflect.Pointer == reflect.ValueOf(current).Kind() {
+            if _, isSeen := seen[current]; true == isSeen {
+                return nil, false, exception.NewError(
+                    "response writer chain reaches itself",
+                    map[string]any{"writerType": fmt.Sprintf("%T", writer), "repeatedType": fmt.Sprintf("%T", current)},
+                    nil,
+                )
+            }
+
+            seen[current] = struct{}{}
+        }
+
         unwrapper, isUnwrapper := current.(interface{ Unwrap() nethttp.ResponseWriter })
         if false == isUnwrapper {
             break
@@ -90,16 +119,16 @@ func streamingFlusherOf(writer nethttp.ResponseWriter) (nethttp.Flusher, bool) {
     }
 
     if _, isFlusher := current.(nethttp.Flusher); false == isFlusher {
-        return nil, false
+        return nil, false, nil
     }
 
     /* the flush goes through the outermost writer, so every wrapper records the commit */
     flusher, isFlusher := writer.(nethttp.Flusher)
     if false == isFlusher {
-        return nil, false
+        return nil, false, nil
     }
 
-    return flusher, true
+    return flusher, true, nil
 }
 
 type ServerSentEventWriter struct {

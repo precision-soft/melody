@@ -196,32 +196,36 @@ func (instance *RateLimiter) allow(parentContext context.Context, callContext co
 
     count, resultErr := result.AsInt64()
     if nil != resultErr {
-        /* the caller's own cancellation is not a store failure: a client that disconnected mid-round-trip surfaces as the context's cancellation and is named so, not as a redis outage. The failure-mode answer applies either way; the call-timeout deadline stays a store failure, since that budget exists to catch a slow store. */
-        if true == exception.ChainIs(resultErr, context.Canceled) {
-            return FailureModeOpen == instance.failureMode, exception.NewError(
-                "redis rate limiter call cancelled by the caller",
-                map[string]any{"key": key, "failureMode": string(instance.failureMode)},
-                resultErr,
-            )
-        }
+        return FailureModeOpen == instance.failureMode, instance.allowFailure(parentContext, key, resultErr)
+    }
 
-        /* the caller's own deadline, tighter than the call timeout, ends the round trip with DeadlineExceeded too; the parent context says whose it was, and it is not a store failure */
-        if true == exception.ChainIs(resultErr, context.DeadlineExceeded) && nil != parentContext.Err() {
-            return FailureModeOpen == instance.failureMode, exception.NewError(
-                "redis rate limiter call ended by the caller's deadline",
-                map[string]any{"key": key, "failureMode": string(instance.failureMode)},
-                fmt.Errorf("%w: %w", errCallerDeadline, resultErr),
-            )
-        }
+    return count <= int64(instance.limit), nil
+}
 
-        return FailureModeOpen == instance.failureMode, exception.NewError(
-            "redis rate limiter store failure",
+func (instance *RateLimiter) allowFailure(parentContext context.Context, key string, resultErr error) error {
+    /* the caller's own cancellation is not a store failure: a client that disconnected mid-round-trip surfaces as the context's cancellation and is named so, not as a redis outage. The failure-mode answer applies either way; the call-timeout deadline stays a store failure, since that budget exists to catch a slow store. */
+    if true == exception.ChainIs(resultErr, context.Canceled) {
+        return exception.NewError(
+            "redis rate limiter call cancelled by the caller",
             map[string]any{"key": key, "failureMode": string(instance.failureMode)},
             resultErr,
         )
     }
 
-    return count <= int64(instance.limit), nil
+    /* the caller's own deadline, tighter than the call timeout, ends the round trip with DeadlineExceeded too; the parent context says whose it was, and it is not a store failure */
+    if true == exception.ChainIs(resultErr, context.DeadlineExceeded) && nil != parentContext.Err() {
+        return exception.NewError(
+            "redis rate limiter call ended by the caller's deadline",
+            map[string]any{"key": key, "failureMode": string(instance.failureMode)},
+            fmt.Errorf("%w: %w", errCallerDeadline, resultErr),
+        )
+    }
+
+    return exception.NewError(
+        "redis rate limiter store failure",
+        map[string]any{"key": key, "failureMode": string(instance.failureMode)},
+        resultErr,
+    )
 }
 
 /* reportError delivers a store failure and answers the error the caller should carry on with. An observer given by the application gets the failure untouched and unmarked, since it may be a counter rather than a journal. With no observer the failure is recorded here, on the call's logger, else the limiter's, else the emergency logger, because Allow answers a bool and Reset nothing, so an outage would otherwise reach no channel; the record takes the level the http middleware picks, a caller's own cancellation not being an outage. The error is then marked already-logged, the framework's mark the exception listener and the http kernel honour, so the middleware files nothing a second time. */

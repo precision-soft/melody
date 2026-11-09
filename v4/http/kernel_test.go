@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/cache"
     "github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
@@ -4930,72 +4931,78 @@ func TestKernel_ARendererBrokenByItsSerializerStillAnswersThroughTheResponsePath
 }
 
 func TestKernel_ACyclicChainFromAHandlerIsAnsweredWithAFiveHundred(t *testing.T) {
-    router := NewRouter()
-    router.Handle(
-        nethttp.MethodGet,
-        "/cycle",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            return nil, newCyclicChainError()
-        },
-    )
+    for _, environment := range []string{config.EnvProduction, config.EnvDevelopment} {
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/cycle",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return nil, newCyclicChainError()
+            },
+        )
 
-    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
+        handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerInEnvironment(environment))
 
-    recorder := httptest.NewRecorder()
-    assertReturnsOnACyclicChain(t, func() {
-        handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/cycle", nil))
-    })
+        recorder := httptest.NewRecorder()
+        assertReturnsOnACyclicChain(t, func() {
+            handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/cycle", nil))
+        })
 
-    if nethttp.StatusInternalServerError != recorder.Code {
-        t.Fatalf("expected 500, got %d", recorder.Code)
+        if nethttp.StatusInternalServerError != recorder.Code {
+            t.Fatalf("expected 500 in the %s environment, got %d", environment, recorder.Code)
+        }
     }
 }
 
 func TestKernel_ACyclicChainFromAStreamedHandlerAfterItsHeaderIsAnswered(t *testing.T) {
-    router := NewRouter()
-    router.Handle(
-        nethttp.MethodGet,
-        "/cycle",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            writer.WriteHeader(nethttp.StatusAccepted)
+    for _, environment := range []string{config.EnvProduction, config.EnvDevelopment} {
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/cycle",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                writer.WriteHeader(nethttp.StatusAccepted)
 
-            return nil, newCyclicChainError()
-        },
-    )
+                return nil, newCyclicChainError()
+            },
+        )
 
-    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
+        handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerInEnvironment(environment))
 
-    recorder := httptest.NewRecorder()
-    assertReturnsOnACyclicChain(t, func() {
-        handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/cycle", nil))
-    })
+        recorder := httptest.NewRecorder()
+        assertReturnsOnACyclicChain(t, func() {
+            handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/cycle", nil))
+        })
 
-    if nethttp.StatusAccepted != recorder.Code {
-        t.Fatalf("expected the committed status, got %d", recorder.Code)
+        if nethttp.StatusAccepted != recorder.Code {
+            t.Fatalf("expected the committed status in the %s environment, got %d", environment, recorder.Code)
+        }
     }
 }
 
 func TestKernel_ACyclicChainFromTheRequestBodyIsAnsweredWithABadRequest(t *testing.T) {
-    router := NewRouter()
-    router.Handle(
-        nethttp.MethodPost,
-        "/cycle",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            return TextResponse(nethttp.StatusOK, "served"), nil
-        },
-    )
+    for _, environment := range []string{config.EnvProduction, config.EnvDevelopment} {
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodPost,
+            "/cycle",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return TextResponse(nethttp.StatusOK, "served"), nil
+            },
+        )
 
-    handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
+        handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerInEnvironment(environment))
 
-    netRequest := httptest.NewRequest(nethttp.MethodPost, "/cycle", &cyclicBodyReader{})
-    netRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+        netRequest := httptest.NewRequest(nethttp.MethodPost, "/cycle", &cyclicBodyReader{})
+        netRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    recorder := httptest.NewRecorder()
-    assertReturnsOnACyclicChain(t, func() {
-        handler.ServeHTTP(recorder, netRequest)
-    })
+        recorder := httptest.NewRecorder()
+        assertReturnsOnACyclicChain(t, func() {
+            handler.ServeHTTP(recorder, netRequest)
+        })
 
-    if nethttp.StatusBadRequest != recorder.Code {
-        t.Fatalf("expected 400, got %d", recorder.Code)
+        if nethttp.StatusBadRequest != recorder.Code {
+            t.Fatalf("expected 400 in the %s environment, got %d", environment, recorder.Code)
+        }
     }
 }
