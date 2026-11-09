@@ -2,11 +2,12 @@ package translation
 
 import (
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     translationcontract "github.com/precision-soft/melody/v4/translation/contract"
 )
 
-/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers, since a locale is assembled from several sources; nil is a manager with no catalog, which answers raw ids. A nil catalog, or one whose Locale is empty and so could never be found, is refused. */
+/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers, since a locale is assembled from several sources; nil is a manager with no catalog, which answers raw ids. A nil catalog, or one whose Locale is empty and so could never be found, is refused; once a catalog is handed, so is a default or fallback locale that is empty or that no catalog carries, since the lookup asks them by that exact name. */
 func NewManager(
     catalogs []translationcontract.Catalog,
     defaultLocale string,
@@ -25,6 +26,38 @@ func NewManager(
         }
 
         catalogsByLocale[locale] = append(catalogsByLocale[locale], catalog)
+    }
+
+    if 0 < len(catalogsByLocale) {
+        if "" == defaultLocale {
+            exception.Panic(exception.NewError("translation default locale is empty", nil, nil))
+        }
+
+        if 0 == len(catalogsByLocale[defaultLocale]) {
+            exception.Panic(
+                exception.NewError(
+                    "translation default locale is carried by no catalog",
+                    exceptioncontract.Context{"defaultLocale": defaultLocale},
+                    nil,
+                ),
+            )
+        }
+
+        for index, fallbackLocale := range fallbackLocales {
+            if "" == fallbackLocale {
+                exception.Panic(exception.NewError("translation fallback locale is empty", exceptioncontract.Context{"index": index}, nil))
+            }
+
+            if 0 == len(catalogsByLocale[fallbackLocale]) {
+                exception.Panic(
+                    exception.NewError(
+                        "translation fallback locale is carried by no catalog",
+                        exceptioncontract.Context{"fallbackLocale": fallbackLocale, "index": index},
+                        nil,
+                    ),
+                )
+            }
+        }
     }
 
     return &Manager{

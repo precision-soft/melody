@@ -4,6 +4,7 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     translationcontract "github.com/precision-soft/melody/v4/translation/contract"
 )
@@ -277,4 +278,53 @@ func TestNewManager_RefusesACatalogWithoutALocale(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         NewManager([]translationcontract.Catalog{NewMapCatalog("")}, "en", nil)
     }, "translation catalog carries no locale")
+}
+
+/* the default and the fallback locales are asked by their exact name, so one no catalog carries would answer raw ids for every message the request locale misses */
+func TestNewManager_RefusesALocaleNoCatalogCarries(t *testing.T) {
+    cases := map[string]struct {
+        defaultLocale   string
+        fallbackLocales []string
+        message         string
+    }{
+        "empty default":                 {"", nil, "translation default locale is empty"},
+        "default without a catalog":     {"fr", nil, "translation default locale is carried by no catalog"},
+        "default is only a region form": {"en-US", nil, "translation default locale is carried by no catalog"},
+        "fallback without a catalog":    {"en", []string{"en", "de"}, "translation fallback locale is carried by no catalog"},
+        "empty fallback":                {"en", []string{""}, "translation fallback locale is empty"},
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            testhelper.AssertPanicsWithError(t, func() {
+                NewManager([]translationcontract.Catalog{NewMapCatalog("en"), NewMapCatalog("ro")}, testCase.defaultLocale, testCase.fallbackLocales)
+            }, testCase.message)
+        })
+    }
+}
+
+func TestNewManager_TheRefusalNamesTheFallbackAndItsIndex(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        exceptionError, isExceptionError := recovered.(*exception.Error)
+        if false == isExceptionError {
+            t.Fatalf("expected an exception error, got %#v", recovered)
+        }
+
+        context := exceptionError.Context()
+        if "de" != context["fallbackLocale"] || 1 != context["index"] {
+            t.Fatalf("expected the refusal to name de at index 1, got %v", context)
+        }
+    }()
+
+    NewManager([]translationcontract.Catalog{NewMapCatalog("en")}, "en", []string{"en", "de"})
+}
+
+/* with no catalog there is no locale to check against */
+func TestNewManager_WithNoCatalogAdmitsAnyLocale(t *testing.T) {
+    manager := NewManager(nil, "", []string{"de"})
+
+    if "greeting" != manager.Trans("greeting", nil, "messages", "fr") {
+        t.Fatalf("expected the raw id, got %q", manager.Trans("greeting", nil, "messages", "fr"))
+    }
 }

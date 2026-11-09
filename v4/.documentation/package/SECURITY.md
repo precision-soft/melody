@@ -435,6 +435,7 @@ A configuration whose hazard has no legitimate reading is refused where it is co
 | `JwtConfig.Secret`                      | the secret is shorter than `JwtConfig.MinimumSecretLength`, 32 bytes by default                                          |
 | `HmacKeyRing.Keys`                      | a key's secret is shorter than `HmacKeyRing.MinimumSecretLength`, 32 bytes by default (`keyId`)                          |
 | `cors.Config.AllowOrigins`              | a credentialed service holds an origin without a scheme (`entry`)                                                        |
+| `cors.Config.AllowOrigins`              | an entry is blank, or `"*"` stands beside other entries (`index`), or the list stands beside `AllowOriginFunc`           |
 | `SessionCookiePolicy.Secure`            | the policy sets `SameSite=None` with `SessionCookieSecureNever`, at `NewKernel` and `SetSessionCookiePolicy`             |
 | `SmtpConfig.Address`                    | the address is empty, padded, not `host:port` with both halves, or names a port the dial cannot read                                                                                  |
 

@@ -18,6 +18,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
@@ -66,31 +67,81 @@ func TestLocalStorage_PutGetExistsDelete(t *testing.T) {
     }
 }
 
-func TestLocalStorage_PutCreatesBaseDirectoryOnFirstWrite(t *testing.T) {
+func TestNewLocalStorage_CreatesTheBaseDirectoryAtConstruction(t *testing.T) {
     base := filepath.Join(t.TempDir(), "missing", "nested-base")
-    local := NewLocalStorage(base, LocalStorageConfig{})
-    runtimeInstance := testRuntime()
+    NewLocalStorage(base, LocalStorageConfig{})
 
-    key := "labels/awb-1.txt"
-    content := "created lazily"
-
-    if putErr := local.Put(runtimeInstance, key, strings.NewReader(content), int64(len(content)), storagecontract.PutOptions{}); nil != putErr {
-        t.Fatalf("put into a not-yet-existing base directory should succeed: %v", putErr)
-    }
-
-    reader, getErr := local.Get(runtimeInstance, key)
-    if nil != getErr {
-        t.Fatalf("get: %v", getErr)
-    }
-    loaded, _ := io.ReadAll(reader)
-    reader.Close()
-
-    if content != string(loaded) {
-        t.Fatalf("content mismatch: %q", string(loaded))
+    info, statErr := os.Stat(base)
+    if nil != statErr || false == info.IsDir() {
+        t.Fatalf("expected the base directory created at construction, stat answered %v", statErr)
     }
 }
 
-/* the refusal is asserted with an object planted where the folded key would land: a key folded rather than refused reads that object, so a pin that only asked for an error passed on the object's absence */
+func TestNewLocalStorage_RefusesABaseDirectoryThatIsAFile(t *testing.T) {
+    base := filepath.Join(t.TempDir(), "occupied")
+    if writeErr := os.WriteFile(base, []byte("not a directory"), 0o600); nil != writeErr {
+        t.Fatalf("write: %v", writeErr)
+    }
+
+    testhelper.AssertPanicsWithError(t, func() {
+        NewLocalStorage(base, LocalStorageConfig{})
+    }, "could not create the storage base directory")
+
+    context := recoveredPanicContext(func() {
+        NewLocalStorage(base, LocalStorageConfig{})
+    })
+    if base != context["baseDirectory"] {
+        t.Fatalf("expected the refusal to name the base directory %s, got %v", base, context)
+    }
+}
+
+/* root opens a directory whatever its mode, so this pin runs only off-root: in the root container of the gate it is skipped */
+func TestNewLocalStorage_RefusesABaseDirectoryItCannotOpen(t *testing.T) {
+    if 0 == os.Geteuid() {
+        t.Skip("root opens a directory whatever its mode")
+    }
+
+    base := filepath.Join(t.TempDir(), "closed")
+    if mkdirErr := os.Mkdir(base, 0o000); nil != mkdirErr {
+        t.Fatalf("mkdir: %v", mkdirErr)
+    }
+    t.Cleanup(func() { _ = os.Chmod(base, 0o700) })
+
+    testhelper.AssertPanicsWithError(t, func() {
+        NewLocalStorage(base, LocalStorageConfig{})
+    }, "could not open the storage base directory")
+
+    context := recoveredPanicContext(func() {
+        NewLocalStorage(base, LocalStorageConfig{})
+    })
+    if base != context["baseDirectory"] {
+        t.Fatalf("expected the refusal to name the base directory %s, got %v", base, context)
+    }
+}
+
+/* every operation reopens the base directory, so one replaced after the construction is the one written to */
+func TestLocalStorage_PutWritesIntoABaseDirectoryReplacedAfterTheConstruction(t *testing.T) {
+    base := filepath.Join(t.TempDir(), "base")
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if removeErr := os.RemoveAll(base); nil != removeErr {
+        t.Fatalf("remove: %v", removeErr)
+    }
+
+    key := "labels/awb-1.txt"
+    content := "written after the replacement"
+
+    if putErr := local.Put(runtimeInstance, key, strings.NewReader(content), int64(len(content)), storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put into a removed base directory should create it again: %v", putErr)
+    }
+
+    loaded, readErr := os.ReadFile(filepath.Join(base, key))
+    if nil != readErr || content != string(loaded) {
+        t.Fatalf("expected the object under the new base directory, got %q, %v", string(loaded), readErr)
+    }
+}
+
 func TestLocalStorage_RejectsPathTraversal(t *testing.T) {
     local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
@@ -158,7 +209,7 @@ func TestLocalStorage_RefusesAParentSegmentAtEveryDoor(t *testing.T) {
     }
 }
 
-func TestLocalStorage_AllowsBaseUnderSymlinkedAncestorCreatedLazily(t *testing.T) {
+func TestLocalStorage_AllowsBaseUnderSymlinkedAncestor(t *testing.T) {
     realRoot := t.TempDir()
     linkRoot := filepath.Join(t.TempDir(), "link")
     if linkErr := os.Symlink(realRoot, linkRoot); nil != linkErr {
@@ -760,7 +811,7 @@ func TestLocalStorage_PutRefusesANilReaderBeforeCreatingAnything(t *testing.T) {
         t.Fatalf("expected a nil reader refused by name, got %v", putErr)
     }
 
-    if _, statErr := os.Stat(base); false == os.IsNotExist(statErr) {
+    if _, statErr := os.Stat(filepath.Join(base, "nested")); false == os.IsNotExist(statErr) {
         t.Fatalf("expected nothing created for a refused put, stat answered %v", statErr)
     }
 }

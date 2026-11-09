@@ -76,7 +76,7 @@ All recognised `.env` keys and their defaults live in [`config/environment.go`](
 | `MELODY_LOG_PATH`                         | `kernel.log_path`                         | `%kernel.logs_dir%/%kernel.environment%.log` |
 | `MELODY_LOG_LEVEL`                        | `kernel.log_level`                        | `"debug"`                                    |
 | `MELODY_DEFAULT_LOCALE`                   | `kernel.default_locale`                   | `"en"`                                       |
-| `MELODY_PUBLIC_DIR`                       | `kernel.public_dir`                       | `"public"`                                   |
+| `MELODY_PUBLIC_DIR`                       | `kernel.public_dir`                       | `"public"` (set explicitly, it must exist)   |
 | `MELODY_STATIC_INDEX_FILE`                | `kernel.static.index_file`                | `"index.html"`                               |
 | `MELODY_STATIC_ENABLE_CACHE`              | `kernel.static.enable_cache`              | `true`                                       |
 | `MELODY_STATIC_CACHE_MAX_AGE`             | `kernel.static.cache_max_age`             | `3600`                                       |

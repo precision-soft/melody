@@ -73,6 +73,8 @@ The order is decided when the pipeline is built, not at registration:
 
 A middleware that answers a request itself, without calling `next`, short-circuits everything ordered inside it — the framework's own static middleware serves a matching file and returns without calling the rest of the chain. It is registered at a priority below the default, which keeps it outermost, so a request for a file that exists is answered before anything registered through the registrar observes it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain the serving process actually built, for in-process inspection; `debug:middleware` describes and — under `--build` — builds a report of its own rather than reading that record. See [HTTP](HTTP.md) for the full ordering contract and for what a `before`/`after` edge does to the build when it names a definition that is not there.
 
+In a filesystem build, `New` refuses an explicitly set `MELODY_PUBLIC_DIR` that is not an existing directory, in every process role, resolved against the project directory as the static file server resolves it, a blank value reading as `public`; the default `public` may be absent, for an application that serves no asset. An embedded build is checked by [`static.NewFileServer`](../../http/static/file_server.go) against the embedded filesystem instead.
+
 The chain is not the outermost thing there is, though: a request that a `kernel.request` listener answers or refuses never reaches it at all; a refusal is rendered through `kernel.exception`. Wrapping *those* too is what [Handler decorators](#handler-decorators) are for.
 
 ## Handler decorators

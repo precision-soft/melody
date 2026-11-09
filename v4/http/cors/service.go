@@ -48,11 +48,47 @@ var maxAgeRule = bound.Rule[int]{
     Minimum: 0,
 }
 
-/* NewService builds the service the config grants; a max age the rule refuses panics naming the field, and so does a credentialed service holding an origin without a scheme, which would admit that host under any scheme, http included. */
+/* NewService builds the service the config grants; a max age the rule refuses panics naming the field, and so does a credentialed service holding an origin without a scheme, which would admit that host under any scheme, http included. A blank origin entry, an origin list beside AllowOriginFunc, which answers alone, and "*" beside other entries, which it leaves dead, are refused too. */
 func NewService(config Config) *Service {
     maxAge, maxAgeErr := bound.Resolve(config.MaxAge, maxAgeRule)
     if nil != maxAgeErr {
         exception.Panic(exception.FromError(maxAgeErr))
+    }
+
+    for index, origin := range config.AllowOrigins {
+        if "" == strings.TrimSpace(origin) {
+            exception.Panic(
+                exception.NewError(
+                    "cors misconfiguration: an allowOrigins entry is blank",
+                    exceptioncontract.Context{"field": "Config.AllowOrigins", "index": index},
+                    nil,
+                ),
+            )
+        }
+    }
+
+    if 0 < len(config.AllowOrigins) && nil != config.AllowOriginFunc {
+        exception.Panic(
+            exception.NewError(
+                "cors misconfiguration: allowOrigins is never read beside allowOriginFunc, which answers every origin alone",
+                exceptioncontract.Context{"fields": []string{"Config.AllowOrigins", "Config.AllowOriginFunc"}},
+                nil,
+            ),
+        )
+    }
+
+    if 1 < len(config.AllowOrigins) {
+        for index, origin := range config.AllowOrigins {
+            if "*" == strings.TrimSpace(origin) {
+                exception.Panic(
+                    exception.NewError(
+                        "cors misconfiguration: the wildcard '*' admits every origin, so the other allowOrigins entries are dead; write []string{\"*\"} alone",
+                        exceptioncontract.Context{"field": "Config.AllowOrigins", "index": index},
+                        nil,
+                    ),
+                )
+            }
+        }
     }
 
     allowOrigins := copyStrings(config.AllowOrigins)
@@ -100,7 +136,7 @@ func NewService(config Config) *Service {
 
         for _, origin := range allowOrigins {
             entry := strings.TrimSpace(origin)
-            if "" == entry || true == strings.Contains(entry, "://") {
+            if true == strings.Contains(entry, "://") {
                 continue
             }
 

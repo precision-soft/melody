@@ -16,6 +16,7 @@ import (
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
@@ -221,4 +222,82 @@ func TestNewStaticFileServerConfig_CarriesTheCacheKeys(t *testing.T) {
     if false == disabledConfig.CacheDisabled || false == disabledConfig.CacheMaxAge.IsAbsent() {
         t.Fatalf("expected the cache off with no max age, got disabled %v and %v", disabledConfig.CacheDisabled, disabledConfig.CacheMaxAge)
     }
+}
+
+func TestNewStaticFileServerConfig_RefusesAnExplicitPublicDirThatIsNotADirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    filePath := filepath.Join(projectDirectory, "assets.txt")
+    if writeErr := os.WriteFile(filePath, []byte("not a directory"), 0o640); nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    cases := map[string]struct {
+        publicDir string
+        message   string
+        resolved  string
+    }{
+        "relative and missing": {"missing-assets", "the public directory does not exist", filepath.Join(projectDirectory, "missing-assets")},
+        "absolute and missing": {filepath.Join(projectDirectory, "absent"), "the public directory does not exist", filepath.Join(projectDirectory, "absent")},
+        "a file":               {"assets.txt", "the public directory is a file", filePath},
+        "the default name set": {"public", "the public directory does not exist", filepath.Join(projectDirectory, "public")},
+        "blank, read as public": {"  ", "the public directory does not exist", filepath.Join(projectDirectory, "public")},
+        "under a file":         {"assets.txt/inner", "the public directory cannot be read", filepath.Join(projectDirectory, "assets.txt", "inner")},
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            configuration := newStaticPublicDirTestConfiguration(t, projectDirectory, map[string]string{config.PublicDirKey: testCase.publicDir})
+
+            defer func() {
+                refusal, isRefusal := recover().(*exception.Error)
+                if false == isRefusal {
+                    t.Fatalf("expected the refusal %q", testCase.message)
+                }
+
+                if testCase.message != refusal.Message() {
+                    t.Fatalf("expected the message %q, got %q", testCase.message, refusal.Message())
+                }
+
+                if config.PublicDirKey != refusal.Context()["environmentKey"] || testCase.resolved != refusal.Context()["publicDir"] {
+                    t.Fatalf("expected the refusal to name %s and %s, got %v", config.PublicDirKey, testCase.resolved, refusal.Context())
+                }
+            }()
+
+            newStaticFileServerConfig(nil, configuration)
+        })
+    }
+}
+
+func TestNewStaticFileServerConfig_AdmitsTheDefaultPublicDirAbsentAndAnExistingOne(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    defaulted := newStaticFileServerConfig(nil, newStaticPublicDirTestConfiguration(t, projectDirectory, map[string]string{}))
+    if "public" != defaulted.PublicDir {
+        t.Fatalf("expected the default public directory admitted while absent, got %q", defaulted.PublicDir)
+    }
+
+    if mkdirErr := os.Mkdir(filepath.Join(projectDirectory, "assets"), 0o750); nil != mkdirErr {
+        t.Fatalf("unexpected make directory error: %v", mkdirErr)
+    }
+
+    explicit := newStaticFileServerConfig(nil, newStaticPublicDirTestConfiguration(t, projectDirectory, map[string]string{config.PublicDirKey: "assets"}))
+    if "assets" != explicit.PublicDir {
+        t.Fatalf("expected the existing explicit directory admitted, got %q", explicit.PublicDir)
+    }
+}
+
+func newStaticPublicDirTestConfiguration(t *testing.T, projectDirectory string, values map[string]string) configcontract.Configuration {
+    t.Helper()
+
+    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    return configuration
 }

@@ -219,6 +219,14 @@ The same holds for a value a module was handed and would drop, refused at the ho
 
 **Remedy.** Hand the dependency, or leave the module out when there is none, as `if nil != client { app.RegisterModule(...) }`; drop a value the module cannot read; check the constructor error behind a nil transport or decorator.
 
+### Storage, translation, cors, static: four constructors refuse what they admitted
+
+**What changed.** Four constructors refuse at construction a value the third major admitted and then dropped or failed on later. `storage.NewLocalStorage` creates and opens its base directory, refusing one it cannot create or open, where the first `Put` failed; each operation still reopens the directory. `translation.NewManager`, handed at least one catalog, refuses an empty default locale and a default or fallback locale no catalog carries, since the lookup asks them by that exact name; `NewManager(nil, …)` keeps answering raw ids. `cors.NewService` refuses a blank `AllowOrigins` entry, an `AllowOrigins` list beside `AllowOriginFunc`, and `"*"` beside other entries. In a filesystem build, the application refuses at `New`, in every process role, an explicitly set `MELODY_PUBLIC_DIR` that is not an existing directory, resolved against the project directory as the file server resolves it, a blank value reading as `public`; the default `public` may be absent.
+
+**Symptom.** A construction that passed now panics: "could not create the storage base directory" or "could not open the storage base directory" (`baseDirectory`); "translation default locale is empty", "translation default locale is carried by no catalog" (`defaultLocale`), "translation fallback locale is empty" or "translation fallback locale is carried by no catalog" (`fallbackLocale`, `index`); a cors misconfiguration naming `Config.AllowOrigins` and the `index`, or both fields; "the public directory does not exist", "the public directory cannot be read" or "the public directory is a file" (`MELODY_PUBLIC_DIR`), in every process role, the cli role included.
+
+**Remedy.** Point the storage at a directory the process can create and open; hand a catalog for every default and fallback locale, or drop the locale; drop the blank entry, keep `AllowOriginFunc` or the list, and spell "allow everything" as `[]string{"*"}` alone; create the public directory, or unset `MELODY_PUBLIC_DIR` when the application serves no assets.
+
 ### Logging: the reopenable file writer can be a container service
 
 **What changed.** [`ReopenableFileWriter`](../logging/reopenable_file_writer.go) carries `CloseWithContext` beside `Close`, so the teardown no longer refuses it as a service, and a close stuck on the watcher ends at the teardown's deadline.

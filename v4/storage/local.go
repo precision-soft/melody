@@ -15,6 +15,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
@@ -41,7 +42,7 @@ var localStorageSweepBatchSizeRule = bound.Rule[int]{
     Minimum: 1,
 }
 
-/* NewLocalStorage stores the objects under baseDirectory, which is required, refusing a config field outside its rule by name. */
+/* NewLocalStorage stores the objects under baseDirectory, which is required, refusing a config field outside its rule by name; the directory is created and opened once here, so a path that cannot hold the objects is refused at construction, and every operation then reopens it. */
 func NewLocalStorage(baseDirectory string, config LocalStorageConfig) *LocalStorage {
     if "" == baseDirectory {
         exception.Panic(exception.NewError("local storage base directory is empty", nil, nil))
@@ -57,8 +58,33 @@ func NewLocalStorage(baseDirectory string, config LocalStorageConfig) *LocalStor
         exception.Panic(exception.FromError(sweepBatchSizeErr))
     }
 
+    cleanBaseDirectory := filepath.Clean(baseDirectory)
+
+    if mkdirErr := os.MkdirAll(cleanBaseDirectory, 0o750); nil != mkdirErr {
+        exception.Panic(
+            exception.NewError(
+                "could not create the storage base directory",
+                exceptioncontract.Context{"baseDirectory": cleanBaseDirectory},
+                mkdirErr,
+            ),
+        )
+    }
+
+    /* no root is kept: a held one would keep reading a directory replaced while the process runs */
+    root, rootErr := os.OpenRoot(cleanBaseDirectory)
+    if nil != rootErr {
+        exception.Panic(
+            exception.NewError(
+                "could not open the storage base directory",
+                exceptioncontract.Context{"baseDirectory": cleanBaseDirectory},
+                rootErr,
+            ),
+        )
+    }
+    _ = root.Close()
+
     return &LocalStorage{
-        baseDirectory:  filepath.Clean(baseDirectory),
+        baseDirectory:  cleanBaseDirectory,
         tempStaleAge:   tempStaleAge,
         sweepBatchSize: sweepBatchSize.Value,
     }
@@ -87,7 +113,7 @@ func (instance *LocalStorage) Put(
         return exception.NewError("storage payload reader is nil", map[string]any{"key": key}, nil)
     }
 
-    /* the base directory is created on first write; os.OpenRoot then confines every key operation to it, each path component checked against symlink escape */
+    /* the base directory is created again if it was removed after the construction; os.OpenRoot then confines every key operation to it, each path component checked against symlink escape */
     if mkdirErr := os.MkdirAll(instance.baseDirectory, 0o750); nil != mkdirErr {
         return exception.NewError("could not create the storage directory", map[string]any{"key": key}, mkdirErr)
     }

@@ -8,6 +8,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
@@ -195,15 +196,6 @@ func TestNewService_AdmitsTheSchemelessEntryOutsideCredentials(t *testing.T) {
     withoutCredentials := NewService(Config{AllowOrigins: []string{"example.com"}})
     if false == withoutCredentials.OriginAllowed("http://example.com") {
         t.Fatalf("expected the schemeless entry to admit any scheme without credentials")
-    }
-
-    withFunction := NewService(Config{
-        AllowOrigins:     []string{"example.com"},
-        AllowCredentials: true,
-        AllowOriginFunc:  func(origin string) bool { return "https://example.com" == origin },
-    })
-    if false == withFunction.OriginAllowed("https://example.com") {
-        t.Fatalf("expected the origin func to decide")
     }
 }
 
@@ -636,5 +628,76 @@ func TestService_ApplyPreflightHeaders_APositiveMaxAgeIsAdvertised(t *testing.T)
 
     if "120" != headers.Get("Access-Control-Max-Age") {
         t.Fatalf("expected the configured max age to be advertised, got %q", headers.Get("Access-Control-Max-Age"))
+    }
+}
+
+func TestNewService_RefusesAnOriginListItWouldNotReadWhole(t *testing.T) {
+    allowEverything := func(origin string) bool { return true }
+
+    cases := map[string]struct {
+        config  Config
+        message string
+        key     string
+        value   any
+    }{
+        "blank entry": {
+            Config{AllowOrigins: []string{"https://app.example.com", "  "}},
+            "cors misconfiguration: an allowOrigins entry is blank",
+            "index",
+            1,
+        },
+        "empty entry under credentials": {
+            Config{AllowOrigins: []string{""}, AllowCredentials: true},
+            "cors misconfiguration: an allowOrigins entry is blank",
+            "index",
+            0,
+        },
+        "list beside the func": {
+            Config{AllowOrigins: []string{"https://app.example.com"}, AllowOriginFunc: allowEverything},
+            "cors misconfiguration: allowOrigins is never read beside allowOriginFunc, which answers every origin alone",
+            "fields",
+            "[Config.AllowOrigins Config.AllowOriginFunc]",
+        },
+        "wildcard beside an entry": {
+            Config{AllowOrigins: []string{"https://app.example.com", " * "}},
+            "cors misconfiguration: the wildcard '*' admits every origin, so the other allowOrigins entries are dead; write []string{\"*\"} alone",
+            "index",
+            1,
+        },
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                refusal, isRefusal := recover().(*exception.Error)
+                if false == isRefusal {
+                    t.Fatalf("expected the refusal %q", testCase.message)
+                }
+
+                if testCase.message != refusal.Message() {
+                    t.Fatalf("expected the message %q, got %q", testCase.message, refusal.Message())
+                }
+
+                if fmt.Sprint(testCase.value) != fmt.Sprint(refusal.Context()[testCase.key]) {
+                    t.Fatalf("expected the refusal to carry %s %v, got %v", testCase.key, testCase.value, refusal.Context())
+                }
+            }()
+
+            NewService(testCase.config)
+        })
+    }
+}
+
+func TestNewService_AdmitsTheWildcardAloneAndTheFuncAlone(t *testing.T) {
+    if false == NewService(Config{AllowOrigins: []string{"*"}}).OriginAllowed("https://any.example.com") {
+        t.Fatalf("expected the wildcard alone to admit every origin")
+    }
+
+    withFunction := NewService(Config{
+        AllowOrigins:    []string{},
+        AllowOriginFunc: func(origin string) bool { return "https://example.com" == origin },
+    })
+    if false == withFunction.OriginAllowed("https://example.com") {
+        t.Fatalf("expected the origin func beside an empty list to decide")
     }
 }
