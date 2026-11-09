@@ -1,8 +1,12 @@
 package amqp
 
 import (
+    "maps"
+    "slices"
+
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
     amqp091 "github.com/rabbitmq/amqp091-go"
 )
 
@@ -40,15 +44,29 @@ func (instance *Module) RegisterParameters(registrar applicationcontract.Paramet
 }
 
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
+    if nil == instance.config.Connection && false == instance.config.CloseTimeout.IsAbsent() {
+        exception.Panic(exception.NewError(
+            "the amqp module is handed a connection close timeout and has no connection",
+            map[string]any{"field": "ModuleConfig.CloseTimeout", "requires": "ModuleConfig.Connection"},
+            nil,
+        ))
+    }
+
+    for _, serviceName := range slices.Sorted(maps.Keys(instance.config.Transports)) {
+        if nil == instance.config.Transports[serviceName] {
+            exception.Panic(exception.NewError(
+                "the amqp module is handed a nil transport",
+                map[string]any{"field": "ModuleConfig.Transports", "transport": serviceName},
+                nil,
+            ))
+        }
+    }
+
     if nil != instance.config.Connection {
         RegisterConnectionService(registrar, instance.config.Connection, ConnectionServiceConfig{CloseTimeout: instance.config.CloseTimeout})
     }
 
     for serviceName, transport := range instance.config.Transports {
-        if nil == transport {
-            continue
-        }
-
         RegisterTransportService(registrar, serviceName, transport)
     }
 }

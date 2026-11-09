@@ -1,6 +1,8 @@
 package outbox
 
 import (
+    "reflect"
+
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -45,6 +47,14 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 
     if nil != instance.config.Relay && nil != instance.config.RelayFactory {
         exception.Panic(exception.NewError("outbox module received both a relay and a relay factory - set exactly one", nil, nil))
+    }
+
+    if nil == instance.config.Relay && nil == instance.config.RelayFactory && false == reflect.ValueOf(instance.config.RelayCommand).IsZero() {
+        exception.Panic(exception.NewError(
+            "the outbox module is handed a relay command configuration and has no relay",
+            map[string]any{"field": "ModuleConfig.RelayCommand", "requires": "ModuleConfig.Relay or ModuleConfig.RelayFactory"},
+            nil,
+        ))
     }
 
     if nil != instance.config.StoreFactory {

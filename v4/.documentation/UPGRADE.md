@@ -209,13 +209,15 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** `/admin/` or `/admin`, as the reach you meant.
 
-### Integrations: a module asked for a role it cannot serve is refused at boot
+### Integrations: a module asked for a role it cannot serve, or handed a value it would drop, is refused at boot
 
 **What changed.** The rueidis, bunorm mysql, bunorm pgsql and aws s3 modules panic at `RegisterServices`, naming the field, on a role with no dependency (`AsLocker` or `AsTokenStore` with no client, `AsLocker` with no database, a `Bucket` or a `Storage` with no client) and on a role's configuration with the role off (`Locker` or `TokenStore` set with its flag false). The third major registered nothing, and the service was missed at its first resolve. An empty `ModuleConfig{}` still registers nothing.
 
-**Symptom.** A boot that passed now panics naming `ModuleConfig.AsLocker`, `ModuleConfig.Locker` or their twins.
+The same holds for a value a module was handed and would drop, refused at the hook that would have dropped it: the rueidis cache module's `Backend` with no `Client`; the amqp module's `CloseTimeout` with no `Connection`, and a nil entry of its `Transports`, named by its transport; the outbox module's `RelayCommand` with neither `Relay` nor `RelayFactory`; and the opentelemetry module's half-declared metrics route, a `MetricsPath` with no `MetricsHandler`, the reverse, or a `MetricsRouteName` with neither, refused at `RegisterHttpRoutes`. The application refuses, while it collects the modules' decorators, a nil http handler decorator a module answers, naming the module and the index, where it skipped it.
 
-**Remedy.** Hand the dependency, or leave the module out when there is none, as `if nil != client { app.RegisterModule(...) }`.
+**Symptom.** A boot that passed now panics naming `ModuleConfig.AsLocker`, `ModuleConfig.Locker` or their twins, one of `ModuleConfig.Backend`, `ModuleConfig.CloseTimeout`, `ModuleConfig.Transports`, `ModuleConfig.RelayCommand`, `ModuleConfig.MetricsPath`, `ModuleConfig.MetricsHandler` and `ModuleConfig.MetricsRouteName`, or "a module answered a nil http handler decorator".
+
+**Remedy.** Hand the dependency, or leave the module out when there is none, as `if nil != client { app.RegisterModule(...) }`; drop a value the module cannot read; check the constructor error behind a nil transport or decorator.
 
 ### Logging: the reopenable file writer can be a container service
 

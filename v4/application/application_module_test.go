@@ -1,12 +1,14 @@
 package application
 
 import (
+    nethttp "net/http"
     "testing"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/http/static"
     "github.com/precision-soft/melody/v4/internal/testhelper"
@@ -571,4 +573,32 @@ func TestBootModulesPostConfigurationResolve_CollectsTheSecurityBuildersBootWarn
             t.Fatalf("expected no shadowed firewall for a declaration without one, got %v", quietApplication.bootWarnings)
         }
     }
+}
+
+func TestCollectModuleHttpHandlerDecorators_ANilDecoratorIsRefusedNamingTheModuleAndTheIndex(t *testing.T) {
+    applicationInstance := &Application{
+        modules: []applicationcontract.Module{
+            decoratorContributingModule{
+                fakeModule: fakeModule{name: "decorator.module"},
+                decorators: []applicationcontract.HttpHandlerDecorator{
+                    func(next nethttp.Handler) nethttp.Handler { return next },
+                    nil,
+                },
+            },
+        },
+    }
+
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatal("expected a nil handler decorator to be refused at boot")
+        }
+
+        logContext := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+        if "decorator.module" != logContext["module"] || 1 != logContext["index"] {
+            t.Fatalf("expected the refusal to name the module and index 1, got %v: %v", logContext, recoveredErr)
+        }
+    }()
+
+    applicationInstance.collectModuleHttpHandlerDecorators()
 }

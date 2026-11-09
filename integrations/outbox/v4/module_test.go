@@ -169,7 +169,6 @@ func TestModule_RegisterCliCommandsHandsTheCommandItsConfig(t *testing.T) {
     }
 }
 
-/* moduleTestKernel answers the service container alone, the one thing RegisterCliCommands reads from the kernel */
 type moduleTestKernel struct {
     kernelcontract.Kernel
     serviceContainer containercontract.Container
@@ -210,4 +209,20 @@ func TestModule_RegisterServicesRegistersFactoryProviders(t *testing.T) {
     if false == containsName(registrar.names, ServiceRelay) {
         t.Fatalf("expected the relay factory registered under %q, got %v", ServiceRelay, registrar.names)
     }
+}
+
+func TestModule_ARelayCommandConfigurationWithNoRelayIsRefusedNamingIt(t *testing.T) {
+    expectPanicNamingField(t, "ModuleConfig.RelayCommand", func() {
+        NewModule(ModuleConfig{RelayCommand: RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}}).RegisterServices(&spyServiceRegistrar{})
+    })
+}
+
+func TestModule_ARelayCommandConfigurationBesideARelayIsAdmitted(t *testing.T) {
+    config := RelayCommandConfig{MaxErrorBackoff: bound.Of(3 * time.Second)}
+
+    NewModule(ModuleConfig{Relay: newModuleTestRelay(), RelayCommand: config}).RegisterServices(&spyServiceRegistrar{})
+    NewModule(ModuleConfig{
+        RelayFactory: func(resolver containercontract.Resolver) (*Relay, error) { return newModuleTestRelay(), nil },
+        RelayCommand: config,
+    }).RegisterServices(&spyServiceRegistrar{})
 }

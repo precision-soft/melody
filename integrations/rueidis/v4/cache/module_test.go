@@ -10,6 +10,7 @@ import (
     melodycache "github.com/precision-soft/melody/v4/cache"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 type fakeClient struct {
@@ -74,4 +75,43 @@ func TestModule_RegisterServicesForwardsTheBackendConfig(t *testing.T) {
     if 750*time.Millisecond != service.backend.commandTimeout {
         t.Fatalf("expected the module to hand its backend config to the registered backend, got %v", service.backend.commandTimeout)
     }
+}
+
+func TestModule_ABackendConfigurationWithNoClientIsRefusedNamingIt(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatal("expected a backend configuration with no client to be refused at boot")
+        }
+
+        context := exception.LogContext(recoveredErr, exception.LogContextConfig{})
+        if "ModuleConfig.Backend" != context["field"] || "ModuleConfig.Client" != context["requires"] {
+            t.Fatalf("expected the refusal to name ModuleConfig.Backend and its requirement, got %v", context)
+        }
+    }()
+
+    NewModule(ModuleConfig{Backend: BackendConfig{Prefix: "cache"}}).RegisterServices(&spyServiceRegistrar{})
+}
+
+type typedNilModuleClient struct {
+    rueidis.Client
+}
+
+func TestModule_ATypedNilClientIsNoClient(t *testing.T) {
+    var client *typedNilModuleClient
+
+    registrar := &spyServiceRegistrar{}
+    NewModule(ModuleConfig{Client: client}).RegisterServices(registrar)
+    if 0 != len(registrar.names) {
+        t.Fatalf("expected no service over a typed nil client, got %v", registrar.names)
+    }
+
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError || "ModuleConfig.Backend" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected a backend configuration over a typed nil client to be refused naming ModuleConfig.Backend, got %v", recoveredErr)
+        }
+    }()
+
+    NewModule(ModuleConfig{Client: client, Backend: BackendConfig{Prefix: "cache"}}).RegisterServices(&spyServiceRegistrar{})
 }

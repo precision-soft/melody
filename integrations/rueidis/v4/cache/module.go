@@ -1,9 +1,12 @@
 package cache
 
 import (
+    "reflect"
+
     "github.com/redis/rueidis"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 type ModuleConfig struct {
@@ -30,7 +33,15 @@ func (instance *Module) Description() string {
 }
 
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
-    if nil == instance.config.Client {
+    if true == clientIsNil(instance.config.Client) {
+        if false == reflect.ValueOf(instance.config.Backend).IsZero() {
+            exception.Panic(exception.NewError(
+                "the rueidis cache module is handed a backend configuration and has no client",
+                map[string]any{"field": "ModuleConfig.Backend", "requires": "ModuleConfig.Client"},
+                nil,
+            ))
+        }
+
         return
     }
 
@@ -41,3 +52,14 @@ var (
     _ applicationcontract.Module        = (*Module)(nil)
     _ applicationcontract.ServiceModule = (*Module)(nil)
 )
+
+/* clientIsNil reads a typed nil as nil, which a bare comparison on the interface takes for a live client. */
+func clientIsNil(client rueidis.Client) bool {
+    if nil == client {
+        return true
+    }
+
+    value := reflect.ValueOf(client)
+
+    return reflect.Pointer == value.Kind() && true == value.IsNil()
+}

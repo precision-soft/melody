@@ -158,6 +158,8 @@ app.RegisterModule(amqp.NewModule(amqp.ModuleConfig{
 }))
 ```
 
+A nil entry of `Transports`, the trace of a discarded constructor error, fails the boot naming the transport, and a `CloseTimeout` with no `Connection` fails it naming the field; an empty `ModuleConfig{}` registers nothing.
+
 ### Auto-reconnect
 
 By default a dropped broker connection stops the consumer (run it under a process supervisor). To let the transport recover on its own, also set a `Dialer` — `Provider.Dialer(dsn)` builds one from the same DSN:

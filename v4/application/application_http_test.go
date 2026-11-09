@@ -1260,7 +1260,6 @@ func recordingHttpHandlerDecorator(name string, sequence *[]string) applicationc
     }
 }
 
-/* the registered decorator comes first and the module's after it, since modules contribute theirs at boot; a nil the module hands back is skipped rather than called */
 func TestApplicationDecorateHttpHandler_TheFirstRegisteredDecoratorIsOutermost(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -1270,7 +1269,6 @@ func TestApplicationDecorateHttpHandler_TheFirstRegisteredDecoratorIsOutermost(t
     applicationInstance.RegisterModule(decoratorContributingModule{
         fakeModule: fakeModule{name: "decorator.module"},
         decorators: []applicationcontract.HttpHandlerDecorator{
-            nil,
             recordingHttpHandlerDecorator("module", &sequence),
         },
     })

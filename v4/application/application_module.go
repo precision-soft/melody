@@ -161,17 +161,7 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
         }
     }
 
-    for _, moduleInstance := range instance.modules {
-        if decoratorModule, ok := moduleInstance.(applicationcontract.HttpHandlerDecoratorModule); true == ok {
-            for _, decorator := range decoratorModule.RegisterHttpHandlerDecorators(instance.kernel) {
-                if nil == decorator {
-                    continue
-                }
-
-                instance.httpHandlerDecorators = append(instance.httpHandlerDecorators, decorator)
-            }
-        }
-    }
+    instance.collectModuleHttpHandlerDecorators()
 
     for _, moduleInstance := range instance.modules {
         if httpModule, ok := moduleInstance.(applicationcontract.HttpModule); true == ok {
@@ -185,6 +175,24 @@ func (instance *Application) bootModulesPostConfigurationResolve() {
 
             for _, command := range commands {
                 instance.RegisterCliCommand(command)
+            }
+        }
+    }
+}
+
+func (instance *Application) collectModuleHttpHandlerDecorators() {
+    for _, moduleInstance := range instance.modules {
+        if decoratorModule, ok := moduleInstance.(applicationcontract.HttpHandlerDecoratorModule); true == ok {
+            for index, decorator := range decoratorModule.RegisterHttpHandlerDecorators(instance.kernel) {
+                if nil == decorator {
+                    exception.Panic(exception.NewError(
+                        "a module answered a nil http handler decorator",
+                        map[string]any{"module": moduleInstance.Name(), "index": index},
+                        nil,
+                    ))
+                }
+
+                instance.httpHandlerDecorators = append(instance.httpHandlerDecorators, decorator)
             }
         }
     }

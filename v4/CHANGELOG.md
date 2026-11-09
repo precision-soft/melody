@@ -58,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- application: **Behavioural change**: the boot refuses a nil http handler decorator a module answers, naming the module and its index, where it skipped it.
 - security: **Breaking**: the four login values of `FirewallConfig`, validated and consumed by nothing in the third major, become the `Login` and `Logout` blocks, and the firewall serves them on `kernel.request` before access control; a route that claims a door's path, a door its prefix does not claim and one an earlier firewall claims are refused at boot.
 - http: **Breaking**: one error mechanism: `kernel.exception` listeners on priorities, a built-in listener at the lowest priority that `ServeHttp` installs, `KernelExceptionEvent.SetResponse` ending the dispatch so the first responder wins, and a final step that renders the error with its own status when a listener fails or none answers, dropping a response a failing listener had set and journaling its status and `Content-Type`.
 - http: **Breaking**: `KernelRequestEvent.Refuse` and `Refusal`: a `kernel.request` listener ends the request with an error the kernel raises through `kernel.exception`, with the record filed before the dispatch; a listener that both answers and refuses, or refuses with a nil error, panics by name and the request gets the fail-closed 500.

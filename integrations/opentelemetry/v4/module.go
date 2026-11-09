@@ -37,7 +37,7 @@ func (instance *Module) Description() string {
     return "registers the tracing and metrics middlewares plus the prometheus metrics route"
 }
 
-/* a nil entry in the configured lists is refused at boot rather than skipped: a skipped observability middleware has no later consumer to fail loudly, so the application would serve uninstrumented behind a dashboard indistinguishable from no traffic. The typical source is a discarded constructor error (`middleware, _ := NewMetricsMiddleware(meter)`). */
+/* a nil entry, typically a discarded constructor error, is refused at boot: a skipped one would leave the application silently uninstrumented */
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Kernel, registrar applicationcontract.HttpMiddlewareRegistrar) {
     for _, middleware := range instance.config.Middlewares {
         if nil == middleware {
@@ -62,8 +62,35 @@ func (instance *Module) RegisterHttpHandlerDecorators(kernelInstance kernelcontr
 }
 
 func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
-    if nil == instance.config.MetricsHandler || "" == instance.config.MetricsPath {
+    hasHandler := nil != instance.config.MetricsHandler
+    hasPath := "" != instance.config.MetricsPath
+
+    if false == hasHandler && false == hasPath {
+        if "" != instance.config.MetricsRouteName {
+            exception.Panic(exception.NewError(
+                "the opentelemetry module is handed a metrics route name and no metrics route",
+                map[string]any{"field": "ModuleConfig.MetricsRouteName", "requires": "ModuleConfig.MetricsHandler and ModuleConfig.MetricsPath"},
+                nil,
+            ))
+        }
+
         return
+    }
+
+    if false == hasHandler {
+        exception.Panic(exception.NewError(
+            "the opentelemetry module is handed a metrics path and no metrics handler",
+            map[string]any{"field": "ModuleConfig.MetricsPath", "requires": "ModuleConfig.MetricsHandler"},
+            nil,
+        ))
+    }
+
+    if false == hasPath {
+        exception.Panic(exception.NewError(
+            "the opentelemetry module is handed a metrics handler and no metrics path",
+            map[string]any{"field": "ModuleConfig.MetricsHandler", "requires": "ModuleConfig.MetricsPath"},
+            nil,
+        ))
     }
 
     routeName := instance.config.MetricsRouteName

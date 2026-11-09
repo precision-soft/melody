@@ -7,6 +7,7 @@ import (
     "testing"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
@@ -69,7 +70,6 @@ func TestModule_RegisterHttpMiddlewaresInstallsTheConfiguredMiddlewaresInOneRegi
     }
 }
 
-/* a skipped observability middleware has no later consumer to fail loudly, so the wiring mistake, typically a discarded constructor error, is refused at boot rather than served as an empty-but-healthy dashboard. */
 func TestModule_RegisterHttpMiddlewaresRefusesANilEntryAtBoot(t *testing.T) {
     registrar := &spyMiddlewareRegistrar{}
 
@@ -101,18 +101,45 @@ func TestModule_RegisterHttpHandlerDecoratorsRefusesANilEntryAtBoot(t *testing.T
     }).RegisterHttpHandlerDecorators(nil)
 }
 
-func TestModule_RegisterHttpRoutesNoHandler(t *testing.T) {
+func TestModule_RegisterHttpRoutesWithNeitherHandlerNorPathRegistersNothing(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
-    NewModule(ModuleConfig{MetricsPath: "/metrics"}).RegisterHttpRoutes(kernel)
+    NewModule(ModuleConfig{}).RegisterHttpRoutes(kernel)
     if 0 != len(kernel.router.handled) {
-        t.Fatalf("expected no route without a handler, got %v", kernel.router.handled)
+        t.Fatalf("expected no route, got %v", kernel.router.handled)
     }
+}
 
-    kernel = &spyKernel{router: &spyRouter{}}
-    NewModule(ModuleConfig{MetricsHandler: nethttp.NewServeMux()}).RegisterHttpRoutes(kernel)
-    if 0 != len(kernel.router.handled) {
-        t.Fatalf("expected no route without a path, got %v", kernel.router.handled)
+func TestModule_RegisterHttpRoutesRefusesAHalfDeclaredMetricsRouteNamingTheField(t *testing.T) {
+    for _, testCase := range []struct {
+        name   string
+        config ModuleConfig
+        field  string
+    }{
+        {"a path with no handler", ModuleConfig{MetricsPath: "/metrics"}, "ModuleConfig.MetricsPath"},
+        {"a handler with no path", ModuleConfig{MetricsHandler: nethttp.NewServeMux()}, "ModuleConfig.MetricsHandler"},
+        {"a route name with neither", ModuleConfig{MetricsRouteName: "metrics"}, "ModuleConfig.MetricsRouteName"},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            kernel := &spyKernel{router: &spyRouter{}}
+
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError {
+                    t.Fatalf("expected %s to be refused at boot", testCase.name)
+                }
+
+                if testCase.field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                    t.Fatalf("expected the refusal to name %s, got %v", testCase.field, exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+                }
+
+                if 0 != len(kernel.router.handled) {
+                    t.Fatalf("expected no route, got %v", kernel.router.handled)
+                }
+            }()
+
+            NewModule(testCase.config).RegisterHttpRoutes(kernel)
+        })
     }
 }
 

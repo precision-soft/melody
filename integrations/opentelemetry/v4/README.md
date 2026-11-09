@@ -125,7 +125,7 @@ app.RegisterModule(opentelemetry.NewModule(opentelemetry.ModuleConfig{
 }))
 ```
 
-The metrics route is skipped when no handler or path is configured.
+The metrics route is registered when both `MetricsHandler` and `MetricsPath` are set and is absent when both are left out; a half-declared one (a path with no handler, a handler with no path, or a `MetricsRouteName` with neither) fails the boot naming the field.
 
 ## Footguns & caveats
 

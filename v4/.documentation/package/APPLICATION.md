@@ -87,7 +87,7 @@ What a decorator gives up in exchange is the request itself. It runs before the 
 Decorators come from two places and share one order:
 
 1. [`(*Application).RegisterHttpHandlerDecorator`](../../application/application_http.go) registers one directly. It panics after boot, and it panics on a `nil` decorator rather than storing one.
-2. A module implementing [`HttpHandlerDecoratorModule`](../../application/contract/http_handler_decorator_module.go) returns a slice from `RegisterHttpHandlerDecorators(kernelInstance)` during boot. A `nil` entry in that slice is skipped, not stored.
+2. A module implementing [`HttpHandlerDecoratorModule`](../../application/contract/http_handler_decorator_module.go) returns a slice from `RegisterHttpHandlerDecorators(kernelInstance)` during boot. A `nil` entry in that slice fails the boot, naming the module and the index, since a skipped decorator would leave its wrapping silently absent.
 
 **The first registered decorator is the outermost**: [`runHttp`](../../application/application_http.go) wraps the kernel handler last-to-first, so registration order reads outside-in, the same way the middleware chain does. Direct registrations all happen before `Boot`, and a module's hook runs during it, so a directly registered decorator is always outside every module-contributed one.
 
