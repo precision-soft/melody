@@ -182,7 +182,7 @@ Each campaign creates a **fresh** `Lock`: every `CreateLock` mints a new fencing
 
 ### Resolve the locker lazily
 
-A CLI command or an HTTP middleware assembled during boot needs a `Locker` before the container is safe to resolve from. [`NewLazyLocker(resolver)`](../../lock/lazy_locker.go) returns a `Locker` whose locks resolve `service.lock.locker` at their first `Acquire`, `Release` or `Refresh`, under the context of the runtime handed to it, so the wait on a locker another goroutine is building ends with that run; a successful resolution is reused thereafter.
+A CLI command or an HTTP middleware assembled during boot needs a `Locker` before the container is safe to resolve from. [`NewLazyLocker(resolver)`](../../lock/lazy_locker.go) returns a `Locker` whose locks resolve `service.lock.locker` at their first `Acquire`, `Release` or `Refresh`, under the context of the runtime handed to it, so the wait on a locker another goroutine is building ends with that run; a successful resolution is reused thereafter. Built during boot over the container with no `service.lock.locker` registered, it fails the boot, naming the line that called `NewLazyLocker`.
 
 ```go
 locker := lock.NewLazyLocker(resolver)

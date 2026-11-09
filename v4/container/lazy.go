@@ -2,6 +2,7 @@ package container
 
 import (
     "context"
+    "reflect"
     "sync"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -24,6 +25,8 @@ type LazyService[T any] struct {
 
 /* Lazy returns a handle that resolves serviceName on first use, the deferred form of FromResolver. A handle over the container is safe for concurrent first uses. A handle over the resolver a provider received is safe for concurrent first uses once that provider has returned: from then on every resolution through its resolver starts a chain of its own and is still recorded as the provider's dependency. Until the provider returns, the resolver is the one chain the provider is resolving on, so a handle for a goroutine the provider starts is built over ForGoroutine(resolver), which resolves on a chain of its own from the start; a handle over the provider's own resolver used there before the provider returns can read the chain the provider is in the middle of, so the provider's own resolutions, or that use, can be refused as circular or recorded under the wrong parent. While the resolution that built the provider is still building a service, a use that reaches back to that service is refused as a circular dependency — from the resolution itself, which would otherwise wait on its own creation, and from any other goroutine as well, since the container cannot tell the two apart. */
 func Lazy[T any](resolver containercontract.Resolver, serviceName string) *LazyService[T] {
+    recordLazyHandleOf(resolver, serviceName, nil, reflect.TypeOf((*T)(nil)).Elem())
+
     return &LazyService[T]{
         source: resolver,
         resolve: func(ctx context.Context) (T, error) {
@@ -34,6 +37,8 @@ func Lazy[T any](resolver containercontract.Resolver, serviceName string) *LazyS
 
 /* LazyByType returns a handle that resolves the service by its type on first use, the deferred form of FromResolverByType. */
 func LazyByType[T any](resolver containercontract.Resolver) *LazyService[T] {
+    recordLazyHandleOf(resolver, "", reflect.TypeOf((*T)(nil)).Elem(), reflect.TypeOf((*T)(nil)).Elem())
+
     return &LazyService[T]{
         source: resolver,
         resolve: func(ctx context.Context) (T, error) {

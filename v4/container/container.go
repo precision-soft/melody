@@ -157,6 +157,10 @@ type container struct {
     closeOnce        sync.Once
     /* teardownDeadline is the record of a teardown that ran past its deadline, nil otherwise; TeardownDeadlineOverrun answers it */
     teardownDeadline exceptioncontract.Context
+    /* read and written under lazyHandleMutex alone, never under mutex */
+    lazyHandleMutex     sync.Mutex
+    lazyHandles         map[lazyHandleRecord]struct{}
+    lazyHandlesVerified bool
 }
 
 /* declaredTeardownEdge is one hand-written ordering: the declaring service, the node it named and the spelling it used. declaredNameEdge and declaredTypeEdge build the two spellings. */

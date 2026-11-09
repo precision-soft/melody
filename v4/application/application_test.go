@@ -23,6 +23,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    "github.com/precision-soft/melody/v4/lock"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/openapi"
@@ -875,6 +876,65 @@ func TestBoot_RefusesADeclaredTeardownDependencyNamingNoService(t *testing.T) {
 
     if false == strings.Contains(string(output), "a declared teardown dependency does not name one container service") || false == strings.Contains(string(output), "service.test.misspelled") {
         t.Fatalf("expected the refusal to name the declaration, got: %s", string(output))
+    }
+}
+
+const bootDanglingLazyHandleProbeMarker = "MELODY_TEST_BOOT_DANGLING_LAZY_HANDLE_PROBE"
+
+func TestBoot_RefusesALazyLockerOverAContainerWithNoLocker(t *testing.T) {
+    projectDirectory := os.Getenv(bootDanglingLazyHandleProbeMarker)
+
+    if "" != projectDirectory {
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{}})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
+            kernel:               newTestKernel(),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        lock.NewLazyLocker(applicationInstance.kernel.ServiceContainer())
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    childProjectDirectory := t.TempDir()
+    child := exec.Command(os.Args[0], "-test.run=TestBoot_RefusesALazyLockerOverAContainerWithNoLocker$")
+    child.Env = append(os.Environ(), bootDanglingLazyHandleProbeMarker+"="+childProjectDirectory)
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError || 1 != exitError.ExitCode() {
+        t.Fatalf("expected the boot to exit 1, got err %v with output: %s", runErr, string(output))
+    }
+
+    if false == strings.Contains(string(output), "a container.Lazy handle names no container service") {
+        t.Fatalf("expected the exit line to name the refusal, got: %s", string(output))
+    }
+
+    journal, readErr := os.ReadFile(filepath.Join(childProjectDirectory, "var", "log", "dev.log"))
+    if nil != readErr {
+        t.Fatalf("expected the child's journal: %v", readErr)
+    }
+
+    for _, expected := range []string{`"serviceName":"` + lock.ServiceLocker + `"`, `lock/lazy_locker.go:`, `application/application_test.go:`} {
+        if false == strings.Contains(string(journal), expected) {
+            t.Fatalf("expected the journal to carry %q, got: %s", expected, string(journal))
+        }
     }
 }
 

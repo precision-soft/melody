@@ -57,3 +57,12 @@ var ErrCircularDependency = errors.New("circular service dependency")
 
 /* ErrCloseDoorRequired is the cause of a refusal for a service that carries Close and not CloseWithContext, with no registration Closer taking it: refused at the registration whose provider declares such a concrete type, at an override installing such a value the container or the scope would close, and at the creation of such a value behind a provider declaring an interface, its Close called once so it does not leak. The teardown hands every close its remaining budget, which a plain Close cannot take. */
 var ErrCloseDoorRequired = errors.New("a service that closes must take the teardown's context")
+
+/* ErrLazyHandleNameNotRegistered is the cause of a VerifyLazyNames refusal for a Lazy or LazyByType handle whose name or type no container registration answers. */
+var ErrLazyHandleNameNotRegistered = errors.New("a lazy handle names a service nothing registered in the container")
+
+/* ErrLazyHandleTypeIsAmbiguous is the cause of a VerifyLazyNames refusal for a LazyByType handle over a type more than one service is registered under. */
+var ErrLazyHandleTypeIsAmbiguous = errors.New("a lazy handle names a type more than one service is registered under")
+
+/* ErrLazyHandleTypeMismatch is the cause of a VerifyLazyNames refusal for a Lazy or LazyByType handle whose service's built value or declared concrete type is not the type the handle asserts. */
+var ErrLazyHandleTypeMismatch = errors.New("a lazy handle asserts a type its service is not")

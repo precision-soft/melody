@@ -243,6 +243,14 @@ The same holds for a value a module was handed and would drop, refused at the ho
 
 **Remedy.** List the codes a command should leave out, or disable the cli journal of boot warnings, in the command's environment only. Bound the session ttl or the count, or register `session.storage` with a storage of your own. Add the three methods to your own configuration type.
 
+### Container: a Lazy handle naming no service fails the boot
+
+**What changed.** A [`container.Lazy`](../container/lazy.go) or `LazyByType` handle built over the container, or over the resolver a container provider was handed, is recorded where it is built. The application checks the record at the end of `Boot` through `VerifyLazyNames`, so a handle whose service no registration answers fails the boot where it failed at its first use, a cron tick or a request. [`lock.NewLazyLocker`](../lock/lazy_locker.go) and the outbox `NewLazyRepository` and `NewRelayCommandFromResolver` build such handles. A handle built after the check, over a scope, or over a resolver of your own is not verified. See [the container](package/CONTAINER.md#scope-teardown).
+
+**Symptom.** The boot panics with "a container.Lazy handle names no container service". Its cause, in the journal, is "a container.Lazy handle names a service nothing registered in the container" (`serviceName`, `site`, `caller`), "a container.LazyByType handle names a type nothing registered in the container" (`type`, `site`, `caller`) "a container.LazyByType handle names a type more than one service is registered under" (`type`, `conflicts`, `site`, `caller`), or "a container.Lazy handle asserts a type its service is not" (`serviceName`, `serviceType`, `handleType`, `site`, `caller`).
+
+**Remedy.** Register the service the handle names, `service.lock.locker` for a lazy locker, or fix the name. For a type several services stand for, build the handle by name. Give the handle the type the provider declares, `*Mailer` for a provider of `*Mailer`. For a service that is optional, build the handle only after `Has` answers true.
+
 ### Logging: the reopenable file writer can be a container service
 
 **What changed.** [`ReopenableFileWriter`](../logging/reopenable_file_writer.go) carries `CloseWithContext` beside `Close`, so the teardown no longer refuses it as a service, and a close stuck on the watcher ends at the teardown's deadline.

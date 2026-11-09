@@ -141,6 +141,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.verifyDeclaredTeardownDependencies()
 
+    instance.verifyLazyHandles()
+
     instance.booted = true
     instance.booting = false
 

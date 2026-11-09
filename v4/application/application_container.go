@@ -516,6 +516,20 @@ func (instance *Application) verifyDeclaredTeardownDependencies() {
     }
 }
 
+/* runs once every module, cli command and http route is in, the last moment a boot-time handle can be built */
+func (instance *Application) verifyLazyHandles() {
+    verifier, verifies := instance.kernel.ServiceContainer().(interface {
+        VerifyLazyNames() error
+    })
+    if false == verifies {
+        return
+    }
+
+    if verifyErr := verifier.VerifyLazyNames(); nil != verifyErr {
+        exception.Panic(exception.NewError("a container.Lazy handle names no container service", nil, verifyErr))
+    }
+}
+
 /* buildMessageBusTransportsCloser builds the closer that joins the registered message bus transports to the container's ordered teardown, for every process that never resolves the transports map itself, an http process routing through transport values among them, and declares it a teardown dependency of the buses the application registered: a bus routes through transport values its module captured, which no resolution records, so the edge is declared. Every service that publishes through a bus resolves it and closes before it, the bus before the transports, under the waves and the sequential teardown alike. A failure is a warning: the transports are optional and the names are the framework's own. */
 func (instance *Application) buildMessageBusTransportsCloser() {
     serviceContainer := instance.kernel.ServiceContainer()
