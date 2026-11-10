@@ -4,16 +4,20 @@ import (
     "errors"
     "io"
     nethttp "net/http"
+    "net/http/httptest"
     "os"
     "strings"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpPkg "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -1254,5 +1258,219 @@ func TestAccessControlListener_AResponseBesideAFirewallAnswerersErrorIsClosed(t 
         if nil == requestEvent.Refusal() {
             t.Fatalf("%s: expected the refusal to stand", name)
         }
+    }
+}
+
+type unavailableRouteFixture struct {
+    kernel          *testKernel
+    entryPoint      *accessControlListenerTestEntryPoint
+    decisionManager *accessControlListenerTestAccessDecisionManager
+    logger          *recordingLogger
+    deniedReasons   []string
+    deniedCauses    []error
+    grantedCount    int
+    observedErr     error
+}
+
+/* newUnavailableRouteFixture registers both security listeners over one firewall whose source answers token; /admin is protected, /public is PUBLIC_ACCESS and nothing else matches */
+func newUnavailableRouteFixture(token securitycontract.Token, retryAfter bound.Duration) *unavailableRouteFixture {
+    fixture := &unavailableRouteFixture{
+        kernel:          newTestKernel(),
+        entryPoint:      &accessControlListenerTestEntryPoint{response: httpPkg.TextResponse(nethttp.StatusUnauthorized, "sign in")},
+        decisionManager: &accessControlListenerTestAccessDecisionManager{},
+        logger:          &recordingLogger{},
+    }
+
+    firewall := newRefusalSiteFirewall(CompiledFirewallConfig{
+        TokenSource: &resolutionListenerTestTokenSource{resolveToken: token},
+        AccessControl: NewAccessControl([]AccessControlRule{
+            accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
+            accesscontrol.NewExactRule("/public", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),
+        }),
+        AccessDecisionManager: fixture.decisionManager,
+        EntryPoint:            fixture.entryPoint,
+        EntryPointSource:      SourceFirewall,
+        UnavailableRetryAfter: retryAfter,
+    })
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
+    RegisterKernelSecurityResolutionListener(fixture.kernel, registry)
+    RegisterKernelAccessControlListener(fixture.kernel, registry)
+
+    dispatcher := fixture.kernel.EventDispatcher()
+    dispatcher.AddListener(
+        securitycontract.EventSecurityAuthorizationDenied,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            reason := ""
+            if deniedErr := eventValue.Payload().(*AuthorizationDeniedEvent).Err(); nil != deniedErr {
+                reason, _ = exception.LogContext(deniedErr, exception.LogContextConfig{})["reason"].(string)
+            }
+            fixture.deniedReasons = append(fixture.deniedReasons, reason)
+            fixture.deniedCauses = append(fixture.deniedCauses, eventValue.Payload().(*AuthorizationDeniedEvent).Err())
+
+            return nil
+        },
+        0,
+    )
+    dispatcher.AddListener(
+        securitycontract.EventSecurityAuthorizationGranted,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            fixture.grantedCount++
+
+            return nil
+        },
+        0,
+    )
+    dispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            fixture.observedErr = eventValue.Payload().(*httpPkg.KernelExceptionEvent).Err()
+
+            return nil
+        },
+        10,
+    )
+
+    return fixture
+}
+
+func (instance *unavailableRouteFixture) serve(t *testing.T, path string) (*httptest.ResponseRecorder, bool, bool) {
+    t.Helper()
+
+    handled := false
+    handlerSawUnavailable := false
+    recorder := serveSecurityRequestThrough(
+        t,
+        instance.kernel,
+        path,
+        instance.logger,
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handled = true
+            if securityContext, exists := SecurityContextFromRuntime(runtimeInstance); true == exists {
+                _, handlerSawUnavailable = AuthenticationUnavailableCause(securityContext.Token())
+            }
+
+            return httpPkg.TextResponse(nethttp.StatusOK, "served"), nil
+        },
+    )
+
+    return recorder, handled, handlerSawUnavailable
+}
+
+var unavailableRouteStoreErr = errors.New("redis is down")
+
+func newMarkedUnavailableToken() *UnavailableToken {
+    return NewUnavailableToken(MarkInfrastructureFailure(unavailableRouteStoreErr))
+}
+
+func TestAccessControlListener_AnUnavailableTokenOnAProtectedRouteIsRefusedWith503AndRetryAfter(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        retryAfter bound.Duration
+        expected   string
+    }{
+        "the default":  {retryAfter: bound.Duration{}, expected: "5"},
+        "the firewall": {retryAfter: bound.Of(9 * time.Second), expected: "9"},
+    } {
+        t.Run(name, func(t *testing.T) {
+            fixture := newUnavailableRouteFixture(newMarkedUnavailableToken(), testCase.retryAfter)
+
+            recorder, handled, _ := fixture.serve(t, "/admin")
+
+            if nethttp.StatusServiceUnavailable != recorder.Code || testCase.expected != recorder.Header().Get("Retry-After") {
+                t.Fatalf("expected 503 with Retry-After %s, got %d %q: %s", testCase.expected, recorder.Code, recorder.Header().Get("Retry-After"), recorder.Body.String())
+            }
+
+            if true == handled || 0 != fixture.entryPoint.calls || "" != fixture.decisionManager.calledMethod {
+                t.Fatalf("expected neither the handler, the entry point nor the decision manager, got handled=%v entry=%d decision=%q", handled, fixture.entryPoint.calls, fixture.decisionManager.calledMethod)
+            }
+
+            if 1 != len(fixture.deniedReasons) || "authentication_unavailable" != fixture.deniedReasons[0] {
+                t.Fatalf("expected one denial with reason authentication_unavailable, got %v", fixture.deniedReasons)
+            }
+
+            if false == errors.Is(fixture.observedErr, ErrAuthenticationUnavailable) || false == errors.Is(fixture.observedErr, unavailableRouteStoreErr) {
+                t.Fatalf("expected the refusal to carry ErrAuthenticationUnavailable and the cause, got %v", fixture.observedErr)
+            }
+
+            refusal := exception.AsHttpException(fixture.observedErr)
+            if nil == refusal || "service unavailable" != refusal.Message() || "authentication_unavailable" != refusal.Context()["reason"] || "main" != refusal.Context()["firewallName"] {
+                t.Fatalf("expected the refusal's message, reason and firewall, got %v", refusal)
+            }
+
+            if 1 != len(fixture.deniedCauses) || false == errors.Is(fixture.deniedCauses[0], unavailableRouteStoreErr) {
+                t.Fatalf("expected the denial to carry the cause, got %v", fixture.deniedCauses)
+            }
+
+            errorRecords := fixture.logger.recordsAtLevel(loggingcontract.LevelError)
+            if 1 != len(errorRecords) || 0 != len(fixture.logger.recordsAtLevel(loggingcontract.LevelWarning)) {
+                t.Fatalf("expected exactly one Error record and no Warning for the request, got %v", fixture.logger.records)
+            }
+
+            if "main" != errorRecords[0].context["firewallName"] || "test" != errorRecords[0].context["tokenSourceName"] || "GET" != errorRecords[0].context["method"] || "/admin" != errorRecords[0].context["path"] {
+                t.Fatalf("expected the record to name the firewall, the source, the method and the path, got %v", errorRecords[0].context)
+            }
+        })
+    }
+}
+
+func TestAccessControlListener_AnUnavailableTokenOnAPublicRouteIsServed(t *testing.T) {
+    for _, path := range []string{"/public", "/elsewhere"} {
+        t.Run(path, func(t *testing.T) {
+            fixture := newUnavailableRouteFixture(newMarkedUnavailableToken(), bound.Duration{})
+
+            recorder, handled, handlerSawUnavailable := fixture.serve(t, path)
+
+            if nethttp.StatusOK != recorder.Code || false == handled || "" != recorder.Header().Get("Retry-After") {
+                t.Fatalf("expected the route served, got %d handled=%v: %s", recorder.Code, handled, recorder.Body.String())
+            }
+
+            if false == handlerSawUnavailable {
+                t.Fatal("expected the handler to read the unavailable token")
+            }
+
+            if 0 != len(fixture.deniedReasons) {
+                t.Fatalf("expected no denial, got %v", fixture.deniedReasons)
+            }
+
+            if "/public" == path && 1 != fixture.grantedCount {
+                t.Fatalf("expected the public rule granted once, got %d", fixture.grantedCount)
+            }
+        })
+    }
+}
+
+type unavailableButAuthenticatedToken struct {
+    *AuthenticatedToken
+}
+
+func (instance *unavailableButAuthenticatedToken) AuthenticationUnavailableCause() error {
+    return MarkInfrastructureFailure(errors.New("redis is down"))
+}
+
+func TestAccessControlListener_ATokenBothUnavailableAndAuthenticatedIsRefused(t *testing.T) {
+    fixture := newUnavailableRouteFixture(&unavailableButAuthenticatedToken{AuthenticatedToken: NewAuthenticatedToken("admin", []string{"ROLE_ADMIN"}, nil)}, bound.Duration{})
+
+    recorder, handled, _ := fixture.serve(t, "/admin")
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "5" != recorder.Header().Get("Retry-After") || true == handled || "" != fixture.decisionManager.calledMethod {
+        t.Fatalf("expected 503 with Retry-After 5 before the decision, got %d %q handled=%v decision=%q", recorder.Code, recorder.Header().Get("Retry-After"), handled, fixture.decisionManager.calledMethod)
+    }
+
+    if 1 != len(fixture.logger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatalf("expected the one Error record for a token of the application's own type, got %v", fixture.logger.records)
+    }
+}
+
+func TestAccessControlListener_AnAnonymousTokenKeepsItsEntryPoint(t *testing.T) {
+    fixture := newUnavailableRouteFixture(NewAnonymousToken(), bound.Duration{})
+
+    recorder, _, _ := fixture.serve(t, "/admin")
+
+    if nethttp.StatusUnauthorized != recorder.Code || "sign in" != recorder.Body.String() || 1 != fixture.entryPoint.calls || "" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected the entry point's 401 without Retry-After, got %d %q entry=%d: %s", recorder.Code, recorder.Header().Get("Retry-After"), fixture.entryPoint.calls, recorder.Body.String())
+    }
+
+    if 1 != len(fixture.deniedReasons) || "token_not_authenticated" != fixture.deniedReasons[0] {
+        t.Fatalf("expected the not-authenticated denial, got %v", fixture.deniedReasons)
     }
 }

@@ -18,6 +18,7 @@ import (
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
@@ -365,22 +366,28 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
     return request, sessionInstance, journal
 }
 
-func TestSessionTokenResolver_FilesAFailedLookupAndKeepsTheSession(t *testing.T) {
+func TestSessionTokenResolver_AFailedLookupIsUnavailableAndKeepsTheSession(t *testing.T) {
     request, sessionInstance, journal := requestCarryingSessionAndJournal(t)
     sessionInstance.Set(SessionKeySecurityUserId, "user-2")
     sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_EDITOR"})
     sessionInstance.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion("original-hash"))
 
+    lookupErr := errors.New("the account repository is unavailable")
     token := SessionTokenResolver(func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
-        return nil, false, errors.New("the account repository is unavailable")
+        return nil, false, lookupErr
     })(request)
 
     if true == token.IsAuthenticated() || false == sessionInstance.Has(SessionKeySecurityUserId) {
-        t.Fatalf("expected an anonymous answer over a kept session, got authenticated %v, kept %v", token.IsAuthenticated(), sessionInstance.Has(SessionKeySecurityUserId))
+        t.Fatalf("expected a not authenticated answer over a kept session, got authenticated %v, kept %v", token.IsAuthenticated(), sessionInstance.Has(SessionKeySecurityUserId))
     }
 
-    if 1 != len(journal.messageList) || "the account repository is unavailable" != journal.contextList[0]["error"] {
-        t.Fatalf("expected the failed lookup filed once with its cause, got %v %v", journal.messageList, journal.contextList)
+    cause, unavailable := melodysecurity.AuthenticationUnavailableCause(token)
+    if false == unavailable || false == melodysecurity.IsInfrastructureFailure(cause) || false == errors.Is(cause, lookupErr) {
+        t.Fatalf("expected the unavailable token carrying the marked lookup failure, got %v %v", cause, unavailable)
+    }
+
+    if 0 != len(journal.messageList) {
+        t.Fatalf("expected no record from the resolver, the framework files the one record, got %v", journal.messageList)
     }
 
     notFoundRequest, notFoundSession, notFoundJournal := requestCarryingSessionAndJournal(t)

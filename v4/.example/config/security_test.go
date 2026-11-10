@@ -2,6 +2,7 @@ package config
 
 import (
     "context"
+    "errors"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -20,9 +21,11 @@ import (
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecurityconfig "github.com/precision-soft/melody/v4/security/config"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -320,5 +323,107 @@ func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExist
         if false == authenticated || 1 != len(token.Roles()) || entity.RoleEditor != token.Roles()[0] {
             t.Fatalf("expected the token authenticated with the account's current roles [%s], got %v", entity.RoleEditor, token)
         }
+    }
+}
+
+type failingInternalNonceGuard struct{}
+
+func (instance *failingInternalNonceGuard) Remember(_ melodyruntimecontract.Runtime, _ string, _ bound.Duration) (bool, error) {
+    return false, errors.New("redis is down")
+}
+
+type securityListenerKernel struct {
+    melodykernelcontract.Kernel
+    dispatcher melodyeventcontract.EventDispatcher
+}
+
+func (instance *securityListenerKernel) EventDispatcher() melodyeventcontract.EventDispatcher {
+    return instance.dispatcher
+}
+
+/* The internal firewall's access control, decision manager, entry point and delay as RegisterSecurity declares them, around an HMAC source over a replay guard that cannot answer, since the guard is picked from the redis client: a signed envelope is told to retry, and a request without an envelope keeps the entry point's 401. */
+func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryAfter(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.buildInternalAuth()
+    moduleInstance.buildTokenAuth()
+    moduleInstance.buildImpersonation()
+
+    builder := melodysecurityconfig.NewBuilder()
+    moduleInstance.RegisterSecurity(builder)
+
+    var internalFirewall *melodysecurity.CompiledFirewall
+    for _, firewall := range builder.BuildAndCompile().Firewalls() {
+        if "internal" == firewall.Name() {
+            internalFirewall = firewall
+        }
+    }
+    if nil == internalFirewall {
+        t.Fatal("expected the internal firewall compiled")
+    }
+
+    outageFirewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
+        Name:    internalFirewall.Name(),
+        Matcher: internalFirewall.Matcher(),
+        TokenSource: melodysecurity.NewHmacTokenSource(melodysecurity.HmacTokenSourceConfig{
+            Secrets:         moduleInstance.hmacSecrets,
+            Apps:            moduleInstance.hmacApps,
+            MaxFutureExpiry: bound.Of(internalEnvelopeMaxFutureExpiry),
+            NonceGuard:      &failingInternalNonceGuard{},
+        }),
+        AccessControl:         internalFirewall.AccessControl(),
+        AccessDecisionManager: internalFirewall.AccessDecisionManager(),
+        EntryPoint:            internalFirewall.EntryPoint(),
+        AccessDeniedHandler:   internalFirewall.AccessDeniedHandler(),
+        UnavailableRetryAfter: bound.Of(internalFirewall.UnavailableRetryAfter()),
+    })
+
+    signer := moduleInstance.internalAuthSigner(bound.Duration{})
+    headerValue, signErr := signer.Sign(nethttp.MethodGet, route.InternalWhoamiPattern, nil, nil)
+    if nil != signErr {
+        t.Fatalf("sign: %v", signErr)
+    }
+
+    for name, testCase := range map[string]struct {
+        headers    map[string]string
+        status     int
+        retryAfter string
+    }{
+        "a signed envelope": {headers: map[string]string{signer.HeaderName(): headerValue}, status: nethttp.StatusServiceUnavailable, retryAfter: "5"},
+        "no envelope":       {headers: map[string]string{}, status: nethttp.StatusUnauthorized, retryAfter: ""},
+    } {
+        t.Run(name, func(t *testing.T) {
+            containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+            melodycontainer.MustRegister[melodyloggingcontract.Logger](containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+                return melodylogging.NewNopLogger(), nil
+            }, melodycontainer.RegisterOptions{})
+            runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+            dispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
+            kernel := &securityListenerKernel{dispatcher: dispatcher}
+            registry := melodysecurity.NewFirewallRegistry(melodysecurity.NewCompiledConfiguration([]*melodysecurity.CompiledFirewall{outageFirewall}, nil))
+            melodysecurity.RegisterKernelSecurityResolutionListener(kernel, registry)
+            melodysecurity.RegisterKernelAccessControlListener(kernel, registry)
+
+            httpRequest := httptest.NewRequest(nethttp.MethodGet, route.InternalWhoamiPattern, nil)
+            httpRequest.Header.Set("Accept", "application/json")
+            for headerName, headerValue := range testCase.headers {
+                httpRequest.Header.Set(headerName, headerValue)
+            }
+            request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("internal-outage", time.Now()))
+
+            requestEvent := melodyhttp.NewKernelRequestEvent(runtimeInstance, request)
+            if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, melodykernelcontract.EventKernelRequest, requestEvent); nil != dispatchErr {
+                t.Fatalf("dispatch: %v", dispatchErr)
+            }
+
+            response := requestEvent.Response()
+            if nil != requestEvent.Refusal() {
+                response = melodyhttp.RenderExceptionResponse(runtimeInstance, request, requestEvent.Refusal(), melodyhttp.ExceptionRenderConfig{})
+            }
+
+            if nil == response || testCase.status != response.StatusCode() || testCase.retryAfter != response.Headers().Get("Retry-After") {
+                t.Fatalf("expected %d with Retry-After %q, got %v", testCase.status, testCase.retryAfter, response)
+            }
+        })
     }
 }

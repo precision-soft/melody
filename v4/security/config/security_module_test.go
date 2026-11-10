@@ -2,7 +2,9 @@ package config
 
 import (
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
@@ -364,4 +366,40 @@ func TestBuilder_AddFirewallRefusesANameAlreadyDeclared(t *testing.T) {
             openFirewallConfig(),
         )
     }, "security firewall name is already declared")
+}
+
+func TestBuilder_RefusesAnUnavailableRetryAfterOutsideItsRule(t *testing.T) {
+    for name, value := range unavailableRetryAfterRefusedValues() {
+        t.Run(name, func(t *testing.T) {
+            expectRefusalField(t, "GlobalConfig.UnavailableRetryAfter", "", func() {
+                NewBuilder().SetGlobal(GlobalConfig{UnavailableRetryAfter: value})
+            })
+
+            override := openFirewallConfig().Override
+            override.UnavailableRetryAfter = value
+            expectRefusalField(t, "FirewallConfig.Override.UnavailableRetryAfter", "api", func() {
+                NewBuilder().AddFirewall("api", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Override: override})
+            })
+
+            _, globalErr := Compile(Configuration{global: GlobalConfig{UnavailableRetryAfter: value}})
+            expectErrorField(t, globalErr, "GlobalConfig.UnavailableRetryAfter", "")
+
+            _, overrideErr := Compile(Configuration{
+                firewalls: []firewallDeclaration{
+                    {name: "api", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: override}},
+                },
+            })
+            expectErrorField(t, overrideErr, "FirewallConfig.Override.UnavailableRetryAfter", "api")
+        })
+    }
+
+    for _, admitted := range []time.Duration{time.Second, time.Hour} {
+        override := openFirewallConfig().Override
+        override.UnavailableRetryAfter = bound.Of(admitted)
+
+        NewBuilder().
+            SetGlobal(GlobalConfig{UnavailableRetryAfter: bound.Of(admitted)}).
+            AddFirewall("api", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, FirewallConfig{Override: override}).
+            BuildAndCompile()
+    }
 }

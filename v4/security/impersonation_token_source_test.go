@@ -274,7 +274,7 @@ func (instance *failingUserResolver) ResolveImpersonatedUser(
     return nil, exception.NewError("user store query failed", nil, MarkInfrastructureFailure(exception.NewError("store is down", nil, nil)))
 }
 
-func TestImpersonation_MarkedResolverFailureLogsAtError(t *testing.T) {
+func TestImpersonation_AMarkedResolverFailureIsUnavailable(t *testing.T) {
     admin := NewAuthenticatedToken("admin-1", []string{securitycontract.RoleAllowedToSwitch}, nil)
     source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
         Inner: &fixedTokenSource{token: admin},
@@ -284,12 +284,40 @@ func TestImpersonation_MarkedResolverFailureLogsAtError(t *testing.T) {
     runtimeInstance, logger := runtimeWithRecordingLogger()
 
     token, resolveErr := source.Resolve(runtimeInstance, switchRequest("anyone"))
-    if nil != resolveErr || true == token.IsAuthenticated() {
-        t.Fatalf("a failed resolution must fail closed to anonymous: authenticated=%v err=%v", token.IsAuthenticated(), resolveErr)
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
     }
 
-    if 1 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
-        t.Fatal("a resolver failure carrying the infrastructure mark degrades every impersonated request to anonymous and must be filed at Error")
+    cause := expectUnavailableToken(t, token)
+    if "anyone" != exception.LogContext(cause, exception.LogContextConfig{})["target"] {
+        t.Fatalf("expected the cause to name the target, got %v", exception.LogContext(cause, exception.LogContextConfig{}))
+    }
+
+    if "" != token.UserIdentifier() || 0 != len(token.Roles()) {
+        t.Fatalf("expected none of the admin's identity or roles, got %q %v", token.UserIdentifier(), token.Roles())
+    }
+
+    if 0 != len(logger.records) {
+        t.Fatalf("expected no record from the source, got %v", logger.records)
+    }
+}
+
+func TestImpersonation_AnUnavailableInnerTokenPassesThroughUntouched(t *testing.T) {
+    inner := NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down")))
+    source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
+        Inner: &fixedTokenSource{token: inner},
+        Users: &failingUserResolver{},
+    })
+
+    for _, request := range []httpcontract.Request{switchRequest("anyone"), switchRequest("")} {
+        token, resolveErr := source.Resolve(testRuntime(), request)
+        if nil != resolveErr {
+            t.Fatalf("resolve: %v", resolveErr)
+        }
+
+        if securitycontract.Token(inner) != token {
+            t.Fatalf("expected the inner unavailable token returned as it is, got %T", token)
+        }
     }
 }
 

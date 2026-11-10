@@ -748,3 +748,21 @@ func TestApiRefusalOfDecodedBody_AnswersABodyPastTheLimit413AndAnyOtherFailure40
         t.Fatalf("expected unreadable json answered 400, got %d", response.StatusCode())
     }
 }
+
+func TestApiRefusalOfErrorCarriesTheRefusalsRetryAfter(t *testing.T) {
+    runtimeInstance, request := runtimeRefusingNothing(t)
+
+    delayed := ApiRefusalOfError(runtimeInstance, request, melodyexception.NewHttpError(nethttp.StatusServiceUnavailable, melodyexception.HttpErrorConfig{Message: "service unavailable", RetryAfter: 7 * time.Second}))
+    if nethttp.StatusServiceUnavailable != delayed.StatusCode() || "7" != delayed.Headers().Get("Retry-After") {
+        t.Fatalf("expected 503 with Retry-After 7, got %d %q", delayed.StatusCode(), delayed.Headers().Get("Retry-After"))
+    }
+
+    for name, refusalErr := range map[string]error{
+        "a refusal without a delay": melodyexception.Conflict("conflict"),
+        "a plain error":             errors.New("plain"),
+    } {
+        if response := ApiRefusalOfError(runtimeInstance, request, refusalErr); "" != response.Headers().Get("Retry-After") {
+            t.Fatalf("expected no Retry-After for %s, got %q", name, response.Headers().Get("Retry-After"))
+        }
+    }
+}

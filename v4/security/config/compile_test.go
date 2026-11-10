@@ -4,7 +4,9 @@ import (
     "errors"
     "strings"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -594,5 +596,37 @@ func TestCompile_RefusesAProtectedRuleNoDecisionManagerReaches(t *testing.T) {
         }); nil != compileErr {
             t.Fatalf("%s: expected the firewall admitted, got %v", name, compileErr)
         }
+    }
+}
+
+func TestCompile_TheUnavailableRetryAfterIsInheritedOverriddenAndDefaulted(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        global   bound.Duration
+        override bound.Duration
+        expected time.Duration
+    }{
+        "both absent":        {expected: 5 * time.Second},
+        "the global":         {global: bound.Of(30 * time.Second), expected: 30 * time.Second},
+        "the override wins":  {global: bound.Of(30 * time.Second), override: bound.Of(10 * time.Second), expected: 10 * time.Second},
+        "an override alone":  {override: bound.Of(2 * time.Second), expected: 2 * time.Second},
+    } {
+        t.Run(name, func(t *testing.T) {
+            override := openFirewallConfig().Override
+            override.UnavailableRetryAfter = testCase.override
+
+            compiled, compileErr := Compile(Configuration{
+                global: GlobalConfig{UnavailableRetryAfter: testCase.global},
+                firewalls: []firewallDeclaration{
+                    {name: "api", matcher: security.NewPathPrefixMatcher("/"), tokenSource: &anonymousTokenSource{}, config: FirewallConfig{Override: override}},
+                },
+            })
+            if nil != compileErr {
+                t.Fatalf("compile: %v", compileErr)
+            }
+
+            if actual := compiled.Firewalls()[0].UnavailableRetryAfter(); testCase.expected != actual {
+                t.Fatalf("expected %s, got %s", testCase.expected, actual)
+            }
+        })
     }
 }

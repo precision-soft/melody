@@ -13,6 +13,10 @@ import (
 
 /* Compile turns a Configuration into the compiled form the runtime reads. Configuration has only unexported fields and no constructor, so a caller outside this package can pass only the empty one, which compiles to a nil configuration and a nil error, meaning no security was declared. The public path from a declaration to the runtime is Builder.BuildAndCompile. A firewall no declared access control reaches, neither its own nor an inherited global one, is refused: it would authorize every path it claims for every token. */
 func Compile(configuration Configuration) (*security.CompiledConfiguration, error) {
+    if retryAfterErr := validateGlobalUnavailableRetryAfter(configuration.global); nil != retryAfterErr {
+        return nil, retryAfterErr
+    }
+
     if escapeErr := refusePercentEscapedAccessControlPaths("", "GlobalConfig.AccessControl", configuration.global.AccessControl); nil != escapeErr {
         return nil, escapeErr
     }
@@ -51,6 +55,10 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
 
         if escapeErr := refusePercentEscapedFirewallPaths(firewall); nil != escapeErr {
             return nil, escapeErr
+        }
+
+        if retryAfterErr := validateOverrideUnavailableRetryAfter(firewall); nil != retryAfterErr {
+            return nil, retryAfterErr
         }
 
         effectiveRoleHierarchy := firewall.config.Override.RoleHierarchy
@@ -206,6 +214,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
                     AccessControlSource:         accessControlSource,
                     EntryPointSource:            entryPointSource,
                     AccessDeniedHandlerSource:   deniedHandlerSource,
+                    UnavailableRetryAfter:       effectiveUnavailableRetryAfter(configuration.global, firewall),
                 },
             ),
         )

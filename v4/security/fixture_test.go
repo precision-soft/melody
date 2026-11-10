@@ -470,15 +470,29 @@ func servedSecurityContainer(t *testing.T, kernelInstance *testKernel, logger lo
 func serveSecurityRequest(t *testing.T, kernelInstance *testKernel, path string) *httptest.ResponseRecorder {
     t.Helper()
 
-    serviceContainer := servedSecurityContainer(t, kernelInstance, logging.NewNopLogger())
-
-    kernelInstance.httpRouter.Handle(
-        nethttp.MethodGet,
+    return serveSecurityRequestThrough(
+        t,
+        kernelInstance,
         path,
+        logging.NewNopLogger(),
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return http.TextResponse(nethttp.StatusOK, "served"), nil
         },
     )
+}
+
+func serveSecurityRequestThrough(
+    t *testing.T,
+    kernelInstance *testKernel,
+    path string,
+    logger loggingcontract.Logger,
+    handler func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error),
+) *httptest.ResponseRecorder {
+    t.Helper()
+
+    serviceContainer := servedSecurityContainer(t, kernelInstance, logger)
+
+    kernelInstance.httpRouter.Handle(nethttp.MethodGet, path, handler)
 
     request := httptest.NewRequest(nethttp.MethodGet, path, nil)
     request.Header.Set("Accept", "application/json")
@@ -487,4 +501,35 @@ func serveSecurityRequest(t *testing.T, kernelInstance *testKernel, path string)
     kernelInstance.httpKernel.ServeHttp(serviceContainer).ServeHTTP(recorder, request)
 
     return recorder
+}
+
+func expectUnavailableToken(t *testing.T, token securitycontract.Token) error {
+    t.Helper()
+
+    cause, unavailable := AuthenticationUnavailableCause(token)
+    if false == unavailable {
+        t.Fatalf("expected an unavailable token, got %T", token)
+    }
+
+    if true == token.IsAuthenticated() {
+        t.Fatal("expected an unavailable token not authenticated")
+    }
+
+    if false == IsInfrastructureFailure(cause) {
+        t.Fatalf("expected the cause to carry the infrastructure mark, got %v", cause)
+    }
+
+    return cause
+}
+
+func expectAnonymousToken(t *testing.T, token securitycontract.Token) {
+    t.Helper()
+
+    if _, unavailable := AuthenticationUnavailableCause(token); true == unavailable {
+        t.Fatalf("expected an anonymous token, got an unavailable one")
+    }
+
+    if _, anonymous := token.(*AnonymousToken); false == anonymous {
+        t.Fatalf("expected *AnonymousToken, got %T", token)
+    }
 }

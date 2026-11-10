@@ -4,7 +4,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* infrastructureFailure marks an error caused by the platform the security machinery stands on, as opposed to a credential that failed its checks. Both fail closed to anonymous, but a platform failure is logged as an incident. The mark is a link in the cause chain, readable through errors.As. */
+/* infrastructureFailure marks an error caused by the platform the security machinery stands on, as opposed to a credential that failed its checks: a platform failure answers the unavailable token and is recorded as an incident, a failed credential answers anonymous. The mark is a link in the cause chain, readable through errors.As. */
 type infrastructureFailure struct {
     cause error
 }
@@ -17,7 +17,7 @@ func (instance *infrastructureFailure) Unwrap() error {
     return instance.cause
 }
 
-/* MarkInfrastructureFailure marks err as a failure of the platform the security machinery stands on, a store or a remote that could not answer, rather than a credential that failed its checks. An application's TokenValidator, ClaimsEnricher or resolver returns its error through it so the token sources file the failure as an incident, at Error, where an unmarked error is the routine Info a bad credential earns; the request fails closed to anonymous either way. A nil error stays nil. */
+/* MarkInfrastructureFailure marks err as a failure of the platform the security machinery stands on, a store or a remote that could not answer, rather than a credential that failed its checks. An application's TokenValidator, TokenEnricher or ImpersonatedUserResolver returns its error through it so the token sources answer the unavailable token for it, 503 with Retry-After on a protected route and anonymous on a public one, recorded at Error by the security resolution listener, where an unmarked error is the anonymous token and the routine Info a bad credential earns. A token source returning a marked error from Resolve is read the same way. A nil error stays nil. */
 func MarkInfrastructureFailure(err error) error {
     if nil == err {
         return nil

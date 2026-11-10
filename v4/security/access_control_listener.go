@@ -24,6 +24,41 @@ func newAnonymousRefusal(reason string) error {
     return refusal
 }
 
+/* authenticationUnavailableCause puts ErrAuthenticationUnavailable before the cause in one chain, so the refusal reads one line and its record names each link once */
+type authenticationUnavailableCause struct {
+    cause error
+}
+
+func (instance *authenticationUnavailableCause) Error() string {
+    return ErrAuthenticationUnavailable.Error()
+}
+
+func (instance *authenticationUnavailableCause) Is(target error) bool {
+    return ErrAuthenticationUnavailable == target
+}
+
+func (instance *authenticationUnavailableCause) Unwrap() error {
+    return instance.cause
+}
+
+/* newUnavailableRefusal builds the 503 an unavailable token earns: ErrAuthenticationUnavailable and the cause in its chain, the firewall's Retry-After, and marked logged, since the security resolution listener already filed the cause */
+func newUnavailableRefusal(firewall *CompiledFirewall, cause error) error {
+    refusal := exception.NewHttpError(
+        nethttp.StatusServiceUnavailable,
+        exception.HttpErrorConfig{
+            Message:    "service unavailable",
+            Cause:      &authenticationUnavailableCause{cause: cause},
+            RetryAfter: firewall.UnavailableRetryAfter(),
+        },
+    )
+    refusal.SetContextValue("reason", "authentication_unavailable")
+    refusal.SetContextValue("firewallName", firewall.Name())
+
+    _ = exception.MarkLogged(refusal)
+
+    return refusal
+}
+
 func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, registry *FirewallRegistry) {
     if nil == registry {
         exception.Panic(
@@ -157,6 +192,32 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 }
 
                 requestEvent.Refuse(newAnonymousRefusal("missing_token"))
+
+                return nil
+            }
+
+            /* read before IsAuthenticated, so a token that says both is refused rather than served; the entry point is not consulted, there is no sign-in to start */
+            if cause, unavailable := AuthenticationUnavailableCause(token); true == unavailable {
+                _, eventSecurityAuthorizationDeniedErr := eventDispatcher.DispatchName(
+                    runtimeInstance,
+                    securitycontract.EventSecurityAuthorizationDenied,
+                    NewAuthorizationDeniedEvent(
+                        requestEvent.Request(),
+                        attributes,
+                        exception.NewError(
+                            "service unavailable",
+                            exceptioncontract.Context{
+                                "reason": "authentication_unavailable",
+                            },
+                            cause,
+                        ),
+                    ),
+                )
+                if nil != eventSecurityAuthorizationDeniedErr {
+                    return eventSecurityAuthorizationDeniedErr
+                }
+
+                requestEvent.Refuse(newUnavailableRefusal(securityContext.Firewall(), cause))
 
                 return nil
             }

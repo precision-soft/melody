@@ -56,7 +56,13 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 }
             }
 
-            token, resolveErr := resolveTokenSourceSafely(firewall, runtimeInstance, requestEvent)
+            token, resolveErr, panicked := resolveTokenSourceSafely(firewall, runtimeInstance, requestEvent)
+
+            /* a marked error is the second spelling of the unavailable token; a panic stays a refusal, whatever it carried */
+            if nil != resolveErr && false == panicked && true == IsInfrastructureFailure(resolveErr) {
+                token = NewUnavailableToken(resolveErr)
+                resolveErr = nil
+            }
 
             if nil != resolveErr {
                 setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
@@ -66,26 +72,9 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
 
                 logger := logging.LoggerFromRuntime(runtimeInstance)
                 if nil != logger {
-                    method := ""
-                    path := ""
-                    if nil != requestEvent.Request().HttpRequest() {
-                        method = requestEvent.Request().HttpRequest().Method
-                        if nil != requestEvent.Request().HttpRequest().URL {
-                            path = requestEvent.Request().HttpRequest().URL.Path
-                        }
-                    }
-
                     /* a token the client got wrong surfaces as a sub-500 HttpException and is recorded at warning, like its api-key sibling; a backend that is down, or any error that is not a deliberate 4xx, keeps the error level. The switch calls the named level methods, so a logger that overrides only one of them is honoured. */
                     resolutionMessage := "security token source resolution failed"
-                    resolutionContext := exception.LogContext(
-                        resolveErr,
-                        exception.LogContextConfig{
-                            Extra: exceptioncontract.Context{
-                                "method": internal.BoundDiagnosticText(method),
-                                "path":   internal.BoundDiagnosticText(path),
-                            },
-                        },
-                    )
+                    resolutionContext := resolutionLogContext(resolveErr, requestEvent, nil)
 
                     httpException := exception.AsHttpException(resolveErr)
                     if nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() {
@@ -105,6 +94,24 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
             /* a typed nil token from the application's source is the nil it means, not a live token published into the security context */
             if true == internal.IsNilInterface(token) {
                 token = NewAnonymousToken()
+            }
+
+            /* the one record of a credential nobody could check, for framework and custom sources alike; the refusal access control raises for it is marked logged */
+            if cause, unavailable := AuthenticationUnavailableCause(token); true == unavailable {
+                logger := logging.LoggerFromRuntime(runtimeInstance)
+                if nil != logger {
+                    logger.Error(
+                        "security token source could not verify the credential: its platform is unavailable",
+                        resolutionLogContext(
+                            cause,
+                            requestEvent,
+                            exceptioncontract.Context{
+                                "firewallName":    firewall.Name(),
+                                "tokenSourceName": firewall.TokenSource().Name(),
+                            },
+                        ),
+                    )
+                }
             }
 
             setSecurityContextOnRuntime(runtimeInstance, firewall, token)
@@ -131,7 +138,7 @@ func resolveTokenSourceSafely(
     firewall *CompiledFirewall,
     runtimeInstance runtimecontract.Runtime,
     requestEvent *http.KernelRequestEvent,
-) (token securitycontract.Token, resolveErr error) {
+) (token securitycontract.Token, resolveErr error, panicked bool) {
     tokenSource := firewall.TokenSource()
 
     defer func() {
@@ -139,6 +146,8 @@ func resolveTokenSourceSafely(
         if nil == recoveredValue {
             return
         }
+
+        panicked = true
 
         var recoveredErr error
         if err, ok := recoveredValue.(error); true == ok {
@@ -166,5 +175,30 @@ func resolveTokenSourceSafely(
 
     token, resolveErr = tokenSource.Resolve(runtimeInstance, requestEvent.Request())
 
-    return token, resolveErr
+    return token, resolveErr, false
+}
+
+func resolutionLogContext(
+    err error,
+    requestEvent *http.KernelRequestEvent,
+    extra exceptioncontract.Context,
+) exceptioncontract.Context {
+    method := ""
+    path := ""
+    if nil != requestEvent.Request().HttpRequest() {
+        method = requestEvent.Request().HttpRequest().Method
+        if nil != requestEvent.Request().HttpRequest().URL {
+            path = requestEvent.Request().HttpRequest().URL.Path
+        }
+    }
+
+    context := exceptioncontract.Context{
+        "method": internal.BoundDiagnosticText(method),
+        "path":   internal.BoundDiagnosticText(path),
+    }
+    for key, value := range extra {
+        context[key] = value
+    }
+
+    return exception.LogContext(err, exception.LogContextConfig{Extra: context})
 }

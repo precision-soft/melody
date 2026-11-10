@@ -9,7 +9,7 @@ type Impersonating interface {
     Impersonator() (Token, bool)
 }
 
-/* ImpersonatedUserResolver resolves the token of the user an admin is switching to. A nil or unauthenticated token, or an error, denies the switch and the request proceeds anonymous, never with the admin's own broader roles. */
+/* ImpersonatedUserResolver resolves the token of the user an admin is switching to. A nil or unauthenticated token, or an error, denies the switch and the request proceeds anonymous, an error carrying security.MarkInfrastructureFailure as the unavailable token, never with the admin's own broader roles. */
 type ImpersonatedUserResolver interface {
     ResolveImpersonatedUser(runtimeInstance runtimecontract.Runtime, identifier string) (Token, error)
 }

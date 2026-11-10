@@ -37,7 +37,7 @@ type HmacTokenSourceConfig struct {
     /* MaxFutureExpiry caps how far past the verifier's clock an envelope's ExpiresAt may sit, since the nonce guard remembers each nonce until its envelope expires and the Leeway passes: 1h by default, at least 1s, unlimited refused, so a signer cannot make the guard hold a nonce for as long as it likes. */
     MaxFutureExpiry bound.Duration
 
-    /* MinimumSecretLength is the fewest bytes a secret the Secrets provider resolves may hold: 32 by default, the RFC 7518 floor for an HMAC-SHA256 key, at least 32, unlimited refused. A shorter secret answers the envelope anonymous and is filed at Error as an infrastructure failure naming the key id, so a custom provider handing a short key verifies nothing with it; the static provider refuses one when it is built. */
+    /* MinimumSecretLength is the fewest bytes a secret the Secrets provider resolves may hold: 32 by default, the RFC 7518 floor for an HMAC-SHA256 key, at least 32, unlimited refused. A shorter secret answers the unavailable token, its cause an infrastructure failure naming the key id that the resolution listener files at Error, so a custom provider handing a short key verifies nothing with it; the static provider refuses one when it is built. */
     MinimumSecretLength bound.Count
 
     /* ServiceIdentity, when set, turns on audience enforcement: an envelope whose signed Audience differs is refused. Empty skips the audience check. */
@@ -379,14 +379,14 @@ func (instance *HmacTokenSource) reject(
     runtimeInstance runtimecontract.Runtime,
     cause error,
 ) (securitycontract.Token, error) {
+    /* a guard or a secret provider that cannot answer is the unavailable token, recorded once by the resolution listener; a bad envelope is anonymous */
+    if true == IsInfrastructureFailure(cause) {
+        return NewUnavailableToken(cause), nil
+    }
+
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil != logger {
-        /* every rejection fails closed to anonymous; an infrastructure failure is logged above the Info a bad envelope gets */
-        if true == IsInfrastructureFailure(cause) {
-            logger.Error("internal-auth verification infrastructure failed", exception.LogContext(cause, exception.LogContextConfig{}))
-        } else {
-            logger.Info("internal-auth envelope rejected", exception.LogContext(cause, exception.LogContextConfig{}))
-        }
+        logger.Info("internal-auth envelope rejected", exception.LogContext(cause, exception.LogContextConfig{}))
     }
 
     return NewAnonymousToken(), nil

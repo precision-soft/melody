@@ -6,7 +6,9 @@ import (
     "fmt"
     "strings"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -367,5 +369,44 @@ func TestNewCompiledFirewall_AnEmptySourceReadsAsNone(t *testing.T) {
 
     if SourceMerged != accessControlSource {
         t.Fatalf("expected the access control source set to stay merged, got %q", accessControlSource)
+    }
+}
+
+func TestNewCompiledFirewall_RefusesAnUnavailableRetryAfterOutsideItsRule(t *testing.T) {
+    for name, value := range map[string]bound.Duration{
+        "0s":        bound.Of(time.Duration(0)),
+        "500ms":     bound.Of(500 * time.Millisecond),
+        "1500ms":    bound.Of(1500 * time.Millisecond),
+        "61m":       bound.Of(61 * time.Minute),
+        "2h":        bound.Of(2 * time.Hour),
+        "unlimited": bound.UnlimitedDuration(),
+    } {
+        t.Run(name, func(t *testing.T) {
+            expectPanicNamingField(t, "CompiledFirewallConfig.UnavailableRetryAfter", func() {
+                NewCompiledFirewall(CompiledFirewallConfig{Name: "main", Matcher: NewPathPrefixMatcher("/"), UnavailableRetryAfter: value})
+            })
+
+            func() {
+                defer func() {
+                    recoveredErr, _ := recover().(error)
+                    if "main" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["firewallName"] {
+                        t.Fatalf("expected the refusal to name the firewall, got %v", recoveredErr)
+                    }
+                }()
+
+                NewCompiledFirewall(CompiledFirewallConfig{Name: "main", Matcher: NewPathPrefixMatcher("/"), UnavailableRetryAfter: value})
+            }()
+        })
+    }
+
+    for _, admitted := range []time.Duration{time.Second, time.Hour} {
+        firewall := NewCompiledFirewall(CompiledFirewallConfig{Name: "main", Matcher: NewPathPrefixMatcher("/"), UnavailableRetryAfter: bound.Of(admitted)})
+        if admitted != firewall.UnavailableRetryAfter() {
+            t.Fatalf("expected %s admitted, got %s", admitted, firewall.UnavailableRetryAfter())
+        }
+    }
+
+    if defaulted := NewCompiledFirewall(CompiledFirewallConfig{Name: "main", Matcher: NewPathPrefixMatcher("/")}); 5*time.Second != defaulted.UnavailableRetryAfter() {
+        t.Fatalf("expected the 5s default, got %s", defaulted.UnavailableRetryAfter())
     }
 }

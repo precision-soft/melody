@@ -50,14 +50,14 @@ func (instance *BearerTokenSource) Resolve(
 
     claims, validateErr := instance.validator.Validate(runtimeInstance, tokenString)
     if nil != validateErr {
-        /* the request fails closed to anonymous either way, but a store that cannot answer degrades every bearer at once, so it is logged above a credential that failed its checks */
+        /* a store that cannot answer is the unavailable token, recorded once by the resolution listener; a credential that failed its checks is anonymous */
+        if true == IsInfrastructureFailure(validateErr) {
+            return NewUnavailableToken(validateErr), nil
+        }
+
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
-            if true == IsInfrastructureFailure(validateErr) {
-                logger.Error("bearer token validation infrastructure failed", exception.LogContext(validateErr, exception.LogContextConfig{}))
-            } else {
-                logger.Info("bearer token rejected", exception.LogContext(validateErr, exception.LogContextConfig{}))
-            }
+            logger.Info("bearer token rejected", exception.LogContext(validateErr, exception.LogContextConfig{}))
         }
 
         return NewAnonymousToken(), nil
@@ -66,13 +66,13 @@ func (instance *BearerTokenSource) Resolve(
     if false == internal.IsNilInterface(instance.enricher) {
         enrichedClaims, enrichErr := instance.enricher.Enrich(runtimeInstance, claims)
         if nil != enrichErr {
+            if true == IsInfrastructureFailure(enrichErr) {
+                return NewUnavailableToken(enrichErr), nil
+            }
+
             logger := logging.LoggerFromRuntime(runtimeInstance)
             if nil != logger {
-                if true == IsInfrastructureFailure(enrichErr) {
-                    logger.Error("bearer token enrichment infrastructure failed", exception.LogContext(enrichErr, exception.LogContextConfig{}))
-                } else {
-                    logger.Info("bearer token enrichment failed", exception.LogContext(enrichErr, exception.LogContextConfig{}))
-                }
+                logger.Info("bearer token enrichment failed", exception.LogContext(enrichErr, exception.LogContextConfig{}))
             }
 
             return NewAnonymousToken(), nil

@@ -91,7 +91,7 @@ An `Acquire` whose reply was lost gives back, detached and best-effort, the leas
 [`NewTokenStore(client, TokenStoreConfig)`](./token_store.go) returns a `*RedisTokenStore` implementing the security `RevocableTokenStore`:
 
 - `Put` — store claims for a token under a `bound.Duration` ttl, read against the security contract's `TokenTtlRule`: an absent ttl and one under a second are refused naming the ttl, and `bound.UnlimitedDuration()` stores with no expiry, ended only by `Delete`, `DeleteByUser` or `RevokeBefore`. The user identifier must be valid UTF-8, refused at every door that writes or matches it.
-- `Lookup` — resolve claims for a token string.
+- `Lookup` — resolve claims for a token string. An error from it, a failed round trip or an unreadable record, is what the bearer source answers the unavailable token for: `503` with `Retry-After` on a protected route, the request served on a public one.
 - `Delete` — revoke a single token.
 - `RevokeBefore(userIdentifier, deviceIdentifier, instant)` — publish a revocation boundary. Every token of that user, or of that one device, issued before the instant stops resolving, including tokens written after the call as long as they were stamped earlier. The boundary only ever moves forward, and the one applied at lookup is the later of the user's and the device's, so a user-wide revocation cannot be undone by a device-scoped one. **This is what ends a user's sessions.**
 - `RevocationEpoch(runtime, userIdentifier, deviceIdentifier)` — read the boundary a token would be compared against; the zero instant means nothing has been revoked.
@@ -127,7 +127,7 @@ tokenSource := security.NewHmacTokenSource(security.HmacTokenSourceConfig{
 })
 ```
 
-The same guard fits any `security/contract.NonceGuard` slot, for example the TOTP authenticator's `ReplayGuard`.
+The same guard fits any `security/contract.NonceGuard` slot, for example the TOTP authenticator's `ReplayGuard`. An error from `Remember` is what the HMAC source answers the unavailable token for: `503` with `Retry-After` on a protected route.
 
 ## Rate limiter
 

@@ -749,3 +749,100 @@ func TestSecurityResolutionListener_AnAsteriskFormTargetIsResolvedByTheRootFirew
         }
     }
 }
+
+type resolutionListenerTestMarkedPanickingTokenSource struct{}
+
+func (instance *resolutionListenerTestMarkedPanickingTokenSource) Name() string { return "marked-panicking" }
+
+func (instance *resolutionListenerTestMarkedPanickingTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+    panic(MarkInfrastructureFailure(errors.New("redis is down")))
+}
+
+func dispatchResolutionThrough(t *testing.T, tokenSource securitycontract.TokenSource) (*httpPkg.KernelRequestEvent, securitycontract.Token, *recordingLogger) {
+    t.Helper()
+
+    kernel := newTestKernel()
+    runtimeInstance, logger := runtimeWithRecordingLogger()
+
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            &resolutionListenerTestMatcher{matches: true},
+        MatcherDescription: "matcher:main",
+        TokenSource:        tokenSource,
+    })
+    RegisterKernelSecurityResolutionListener(kernel, NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil)))
+
+    requestEvent := httpPkg.NewKernelRequestEvent(runtimeInstance, newSecurityTestRequest("GET", "/admin", nil, runtimeInstance))
+    if _, dispatchErr := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", requestEvent); nil != dispatchErr {
+        t.Fatalf("unexpected error: %v", dispatchErr)
+    }
+
+    securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
+    if false == exists || nil == securityContext {
+        t.Fatal("expected a security context on the runtime")
+    }
+
+    return requestEvent, securityContext.Token(), logger
+}
+
+func TestSecurityResolutionListener_AnUnavailableTokenIsPublishedAndRecordedOnceAtError(t *testing.T) {
+    token := NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down")))
+
+    requestEvent, published, logger := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveToken: token})
+
+    if nil != requestEvent.Refusal() || securitycontract.Token(token) != published {
+        t.Fatalf("expected the token published and no refusal, got %T, %v", published, requestEvent.Refusal())
+    }
+
+    records := logger.recordsAtLevel(loggingcontract.LevelError)
+    if 1 != len(records) || 0 != len(logger.recordsAtLevel(loggingcontract.LevelWarning)) {
+        t.Fatalf("expected one Error record and no Warning, got %v", logger.records)
+    }
+
+    context := records[0].context
+    if "main" != context["firewallName"] || "test" != context["tokenSourceName"] || "GET" != context["method"] || "/admin" != context["path"] || "redis is down" != context["error"] {
+        t.Fatalf("expected the record to name the firewall, the source, the method, the path and the cause, got %v", context)
+    }
+
+    _, anonymous, anonymousLogger := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveToken: NewAnonymousToken()})
+    expectAnonymousToken(t, anonymous)
+    if 0 != len(anonymousLogger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatalf("expected no record for an anonymous token, got %v", anonymousLogger.records)
+    }
+}
+
+func TestSecurityResolutionListener_AMarkedResolveErrorIsReadAsUnavailable(t *testing.T) {
+    storeErr := errors.New("redis is down")
+
+    requestEvent, published, logger := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveErr: MarkInfrastructureFailure(storeErr)})
+
+    if nil != requestEvent.Refusal() {
+        t.Fatalf("expected no refusal for a marked error, got %v", requestEvent.Refusal())
+    }
+
+    if cause := expectUnavailableToken(t, published); false == errors.Is(cause, storeErr) {
+        t.Fatalf("expected the source's error as the cause, got %v", cause)
+    }
+
+    if 1 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatalf("expected one Error record, got %v", logger.records)
+    }
+
+    _, besideAuthenticated, _ := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{
+        resolveToken: NewAuthenticatedToken("admin", []string{"ROLE_ADMIN"}, nil),
+        resolveErr:   MarkInfrastructureFailure(storeErr),
+    })
+    expectUnavailableToken(t, besideAuthenticated)
+
+    unmarkedEvent, unmarked, _ := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveErr: storeErr})
+    if nil == unmarkedEvent.Refusal() {
+        t.Fatal("expected an unmarked error refused")
+    }
+    expectAnonymousToken(t, unmarked)
+
+    panickedEvent, panicked, _ := dispatchResolutionThrough(t, &resolutionListenerTestMarkedPanickingTokenSource{})
+    if nil == panickedEvent.Refusal() {
+        t.Fatal("expected a source panicking with a marked error refused, a panic is never the unavailable token")
+    }
+    expectAnonymousToken(t, panicked)
+}

@@ -749,14 +749,15 @@ func (instance *failingNonceGuard) Remember(_ runtimecontract.Runtime, _ string,
     return false, instance.failure
 }
 
-func TestHmacTokenSource_NonceGuardFailureLogsAtErrorAndFailsClosed(t *testing.T) {
+func TestHmacTokenSource_ANonceGuardThatCannotAnswerIsUnavailable(t *testing.T) {
     signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
     headerValue, signErr := signer.Sign("GET", "/internal/ping", nil, nil)
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }
 
-    source := hmacTestSource(&failingNonceGuard{failure: errors.New("redis is down")})
+    guardErr := errors.New("redis is down")
+    source := hmacTestSource(&failingNonceGuard{failure: guardErr})
     runtimeInstance, logger := runtimeWithRecordingLogger()
 
     token, resolveErr := source.Resolve(runtimeInstance, hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
@@ -764,21 +765,28 @@ func TestHmacTokenSource_NonceGuardFailureLogsAtErrorAndFailsClosed(t *testing.T
         t.Fatalf("resolve: %v", resolveErr)
     }
 
-    if true == token.IsAuthenticated() {
-        t.Fatal("an unanswerable nonce guard must fail closed to anonymous")
+    cause := expectUnavailableToken(t, token)
+    if false == errors.Is(cause, guardErr) {
+        t.Fatalf("expected the guard's error in the cause chain, got %v", cause)
     }
 
-    errorRecords := logger.recordsAtLevel(loggingcontract.LevelError)
-    if 1 != len(errorRecords) {
-        t.Fatalf("the guard's backend being down degrades every internal caller to anonymous at once and must be filed at Error, got %d error records", len(errorRecords))
+    if 0 != len(logger.records) {
+        t.Fatalf("expected no record from the source, the resolution listener files the one record, got %v", logger.records)
     }
 
-    if 0 != len(logger.recordsAtLevel(loggingcontract.LevelInfo)) {
-        t.Fatal("the infrastructure failure must not additionally be filed as a routine Info rejection")
-    }
+    tampered, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), tamperHmacPayload(headerValue)))
+    expectAnonymousToken(t, tampered)
+
+    missing, _ := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), ""))
+    expectAnonymousToken(t, missing)
+
+    replaySource := hmacTestSource(NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
+    _, _ = replaySource.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
+    replayed, _ := replaySource.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), headerValue))
+    expectAnonymousToken(t, replayed)
 }
 
-func TestHmacTokenSource_AFullNonceGuardFailsClosedAndLogsAtError(t *testing.T) {
+func TestHmacTokenSource_AFullNonceGuardIsUnavailable(t *testing.T) {
     signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
     first, _ := signer.Sign("GET", "/internal/ping", nil, nil)
     second, _ := signer.Sign("GET", "/internal/ping", nil, nil)
@@ -789,16 +797,12 @@ func TestHmacTokenSource_AFullNonceGuardFailsClosedAndLogsAtError(t *testing.T) 
         t.Fatal("expected the first envelope to authenticate while the guard has room")
     }
 
-    runtimeInstance, logger := runtimeWithRecordingLogger()
-
-    token, resolveErr := source.Resolve(runtimeInstance, hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), second))
-    if nil != resolveErr || true == token.IsAuthenticated() {
-        t.Fatalf("expected a full guard to fail closed to anonymous, got %v, %v", token, resolveErr)
+    token, resolveErr := source.Resolve(testRuntime(), hmacRequest("GET", "/internal/ping", nil, signer.HeaderName(), second))
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
     }
 
-    if 1 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
-        t.Fatal("expected the full guard filed at Error as an infrastructure failure")
-    }
+    expectUnavailableToken(t, token)
 }
 
 func TestHmacTokenSource_ForgedEnvelopeStaysAtInfo(t *testing.T) {

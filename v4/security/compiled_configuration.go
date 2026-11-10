@@ -2,7 +2,9 @@ package security
 
 import (
     "errors"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -53,6 +55,9 @@ type CompiledFirewallConfig struct {
     AccessControlSource         Source
     EntryPointSource            Source
     AccessDeniedHandlerSource   Source
+
+    /* UnavailableRetryAfter is the Retry-After of the 503 an unavailable token earns on a protected route: absent is 5s, 1s to 1h in whole seconds, unlimited refused. */
+    UnavailableRetryAfter bound.Duration
 }
 
 func NewCompiledFirewall(config CompiledFirewallConfig) *CompiledFirewall {
@@ -86,6 +91,14 @@ func NewCompiledFirewall(config CompiledFirewallConfig) *CompiledFirewall {
                 ),
             )
         }
+    }
+
+    unavailableRetryAfter, retryAfterErr := ResolveUnavailableRetryAfter(config.UnavailableRetryAfter, "CompiledFirewallConfig.UnavailableRetryAfter")
+    if nil != retryAfterErr {
+        refusal := exception.FromError(retryAfterErr)
+        refusal.SetContextValue("firewallName", config.Name)
+
+        exception.Panic(refusal)
     }
 
     var firewall *Firewall
@@ -130,6 +143,7 @@ func NewCompiledFirewall(config CompiledFirewallConfig) *CompiledFirewall {
         accessControlSource:         sourceOrNone(config.AccessControlSource),
         entryPointSource:            sourceOrNone(config.EntryPointSource),
         accessDeniedHandlerSource:   sourceOrNone(config.AccessDeniedHandlerSource),
+        unavailableRetryAfter:       unavailableRetryAfter,
     }
 }
 
@@ -168,6 +182,7 @@ type CompiledFirewall struct {
     accessControlSource         Source
     entryPointSource            Source
     accessDeniedHandlerSource   Source
+    unavailableRetryAfter       time.Duration
 }
 
 func (instance *CompiledFirewall) Name() string {
@@ -184,6 +199,11 @@ func (instance *CompiledFirewall) MatcherDescription() string {
 
 func (instance *CompiledFirewall) Rules() []securitycontract.Rule {
     return append([]securitycontract.Rule{}, instance.rules...)
+}
+
+/* UnavailableRetryAfter answers the Retry-After delay of the 503 this firewall refuses an unavailable token with. */
+func (instance *CompiledFirewall) UnavailableRetryAfter() time.Duration {
+    return instance.unavailableRetryAfter
 }
 
 func (instance *CompiledFirewall) TokenSource() securitycontract.TokenSource {

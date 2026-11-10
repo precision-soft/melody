@@ -171,8 +171,9 @@ func (instance *failingTokenStore) Lookup(
     return securitycontract.Claims{}, false, instance.failure
 }
 
-func TestBearerTokenSource_StoreFailureLogsAtErrorAndFailsClosed(t *testing.T) {
-    source := NewBearerTokenSource(NewOpaqueTokenValidator(&failingTokenStore{failure: errors.New("redis is down")}), nil)
+func TestBearerTokenSource_AStoreThatCannotAnswerIsUnavailable(t *testing.T) {
+    storeErr := errors.New("redis is down")
+    source := NewBearerTokenSource(NewOpaqueTokenValidator(&failingTokenStore{failure: storeErr}), nil)
     runtimeInstance, logger := runtimeWithRecordingLogger()
 
     token, resolveErr := source.Resolve(runtimeInstance, bearerRequest("opaque-123"))
@@ -180,17 +181,20 @@ func TestBearerTokenSource_StoreFailureLogsAtErrorAndFailsClosed(t *testing.T) {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
-    if true == token.IsAuthenticated() {
-        t.Fatal("an unanswerable token store must fail closed to anonymous")
+    cause := expectUnavailableToken(t, token)
+    if false == errors.Is(cause, storeErr) {
+        t.Fatalf("expected the store's error in the cause chain, got %v", cause)
     }
 
-    if 1 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
-        t.Fatal("the store's backend being down degrades every bearer of a valid token to anonymous at once and must be filed at Error")
+    if 0 != len(logger.records) {
+        t.Fatalf("expected no record from the source, the resolution listener files the one record, got %v", logger.records)
     }
 
-    if 0 != len(logger.recordsAtLevel(loggingcontract.LevelInfo)) {
-        t.Fatal("the infrastructure failure must not additionally be filed as a routine Info rejection")
-    }
+    unknown, _ := NewBearerTokenSource(NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})), nil).Resolve(testRuntime(), bearerRequest("opaque-unknown"))
+    expectAnonymousToken(t, unknown)
+
+    missing, _ := source.Resolve(testRuntime(), newSecurityTestRequest("GET", "/", nil, testRuntime()))
+    expectAnonymousToken(t, missing)
 }
 
 func TestBearerTokenSource_BadCredentialStaysAtInfo(t *testing.T) {
@@ -222,7 +226,7 @@ func (instance *markingEnricher) Enrich(
     return securitycontract.Claims{}, exception.NewError("roles lookup failed", nil, MarkInfrastructureFailure(errors.New("store is down")))
 }
 
-func TestBearerTokenSource_MarkedEnrichmentFailureLogsAtError(t *testing.T) {
+func TestBearerTokenSource_AMarkedEnrichmentFailureIsUnavailable(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     store.Put("opaque-1", securitycontract.Claims{UserIdentifier: "user-9"}, bound.UnlimitedDuration())
 
@@ -230,12 +234,14 @@ func TestBearerTokenSource_MarkedEnrichmentFailureLogsAtError(t *testing.T) {
     runtimeInstance, logger := runtimeWithRecordingLogger()
 
     token, resolveErr := source.Resolve(runtimeInstance, bearerRequest("opaque-1"))
-    if nil != resolveErr || true == token.IsAuthenticated() {
-        t.Fatalf("a failed enrichment must fail closed to anonymous: authenticated=%v err=%v", token.IsAuthenticated(), resolveErr)
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
     }
 
-    if 1 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
-        t.Fatal("an enrichment failure carrying the infrastructure mark must be filed at Error")
+    expectUnavailableToken(t, token)
+
+    if 0 != len(logger.records) {
+        t.Fatalf("expected no record from the source, got %v", logger.records)
     }
 }
 

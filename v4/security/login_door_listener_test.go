@@ -6,7 +6,9 @@ import (
     "net/http/httptest"
     "strings"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/http"
@@ -722,4 +724,55 @@ func doorSessionCookie(recorder *httptest.ResponseRecorder) *nethttp.Cookie {
     }
 
     return nil
+}
+
+type doorOwnUnavailableToken struct {
+    AnonymousToken
+}
+
+func (instance *doorOwnUnavailableToken) AuthenticationUnavailableCause() error {
+    return MarkInfrastructureFailure(errors.New("redis is down"))
+}
+
+func TestLoginDoor_AnUnavailableTokenOnADoorWithoutAnAuthenticatorIsRefusedBeforeTheHandler(t *testing.T) {
+    for name, token := range map[string]securitycontract.Token{
+        "the framework's token":   NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down"))),
+        "the application's token": &doorOwnUnavailableToken{},
+    } {
+        t.Run(name, func(t *testing.T) {
+            fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+                config.TokenSource = &doorTokenSource{token: token}
+                config.UnavailableRetryAfter = bound.Of(7 * time.Second)
+            })
+
+            recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
+
+            if nethttp.StatusServiceUnavailable != recorder.Code || "7" != recorder.Header().Get("Retry-After") {
+                t.Fatalf("expected 503 with Retry-After 7, got %d %q: %s", recorder.Code, recorder.Header().Get("Retry-After"), recorder.Body.String())
+            }
+
+            if 0 != fixture.login.calls || 0 != *fixture.failures || 0 != *fixture.successes {
+                t.Fatalf("expected no handler call and no sign-in event, got %d calls, %d failures, %d successes", fixture.login.calls, *fixture.failures, *fixture.successes)
+            }
+
+            if 1 != len(fixture.logger.recordsAtLevel(loggingcontract.LevelError)) {
+                t.Fatalf("expected the one Error record, got %v", fixture.logger.records)
+            }
+        })
+    }
+}
+
+func TestLoginDoor_ADoorAuthenticatorDecidesOverAnUnavailableSourceToken(t *testing.T) {
+    authenticator := &doorAuthenticator{token: NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)}
+    fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.TokenSource = &doorTokenSource{token: NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down")))}
+        config.LoginAuthenticator = authenticator
+    })
+    fixture.login.response = http.TextResponse(nethttp.StatusOK, "signed in")
+
+    recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
+
+    if nethttp.StatusOK != recorder.Code || 1 != authenticator.calls || 1 != fixture.login.calls {
+        t.Fatalf("expected the authenticator's sign-in served, got %d, %d authenticator calls, %d handler calls", recorder.Code, authenticator.calls, fixture.login.calls)
+    }
 }

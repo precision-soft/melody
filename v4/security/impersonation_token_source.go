@@ -174,23 +174,22 @@ func (instance *ImpersonationTokenSource) Resolve(
 
     impersonatedToken, userErr := instance.users.ResolveImpersonatedUser(runtimeInstance, target)
     if nil != userErr {
-        /* the resolver's error travels as the cause; the contract spells an error as a denial, so the record is Info unless the error carries the infrastructure mark */
-        logger := logging.LoggerFromRuntime(runtimeInstance)
-        if nil != logger {
-            record := exception.LogContext(exception.NewError(
-                "could not resolve the impersonated user",
-                map[string]any{"target": internal.BoundDiagnosticText(target)},
-                userErr,
-            ), exception.LogContextConfig{})
+        resolutionErr := exception.NewError(
+            "could not resolve the impersonated user",
+            map[string]any{"target": internal.BoundDiagnosticText(target)},
+            userErr,
+        )
 
-            if true == IsInfrastructureFailure(userErr) {
-                logger.Error("switch-user target resolution infrastructure failed", record)
-            } else {
-                logger.Info("switch-user denied", record)
-            }
+        /* the caller passed the switch-role check, so a failed resolution never runs with the caller's broader roles: a resolver that cannot answer is the unavailable token, recorded once by the resolution listener, any other error a denial with an anonymous token; the earlier branches narrow nothing and pass the inner token through */
+        if true == IsInfrastructureFailure(userErr) {
+            return NewUnavailableToken(resolutionErr), nil
         }
 
-        /* the caller passed the switch-role check, so a failed resolution refuses with an anonymous token rather than running with the caller's broader roles; the earlier branches narrow nothing and pass the inner token through */
+        logger := logging.LoggerFromRuntime(runtimeInstance)
+        if nil != logger {
+            logger.Info("switch-user denied", exception.LogContext(resolutionErr, exception.LogContextConfig{}))
+        }
+
         return NewAnonymousToken(), nil
     }
 

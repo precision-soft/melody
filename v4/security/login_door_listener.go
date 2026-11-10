@@ -167,6 +167,15 @@ func serveLoginDoor(
         return
     }
 
+    /* without an authenticator the handler reads the source's token, and would answer "invalid credentials" for a credential nobody could check */
+    if true == internal.IsNilInterface(firewall.loginAuthenticator) {
+        if cause, unavailable := AuthenticationUnavailableCause(token); true == unavailable {
+            requestEvent.Refuse(newUnavailableRefusal(firewall, cause))
+
+            return
+        }
+    }
+
     previousSessionId := ""
 
     if false == internal.IsNilInterface(firewall.loginAuthenticator) {

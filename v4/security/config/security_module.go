@@ -3,6 +3,7 @@ package config
 import (
     "fmt"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -26,6 +27,9 @@ type GlobalConfig struct {
     AccessDecisionManager securitycontract.AccessDecisionManager
     EntryPoint            securitycontract.EntryPoint
     AccessDeniedHandler   securitycontract.AccessDeniedHandler
+
+    /* UnavailableRetryAfter is the Retry-After of the 503 an unavailable token earns on a protected route: absent is 5s, 1s to 1h in whole seconds, unlimited refused. */
+    UnavailableRetryAfter bound.Duration
 }
 
 /* FirewallOverride is what one firewall declares against the global configuration; the zero value inherits the global access control, local rules first, and overrides nothing. A typed nil among the dependencies is refused naming the field. */
@@ -41,6 +45,9 @@ type FirewallOverride struct {
     AccessDecisionManager securitycontract.AccessDecisionManager
     EntryPoint            securitycontract.EntryPoint
     AccessDeniedHandler   securitycontract.AccessDeniedHandler
+
+    /* UnavailableRetryAfter overrides GlobalConfig.UnavailableRetryAfter for this firewall; absent inherits it. */
+    UnavailableRetryAfter bound.Duration
 }
 
 /* FirewallConfig is what a firewall declares beyond its name, its matcher and its token source: its rules, the sign-in and sign-out doors it serves, and what it overrides of the global configuration. */
@@ -96,6 +103,10 @@ func (instance *Builder) SetGlobal(config GlobalConfig) *Builder {
     refuseTypedNilGlobalDependency("entry point", "GlobalConfig.EntryPoint", config.EntryPoint)
     refuseTypedNilGlobalDependency("access denied handler", "GlobalConfig.AccessDeniedHandler", config.AccessDeniedHandler)
 
+    if retryAfterErr := validateGlobalUnavailableRetryAfter(config); nil != retryAfterErr {
+        exception.Panic(exception.FromError(retryAfterErr))
+    }
+
     instance.globalConfigured = true
     instance.global = config
 
@@ -143,6 +154,10 @@ func (instance *Builder) AddFirewall(
     refuseTypedNilOverrideDependency(name, "entry point", "FirewallConfig.Override.EntryPoint", config.Override.EntryPoint)
     refuseTypedNilOverrideDependency(name, "access denied handler", "FirewallConfig.Override.AccessDeniedHandler", config.Override.AccessDeniedHandler)
 
+    if retryAfterErr := validateOverrideUnavailableRetryAfter(declaration); nil != retryAfterErr {
+        exception.Panic(exception.FromError(retryAfterErr))
+    }
+
     instance.firewalls = append(instance.firewalls, declaration)
 
     return instance
@@ -167,6 +182,32 @@ func (instance *Builder) BuildAndCompile() *security.CompiledConfiguration {
 /* BootWarnings answers the hazards the last BuildAndCompile found in the declaration, each one a configuration the framework admits and does not refuse; the application writes them into the configured journal once, at the boot of an http process or a command */
 func (instance *Builder) BootWarnings() []BootWarning {
     return append([]BootWarning{}, instance.bootWarnings...)
+}
+
+func validateGlobalUnavailableRetryAfter(global GlobalConfig) error {
+    _, retryAfterErr := security.ResolveUnavailableRetryAfter(global.UnavailableRetryAfter, "GlobalConfig.UnavailableRetryAfter")
+
+    return retryAfterErr
+}
+
+func validateOverrideUnavailableRetryAfter(declaration firewallDeclaration) error {
+    _, retryAfterErr := security.ResolveUnavailableRetryAfter(declaration.config.Override.UnavailableRetryAfter, "FirewallConfig.Override.UnavailableRetryAfter")
+    if nil != retryAfterErr {
+        refusal := exception.FromError(retryAfterErr)
+        refusal.SetContextValue("firewallName", declaration.name)
+
+        return refusal
+    }
+
+    return nil
+}
+
+func effectiveUnavailableRetryAfter(global GlobalConfig, declaration firewallDeclaration) bound.Duration {
+    if true == declaration.config.Override.UnavailableRetryAfter.IsAbsent() {
+        return global.UnavailableRetryAfter
+    }
+
+    return declaration.config.Override.UnavailableRetryAfter
 }
 
 func validateFirewallIdentity(declaration firewallDeclaration) error {

@@ -1,13 +1,13 @@
 package security
 
 import (
+    "fmt"
     "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
-    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 const thirtyTwoByteSecret = "a-secret-of-exactly-32-bytes-ok!"
@@ -127,28 +127,25 @@ func TestHmacTokenSource_AShortSecretOfACustomProviderVerifiesNothing(t *testing
         t.Fatalf("encode: %v", encodeErr)
     }
 
-    runtimeInstance, logger := runtimeWithRecordingLogger()
     source := NewHmacTokenSource(HmacTokenSourceConfig{Secrets: &customHmacSecretProvider{secret: shortSecret}, Apps: hmacTestApps()})
 
-    token, resolveErr := source.Resolve(runtimeInstance, hmacRequest("GET", "/internal", nil, DefaultHmacHeaderName, headerValue))
-    if nil != resolveErr || true == token.IsAuthenticated() {
-        t.Fatalf("expected the envelope answered anonymous, got %v / %v", token, resolveErr)
+    token, resolveErr := source.Resolve(testRuntime(), hmacRequest("GET", "/internal", nil, DefaultHmacHeaderName, headerValue))
+    if nil != resolveErr {
+        t.Fatalf("resolve: %v", resolveErr)
     }
 
-    records := logger.recordsAtLevel(loggingcontract.LevelError)
-    if 1 != len(records) {
-        t.Fatalf("expected one Error record, got %v", logger.records)
-    }
+    cause := expectUnavailableToken(t, token)
 
-    context := records[0].context
-    if "HmacTokenSourceConfig.Secrets" != context["field"] || "key-custom" != context["keyId"] || 19 != context["secretLength"] || 32 != context["minimumLength"] {
-        t.Fatalf("expected the short secret named by field, key id and length, got %v", context)
-    }
-
-    for _, value := range context {
-        if rendered, isString := value.(string); true == isString && true == strings.Contains(rendered, string(shortSecret)) {
-            t.Fatalf("expected the secret never written, got %v", context)
+    context := exception.LogContext(cause, exception.LogContextConfig{})
+    rendered := fmt.Sprintf("%v", context)
+    for _, expected := range []string{"HmacTokenSourceConfig.Secrets", "key-custom", "secretLength:19", "minimumLength:32"} {
+        if false == strings.Contains(rendered, expected) {
+            t.Fatalf("expected the short secret named by field, key id and length in the cause, missing %q in %s", expected, rendered)
         }
+    }
+
+    if true == strings.Contains(rendered, string(shortSecret)) {
+        t.Fatalf("expected the secret never written, got %s", rendered)
     }
 
     longSecret := []byte(thirtyTwoByteSecret)

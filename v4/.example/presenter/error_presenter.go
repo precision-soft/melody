@@ -71,7 +71,7 @@ func ApiError(
     )
 }
 
-/* ApiRefusalOfError renders an error the kernel raised: a refusal keeps its status and public message, its cause travels under the development environment alone, anything else answers 500 and says nothing of itself. The second-factor challenge names the factor the client must present. */
+/* ApiRefusalOfError renders an error the kernel raised: a refusal keeps its status and public message, its cause travels under the development environment alone, anything else answers 500 and says nothing of itself. The second-factor challenge names the factor the client must present; a refusal carrying a Retry-After delay keeps it as the header. */
 func ApiRefusalOfError(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
@@ -83,12 +83,18 @@ func ApiRefusalOfError(
 
     statusCode := nethttp.StatusInternalServerError
     message := "internal server error"
-    if httpException := melodyexception.AsHttpException(refusalErr); nil != httpException {
+    httpException := melodyexception.AsHttpException(refusalErr)
+    if nil != httpException {
         statusCode = httpException.StatusCode()
         message = httpException.Message()
     }
 
-    return ApiErrorWithErr(runtimeInstance, request, statusCode, message, refusalErr)
+    response := ApiErrorWithErr(runtimeInstance, request, statusCode, message, refusalErr)
+
+    /* the envelope replaces the framework's rendering, so it carries the refusal's Retry-After itself */
+    melodyhttp.SetRetryAfter(response, httpException.RetryAfter())
+
+    return response
 }
 
 /* ApiErrorWithPayload renders a refusal that tells the client how to go on: the payload names what the client must present next, beside the public message. */
