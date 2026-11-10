@@ -3,8 +3,11 @@ package security
 import (
     "context"
     "errors"
+    nethttp "net/http"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -648,5 +651,95 @@ func TestAuthenticatorTokenSource_AFailedRejectedCredentialsDispatchKeepsTheReje
     )
     if nil == announcedErr || false == errors.Is(err, announcedErr) || false == errors.Is(err, listenerErr) {
         t.Fatalf("expected the rejection kept beside the dispatch error, got %v", err)
+    }
+}
+
+func authenticatorTokenSourceAnswering(token securitycontract.Token, err error) *AuthenticatorTokenSource {
+    return NewAuthenticatorTokenSource(
+        NewAuthenticatorManager([]securitycontract.Authenticator{
+            &testAuthenticator{
+                supportsCallback: func(request httpcontract.Request) bool { return true },
+                authenticateCallback: func(request httpcontract.Request) (securitycontract.Token, error) {
+                    return token, err
+                },
+            },
+        }),
+    )
+}
+
+func TestAuthenticatorTokenSource_AnAuthenticatorThatCouldNotCheckTheCredentialIsNoLoginFailure(t *testing.T) {
+    storeErr := errors.New("redis is down")
+
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+    dispatchedNameList := recordSecurityLoginEvents(dispatcher)
+
+    _, err := authenticatorTokenSourceAnswering(nil, MarkInfrastructureFailure(storeErr)).Resolve(runtimeInstance, newFirewallTestRequest("/"))
+    if false == errors.Is(err, storeErr) || false == IsInfrastructureFailure(err) {
+        t.Fatalf("expected the marked error handed back, got %v", err)
+    }
+
+    unavailable := NewUnavailableToken(MarkInfrastructureFailure(storeErr))
+    token, tokenErr := authenticatorTokenSourceAnswering(unavailable, nil).Resolve(runtimeInstance, newFirewallTestRequest("/"))
+    if nil != tokenErr || securitycontract.Token(unavailable) != token {
+        t.Fatalf("expected the unavailable token passed through, got %T, %v", token, tokenErr)
+    }
+
+    if 0 != len(*dispatchedNameList) {
+        t.Fatalf("expected no sign-in event for a credential nobody could check, got %v", *dispatchedNameList)
+    }
+
+    statusErr := exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: MarkInfrastructureFailure(storeErr)})
+    if _, keptErr := authenticatorTokenSourceAnswering(nil, statusErr).Resolve(runtimeInstance, newFirewallTestRequest("/")); nil == keptErr {
+        t.Fatal("expected the error that keeps its status handed back")
+    }
+    if 1 != len(*dispatchedNameList) || securitycontract.EventSecurityLoginFailure != (*dispatchedNameList)[0] {
+        t.Fatalf("expected the failure event for an error answered with its own status, got %v", *dispatchedNameList)
+    }
+
+    both := &unavailableAuthenticatedToken{}
+    if token, bothErr := authenticatorTokenSourceAnswering(both, nil).Resolve(runtimeInstance, newFirewallTestRequest("/")); nil != bothErr || securitycontract.Token(both) != token || 1 != len(*dispatchedNameList) {
+        t.Fatalf("expected a token both unavailable and authenticated passed through with no event, got %T %v %v", token, bothErr, *dispatchedNameList)
+    }
+}
+
+/* unavailableAuthenticatedToken says both, and the capability decides */
+type unavailableAuthenticatedToken struct {
+    AuthenticatedToken
+}
+
+func (instance *unavailableAuthenticatedToken) IsAuthenticated() bool { return true }
+
+func (instance *unavailableAuthenticatedToken) AuthenticationUnavailableCause() error {
+    return MarkInfrastructureFailure(errors.New("redis is down"))
+}
+
+func TestKernel_AnAuthenticatorOutageServesAPublicRouteAndRefusesAProtectedOneWith503(t *testing.T) {
+    for name, tokenSource := range map[string]func() securitycontract.TokenSource{
+        "a marked error": func() securitycontract.TokenSource {
+            return authenticatorTokenSourceAnswering(nil, MarkInfrastructureFailure(errors.New("redis is down")))
+        },
+        "an unavailable token": func() securitycontract.TokenSource {
+            return authenticatorTokenSourceAnswering(NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down"))), nil)
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            public, handled, _ := newUnavailableRouteFixtureOver(tokenSource(), bound.Of(7*time.Second)).serve(t, "/public")
+            if nethttp.StatusOK != public.Code || false == handled {
+                t.Fatalf("expected the public route served, got %d: %s", public.Code, public.Body.String())
+            }
+
+            protected, protectedHandled, _ := newUnavailableRouteFixtureOver(tokenSource(), bound.Of(7*time.Second)).serve(t, "/admin")
+            if nethttp.StatusServiceUnavailable != protected.Code || "7" != protected.Header().Get("Retry-After") || true == protectedHandled {
+                t.Fatalf("expected 503 with Retry-After 7, got %d %q: %s", protected.Code, protected.Header().Get("Retry-After"), protected.Body.String())
+            }
+        })
+    }
+
+    for _, path := range []string{"/public", "/admin"} {
+        statusErr := exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: MarkInfrastructureFailure(errors.New("redis is down"))})
+        recorder, _, _ := newUnavailableRouteFixtureOver(authenticatorTokenSourceAnswering(nil, statusErr), bound.Of(7*time.Second)).serve(t, path)
+        if nethttp.StatusTooManyRequests != recorder.Code || "" != recorder.Header().Get("Retry-After") {
+            t.Fatalf("expected a marked error that answers 429 to keep it on %s, got %d %q", path, recorder.Code, recorder.Header().Get("Retry-After"))
+        }
     }
 }

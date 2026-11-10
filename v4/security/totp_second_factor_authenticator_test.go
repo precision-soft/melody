@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -418,4 +419,127 @@ func secondFactorRejected(t *testing.T, token securitycontract.Token) bool {
     }
 
     return rejection.SecondFactorRejected()
+}
+
+type failingRecoveryEnrollmentStore struct {
+    redeemErr error
+}
+
+func (instance *failingRecoveryEnrollmentStore) FindTotpSecret(
+    runtimeInstance runtimecontract.Runtime,
+    userIdentifier string,
+) (string, bool, error) {
+    return "JBSWY3DPEHPK3PXP", true, nil
+}
+
+func (instance *failingRecoveryEnrollmentStore) RedeemRecoveryCode(
+    runtimeInstance runtimecontract.Runtime,
+    userIdentifier string,
+    recoveryCode string,
+) (bool, error) {
+    return false, instance.redeemErr
+}
+
+func TestTotpSecondFactor_MarksItsThreeStoreFailures(t *testing.T) {
+    storeErr := errors.New("redis is down")
+    primary := &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)}
+
+    validCode, codeErr := totp.GenerateCodeAt("JBSWY3DPEHPK3PXP", time.Now(), totp.Config{})
+    if nil != codeErr {
+        t.Fatalf("unexpected error: %v", codeErr)
+    }
+
+    for name, turn := range map[string]struct {
+        authenticator *TotpSecondFactorAuthenticator
+        request       httpcontract.Request
+    }{
+        "the enrollment lookup": {
+            authenticator: NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{Primary: primary, Enrollments: &failingEnrollmentStore{lookupErr: storeErr}}),
+            request:       totpRequest(""),
+        },
+        "the recovery redemption": {
+            authenticator: NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{Primary: primary, Enrollments: &failingRecoveryEnrollmentStore{redeemErr: storeErr}}),
+            request:       totpRecoveryRequest("recovery-1"),
+        },
+        "the replay guard": {
+            authenticator: totpAuthenticator("JBSWY3DPEHPK3PXP", true, &failingNonceGuard{failure: storeErr}),
+            request:       totpRequest(validCode),
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            token, err := turn.authenticator.Authenticate(turn.request)
+            if nil != token || false == errors.Is(err, storeErr) || false == IsInfrastructureFailure(err) {
+                t.Fatalf("expected the store failure marked, got %v, %v", token, err)
+            }
+        })
+    }
+
+    wrongCode, wrongErr := totpAuthenticator("JBSWY3DPEHPK3PXP", true, &failingNonceGuard{failure: storeErr}).Authenticate(totpRequest("000000"))
+    if nil != wrongErr || true == wrongCode.IsAuthenticated() || false == secondFactorRejected(t, wrongCode) {
+        t.Fatalf("expected a wrong code to stay a rejected token with no error, got %v, %v", wrongCode, wrongErr)
+    }
+}
+
+func TestTotpSecondFactor_ASecretThatCannotBeReadIsNoOutage(t *testing.T) {
+    token, err := totpAuthenticator("not base32!", true, nil).Authenticate(totpRequest("123456"))
+    if nil != token || nil == err || true == IsInfrastructureFailure(err) {
+        t.Fatalf("expected an unmarked refusal for an unreadable secret, got %v, %v", token, err)
+    }
+}
+
+type failingPrimaryAuthenticator struct {
+    err error
+}
+
+func (instance *failingPrimaryAuthenticator) Supports(_ httpcontract.Request) bool {
+    return true
+}
+
+func (instance *failingPrimaryAuthenticator) Authenticate(_ httpcontract.Request) (securitycontract.Token, error) {
+    return nil, instance.err
+}
+
+func TestTotpSecondFactor_ThePrimarysErrorPassesThroughUnmarked(t *testing.T) {
+    primaryErr := errors.New("malformed credentials")
+
+    _, err := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+        Primary:     &failingPrimaryAuthenticator{err: primaryErr},
+        Enrollments: &fixedEnrollmentStore{secret: "JBSWY3DPEHPK3PXP", enrolled: true},
+    }).Authenticate(totpRequest(""))
+    if false == errors.Is(err, primaryErr) || true == IsInfrastructureFailure(err) {
+        t.Fatalf("expected the primary's error untouched, got %v", err)
+    }
+}
+
+func TestTotpSecondFactor_AStoreFailureItsStoreFiledStaysFiled(t *testing.T) {
+    filed := exception.NewError("enrollment store unavailable", nil, nil)
+    _ = exception.MarkLogged(filed)
+
+    _, filedErr := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
+        Enrollments: &failingEnrollmentStore{lookupErr: filed},
+    }).Authenticate(totpRequest(""))
+    if false == exception.IsAlreadyLogged(filedErr) || false == IsInfrastructureFailure(filedErr) {
+        t.Fatalf("expected a filed store failure to stay filed under the mark, got %v", filedErr)
+    }
+
+    _, unfiledErr := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+        Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
+        Enrollments: &failingEnrollmentStore{lookupErr: errors.New("enrollment store unavailable")},
+    }).Authenticate(totpRequest(""))
+    if true == exception.IsAlreadyLogged(unfiledErr) {
+        t.Fatalf("expected an unfiled store failure left to be filed, got %v", unfiledErr)
+    }
+}
+
+func TestTotpSecondFactor_APrimaryThatCouldNotCheckTheCredentialIsPassedThrough(t *testing.T) {
+    unavailable := &unavailableAuthenticatedToken{}
+
+    token, err := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
+        Primary:     &fixedAuthenticator{token: unavailable},
+        Enrollments: &fixedEnrollmentStore{secret: "JBSWY3DPEHPK3PXP", enrolled: true},
+    }).Authenticate(totpRequest(""))
+    if nil != err || securitycontract.Token(unavailable) != token {
+        t.Fatalf("expected the unavailable token passed through, got %T, %v", token, err)
+    }
 }

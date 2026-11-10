@@ -20,7 +20,7 @@ const DefaultTotpCodeHeaderName = "X-2FA-Code"
 /* DefaultTotpRecoveryHeaderName is the request header a single-use recovery code is read from unless overridden; it is distinct from the TOTP code header so the two never collide. */
 const DefaultTotpRecoveryHeaderName = "X-2FA-Recovery-Code"
 
-/* TotpSecondFactorAuthenticatorConfig composes a primary authenticator with a TOTP second factor into one Authenticator. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is also required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code. When Enrollments also implements TwoFactorRecoveryStore, a single-use recovery code on RecoveryHeaderName is accepted instead of a TOTP code. The ReplayGuard blocks reuse of an accepted code, but failed attempts are NOT rate-limited: throttling and per-user lockout are the application's and MUST front this authenticator, or a 6-digit code can be brute-forced once the primary credential is known. */
+/* TotpSecondFactorAuthenticatorConfig composes a primary authenticator with a TOTP second factor into one Authenticator. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is also required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code. When Enrollments also implements TwoFactorRecoveryStore, a single-use recovery code on RecoveryHeaderName is accepted instead of a TOTP code. The ReplayGuard blocks reuse of an accepted code, but failed attempts are NOT rate-limited: throttling and per-user lockout are the application's and MUST front this authenticator, or a 6-digit code can be brute-forced once the primary credential is known. An enrollment lookup, a recovery redemption or a replay guard that fails returns its error marked with MarkInfrastructureFailure, so the firewall answers it as a credential nobody could check rather than a failed sign-in. */
 type TotpSecondFactorAuthenticatorConfig struct {
     Primary securitycontract.Authenticator
 
@@ -126,11 +126,16 @@ func (instance *TotpSecondFactorAuthenticator) Authenticate(request httpcontract
         return token, nil
     }
 
+    /* a primary that could not check the credential has nothing for the second factor to complete */
+    if _, unavailable := AuthenticationUnavailableCause(token); true == unavailable {
+        return token, nil
+    }
+
     runtimeInstance := request.RuntimeInstance()
 
     secret, enrolled, findErr := instance.enrollments.FindTotpSecret(runtimeInstance, token.UserIdentifier())
     if nil != findErr {
-        return nil, exception.NewError("could not look up two-factor enrollment", nil, findErr)
+        return nil, storeFailure("could not look up two-factor enrollment", findErr)
     }
 
     if false == enrolled {
@@ -200,7 +205,7 @@ func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
         recoveryCode,
     )
     if nil != redeemErr {
-        return false, true, exception.NewError("could not redeem the two-factor recovery code", nil, redeemErr)
+        return false, true, storeFailure("could not redeem the two-factor recovery code", redeemErr)
     }
 
     return redeemed, true, nil
@@ -216,10 +221,20 @@ func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
 
     seen, rememberErr := instance.replayGuard.Remember(request.RuntimeInstance(), nonce, bound.Of(instance.codeValidityWindow))
     if nil != rememberErr {
-        return false, exception.NewError("two-factor replay guard failed", nil, rememberErr)
+        return false, storeFailure("two-factor replay guard failed", rememberErr)
     }
 
     return seen, nil
+}
+
+/* storeFailure marks a store's failure under the message; a cause its store already filed keeps the wrap marked logged, so the store's record stays the only one */
+func storeFailure(message string, storeErr error) error {
+    failure := exception.NewError(message, nil, MarkInfrastructureFailure(storeErr))
+    if true == exception.IsAlreadyLogged(storeErr) {
+        _ = exception.MarkLogged(failure)
+    }
+
+    return failure
 }
 
 var _ securitycontract.Authenticator = (*TotpSecondFactorAuthenticator)(nil)

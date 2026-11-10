@@ -179,7 +179,7 @@ func serveLoginDoor(
     previousSessionId := ""
 
     if false == internal.IsNilInterface(firewall.loginAuthenticator) {
-        authenticatedToken, refusal := authenticateAtLoginDoor(runtimeInstance, request, firewall)
+        authenticatedToken, refusal := authenticateAtLoginDoor(runtimeInstance, requestEvent, firewall)
         if nil != refusal {
             requestEvent.Refuse(refusal)
 
@@ -209,6 +209,12 @@ func serveLoginDoor(
             }
         }
 
+        if true == answeredAsUnavailable(loginErr) {
+            requestEvent.Refuse(refuseUnavailableAtLoginDoor(runtimeInstance, requestEvent, firewall, loginErr))
+
+            return
+        }
+
         requestEvent.Refuse(loginErr)
 
         return
@@ -226,17 +232,23 @@ func serveLoginDoor(
     )
 }
 
-/* authenticateAtLoginDoor reads the credentials through the door's authenticator, on the token source's terms: refused credentials and a refused second factor raise security.login.failure, a second factor not yet presented is a challenge announced to nobody, and an authenticator's error, an outage or a malformed request, is no failed sign-in. */
+/* authenticateAtLoginDoor reads the credentials through the door's authenticator, on the token source's terms: refused credentials and a refused second factor raise security.login.failure, a second factor not yet presented is a challenge announced to nobody, and an authenticator's error, an outage or a malformed request, is no failed sign-in. An outage, a marked error with no http status around the mark or a token carrying securitycontract.AuthenticationUnavailable, is refused 503 with the firewall's Retry-After. */
 func authenticateAtLoginDoor(
     runtimeInstance runtimecontract.Runtime,
-    request httpcontract.Request,
+    requestEvent *http.KernelRequestEvent,
     firewall *CompiledFirewall,
 ) (securitycontract.Token, error) {
+    request := requestEvent.Request()
+
     var token securitycontract.Token = NewAnonymousToken()
 
     if true == firewall.loginAuthenticator.Supports(request) {
         authenticatedToken, authenticateErr := firewall.loginAuthenticator.Authenticate(request)
         if nil != authenticateErr {
+            if true == answeredAsUnavailable(authenticateErr) {
+                return nil, refuseUnavailableAtLoginDoor(runtimeInstance, requestEvent, firewall, authenticateErr)
+            }
+
             return nil, authenticateErr
         }
 
@@ -244,6 +256,10 @@ func authenticateAtLoginDoor(
         if false == internal.IsNilInterface(authenticatedToken) {
             token = authenticatedToken
         }
+    }
+
+    if cause, unavailable := AuthenticationUnavailableCause(token); true == unavailable {
+        return nil, refuseUnavailableAtLoginDoor(runtimeInstance, requestEvent, firewall, cause)
     }
 
     if true == token.IsAuthenticated() {
@@ -276,6 +292,32 @@ func authenticateAtLoginDoor(
     }
 
     return nil, exception.Unauthorized(failureErr.Error())
+}
+
+/* refuseUnavailableAtLoginDoor files the one record of a credential the door could not check, since no resolution listener saw it, unless the cause was already filed */
+func refuseUnavailableAtLoginDoor(
+    runtimeInstance runtimecontract.Runtime,
+    requestEvent *http.KernelRequestEvent,
+    firewall *CompiledFirewall,
+    cause error,
+) error {
+    if false == exception.IsAlreadyLogged(cause) {
+        if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+            logger.Error(
+                "security login door authenticator could not verify the credential: its platform is unavailable",
+                resolutionLogContext(
+                    cause,
+                    requestEvent,
+                    exceptioncontract.Context{
+                        "firewallName": firewall.Name(),
+                        "doorName":     firewall.loginDoor.name,
+                    },
+                ),
+            )
+        }
+    }
+
+    return newUnavailableRefusal(firewall, cause)
 }
 
 func serveLogoutDoor(

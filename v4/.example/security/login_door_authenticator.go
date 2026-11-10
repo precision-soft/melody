@@ -7,9 +7,9 @@ import (
     nethttp "net/http"
     "strings"
 
-    "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -80,8 +80,9 @@ func (instance *LoginDoorAuthenticator) Authenticate(request melodyhttpcontract.
         return nil, chainRefusal(nethttp.StatusTooManyRequests, "too many attempts", authenticationErr)
     }
 
-    if true == errors.Is(authenticationErr, ErrSecondFactorBudgetUnavailable) || true == errors.Is(authenticationErr, twofactor.ErrStoreUnavailable) {
-        return nil, chainRefusal(nethttp.StatusServiceUnavailable, "the second factor is unavailable", authenticationErr)
+    /* an outage carries the framework's mark: the door answers it 503 with the firewall's Retry-After */
+    if true == melodysecurity.IsInfrastructureFailure(authenticationErr) {
+        return nil, authenticationErr
     }
 
     /* the cause names internals and this door is unauthenticated, so the public message says nothing of it */

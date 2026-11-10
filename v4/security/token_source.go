@@ -60,7 +60,8 @@ func (instance *AuthenticatorTokenSource) Name() string {
 func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     token, usedAuthenticator, err := instance.manager.Authenticate(request)
     if nil != err {
-        if true == usedAuthenticator {
+        /* an error answered as the unavailable token is an outage, no failed sign-in: a lockout listener must not count it */
+        if true == usedAuthenticator && false == answeredAsUnavailable(err) {
             eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
             _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
                 runtimeInstance,
@@ -85,6 +86,11 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
     /* IsNilInterface: a typed nil token falls through to the anonymous one */
     if true == internal.IsNilInterface(token) {
         token = NewAnonymousToken()
+    }
+
+    /* a credential the authenticator could not check is neither a rejection nor a sign-in */
+    if _, unavailable := AuthenticationUnavailableCause(token); true == unavailable {
+        return token, nil
     }
 
     /* an authenticator that supported the request and answered no user rejected the credentials the request carried, a wrong api key among them: the failure event lets an audit or lockout listener see it, and the request goes on anonymous; a pending second factor is a rejection only when the token says the factor was supplied and refused, since a correct primary credential waiting for its code is the ordinary challenge */

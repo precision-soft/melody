@@ -1274,6 +1274,10 @@ type unavailableRouteFixture struct {
 
 /* newUnavailableRouteFixture registers both security listeners over one firewall whose source answers token; /admin is protected, /public is PUBLIC_ACCESS and nothing else matches */
 func newUnavailableRouteFixture(token securitycontract.Token, retryAfter bound.Duration) *unavailableRouteFixture {
+    return newUnavailableRouteFixtureOver(&resolutionListenerTestTokenSource{resolveToken: token}, retryAfter)
+}
+
+func newUnavailableRouteFixtureOver(tokenSource securitycontract.TokenSource, retryAfter bound.Duration) *unavailableRouteFixture {
     fixture := &unavailableRouteFixture{
         kernel:          newTestKernel(),
         entryPoint:      &accessControlListenerTestEntryPoint{response: httpPkg.TextResponse(nethttp.StatusUnauthorized, "sign in")},
@@ -1282,7 +1286,7 @@ func newUnavailableRouteFixture(token securitycontract.Token, retryAfter bound.D
     }
 
     firewall := newRefusalSiteFirewall(CompiledFirewallConfig{
-        TokenSource: &resolutionListenerTestTokenSource{resolveToken: token},
+        TokenSource: tokenSource,
         AccessControl: NewAccessControl([]AccessControlRule{
             accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
             accesscontrol.NewExactRule("/public", accesscontrol.RuleConfig{Attributes: []string{securitycontract.AttributePublicAccess}}),

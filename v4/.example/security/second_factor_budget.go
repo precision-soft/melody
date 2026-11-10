@@ -5,13 +5,14 @@ import (
     "fmt"
 
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 /* ErrSecondFactorBudgetSpent is the refusal of a sign-in whose account has spent its second-factor budget; the door answers it 429 before any code is verified. */
 var ErrSecondFactorBudgetSpent = errors.New("second factor budget spent")
 
-/* ErrSecondFactorBudgetUnavailable is the refusal of a sign-in whose second-factor budget could not be read: the door answers it 503, the limiter's failure carried beside it, which the redis limiter has already journaled. */
+/* ErrSecondFactorBudgetUnavailable is the refusal of a sign-in whose second-factor budget could not be read: Authenticate returns it marked with security.MarkInfrastructureFailure, so the door answers it 503 with Retry-After, the limiter's failure carried beside it, which the redis limiter has already journaled. */
 var ErrSecondFactorBudgetUnavailable = errors.New("second factor budget unavailable")
 
 /* NewSecondFactorBudget fronts the second factor with a budget per account, which the TOTP authenticator requires of its application: it limits neither failed codes nor accounts, so a six-digit code could be guessed from as many addresses as the per-address budget allows each.
@@ -66,7 +67,7 @@ func (instance *SecondFactorBudget) Authenticate(request melodyhttpcontract.Requ
             }
 
             /* joined rather than wrapped in a melody error, so the limiter's already-logged mark stays the nearest one in the chain and the door files nothing a second time */
-            return nil, fmt.Errorf("%w: %w", ErrSecondFactorBudgetUnavailable, allowErr)
+            return nil, melodysecurity.MarkInfrastructureFailure(fmt.Errorf("%w: %w", ErrSecondFactorBudgetUnavailable, allowErr))
         }
 
         if false == allowed {

@@ -58,8 +58,8 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
 
             token, resolveErr, panicked := resolveTokenSourceSafely(firewall, runtimeInstance, requestEvent)
 
-            /* a marked error is the second spelling of the unavailable token; a panic stays a refusal, whatever it carried */
-            if nil != resolveErr && false == panicked && true == IsInfrastructureFailure(resolveErr) {
+            /* a marked error is the second spelling of the unavailable token; a panic stays a refusal, whatever it carried, and an http status around the mark is kept */
+            if nil != resolveErr && false == panicked && true == answeredAsUnavailable(resolveErr) {
                 token = NewUnavailableToken(resolveErr)
                 resolveErr = nil
             }
@@ -96,8 +96,8 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
                 token = NewAnonymousToken()
             }
 
-            /* the one record of a credential nobody could check, for framework and custom sources alike; the refusal access control raises for it is marked logged */
-            if cause, unavailable := AuthenticationUnavailableCause(token); true == unavailable {
+            /* the one record of a credential nobody could check, for framework and custom sources alike, unless its producer filed the cause; the refusal access control raises for it is marked logged */
+            if cause, unavailable := AuthenticationUnavailableCause(token); true == unavailable && false == exception.IsAlreadyLogged(cause) {
                 logger := logging.LoggerFromRuntime(runtimeInstance)
                 if nil != logger {
                     logger.Error(

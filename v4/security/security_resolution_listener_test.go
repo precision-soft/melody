@@ -3,6 +3,7 @@ package security
 import (
     "context"
     "errors"
+    nethttp "net/http"
     "strings"
     "testing"
 
@@ -845,4 +846,46 @@ func TestSecurityResolutionListener_AMarkedResolveErrorIsReadAsUnavailable(t *te
         t.Fatal("expected a source panicking with a marked error refused, a panic is never the unavailable token")
     }
     expectAnonymousToken(t, panicked)
+}
+
+func TestSecurityResolutionListener_AMarkedResolveErrorThatAnswersAStatusKeepsIt(t *testing.T) {
+    for name, resolveErr := range map[string]error{
+        "a marked cause under a 400": exception.NewHttpError(nethttp.StatusBadRequest, exception.HttpErrorConfig{Message: "malformed", Cause: MarkInfrastructureFailure(errors.New("redis is down"))}),
+        "a 429 around a marked cause": exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: MarkInfrastructureFailure(errors.New("redis is down"))}),
+    } {
+        t.Run(name, func(t *testing.T) {
+            requestEvent, published, _ := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveErr: resolveErr})
+
+            refusal := exception.AsHttpException(requestEvent.Refusal())
+            if nil == refusal || exception.AsHttpException(resolveErr).StatusCode() != refusal.StatusCode() {
+                t.Fatalf("expected the error's own status refused, got %v", requestEvent.Refusal())
+            }
+
+            expectAnonymousToken(t, published)
+        })
+    }
+}
+
+func TestSecurityResolutionListener_AStoresStatusUnderTheMarkIsReadAsUnavailable(t *testing.T) {
+    requestEvent, published, _ := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{
+        resolveErr: MarkInfrastructureFailure(exception.NewHttpException(nethttp.StatusNotFound, "remote said no such user")),
+    })
+
+    if nil != requestEvent.Refusal() {
+        t.Fatalf("expected no refusal for a status the mark wraps, got %v", requestEvent.Refusal())
+    }
+
+    expectUnavailableToken(t, published)
+}
+
+func TestSecurityResolutionListener_AnUnavailableCauseItsProducerFiledIsNotFiledAgain(t *testing.T) {
+    filed := exception.NewError("redis is down", nil, nil)
+    _ = exception.MarkLogged(filed)
+
+    _, published, logger := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveToken: NewUnavailableToken(MarkInfrastructureFailure(filed))})
+
+    expectUnavailableToken(t, published)
+    if 0 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatalf("expected no second record for a cause already filed, got %v", logger.records)
+    }
 }

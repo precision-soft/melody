@@ -15,7 +15,7 @@ const (
     RequestAttributeLoginAccount  = "example.login.account"
 )
 
-/* PasswordCheck answers the account a username and password name, and false for a pair it refuses; an error is a failure to decide, never a refusal. */
+/* PasswordCheck answers the account a username and password name, and false for a pair it refuses; an error is a failure to decide, never a refusal, and the authenticator returns it marked with security.MarkInfrastructureFailure, so the door answers 503 with Retry-After. */
 type PasswordCheck func(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error)
 
 /* NewPasswordAuthenticator is the first factor of the sign-in. It reads the credentials the door set as request attributes, never the body the door already consumed, and publishes the account it accepted on the request, so the door writes the session without reading the account a second time. */
@@ -38,7 +38,7 @@ func (instance *PasswordAuthenticator) Authenticate(request melodyhttpcontract.R
 
     account, accepted, checkErr := instance.check(request.RuntimeInstance(), username, password)
     if nil != checkErr {
-        return nil, checkErr
+        return nil, melodysecurity.MarkInfrastructureFailure(checkErr)
     }
 
     if false == accepted || nil == account {

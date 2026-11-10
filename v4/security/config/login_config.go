@@ -30,7 +30,7 @@ type LoginConfig struct {
     /* Attributes are the door's route attributes, ExposedRouteAttributes among them, under the rules of a route's. */
     Attributes map[string]any
 
-    /* Authenticator reads the credentials before Handler runs, and the door then rotates the session id; nil hands Handler the token source's token, and Handler rotates. */
+    /* Authenticator reads the credentials before Handler runs, and the door then rotates the session id; nil hands Handler the token source's token, and Handler rotates. An authenticator, or a Handler, that could not check the credential is answered 503 with the firewall's Retry-After. */
     Authenticator securitycontract.Authenticator
 
     /* Methods are what the door serves, POST when left out; a safe method is refused, since a state change on one is forgeable by a link. */

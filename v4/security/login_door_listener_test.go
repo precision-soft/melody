@@ -15,6 +15,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     httpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
     "github.com/precision-soft/melody/v4/internal"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -774,5 +775,136 @@ func TestLoginDoor_ADoorAuthenticatorDecidesOverAnUnavailableSourceToken(t *test
 
     if nethttp.StatusOK != recorder.Code || 1 != authenticator.calls || 1 != fixture.login.calls {
         t.Fatalf("expected the authenticator's sign-in served, got %d, %d authenticator calls, %d handler calls", recorder.Code, authenticator.calls, fixture.login.calls)
+    }
+}
+
+func TestLoginDoor_AnAuthenticatorThatCouldNotCheckTheCredentialIsRefusedWith503AndRetryAfter(t *testing.T) {
+    alreadyFiled := exception.NewError("redis is down", nil, nil)
+    _ = exception.MarkLogged(alreadyFiled)
+
+    for name, turn := range map[string]struct {
+        authenticator *doorAuthenticator
+        records       int
+    }{
+        "a marked error":                {authenticator: &doorAuthenticator{err: MarkInfrastructureFailure(errors.New("redis is down"))}, records: 1},
+        "an unavailable token":          {authenticator: &doorAuthenticator{token: NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down")))}, records: 1},
+        "a marked error already filed":  {authenticator: &doorAuthenticator{err: MarkInfrastructureFailure(alreadyFiled)}, records: 0},
+        "the application's own token":   {authenticator: &doorAuthenticator{token: &doorOwnUnavailableToken{}}, records: 1},
+        "a token both unavailable and authenticated": {authenticator: &doorAuthenticator{token: &unavailableAuthenticatedToken{}}, records: 1},
+        "a store's status under the mark": {authenticator: &doorAuthenticator{err: MarkInfrastructureFailure(exception.NewHttpException(nethttp.StatusNotFound, "remote said no such user"))}, records: 1},
+    } {
+        t.Run(name, func(t *testing.T) {
+            fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+                config.LoginAuthenticator = turn.authenticator
+                config.UnavailableRetryAfter = bound.Of(7 * time.Second)
+            })
+
+            recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
+
+            if nethttp.StatusServiceUnavailable != recorder.Code || "7" != recorder.Header().Get("Retry-After") {
+                t.Fatalf("expected 503 with Retry-After 7, got %d %q: %s", recorder.Code, recorder.Header().Get("Retry-After"), recorder.Body.String())
+            }
+
+            if 0 != fixture.login.calls || 0 != *fixture.failures || 0 != *fixture.successes {
+                t.Fatalf("expected no handler call and no sign-in event, got %d calls, %d failures, %d successes", fixture.login.calls, *fixture.failures, *fixture.successes)
+            }
+
+            if cookie := doorSessionCookie(recorder); nil != cookie {
+                t.Fatalf("expected the session not rotated, got %+v", cookie)
+            }
+
+            records := fixture.logger.recordsAtLevel(loggingcontract.LevelError)
+            if turn.records != len(records) {
+                t.Fatalf("expected %d Error records, got %v", turn.records, fixture.logger.records)
+            }
+
+            if 1 == len(records) && ("main" != records[0].context["firewallName"] || doorLoginPath != records[0].context["path"] || nethttp.MethodPost != records[0].context["method"]) {
+                t.Fatalf("expected the record to name the firewall, the method and the path, got %v", records[0].context)
+            }
+        })
+    }
+}
+
+func TestLoginDoor_AnAuthenticatorErrorThatAnswersAStatusKeepsIt(t *testing.T) {
+    for name, turn := range map[string]struct {
+        err    error
+        status int
+    }{
+        "a marked cause under a 400": {err: exception.NewHttpError(nethttp.StatusBadRequest, exception.HttpErrorConfig{Message: "malformed", Cause: MarkInfrastructureFailure(errors.New("redis is down"))}), status: nethttp.StatusBadRequest},
+        "a 429 around a marked cause": {err: exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: MarkInfrastructureFailure(errors.New("redis is down"))}), status: nethttp.StatusTooManyRequests},
+        "an unmarked error":          {err: errors.New("malformed json"), status: nethttp.StatusInternalServerError},
+    } {
+        t.Run(name, func(t *testing.T) {
+            fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+                config.LoginAuthenticator = &doorAuthenticator{err: turn.err}
+            })
+
+            recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
+
+            if turn.status != recorder.Code || "" != recorder.Header().Get("Retry-After") {
+                t.Fatalf("expected %d without Retry-After, got %d %q", turn.status, recorder.Code, recorder.Header().Get("Retry-After"))
+            }
+        })
+    }
+}
+
+func TestLoginDoor_TheUnavailableRefusalNamesTheDoorAndCarriesTheCause(t *testing.T) {
+    storeErr := errors.New("redis is down")
+    fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.LoginAuthenticator = &doorAuthenticator{err: MarkInfrastructureFailure(storeErr)}
+        config.LoginName = "security.main.login"
+    })
+
+    var observedErr error
+    fixture.kernel.eventDispatcher.AddListener(kernelcontract.EventKernelException, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        observedErr = eventValue.Payload().(*http.KernelExceptionEvent).Err()
+
+        return nil
+    }, 10)
+
+    recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || false == errors.Is(observedErr, storeErr) || false == errors.Is(observedErr, ErrAuthenticationUnavailable) {
+        t.Fatalf("expected the 503 to carry the cause and the sentinel, got %d %v", recorder.Code, observedErr)
+    }
+
+    records := fixture.logger.recordsAtLevel(loggingcontract.LevelError)
+    if 1 != len(records) {
+        t.Fatalf("expected one Error record, got %v", fixture.logger.records)
+    }
+
+    record := records[0]
+    if "security login door authenticator could not verify the credential: its platform is unavailable" != record.message || "security.main.login" != record.context["doorName"] || "redis is down" != record.context["error"] {
+        t.Fatalf("expected the record to name the door and the cause, got %q %v", record.message, record.context)
+    }
+}
+
+func TestLoginDoor_AHandlerThatCouldNotReachItsStoreIsRefusedWith503AndNoFailedSignIn(t *testing.T) {
+    fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.LoginAuthenticator = &doorAuthenticator{token: NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)}
+        config.UnavailableRetryAfter = bound.Of(7 * time.Second)
+    })
+    fixture.login.err = MarkInfrastructureFailure(errors.New("session store is down"))
+
+    recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "7" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with Retry-After 7, got %d %q: %s", recorder.Code, recorder.Header().Get("Retry-After"), recorder.Body.String())
+    }
+
+    if 0 != *fixture.failures || 1 != len(fixture.logger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatalf("expected no failure event and one Error record, got %d failures, %v", *fixture.failures, fixture.logger.records)
+    }
+
+    if cookie := doorSessionCookie(recorder); nil != cookie && 0 <= cookie.MaxAge {
+        t.Fatalf("expected the rotated session ended, got %+v", cookie)
+    }
+
+    unmarked := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.LoginAuthenticator = &doorAuthenticator{token: NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)}
+    })
+    unmarked.login.err = errors.New("handler bug")
+    if refused := unmarked.serve(t, nethttp.MethodPost, doorLoginPath, nil); nethttp.StatusInternalServerError != refused.Code || 1 != *unmarked.failures {
+        t.Fatalf("expected an unmarked handler error 500 with its failure event, got %d, %d failures", refused.Code, *unmarked.failures)
     }
 }

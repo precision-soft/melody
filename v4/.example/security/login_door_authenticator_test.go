@@ -154,8 +154,8 @@ func TestLoginHandler_KeepsTheAuthenticationCauseOutOfTheResponseWithoutDebug(t 
 
     statusCode, body := loginResponseBody(t, runtimeInstance)
 
-    if nethttp.StatusInternalServerError != statusCode {
-        t.Fatalf("expected the authentication failure answered as 500, got %d", statusCode)
+    if nethttp.StatusServiceUnavailable != statusCode {
+        t.Fatalf("expected the account store outage answered as 503, got %d", statusCode)
     }
 
     if true == strings.Contains(body, authenticationCauseSecret) {
@@ -172,7 +172,7 @@ func TestLoginHandler_KeepsTheAuthenticationCauseOutOfTheResponseWithoutDebug(t 
         t.Fatalf("unmarshal response body: %v (%s)", unmarshalErr, body)
     }
 
-    if 1 != len(decoded.Errors) || "authentication failed" != decoded.Errors[0] {
+    if 1 != len(decoded.Errors) || "service unavailable" != decoded.Errors[0] {
         t.Fatalf("expected only the public message in the errors list, got %#v", decoded.Errors)
     }
 
@@ -191,8 +191,8 @@ func TestLoginHandler_CarriesTheAuthenticationCauseUnderDebug(t *testing.T) {
 
     statusCode, body := loginResponseBody(t, runtimeInstance)
 
-    if nethttp.StatusInternalServerError != statusCode {
-        t.Fatalf("expected the authentication failure answered as 500, got %d", statusCode)
+    if nethttp.StatusServiceUnavailable != statusCode {
+        t.Fatalf("expected the account store outage answered as 503, got %d", statusCode)
     }
 
     var decoded struct {
@@ -205,18 +205,16 @@ func TestLoginHandler_CarriesTheAuthenticationCauseUnderDebug(t *testing.T) {
         t.Fatalf("unmarshal response body: %v (%s)", unmarshalErr, body)
     }
 
-    if 1 != len(decoded.Errors) || "authentication failed" != decoded.Errors[0] {
+    if 1 != len(decoded.Errors) || "service unavailable" != decoded.Errors[0] {
         t.Fatalf("expected the errors list to stay the public message even under debug, got %#v", decoded.Errors)
     }
 
-    errorEntry, exists := decoded.Context["error"].(map[string]any)
-    if false == exists {
-        t.Fatalf("expected the cause in the debug-gated context, got %#v", decoded.Context)
+    if _, exists := decoded.Context["error"].(map[string]any); false == exists {
+        t.Fatalf("expected the error in the debug-gated context, got %#v", decoded.Context)
     }
 
-    message, isString := errorEntry["message"].(string)
-    if false == isString || false == strings.Contains(message, authenticationCauseSecret) {
-        t.Fatalf("expected the cause message under debug, got %#v", errorEntry)
+    if false == strings.Contains(body, authenticationCauseSecret) {
+        t.Fatalf("expected the cause under debug, got %s", body)
     }
 
     if 0 == len(decoded.Trace) {
@@ -254,12 +252,12 @@ func TestLoginHandler_ReadsTheJsonCredentialsFromTheBodyAndRefusesAnyOtherBody(t
     }
 
     statusCode, body = login("/login", "application/json", `{"username":"admin","password":"secret"}`)
-    if nethttp.StatusInternalServerError != statusCode || false == strings.Contains(body, "authentication failed") {
+    if nethttp.StatusServiceUnavailable != statusCode || false == strings.Contains(body, "service unavailable") {
         t.Fatalf("credentials carried by the body did not reach the authentication: status %d, body %s", statusCode, body)
     }
 
     statusCode, body = login("/login", "application/json; charset=utf-8", `{"username":"admin","password":"secret"}`)
-    if nethttp.StatusInternalServerError != statusCode {
+    if nethttp.StatusServiceUnavailable != statusCode {
         t.Fatalf("a json body with a charset parameter did not reach the authentication: status %d, body %s", statusCode, body)
     }
 
@@ -1177,7 +1175,7 @@ func (instance *unreadableBudgetLimiter) AllowWithRuntime(runtimeInstance melody
 
 func (instance *unreadableBudgetLimiter) Reset(key string) {}
 
-func TestLoginHandler_AnswersAnUnreadableBudgetWith503AndOneRecord(t *testing.T) {
+func TestLoginHandler_AnswersAnUnreadableBudgetWith503RetryAfterAndOneRecord(t *testing.T) {
     journal := &loginJournalRecordingLogger{Logger: melodylogging.NewNopLogger()}
     login := newSecondFactorLoginWith(t, secondFactorLoginOptions{
         limiter: func(clockInstance melodyclockcontract.Clock) melodyhttpcontract.RateLimiter {
@@ -1188,9 +1186,12 @@ func TestLoginHandler_AnswersAnUnreadableBudgetWith503AndOneRecord(t *testing.T)
 
     response, sessionInstance := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: login.currentCode(t)})
 
-    requireLoginAnswer(t, response, nethttp.StatusServiceUnavailable, "the second factor is unavailable")
+    requireLoginAnswer(t, response, nethttp.StatusServiceUnavailable, "service unavailable")
+    if "5" != response.Headers().Get("Retry-After") {
+        t.Fatalf("expected the firewall's Retry-After, got %q", response.Headers().Get("Retry-After"))
+    }
 
-    if 1 != len(journal.recordsNamed("rate limiter store failure")) || 0 != len(journal.recordsNamed("handler answered a server error")) {
+    if 1 != len(journal.recordsNamed("rate limiter store failure")) || 0 != len(journal.recordsNamed("security login door authenticator could not verify the credential: its platform is unavailable")) || 0 != len(journal.recordsNamed("handler answered a server error")) {
         t.Fatalf("expected the outage filed once, by the limiter, got %v", journal.errorRecords)
     }
 
@@ -1199,7 +1200,7 @@ func TestLoginHandler_AnswersAnUnreadableBudgetWith503AndOneRecord(t *testing.T)
     }
 }
 
-func TestLoginHandler_AnswersAnUnavailableSecondFactorStoreWith503(t *testing.T) {
+func TestLoginHandler_AnswersAnUnavailableSecondFactorStoreWith503RetryAfterAndOneRecord(t *testing.T) {
     journal := &loginJournalRecordingLogger{Logger: melodylogging.NewNopLogger()}
     login := newSecondFactorLoginWith(t, secondFactorLoginOptions{
         enrollments: twofactor.NewEnrollments(func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
@@ -1210,9 +1211,12 @@ func TestLoginHandler_AnswersAnUnavailableSecondFactorStoreWith503(t *testing.T)
 
     response, _ := login.post(t, "editor", "editor", nil)
 
-    requireLoginAnswer(t, response, nethttp.StatusServiceUnavailable, "the second factor is unavailable")
+    requireLoginAnswer(t, response, nethttp.StatusServiceUnavailable, "service unavailable")
+    if "5" != response.Headers().Get("Retry-After") {
+        t.Fatalf("expected the firewall's Retry-After, got %q", response.Headers().Get("Retry-After"))
+    }
 
-    if 1 != len(journal.recordsNamed("handler answered a server error")) {
+    if 1 != len(journal.recordsNamed("security login door authenticator could not verify the credential: its platform is unavailable")) || 0 != len(journal.recordsNamed("handler answered a server error")) {
         t.Fatalf("expected the unavailable store filed once by the door, got %v", journal.errorRecords)
     }
 

@@ -41,7 +41,7 @@ func (instance *authenticationUnavailableCause) Unwrap() error {
     return instance.cause
 }
 
-/* newUnavailableRefusal builds the 503 an unavailable token earns: ErrAuthenticationUnavailable and the cause in its chain, the firewall's Retry-After, and marked logged, since the security resolution listener already filed the cause */
+/* newUnavailableRefusal builds the 503 an unavailable token earns: ErrAuthenticationUnavailable and the cause in its chain, the firewall's Retry-After, and marked logged, since its cause was filed where it was read: by the security resolution listener, by the sign-in door or by its own producer */
 func newUnavailableRefusal(firewall *CompiledFirewall, cause error) error {
     refusal := exception.NewHttpError(
         nethttp.StatusServiceUnavailable,
