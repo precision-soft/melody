@@ -1,6 +1,7 @@
 package internal
 
 import (
+    "slices"
     "testing"
 
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -64,14 +65,17 @@ func TestBootWarningRegistry_NamesEachCodeOnceAndMarksWhatACliProcessWrites(t *t
         }
     }
 
-    if cliNames := registry.CliNames(); 1 != len(cliNames) || BootWarningNameFirewallDoorReachUnknown != cliNames[0] {
-        t.Fatalf("expected the door reach code alone written by a cli process, got %v", cliNames)
+    expectedCliNames := []string{BootWarningNameFirewallDoorReachUnknown, BootWarningNameProcessEnvironmentVariableIgnored, BootWarningNameSecretMarkUnmatched}
+    if cliNames := registry.CliNames(); false == slices.Equal(expectedCliNames, cliNames) {
+        t.Fatalf("expected %v written by a cli process, got %v", expectedCliNames, cliNames)
     }
 
     for name, expected := range map[string]bool{
         BootWarningNameFirewallDoorReachUnknown:                   true,
         BootWarningNameEnvironmentDefaulted:                       false,
         BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage: false,
+        BootWarningNameProcessEnvironmentVariableIgnored:          true,
+        BootWarningNameSecretMarkUnmatched:                        true,
         "security.firewallShadowed":                               false,
     } {
         if expected != registry.WrittenInCli(name) {
@@ -99,7 +103,7 @@ func TestBootWarningRegistry_DeclareAddsACodeOnceAndKeepsEachRegistryApart(t *te
         t.Fatalf("expected the http code known and not written in cli")
     }
 
-    if cliNames := registry.CliNames(); 2 != len(cliNames) || "module.cliHazard" != cliNames[1] {
+    if cliNames := registry.CliNames(); 4 != len(cliNames) || "module.cliHazard" != cliNames[3] {
         t.Fatalf("expected the declared cli code after the framework's, got %v", cliNames)
     }
 

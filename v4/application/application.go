@@ -48,6 +48,8 @@ type Application struct {
     httpShutdownHooks         []func()
     securityConfiguration     *security.CompiledConfiguration
     bootWarnings              []internal.BootWarning
+    /* the run writes the boot warnings when it starts and an exit handler when the process dies before that, so the two never write them twice */
+    bootWarningsWritten       bool
     bootWarningRegistry       *internal.BootWarningRegistry
     /* the module that declared each code, so a second declaration names both owners */
     bootWarningOwners         map[string]string
@@ -128,7 +130,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.checkDefaultSessionStorageBound()
 
-    warnIgnoredProcessEnvironment(instance.bootLogger(), configuration, os.Environ())
+    instance.bootWarnings = append(instance.bootWarnings, ignoredProcessEnvironmentBootWarnings(configuration, os.Environ())...)
 
     instance.bootCli()
 
@@ -143,7 +145,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     /* after the collisions are reported and every registration is in: an optional feature built for its teardown, not for a caller */
     instance.buildMessageBusTransportsCloser()
 
-    instance.warnUnappliedSecretMarks()
+    instance.collectUnappliedSecretMarks()
 
     instance.verifyDeclaredTeardownDependencies()
 
@@ -170,7 +172,7 @@ func (instance *Application) RegisterSecretParameter(
     instance.registerParameter(name, value, true)
 }
 
-/* MarkParameterSecret marks a parameter that already exists, typically one melody registered from the .env artifacts, as holding a credential. A name that matches nothing does not fail the boot, since an environment key may be undefined in some environments; it is retried before the configuration resolves and at the end of the boot, and warned about then. */
+/* MarkParameterSecret marks a parameter that already exists, typically one melody registered from the .env artifacts, as holding a credential. A name that matches nothing does not fail the boot, since an environment key may be undefined in some environments; it is retried before the configuration resolves and at the end of the boot, and what still matches nothing is the boot warning `application.secretMark.unmatched`. */
 func (instance *Application) MarkParameterSecret(name string) {
     if true == instance.booted {
         exception.Panic(
@@ -202,19 +204,20 @@ func (instance *Application) applyUnappliedSecretMarks() {
     instance.unappliedSecretMarks = remaining
 }
 
-/* warnUnappliedSecretMarks runs when every phase that can register a parameter has finished: a marking that still matches nothing is a misspelled name or a key undefined in this environment. */
-func (instance *Application) warnUnappliedSecretMarks() {
+/* collectUnappliedSecretMarks runs when every phase that can register a parameter has finished: a marking that still matches nothing is a misspelled name or a key undefined in this environment. */
+func (instance *Application) collectUnappliedSecretMarks() {
     for _, name := range instance.unappliedSecretMarks {
         if true == instance.configuration.MarkSecret(name) {
             continue
         }
 
-        instance.bootLogger().Warning(
-            "a secret marking matched no parameter; the name may be misspelled, or the environment key is undefined in this environment",
-            loggingcontract.Context{
+        instance.bootWarnings = append(instance.bootWarnings, internal.BootWarning{
+            Name:    internal.BootWarningNameSecretMarkUnmatched,
+            Message: "a secret marking matched no parameter; the name may be misspelled, or the environment key is undefined in this environment",
+            Context: loggingcontract.Context{
                 "parameterName": name,
             },
-        )
+        })
     }
 
     instance.unappliedSecretMarks = nil
@@ -278,7 +281,10 @@ func (instance *Application) Run() {
             return
         }
 
-        logging.LogOnRecoverAndExit(instance.resolveExitLogger(), recoveredValue, 1, instance.exitConfig())
+        exitLogger := instance.resolveExitLogger()
+        instance.writeBootWarningsBeforeExit(exitLogger)
+
+        logging.LogOnRecoverAndExit(exitLogger, recoveredValue, 1, instance.exitConfig())
     }()
 
     if config.ModeCli == instance.runtimeFlags.Mode() {
@@ -390,7 +396,19 @@ func (instance *Application) logOnRecoverAndExit() {
     }
 
     /* the teardown hook mirrors the one Run passes, so a boot that dies after the container was built closes it before os.Exit: the record is written first, then the close runs, then the exit. A boot that died before the kernel existed costs nothing through the nil-kernel check close starts with. */
-    logging.LogOnRecoverAndExit(instance.resolveExitLogger(), recoveredValue, 1, instance.exitConfig())
+    exitLogger := instance.resolveExitLogger()
+    instance.writeBootWarningsBeforeExit(exitLogger)
+
+    logging.LogOnRecoverAndExit(exitLogger, recoveredValue, 1, instance.exitConfig())
+}
+
+/* writeBootWarningsBeforeExit writes the boot warnings a process dying before its run wrote none of, since the hazard they name may be what killed it; a failure writing them gives way to the exit record */
+func (instance *Application) writeBootWarningsBeforeExit(logger loggingcontract.Logger) {
+    defer func() {
+        _ = recover()
+    }()
+
+    instance.writeBootWarnings(logger)
 }
 
 /* resolveExitLogger picks the logger the final fatal record is written through: the container logger while it still writes, else a last-resort logger on the configured destination, else the emergency logger. Liveness is asked of the logger itself, since the container keeps serving built instances after Close and a closed file logger drops every write. An Application assembled without NewApplication answers the emergency logger. */
@@ -533,14 +551,24 @@ func environmentDefaultedBootWarnings(mode string, configuration configcontract.
     }
 }
 
-/* the cli keys are refused in an http process, so the filter only ever narrows what a command writes */
+/* only a command reads the cli keys: an http process dying on its refusal of them still writes every boot warning */
 func (instance *Application) writeBootWarnings(logger loggingcontract.Logger) {
-    cliConfiguration := instance.configuration.Cli()
-    if true == cliConfiguration.BootWarningsDisabled() {
+    if true == instance.bootWarningsWritten {
         return
     }
 
-    ignored := cliConfiguration.BootWarningsIgnored()
+    instance.bootWarningsWritten = true
+
+    ignored := make([]string, 0)
+
+    if nil != instance.runtimeFlags && config.ModeCli == instance.runtimeFlags.Mode() && nil != instance.configuration && false == internal.IsNilInterface(instance.configuration.Cli()) {
+        cliConfiguration := instance.configuration.Cli()
+        if true == cliConfiguration.BootWarningsDisabled() {
+            return
+        }
+
+        ignored = cliConfiguration.BootWarningsIgnored()
+    }
 
     for _, bootWarning := range instance.bootWarnings {
         if true == slices.Contains(ignored, bootWarning.Name) {

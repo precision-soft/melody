@@ -4,6 +4,8 @@ import (
     "context"
     "os"
     "os/exec"
+    "path/filepath"
+    "slices"
     "strings"
     "testing"
 
@@ -12,8 +14,9 @@ import (
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
-    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
+    "github.com/precision-soft/melody/v4/lock"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 type bootWarningDeclaration struct {
@@ -162,7 +165,7 @@ func TestBootModuleBootWarnings_AdmitsTheSameModuleRegisteredTwice(t *testing.T)
         t.Fatalf("expected a second instance of one module admitted, got %v", refusal)
     }
 
-    if cliNames := applicationInstance.bootWarningRegistryOf().CliNames(); 2 != len(cliNames) || "test.module.hazard" != cliNames[1] {
+    if cliNames := applicationInstance.bootWarningRegistryOf().CliNames(); 4 != len(cliNames) || "test.module.hazard" != cliNames[3] {
         t.Fatalf("expected the code declared once, got %v", cliNames)
     }
 }
@@ -247,6 +250,8 @@ func TestRefuseUnknownCliBootWarningCodes_JudgesEachCodeAgainstTheFrameworkAndTh
             "cli boot warning code names a boot warning only an http process writes, so a cli process never reads it",
         },
         {"a cli framework code", internal.BootWarningNameFirewallDoorReachUnknown, nil, ""},
+        {"the ignored process variable code", internal.BootWarningNameProcessEnvironmentVariableIgnored, nil, ""},
+        {"the unmatched secret mark code", internal.BootWarningNameSecretMarkUnmatched, nil, ""},
         {"a cli module code", "test.module.hazard", []applicationcontract.Module{newModuleHazardModule("storage")}, ""},
     } {
         applicationInstance := newCacheWarningTestApplicationOver(t, config.ModeCli, map[string]string{config.CliBootWarningsIgnoredKey: "  " + testCase.code}, &warningRecordingLogger{})
@@ -267,7 +272,7 @@ func TestRefuseUnknownCliBootWarningCodes_JudgesEachCodeAgainstTheFrameworkAndTh
         }
 
         cliCodes, isList := refusal.Context()["cliCodes"].([]string)
-        if false == isList || 1 != len(cliCodes) || internal.BootWarningNameFirewallDoorReachUnknown != cliCodes[0] {
+        if false == isList || false == slices.Equal(internal.NewBootWarningRegistry().CliNames(), cliCodes) {
             t.Fatalf("%s: expected the codes a command can list named, got %v", testCase.name, refusal.Context()["cliCodes"])
         }
 
@@ -334,4 +339,238 @@ func TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs(t *testing.T) {
             t.Fatalf("%s: expected the refusal %q, got: %s", probe, expected.output, string(output))
         }
     }
+}
+
+const (
+    ignoredProcessVariableFragment = "process environment variable is ignored"
+    unmatchedSecretMarkFragment    = "a secret marking matched no parameter"
+)
+
+/* both are collected rather than written at boot, so a command filters them like every other boot warning */
+func TestRunCli_WritesTheIgnoredProcessVariableAndTheUnmatchedSecretMarkUnderTheCliKeys(t *testing.T) {
+    originalArguments := os.Args
+    os.Args = []string{"melody"}
+    defer func() { os.Args = originalArguments }()
+
+    for _, testCase := range []struct {
+        name               string
+        values             map[string]string
+        expectedVariable   int
+        expectedSecretMark int
+    }{
+        {"every code", map[string]string{}, 1, 1},
+        {"the variable code ignored", map[string]string{config.CliBootWarningsIgnoredKey: internal.BootWarningNameProcessEnvironmentVariableIgnored}, 0, 1},
+        {"the secret mark code ignored", map[string]string{config.CliBootWarningsIgnoredKey: internal.BootWarningNameSecretMarkUnmatched}, 1, 0},
+        {"the journal disabled", map[string]string{config.CliBootWarningsDisabledKey: "true"}, 0, 0},
+    } {
+        cliLogger := &warningRecordingLogger{}
+        cliApplication := newCacheWarningTestApplicationOver(t, config.ModeCli, testCase.values, cliLogger)
+        cliApplication.refuseUnknownCliBootWarningCodes()
+
+        cliApplication.bootWarnings = append(cliApplication.bootWarnings, ignoredProcessEnvironmentBootWarnings(cliApplication.configuration, []string{"MELODY_PROCESS_ROLE=worker"})...)
+        cliApplication.MarkParameterSecret("app.misspelled")
+        cliApplication.collectUnappliedSecretMarks()
+
+        if runErr := cliApplication.runCli(); nil != runErr {
+            t.Fatalf("%s: unexpected run cli error: %v", testCase.name, runErr)
+        }
+
+        if warnings := cliLogger.warningsContaining(ignoredProcessVariableFragment); testCase.expectedVariable != len(warnings) {
+            t.Fatalf("%s: expected the ignored variable written %d times, got %v", testCase.name, testCase.expectedVariable, warnings)
+        }
+
+        if warnings := cliLogger.warningsContaining(unmatchedSecretMarkFragment); testCase.expectedSecretMark != len(warnings) {
+            t.Fatalf("%s: expected the unmatched secret mark written %d times, got %v", testCase.name, testCase.expectedSecretMark, warnings)
+        }
+    }
+}
+
+func TestBoot_CollectsTheIgnoredProcessVariableAndTheUnmatchedSecretMark(t *testing.T) {
+    t.Setenv(config.HttpAddressKey, "127.0.0.1:1")
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance.MarkParameterSecret("app.misspelled")
+
+    applicationInstance.Boot()
+
+    collected := make(map[string]loggingcontract.Context)
+    for _, bootWarning := range applicationInstance.bootWarnings {
+        collected[bootWarning.Name] = bootWarning.Context
+    }
+
+    if config.HttpAddressKey != collected[internal.BootWarningNameProcessEnvironmentVariableIgnored]["environmentVariable"] {
+        t.Fatalf("expected the boot to collect the ignored process variable, got %+v", applicationInstance.bootWarnings)
+    }
+
+    if "app.misspelled" != collected[internal.BootWarningNameSecretMarkUnmatched]["parameterName"] {
+        t.Fatalf("expected the boot to collect the unmatched secret mark, got %+v", applicationInstance.bootWarnings)
+    }
+}
+
+const bootWarningsBeforeExitProbeMarker = "MELODY_TEST_BOOT_WARNINGS_BEFORE_EXIT_PROBE"
+
+/* a boot refused after the collection exits before any run, so the exit handler writes the boot warnings beside the exit record; the hazard they name may be what killed it */
+func TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord(t *testing.T) {
+    if probe := os.Getenv(bootWarningsBeforeExitProbeMarker); "" != probe {
+        projectDirectory, disabled, _ := strings.Cut(probe, "|")
+        values := map[string]string{config.HttpAddressKey: "127.0.0.1:34525"}
+        if "disabled" == disabled {
+            values[config.CliBootWarningsDisabledKey] = "true"
+        }
+
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli}),
+            kernel:               newTestKernel(),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.MarkParameterSecret("app.misspelled")
+        lock.NewLazyLocker(applicationInstance.kernel.ServiceContainer())
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    for _, testCase := range []struct {
+        name     string
+        disabled string
+        expected bool
+    }{
+        {"every code", "", true},
+        {"the journal disabled", "disabled", false},
+    } {
+        childProjectDirectory := t.TempDir()
+        child := exec.Command(os.Args[0], "-test.run=^TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord$")
+        child.Env = append(os.Environ(), bootWarningsBeforeExitProbeMarker+"="+childProjectDirectory+"|"+testCase.disabled, config.HttpAddressKey+"=127.0.0.1:1")
+
+        output, runErr := child.CombinedOutput()
+
+        exitError, isExitError := runErr.(*exec.ExitError)
+        if false == isExitError || 1 != exitError.ExitCode() {
+            t.Fatalf("%s: expected the boot to exit 1, got err %v with output: %s", testCase.name, runErr, string(output))
+        }
+
+        journal, readErr := os.ReadFile(filepath.Join(childProjectDirectory, "var", "log", "dev.log"))
+        if nil != readErr {
+            t.Fatalf("%s: expected the child's journal: %v", testCase.name, readErr)
+        }
+
+        refusalAt := strings.Index(string(journal), "a container.Lazy handle names no container service")
+        if -1 == refusalAt {
+            t.Fatalf("%s: expected the journal to carry the refusal, got: %s", testCase.name, string(journal))
+        }
+
+        for _, code := range []string{internal.BootWarningNameProcessEnvironmentVariableIgnored, internal.BootWarningNameSecretMarkUnmatched} {
+            writtenAt := strings.Index(string(journal), `"bootWarning":"`+code+`"`)
+            if testCase.expected != (-1 != writtenAt) {
+                t.Fatalf("%s: expected the boot warning %q written %v, got: %s", testCase.name, code, testCase.expected, string(journal))
+            }
+
+            if true == testCase.expected && writtenAt > refusalAt {
+                t.Fatalf("%s: expected the boot warning %q before the exit record, got: %s", testCase.name, code, string(journal))
+            }
+        }
+    }
+}
+
+func TestWriteBootWarnings_WritesOnceAndAnHttpProcessReadsNoCliKey(t *testing.T) {
+    bootWarning := internal.BootWarning{Name: internal.BootWarningNameFirewallDoorReachUnknown, Message: "a firewall door's reach is not known at boot"}
+
+    httpLogger := &warningRecordingLogger{}
+    httpApplication := newCacheWarningTestApplicationOver(t, config.ModeHttp, map[string]string{config.CliBootWarningsDisabledKey: "true"}, httpLogger)
+    httpApplication.bootWarnings = []internal.BootWarning{bootWarning}
+
+    httpApplication.writeBootWarnings(httpLogger)
+    httpApplication.writeBootWarningsBeforeExit(httpLogger)
+
+    if warnings := httpLogger.warningsContaining(bootWarning.Message); 1 != len(warnings) {
+        t.Fatalf("expected an http process dying on the cli keys to write the boot warning once, got %v", warnings)
+    }
+}
+
+const runRefusalBootWarningsProbeMarker = "MELODY_TEST_RUN_REFUSAL_BOOT_WARNINGS_PROBE"
+
+/* runHttp refuses a scope teardown outlasting the http shutdown before it writes the boot warnings, so Run's exit handler writes them */
+func TestRun_AnHttpRunRefusedBeforeItsWriterWritesTheBootWarningsBeforeItsExitRecord(t *testing.T) {
+    if projectDirectory := os.Getenv(runRefusalBootWarningsProbeMarker); "" != projectDirectory {
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{
+            config.HttpAddressKey:          "127.0.0.1:34526",
+            config.ScopeTeardownTimeoutKey: "1h",
+        }})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
+            kernel:               newTestKernel(),
+            httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.MarkParameterSecret("app.misspelled")
+
+        applicationInstance.Run()
+
+        os.Exit(93)
+    }
+
+    childProjectDirectory := t.TempDir()
+    child := exec.Command(os.Args[0], "-test.run=^TestRun_AnHttpRunRefusedBeforeItsWriterWritesTheBootWarningsBeforeItsExitRecord$")
+    child.Env = append(os.Environ(), runRefusalBootWarningsProbeMarker+"="+childProjectDirectory)
+
+    output, runErr := child.CombinedOutput()
+
+    exitError, isExitError := runErr.(*exec.ExitError)
+    if false == isExitError || 1 != exitError.ExitCode() {
+        t.Fatalf("expected the run to exit 1, got err %v with output: %s", runErr, string(output))
+    }
+
+    journal, readErr := os.ReadFile(filepath.Join(childProjectDirectory, "var", "log", "dev.log"))
+    if nil != readErr {
+        t.Fatalf("expected the child's journal: %v; output: %s", readErr, string(output))
+    }
+
+    refusalAt := strings.Index(string(journal), "the scope teardown timeout must stay under the http shutdown timeout")
+    writtenAt := strings.Index(string(journal), `"bootWarning":"`+internal.BootWarningNameSecretMarkUnmatched+`"`)
+    if -1 == refusalAt || -1 == writtenAt || writtenAt > refusalAt {
+        t.Fatalf("expected the boot warning before the exit record, got: %s", string(journal))
+    }
+}
+
+type panickingWarningLogger struct {
+    warningRecordingLogger
+}
+
+func (instance *panickingWarningLogger) Warning(message string, context loggingcontract.Context) {
+    panic("the journal is gone")
+}
+
+func TestWriteBootWarningsBeforeExit_AFailingWriteGivesWayToTheExitRecord(t *testing.T) {
+    applicationInstance := newCacheWarningTestApplicationOver(t, config.ModeCli, map[string]string{}, &warningRecordingLogger{})
+    applicationInstance.bootWarnings = []internal.BootWarning{{Name: internal.BootWarningNameSecretMarkUnmatched, Message: "a secret marking matched no parameter"}}
+
+    applicationInstance.writeBootWarningsBeforeExit(&panickingWarningLogger{})
 }

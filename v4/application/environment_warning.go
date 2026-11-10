@@ -5,6 +5,7 @@ import (
     "strings"
 
     configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -19,14 +20,13 @@ func (instance *Application) bootLogger() loggingcontract.Logger {
     return logger
 }
 
-/* warnIgnoredProcessEnvironment reports every process environment variable named like a resolved configuration parameter: melody reads configuration only from the .env artifacts, so such a variable is inert. A variable whose value equals the resolved one is skipped, and values are never logged, since they may be secrets. */
-func warnIgnoredProcessEnvironment(
-    logger loggingcontract.Logger,
+/* ignoredProcessEnvironmentBootWarnings answers one boot warning per process environment variable named like a resolved configuration parameter: melody reads configuration only from the .env artifacts, so such a variable is inert. A variable whose value equals the resolved one is skipped, and values are never written, since they may be secrets. */
+func ignoredProcessEnvironmentBootWarnings(
     configuration configcontract.Configuration,
     processEnvironment []string,
-) {
-    if nil == logger || nil == configuration {
-        return
+) []internal.BootWarning {
+    if nil == configuration {
+        return nil
     }
 
     ignoredNames := make([]string, 0)
@@ -49,18 +49,18 @@ func warnIgnoredProcessEnvironment(
         ignoredNames = append(ignoredNames, name)
     }
 
-    if 0 == len(ignoredNames) {
-        return
-    }
-
     sort.Strings(ignoredNames)
 
+    bootWarnings := make([]internal.BootWarning, 0, len(ignoredNames))
     for _, name := range ignoredNames {
-        logger.Warning(
-            "process environment variable is ignored: melody reads configuration only from .env files",
-            loggingcontract.Context{
+        bootWarnings = append(bootWarnings, internal.BootWarning{
+            Name:    internal.BootWarningNameProcessEnvironmentVariableIgnored,
+            Message: "process environment variable is ignored: melody reads configuration only from .env files",
+            Context: loggingcontract.Context{
                 "environmentVariable": name,
             },
-        )
+        })
     }
+
+    return bootWarnings
 }

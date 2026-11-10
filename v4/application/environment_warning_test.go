@@ -3,111 +3,91 @@ package application
 import (
     "testing"
 
+    "github.com/precision-soft/melody/v4/internal"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-type recordingLogger struct {
-    warnings []loggingcontract.Context
-}
-
-func (instance *recordingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
-}
-
-func (instance *recordingLogger) Debug(message string, context loggingcontract.Context) {}
-
-func (instance *recordingLogger) Info(message string, context loggingcontract.Context) {}
-
-func (instance *recordingLogger) Warning(message string, context loggingcontract.Context) {
-    instance.warnings = append(instance.warnings, context)
-}
-
-func (instance *recordingLogger) Error(message string, context loggingcontract.Context) {}
-
-func (instance *recordingLogger) Emergency(message string, context loggingcontract.Context) {}
-
-func TestWarnIgnoredProcessEnvironment_WarnsOnKnownParameterName(t *testing.T) {
+func TestIgnoredProcessEnvironmentBootWarnings_NamesEachKnownParameterNameOnceUnderItsCodeInOrder(t *testing.T) {
     configuration := newCollisionTestConfiguration(t)
     if resolveErr := configuration.Resolve(); nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
 
-    logger := &recordingLogger{}
-
-    warnIgnoredProcessEnvironment(logger, configuration, []string{
+    bootWarnings := ignoredProcessEnvironmentBootWarnings(configuration, []string{
         "MELODY_PROCESS_ROLE=worker",
+        "MELODY_ENV=prod",
     })
 
-    if 1 != len(logger.warnings) {
-        t.Fatalf("expected one warning, got %d", len(logger.warnings))
+    if 2 != len(bootWarnings) {
+        t.Fatalf("expected one boot warning per name, got %d: %+v", len(bootWarnings), bootWarnings)
     }
 
-    if "MELODY_PROCESS_ROLE" != logger.warnings[0]["environmentVariable"] {
-        t.Fatalf("unexpected warning context: %+v", logger.warnings[0])
-    }
+    for index, expectedName := range []string{"MELODY_ENV", "MELODY_PROCESS_ROLE"} {
+        bootWarning := bootWarnings[index]
+        if internal.BootWarningNameProcessEnvironmentVariableIgnored != bootWarning.Name {
+            t.Fatalf("expected the code %q, got %q", internal.BootWarningNameProcessEnvironmentVariableIgnored, bootWarning.Name)
+        }
 
-    for key := range logger.warnings[0] {
-        if "environmentVariable" != key {
-            t.Fatalf("the warning must not carry values, got key: %s", key)
+        if expectedName != bootWarning.Context["environmentVariable"] {
+            t.Fatalf("expected the names in order, %q at %d, got %+v", expectedName, index, bootWarning.Context)
+        }
+
+        for key := range bootWarning.Context {
+            if "environmentVariable" != key {
+                t.Fatalf("the boot warning must not carry values, got key: %s", key)
+            }
         }
     }
 }
 
-func TestWarnIgnoredProcessEnvironment_IgnoresUnknownVariables(t *testing.T) {
+func TestIgnoredProcessEnvironmentBootWarnings_IgnoresUnknownVariables(t *testing.T) {
     configuration := newCollisionTestConfiguration(t)
     if resolveErr := configuration.Resolve(); nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
 
-    logger := &recordingLogger{}
-
-    warnIgnoredProcessEnvironment(logger, configuration, []string{
+    bootWarnings := ignoredProcessEnvironmentBootWarnings(configuration, []string{
         "PATH=/usr/bin",
         "HOME=/home/user",
         "SOME_RANDOM_VARIABLE=value",
     })
 
-    if 0 != len(logger.warnings) {
-        t.Fatalf("expected no warnings, got %d: %+v", len(logger.warnings), logger.warnings)
+    if 0 != len(bootWarnings) {
+        t.Fatalf("expected no boot warnings, got %d: %+v", len(bootWarnings), bootWarnings)
     }
 }
 
-func TestWarnIgnoredProcessEnvironment_SuppressesMirroredValues(t *testing.T) {
+func TestIgnoredProcessEnvironmentBootWarnings_SuppressesMirroredValues(t *testing.T) {
     configuration := newCollisionTestConfiguration(t)
     if resolveErr := configuration.Resolve(); nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
 
-    logger := &recordingLogger{}
-
     /* a platform that mirrors the resolved .env value into the environment is harmless: same value, no drift possible */
-    warnIgnoredProcessEnvironment(logger, configuration, []string{
+    bootWarnings := ignoredProcessEnvironmentBootWarnings(configuration, []string{
         "MELODY_PROCESS_ROLE=all",
     })
 
-    if 0 != len(logger.warnings) {
-        t.Fatalf("expected the mirrored value to be suppressed, got %d warnings", len(logger.warnings))
+    if 0 != len(bootWarnings) {
+        t.Fatalf("expected the mirrored value to be suppressed, got %d boot warnings", len(bootWarnings))
     }
 }
 
-func TestWarnIgnoredProcessEnvironment_SkipsMalformedEntries(t *testing.T) {
+func TestIgnoredProcessEnvironmentBootWarnings_SkipsMalformedEntries(t *testing.T) {
     configuration := newCollisionTestConfiguration(t)
     if resolveErr := configuration.Resolve(); nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
 
-    logger := &recordingLogger{}
-
-    warnIgnoredProcessEnvironment(logger, configuration, []string{
+    bootWarnings := ignoredProcessEnvironmentBootWarnings(configuration, []string{
         "MALFORMED",
         "=value",
     })
 
-    if 0 != len(logger.warnings) {
-        t.Fatalf("expected no warnings, got %d", len(logger.warnings))
+    if 0 != len(bootWarnings) {
+        t.Fatalf("expected no boot warnings, got %d", len(bootWarnings))
     }
 }
-
-var _ loggingcontract.Logger = (*recordingLogger)(nil)
 
 func TestBootLogger_FallsBackToTheEmergencyLoggerWhenTheContainerHasNone(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)

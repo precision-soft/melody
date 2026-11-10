@@ -21,6 +21,7 @@ import (
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/lock"
@@ -485,36 +486,28 @@ func TestApplyUnappliedSecretMarks_AppliesWhatALaterRegistrationMadeReal(t *test
 }
 
 /* the warning at the end of the boot is what keeps a misspelled name from silently redacting nothing: every phase that can register a parameter has run by then, so a marking still matching nothing names something that does not exist. A name a late phase did make real is applied here instead, without a warning, and the queue is emptied either way. */
-func TestWarnUnappliedSecretMarks_WarnsOnlyAboutWhatStillMatchesNothing(t *testing.T) {
+func TestCollectUnappliedSecretMarks_CollectsOnlyWhatStillMatchesNothingUnderItsCode(t *testing.T) {
     applicationInstance := newCollisionTestApplication(t)
-
-    logger := &recordingLogger{}
-    applicationInstance.RegisterService(
-        logging.ServiceLogger,
-        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            return logger, nil
-        },
-        container.RegisterOptions{},
-    )
 
     applicationInstance.MarkParameterSecret("app.misspelled")
     applicationInstance.MarkParameterSecret("app.registered.last")
 
     applicationInstance.RegisterParameter("app.registered.last", "sk_live_51H")
 
-    applicationInstance.warnUnappliedSecretMarks()
+    applicationInstance.collectUnappliedSecretMarks()
 
     parameter := applicationInstance.configuration.Get("app.registered.last")
     if nil == parameter || false == parameter.IsSecret() {
         t.Fatalf("expected a name a late phase made real to be marked here rather than warned about")
     }
 
-    if 1 != len(logger.warnings) {
-        t.Fatalf("expected exactly one warning, got %d", len(logger.warnings))
+    if 1 != len(applicationInstance.bootWarnings) {
+        t.Fatalf("expected exactly one boot warning collected, got %+v", applicationInstance.bootWarnings)
     }
 
-    if "app.misspelled" != logger.warnings[0]["parameterName"] {
-        t.Fatalf("expected the warning to name the marking that matched nothing, got %+v", logger.warnings[0])
+    bootWarning := applicationInstance.bootWarnings[0]
+    if internal.BootWarningNameSecretMarkUnmatched != bootWarning.Name || "app.misspelled" != bootWarning.Context["parameterName"] {
+        t.Fatalf("expected the boot warning to name its code and the marking that matched nothing, got %+v", bootWarning)
     }
 
     if 0 != len(applicationInstance.unappliedSecretMarks) {
