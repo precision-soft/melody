@@ -13,11 +13,13 @@ import (
     neturl "net/url"
     "os"
     "path/filepath"
+    "strconv"
     "strings"
     "time"
 
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 const (
@@ -111,6 +113,26 @@ func NewErrorResponsePayload(statusCode int, message string, timeString string) 
             Message: message,
         },
     }
+}
+
+/* SetRetryAfter writes the Retry-After header as whole seconds, rounded up; a delay of zero or below, or a nil response, writes nothing. The header is written through SetHeaders, so a response whose Headers answers a copy still carries it. */
+func SetRetryAfter(response httpcontract.Response, delay time.Duration) {
+    if 0 >= delay || true == internal.IsNilInterface(response) {
+        return
+    }
+
+    seconds := int64(delay / time.Second)
+    if 0 != delay%time.Second {
+        seconds++
+    }
+
+    headers := response.Headers().Clone()
+    if nil == headers {
+        headers = make(nethttp.Header)
+    }
+
+    headers.Set("Retry-After", strconv.FormatInt(seconds, 10))
+    response.SetHeaders(headers)
 }
 
 func NewResponse(statusCode int, body []byte) *Response {

@@ -938,17 +938,18 @@ func TestContainer_Close_FirstFieldPointerAliasEachClose(t *testing.T) {
 
 type sameTypeZeroSizeCloser struct{}
 
-var sameTypeZeroSizeCloseCount = 0
+/* atomic: the two services share no edge, so the default teardown closes them in one wave, concurrently */
+var sameTypeZeroSizeCloseCount atomic.Int64
 
 func (instance *sameTypeZeroSizeCloser) CloseWithContext(closeContext context.Context) error {
-    sameTypeZeroSizeCloseCount = sameTypeZeroSizeCloseCount + 1
+    sameTypeZeroSizeCloseCount.Add(1)
 
     return nil
 }
 
 /* two distinct services of one zero-size type share an address, so pairing the address with the type is not enough to tell them apart; without the dependency-graph qualifier the second one was collapsed onto the first and never closed */
 func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T) {
-    sameTypeZeroSizeCloseCount = 0
+    sameTypeZeroSizeCloseCount.Store(0)
 
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -977,14 +978,14 @@ func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T
         t.Fatalf("unexpected close error: %v", err)
     }
 
-    if 2 != sameTypeZeroSizeCloseCount {
-        t.Fatalf("expected both distinct zero-size services to be closed, got %d", sameTypeZeroSizeCloseCount)
+    if 2 != sameTypeZeroSizeCloseCount.Load() {
+        t.Fatalf("expected both distinct zero-size services to be closed, got %d", sameTypeZeroSizeCloseCount.Load())
     }
 }
 
 /* the mirror case: a service whose provider hands back what it resolved from another service holds the same instance, and the dependency edge proves it, so the shared instance is still closed exactly once */
 func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
-    sameTypeZeroSizeCloseCount = 0
+    sameTypeZeroSizeCloseCount.Store(0)
 
     serviceContainer := NewContainer(ContainerConfig{})
 
@@ -1012,8 +1013,8 @@ func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
         t.Fatalf("unexpected close error: %v", err)
     }
 
-    if 1 != sameTypeZeroSizeCloseCount {
-        t.Fatalf("expected the shared instance to be closed exactly once, got %d", sameTypeZeroSizeCloseCount)
+    if 1 != sameTypeZeroSizeCloseCount.Load() {
+        t.Fatalf("expected the shared instance to be closed exactly once, got %d", sameTypeZeroSizeCloseCount.Load())
     }
 }
 

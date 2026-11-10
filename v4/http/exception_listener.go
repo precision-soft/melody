@@ -190,7 +190,11 @@ func RenderExceptionResponse(runtimeInstance runtimecontract.Runtime, request ht
         }
     }
 
-    return renderErrorResponse(runtimeInstance, request, statusCode, message, payloadExtras)
+    response := renderErrorResponse(runtimeInstance, request, statusCode, message, payloadExtras)
+
+    SetRetryAfter(response, httpException.RetryAfter())
+
+    return response
 }
 
 /* attachRequestContextToError carries the request coordinates onto an already-logged error: onto the occurrence the kernel marked when the chain holds one, so a value several requests share keeps no request's coordinates, and onto the nearest melody error otherwise, the error a lower layer filed itself. A key already held is kept, and an empty coordinate is not written. */

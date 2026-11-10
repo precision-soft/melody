@@ -45,7 +45,7 @@ Melody uses this package to:
     - [`IsHttpException`](../../exception/http_exception.go)
     - [`AsHttpException`](../../exception/http_exception.go)
     - [`ValidationFailed`](../../exception/http_exception.go)
-    - [`NewHttpError`](../../exception/http_exception_new.go), the constructor that declares a client-facing code, translation key and parameters, and the cause
+    - [`NewHttpError`](../../exception/http_exception_new.go), the constructor that declares a client-facing code, translation key and parameters, the cause, and the `Retry-After` delay
     - HTTP exception constructors (status helpers) in [`http_exception_new.go`](../../exception/http_exception_new.go)
 
 ## Usage
@@ -172,5 +172,5 @@ func readFile(path string) []byte {
 - [`IsHttpException(error) bool`](../../exception/http_exception.go)
 - [`AsHttpException(error) *HttpException`](../../exception/http_exception.go)
 - [`ValidationFailed(validationErrors any) *HttpException`](../../exception/http_exception.go)
-- [`NewHttpError(statusCode int, config HttpErrorConfig) *HttpException`](../../exception/http_exception_new.go) — [`HttpErrorConfig`](../../exception/http_exception_new.go) holds `Code`, `Key`, `Message`, `Parameters` and `Cause`, every one optional, the zero value a bare exception of its status; the client-facing identity, read back through [`Code() string`](../../exception/http_exception.go), [`Key() string`](../../exception/http_exception.go) and [`Parameters() map[string]any`](../../exception/http_exception.go), which the kernel's error renderer serves inside the error object of the body, each left out when empty; the parameters are copied in and out, and the framework translates nothing
+- [`NewHttpError(statusCode int, config HttpErrorConfig) *HttpException`](../../exception/http_exception_new.go) — [`HttpErrorConfig`](../../exception/http_exception_new.go) holds `Code`, `Key`, `Message`, `Parameters`, `Cause` and `RetryAfter`, every one optional, the zero value a bare exception of its status; the client-facing identity, read back through [`Code() string`](../../exception/http_exception.go), [`Key() string`](../../exception/http_exception.go) and [`Parameters() map[string]any`](../../exception/http_exception.go), which the kernel's error renderer serves inside the error object of the body, each left out when empty; the parameters are copied in and out, and the framework translates nothing; `RetryAfter`, read back through [`RetryAfter() time.Duration`](../../exception/http_exception.go), is served by the error renderer as the `Retry-After` header in whole seconds rounded up, zero serving none and a negative value refused by panic at construction
 - Status constructors (for example, `BadRequest`, `NotFound`, `InternalServerError`) in [`http_exception_new.go`](../../exception/http_exception_new.go)

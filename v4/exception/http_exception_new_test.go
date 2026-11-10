@@ -4,6 +4,7 @@ import (
     "errors"
     nethttp "net/http"
     "testing"
+    "time"
 )
 
 func TestHttpException_DefaultMessageWhenEmpty(t *testing.T) {
@@ -194,4 +195,38 @@ func TestNewHttpError_TheZeroConfigIsABareExceptionOfItsStatus(t *testing.T) {
     if nil != errors.Unwrap(httpError) {
         t.Fatalf("expected no cause, got %v", errors.Unwrap(httpError))
     }
+}
+
+func TestNewHttpError_CarriesTheRetryAfterDelay(t *testing.T) {
+    if 7*time.Second != NewHttpError(nethttp.StatusServiceUnavailable, HttpErrorConfig{RetryAfter: 7 * time.Second}).RetryAfter() {
+        t.Fatalf("expected the configured delay")
+    }
+
+    if 0 != NewHttpError(nethttp.StatusServiceUnavailable, HttpErrorConfig{}).RetryAfter() {
+        t.Fatalf("expected no delay on the zero config")
+    }
+
+    if 0 != NewHttpException(nethttp.StatusServiceUnavailable, "down").RetryAfter() {
+        t.Fatalf("expected no delay on a bare exception")
+    }
+
+    var nilException *HttpException
+    if 0 != nilException.RetryAfter() {
+        t.Fatalf("expected no delay on a nil receiver")
+    }
+}
+
+func TestNewHttpError_RefusesANegativeRetryAfter(t *testing.T) {
+    assertPanicsWithEmergency(t, "http error retry after is negative", func() {
+        NewHttpError(nethttp.StatusServiceUnavailable, HttpErrorConfig{RetryAfter: -time.Second})
+    })
+
+    defer func() {
+        recoveredError, _ := recover().(*Error)
+        if nil == recoveredError || "HttpErrorConfig.RetryAfter" != recoveredError.Context()["field"] {
+            t.Fatalf("expected the refusal to name the field, got %v", recoveredError)
+        }
+    }()
+
+    NewHttpError(nethttp.StatusServiceUnavailable, HttpErrorConfig{RetryAfter: -time.Second})
 }

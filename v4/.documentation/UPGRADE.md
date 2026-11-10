@@ -689,7 +689,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Exception: `NewHttpError` takes a struct, the cause goes through it, and the `FromError` level doors fold into `FromErrorAs`
 
-**What changed.** [`NewHttpError`](../exception/http_exception_new.go) takes the status and an `HttpErrorConfig{Code, Key, Message, Parameters, Cause}`, every field optional, the zero value a bare exception of its status. `NewHttpExceptionWithCause` is removed: its cause goes through `NewHttpError`. [`FromErrorAs`](../exception/utility.go) takes the error and a `FromErrorConfig{Level, Context}`, the level error when left out and the context merged over the provider's; the zero config answers what `FromError` answers, an `*Error` unchanged. `FromErrorWithLevel` and `FromErrorWithLevelAndContext` are removed. `NewHttpException(status, message)` is unchanged.
+**What changed.** [`NewHttpError`](../exception/http_exception_new.go) takes the status and an `HttpErrorConfig{Code, Key, Message, Parameters, Cause, RetryAfter}`, every field optional, the zero value a bare exception of its status. `NewHttpExceptionWithCause` is removed: its cause goes through `NewHttpError`. [`FromErrorAs`](../exception/utility.go) takes the error and a `FromErrorConfig{Level, Context}`, the level error when left out and the context merged over the provider's; the zero config answers what `FromError` answers, an `*Error` unchanged. `FromErrorWithLevel` and `FromErrorWithLevelAndContext` are removed. `NewHttpException(status, message)` is unchanged.
 
 **Symptom.** The six-argument `NewHttpError`, `NewHttpExceptionWithCause` and the two `FromError` level doors no longer compile.
 
@@ -1736,7 +1736,7 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Exception: an http exception declares its client-facing code, key and parameters
 
-**What changed.** `exception.NewHttpError(statusCode, exception.HttpErrorConfig{Code, Key, Message, Parameters, Cause})` builds an `*exception.HttpException` that declares a client-facing identity: `code`, a stable value a client branches on, `key`, a translation key, and `parameters`, the values it is rendered with, read back through `Code`, `Key` and `Parameters`. The error renderer serves them inside the envelope's `error` object beside the message, outside debug mode too, each left out when empty; the parameters are copied at construction and on every read, and the framework translates nothing. An exception built through the other constructors declares no identity and its body is unchanged.
+**What changed.** `exception.NewHttpError(statusCode, exception.HttpErrorConfig{Code, Key, Message, Parameters, Cause, RetryAfter})` builds an `*exception.HttpException` that declares a client-facing identity: `code`, a stable value a client branches on, `key`, a translation key, and `parameters`, the values it is rendered with, read back through `Code`, `Key` and `Parameters`. The error renderer serves them inside the envelope's `error` object beside the message, outside debug mode too, each left out when empty; the parameters are copied at construction and on every read, and the framework translates nothing. An exception built through the other constructors declares no identity and its body is unchanged.
 
 **Symptom.** None for an application that does not call it.
 

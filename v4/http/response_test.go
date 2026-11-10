@@ -13,6 +13,7 @@ import (
     "reflect"
     "strings"
     "testing"
+    "time"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -759,5 +760,89 @@ func TestErrorResponseKeys_AreThePayloadsTags(t *testing.T) {
 
     if "requestId" != errorResponseKeyRequestId {
         t.Fatalf("expected the released request id key, got %q", errorResponseKeyRequestId)
+    }
+}
+
+func TestSetRetryAfter_RoundsUpToWholeSecondsAndWritesNothingForZero(t *testing.T) {
+    for delay, expected := range map[time.Duration]string{
+        time.Millisecond:        "1",
+        time.Second:             "1",
+        1001 * time.Millisecond: "2",
+        90 * time.Second:        "90",
+    } {
+        response := TextResponse(nethttp.StatusServiceUnavailable, "down")
+        SetRetryAfter(response, delay)
+
+        if expected != response.Headers().Get("Retry-After") {
+            t.Fatalf("expected Retry-After %q for %s, got %q", expected, delay, response.Headers().Get("Retry-After"))
+        }
+
+        if ContentTypeTextPlain != response.Headers().Get("Content-Type") {
+            t.Fatalf("expected the other headers kept for %s", delay)
+        }
+    }
+
+    for _, delay := range []time.Duration{0, -time.Second} {
+        response := TextResponse(nethttp.StatusServiceUnavailable, "down")
+        SetRetryAfter(response, delay)
+
+        if _, exists := response.Headers()["Retry-After"]; true == exists {
+            t.Fatalf("expected no Retry-After for %s", delay)
+        }
+    }
+}
+
+func TestSetRetryAfter_WritesOnAResponseWithoutHeadersAndIgnoresANilOne(t *testing.T) {
+    response := &Response{statusCode: nethttp.StatusServiceUnavailable}
+    SetRetryAfter(response, 3*time.Second)
+
+    if "3" != response.Headers().Get("Retry-After") {
+        t.Fatalf("expected Retry-After 3, got %q", response.Headers().Get("Retry-After"))
+    }
+
+    var nilResponse *Response
+    SetRetryAfter(nilResponse, 3*time.Second)
+    SetRetryAfter(nil, 3*time.Second)
+}
+
+type sharedHeadersResponse struct {
+    shared    nethttp.Header
+    published nethttp.Header
+}
+
+func (instance *sharedHeadersResponse) StatusCode() int { return nethttp.StatusServiceUnavailable }
+
+func (instance *sharedHeadersResponse) SetStatusCode(statusCode int) {}
+
+func (instance *sharedHeadersResponse) Headers() nethttp.Header { return instance.shared }
+
+func (instance *sharedHeadersResponse) SetHeaders(headers nethttp.Header) { instance.published = headers }
+
+func (instance *sharedHeadersResponse) BodyReader() io.Reader { return nil }
+
+func (instance *sharedHeadersResponse) SetBodyReader(reader io.Reader) {}
+
+func TestSetRetryAfter_PublishesThroughSetHeadersAndLeavesTheAnsweredMapUntouched(t *testing.T) {
+    shared := nethttp.Header{"Content-Type": []string{ContentTypeTextPlain}}
+    response := &sharedHeadersResponse{shared: shared}
+
+    SetRetryAfter(response, 2*time.Second)
+
+    if "2" != response.published.Get("Retry-After") || ContentTypeTextPlain != response.published.Get("Content-Type") {
+        t.Fatalf("expected SetHeaders handed the headers with Retry-After 2, got %v", response.published)
+    }
+
+    if _, exists := shared["Retry-After"]; true == exists {
+        t.Fatalf("expected the map Headers answered left untouched, got %v", shared)
+    }
+}
+
+func TestSetRetryAfter_ReplacesADelayAlreadySet(t *testing.T) {
+    response := TextResponse(nethttp.StatusServiceUnavailable, "down")
+    SetRetryAfter(response, 9*time.Second)
+    SetRetryAfter(response, 2*time.Second)
+
+    if values := response.Headers().Values("Retry-After"); 1 != len(values) || "2" != values[0] {
+        t.Fatalf("expected one Retry-After 2, got %v", values)
     }
 }

@@ -5006,3 +5006,49 @@ func TestKernel_ACyclicChainFromTheRequestBodyIsAnsweredWithABadRequest(t *testi
         }
     }
 }
+
+func TestKernel_ARefusalCarryingRetryAfterIsServedWithTheHeader(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelRequest,
+        newRefusingKernelRequestListener(exception.NewHttpError(nethttp.StatusServiceUnavailable, exception.HttpErrorConfig{Message: "down", RetryAfter: 3 * time.Second})),
+        0,
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(newFailingKernelTestRouter(exception.NotFound("unreached")), KernelConfig{}).
+        ServeHttp(serviceContainer).
+        ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "3" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with Retry-After 3, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+}
+
+func TestKernel_TheFinalStepKeepsTheRetryAfterHeader(t *testing.T) {
+    serviceContainer := newHttpTestContainer()
+
+    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelRequest,
+        newRefusingKernelRequestListener(exception.NewHttpError(nethttp.StatusServiceUnavailable, exception.HttpErrorConfig{Message: "down", RetryAfter: 3 * time.Second})),
+        0,
+    )
+    eventDispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            panic("listener exploded")
+        },
+        0,
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(newFailingKernelTestRouter(exception.NotFound("unreached")), KernelConfig{}).
+        ServeHttp(serviceContainer).
+        ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/fail", nil))
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "3" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with Retry-After 3 from the final step, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+}

@@ -10,6 +10,7 @@ import (
     "reflect"
     "strings"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
@@ -1041,4 +1042,29 @@ func TestExceptionListener_TheOccurrenceDoorsReturnOnACyclicChain(t *testing.T) 
             t.Error("expected the context back")
         }
     })
+}
+
+func TestRenderExceptionResponse_ServesTheRetryAfterHeader(t *testing.T) {
+    runtimeInstance := newErrorRendererTextAndJsonRuntime()
+    unavailable := exception.NewHttpError(503, exception.HttpErrorConfig{Message: "down", RetryAfter: 7 * time.Second})
+
+    for accept, contentType := range map[string]string{"application/json": ContentTypeJson, "text/html": ContentTypeTextHtml, "text/plain": ContentTypeTextPlain} {
+        request := httptest.NewRequest("GET", "/api/test", nil)
+        request.Header.Set("Accept", accept)
+
+        response := RenderExceptionResponse(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), unavailable, ExceptionRenderConfig{})
+
+        if 503 != response.StatusCode() || "7" != response.Headers().Get("Retry-After") {
+            t.Fatalf("expected 503 with Retry-After 7 for %s, got %d %q", accept, response.StatusCode(), response.Headers().Get("Retry-After"))
+        }
+
+        if contentType != response.Headers().Get("Content-Type") {
+            t.Fatalf("expected the %s body for %s, got %q", contentType, accept, response.Headers().Get("Content-Type"))
+        }
+
+        plain := RenderExceptionResponse(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), exception.ServiceUnavailable("down"), ExceptionRenderConfig{})
+        if _, exists := plain.Headers()["Retry-After"]; true == exists {
+            t.Fatalf("expected no Retry-After without a delay for %s", accept)
+        }
+    }
 }

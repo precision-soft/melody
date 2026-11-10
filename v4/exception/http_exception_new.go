@@ -2,6 +2,7 @@ package exception
 
 import (
     nethttp "net/http"
+    "time"
 
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
@@ -32,11 +33,27 @@ type HttpErrorConfig struct {
 
     /* Cause is the wrapped error; nil for none. */
     Cause error
+
+    /* RetryAfter is how long the client should wait before it asks again, served by the error renderer as the Retry-After header in whole seconds rounded up; zero serves none, a negative value is refused. */
+    RetryAfter time.Duration
 }
 
 /* NewHttpError builds an http exception answering statusCode, refused outside 200..599, with the identity the config declares: the error renderer serves code, key and parameters inside the error object beside the message, each left out when empty, so a client branches on the code and translates the key without parsing the message. The framework translates nothing. */
 func NewHttpError(statusCode int, config HttpErrorConfig) *HttpException {
     refuseStatusCodeOutOfRange(statusCode)
+
+    if 0 > config.RetryAfter {
+        Panic(
+            NewEmergency(
+                "http error retry after is negative",
+                exceptioncontract.Context{
+                    "field":      "HttpErrorConfig.RetryAfter",
+                    "retryAfter": config.RetryAfter.String(),
+                },
+                nil,
+            ),
+        )
+    }
 
     return &HttpException{
         statusCode: statusCode,
@@ -46,6 +63,7 @@ func NewHttpError(statusCode int, config HttpErrorConfig) *HttpException {
         parameters: copyStringMap(config.Parameters),
         context:    make(exceptioncontract.Context),
         causeErr:   config.Cause,
+        retryAfter: config.RetryAfter,
     }
 }
 

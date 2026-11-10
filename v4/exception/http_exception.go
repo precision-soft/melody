@@ -4,6 +4,7 @@ import (
     "fmt"
     nethttp "net/http"
     "sync"
+    "time"
 
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
@@ -14,6 +15,7 @@ type HttpException struct {
     code       string
     key        string
     parameters map[string]any
+    retryAfter time.Duration
     /* stateMutex guards context and alreadyLogged: a memoized failure is shared across request goroutines. */
     stateMutex    sync.RWMutex
     context       exceptioncontract.Context
@@ -122,6 +124,15 @@ func (instance *HttpException) Key() string {
     }
 
     return instance.key
+}
+
+/* RetryAfter answers how long the client should wait before it asks again, which the error renderer serves as the Retry-After header; an exception built without a delay, or a nil receiver, answers zero. */
+func (instance *HttpException) RetryAfter() time.Duration {
+    if nil == instance {
+        return 0
+    }
+
+    return instance.retryAfter
 }
 
 /* Parameters answers a copy of the values the key is rendered with; an exception built without NewHttpError answers an empty map, a nil receiver nil. */
