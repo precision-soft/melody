@@ -42,6 +42,9 @@ const DefaultSessionTombstoneRetention = 5 * time.Minute
 /* DefaultSessionMaxSessions is how many sessions the framework-wired in-memory storage holds at once when MELODY_HTTP_SESSION_MAX_SESSIONS says nothing; at the ceiling a new session id is refused. */
 const DefaultSessionMaxSessions = 100_000
 
+/* DefaultUnavailableRetryAfter is the Retry-After of a 503 answering an infrastructure failure outside a firewall when neither MELODY_HTTP_UNAVAILABLE_RETRY_AFTER nor ApplicationConfig names one; a firewall's own delay has the same default. */
+const DefaultUnavailableRetryAfter = 5 * time.Second
+
 /* DefaultHttpShutdownTimeout is how long a stopping http server waits for the requests already admitted when MELODY_HTTP_SHUTDOWN_TIMEOUT says nothing. It is far below the write timeout; a deployment whose supervisor grants a longer grace raises it to match. */
 const DefaultHttpShutdownTimeout = 5 * time.Second
 
@@ -120,6 +123,8 @@ type httpServerLimits struct {
     writeTimeout      bound.Duration
     idleTimeout       bound.Duration
     maxHeaderBytes    bound.Count
+
+    unavailableRetryAfter bound.Duration
 }
 
 func (instance *httpConfiguration) Address() string {
@@ -196,6 +201,11 @@ func (instance *httpConfiguration) IdleTimeout() bound.Duration {
 
 func (instance *httpConfiguration) MaxHeaderBytes() bound.Count {
     return instance.serverLimits.maxHeaderBytes
+}
+
+/* UnavailableRetryAfter is MELODY_HTTP_UNAVAILABLE_RETRY_AFTER as the deployment set it, absent when the key says nothing; the application decides it against its own config and UnavailableRetryAfterRule. */
+func (instance *httpConfiguration) UnavailableRetryAfter() bound.Duration {
+    return instance.serverLimits.unavailableRetryAfter
 }
 
 func (instance *httpConfiguration) validate() error {

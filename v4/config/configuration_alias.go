@@ -121,6 +121,10 @@ var environmentKeyAliasMap = map[string][]string{
         HttpMaxHeaderBytesKey,
         KernelHttpMaxHeaderBytes,
     },
+    HttpUnavailableRetryAfterKey: {
+        HttpUnavailableRetryAfterKey,
+        KernelHttpUnavailableRetryAfter,
+    },
 }
 
 func (instance *Configuration) addAliasedParameterFromEnvironment(

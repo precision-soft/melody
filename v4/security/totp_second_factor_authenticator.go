@@ -20,7 +20,7 @@ const DefaultTotpCodeHeaderName = "X-2FA-Code"
 /* DefaultTotpRecoveryHeaderName is the request header a single-use recovery code is read from unless overridden; it is distinct from the TOTP code header so the two never collide. */
 const DefaultTotpRecoveryHeaderName = "X-2FA-Recovery-Code"
 
-/* TotpSecondFactorAuthenticatorConfig composes a primary authenticator with a TOTP second factor into one Authenticator. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is also required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code. When Enrollments also implements TwoFactorRecoveryStore, a single-use recovery code on RecoveryHeaderName is accepted instead of a TOTP code. The ReplayGuard blocks reuse of an accepted code, but failed attempts are NOT rate-limited: throttling and per-user lockout are the application's and MUST front this authenticator, or a 6-digit code can be brute-forced once the primary credential is known. An enrollment lookup, a recovery redemption or a replay guard that fails returns its error marked with MarkInfrastructureFailure, so the firewall answers it as a credential nobody could check rather than a failed sign-in. */
+/* TotpSecondFactorAuthenticatorConfig composes a primary authenticator with a TOTP second factor into one Authenticator. When the primary credential is accepted and the user has a TOTP enrollment, a valid code header is also required; otherwise the result is a non-authenticated TwoFactorPendingToken the application uses to prompt for a code. When Enrollments also implements TwoFactorRecoveryStore, a single-use recovery code on RecoveryHeaderName is accepted instead of a TOTP code. The ReplayGuard blocks reuse of an accepted code, but failed attempts are NOT rate-limited: throttling and per-user lockout are the application's and MUST front this authenticator, or a 6-digit code can be brute-forced once the primary credential is known. An enrollment lookup, a recovery redemption or a replay guard that fails returns its error marked with exception.MarkInfrastructureFailure, so the firewall answers it as a credential nobody could check rather than a failed sign-in. */
 type TotpSecondFactorAuthenticatorConfig struct {
     Primary securitycontract.Authenticator
 
@@ -229,7 +229,7 @@ func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
 
 /* storeFailure marks a store's failure under the message; a cause its store already filed keeps the wrap marked logged, so the store's record stays the only one */
 func storeFailure(message string, storeErr error) error {
-    failure := exception.NewError(message, nil, MarkInfrastructureFailure(storeErr))
+    failure := exception.NewError(message, nil, exception.MarkInfrastructureFailure(storeErr))
     if true == exception.IsAlreadyLogged(storeErr) {
         _ = exception.MarkLogged(failure)
     }

@@ -10,6 +10,7 @@ import (
     "time"
     "unicode"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
@@ -43,6 +44,9 @@ type KernelConfig struct {
     Middlewares []httpcontract.Middleware
 
     NotFoundHandler httpcontract.Handler
+
+    /* UnavailableRetryAfter is the Retry-After of the 503 a marked infrastructure failure renders: 5s when left out, 1s to 1h in whole seconds, unlimited refused. */
+    UnavailableRetryAfter bound.Duration
 }
 
 type kernelPolicies struct {
@@ -63,15 +67,17 @@ func NewKernel(router httpcontract.Router, kernelConfig KernelConfig) *Kernel {
     kernel.SetSessionCookiePolicy(kernelConfig.SessionCookiePolicy)
     kernel.Use(kernelConfig.Middlewares)
     kernel.SetNotFoundHandler(kernelConfig.NotFoundHandler)
+    kernel.SetUnavailableRetryAfter(kernelConfig.UnavailableRetryAfter)
 
     return kernel
 }
 
 type Kernel struct {
-    router          httpcontract.Router
-    middlewares     []httpcontract.Middleware
-    notFoundHandler httpcontract.Handler
-    policies        kernelPolicies
+    router                httpcontract.Router
+    middlewares           []httpcontract.Middleware
+    notFoundHandler       httpcontract.Handler
+    policies              kernelPolicies
+    unavailableRetryAfter time.Duration
     /* request scopes opened and not yet closed: the shutdown's only measure of a hijacked connection, which net/http's Shutdown does not wait for. Written by every serving goroutine, read by the shutdown one. */
     openRequestScopes atomic.Int64
     /* raised when ServeHttp builds the handler; atomic, since a mutator racing the first request is what it exists to catch */
@@ -150,6 +156,27 @@ func (instance *Kernel) SetMethodPolicy(policy httpcontract.MethodPolicy) {
     instance.refuseMutationWhileServing("SetMethodPolicy")
 
     instance.policies.methodPolicy = policy
+}
+
+/* SetUnavailableRetryAfter installs the Retry-After of the 503 a marked infrastructure failure renders, carried on every kernel.exception event and used by the final step; it is boot-only, and a delay outside 1s to 1h, not in whole seconds or unlimited is refused naming the field. */
+func (instance *Kernel) SetUnavailableRetryAfter(delay bound.Duration) {
+    instance.refuseMutationWhileServing("SetUnavailableRetryAfter")
+
+    resolved, resolveErr := config.ResolveUnavailableRetryAfter(delay, "KernelConfig.UnavailableRetryAfter")
+    if nil != resolveErr {
+        exception.Panic(exception.FromError(resolveErr))
+    }
+
+    instance.unavailableRetryAfter = resolved
+}
+
+/* a kernel built without NewKernel holds no delay, which reads as the default */
+func (instance *Kernel) unavailableRetryAfterLimit() bound.Duration {
+    if 0 == instance.unavailableRetryAfter {
+        return bound.Duration{}
+    }
+
+    return bound.Of(instance.unavailableRetryAfter)
 }
 
 func copyStringList(values []string) []string {
@@ -839,7 +866,7 @@ func (instance *Kernel) raiseException(
     eventDispatcher eventcontract.EventDispatcher,
     debugMode bool,
 ) httpcontract.Response {
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, err)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, err, KernelExceptionEventConfig{UnavailableRetryAfter: instance.unavailableRetryAfterLimit()})
 
     _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     instance.logEventDispatchError(requestLogger, "kernel exception error", dispatchErr)
@@ -862,7 +889,7 @@ func (instance *Kernel) raiseException(
         closeDiscardedResponseBody(answered, requestLogger)
     }
 
-    return renderExceptionSafely(runtimeInstance, request, exceptionEvent.Err(), requestLogger, debugMode)
+    return renderExceptionSafely(runtimeInstance, request, exceptionEvent.Err(), requestLogger, ExceptionRenderConfig{DebugMode: debugMode, UnavailableRetryAfter: bound.Of(exceptionEvent.UnavailableRetryAfter())})
 }
 
 /* renderExceptionSafely is the kernel's final step: the error keeps its own status when a listener failed or none answered, and only a renderer that panics too turns it into the static 500. */
@@ -871,7 +898,7 @@ func renderExceptionSafely(
     request httpcontract.Request,
     err error,
     requestLogger loggingcontract.Logger,
-    debugMode bool,
+    renderConfig ExceptionRenderConfig,
 ) (rendered httpcontract.Response) {
     defer func() {
         recoveredValue := recover()
@@ -895,7 +922,7 @@ func renderExceptionSafely(
         rendered = JsonErrorResponse(nethttp.StatusInternalServerError, "internal server error")
     }()
 
-    return RenderExceptionResponse(runtimeInstance, request, err, ExceptionRenderConfig{DebugMode: debugMode})
+    return RenderExceptionResponse(runtimeInstance, request, err, renderConfig)
 }
 
 func (instance *Kernel) requestIdLogger(
@@ -971,11 +998,9 @@ func logHandlerError(requestLogger loggingcontract.Logger, message string, handl
     clientCancelled := true == exception.ChainIs(handlerErr, context.Canceled) &&
         nil != httpRequest && context.Canceled == context.Cause(httpRequest.Context())
 
-    httpException := exception.AsHttpException(handlerErr)
-
     if true == clientCancelled {
         requestLogger.Warning("request cancelled by client", logContext)
-    } else if true == isDeliberateClientFault(httpException) {
+    } else if true == isDeliberateClientFault(handlerErr) {
         requestLogger.Warning(message, logContext)
     } else {
         requestLogger.Error(message, logContext)

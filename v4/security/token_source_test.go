@@ -673,12 +673,12 @@ func TestAuthenticatorTokenSource_AnAuthenticatorThatCouldNotCheckTheCredentialI
     runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
     dispatchedNameList := recordSecurityLoginEvents(dispatcher)
 
-    _, err := authenticatorTokenSourceAnswering(nil, MarkInfrastructureFailure(storeErr)).Resolve(runtimeInstance, newFirewallTestRequest("/"))
-    if false == errors.Is(err, storeErr) || false == IsInfrastructureFailure(err) {
+    _, err := authenticatorTokenSourceAnswering(nil, exception.MarkInfrastructureFailure(storeErr)).Resolve(runtimeInstance, newFirewallTestRequest("/"))
+    if false == errors.Is(err, storeErr) || false == exception.IsInfrastructureFailure(err) {
         t.Fatalf("expected the marked error handed back, got %v", err)
     }
 
-    unavailable := NewUnavailableToken(MarkInfrastructureFailure(storeErr))
+    unavailable := NewUnavailableToken(exception.MarkInfrastructureFailure(storeErr))
     token, tokenErr := authenticatorTokenSourceAnswering(unavailable, nil).Resolve(runtimeInstance, newFirewallTestRequest("/"))
     if nil != tokenErr || securitycontract.Token(unavailable) != token {
         t.Fatalf("expected the unavailable token passed through, got %T, %v", token, tokenErr)
@@ -688,7 +688,7 @@ func TestAuthenticatorTokenSource_AnAuthenticatorThatCouldNotCheckTheCredentialI
         t.Fatalf("expected no sign-in event for a credential nobody could check, got %v", *dispatchedNameList)
     }
 
-    statusErr := exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: MarkInfrastructureFailure(storeErr)})
+    statusErr := exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: exception.MarkInfrastructureFailure(storeErr)})
     if _, keptErr := authenticatorTokenSourceAnswering(nil, statusErr).Resolve(runtimeInstance, newFirewallTestRequest("/")); nil == keptErr {
         t.Fatal("expected the error that keeps its status handed back")
     }
@@ -710,16 +710,16 @@ type unavailableAuthenticatedToken struct {
 func (instance *unavailableAuthenticatedToken) IsAuthenticated() bool { return true }
 
 func (instance *unavailableAuthenticatedToken) AuthenticationUnavailableCause() error {
-    return MarkInfrastructureFailure(errors.New("redis is down"))
+    return exception.MarkInfrastructureFailure(errors.New("redis is down"))
 }
 
 func TestKernel_AnAuthenticatorOutageServesAPublicRouteAndRefusesAProtectedOneWith503(t *testing.T) {
     for name, tokenSource := range map[string]func() securitycontract.TokenSource{
         "a marked error": func() securitycontract.TokenSource {
-            return authenticatorTokenSourceAnswering(nil, MarkInfrastructureFailure(errors.New("redis is down")))
+            return authenticatorTokenSourceAnswering(nil, exception.MarkInfrastructureFailure(errors.New("redis is down")))
         },
         "an unavailable token": func() securitycontract.TokenSource {
-            return authenticatorTokenSourceAnswering(NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down"))), nil)
+            return authenticatorTokenSourceAnswering(NewUnavailableToken(exception.MarkInfrastructureFailure(errors.New("redis is down"))), nil)
         },
     } {
         t.Run(name, func(t *testing.T) {
@@ -736,7 +736,7 @@ func TestKernel_AnAuthenticatorOutageServesAPublicRouteAndRefusesAProtectedOneWi
     }
 
     for _, path := range []string{"/public", "/admin"} {
-        statusErr := exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: MarkInfrastructureFailure(errors.New("redis is down"))})
+        statusErr := exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: exception.MarkInfrastructureFailure(errors.New("redis is down"))})
         recorder, _, _ := newUnavailableRouteFixtureOver(authenticatorTokenSourceAnswering(nil, statusErr), bound.Of(7*time.Second)).serve(t, path)
         if nethttp.StatusTooManyRequests != recorder.Code || "" != recorder.Header().Get("Retry-After") {
             t.Fatalf("expected a marked error that answers 429 to keep it on %s, got %d %q", path, recorder.Code, recorder.Header().Get("Retry-After"))

@@ -271,7 +271,7 @@ func (instance *failingUserResolver) ResolveImpersonatedUser(
     _ runtimecontract.Runtime,
     _ string,
 ) (securitycontract.Token, error) {
-    return nil, exception.NewError("user store query failed", nil, MarkInfrastructureFailure(exception.NewError("store is down", nil, nil)))
+    return nil, exception.NewError("user store query failed", nil, exception.MarkInfrastructureFailure(exception.NewError("store is down", nil, nil)))
 }
 
 func TestImpersonation_AMarkedResolverFailureIsUnavailable(t *testing.T) {
@@ -303,7 +303,7 @@ func TestImpersonation_AMarkedResolverFailureIsUnavailable(t *testing.T) {
 }
 
 func TestImpersonation_AnUnavailableInnerTokenPassesThroughUntouched(t *testing.T) {
-    inner := NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down")))
+    inner := NewUnavailableToken(exception.MarkInfrastructureFailure(errors.New("redis is down")))
     source := NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
         Inner: &fixedTokenSource{token: inner},
         Users: &failingUserResolver{},

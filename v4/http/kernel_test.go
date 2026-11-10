@@ -4507,7 +4507,7 @@ func TestRenderExceptionSafely_ARendererThatPanicsAnswersTheStatic500(t *testing
     request := httptest.NewRequest(nethttp.MethodGet, "/fail", nil)
     request.Header.Set("Accept", "application/json")
 
-    response := renderExceptionSafely(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(request), failure, capture, false)
+    response := renderExceptionSafely(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(request), failure, capture, ExceptionRenderConfig{})
 
     if nethttp.StatusInternalServerError != response.StatusCode() {
         t.Fatalf("expected the static 500, got %d", response.StatusCode())
@@ -5050,5 +5050,106 @@ func TestKernel_TheFinalStepKeepsTheRetryAfterHeader(t *testing.T) {
 
     if nethttp.StatusServiceUnavailable != recorder.Code || "3" != recorder.Header().Get("Retry-After") {
         t.Fatalf("expected 503 with Retry-After 3 from the final step, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+}
+
+func TestKernel_AHandlerReturningAMarkedErrorAnswers503WithTheKernelDelay(t *testing.T) {
+    for name, throughTheFinalStep := range map[string]bool{"the final step": true, "the built-in listener": false} {
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/page",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                return nil, exception.MarkInfrastructureFailure(errors.New("cache is down"))
+            },
+        )
+
+        serviceContainer := newHttpTestContainer()
+        if true == throughTheFinalStep {
+            event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+                kernelcontract.EventKernelException,
+                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    panic("listener exploded")
+                },
+                0,
+            )
+        }
+
+        handler := NewKernel(router, KernelConfig{UnavailableRetryAfter: bound.Of(11 * time.Second)}).ServeHttp(serviceContainer)
+
+        request := httptest.NewRequest(nethttp.MethodGet, "/page", nil)
+        request.Header.Set("Accept", "application/json")
+        recorder := httptest.NewRecorder()
+
+        handler.ServeHTTP(recorder, request)
+
+        if nethttp.StatusServiceUnavailable != recorder.Code || "11" != recorder.Header().Get("Retry-After") {
+            t.Fatalf("%s: expected 503 with Retry-After 11, got %d %q", name, recorder.Code, recorder.Header().Get("Retry-After"))
+        }
+    }
+}
+
+func TestKernel_SetUnavailableRetryAfterRefusesADelayOutsideTheRule(t *testing.T) {
+    for name, delay := range map[string]bound.Duration{
+        "below a second":   bound.Of(500 * time.Millisecond),
+        "above an hour":    bound.Of(2 * time.Hour),
+        "a part of second": bound.Of(1500 * time.Millisecond),
+        "unlimited":        bound.UnlimitedDuration(),
+    } {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError || "KernelConfig.UnavailableRetryAfter" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+                    t.Fatalf("expected a refusal naming KernelConfig.UnavailableRetryAfter, got %v", recoveredErr)
+                }
+            }()
+
+            NewKernel(NewRouter(), KernelConfig{UnavailableRetryAfter: delay})
+        })
+    }
+}
+
+func TestLogHandlerError_AStoreStatusBeneathTheMarkIsAnError(t *testing.T) {
+    capture := &exceptionListenerCaptureLogger{}
+
+    logHandlerError(capture, "controller handler error", exception.MarkInfrastructureFailure(exception.NotFound("no such row")), httptest.NewRequest(nethttp.MethodGet, "/orders/7", nil))
+
+    if 1 != capture.errorCalls || 0 != capture.warningCalls {
+        t.Fatalf("expected one error and no warning for an outage, got %d errors %d warnings", capture.errorCalls, capture.warningCalls)
+    }
+}
+
+/* a panic carrying the mark is an outage like a returned one: a session manager that cannot read its storage panics with the storage's error */
+func TestKernel_APanicCarryingTheMarkAnswers503(t *testing.T) {
+    for name, value := range map[string]any{
+        "the marked error":           exception.MarkInfrastructureFailure(errors.New("storage is down")),
+        "a melody error wrapping it": exception.NewError("could not load the session", nil, exception.MarkInfrastructureFailure(errors.New("storage is down"))),
+    } {
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/page",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                panic(value)
+            },
+        )
+
+        recorder := httptest.NewRecorder()
+        NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer()).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/page", nil))
+
+        if nethttp.StatusServiceUnavailable != recorder.Code || "5" != recorder.Header().Get("Retry-After") {
+            t.Fatalf("%s: expected 503 with Retry-After 5, got %d %q", name, recorder.Code, recorder.Header().Get("Retry-After"))
+        }
+    }
+}
+
+func TestKernel_AKernelBuiltWithoutNewKernelRendersTheDefaultDelay(t *testing.T) {
+    if false == (&Kernel{}).unavailableRetryAfterLimit().IsAbsent() {
+        t.Fatal("expected a kernel holding no delay to hand the event an absent one, which the event reads as the default")
+    }
+
+    exceptionEvent := NewKernelExceptionEvent(nil, nil, errors.New("x"), KernelExceptionEventConfig{UnavailableRetryAfter: (&Kernel{}).unavailableRetryAfterLimit()})
+    if config.DefaultUnavailableRetryAfter != exceptionEvent.UnavailableRetryAfter() {
+        t.Fatalf("expected the default delay, got %s", exceptionEvent.UnavailableRetryAfter())
     }
 }

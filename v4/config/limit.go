@@ -90,7 +90,41 @@ var (
         Minimum:           bound.TimeoutMinimum,
         UnlimitedAdmitted: true,
     }
+
+    /* UnavailableRetryAfterRule bounds the Retry-After of a 503 answering an infrastructure failure: 5s when left out, 1s to 1h, unlimited refused; ResolveUnavailableRetryAfter adds the whole-second check. */
+    UnavailableRetryAfterRule = bound.Rule[time.Duration]{
+        Name:    "ApplicationConfig.UnavailableRetryAfter",
+        Default: DefaultUnavailableRetryAfter,
+        Minimum: bound.TtlMinimum,
+        Maximum: maximumUnavailableRetryAfter,
+    }
 )
+
+const maximumUnavailableRetryAfter = time.Hour
+
+/* ResolveUnavailableRetryAfter decides the Retry-After delay of a 503 answering an infrastructure failure against UnavailableRetryAfterRule, and refuses a value that is not a whole number of seconds, since the header carries whole seconds; every refusal names field. */
+func ResolveUnavailableRetryAfter(limit bound.Duration, field string) (time.Duration, error) {
+    rule := UnavailableRetryAfterRule
+    rule.Name = field
+
+    resolved, resolveErr := bound.Resolve(limit, rule)
+    if nil != resolveErr {
+        return 0, resolveErr
+    }
+
+    if 0 != resolved.Value%time.Second {
+        return 0, exception.NewError(
+            "the limit is not a whole number of seconds, and Retry-After is served in whole seconds",
+            exceptioncontract.Context{
+                "field": field,
+                "value": resolved.Value.String(),
+            },
+            nil,
+        )
+    }
+
+    return resolved.Value, nil
+}
 
 func parameterLimit[T bound.Unit](parameter configcontract.Parameter, environmentKey string) (bound.Limit[T], error) {
     text := ""
@@ -152,6 +186,26 @@ func checkedParameterLimit[T bound.Unit](parameter configcontract.Parameter, env
             "invalid environment value",
             exceptioncontract.Context{
                 "environmentKey": environmentKey,
+            },
+            resolveErr,
+        )
+    }
+
+    return limit, nil
+}
+
+/* checkedUnavailableRetryAfter reads MELODY_HTTP_UNAVAILABLE_RETRY_AFTER as checkedParameterLimit reads a limit, the whole-second check included */
+func checkedUnavailableRetryAfter(parameter configcontract.Parameter) (bound.Duration, error) {
+    limit, limitErr := checkedParameterLimit(parameter, HttpUnavailableRetryAfterKey, UnavailableRetryAfterRule)
+    if nil != limitErr || true == limit.IsAbsent() {
+        return limit, limitErr
+    }
+
+    if _, resolveErr := ResolveUnavailableRetryAfter(limit, UnavailableRetryAfterRule.Name); nil != resolveErr {
+        return bound.Duration{}, exception.NewError(
+            "invalid environment value",
+            exceptioncontract.Context{
+                "environmentKey": HttpUnavailableRetryAfterKey,
             },
             resolveErr,
         )

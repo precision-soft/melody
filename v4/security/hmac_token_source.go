@@ -327,7 +327,7 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
     seen, rememberErr := instance.nonceGuard.Remember(runtimeInstance, hmacNonceGuardKey(keyId, envelope.Nonce), bound.Of(ttl))
     if nil != rememberErr {
         /* the guard failing to answer is the platform's failure, marked so reject logs it as an incident */
-        return exception.NewError("internal-auth nonce guard failed", nil, MarkInfrastructureFailure(rememberErr))
+        return exception.NewError("internal-auth nonce guard failed", nil, exception.MarkInfrastructureFailure(rememberErr))
     }
 
     if true == seen {
@@ -380,7 +380,7 @@ func (instance *HmacTokenSource) reject(
     cause error,
 ) (securitycontract.Token, error) {
     /* a guard or a secret provider that cannot answer is the unavailable token, recorded once by the resolution listener; a bad envelope is anonymous */
-    if true == IsInfrastructureFailure(cause) {
+    if true == exception.IsInfrastructureFailure(cause) {
         return NewUnavailableToken(cause), nil
     }
 

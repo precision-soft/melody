@@ -6,6 +6,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -66,13 +67,13 @@ func TestOpaqueTokenValidator_ValidateMarksAStoreFailureAsInfrastructure(t *test
         t.Fatalf("expected the store's own failure to stay in the cause chain, got %v", validateErr)
     }
 
-    if false == IsInfrastructureFailure(validateErr) {
+    if false == exception.IsInfrastructureFailure(validateErr) {
         t.Fatalf("expected the failure to be marked as infrastructure, got %v", validateErr)
     }
 
     notFoundErr := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
     _, routineErr := NewOpaqueTokenValidator(notFoundErr).Validate(nil, "opaque-absent")
-    if true == IsInfrastructureFailure(routineErr) {
+    if true == exception.IsInfrastructureFailure(routineErr) {
         t.Fatalf("expected an absent token to stay a routine refusal, got %v", routineErr)
     }
 }

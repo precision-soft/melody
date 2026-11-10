@@ -278,7 +278,7 @@ func (instance *JwtTokenValidator) verifyRevocationEpoch(
         return exception.NewError(
             "jwt revocation epoch is unavailable",
             map[string]any{"user": claims.UserIdentifier},
-            MarkInfrastructureFailure(epochErr),
+            exception.MarkInfrastructureFailure(epochErr),
         )
     }
 

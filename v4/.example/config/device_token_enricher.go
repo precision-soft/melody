@@ -6,7 +6,6 @@ import (
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
-    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -37,7 +36,7 @@ func (instance deviceAccountEnricher) Enrich(
         return claims, melodyexception.NewError(
             "the account a device token names could not be read",
             melodyexceptioncontract.Context{"userIdentifier": claims.UserIdentifier},
-            melodysecurity.MarkInfrastructureFailure(lookupErr),
+            melodyexception.MarkInfrastructureFailure(lookupErr),
         )
     }
 

@@ -385,20 +385,21 @@ one, the budget is what bounds the wait.
 
 ### Server limits
 
-An http process serves with five per-request limits, a clean stop spends one teardown budget, the close of a scope runs under one term, and the container bounds the resolutions waiting on one creation. Each is a [`bound`](../../bound/limit.go) limit with three sources, decided in this order: the configuration key a deployment sets, then the field of [`ApplicationConfig`](../../application/application_new.go), then the framework default.
+An http process serves with five per-request limits, a clean stop spends one teardown budget, the close of a scope runs under one term, the container bounds the resolutions waiting on one creation, and the `503` answering an infrastructure failure outside a firewall carries one `Retry-After` delay. Each is a [`bound`](../../bound/limit.go) limit with three sources, decided in this order: the configuration key a deployment sets, then the field of [`ApplicationConfig`](../../application/application_new.go), then the framework default.
 
-| Field                      | Key                                 | Default | Minimum | Unlimited |
-|----------------------------|-------------------------------------|---------|---------|-----------|
-| `ReadTimeout`              | `MELODY_HTTP_READ_TIMEOUT`          | 15s     | 1ms     | refused   |
-| `ReadHeaderTimeout`        | `MELODY_HTTP_READ_HEADER_TIMEOUT`   | 5s      | 1ms     | refused   |
-| `WriteTimeout`             | `MELODY_HTTP_WRITE_TIMEOUT`         | 30s     | 1ms     | refused   |
-| `IdleTimeout`              | `MELODY_HTTP_IDLE_TIMEOUT`          | 60s     | 1ms     | refused   |
-| `MaxHeaderBytes`           | `MELODY_HTTP_MAX_HEADER_BYTES`      | 1 MiB   | 4 KiB   | refused   |
-| `TeardownTimeout`          | `MELODY_TEARDOWN_TIMEOUT`           | 10s     | 1ms     | admitted  |
-| `ScopeTeardownTimeout`     | `MELODY_SCOPE_TEARDOWN_TIMEOUT`     | 3s      | 1ms     | admitted  |
-| `ContainerCreationWaiters` | `MELODY_CONTAINER_CREATION_WAITERS` | 1,024   | 1       | admitted  |
+| Field                      | Key                                   | Default | Minimum | Unlimited |
+|----------------------------|---------------------------------------|---------|---------|-----------|
+| `ReadTimeout`              | `MELODY_HTTP_READ_TIMEOUT`            | 15s     | 1ms     | refused   |
+| `ReadHeaderTimeout`        | `MELODY_HTTP_READ_HEADER_TIMEOUT`     | 5s      | 1ms     | refused   |
+| `WriteTimeout`             | `MELODY_HTTP_WRITE_TIMEOUT`           | 30s     | 1ms     | refused   |
+| `IdleTimeout`              | `MELODY_HTTP_IDLE_TIMEOUT`            | 60s     | 1ms     | refused   |
+| `MaxHeaderBytes`           | `MELODY_HTTP_MAX_HEADER_BYTES`        | 1 MiB   | 4 KiB   | refused   |
+| `TeardownTimeout`          | `MELODY_TEARDOWN_TIMEOUT`             | 10s     | 1ms     | admitted  |
+| `ScopeTeardownTimeout`     | `MELODY_SCOPE_TEARDOWN_TIMEOUT`       | 3s      | 1ms     | admitted  |
+| `ContainerCreationWaiters` | `MELODY_CONTAINER_CREATION_WAITERS`   | 1,024   | 1       | admitted  |
+| `UnavailableRetryAfter`    | `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER` | 5s      | 1s      | refused   |
 
-The field is the application's own default for its deployments, and the key is the deployment's word over it. A key read `unlimited` where the rule refuses it, or a value below the minimum from either source, fails the boot naming the field, and the key when the key carried it. Unlimited is refused on the five server limits because `net/http` reads no bound as no timeout, which leaves a slow client holding a connection; a deployment that wants a long one names it. A teardown without a deadline is `unlimited`, and so is a container that admits every waiter.
+The field is the application's own default for its deployments, and the key is the deployment's word over it. A key read `unlimited` where the rule refuses it, or a value below the minimum from either source, fails the boot naming the field, and the key when the key carried it. Unlimited is refused on the five server limits because `net/http` reads no bound as no timeout, which leaves a slow client holding a connection; a deployment that wants a long one names it. A teardown without a deadline is `unlimited`, and so is a container that admits every waiter. The unavailable delay is at most 1h and a whole number of seconds, since `Retry-After` carries whole seconds; the http run installs the resolved delay on the kernel last, so a module's own `SetUnavailableRetryAfter` does not outrank it; a firewall answers its own refusal with its own `UnavailableRetryAfter` (see [SECURITY.md](SECURITY.md#a-store-that-cannot-answer)).
 
 The container's teardown order is a switch beside them, decided the same way: `ContainerTeardownSequential` closes the services one after the other instead of in dependency waves, and `MELODY_CONTAINER_TEARDOWN_SEQUENTIAL`, when set, wins over it (see [CONFIG.md](CONFIG.md#container-teardown-order)). Once the modules registered their services, the boot refuses, before `Run`, a declared teardown dependency that does not name one container service — the framework's container carries the verification door, and a container of another implementation that does not is not checked (see [CONTAINER.md](CONTAINER.md)).
 

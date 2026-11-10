@@ -91,8 +91,12 @@ func completedStatusCode(handlerErr error, response httpcontract.Response, recor
     return recorder.observedStatusCode()
 }
 
-/* statusCodeForError maps a handler error to the status the client receives, as the kernel does: an HttpException is sent at its own status, a 502 as a 502, a body past its limit as 413, and anything else is a server error. */
+/* statusCodeForError maps a handler error to the status the client receives, as the kernel does: an error answered as an infrastructure failure is a 503, an HttpException is sent at its own status, a 502 as a 502, a body past its limit as 413, and anything else is a server error. */
 func statusCodeForError(handlerErr error) int {
+    if true == exception.AnswersUnavailable(handlerErr) {
+        return nethttp.StatusServiceUnavailable
+    }
+
     httpException := exception.AsHttpException(handlerErr)
     if nil != httpException && 100 <= httpException.StatusCode() && 599 >= httpException.StatusCode() {
         return httpException.StatusCode()

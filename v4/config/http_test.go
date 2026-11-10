@@ -130,6 +130,10 @@ func TestConfigurationHttpLimitsRefuseWhatTheirRuleDoesNotAdmit(t *testing.T) {
         {HttpMaxHeaderBytesKey, "unlimited", "ApplicationConfig.MaxHeaderBytes"},
         {HttpReadHeaderTimeoutKey, "999us", "ApplicationConfig.ReadHeaderTimeout"},
         {TeardownTimeoutKey, "0", "ApplicationConfig.TeardownTimeout"},
+        {HttpUnavailableRetryAfterKey, "500ms", "ApplicationConfig.UnavailableRetryAfter"},
+        {HttpUnavailableRetryAfterKey, "2h", "ApplicationConfig.UnavailableRetryAfter"},
+        {HttpUnavailableRetryAfterKey, "unlimited", "ApplicationConfig.UnavailableRetryAfter"},
+        {HttpUnavailableRetryAfterKey, "1500ms", "ApplicationConfig.UnavailableRetryAfter"},
     }
 
     for _, testCase := range cases {
@@ -166,6 +170,14 @@ func TestConfigurationApplicationLimitsAreAbsentUnlessSet(t *testing.T) {
         bound.Of(4096) != configuration.Http().MaxHeaderBytes() ||
         false == configuration.Kernel().TeardownTimeout().IsUnlimited() {
         t.Fatalf("expected the application limits as set, got %v %v %v %v %v %v", configuration.Http().ReadTimeout(), configuration.Http().ReadHeaderTimeout(), configuration.Http().WriteTimeout(), configuration.Http().IdleTimeout(), configuration.Http().MaxHeaderBytes(), configuration.Kernel().TeardownTimeout())
+    }
+
+    if false == configuration.Http().UnavailableRetryAfter().IsAbsent() {
+        t.Fatalf("expected the unavailable retry after absent when no key sets it")
+    }
+
+    if bound.Of(7*time.Second) != mustConfigurationFromValues(t, map[string]string{HttpUnavailableRetryAfterKey: "7s"}).Http().UnavailableRetryAfter() {
+        t.Fatalf("expected the unavailable retry after as set")
     }
 
     if "3s" != mustConfigurationFromValues(t, map[string]string{HttpReadTimeoutKey: "3s"}).MustGet(KernelHttpReadTimeout).MustString() {

@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Behavioural change** — `metrics_middleware.go`: a handler error carrying `exception.MarkInfrastructureFailure` is labelled `503`, the status the fourth major's error renderer answers it with, where it was labelled `500`, or the store's own status beneath the mark; an http status around the marked cause keeps its own label.
 - **Behavioural change** — `module.go`: `RegisterHttpRoutes` refuses a half-declared metrics route, naming the field: a `MetricsPath` with no `MetricsHandler`, a `MetricsHandler` with no `MetricsPath`, and a `MetricsRouteName` with neither, where it registered no route; leaving all three out still registers none.
 - `otlp/module.go`: `RegisterHttpMiddlewares` resolves the tracer provider under `Kernel.Context()`, the application's context, the fourth major's resolver form.
 - `tracing_middleware.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.

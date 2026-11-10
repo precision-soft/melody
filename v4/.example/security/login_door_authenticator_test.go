@@ -592,7 +592,7 @@ func serveLoginDoor(t *testing.T, runtimeInstance melodyruntimecontract.Runtime,
     }
 
     if nil != requestEvent.Refusal() {
-        return presenter.ApiRefusalOfError(runtimeInstance, request, requestEvent.Refusal()), nil
+        return presenter.ApiRefusalOfError(runtimeInstance, request, requestEvent.Refusal(), melodyconfig.DefaultUnavailableRetryAfter), nil
     }
 
     return requestEvent.Response(), nil

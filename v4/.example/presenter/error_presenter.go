@@ -71,14 +71,23 @@ func ApiError(
     )
 }
 
-/* ApiRefusalOfError renders an error the kernel raised: a refusal keeps its status and public message, its cause travels under the development environment alone, anything else answers 500 and says nothing of itself. The second-factor challenge names the factor the client must present; a refusal carrying a Retry-After delay keeps it as the header. */
+/* ApiRefusalOfError renders an error the kernel raised: a refusal keeps its status and public message, its cause travels under the development environment alone, an error marked as an infrastructure failure answers 503 with unavailableRetryAfter, the kernel's delay the exception event carries, anything else answers 500 and says nothing of itself. The second-factor challenge names the factor the client must present; a refusal carrying a Retry-After delay keeps it as the header. */
 func ApiRefusalOfError(
     runtimeInstance melodyruntimecontract.Runtime,
     request melodyhttpcontract.Request,
     refusalErr error,
+    unavailableRetryAfter time.Duration,
 ) melodyhttpcontract.Response {
     if true == errors.Is(refusalErr, melodysecurity.ErrSecondFactorRequired) {
         return ApiErrorWithPayload(runtimeInstance, request, nethttp.StatusUnauthorized, map[string]any{"factor": "totp"}, melodysecurity.ErrSecondFactorRequired.Error())
+    }
+
+    if true == melodyexception.AnswersUnavailable(refusalErr) {
+        response := ApiErrorWithErr(runtimeInstance, request, nethttp.StatusServiceUnavailable, "service unavailable", refusalErr)
+
+        melodyhttp.SetRetryAfter(response, unavailableRetryAfter)
+
+        return response
     }
 
     statusCode := nethttp.StatusInternalServerError

@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
@@ -382,7 +383,7 @@ func TestSessionTokenResolver_AFailedLookupIsUnavailableAndKeepsTheSession(t *te
     }
 
     cause, unavailable := melodysecurity.AuthenticationUnavailableCause(token)
-    if false == unavailable || false == melodysecurity.IsInfrastructureFailure(cause) || false == errors.Is(cause, lookupErr) {
+    if false == unavailable || false == exception.IsInfrastructureFailure(cause) || false == errors.Is(cause, lookupErr) {
         t.Fatalf("expected the unavailable token carrying the marked lookup failure, got %v %v", cause, unavailable)
     }
 

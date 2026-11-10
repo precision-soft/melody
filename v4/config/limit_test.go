@@ -1,10 +1,11 @@
-package security
+package config
 
 import (
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 func TestResolveUnavailableRetryAfter_DecidesTheDelayAgainstItsRule(t *testing.T) {
@@ -31,9 +32,12 @@ func TestResolveUnavailableRetryAfter_DecidesTheDelayAgainstItsRule(t *testing.T
         "unlimited": bound.UnlimitedDuration(),
     } {
         _, resolveErr := ResolveUnavailableRetryAfter(limit, "Field")
-        expectErrorNamingField(t, resolveErr, "Field")
         if nil == resolveErr {
             t.Fatalf("%s: expected a refusal", name)
+        }
+
+        if "Field" != exception.LogContext(resolveErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("%s: expected the refusal to name the field, got %v", name, resolveErr)
         }
     }
 }

@@ -1364,7 +1364,28 @@ func (instance *unavailableRouteFixture) serve(t *testing.T, path string) (*http
 var unavailableRouteStoreErr = errors.New("redis is down")
 
 func newMarkedUnavailableToken() *UnavailableToken {
-    return NewUnavailableToken(MarkInfrastructureFailure(unavailableRouteStoreErr))
+    return NewUnavailableToken(exception.MarkInfrastructureFailure(unavailableRouteStoreErr))
+}
+
+func TestAccessControlListener_TheFirewallRefusalKeepsTheFirewallDelayOverTheKernels(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        retryAfter bound.Duration
+        expected   string
+    }{
+        "the firewall's default": {retryAfter: bound.Duration{}, expected: "5"},
+        "the firewall's own":     {retryAfter: bound.Of(9 * time.Second), expected: "9"},
+    } {
+        t.Run(name, func(t *testing.T) {
+            fixture := newUnavailableRouteFixture(newMarkedUnavailableToken(), testCase.retryAfter)
+            fixture.kernel.httpKernel.SetUnavailableRetryAfter(bound.Of(13 * time.Second))
+
+            recorder, _, _ := fixture.serve(t, "/admin")
+
+            if nethttp.StatusServiceUnavailable != recorder.Code || testCase.expected != recorder.Header().Get("Retry-After") {
+                t.Fatalf("expected 503 with the firewall's Retry-After %s, not the kernel's 13, got %d %q", testCase.expected, recorder.Code, recorder.Header().Get("Retry-After"))
+            }
+        })
+    }
 }
 
 func TestAccessControlListener_AnUnavailableTokenOnAProtectedRouteIsRefusedWith503AndRetryAfter(t *testing.T) {
@@ -1448,7 +1469,7 @@ type unavailableButAuthenticatedToken struct {
 }
 
 func (instance *unavailableButAuthenticatedToken) AuthenticationUnavailableCause() error {
-    return MarkInfrastructureFailure(errors.New("redis is down"))
+    return exception.MarkInfrastructureFailure(errors.New("redis is down"))
 }
 
 func TestAccessControlListener_ATokenBothUnavailableAndAuthenticatedIsRefused(t *testing.T) {

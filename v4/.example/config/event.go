@@ -176,7 +176,7 @@ func (instance *Module) registerApiExceptionListener(eventDispatcher melodyevent
                 return nil
             }
 
-            exceptionEvent.SetResponse(presenter.ApiRefusalOfError(runtimeInstance, exceptionEvent.Request(), exceptionEvent.Err()))
+            exceptionEvent.SetResponse(presenter.ApiRefusalOfError(runtimeInstance, exceptionEvent.Request(), exceptionEvent.Err(), exceptionEvent.UnavailableRetryAfter()))
 
             return nil
         },

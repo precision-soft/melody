@@ -72,6 +72,7 @@ All recognised `.env` keys and their defaults live in [`config/environment.go`](
 | `MELODY_HTTP_WRITE_TIMEOUT`               | `kernel.http.write_timeout`               | `""` (the application's, then `30s`)         |
 | `MELODY_HTTP_IDLE_TIMEOUT`                | `kernel.http.idle_timeout`                | `""` (the application's, then `60s`)         |
 | `MELODY_HTTP_MAX_HEADER_BYTES`            | `kernel.http.max_header_bytes`            | `""` (the application's, then `1048576`)     |
+| `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER`     | `kernel.http.unavailable_retry_after`     | `""` (the application's, then `5s`)          |
 | `MELODY_CLI_NAME`                         | `kernel.cli_name`                         | `"melody"`                                   |
 | `MELODY_CLI_DESCRIPTION`                  | `kernel.cli_description`                  | `""`                                         |
 | `MELODY_CLI_BOOT_WARNINGS_IGNORED`        | `kernel.cli_boot_warnings_ignored`        | `""`                                         |
@@ -401,11 +402,11 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 

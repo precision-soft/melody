@@ -82,6 +82,16 @@ func resolveScopeTeardownTimeout(configuration configcontract.Configuration, app
     return resolveApplicationLimit(configuration.Kernel().ScopeTeardownTimeout(), applicationConfig.ScopeTeardownTimeout, container.ScopeTeardownTimeoutRule)
 }
 
+/* resolveUnavailableRetryAfter answers the delay the key sets, then the application's field, then the default, a refusal naming the field as its siblings do; the configuration already refused a bad key naming the key */
+func resolveUnavailableRetryAfter(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (time.Duration, error) {
+    limit := applicationConfig.UnavailableRetryAfter
+    if keyLimit := configuration.Http().UnavailableRetryAfter(); false == keyLimit.IsAbsent() {
+        limit = keyLimit
+    }
+
+    return config.ResolveUnavailableRetryAfter(limit, config.UnavailableRetryAfterRule.Name)
+}
+
 /* refuseScopeTeardownOutlastingHttpShutdown fails an http boot whose request scope may still be closing when the shutdown's wait ends, which every stop catching a slow close would report as a scope left open and exit non-zero on. */
 func refuseScopeTeardownOutlastingHttpShutdown(configuration configcontract.Configuration, applicationConfig ApplicationConfig) error {
     scopeTeardownTimeout, scopeTeardownTimeoutErr := resolveScopeTeardownTimeout(configuration, applicationConfig)

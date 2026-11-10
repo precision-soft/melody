@@ -9,7 +9,6 @@ import (
 
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -81,7 +80,7 @@ func (instance *LoginDoorAuthenticator) Authenticate(request melodyhttpcontract.
     }
 
     /* an outage carries the framework's mark: the door answers it 503 with the firewall's Retry-After */
-    if true == melodysecurity.IsInfrastructureFailure(authenticationErr) {
+    if true == melodyexception.IsInfrastructureFailure(authenticationErr) {
         return nil, authenticationErr
     }
 

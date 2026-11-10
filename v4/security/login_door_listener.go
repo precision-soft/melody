@@ -209,7 +209,7 @@ func serveLoginDoor(
             }
         }
 
-        if true == answeredAsUnavailable(loginErr) {
+        if true == exception.AnswersUnavailable(loginErr) {
             requestEvent.Refuse(refuseUnavailableAtLoginDoor(runtimeInstance, requestEvent, firewall, loginErr))
 
             return
@@ -245,7 +245,7 @@ func authenticateAtLoginDoor(
     if true == firewall.loginAuthenticator.Supports(request) {
         authenticatedToken, authenticateErr := firewall.loginAuthenticator.Authenticate(request)
         if nil != authenticateErr {
-            if true == answeredAsUnavailable(authenticateErr) {
+            if true == exception.AnswersUnavailable(authenticateErr) {
                 return nil, refuseUnavailableAtLoginDoor(runtimeInstance, requestEvent, firewall, authenticateErr)
             }
 

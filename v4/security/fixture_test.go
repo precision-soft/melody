@@ -515,7 +515,7 @@ func expectUnavailableToken(t *testing.T, token securitycontract.Token) error {
         t.Fatal("expected an unavailable token not authenticated")
     }
 
-    if false == IsInfrastructureFailure(cause) {
+    if false == exception.IsInfrastructureFailure(cause) {
         t.Fatalf("expected the cause to carry the infrastructure mark, got %v", cause)
     }
 

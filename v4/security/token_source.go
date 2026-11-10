@@ -61,7 +61,7 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
     token, usedAuthenticator, err := instance.manager.Authenticate(request)
     if nil != err {
         /* an error answered as the unavailable token is an outage, no failed sign-in: a lockout listener must not count it */
-        if true == usedAuthenticator && false == answeredAsUnavailable(err) {
+        if true == usedAuthenticator && false == exception.AnswersUnavailable(err) {
             eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
             _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
                 runtimeInstance,

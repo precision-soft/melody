@@ -6,12 +6,14 @@ import (
     "errors"
     "fmt"
     "io"
+    nethttp "net/http"
     "net/http/httptest"
     "reflect"
     "strings"
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/container"
@@ -43,7 +45,7 @@ func TestExceptionListener_HtmlResponse_EscapesXss(t *testing.T) {
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -79,7 +81,7 @@ func TestExceptionListener_JsonResponse_ContainsMessage(t *testing.T) {
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -115,7 +117,7 @@ func TestExceptionListener_DebugModeOff_GenericMessage(t *testing.T) {
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, genericErr)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, genericErr, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -154,7 +156,7 @@ func TestExceptionListener_DebugModeOn_ShowsErrorMessage(t *testing.T) {
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, genericErr)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, genericErr, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -186,7 +188,7 @@ func TestExceptionListener_DebugModeOn_HtmlEscapesMessage(t *testing.T) {
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, genericErr)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, genericErr, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -217,7 +219,7 @@ func TestExceptionListener_NilErr_NoResponse(t *testing.T) {
     request := httptest.NewRequest("GET", "/test", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, nil)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, nil, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -241,7 +243,7 @@ func TestExceptionListener_ResponseAlreadySet_Skips(t *testing.T) {
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     existingResponse := TextResponse(200, "already handled")
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, errors.New("some error"))
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, errors.New("some error"), KernelExceptionEventConfig{})
     exceptionEvent.SetResponse(existingResponse)
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
@@ -269,7 +271,7 @@ func TestExceptionListener_SetsRequestIdHeader(t *testing.T) {
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -301,7 +303,7 @@ func TestExceptionListener_HttpExceptionStatusCode(t *testing.T) {
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -352,7 +354,7 @@ func TestExceptionListener_ValidationErrorsContextReachesTheJsonBody(t *testing.
     request := httptest.NewRequest("POST", "/test", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -391,7 +393,7 @@ func TestExceptionListener_ContextWithoutValidationErrorsKeyStaysPrivate(t *test
     request := httptest.NewRequest("POST", "/test", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, httpErr, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -426,7 +428,7 @@ func TestExceptionListener_WritesTheEnvelopeWithTheRequestId(t *testing.T) {
     request := httptest.NewRequest("GET", "/orders/7", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(404, "order not found"))
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(404, "order not found"), KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -472,7 +474,7 @@ func TestExceptionListener_CarriesTheClientFacingIdentityInsideTheErrorObject(t 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     failure := fmt.Errorf("lookup: %w", exception.NewHttpError(404, exception.HttpErrorConfig{Code: "order.notFound", Key: "error.order.not_found", Message: "order not found", Parameters: map[string]any{"id": 7}, Cause: errors.New("no row")}))
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, failure)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, failure, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -521,7 +523,7 @@ func TestExceptionListener_DebugContextAndCauseAreInsideTheErrorObject(t *testin
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
     failure := exception.NewError("order lookup failed", exceptioncontract.Context{"orderId": "7"}, errors.New("connection refused"))
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, failure)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, failure, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -566,7 +568,7 @@ func TestExceptionListener_AnswersATypedNilHttpExceptionWithoutDereferencingIt(t
     request := httptest.NewRequest("GET", "/test", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, unassignedHttpException)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, unassignedHttpException, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -596,7 +598,7 @@ func TestExceptionListener_UnmarkedError_LogsOneRecordAndMarksIt(t *testing.T) {
     request := httptest.NewRequest("GET", "/orders/7", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -639,7 +641,7 @@ func TestExceptionListener_AlreadyLoggedError_WritesNoSecondRecord(t *testing.T)
     request := httptest.NewRequest("GET", "/orders/7", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -675,7 +677,7 @@ func TestExceptionListener_AlreadyLoggedError_AttachesRequestCoordinatesWithoutO
     request := httptest.NewRequest("DELETE", "/orders/7", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, err, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -708,7 +710,7 @@ func TestExceptionListener_AlreadyLoggedErrorWithoutARequest_AttachesNoEmptyCoor
     err := exception.NewError("logged upstream", nil, nil)
     _ = exception.MarkLogged(err)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, nil, err)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, nil, err, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -735,7 +737,7 @@ func TestExceptionListener_ADeliberate4xxIsRecordedAtWarning(t *testing.T) {
     request := httptest.NewRequest("GET", "/orders/7", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(404, "order not found"))
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(404, "order not found"), KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -758,7 +760,7 @@ func TestExceptionListener_A5xxKeepsTheErrorLevel(t *testing.T) {
     request := httptest.NewRequest("GET", "/orders/7", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(502, "upstream failed"))
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, exception.NewHttpException(502, "upstream failed"), KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -786,7 +788,7 @@ func TestExceptionListener_AValidationWiringFaultIsRecordedAtErrorRatherThanAsAR
     })
 
     request := httptest.NewRequest("POST", "/api/subscribe", nil)
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -814,7 +816,7 @@ func TestExceptionListener_AGenuineFieldRefusalStaysAWarning(t *testing.T) {
     })
 
     request := httptest.NewRequest("POST", "/api/subscribe", nil)
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -843,7 +845,7 @@ func TestExceptionListener_AWiringFaultKeepsItsContextInTheRecordAndOutOfTheResp
     })
 
     request := httptest.NewRequest("POST", "/api/subscribe", nil)
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), httpException, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -902,7 +904,7 @@ func TestExceptionListener_DebugModeOn_APanickingErrorTextIsContained(t *testing
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, &nilMapPanickingError{})
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, &nilMapPanickingError{}, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -935,7 +937,7 @@ func TestExceptionListener_DebugModeOn_APanickingCauseTextIsContained(t *testing
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, wrapped)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, melodyRequest, wrapped, KernelExceptionEventConfig{})
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
     if nil != dispatchErr {
@@ -978,7 +980,7 @@ func TestBuiltInExceptionListener_ABareRuntimeRendersTheProductionBody(t *testin
     request := httptest.NewRequest("GET", "/api/test", nil)
     request.Header.Set("Accept", "application/json")
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), errors.New("detailed debug info here"))
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), errors.New("detailed debug info here"), KernelExceptionEventConfig{})
 
     if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent); nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
@@ -1002,7 +1004,7 @@ func TestBuiltInExceptionListener_AProductionConfigurationRendersTheProductionBo
     request := httptest.NewRequest("GET", "/api/test", nil)
     request.Header.Set("Accept", "application/json")
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), errors.New("detailed debug info here"))
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(request), errors.New("detailed debug info here"), KernelExceptionEventConfig{})
 
     if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent); nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
@@ -1066,5 +1068,158 @@ func TestRenderExceptionResponse_ServesTheRetryAfterHeader(t *testing.T) {
         if _, exists := plain.Headers()["Retry-After"]; true == exists {
             t.Fatalf("expected no Retry-After without a delay for %s", accept)
         }
+    }
+}
+
+func TestRenderExceptionResponse_AnswersAMarkedErrorAsUnavailable(t *testing.T) {
+    runtimeInstance := newErrorRendererTextAndJsonRuntime()
+    marked := exception.MarkInfrastructureFailure(errors.New("session storage is down"))
+
+    for accept, contentType := range map[string]string{"application/json": ContentTypeJson, "text/html": ContentTypeTextHtml, "text/plain": ContentTypeTextPlain} {
+        request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/page", accept)
+
+        response := RenderExceptionResponse(runtimeInstance, request, marked, ExceptionRenderConfig{})
+        if nethttp.StatusServiceUnavailable != response.StatusCode() || "5" != response.Headers().Get("Retry-After") {
+            t.Fatalf("expected 503 with Retry-After 5 for %s, got %d %q", accept, response.StatusCode(), response.Headers().Get("Retry-After"))
+        }
+
+        if contentType != response.Headers().Get("Content-Type") {
+            t.Fatalf("expected the %s body for %s, got %q", contentType, accept, response.Headers().Get("Content-Type"))
+        }
+
+        if false == strings.Contains(readResponseBody(t, response), "service unavailable") || true == strings.Contains(readResponseBody(t, response), "session storage") {
+            t.Fatalf("expected the generic unavailable message without the cause for %s", accept)
+        }
+
+        unmarked := RenderExceptionResponse(runtimeInstance, request, errors.New("session storage is down"), ExceptionRenderConfig{})
+        if nethttp.StatusInternalServerError != unmarked.StatusCode() {
+            t.Fatalf("expected 500 for an unmarked error for %s, got %d", accept, unmarked.StatusCode())
+        }
+
+        if _, exists := unmarked.Headers()["Retry-After"]; true == exists {
+            t.Fatalf("expected no Retry-After on an unmarked error for %s", accept)
+        }
+    }
+}
+
+func TestRenderExceptionResponse_AStatusOutsideTheMarkIsKept(t *testing.T) {
+    runtimeInstance := newErrorRendererTextAndJsonRuntime()
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/page", "application/json")
+
+    answered := exception.NewHttpError(nethttp.StatusBadRequest, exception.HttpErrorConfig{Message: "bad request", Cause: exception.MarkInfrastructureFailure(errors.New("down"))})
+    response := RenderExceptionResponse(runtimeInstance, request, answered, ExceptionRenderConfig{})
+    if nethttp.StatusBadRequest != response.StatusCode() {
+        t.Fatalf("expected the application's 400 around the marked cause, got %d", response.StatusCode())
+    }
+
+    if _, exists := response.Headers()["Retry-After"]; true == exists {
+        t.Fatal("expected no Retry-After on the application's own answer")
+    }
+
+    beneath := exception.MarkInfrastructureFailure(exception.NewHttpError(nethttp.StatusNotFound, exception.HttpErrorConfig{Message: "no such row", Code: "row.missing"}))
+    response = RenderExceptionResponse(runtimeInstance, request, beneath, ExceptionRenderConfig{})
+    if nethttp.StatusServiceUnavailable != response.StatusCode() || "5" != response.Headers().Get("Retry-After") {
+        t.Fatalf("expected a store's 404 beneath the mark to answer 503, got %d %q", response.StatusCode(), response.Headers().Get("Retry-After"))
+    }
+
+    if body := readResponseBody(t, response); true == strings.Contains(body, "row.missing") || true == strings.Contains(body, "no such row") {
+        t.Fatalf("expected nothing of the store's answer in the body, got %s", body)
+    }
+}
+
+func TestRenderExceptionResponse_ServesTheConfiguredUnavailableDelay(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/page", "application/json")
+    marked := exception.MarkInfrastructureFailure(errors.New("down"))
+
+    response := RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, marked, ExceptionRenderConfig{UnavailableRetryAfter: bound.Of(7 * time.Second)})
+    if "7" != response.Headers().Get("Retry-After") {
+        t.Fatalf("expected Retry-After 7, got %q", response.Headers().Get("Retry-After"))
+    }
+
+    assertPanicsNamingField(
+        t,
+        func() {
+            RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, marked, ExceptionRenderConfig{UnavailableRetryAfter: bound.Of(1500 * time.Millisecond)})
+        },
+        "the limit is not a whole number of seconds, and Retry-After is served in whole seconds",
+        "ExceptionRenderConfig.UnavailableRetryAfter",
+    )
+}
+
+func TestBuiltInExceptionListener_ServesTheDelayTheEventCarries(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    runtimeInstance := newTestRuntime()
+
+    installBuiltInExceptionListener(dispatcher)
+
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/page", "application/json")
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, exception.MarkInfrastructureFailure(errors.New("down")), KernelExceptionEventConfig{UnavailableRetryAfter: bound.Of(9 * time.Second)})
+
+    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if nil == exceptionEvent.Response() || nethttp.StatusServiceUnavailable != exceptionEvent.Response().StatusCode() || "9" != exceptionEvent.Response().Headers().Get("Retry-After") {
+        t.Fatalf("expected 503 with the event's Retry-After 9, got %v", exceptionEvent.Response())
+    }
+
+    if config.DefaultUnavailableRetryAfter != NewKernelExceptionEvent(runtimeInstance, request, errors.New("x"), KernelExceptionEventConfig{}).UnavailableRetryAfter() {
+        t.Fatal("expected an event built without a delay to carry the default")
+    }
+
+    assertPanicsNamingField(
+        t,
+        func() {
+            NewKernelExceptionEvent(runtimeInstance, request, errors.New("x"), KernelExceptionEventConfig{UnavailableRetryAfter: bound.UnlimitedDuration()})
+        },
+        "the limit does not admit unlimited",
+        "KernelExceptionEventConfig.UnavailableRetryAfter",
+    )
+}
+
+func TestExceptionListener_AStoreStatusBeneathTheMarkIsRecordedAtError(t *testing.T) {
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    capture := &exceptionListenerCaptureLogger{}
+    runtimeInstance := newExceptionListenerTestRuntimeWithLogger(capture)
+
+    installBuiltInExceptionListener(dispatcher)
+
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, testhelper.NewHttpTestRequestFromHttpRequest(httptest.NewRequest("GET", "/orders/7", nil)), exception.MarkInfrastructureFailure(exception.NotFound("no such row")), KernelExceptionEventConfig{})
+
+    if _, dispatchErr := dispatcher.DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent); nil != dispatchErr {
+        t.Fatalf("unexpected dispatch error: %v", dispatchErr)
+    }
+
+    if 1 != capture.errorCalls || 0 != capture.warningCalls {
+        t.Fatalf("expected one error record for an outage answered 503, got %d error / %d warning", capture.errorCalls, capture.warningCalls)
+    }
+}
+
+func TestRenderExceptionResponse_RefusesABadDelayOnAnyError(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/page", "application/json")
+
+    assertPanicsNamingField(
+        t,
+        func() {
+            RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, errors.New("plain"), ExceptionRenderConfig{UnavailableRetryAfter: bound.UnlimitedDuration()})
+        },
+        "the limit does not admit unlimited",
+        "ExceptionRenderConfig.UnavailableRetryAfter",
+    )
+}
+
+func TestRenderExceptionResponse_DebugModeShowsAPlainMarkedErrorsText(t *testing.T) {
+    request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/page", "application/json")
+
+    response := RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, exception.MarkInfrastructureFailure(errors.New("redis is down at 10.0.0.5")), ExceptionRenderConfig{DebugMode: true})
+    body := readResponseBody(t, response)
+
+    if nethttp.StatusServiceUnavailable != response.StatusCode() || false == strings.Contains(body, "redis is down at 10.0.0.5") || false == strings.Contains(body, "service unavailable") {
+        t.Fatalf("expected the generic message with the cause in debug mode, got %d %s", response.StatusCode(), body)
+    }
+
+    production := readResponseBody(t, RenderExceptionResponse(newErrorRendererTextAndJsonRuntime(), request, exception.MarkInfrastructureFailure(errors.New("redis is down at 10.0.0.5")), ExceptionRenderConfig{}))
+    if true == strings.Contains(production, "redis is down") {
+        t.Fatalf("expected the cause kept out of the production body, got %s", production)
     }
 }

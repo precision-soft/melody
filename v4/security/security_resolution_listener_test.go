@@ -756,7 +756,7 @@ type resolutionListenerTestMarkedPanickingTokenSource struct{}
 func (instance *resolutionListenerTestMarkedPanickingTokenSource) Name() string { return "marked-panicking" }
 
 func (instance *resolutionListenerTestMarkedPanickingTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
-    panic(MarkInfrastructureFailure(errors.New("redis is down")))
+    panic(exception.MarkInfrastructureFailure(errors.New("redis is down")))
 }
 
 func dispatchResolutionThrough(t *testing.T, tokenSource securitycontract.TokenSource) (*httpPkg.KernelRequestEvent, securitycontract.Token, *recordingLogger) {
@@ -787,7 +787,7 @@ func dispatchResolutionThrough(t *testing.T, tokenSource securitycontract.TokenS
 }
 
 func TestSecurityResolutionListener_AnUnavailableTokenIsPublishedAndRecordedOnceAtError(t *testing.T) {
-    token := NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down")))
+    token := NewUnavailableToken(exception.MarkInfrastructureFailure(errors.New("redis is down")))
 
     requestEvent, published, logger := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveToken: token})
 
@@ -815,7 +815,7 @@ func TestSecurityResolutionListener_AnUnavailableTokenIsPublishedAndRecordedOnce
 func TestSecurityResolutionListener_AMarkedResolveErrorIsReadAsUnavailable(t *testing.T) {
     storeErr := errors.New("redis is down")
 
-    requestEvent, published, logger := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveErr: MarkInfrastructureFailure(storeErr)})
+    requestEvent, published, logger := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveErr: exception.MarkInfrastructureFailure(storeErr)})
 
     if nil != requestEvent.Refusal() {
         t.Fatalf("expected no refusal for a marked error, got %v", requestEvent.Refusal())
@@ -831,7 +831,7 @@ func TestSecurityResolutionListener_AMarkedResolveErrorIsReadAsUnavailable(t *te
 
     _, besideAuthenticated, _ := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{
         resolveToken: NewAuthenticatedToken("admin", []string{"ROLE_ADMIN"}, nil),
-        resolveErr:   MarkInfrastructureFailure(storeErr),
+        resolveErr:   exception.MarkInfrastructureFailure(storeErr),
     })
     expectUnavailableToken(t, besideAuthenticated)
 
@@ -850,8 +850,8 @@ func TestSecurityResolutionListener_AMarkedResolveErrorIsReadAsUnavailable(t *te
 
 func TestSecurityResolutionListener_AMarkedResolveErrorThatAnswersAStatusKeepsIt(t *testing.T) {
     for name, resolveErr := range map[string]error{
-        "a marked cause under a 400": exception.NewHttpError(nethttp.StatusBadRequest, exception.HttpErrorConfig{Message: "malformed", Cause: MarkInfrastructureFailure(errors.New("redis is down"))}),
-        "a 429 around a marked cause": exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: MarkInfrastructureFailure(errors.New("redis is down"))}),
+        "a marked cause under a 400":  exception.NewHttpError(nethttp.StatusBadRequest, exception.HttpErrorConfig{Message: "malformed", Cause: exception.MarkInfrastructureFailure(errors.New("redis is down"))}),
+        "a 429 around a marked cause": exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: exception.MarkInfrastructureFailure(errors.New("redis is down"))}),
     } {
         t.Run(name, func(t *testing.T) {
             requestEvent, published, _ := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveErr: resolveErr})
@@ -868,7 +868,7 @@ func TestSecurityResolutionListener_AMarkedResolveErrorThatAnswersAStatusKeepsIt
 
 func TestSecurityResolutionListener_AStoresStatusUnderTheMarkIsReadAsUnavailable(t *testing.T) {
     requestEvent, published, _ := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{
-        resolveErr: MarkInfrastructureFailure(exception.NewHttpException(nethttp.StatusNotFound, "remote said no such user")),
+        resolveErr: exception.MarkInfrastructureFailure(exception.NewHttpException(nethttp.StatusNotFound, "remote said no such user")),
     })
 
     if nil != requestEvent.Refusal() {
@@ -882,7 +882,7 @@ func TestSecurityResolutionListener_AnUnavailableCauseItsProducerFiledIsNotFiled
     filed := exception.NewError("redis is down", nil, nil)
     _ = exception.MarkLogged(filed)
 
-    _, published, logger := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveToken: NewUnavailableToken(MarkInfrastructureFailure(filed))})
+    _, published, logger := dispatchResolutionThrough(t, &resolutionListenerTestTokenSource{resolveToken: NewUnavailableToken(exception.MarkInfrastructureFailure(filed))})
 
     expectUnavailableToken(t, published)
     if 0 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {

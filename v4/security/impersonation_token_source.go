@@ -181,7 +181,7 @@ func (instance *ImpersonationTokenSource) Resolve(
         )
 
         /* the caller passed the switch-role check, so a failed resolution never runs with the caller's broader roles: a resolver that cannot answer is the unavailable token, recorded once by the resolution listener, any other error a denial with an anonymous token; the earlier branches narrow nothing and pass the inner token through */
-        if true == IsInfrastructureFailure(userErr) {
+        if true == exception.IsInfrastructureFailure(userErr) {
             return NewUnavailableToken(resolutionErr), nil
         }
 

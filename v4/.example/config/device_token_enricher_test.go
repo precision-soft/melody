@@ -6,8 +6,8 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/exception"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
-    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -38,7 +38,7 @@ func TestDeviceAccountEnricher_HoldsTheTokenToItsAccount(t *testing.T) {
             t.Fatalf("%s: expected the token refused", userIdentifier)
         }
 
-        if infrastructureFailure != melodysecurity.IsInfrastructureFailure(refusal) {
+        if infrastructureFailure != exception.IsInfrastructureFailure(refusal) {
             t.Fatalf("%s: expected the infrastructure mark to be %v, got %v", userIdentifier, infrastructureFailure, refusal)
         }
     }

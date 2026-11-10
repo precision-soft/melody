@@ -47,6 +47,10 @@ Melody uses this package to:
     - [`ValidationFailed`](../../exception/http_exception.go)
     - [`NewHttpError`](../../exception/http_exception_new.go), the constructor that declares a client-facing code, translation key and parameters, the cause, and the `Retry-After` delay
     - HTTP exception constructors (status helpers) in [`http_exception_new.go`](../../exception/http_exception_new.go)
+- The infrastructure mark:
+    - [`MarkInfrastructureFailure`](../../exception/infrastructure_failure.go)
+    - [`IsInfrastructureFailure`](../../exception/infrastructure_failure.go)
+    - [`AnswersUnavailable`](../../exception/infrastructure_failure.go)
 
 ## Usage
 
@@ -121,6 +125,7 @@ func readFile(path string) []byte {
 - `ValidationFailed` stores its detail under the `validationErrors` context key, the one the built-in exception listener renders, through `RenderExceptionResponse`, into the json and the text/plain error bodies, through `ValidationErrors.WithoutRuleWiringContext()`, which leaves the rule-wiring detail out, with status 422; the html error page carries the status, the message and the request id alone.
 - The log record built by `LogContext` takes `cause`/`causeChain`/`causeContextChain` from the top error's own wrap links — links, plural, because a joined error has several, and each branch contributes side by side — one entry per link; any link implementing `ContextProvider` contributes its context. Both chains hold at most `LogContextConfig.CauseChainDepth` links, 8 when left out, and the `Extra` map of the config is merged on top, its keys winning.
 - The renderings `LogContext` and the `FromError*` constructors perform on a FOREIGN error are contained: the message is produced under a recover, and a provider's `Context()` is read under one, so an error whose own methods panic — often on the very nil field that made it panic-worthy — costs its text or its context and never the record reporting it; the panic value is kept in the lost half's place.
+- The infrastructure mark tells a store or a remote that could not answer from a request that failed its checks, for every layer: an error returned through `MarkInfrastructureFailure`, from an application's storage, cache or handler or from a security component, is rendered `503 service unavailable` with `Retry-After` where an unmarked one is a `500`. The delay is the kernel's, `ApplicationConfig.UnavailableRetryAfter` or `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER`, 5s when left out; a firewall answers its own refusal with its own delay. `AnswersUnavailable` is the rule the renderer and the security machinery read: the mark counts unless an http status answers outside what it wraps, so `NewHttpError(400, {Cause: marked})` keeps its `400`, while a store's own status beneath the mark, `MarkInfrastructureFailure(NotFound(...))`, is answered `503` and its message, code and parameters are not served. The mark is a link in the chain, so wrapping a marked error further keeps it.
 - Both exception types guard their context map and already-logged mark internally, because a memoized failure (a container creation error, a container close error) is reachable from several request goroutines at once. Error handling otherwise stays single-threaded per request by design.
 
 ## Userland API
@@ -174,3 +179,9 @@ func readFile(path string) []byte {
 - [`ValidationFailed(validationErrors any) *HttpException`](../../exception/http_exception.go)
 - [`NewHttpError(statusCode int, config HttpErrorConfig) *HttpException`](../../exception/http_exception_new.go) — [`HttpErrorConfig`](../../exception/http_exception_new.go) holds `Code`, `Key`, `Message`, `Parameters`, `Cause` and `RetryAfter`, every one optional, the zero value a bare exception of its status; the client-facing identity, read back through [`Code() string`](../../exception/http_exception.go), [`Key() string`](../../exception/http_exception.go) and [`Parameters() map[string]any`](../../exception/http_exception.go), which the kernel's error renderer serves inside the error object of the body, each left out when empty; the parameters are copied in and out, and the framework translates nothing; `RetryAfter`, read back through [`RetryAfter() time.Duration`](../../exception/http_exception.go), is served by the error renderer as the `Retry-After` header in whole seconds rounded up, zero serving none and a negative value refused by panic at construction
 - Status constructors (for example, `BadRequest`, `NotFound`, `InternalServerError`) in [`http_exception_new.go`](../../exception/http_exception_new.go)
+
+### The infrastructure mark (`exception`)
+
+- [`MarkInfrastructureFailure(err error) error`](../../exception/infrastructure_failure.go) — marks err as a failure of the platform a layer stands on; a nil error stays nil, and the mark's text is the cause's
+- [`IsInfrastructureFailure(err error) bool`](../../exception/infrastructure_failure.go) — a link of the chain carries the mark
+- [`AnswersUnavailable(err error) bool`](../../exception/infrastructure_failure.go) — the mark, and no http status answering outside what it wraps

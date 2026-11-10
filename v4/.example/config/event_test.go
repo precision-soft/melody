@@ -257,7 +257,7 @@ func TestRegisterApiExceptionListener_AnswersTheApiPathsAndLeavesTheOthersToTheB
 
     dispatchRefusal := func(path string, refusal error) *melodyhttp.KernelExceptionEvent {
         request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, path, nil), nil, runtimeInstance, melodyhttp.NewRequestContext("api-test", time.Now()))
-        exceptionEvent := melodyhttp.NewKernelExceptionEvent(runtimeInstance, request, refusal)
+        exceptionEvent := melodyhttp.NewKernelExceptionEvent(runtimeInstance, request, refusal, melodyhttp.KernelExceptionEventConfig{})
 
         if _, dispatchErr := eventDispatcher.DispatchName(runtimeInstance, melodykernelcontract.EventKernelException, exceptionEvent); nil != dispatchErr {
             t.Fatalf("unexpected dispatch error: %v", dispatchErr)

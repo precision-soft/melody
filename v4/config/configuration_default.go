@@ -40,6 +40,7 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(HttpWriteTimeoutKey, "")
     instance.setDefaultParameter(HttpIdleTimeoutKey, "")
     instance.setDefaultParameter(HttpMaxHeaderBytesKey, "")
+    instance.setDefaultParameter(HttpUnavailableRetryAfterKey, "")
 
     instance.setDefaultParameter(CliNameKey, "melody")
 

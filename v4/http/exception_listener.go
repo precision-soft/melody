@@ -5,6 +5,7 @@ import (
     "math"
     nethttp "net/http"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -67,7 +68,15 @@ func builtInExceptionListener(runtimeInstance runtimecontract.Runtime, eventValu
     }
 
     exceptionEvent.SetResponse(
-        RenderExceptionResponse(runtimeInstance, exceptionEvent.Request(), exceptionEvent.Err(), ExceptionRenderConfig{DebugMode: exceptionListenerDebugMode(runtimeInstance)}),
+        RenderExceptionResponse(
+            runtimeInstance,
+            exceptionEvent.Request(),
+            exceptionEvent.Err(),
+            ExceptionRenderConfig{
+                DebugMode:             exceptionListenerDebugMode(runtimeInstance),
+                UnavailableRetryAfter: bound.Of(exceptionEvent.UnavailableRetryAfter()),
+            },
+        ),
     )
 
     return nil
@@ -110,8 +119,7 @@ func recordExceptionOccurrence(loggerInstance loggingcontract.Logger, request ht
         },
     )
 
-    /* the search goes through the exception package's door, which refuses a typed nil errors.As would match */
-    if true == isDeliberateClientFault(exception.AsHttpException(err)) {
+    if true == isDeliberateClientFault(err) {
         loggerInstance.Warning("unhandled exception", recordContext)
     } else {
         loggerInstance.Error("unhandled exception", recordContext)
@@ -136,18 +144,35 @@ func exceptionListenerDebugMode(runtimeInstance runtimecontract.Runtime) bool {
 type ExceptionRenderConfig struct {
     /* DebugMode adds the context and cause of the nearest melody error, and shows a plain error's own text. */
     DebugMode bool
+
+    /* UnavailableRetryAfter is the Retry-After of the 503 a marked infrastructure failure earns: 5s when left out, 1s to 1h in whole seconds, unlimited refused, a refused value a panic naming the field. */
+    UnavailableRetryAfter bound.Duration
 }
 
-/* RenderExceptionResponse renders the answer an error earns: the status and message of the http exception its chain carries, its client-facing code, key and parameters, its validation errors projected for the client, and in debug mode the context and cause of the nearest melody error; any other error is a 500. The built-in listener answers with it and the kernel's final step renders with it; an application listener that wants the framework body for some errors calls it. */
+/* RenderExceptionResponse renders the answer an error earns: an error exception.AnswersUnavailable reads as unavailable is 503 service unavailable with Retry-After, whatever status lies beneath the mark; otherwise the status and message of the http exception its chain carries, its client-facing code, key and parameters, its validation errors projected for the client, and in debug mode the context and cause of the nearest melody error; any other error is a 500. The built-in listener answers with it and the kernel's final step renders with it; an application listener that wants the framework body for some errors calls it. */
 func RenderExceptionResponse(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, err error, renderConfig ExceptionRenderConfig) httpcontract.Response {
     debugMode := renderConfig.DebugMode
+
+    /* resolved for every error, so a refused delay meets its caller at the first error rendered rather than at the first outage */
+    unavailableRetryAfter, retryAfterErr := config.ResolveUnavailableRetryAfter(renderConfig.UnavailableRetryAfter, "ExceptionRenderConfig.UnavailableRetryAfter")
+    if nil != retryAfterErr {
+        exception.Panic(exception.FromError(retryAfterErr))
+    }
 
     httpException := exception.AsHttpException(err)
 
     statusCode := nethttp.StatusInternalServerError
     message := "internal server error"
+    retryAfter := httpException.RetryAfter()
+    unavailable := exception.AnswersUnavailable(err)
 
-    if nil != httpException {
+    if true == unavailable {
+        /* a status beneath the mark is a store's, never the caller's answer */
+        httpException = nil
+        statusCode = nethttp.StatusServiceUnavailable
+        message = "service unavailable"
+        retryAfter = unavailableRetryAfter
+    } else if nil != httpException {
         statusCode = httpException.StatusCode()
         message = httpException.Message()
     } else if true == debugMode {
@@ -187,12 +212,14 @@ func RenderExceptionResponse(runtimeInstance runtimecontract.Runtime, request ht
             if nil != causeErr {
                 payloadExtras[errorResponseKeyCause] = debugErrorMessage(causeErr)
             }
+        } else if true == unavailable {
+            payloadExtras[errorResponseKeyCause] = debugErrorMessage(err)
         }
     }
 
     response := renderErrorResponse(runtimeInstance, request, statusCode, message, payloadExtras)
 
-    SetRetryAfter(response, httpException.RetryAfter())
+    SetRetryAfter(response, retryAfter)
 
     return response
 }
@@ -244,8 +271,14 @@ func attachRequestContextToError(err error, requestId string, method string, pat
     }
 }
 
-/* isDeliberateClientFault reports whether a failure is a 4xx the handler meant, which is recorded at warning: a 5xx, a non-http error and a 4xx whose validation errors blame the declaration are program failures, recorded at error. The kernel's handler-error record and the exception listener's read the same answer. */
-func isDeliberateClientFault(httpException *exception.HttpException) bool {
+/* isDeliberateClientFault reports whether a failure is a 4xx the handler meant, which is recorded at warning: a 5xx, a non-http error, a 4xx whose validation errors blame the declaration and an error answered as unavailable, whatever store status lies beneath its mark, are failures recorded at error. The kernel's handler-error record and the exception listener's read the same answer. */
+func isDeliberateClientFault(err error) bool {
+    if true == exception.AnswersUnavailable(err) {
+        return false
+    }
+
+    httpException := exception.AsHttpException(err)
+
     return nil != httpException && nethttp.StatusInternalServerError > httpException.StatusCode() && false == carriesRuleWiringError(httpException)
 }
 

@@ -5,6 +5,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    melodyconfig "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -93,7 +94,7 @@ func NewCompiledFirewall(config CompiledFirewallConfig) *CompiledFirewall {
         }
     }
 
-    unavailableRetryAfter, retryAfterErr := ResolveUnavailableRetryAfter(config.UnavailableRetryAfter, "CompiledFirewallConfig.UnavailableRetryAfter")
+    unavailableRetryAfter, retryAfterErr := melodyconfig.ResolveUnavailableRetryAfter(config.UnavailableRetryAfter, "CompiledFirewallConfig.UnavailableRetryAfter")
     if nil != retryAfterErr {
         refusal := exception.FromError(retryAfterErr)
         refusal.SetContextValue("firewallName", config.Name)
@@ -238,7 +239,7 @@ func (instance *CompiledFirewall) LogoutPath() string {
     return instance.logoutPath
 }
 
-/* Login runs the firewall's login handler and leaves the session id as it was: the door rotates it first when it authenticated the credentials, and a handler behind a door with no authenticator that writes an identity into the session rotates the id itself, through http.RegenerateRequestSession, since only it knows when the privilege changes; a login that does not rotate is open to session fixation. A handler error answered as the unavailable token, marked with MarkInfrastructureFailure, raises no security.login.failure. */
+/* Login runs the firewall's login handler and leaves the session id as it was: the door rotates it first when it authenticated the credentials, and a handler behind a door with no authenticator that writes an identity into the session rotates the id itself, through http.RegenerateRequestSession, since only it knows when the privilege changes; a login that does not rotate is open to session fixation. A handler error answered as the unavailable token, marked with exception.MarkInfrastructureFailure, raises no security.login.failure. */
 func (instance *CompiledFirewall) Login(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -258,7 +259,7 @@ func (instance *CompiledFirewall) Login(
     result, err := instance.loginHandler.Login(runtimeInstance, request, input)
     if nil != err {
         /* a store the handler could not reach is no failed sign-in */
-        if true == answeredAsUnavailable(err) {
+        if true == exception.AnswersUnavailable(err) {
             return nil, err
         }
 

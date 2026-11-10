@@ -468,7 +468,7 @@ func TestTotpSecondFactor_MarksItsThreeStoreFailures(t *testing.T) {
     } {
         t.Run(name, func(t *testing.T) {
             token, err := turn.authenticator.Authenticate(turn.request)
-            if nil != token || false == errors.Is(err, storeErr) || false == IsInfrastructureFailure(err) {
+            if nil != token || false == errors.Is(err, storeErr) || false == exception.IsInfrastructureFailure(err) {
                 t.Fatalf("expected the store failure marked, got %v, %v", token, err)
             }
         })
@@ -482,7 +482,7 @@ func TestTotpSecondFactor_MarksItsThreeStoreFailures(t *testing.T) {
 
 func TestTotpSecondFactor_ASecretThatCannotBeReadIsNoOutage(t *testing.T) {
     token, err := totpAuthenticator("not base32!", true, nil).Authenticate(totpRequest("123456"))
-    if nil != token || nil == err || true == IsInfrastructureFailure(err) {
+    if nil != token || nil == err || true == exception.IsInfrastructureFailure(err) {
         t.Fatalf("expected an unmarked refusal for an unreadable secret, got %v, %v", token, err)
     }
 }
@@ -506,7 +506,7 @@ func TestTotpSecondFactor_ThePrimarysErrorPassesThroughUnmarked(t *testing.T) {
         Primary:     &failingPrimaryAuthenticator{err: primaryErr},
         Enrollments: &fixedEnrollmentStore{secret: "JBSWY3DPEHPK3PXP", enrolled: true},
     }).Authenticate(totpRequest(""))
-    if false == errors.Is(err, primaryErr) || true == IsInfrastructureFailure(err) {
+    if false == errors.Is(err, primaryErr) || true == exception.IsInfrastructureFailure(err) {
         t.Fatalf("expected the primary's error untouched, got %v", err)
     }
 }
@@ -519,7 +519,7 @@ func TestTotpSecondFactor_AStoreFailureItsStoreFiledStaysFiled(t *testing.T) {
         Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
         Enrollments: &failingEnrollmentStore{lookupErr: filed},
     }).Authenticate(totpRequest(""))
-    if false == exception.IsAlreadyLogged(filedErr) || false == IsInfrastructureFailure(filedErr) {
+    if false == exception.IsAlreadyLogged(filedErr) || false == exception.IsInfrastructureFailure(filedErr) {
         t.Fatalf("expected a filed store failure to stay filed under the mark, got %v", filedErr)
     }
 

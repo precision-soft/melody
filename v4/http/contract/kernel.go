@@ -3,6 +3,7 @@ package contract
 import (
     nethttp "net/http"
 
+    "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
@@ -46,6 +47,9 @@ type Kernel interface {
     SetSessionCookiePolicy(policy SessionCookiePolicy)
 
     SetMethodPolicy(policy MethodPolicy)
+
+    /* SetUnavailableRetryAfter installs the Retry-After of the 503 the error renderer answers an infrastructure failure with: 5s when absent, 1s to 1h in whole seconds, unlimited refused. */
+    SetUnavailableRetryAfter(delay bound.Duration)
 
     ServeHttp(serviceContainer containercontract.Container) nethttp.Handler
 }

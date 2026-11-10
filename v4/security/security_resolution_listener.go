@@ -59,7 +59,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
             token, resolveErr, panicked := resolveTokenSourceSafely(firewall, runtimeInstance, requestEvent)
 
             /* a marked error is the second spelling of the unavailable token; a panic stays a refusal, whatever it carried, and an http status around the mark is kept */
-            if nil != resolveErr && false == panicked && true == answeredAsUnavailable(resolveErr) {
+            if nil != resolveErr && false == panicked && true == exception.AnswersUnavailable(resolveErr) {
                 token = NewUnavailableToken(resolveErr)
                 resolveErr = nil
             }

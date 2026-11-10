@@ -78,7 +78,7 @@ func TestKernelExceptionEvent_CarriesTheFailureAndStartsWithoutAResponse(t *test
     request := testhelper.NewHttpTestRequestFromHttpRequest(httptest.NewRequest(nethttp.MethodGet, "/articles", nil))
     failure := exception.NewHttpException(nethttp.StatusTeapot, "short and stout")
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, failure)
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, failure, KernelExceptionEventConfig{})
 
     if runtimeInstance != exceptionEvent.Runtime() {
         t.Fatalf("the exception event reported another runtime")
@@ -123,7 +123,7 @@ func TestKernelEvents_SetResponseStoresTheNilATypedNilMeans(t *testing.T) {
         t.Fatalf("expected the controller event to store the nil a typed nil means")
     }
 
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, exception.NewError("failed", nil, nil))
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, exception.NewError("failed", nil, nil), KernelExceptionEventConfig{})
     exceptionEvent.SetResponse(unassignedResponse)
     if nil != exceptionEvent.Response() {
         t.Fatalf("expected the exception event to store the nil a typed nil means")
@@ -172,7 +172,7 @@ func TestKernelExceptionEvent_SetResponseStopsPropagation(t *testing.T) {
     )
 
     request := testhelper.NewHttpTestRequestFromHttpRequest(httptest.NewRequest(nethttp.MethodGet, "/articles", nil))
-    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, exception.NotFound("gone"))
+    exceptionEvent := NewKernelExceptionEvent(runtimeInstance, request, exception.NotFound("gone"), KernelExceptionEventConfig{})
 
     if true == exceptionEvent.IsPropagationStopped() {
         t.Fatalf("expected a fresh event to report propagation live")

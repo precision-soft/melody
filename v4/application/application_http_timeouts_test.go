@@ -1,7 +1,10 @@
 package application
 
 import (
+    "context"
+    "errors"
     nethttp "net/http"
+    "net/http/httptest"
     "testing"
     "time"
 
@@ -10,8 +13,11 @@ import (
     "github.com/precision-soft/melody/v4/container"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func newLimitConfiguration(t *testing.T, values map[string]string) configcontract.Configuration {
@@ -288,5 +294,59 @@ func TestRefuseScopeTeardownOutlastingHttpShutdown_AdmitsOnlyATermStrictlyUnderT
         if config.ScopeTeardownTimeoutKey != refusalContext["scopeTeardownKey"] || config.HttpShutdownTimeoutKey != refusalContext["httpShutdownKey"] {
             t.Fatalf("%s: expected the refusal to name both keys, got %v", name, refusalContext)
         }
+    }
+}
+
+func TestResolveUnavailableRetryAfter_TheKeyWinsOverTheFieldOverTheDefault(t *testing.T) {
+    byDefault, byDefaultErr := resolveUnavailableRetryAfter(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{})
+    if nil != byDefaultErr || config.DefaultUnavailableRetryAfter != byDefault {
+        t.Fatalf("expected the default, got %s (%v)", byDefault, byDefaultErr)
+    }
+
+    fromField, fromFieldErr := resolveUnavailableRetryAfter(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{UnavailableRetryAfter: bound.Of(9 * time.Second)})
+    if nil != fromFieldErr || 9*time.Second != fromField {
+        t.Fatalf("expected the field, got %s (%v)", fromField, fromFieldErr)
+    }
+
+    fromKey, fromKeyErr := resolveUnavailableRetryAfter(newLimitConfiguration(t, map[string]string{config.HttpUnavailableRetryAfterKey: "7s"}), ApplicationConfig{UnavailableRetryAfter: bound.Of(9 * time.Second)})
+    if nil != fromKeyErr || 7*time.Second != fromKey {
+        t.Fatalf("expected the key to win, got %s (%v)", fromKey, fromKeyErr)
+    }
+
+    for name, limit := range map[string]bound.Duration{
+        "500ms":     bound.Of(500 * time.Millisecond),
+        "1500ms":    bound.Of(1500 * time.Millisecond),
+        "2h":        bound.Of(2 * time.Hour),
+        "unlimited": bound.UnlimitedDuration(),
+    } {
+        _, refusedErr := resolveUnavailableRetryAfter(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{UnavailableRetryAfter: limit})
+        if nil == refusedErr || "ApplicationConfig.UnavailableRetryAfter" != exception.LogContext(refusedErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("%s: expected a refusal naming the field, got %v", name, refusedErr)
+        }
+    }
+}
+
+func TestNewApplication_TheUnavailableRetryAfterFieldReachesTheHttpKernel(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), UnavailableRetryAfter: bound.Of(13 * time.Second)})
+    serviceContainer := applicationInstance.kernel.ServiceContainer()
+    defer func() {
+        _ = serviceContainer.Close()
+    }()
+
+    applicationInstance.Boot()
+
+    applicationInstance.kernel.HttpRouter().Handle(
+        nethttp.MethodGet,
+        "/unavailable",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, exception.MarkInfrastructureFailure(errors.New("cache is down"))
+        },
+    )
+
+    recorder := httptest.NewRecorder()
+    applicationInstance.kernel.HttpKernel().ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/unavailable", nil))
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "13" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with the field's Retry-After 13, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
     }
 }

@@ -732,12 +732,12 @@ type doorOwnUnavailableToken struct {
 }
 
 func (instance *doorOwnUnavailableToken) AuthenticationUnavailableCause() error {
-    return MarkInfrastructureFailure(errors.New("redis is down"))
+    return exception.MarkInfrastructureFailure(errors.New("redis is down"))
 }
 
 func TestLoginDoor_AnUnavailableTokenOnADoorWithoutAnAuthenticatorIsRefusedBeforeTheHandler(t *testing.T) {
     for name, token := range map[string]securitycontract.Token{
-        "the framework's token":   NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down"))),
+        "the framework's token":   NewUnavailableToken(exception.MarkInfrastructureFailure(errors.New("redis is down"))),
         "the application's token": &doorOwnUnavailableToken{},
     } {
         t.Run(name, func(t *testing.T) {
@@ -766,7 +766,7 @@ func TestLoginDoor_AnUnavailableTokenOnADoorWithoutAnAuthenticatorIsRefusedBefor
 func TestLoginDoor_ADoorAuthenticatorDecidesOverAnUnavailableSourceToken(t *testing.T) {
     authenticator := &doorAuthenticator{token: NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)}
     fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
-        config.TokenSource = &doorTokenSource{token: NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down")))}
+        config.TokenSource = &doorTokenSource{token: NewUnavailableToken(exception.MarkInfrastructureFailure(errors.New("redis is down")))}
         config.LoginAuthenticator = authenticator
     })
     fixture.login.response = http.TextResponse(nethttp.StatusOK, "signed in")
@@ -786,12 +786,12 @@ func TestLoginDoor_AnAuthenticatorThatCouldNotCheckTheCredentialIsRefusedWith503
         authenticator *doorAuthenticator
         records       int
     }{
-        "a marked error":                {authenticator: &doorAuthenticator{err: MarkInfrastructureFailure(errors.New("redis is down"))}, records: 1},
-        "an unavailable token":          {authenticator: &doorAuthenticator{token: NewUnavailableToken(MarkInfrastructureFailure(errors.New("redis is down")))}, records: 1},
-        "a marked error already filed":  {authenticator: &doorAuthenticator{err: MarkInfrastructureFailure(alreadyFiled)}, records: 0},
-        "the application's own token":   {authenticator: &doorAuthenticator{token: &doorOwnUnavailableToken{}}, records: 1},
+        "a marked error":                             {authenticator: &doorAuthenticator{err: exception.MarkInfrastructureFailure(errors.New("redis is down"))}, records: 1},
+        "an unavailable token":                       {authenticator: &doorAuthenticator{token: NewUnavailableToken(exception.MarkInfrastructureFailure(errors.New("redis is down")))}, records: 1},
+        "a marked error already filed":               {authenticator: &doorAuthenticator{err: exception.MarkInfrastructureFailure(alreadyFiled)}, records: 0},
+        "the application's own token":                {authenticator: &doorAuthenticator{token: &doorOwnUnavailableToken{}}, records: 1},
         "a token both unavailable and authenticated": {authenticator: &doorAuthenticator{token: &unavailableAuthenticatedToken{}}, records: 1},
-        "a store's status under the mark": {authenticator: &doorAuthenticator{err: MarkInfrastructureFailure(exception.NewHttpException(nethttp.StatusNotFound, "remote said no such user"))}, records: 1},
+        "a store's status under the mark":            {authenticator: &doorAuthenticator{err: exception.MarkInfrastructureFailure(exception.NewHttpException(nethttp.StatusNotFound, "remote said no such user"))}, records: 1},
     } {
         t.Run(name, func(t *testing.T) {
             fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
@@ -830,9 +830,9 @@ func TestLoginDoor_AnAuthenticatorErrorThatAnswersAStatusKeepsIt(t *testing.T) {
         err    error
         status int
     }{
-        "a marked cause under a 400": {err: exception.NewHttpError(nethttp.StatusBadRequest, exception.HttpErrorConfig{Message: "malformed", Cause: MarkInfrastructureFailure(errors.New("redis is down"))}), status: nethttp.StatusBadRequest},
-        "a 429 around a marked cause": {err: exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: MarkInfrastructureFailure(errors.New("redis is down"))}), status: nethttp.StatusTooManyRequests},
-        "an unmarked error":          {err: errors.New("malformed json"), status: nethttp.StatusInternalServerError},
+        "a marked cause under a 400":  {err: exception.NewHttpError(nethttp.StatusBadRequest, exception.HttpErrorConfig{Message: "malformed", Cause: exception.MarkInfrastructureFailure(errors.New("redis is down"))}), status: nethttp.StatusBadRequest},
+        "a 429 around a marked cause": {err: exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "too many", Cause: exception.MarkInfrastructureFailure(errors.New("redis is down"))}), status: nethttp.StatusTooManyRequests},
+        "an unmarked error":           {err: errors.New("malformed json"), status: nethttp.StatusInternalServerError},
     } {
         t.Run(name, func(t *testing.T) {
             fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
@@ -851,7 +851,7 @@ func TestLoginDoor_AnAuthenticatorErrorThatAnswersAStatusKeepsIt(t *testing.T) {
 func TestLoginDoor_TheUnavailableRefusalNamesTheDoorAndCarriesTheCause(t *testing.T) {
     storeErr := errors.New("redis is down")
     fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
-        config.LoginAuthenticator = &doorAuthenticator{err: MarkInfrastructureFailure(storeErr)}
+        config.LoginAuthenticator = &doorAuthenticator{err: exception.MarkInfrastructureFailure(storeErr)}
         config.LoginName = "security.main.login"
     })
 
@@ -884,7 +884,7 @@ func TestLoginDoor_AHandlerThatCouldNotReachItsStoreIsRefusedWith503AndNoFailedS
         config.LoginAuthenticator = &doorAuthenticator{token: NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)}
         config.UnavailableRetryAfter = bound.Of(7 * time.Second)
     })
-    fixture.login.err = MarkInfrastructureFailure(errors.New("session store is down"))
+    fixture.login.err = exception.MarkInfrastructureFailure(errors.New("session store is down"))
 
     recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
 

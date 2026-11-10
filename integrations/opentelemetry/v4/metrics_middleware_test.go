@@ -279,6 +279,18 @@ func TestStatusCodeForError_MapsHttpExceptionsAtTheirOwnStatusABodyLimitTo413And
     if nethttp.StatusRequestEntityTooLarge != statusCodeForError(fmt.Errorf("read body: %w", &nethttp.MaxBytesError{Limit: 16})) {
         t.Fatalf("expected a body past its limit graphed at the 413 the kernel sends")
     }
+    if nethttp.StatusServiceUnavailable != statusCodeForError(exception.MarkInfrastructureFailure(errors.New("redis is down"))) {
+        t.Fatal("expected a marked error labelled 503, the status the renderer answers")
+    }
+
+    if nethttp.StatusServiceUnavailable != statusCodeForError(exception.MarkInfrastructureFailure(exception.NewHttpException(nethttp.StatusNotFound, "no such row"))) {
+        t.Fatal("expected a store's status beneath the mark labelled 503")
+    }
+
+    if nethttp.StatusBadRequest != statusCodeForError(exception.NewHttpError(nethttp.StatusBadRequest, exception.HttpErrorConfig{Message: "bad", Cause: exception.MarkInfrastructureFailure(errors.New("down"))})) {
+        t.Fatal("expected an http status around the marked cause kept")
+    }
+
     if nethttp.StatusInternalServerError != statusCodeForError(errors.New("plain")) {
         t.Fatalf("expected a non-http error to be a server error")
     }

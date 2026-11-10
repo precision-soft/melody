@@ -1,6 +1,10 @@
 package http
 
 import (
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/config"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -203,24 +207,43 @@ func (instance *KernelTerminateEvent) Response() httpcontract.Response {
     return instance.response
 }
 
+type KernelExceptionEventConfig struct {
+    /* UnavailableRetryAfter is the Retry-After the event carries for a marked infrastructure failure: 5s when left out, 1s to 1h in whole seconds, unlimited refused, a refused value a panic naming the field. */
+    UnavailableRetryAfter bound.Duration
+}
+
+/* NewKernelExceptionEvent builds the event a kernel dispatches on kernel.exception; a kernel of its own passes the delay it was configured with, so the built-in listener serves it. */
 func NewKernelExceptionEvent(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
     err error,
+    eventConfig KernelExceptionEventConfig,
 ) *KernelExceptionEvent {
+    unavailableRetryAfter, retryAfterErr := config.ResolveUnavailableRetryAfter(eventConfig.UnavailableRetryAfter, "KernelExceptionEventConfig.UnavailableRetryAfter")
+    if nil != retryAfterErr {
+        exception.Panic(exception.FromError(retryAfterErr))
+    }
+
     return &KernelExceptionEvent{
-        runtime:  runtimeInstance,
-        request:  request,
-        err:      err,
-        response: nil,
+        runtime:               runtimeInstance,
+        request:               request,
+        err:                   err,
+        response:              nil,
+        unavailableRetryAfter: unavailableRetryAfter,
     }
 }
 
 type KernelExceptionEvent struct {
-    runtime  runtimecontract.Runtime
-    request  httpcontract.Request
-    err      error
-    response httpcontract.Response
+    runtime               runtimecontract.Runtime
+    request               httpcontract.Request
+    err                   error
+    response              httpcontract.Response
+    unavailableRetryAfter time.Duration
+}
+
+/* UnavailableRetryAfter is the Retry-After a marked infrastructure failure is answered with, the delay the kernel was configured with; a listener that builds its own response sets it with SetRetryAfter, one that answers through RenderExceptionResponse passes it in ExceptionRenderConfig. */
+func (instance *KernelExceptionEvent) UnavailableRetryAfter() time.Duration {
+    return instance.unavailableRetryAfter
 }
 
 func (instance *KernelExceptionEvent) Runtime() runtimecontract.Runtime {

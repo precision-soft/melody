@@ -8,6 +8,7 @@ import (
     "time"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -142,7 +143,15 @@ func (instance *Application) runHttp(
         return refusedErr
     }
 
+    unavailableRetryAfter, unavailableRetryAfterErr := resolveUnavailableRetryAfter(configuration, instance.applicationConfig)
+    if nil != unavailableRetryAfterErr {
+        return unavailableRetryAfterErr
+    }
+
     httpKernel := instance.kernel.HttpKernel()
+
+    /* installed again last, so a module's own SetUnavailableRetryAfter does not outrank the deployment's key */
+    httpKernel.SetUnavailableRetryAfter(bound.Of(unavailableRetryAfter))
     instance.installHttpMiddlewares(httpKernel)
 
     httpHandler := instance.decorateHttpHandler(httpKernel.ServeHttp(instance.kernel.ServiceContainer()))

@@ -785,6 +785,9 @@ func (instance *plainHttpKernel) SetSessionCookiePolicy(policy httpcontract.Sess
 func (instance *plainHttpKernel) SetMethodPolicy(policy httpcontract.MethodPolicy) {
 }
 
+func (instance *plainHttpKernel) SetUnavailableRetryAfter(delay bound.Duration) {
+}
+
 func (instance *plainHttpKernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
     return nil
 }
@@ -1209,6 +1212,7 @@ func TestRunHttp_ServesWithTheBuiltInExceptionListener(t *testing.T) {
         runtimeInstance,
         testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/fail"),
         exception.NewError("serving failure", nil, nil),
+        http.KernelExceptionEventConfig{},
     )
 
     _, dispatchErr := applicationInstance.kernel.EventDispatcher().DispatchName(runtimeInstance, kernelcontract.EventKernelException, exceptionEvent)
@@ -1768,5 +1772,37 @@ func TestRunHttp_RefusesAScopeTeardownTimeoutOutlastingTheShutdownBeforeServing(
     runErr := applicationInstance.runHttp(context.Background())
     if nil == runErr || "the scope teardown timeout must stay under the http shutdown timeout" != runErr.Error() {
         t.Fatalf("expected the boot refused by name, got %v", runErr)
+    }
+}
+
+func TestRunHttp_TheDeploymentsUnavailableDelayOutranksAModulesSetter(t *testing.T) {
+    applicationInstance := newSessionBoundTestApplication(t, config.ModeHttp, map[string]string{config.HttpUnavailableRetryAfterKey: "7s"}, &warningRecordingLogger{})
+
+    kernelInstance, ok := applicationInstance.kernel.(*testKernel)
+    if false == ok {
+        t.Fatalf("expected the test kernel, got %T", applicationInstance.kernel)
+    }
+
+    kernelInstance.httpKernel.SetUnavailableRetryAfter(bound.Of(9 * time.Second))
+    kernelInstance.httpRouter.Handle(
+        nethttp.MethodGet,
+        "/unavailable",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, exception.MarkInfrastructureFailure(errors.New("cache is down"))
+        },
+    )
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if runErr := applicationInstance.runHttp(cancelledContext); nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    recorder := httptest.NewRecorder()
+    kernelInstance.httpKernel.ServeHttp(kernelInstance.serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/unavailable", nil))
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "7" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with the key's Retry-After 7 over the module's 9, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
     }
 }

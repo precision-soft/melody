@@ -607,6 +607,10 @@ func (instance *Configuration) buildHttpConfiguration() error {
         return serverLimitErr
     }
 
+    if serverLimits.unavailableRetryAfter, serverLimitErr = checkedUnavailableRetryAfter(instance.MustGet(KernelHttpUnavailableRetryAfter)); nil != serverLimitErr {
+        return serverLimitErr
+    }
+
     httpConfigurationInstance, newHttpConfigurationErr := newHttpConfiguration(
         instance.MustGet(KernelHttpAddress).MustString(),
         instance.MustGet(KernelDefaultLocale).MustString(),

@@ -56,7 +56,7 @@ func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.T
                 melodyexception.NewError(
                     "the account a session names could not be read",
                     melodyexceptioncontract.Context{"userId": userId},
-                    melodysecurity.MarkInfrastructureFailure(lookupErr),
+                    melodyexception.MarkInfrastructureFailure(lookupErr),
                 ),
             )
         }

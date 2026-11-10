@@ -752,7 +752,7 @@ func TestApiRefusalOfDecodedBody_AnswersABodyPastTheLimit413AndAnyOtherFailure40
 func TestApiRefusalOfErrorCarriesTheRefusalsRetryAfter(t *testing.T) {
     runtimeInstance, request := runtimeRefusingNothing(t)
 
-    delayed := ApiRefusalOfError(runtimeInstance, request, melodyexception.NewHttpError(nethttp.StatusServiceUnavailable, melodyexception.HttpErrorConfig{Message: "service unavailable", RetryAfter: 7 * time.Second}))
+    delayed := ApiRefusalOfError(runtimeInstance, request, melodyexception.NewHttpError(nethttp.StatusServiceUnavailable, melodyexception.HttpErrorConfig{Message: "service unavailable", RetryAfter: 7 * time.Second}), 5*time.Second)
     if nethttp.StatusServiceUnavailable != delayed.StatusCode() || "7" != delayed.Headers().Get("Retry-After") {
         t.Fatalf("expected 503 with Retry-After 7, got %d %q", delayed.StatusCode(), delayed.Headers().Get("Retry-After"))
     }
@@ -761,8 +761,26 @@ func TestApiRefusalOfErrorCarriesTheRefusalsRetryAfter(t *testing.T) {
         "a refusal without a delay": melodyexception.Conflict("conflict"),
         "a plain error":             errors.New("plain"),
     } {
-        if response := ApiRefusalOfError(runtimeInstance, request, refusalErr); "" != response.Headers().Get("Retry-After") {
+        if response := ApiRefusalOfError(runtimeInstance, request, refusalErr, 5*time.Second); "" != response.Headers().Get("Retry-After") {
             t.Fatalf("expected no Retry-After for %s, got %q", name, response.Headers().Get("Retry-After"))
+        }
+    }
+}
+
+func TestApiRefusalOfErrorAnswersAMarkedErrorAsUnavailable(t *testing.T) {
+    runtimeInstance, request := runtimeRefusingNothing(t)
+
+    for name, refusalErr := range map[string]error{
+        "a marked plain error":        melodyexception.MarkInfrastructureFailure(errors.New("redis is down")),
+        "a store's status beneath it": melodyexception.MarkInfrastructureFailure(melodyexception.NotFound("no such row")),
+    } {
+        response := ApiRefusalOfError(runtimeInstance, request, refusalErr, 6*time.Second)
+        if nethttp.StatusServiceUnavailable != response.StatusCode() || "6" != response.Headers().Get("Retry-After") {
+            t.Fatalf("%s: expected 503 with Retry-After 6, got %d %q", name, response.StatusCode(), response.Headers().Get("Retry-After"))
+        }
+
+        if true == strings.Contains(responseBodyOf(t, response), "no such row") {
+            t.Fatalf("%s: expected the store's message kept out of the body", name)
         }
     }
 }

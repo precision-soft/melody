@@ -46,4 +46,7 @@ type HttpConfiguration interface {
     IdleTimeout() bound.Duration
 
     MaxHeaderBytes() bound.Count
+
+    /* UnavailableRetryAfter is MELODY_HTTP_UNAVAILABLE_RETRY_AFTER as the deployment set it, the Retry-After of a 503 answering an infrastructure failure, absent when the key says nothing: the application decides it against its own config, the key winning. */
+    UnavailableRetryAfter() bound.Duration
 }

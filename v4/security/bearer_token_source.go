@@ -51,7 +51,7 @@ func (instance *BearerTokenSource) Resolve(
     claims, validateErr := instance.validator.Validate(runtimeInstance, tokenString)
     if nil != validateErr {
         /* a store that cannot answer is the unavailable token, recorded once by the resolution listener; a credential that failed its checks is anonymous */
-        if true == IsInfrastructureFailure(validateErr) {
+        if true == exception.IsInfrastructureFailure(validateErr) {
             return NewUnavailableToken(validateErr), nil
         }
 
@@ -66,7 +66,7 @@ func (instance *BearerTokenSource) Resolve(
     if false == internal.IsNilInterface(instance.enricher) {
         enrichedClaims, enrichErr := instance.enricher.Enrich(runtimeInstance, claims)
         if nil != enrichErr {
-            if true == IsInfrastructureFailure(enrichErr) {
+            if true == exception.IsInfrastructureFailure(enrichErr) {
                 return NewUnavailableToken(enrichErr), nil
             }
 

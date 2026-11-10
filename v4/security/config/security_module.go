@@ -4,6 +4,7 @@ import (
     "fmt"
 
     "github.com/precision-soft/melody/v4/bound"
+    melodyconfig "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -185,13 +186,13 @@ func (instance *Builder) BootWarnings() []BootWarning {
 }
 
 func validateGlobalUnavailableRetryAfter(global GlobalConfig) error {
-    _, retryAfterErr := security.ResolveUnavailableRetryAfter(global.UnavailableRetryAfter, "GlobalConfig.UnavailableRetryAfter")
+    _, retryAfterErr := melodyconfig.ResolveUnavailableRetryAfter(global.UnavailableRetryAfter, "GlobalConfig.UnavailableRetryAfter")
 
     return retryAfterErr
 }
 
 func validateOverrideUnavailableRetryAfter(declaration firewallDeclaration) error {
-    _, retryAfterErr := security.ResolveUnavailableRetryAfter(declaration.config.Override.UnavailableRetryAfter, "FirewallConfig.Override.UnavailableRetryAfter")
+    _, retryAfterErr := melodyconfig.ResolveUnavailableRetryAfter(declaration.config.Override.UnavailableRetryAfter, "FirewallConfig.Override.UnavailableRetryAfter")
     if nil != retryAfterErr {
         refusal := exception.FromError(retryAfterErr)
         refusal.SetContextValue("firewallName", declaration.name)

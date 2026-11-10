@@ -939,7 +939,7 @@ func TestJwtTokenValidator_MarksAnEpochStoreFailureAsInfrastructure(t *testing.T
         t.Fatal("an unanswerable epoch store must fail the validation closed")
     }
 
-    if false == IsInfrastructureFailure(validateErr) {
+    if false == exception.IsInfrastructureFailure(validateErr) {
         t.Fatal("the epoch store failing to answer is the platform's failure and must carry the infrastructure mark")
     }
 }
