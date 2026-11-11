@@ -134,7 +134,7 @@ func TestBootModuleBootWarnings_RefusesANameAnotherOwnerHoldsNamingBoth(t *testi
     }{
         {"another module", "test.module.hazard", "storage"},
         {"the same module, written in cli no more", "test.module.hazard", "storage"},
-        {"the framework", internal.BootWarningNameEnvironmentDefaulted, "the framework"},
+        {"the framework", internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage, "the framework"},
     } {
         applicationInstance := newCacheWarningTestApplication(t, config.ModeCli, &warningRecordingLogger{})
         secondModule := &bootWarningTestModule{name: "mailer", declarations: []bootWarningDeclaration{{name: testCase.declaredName, writtenInCli: true}}}
@@ -242,7 +242,8 @@ func TestRefuseUnknownCliBootWarningCodes_JudgesEachCodeAgainstTheFrameworkAndTh
     }{
         {"an unknown code", "security.firewallShadowed", nil, "cli boot warning code names no boot warning the framework or a module writes"},
         {"a module code with no module", "test.module.hazard", nil, "cli boot warning code names no boot warning the framework or a module writes"},
-        {"an http-only framework code", internal.BootWarningNameEnvironmentDefaulted, nil, "cli boot warning code names a boot warning only an http process writes, so a cli process never reads it"},
+        {"an http-only framework code", internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage, nil, "cli boot warning code names a boot warning only an http process writes, so a cli process never reads it"},
+        {"the retired defaulted environment code", "application.environment.defaulted", nil, "cli boot warning code names no boot warning the framework or a module writes"},
         {
             "an http-only module code",
             "test.module.httpHazard",
@@ -288,6 +289,7 @@ const bootCliCodeProbeMarker = "MELODY_TEST_BOOT_CLI_CODE_PROBE"
 func TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs(t *testing.T) {
     if probe := os.Getenv(bootCliCodeProbeMarker); "" != probe {
         values := map[string]string{
+            config.EnvKey:                    config.EnvDevelopment,
             config.HttpAddressKey:            "127.0.0.1:34524",
             config.CliBootWarningsIgnoredKey: map[string]string{"moduleCode": "test.module.hazard", "unknownCode": "test.nobody.writes"}[probe],
         }
@@ -413,7 +415,7 @@ const bootWarningsBeforeExitProbeMarker = "MELODY_TEST_BOOT_WARNINGS_BEFORE_EXIT
 func TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord(t *testing.T) {
     if probe := os.Getenv(bootWarningsBeforeExitProbeMarker); "" != probe {
         projectDirectory, disabled, _ := strings.Cut(probe, "|")
-        values := map[string]string{config.HttpAddressKey: "127.0.0.1:34525"}
+        values := map[string]string{config.EnvKey: config.EnvDevelopment, config.HttpAddressKey: "127.0.0.1:34525"}
         if "disabled" == disabled {
             values[config.CliBootWarningsDisabledKey] = "true"
         }
@@ -508,6 +510,7 @@ const runRefusalBootWarningsProbeMarker = "MELODY_TEST_RUN_REFUSAL_BOOT_WARNINGS
 func TestRun_AnHttpRunRefusedBeforeItsWriterWritesTheBootWarningsBeforeItsExitRecord(t *testing.T) {
     if projectDirectory := os.Getenv(runRefusalBootWarningsProbeMarker); "" != projectDirectory {
         environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{
+            config.EnvKey:                  config.EnvDevelopment,
             config.HttpAddressKey:          "127.0.0.1:34526",
             config.ScopeTeardownTimeoutKey: "1h",
         }})

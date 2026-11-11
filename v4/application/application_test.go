@@ -571,27 +571,125 @@ func TestRefuseHttpBootWithoutEnvironment_AcceptsAnHttpBootWithAnyKey(t *testing
     applicationInstance.refuseHttpBootWithoutEnvironment()
 }
 
-func TestRefuseHttpBootWithoutEnvironment_LeavesTheCliPermissive(t *testing.T) {
+func TestRefuseHttpBootWithoutEnvironment_LeavesTheCliToTheDefaultedEnvironmentRefusal(t *testing.T) {
     applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{})
 
     applicationInstance.refuseHttpBootWithoutEnvironment()
 }
 
-func TestEnvironmentDefaultedBootWarnings_NamesAnHttpBootWhoseEnvironmentNameWasDefaulted(t *testing.T) {
-    defaulted := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{"APP_NAME": "shop"})
+/* a defaulted name selects the .env.dev files and turns the debug tooling on, so a production process, a worker or a command among them, would run on the development files without a word */
+func TestRefuseBootWithDefaultedEnvironment_RefusesEveryModeNamingTheKey(t *testing.T) {
+    for _, mode := range []string{config.ModeHttp, config.ModeCli} {
+        applicationInstance := newEnvironmentRefusalApplication(t, mode, map[string]string{"APP_NAME": "shop"})
 
-    warnings := environmentDefaultedBootWarnings(config.ModeHttp, defaulted.configuration)
-    if 1 != len(warnings) || "application.environment.defaulted" != warnings[0].Name {
-        t.Fatalf("expected the defaulted environment named once, got %v", warnings)
+        var refusal *exception.Error
+        func() {
+            defer func() {
+                refusal, _ = recover().(*exception.Error)
+            }()
+
+            applicationInstance.refuseBootWithDefaultedEnvironment()
+        }()
+
+        if nil == refusal || false == strings.Contains(refusal.Message(), "MELODY_ENV is not set in the .env artifacts") {
+            t.Fatalf("expected the %s boot refused on the defaulted name, got %v", mode, refusal)
+        }
+
+        if config.EnvKey != refusal.Context()["environmentKey"] {
+            t.Fatalf("expected the %s refusal to name %s, got %v", mode, config.EnvKey, refusal.Context())
+        }
+    }
+}
+
+func TestRefuseBootWithDefaultedEnvironment_AdmitsAnExplicitDevInEveryMode(t *testing.T) {
+    for _, mode := range []string{config.ModeHttp, config.ModeCli} {
+        applicationInstance := newEnvironmentRefusalApplication(t, mode, map[string]string{config.EnvKey: config.EnvDevelopment})
+
+        applicationInstance.refuseBootWithDefaultedEnvironment()
+    }
+}
+
+/* the name .env.dev sets is no default: the files it was read from were selected by the default, but the parameter itself was written by an artifact */
+func TestRefuseBootWithDefaultedEnvironment_AdmitsANameSetByTheDevelopmentFile(t *testing.T) {
+    source := config.NewEnvironmentSource(config.EnvironmentSourceConfig{FileSystem: fstest.MapFS{
+        ".env":     &fstest.MapFile{Data: []byte("APP_NAME=shop\n")},
+        ".env.dev": &fstest.MapFile{Data: []byte("MELODY_ENV=dev\n")},
+    }})
+
+    environment, environmentErr := config.NewEnvironment(source)
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    explicit := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{config.EnvKey: "dev"})
-    if 0 != len(environmentDefaultedBootWarnings(config.ModeHttp, explicit.configuration)) {
-        t.Fatalf("expected an explicit MELODY_ENV=dev to raise no warning")
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
 
-    if 0 != len(environmentDefaultedBootWarnings(config.ModeCli, defaulted.configuration)) {
-        t.Fatalf("expected a console process to raise no warning")
+    applicationInstance := &Application{configuration: configuration, runtimeFlags: NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})}
+
+    applicationInstance.refuseBootWithDefaultedEnvironment()
+}
+
+const bootEnvironmentProbeMarker = "MELODY_TEST_BOOT_ENVIRONMENT_PROBE"
+
+/* Boot exits the process on a refusal, so each probe boots in a child of the test binary: an http process with no environment file at all is told that first, since the missing name is only its consequence, and a command whose files set keys but no name is refused on the name */
+func TestBoot_RefusesTheDefaultedEnvironmentNameAfterTheZeroKeyRefusal(t *testing.T) {
+    if probe := os.Getenv(bootEnvironmentProbeMarker); "" != probe {
+        values := map[string]string{}
+        mode := config.ModeHttp
+        if "httpWithoutKeys" != probe {
+            values["APP_NAME"] = "shop"
+        }
+        if "cliWithKeys" == probe {
+            mode = config.ModeCli
+        }
+
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+        if nil != environmentErr {
+            os.Exit(91)
+        }
+
+        configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+        if nil != configurationErr {
+            os.Exit(92)
+        }
+
+        applicationInstance := &Application{
+            ctx:                  context.Background(),
+            configuration:        configuration,
+            runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode}),
+            kernel:               newTestKernel(),
+            cliCommands:          make([]clicontract.Command, 0),
+            moduleConfigurations: make(map[string]any),
+        }
+
+        applicationInstance.Boot()
+
+        os.Exit(93)
+    }
+
+    for probe, expected := range map[string]struct {
+        output string
+        absent string
+    }{
+        "httpWithoutKeys": {"no environment keys were loaded", "MELODY_ENV is not set"},
+        "cliWithKeys":     {"MELODY_ENV is not set in the .env artifacts", "no environment keys were loaded"},
+        "httpWithKeys":    {"MELODY_ENV is not set in the .env artifacts", "no environment keys were loaded"},
+    } {
+        child := exec.Command(os.Args[0], "-test.run=^TestBoot_RefusesTheDefaultedEnvironmentNameAfterTheZeroKeyRefusal$")
+        child.Env = append(os.Environ(), bootEnvironmentProbeMarker+"="+probe)
+
+        output, runErr := child.CombinedOutput()
+
+        exitError, isExitError := runErr.(*exec.ExitError)
+        if false == isExitError || 1 != exitError.ExitCode() {
+            t.Fatalf("%s: expected the boot to exit 1, got err %v with output: %s", probe, runErr, string(output))
+        }
+
+        if false == strings.Contains(string(output), expected.output) || true == strings.Contains(string(output), expected.absent) {
+            t.Fatalf("%s: expected %q and not %q, got: %s", probe, expected.output, expected.absent, string(output))
+        }
     }
 }
 
@@ -635,7 +733,7 @@ func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *
     projectDirectory := os.Getenv(runPanicPathProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{}})
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvKey: config.EnvDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -756,7 +854,7 @@ func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
     projectDirectory := os.Getenv(bootPanicTeardownProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{}})
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvKey: config.EnvDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -825,7 +923,7 @@ func TestBoot_RefusesADeclaredTeardownDependencyNamingNoService(t *testing.T) {
     projectDirectory := os.Getenv(bootDanglingDeclarationProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{}})
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvKey: config.EnvDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -878,7 +976,7 @@ func TestBoot_RefusesALazyLockerOverAContainerWithNoLocker(t *testing.T) {
     projectDirectory := os.Getenv(bootDanglingLazyHandleProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{}})
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvKey: config.EnvDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -942,7 +1040,7 @@ func bootHttpRefusalChildValues() map[string]map[string]string {
 
 func TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrACliBootWarningKey(t *testing.T) {
     if probe := os.Getenv(bootHttpRefusalProbeMarker); "" != probe {
-        values := map[string]string{config.HttpAddressKey: "127.0.0.1:34523"}
+        values := map[string]string{config.EnvKey: config.EnvDevelopment, config.HttpAddressKey: "127.0.0.1:34523"}
         for key, value := range bootHttpRefusalChildValues()[probe] {
             values[key] = value
         }
@@ -1355,7 +1453,7 @@ func TestRun_ClosesIndependentDependentsTogetherUnderTheConfiguredBudget(t *test
     t.Cleanup(func() { applicationExit = originalExit })
 
     directory := t.TempDir()
-    environment := []byte("MELODY_TEARDOWN_TIMEOUT=3s\n")
+    environment := []byte("MELODY_ENV=dev\nMELODY_TEARDOWN_TIMEOUT=3s\n")
     writeErr := os.WriteFile(filepath.Join(directory, ".env"), environment, 0o600)
     if nil != writeErr {
         t.Fatalf("write .env: %v", writeErr)

@@ -112,9 +112,9 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     }
 
     instance.refuseHttpBootWithoutEnvironment()
+    instance.refuseBootWithDefaultedEnvironment()
     instance.refuseCliBootWarningKeysInHttp()
     instance.refuseUnknownCliBootWarningCodes()
-    instance.bootWarnings = append(instance.bootWarnings, environmentDefaultedBootWarnings(instance.runtimeFlags.Mode(), instance.configuration)...)
 
     instance.ensureRuntimeDirectories()
 
@@ -528,29 +528,6 @@ func (instance *Application) exitConfig() logging.ExitConfig {
     }
 }
 
-/* environmentDefaultedBootWarnings names an http process whose environment name no artifact set: the kernel reads it as dev, so the process serves with debug tooling on */
-func environmentDefaultedBootWarnings(mode string, configuration configcontract.Configuration) []internal.BootWarning {
-    if config.ModeHttp != mode {
-        return nil
-    }
-
-    environmentParameter := configuration.Get(config.EnvKey)
-    if nil != environmentParameter && false == environmentParameter.IsDefault() {
-        return nil
-    }
-
-    return []internal.BootWarning{
-        {
-            Name:    internal.BootWarningNameEnvironmentDefaulted,
-            Message: "MELODY_ENV is not set, so the http process boots as dev with debug tooling on; set MELODY_ENV explicitly",
-            Context: loggingcontract.Context{
-                "environmentKey": config.EnvKey,
-                "environment":    config.EnvDevelopment,
-            },
-        },
-    }
-}
-
 /* only a command reads the cli keys: an http process dying on its refusal of them still writes every boot warning */
 func (instance *Application) writeBootWarnings(logger loggingcontract.Logger) {
     if true == instance.bootWarningsWritten {
@@ -608,7 +585,7 @@ func (instance *Application) refuseCliBootWarningKeysInHttp() {
     }
 }
 
-/* refuseHttpBootWithoutEnvironment fails the boot of an http process whose .env artifacts contributed no keys: every built-in parameter has a development default, so such a binary would serve in the dev environment with debug tooling on. A cli process stays permissive, since development commands run without an environment file. */
+/* refuseHttpBootWithoutEnvironment fails the boot of an http process whose .env artifacts contributed no keys: every built-in parameter has a development default, so such a binary would serve in the dev environment with debug tooling on. It runs before refuseBootWithDefaultedEnvironment, so an http process with no environment file is told that, not only that its name is missing. */
 func (instance *Application) refuseHttpBootWithoutEnvironment() {
     if config.ModeHttp != instance.runtimeFlags.Mode() {
         return
@@ -629,6 +606,27 @@ func (instance *Application) refuseHttpBootWithoutEnvironment() {
         exception.NewError(
             "no environment keys were loaded from the .env artifacts and the process is booting in http mode; refusing to serve on development defaults"+missingEnvironmentFileHint(projectDirectory),
             exceptioncontract.Context{
+                "projectDirectory": projectDirectory,
+            },
+            nil,
+        ),
+    )
+}
+
+/* refuseBootWithDefaultedEnvironment fails the boot, in every mode, of a process whose MELODY_ENV no .env artifact set: the name defaults to dev, which selects the .env.dev files and turns the debug tooling on, so a production process would run on the development files without a word. A process environment variable does not set it, since melody reads configuration only from the .env artifacts. */
+func (instance *Application) refuseBootWithDefaultedEnvironment() {
+    environmentParameter := instance.configuration.Get(config.EnvKey)
+    if nil != environmentParameter && false == environmentParameter.IsDefault() {
+        return
+    }
+
+    projectDirectory := instance.configuration.Kernel().ProjectDir()
+
+    exception.Panic(
+        exception.NewError(
+            "MELODY_ENV is not set in the .env artifacts; refusing to boot as dev on a defaulted environment name, which selected the .env.dev files; set it in .env, since a process environment variable is not read"+missingEnvironmentFileHint(projectDirectory),
+            exceptioncontract.Context{
+                "environmentKey":   config.EnvKey,
                 "projectDirectory": projectDirectory,
             },
             nil,

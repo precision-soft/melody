@@ -72,7 +72,6 @@ func TestBootWarningRegistry_NamesEachCodeOnceAndMarksWhatACliProcessWrites(t *t
 
     for name, expected := range map[string]bool{
         BootWarningNameFirewallDoorReachUnknown:                   true,
-        BootWarningNameEnvironmentDefaulted:                       false,
         BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage: false,
         BootWarningNameProcessEnvironmentVariableIgnored:          true,
         BootWarningNameSecretMarkUnmatched:                        true,
@@ -83,8 +82,10 @@ func TestBootWarningRegistry_NamesEachCodeOnceAndMarksWhatACliProcessWrites(t *t
         }
     }
 
-    if true == registry.Known("security.firewallShadowed") {
-        t.Fatalf("expected a code the framework no longer writes unknown")
+    for _, name := range []string{"security.firewallShadowed", "application.environment.defaulted"} {
+        if true == registry.Known(name) {
+            t.Fatalf("expected %q, a code the framework no longer writes, unknown", name)
+        }
     }
 }
 
@@ -107,13 +108,13 @@ func TestBootWarningRegistry_DeclareAddsACodeOnceAndKeepsEachRegistryApart(t *te
         t.Fatalf("expected the declared cli code after the framework's, got %v", cliNames)
     }
 
-    for _, name := range []string{"", "module.cliHazard", BootWarningNameEnvironmentDefaulted} {
+    for _, name := range []string{"", "module.cliHazard", BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage} {
         if true == registry.Declare(name, true) {
             t.Fatalf("expected %q refused", name)
         }
     }
 
-    if true == registry.WrittenInCli(BootWarningNameEnvironmentDefaulted) {
+    if true == registry.WrittenInCli(BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage) {
         t.Fatalf("expected a refused declaration to leave the framework's row as it was")
     }
 

@@ -9,7 +9,6 @@ const BootWarningContextKey = "bootWarning"
 
 const (
     BootWarningNameFirewallDoorReachUnknown                   = "security.firewallDoorReachUnknown"
-    BootWarningNameEnvironmentDefaulted                       = "application.environment.defaulted"
     BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage = "http.session.unboundedTtlOnBoundedDefaultStorage"
     BootWarningNameProcessEnvironmentVariableIgnored          = "application.environment.processVariableIgnored"
     BootWarningNameSecretMarkUnmatched                        = "application.secretMark.unmatched"
@@ -30,7 +29,6 @@ func NewBootWarningRegistry() *BootWarningRegistry {
     return &BootWarningRegistry{
         registrations: []bootWarningRegistration{
             {name: BootWarningNameFirewallDoorReachUnknown, writtenInCli: true},
-            {name: BootWarningNameEnvironmentDefaulted, writtenInCli: false},
             {name: BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage, writtenInCli: false},
             {name: BootWarningNameProcessEnvironmentVariableIgnored, writtenInCli: true},
             {name: BootWarningNameSecretMarkUnmatched, writtenInCli: true},

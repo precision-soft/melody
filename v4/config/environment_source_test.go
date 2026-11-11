@@ -284,6 +284,194 @@ func TestLoad_PreservesNonUtf8BytesInQuotedValues(t *testing.T) {
     }
 }
 
+/* godotenv rewrites a byte that is not valid UTF-8 in an unquoted value to U+FFFD, so the parameter would hold another password than the file; the refusal names the key and the file and never the value, whatever godotenv's grammar put around it */
+func TestLoad_RefusesAnUnquotedValueThatIsNotUtf8(t *testing.T) {
+    for _, testCase := range []struct {
+        file    string
+        content string
+        key     string
+    }{
+        {".env", "DB_PASSWORD=caf\xe9\n", "DB_PASSWORD"},
+        {".env", "export DB_PASSWORD = caf\xe9 # note\n", "DB_PASSWORD"},
+        {".env", "DB_PASSWORD: caf\xe9\n", "DB_PASSWORD"},
+        {".env", "APP_NAME=\"shop\" DB_PASSWORD=caf\xe9\n", "DB_PASSWORD"},
+        {".env", "APP_NAME='shop' DB_PASSWORD=caf\xe9\n", "DB_PASSWORD"},
+        {".env", "APP_NAME=\"a\nb\" DB_PASSWORD=caf\xe9\n", "DB_PASSWORD"},
+        {".env", "DB_PASSWORD=abc #caf\xe9 # note\n", "DB_PASSWORD"},
+        {".env.local", "DB_PASSWORD=caf\xe9\n", "DB_PASSWORD"},
+        {".env.dev", "DB_PASSWORD=caf\xe9\n", "DB_PASSWORD"},
+    } {
+        files := map[string]string{".env": "MELODY_ENV=dev\n"}
+        files[testCase.file] = files[testCase.file] + testCase.content
+
+        _, loadErr := writeDotEnvFiles(t, files).Load()
+
+        refusal := findEnvironmentSourceError(loadErr, "an unquoted env value is not valid UTF-8")
+        if nil == refusal || "["+testCase.key+"]" != fmt.Sprint(refusal.Context()["keys"]) {
+            t.Fatalf("%q: expected the refusal naming %s, got %v", testCase.content, testCase.key, loadErr)
+        }
+
+        if false == strings.HasSuffix(fmt.Sprint(refusal.Context()["path"]), testCase.file) {
+            t.Fatalf("%q: expected the file %s named, got %v", testCase.content, testCase.file, refusal.Context())
+        }
+
+        if true == strings.Contains(fmt.Sprintf("%v %v", loadErr, refusal.Context()), "caf") {
+            t.Fatalf("%q: expected the value out of the refusal", testCase.content)
+        }
+    }
+}
+
+/* a comment is no part of a value, a quoted value is kept as it is, and a U+FFFD the file spells is its own value, so none of them is judged */
+func TestLoad_AdmitsWhatGodotenvDoesNotRewrite(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env": "MELODY_ENV=dev\nAPP_NAME=shop # caf\xe9\n# caf\xe9\nDB_PASSWORD='caf\xe9' # caf\xe9\nAPP_MARK=\ufffd\n",
+    })
+
+    values, loadErr := source.Load()
+    if nil != loadErr {
+        t.Fatalf("expected the file admitted, got %v", loadErr)
+    }
+
+    if "shop" != values["APP_NAME"] || "caf\xe9" != values["DB_PASSWORD"] || "\ufffd" != values["APP_MARK"] {
+        t.Fatalf("expected the values read as the file holds them, got %q", values)
+    }
+}
+
+func findEnvironmentSourceError(err error, message string) *exception.Error {
+    for nil != err {
+        if typed, isTyped := err.(*exception.Error); true == isTyped && true == strings.HasPrefix(typed.Message(), message) {
+            return typed
+        }
+
+        unwrapper, isUnwrapper := err.(interface{ Unwrap() error })
+        if false == isUnwrapper {
+            return nil
+        }
+
+        err = unwrapper.Unwrap()
+    }
+
+    return nil
+}
+
+/* the name read from .env and .env.local selects the per-environment files; a rename inside them would run the production files as dev with the debug tooling on */
+func TestLoad_RefusesAnEnvironmentFileThatRenamesTheEnvironment(t *testing.T) {
+    for _, file := range []string{".env.prod", ".env.prod.local"} {
+        source := writeDotEnvFiles(t, map[string]string{
+            ".env": "MELODY_ENV=prod\nDB_PASSWORD=hunter2\n",
+            file:   "MELODY_ENV=dev\n",
+        })
+
+        _, loadErr := source.Load()
+
+        refusal := findEnvironmentSourceError(loadErr, "a per-environment env file renames the environment")
+        if nil == refusal {
+            t.Fatalf("%s: expected the rename refused, got %v", file, loadErr)
+        }
+
+        if "prod" != refusal.Context()["selectedEnvironment"] || "dev" != refusal.Context()["overwritingEnvironment"] || EnvKey != refusal.Context()["environmentKey"] {
+            t.Fatalf("%s: expected both names and the key, got %v", file, refusal.Context())
+        }
+
+        if true == strings.Contains(fmt.Sprint(refusal.Context()), "hunter2") {
+            t.Fatalf("%s: expected no other key's value in the refusal", file)
+        }
+    }
+}
+
+func TestLoad_AdmitsAnEnvironmentFileThatRepeatsTheName(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env":            "MELODY_ENV=prod\n",
+        ".env.prod":       "MELODY_ENV=prod\n",
+        ".env.prod.local": "MELODY_ENV= prod\n",
+    })
+
+    if _, loadErr := source.Load(); nil != loadErr {
+        t.Fatalf("expected the same name admitted, got %v", loadErr)
+    }
+}
+
+func TestLoad_RefusesARenameOfADefaultedName(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env":     "APP_NAME=shop\n",
+        ".env.dev": "MELODY_ENV=prod\n",
+    })
+
+    _, loadErr := source.Load()
+
+    refusal := findEnvironmentSourceError(loadErr, "a per-environment env file renames the environment")
+    if nil == refusal || "dev" != refusal.Context()["selectedEnvironment"] || "prod" != refusal.Context()["overwritingEnvironment"] {
+        t.Fatalf("expected the defaulted name's rename refused, got %v", loadErr)
+    }
+
+    admitted := writeDotEnvFiles(t, map[string]string{
+        ".env":     "APP_NAME=shop\n",
+        ".env.dev": "MELODY_ENV=dev\n",
+    })
+
+    if _, admittedErr := admitted.Load(); nil != admittedErr {
+        t.Fatalf("expected .env.dev naming dev admitted, got %v", admittedErr)
+    }
+}
+
+func TestLoad_ComparesTheTrimmedEnvironmentName(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env":      "MELODY_ENV=prod\n",
+        ".env.prod": "MELODY_ENV=\" prod \"\n",
+    })
+
+    if _, loadErr := source.Load(); nil != loadErr {
+        t.Fatalf("expected a padded repeat of the name admitted, got %v", loadErr)
+    }
+}
+
+/* a name assembled from another key is reported by that key, so a referenced secret never reaches the exit record */
+func TestLoad_ReportsAReferencedRenameByItsKeys(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env":      "MELODY_ENV=prod\nDB_PASSWORD=hunter2\n",
+        ".env.prod": "MELODY_ENV=${DB_PASSWORD}\n",
+    })
+
+    _, loadErr := source.Load()
+
+    refusal := findEnvironmentSourceError(loadErr, "a per-environment env file renames the environment")
+    if nil == refusal || "[DB_PASSWORD]" != fmt.Sprint(refusal.Context()["overwritingEnvironmentAssembledFrom"]) {
+        t.Fatalf("expected the rename reported by its keys, got %v", loadErr)
+    }
+
+    if true == strings.Contains(fmt.Sprintf("%v %v", loadErr, refusal.Context()), "hunter2") {
+        t.Fatalf("expected the referenced value out of the refusal, got %v", refusal.Context())
+    }
+}
+
+func TestLoad_ReportsAnEmptiedNameAsEmpty(t *testing.T) {
+    source := writeDotEnvFiles(t, map[string]string{
+        ".env":      "MELODY_ENV=prod\n",
+        ".env.prod": "MELODY_ENV=\n",
+    })
+
+    _, loadErr := source.Load()
+
+    refusal := findEnvironmentSourceError(loadErr, "a per-environment env file renames the environment")
+    if nil == refusal || "" != refusal.Context()["overwritingEnvironment"] {
+        t.Fatalf("expected the emptied name reported empty, got %v", loadErr)
+    }
+}
+
+func TestLoad_ComparesTheEnvironmentNameAfterTheReferencesAreExpanded(t *testing.T) {
+    for target, refused := range map[string]bool{"prod": false, "dev": true} {
+        source := writeDotEnvFiles(t, map[string]string{
+            ".env":      "MELODY_ENV=prod\n",
+            ".env.prod": "MELODY_ENV=${TARGET}\nTARGET=" + target + "\n",
+        })
+
+        _, loadErr := source.Load()
+        if refused != (nil != findEnvironmentSourceError(loadErr, "a per-environment env file renames the environment")) {
+            t.Fatalf("TARGET=%s: expected refused %v, got %v", target, refused, loadErr)
+        }
+    }
+}
+
 func TestLoad_RefusesMalformedBracedReference(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{
         ".env": "DSN=mysql://root:${DB-PASS}@db/app\n",

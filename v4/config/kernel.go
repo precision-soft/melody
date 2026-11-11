@@ -183,7 +183,7 @@ func (instance *kernelConfiguration) validateEnvironment() error {
             exceptioncontract.Context{
                 "environmentKey": EnvKey,
                 "parameterName":  KernelEnv,
-                "hint":           "remove " + EnvKey + " from .env or .env.local, or give it a value: an empty one still selects the .env." + EnvDevelopment + " files",
+                "hint":           "give " + EnvKey + " a value in .env or .env.local: an empty one still selects the .env." + EnvDevelopment + " files, and a removed one is refused as a defaulted name",
             },
             nil,
         )

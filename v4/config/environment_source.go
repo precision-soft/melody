@@ -2,11 +2,13 @@ package config
 
 import (
     "bufio"
+    "bytes"
     "io/fs"
     "path/filepath"
     "sort"
     "strings"
     "unicode"
+    "unicode/utf8"
 
     "github.com/joho/godotenv"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
@@ -62,9 +64,46 @@ func (instance *EnvironmentSource) Load() (map[string]string, error) {
         return nil, expandDotEnvReferencesErr
     }
 
+    refuseEnvironmentRenameErr := refuseEnvironmentRename(values, environmentName, assembledFrom[EnvKey])
+    if nil != refuseEnvironmentRenameErr {
+        return nil, refuseEnvironmentRenameErr
+    }
+
     instance.provenance = &dotEnvProvenance{assembledFrom: assembledFrom}
 
     return values, nil
+}
+
+/* refuseEnvironmentRename fails the load when .env.<name> or .env.<name>.local leaves MELODY_ENV naming another environment than the one that selected them: the process would run the selected files under another name, the production files as dev with the debug tooling on. The name is compared once the references are expanded, and an absent or empty value reads as dev, as it does when the files are selected. A name assembled from other keys is reported by those keys, never by the value they gave it. */
+func refuseEnvironmentRename(values map[string]string, environmentName string, assembledFrom []string) error {
+    overwritingName := strings.TrimSpace(values[EnvKey])
+
+    finalName := overwritingName
+    if "" == finalName {
+        finalName = EnvDevelopment
+    }
+
+    if environmentName == finalName {
+        return nil
+    }
+
+    context := exceptioncontract.Context{
+        "environmentKey":      EnvKey,
+        "selectedEnvironment": environmentName,
+        "environmentFiles":    []string{".env." + environmentName, ".env." + environmentName + ".local"},
+    }
+
+    if 0 < len(assembledFrom) {
+        context["overwritingEnvironmentAssembledFrom"] = assembledFrom
+    } else {
+        context["overwritingEnvironment"] = overwritingName
+    }
+
+    return exception.NewError(
+        "a per-environment env file renames the environment that selected it; MELODY_ENV in .env or .env.local selects the .env.<name> files, which may repeat the name but not change it, and an empty one reads as dev",
+        context,
+        nil,
+    )
 }
 
 func (instance *EnvironmentSource) loadDotEnvFiles(values map[string]string) (string, error) {
@@ -187,6 +226,11 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
         )
     }
 
+    refuseRewrittenValueErr := refuseRewrittenDotEnvValue(data, parsed, pathValue)
+    if nil != refuseRewrittenValueErr {
+        return refuseRewrittenValueErr
+    }
+
     for key, value := range parsed {
         trimmedKey := strings.TrimSpace(key)
         if "" == trimmedKey {
@@ -197,6 +241,37 @@ func (instance *EnvironmentSource) loadExistingDotEnvFile(values map[string]stri
     }
 
     return nil
+}
+
+/* refuseRewrittenDotEnvValue fails a file whose bytes are not valid UTF-8 when godotenv rewrote such a byte to U+FFFD in a value, which it does for an unquoted value and never for a quoted one: the parameter would hold another value than the file, a Latin-1 password among them. The parser's own reading is judged, so a comment, a second statement on a line or a key's spelling follow godotenv's grammar; a value the file spells verbatim, a U+FFFD typed into it, is no rewrite. The key and the file are named and the value never is. */
+func refuseRewrittenDotEnvValue(data []byte, parsed map[string]string, pathValue string) error {
+    if true == utf8.Valid(data) {
+        return nil
+    }
+
+    rewrittenKeys := make([]string, 0)
+    for key, value := range parsed {
+        if false == strings.ContainsRune(value, utf8.RuneError) || true == bytes.Contains(data, []byte(value)) {
+            continue
+        }
+
+        rewrittenKeys = append(rewrittenKeys, strings.TrimSpace(key))
+    }
+
+    if 0 == len(rewrittenKeys) {
+        return nil
+    }
+
+    sort.Strings(rewrittenKeys)
+
+    return exception.NewError(
+        "an unquoted env value is not valid UTF-8; quote it, since a quoted value is kept byte for byte",
+        exceptioncontract.Context{
+            "path": pathValue,
+            "keys": rewrittenKeys,
+        },
+        nil,
+    )
 }
 
 /* sanitizeDotEnvParseFailure keeps the failure's shape and drops the file content it quotes. The unterminated-value failure is read by its prefix before the " near " cut, since godotenv appends the value's first line to it raw; the malformed-name failure carries " near " ahead of the content it quotes. */

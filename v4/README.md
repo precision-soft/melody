@@ -53,7 +53,7 @@ func main() {
 }
 ```
 
-An http process refuses to boot when its `.env` files contributed no key, since every built-in parameter has a development default, so the sample carries a one-line `.env` beside its `go.mod`. Run it, then call the endpoint (the HTTP server listens on `:8080` by default):
+A process refuses to boot when its `.env` files do not set `MELODY_ENV`, since the default would select the development files and turn the debug tooling on, so the sample carries a one-line `.env` beside its `go.mod`. Run it, then call the endpoint (the HTTP server listens on `:8080` by default):
 
 ```bash
 echo 'MELODY_ENV=dev' > .env

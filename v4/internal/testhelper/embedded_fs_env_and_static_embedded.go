@@ -8,7 +8,9 @@ import (
 )
 
 func NewEmbeddedEnvFs() fs.FS {
-    return fstest.MapFS{}
+    return fstest.MapFS{
+        ".env": &fstest.MapFile{Data: []byte("MELODY_ENV=dev\n")},
+    }
 }
 
 /* NewEmbeddedStaticFs stands in for the filesystem a release build embeds and so holds the public directory the file server requires. */
