@@ -53,7 +53,7 @@ func TestSessionLoginHandlerWritesTheIdentityOnTheSessionTheRequestCarries(t *te
 
     arrivedSession := mustSession(manager.NewSession())
     arrivedSession.Set("cart", "kept across the login")
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, arrivedSession)
+    _ = melodyhttp.SetRequestSession(request, arrivedSession)
 
     result, loginErr := NewSessionLoginHandler(currentAccountLookup, (&recordingSessionIndex{}).lookup).Login(
         runtimeInstance,
@@ -68,7 +68,7 @@ func TestSessionLoginHandlerWritesTheIdentityOnTheSessionTheRequestCarries(t *te
         t.Fatalf("expected the login door to answer 200, got %+v", result)
     }
 
-    publishedSession := getSession(request)
+    publishedSession := sessionOnRequest(request)
     if nil == publishedSession {
         t.Fatal("the request carries no session after the login")
     }
@@ -123,7 +123,7 @@ func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontra
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, mustSession(manager.NewSession()))
+    _ = melodyhttp.SetRequestSession(request, mustSession(manager.NewSession()))
 
     return runtimeInstance, request
 }
@@ -160,7 +160,7 @@ func TestSessionLoginHandlerOpensASessionThePasswordChangeRevokes(t *testing.T) 
         t.Fatalf("the login door failed: %v", loginErr)
     }
 
-    publishedSession := getSession(request)
+    publishedSession := sessionOnRequest(request)
     roles, _ := getStringSliceFromSession(publishedSession, SessionKeySecurityRoles)
     if 1 != len(roles) || "ROLE_EDITOR" != roles[0] {
         t.Fatalf("expected the account's roles in the session, got %v", roles)
@@ -191,7 +191,7 @@ func TestSessionLoginHandlerRefusesATokenThatIsNotAuthenticated(t *testing.T) {
                 t.Fatal("expected the login door to refuse a token that is not authenticated")
             }
 
-            if true == getSession(request).Has(SessionKeySecurityUserId) {
+            if true == sessionOnRequest(request).Has(SessionKeySecurityUserId) {
                 t.Fatal("an identity was written for a token that is not authenticated")
             }
         })
@@ -229,7 +229,7 @@ func TestSessionLoginHandlerRefusesAnAccountThatIsNotAvailable(t *testing.T) {
                 t.Fatal("expected the login door to refuse an account that is not available")
             }
 
-            if true == getSession(request).Has(SessionKeySecurityUserId) {
+            if true == sessionOnRequest(request).Has(SessionKeySecurityUserId) {
                 t.Fatal("an identity was written for an account that is not available")
             }
         })
@@ -239,7 +239,7 @@ func TestSessionLoginHandlerRefusesAnAccountThatIsNotAvailable(t *testing.T) {
 /* the firewall's sign-in admits the rotated session under the account, naming the id the rotation retired, so a session opened through the firewall counts against the account's cap as one opened at the sign-in door does */
 func TestSessionLoginHandlerAdmitsTheRotatedSessionUnderTheAccount(t *testing.T) {
     runtimeInstance, request := loginRequest(t)
-    arrivedSessionId := getSession(request).Id()
+    arrivedSessionId := sessionOnRequest(request).Id()
 
     index := &recordingSessionIndex{}
 
@@ -252,7 +252,7 @@ func TestSessionLoginHandlerAdmitsTheRotatedSessionUnderTheAccount(t *testing.T)
         t.Fatalf("the login door failed: %v", loginErr)
     }
 
-    expected := sessionAdmission{userId: "user-1", previousSessionId: arrivedSessionId, sessionId: getSession(request).Id(), createdAt: sessionAdmissionTestInstant}
+    expected := sessionAdmission{userId: "user-1", previousSessionId: arrivedSessionId, sessionId: sessionOnRequest(request).Id(), createdAt: sessionAdmissionTestInstant}
     if 1 != len(index.admittedList) || expected != index.admittedList[0] {
         t.Fatalf("expected one admission %+v, got %+v", expected, index.admittedList)
     }
@@ -274,7 +274,7 @@ func TestSessionLoginHandlerRefusedAdmissionOpensNoSession(t *testing.T) {
         t.Fatalf("expected the index's refusal, got %v", loginErr)
     }
 
-    if false == getSession(request).IsCleared() {
+    if false == sessionOnRequest(request).IsCleared() {
         t.Fatal("expected the rotated session cleared, so the response path deletes it rather than saving it")
     }
 }

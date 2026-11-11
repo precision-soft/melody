@@ -17,11 +17,16 @@ const (
     SessionKeySecurityCredentialVersion = "security.credentialVersion"
 )
 
-/* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers the unavailable token, 503 with Retry-After on a protected page, and leaves the session alone, since the failure says nothing about the account; the framework files the cause at error. */
+/* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session its storage could not load answers the unavailable token; any other error reading the session answers anonymous, its record filed by the read. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers the unavailable token, 503 with Retry-After on a protected page, and leaves the session alone, since the failure says nothing about the account; the framework files the cause at error. */
 func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.TokenResolver {
     return func(request melodyhttpcontract.Request) melodysecuritycontract.Token {
-        sessionInstance := getSession(request)
-        if nil == sessionInstance {
+        sessionInstance, sessionErr := melodyhttp.RequestSession(request)
+        if nil != sessionErr {
+            /* a session its storage could not load says nothing about the visitor: a public page is served as not signed in, a protected one answers 503 with Retry-After */
+            if true == melodyexception.AnswersUnavailable(sessionErr) {
+                return melodysecurity.NewUnavailableToken(sessionErr)
+            }
+
             return melodysecurity.NewAnonymousToken()
         }
 
@@ -85,29 +90,6 @@ func sessionAccountIsCurrent(user *entity.User, found bool, userId string, crede
     }
 
     return credentialVersion == SessionCredentialVersion(user.Password)
-}
-
-func getSession(request melodyhttpcontract.Request) melodysessioncontract.Session {
-    if nil == request {
-        return nil
-    }
-
-    attributes := request.Attributes()
-    if nil == attributes {
-        return nil
-    }
-
-    value, exists := attributes.Get(melodyhttp.RequestAttributeSession)
-    if false == exists {
-        return nil
-    }
-
-    sessionInstance, ok := value.(melodysessioncontract.Session)
-    if false == ok {
-        return nil
-    }
-
-    return sessionInstance
 }
 
 func getStringFromSession(sessionInstance melodysessioncontract.Session, key string) (string, bool) {

@@ -41,19 +41,18 @@ func requestCarryingSession(t *testing.T) (melodyhttpcontract.Request, melodyses
     manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
     sessionInstance := mustSession(manager.NewSession())
 
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
+    _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
     return request, sessionInstance
 }
 
-/* requestCarryingSessionAttribute publishes an arbitrary value under the session attribute, so the resolver can be asked what it does when something that is NOT a session sits where one is expected. */
-func requestCarryingSessionAttribute(t *testing.T, value any) melodyhttpcontract.Request {
-    t.Helper()
+func sessionOnRequest(request melodyhttpcontract.Request) melodysessioncontract.Session {
+    sessionInstance, sessionErr := melodyhttp.RequestSession(request)
+    if nil != sessionErr {
+        return nil
+    }
 
-    request := plainRequest(t)
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, value)
-
-    return request
+    return sessionInstance
 }
 
 const testPasswordHash = "test-password-hash"

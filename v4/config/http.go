@@ -18,7 +18,7 @@ var (
     defaultLocalePattern = regexp.MustCompile(`^[a-z]{2}(-[A-Za-z]{2})?$`)
 )
 
-/* DefaultSessionTtl is the lifetime a stored session gets when MELODY_HTTP_SESSION_TTL says nothing. Melody mints a session for every request without a session cookie, so the default is bounded: an unbounded lifetime makes every cookie-less request on a path that writes a session a permanent entry, which the default in-memory storage cannot expire. A deployment that wants no expiry writes unlimited, and the application warns at boot on that combination. The ttl is at least one second: the storages purge a lapsed entry on the next write or load, so a shorter one stores no usable session. */
+/* DefaultSessionTtl is the lifetime a stored session gets when MELODY_HTTP_SESSION_TTL says nothing. Melody mints a session for every request that reads the session without a session cookie, so the default is bounded: an unbounded lifetime makes every cookie-less request on a path that writes a session a permanent entry, which the default in-memory storage cannot expire. A deployment that wants no expiry writes unlimited, and the application warns at boot on that combination. The ttl is at least one second: the storages purge a lapsed entry on the next write or load, so a shorter one stores no usable session. */
 const DefaultSessionTtl = 24 * time.Hour
 
 /* DefaultHttpMaxRequestBodyBytes is the request body cap when MELODY_HTTP_MAX_REQUEST_BODY_BYTES says nothing, 1 MiB. */

@@ -9,15 +9,15 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* RegenerateRequestSession rotates the id of the session the request carries and publishes the rotated session back on the request, which is the whole operation a login handler needs against session fixation: the response path saves that session and emits its cookie. Call it before writing the authenticated identity, and write the identity to the session it returns. The two steps are one call on purpose — rotating without republishing destroys the id the browser holds without ever telling it the new one. */
+/* RegenerateRequestSession rotates the id of the session the request carries and publishes the rotated session back on the request, which is the whole operation a login handler needs against session fixation: the response path saves that session and emits its cookie. Call it before writing the authenticated identity, and write the identity to the session it returns. It loads the session when nothing read it yet, and answers the load's or the rotation's error, a storage that could not answer carrying session.ErrSessionUnavailable. The two steps are one call on purpose — rotating without republishing destroys the id the browser holds without ever telling it the new one. */
 func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error) {
     if true == internal.IsNilInterface(request) {
         return nil, exception.NewError("request is nil in regenerate request session", nil, nil)
     }
 
-    currentSession := sessionFromRequestAttribute(request)
-    if nil == currentSession {
-        return nil, exception.NewError("request carries no session in regenerate request session", nil, nil)
+    currentSession, currentSessionErr := RequestSession(request)
+    if nil != currentSessionErr {
+        return nil, currentSessionErr
     }
 
     runtimeInstance := request.RuntimeInstance()
@@ -36,10 +36,12 @@ func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Ses
 
     rotatedSession, regenerateErr := sessionManager.RegenerateSession(currentSession)
     if nil != regenerateErr {
-        return nil, regenerateErr
+        return nil, markSessionUnavailable(regenerateErr)
     }
 
-    request.Attributes().Set(RequestAttributeSession, rotatedSession)
+    if publishErr := SetRequestSession(request, rotatedSession); nil != publishErr {
+        return nil, publishErr
+    }
 
     return rotatedSession, nil
 }

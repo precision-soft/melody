@@ -306,14 +306,13 @@ func requestPathIsCanonical(path string) bool {
     return stdpath.Clean(trimmedPath) == trimmedPath
 }
 
-/* writeResponse persists the session, emits the session cookie and writes the response, and returns the response it actually wrote, which the caller publishes. A session-storage outage on save replaces the response with a fresh empty 500 that carries neither the original headers nor the session cookie. */
+/* writeResponse persists the session a reader loaded or a handler published, emits the session cookie and writes the response, and returns the response it actually wrote, which the caller publishes. A session-storage outage on save replaces the response with a fresh empty 500 that carries neither the original headers nor the session cookie. */
 func writeResponse(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
     writer nethttp.ResponseWriter,
     response httpcontract.Response,
     sessionManager sessioncontract.Manager,
-    sessionInstance sessioncontract.Session,
     forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy,
     sessionCookiePolicy httpcontract.SessionCookiePolicy,
 ) httpcontract.Response {
@@ -350,7 +349,8 @@ func writeResponse(
     recorder, isRecorder := writer.(headerCommitRecorder)
     responseIsDiscarded := true == isRecorder && true == recorder.HeadersWritten()
 
-    sessionInstance = republishedSession(request, sessionInstance)
+    /* only a session a reader loaded or published is persisted: a request that never read it leaves the storage and the cookie alone */
+    sessionInstance := effectiveRequestSession(request)
 
     if false == sessionAlreadyPersisted && false == internal.IsNilInterface(sessionManager) && false == internal.IsNilInterface(sessionInstance) {
         sessionPersistFailed := false
@@ -359,7 +359,7 @@ func writeResponse(
         _, sessionModified, sessionCleared := session.Snapshot(sessionInstance)
 
         if true == sessionCleared {
-            /* only a session the request's cookie named can be stored: one the kernel minted for an unknown or absent cookie, or a rotated one never saved, has no entry to remove and no copy to bury */
+            /* only a session the request's cookie named can be stored: one a read minted for an unknown or absent cookie, or a rotated one never saved, has no entry to remove and no copy to bury */
             if true == requestNamesSession(request, sessionInstance.Id()) {
                 if err := sessionManager.DeleteSession(sessionInstance.Id()); nil != err {
                     /* a failed delete on logout is logged and still expires the cookie, which can only end a session; a failed save, by contrast, suppresses the cookie */
@@ -494,42 +494,6 @@ func isClientAbortWriteError(request httpcontract.Request, err error) bool {
     }
 
     return context.Canceled == context.Cause(request.HttpRequest().Context())
-}
-
-/* republishedSession prefers the session a handler published on the request over the one captured before routing, so a rotated id reaches the store and the Set-Cookie. */
-func republishedSession(
-    request httpcontract.Request,
-    capturedSession sessioncontract.Session,
-) sessioncontract.Session {
-    publishedSession := sessionFromRequestAttribute(request)
-    if nil == publishedSession {
-        return capturedSession
-    }
-
-    return publishedSession
-}
-
-func sessionFromRequestAttribute(request httpcontract.Request) sessioncontract.Session {
-    if true == internal.IsNilInterface(request) {
-        return nil
-    }
-
-    attributes := request.Attributes()
-    if true == internal.IsNilInterface(attributes) {
-        return nil
-    }
-
-    attributeValue, exists := attributes.Get(RequestAttributeSession)
-    if false == exists {
-        return nil
-    }
-
-    publishedSession, isSession := attributeValue.(sessioncontract.Session)
-    if false == isSession || true == internal.IsNilInterface(publishedSession) {
-        return nil
-    }
-
-    return publishedSession
 }
 
 func requestNamesSession(request httpcontract.Request, sessionId string) bool {

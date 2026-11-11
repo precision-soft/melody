@@ -456,7 +456,6 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         eventDispatcher := event.EventDispatcherMustFromContainer(request.Context(), serviceContainer)
 
         var sessionManager sessioncontract.Manager
-        var sessionInstance sessioncontract.Session
 
         defer func() {
             _, eventKernelTerminateErr := eventDispatcher.DispatchName(
@@ -541,37 +540,19 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = exceptionResponse
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, panickedResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, panickedResponse, sessionManager, requestLogger, eventDispatcher)
         }()
 
-        /* the session is loaded after the recovery defer is installed and must stay below it, since a replaceable manager may panic, which above the guard escapes ServeHttp with no response */
+        /* the manager is resolved after the recovery defer is installed and must stay below it, since a replaceable container may panic, which above the guard escapes ServeHttp with no response; the session itself is loaded by its first reader, so a route that never reads it costs the storage nothing */
         sessionManager = session.SessionMustFromContainer(request.Context(), serviceContainer)
 
-        var sessionLoadErr error
-
+        cookieValue := ""
         cookie, _ := request.Cookie(session.SessionCookieName)
         if nil != cookie {
-            sessionInstance, sessionLoadErr = sessionManager.Session(cookie.Value)
-        }
-        /* IsNilInterface on both, since a replaceable manager may answer "not found" with a typed-nil session, which a bare comparison takes for a live one, and "no error" with a typed-nil error, which it takes for an error */
-        if true == internal.IsNilInterface(sessionLoadErr) && true == internal.IsNilInterface(sessionInstance) {
-            sessionInstance, sessionLoadErr = sessionManager.NewSession()
+            cookieValue = cookie.Value
         }
 
-        /* a session the manager could not load or mint refuses the request before the router: a marked storage outage is answered 503 with Retry-After, any other error 500, and the kernel publishes, saves and writes no session */
-        if false == internal.IsNilInterface(sessionLoadErr) {
-            sessionInstance = nil
-
-            reportedErr := recordExceptionOccurrence(requestLogger, melodyRequest, sessionLoadErr)
-
-            finalResponse = instance.raiseException(runtimeInstance, melodyRequest, reportedErr, requestLogger, eventDispatcher, debugMode)
-
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, nil, requestLogger, eventDispatcher)
-
-            return
-        }
-
-        melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)
+        melodyRequest.Attributes().Set(requestAttributeSession, newRequestSession(sessionManager, melodyRequest, requestLogger, cookieValue, nil != cookie))
 
         /* a path that folds to a different spelling is refused after the route is matched and before it is authorized or handled, so the router, the firewall matchers and the access control never disagree about the resource; it is asked of RequestPathAsRouted, the spelling the access-control matcher reads too, and requestPathIsCanonical states the boundary. The leading form of the padded path is asked of the decoded path as well, since " /public" routes as "%20/public". A stale RawPath, left by a handler in front that rewrote Path alone, does not carry the spelling the client sent, so an encoded separator would be read as a separator: it is refused, as the first and second majors refuse on the raw path. */
         if true == pathRefused {
@@ -586,7 +567,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusBadRequest, "bad request", nil)
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
 
             return
         }
@@ -617,7 +598,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil)
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
 
             return
         }
@@ -655,7 +636,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = instance.raiseException(runtimeInstance, melodyRequest, reportedErr, requestLogger, eventDispatcher, debugMode)
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
 
             return
         }
@@ -663,7 +644,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != kernelRequestEvent.Response() {
             finalResponse = kernelRequestEvent.Response()
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
 
             return
         }
@@ -779,7 +760,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != kernelControllerEvent.Response() {
             finalResponse = kernelControllerEvent.Response()
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
 
             return
         }
@@ -818,7 +799,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         finalResponse = response
-        instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, sessionInstance, requestLogger, eventDispatcher)
+        instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
     })
 }
 
@@ -830,7 +811,6 @@ func (instance *Kernel) dispatchResponseAndWrite(
     finalResponse *httpcontract.Response,
     discardCandidate httpcontract.Response,
     sessionManager sessioncontract.Manager,
-    sessionInstance sessioncontract.Session,
     requestLogger loggingcontract.Logger,
     eventDispatcher eventcontract.EventDispatcher,
 ) {
@@ -866,7 +846,6 @@ func (instance *Kernel) dispatchResponseAndWrite(
         writer,
         *finalResponse,
         sessionManager,
-        sessionInstance,
         instance.policies.forwardedHeadersPolicy,
         instance.policies.sessionCookiePolicy,
     )

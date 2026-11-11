@@ -15,6 +15,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
+    "github.com/precision-soft/melody/v4/session"
 )
 
 func newAnonymousRefusal(reason string) error {
@@ -52,6 +53,41 @@ func newUnavailableRefusal(firewall *CompiledFirewall, cause error) error {
         },
     )
     refusal.SetContextValue("reason", "authentication_unavailable")
+    refusal.SetContextValue("firewallName", firewall.Name())
+
+    _ = exception.MarkLogged(refusal)
+
+    return refusal
+}
+
+/* sessionUnavailableCause puts session.ErrSessionUnavailable before the storage's error in one chain */
+type sessionUnavailableCause struct {
+    cause error
+}
+
+func (instance *sessionUnavailableCause) Error() string {
+    return session.ErrSessionUnavailable.Error()
+}
+
+func (instance *sessionUnavailableCause) Is(target error) bool {
+    return session.ErrSessionUnavailable == target
+}
+
+func (instance *sessionUnavailableCause) Unwrap() error {
+    return instance.cause
+}
+
+/* newSessionUnavailableRefusal builds the 503 a firewall door answers for a session its storage could not load: session.ErrSessionUnavailable and the cause in its chain, the firewall's Retry-After, reason session_unavailable, and marked logged, since its cause was filed where it was read */
+func newSessionUnavailableRefusal(firewall *CompiledFirewall, cause error) error {
+    refusal := exception.NewHttpError(
+        nethttp.StatusServiceUnavailable,
+        exception.HttpErrorConfig{
+            Message:    "service unavailable",
+            Cause:      &sessionUnavailableCause{cause: cause},
+            RetryAfter: firewall.UnavailableRetryAfter(),
+        },
+    )
+    refusal.SetContextValue("reason", "session_unavailable")
     refusal.SetContextValue("firewallName", firewall.Name())
 
     _ = exception.MarkLogged(refusal)

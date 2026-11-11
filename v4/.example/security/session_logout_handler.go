@@ -3,6 +3,7 @@ package security
 import (
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
     melodyexception "github.com/precision-soft/melody/v4/exception"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
@@ -25,9 +26,9 @@ func (instance *sessionLogoutHandler) Logout(
     request melodyhttpcontract.Request,
     input melodysecuritycontract.LogoutInput,
 ) (*melodysecuritycontract.LogoutResult, error) {
-    sessionInstance := getSession(request)
-    if nil == sessionInstance {
-        return &melodysecuritycontract.LogoutResult{}, nil
+    sessionInstance, sessionErr := melodyhttp.RequestSession(request)
+    if nil != sessionErr {
+        return nil, sessionErr
     }
 
     /* the sign-out stands whatever the index answers: the door ends the session once this returned, and a row that could not be removed is journaled and holds its place until a later sign-in drops it as the oldest */

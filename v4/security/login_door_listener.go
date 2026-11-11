@@ -14,7 +14,7 @@ import (
     "github.com/precision-soft/melody/v4/logging"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
-    sessioncontract "github.com/precision-soft/melody/v4/session/contract"
+    "github.com/precision-soft/melody/v4/session"
 )
 
 /* CrossSitePolicy states what a firewall door does with a request a browser marks as coming from another site. */
@@ -170,6 +170,12 @@ func serveLoginDoor(
     /* without an authenticator the handler reads the source's token, and would answer "invalid credentials" for a credential nobody could check */
     if true == internal.IsNilInterface(firewall.loginAuthenticator) {
         if cause, unavailable := AuthenticationUnavailableCause(token); true == unavailable {
+            if true == exception.ChainIs(cause, session.ErrSessionUnavailable) {
+                requestEvent.Refuse(newSessionUnavailableRefusal(firewall, cause))
+
+                return
+            }
+
             requestEvent.Refuse(newUnavailableRefusal(firewall, cause))
 
             return
@@ -179,6 +185,14 @@ func serveLoginDoor(
     previousSessionId := ""
 
     if false == internal.IsNilInterface(firewall.loginAuthenticator) {
+        /* read before the authenticator, so a sign-in the session storage cannot complete checks no credential and spends no second factor */
+        sessionInstance, sessionErr := http.RequestSession(request)
+        if nil != sessionErr {
+            requestEvent.Refuse(refuseSessionErrorAtFirewallDoor(runtimeInstance, requestEvent, firewall, firewall.loginDoor.name, sessionErr))
+
+            return
+        }
+
         authenticatedToken, refusal := authenticateAtLoginDoor(runtimeInstance, requestEvent, firewall)
         if nil != refusal {
             requestEvent.Refuse(refusal)
@@ -189,14 +203,12 @@ func serveLoginDoor(
         token = authenticatedToken
 
         /* rotated before the handler writes the identity: an id the client held before signing in must not carry it */
-        if sessionInstance := requestSession(request); nil != sessionInstance {
-            previousSessionId = sessionInstance.Id()
+        previousSessionId = sessionInstance.Id()
 
-            if _, regenerateErr := http.RegenerateRequestSession(request); nil != regenerateErr {
-                requestEvent.Refuse(regenerateErr)
+        if _, regenerateErr := http.RegenerateRequestSession(request); nil != regenerateErr {
+            requestEvent.Refuse(refuseSessionErrorAtFirewallDoor(runtimeInstance, requestEvent, firewall, firewall.loginDoor.name, regenerateErr))
 
-                return
-            }
+            return
         }
     }
 
@@ -204,9 +216,16 @@ func serveLoginDoor(
     if nil != loginErr {
         /* the handler may have written the identity on the session the door rotated, and a refused sign-in must not leave it usable */
         if "" != previousSessionId {
-            if sessionInstance := requestSession(request); nil != sessionInstance {
+            if sessionInstance, sessionErr := http.RequestSession(request); nil == sessionErr {
                 sessionInstance.Clear()
             }
+        }
+
+        /* a handler that rotated the session itself, the door without an authenticator, meets a session outage under its own reason */
+        if true == exception.ChainIs(loginErr, session.ErrSessionUnavailable) {
+            requestEvent.Refuse(refuseSessionErrorAtFirewallDoor(runtimeInstance, requestEvent, firewall, firewall.loginDoor.name, loginErr))
+
+            return
         }
 
         if true == exception.AnswersUnavailable(loginErr) {
@@ -320,6 +339,37 @@ func refuseUnavailableAtLoginDoor(
     return newUnavailableRefusal(firewall, cause)
 }
 
+/* refuseSessionErrorAtFirewallDoor answers a session a door could not load or rotate: a storage that could not answer is refused 503 with the firewall's Retry-After and reason session_unavailable, its cause filed once, and any other error is refused as it is */
+func refuseSessionErrorAtFirewallDoor(
+    runtimeInstance runtimecontract.Runtime,
+    requestEvent *http.KernelRequestEvent,
+    firewall *CompiledFirewall,
+    doorName string,
+    sessionErr error,
+) error {
+    if false == exception.AnswersUnavailable(sessionErr) {
+        return sessionErr
+    }
+
+    if false == exception.IsAlreadyLogged(sessionErr) {
+        if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+            logger.Error(
+                "security firewall door could not read or rotate the session: its storage is unavailable",
+                resolutionLogContext(
+                    sessionErr,
+                    requestEvent,
+                    exceptioncontract.Context{
+                        "firewallName": firewall.Name(),
+                        "doorName":     doorName,
+                    },
+                ),
+            )
+        }
+    }
+
+    return newSessionUnavailableRefusal(firewall, sessionErr)
+}
+
 func serveLogoutDoor(
     runtimeInstance runtimecontract.Runtime,
     requestEvent *http.KernelRequestEvent,
@@ -334,12 +384,22 @@ func serveLogoutDoor(
         return
     }
 
+    /* read before the handler: a session the storage cannot answer cannot be ended, so nothing is cleared and the client is told to come back */
+    sessionInstance, sessionErr := http.RequestSession(request)
+    if nil != sessionErr {
+        requestEvent.Refuse(refuseSessionErrorAtFirewallDoor(runtimeInstance, requestEvent, firewall, firewall.logoutDoor.name, sessionErr))
+
+        return
+    }
+
     result, logoutErr := firewall.Logout(runtimeInstance, request, securitycontract.LogoutInput{Token: token})
 
-    /* a result beside an error is a handler that succeeded and a success listener that failed: the sign-out stands, so the session ends either way. Clear routes the response path to deleting the entry and expiring the cookie. */
+    /* a result beside an error is a handler that succeeded and a success listener that failed: the sign-out stands, so the session ends either way, the one a handler rotated or published included. Clear routes the response path to deleting the entry and expiring the cookie. */
     if nil != result {
-        if sessionInstance := requestSession(request); nil != sessionInstance {
-            sessionInstance.Clear()
+        sessionInstance.Clear()
+
+        if publishedSession, publishedErr := http.RequestSession(request); nil == publishedErr && publishedSession != sessionInstance {
+            publishedSession.Clear()
         }
 
         setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
@@ -421,18 +481,4 @@ func requestIsCrossSite(request httpcontract.Request) bool {
     }
 
     return false == strings.EqualFold(originUrl.Host, httpRequest.Host)
-}
-
-func requestSession(request httpcontract.Request) sessioncontract.Session {
-    value, exists := request.Attributes().Get(http.RequestAttributeSession)
-    if false == exists {
-        return nil
-    }
-
-    sessionInstance, isSession := value.(sessioncontract.Session)
-    if false == isSession || true == internal.IsNilInterface(sessionInstance) {
-        return nil
-    }
-
-    return sessionInstance
 }

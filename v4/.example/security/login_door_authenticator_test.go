@@ -131,6 +131,7 @@ func loginResponseBody(t *testing.T, runtimeInstance melodyruntimecontract.Runti
         runtimeInstance,
         melodyhttp.NewRequestContext("login-test", time.Now()),
     )
+    publishSignInSession(t, request)
 
     response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
     if nil != handlerErr {
@@ -232,6 +233,7 @@ func TestLoginHandler_ReadsTheJsonCredentialsFromTheBodyAndRefusesAnyOtherBody(t
         httpRequest.Header.Set("Content-Type", contentType)
 
         request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-form-test", time.Now()))
+        publishSignInSession(t, request)
 
         response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
         if nil != handlerErr {
@@ -359,6 +361,7 @@ func TestLoginHandler_RaisesTheLoginFailureOnRefusedCredentials(t *testing.T) {
     httpRequest.Header.Set("Content-Type", "application/json")
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-failure-test", time.Now()))
+    publishSignInSession(t, request)
 
     response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
     if nil != handlerErr {
@@ -455,7 +458,7 @@ func (instance *loginJournalRecordingLogger) Error(message string, context melod
 }
 
 /* accepted credentials raise no login failure: the request carries no session, so the door stops after the authentication with its 500, and the only event it could have raised by then is the one this test refuses */
-func TestLoginHandler_AMissingSessionIsTheHandlersFailureNotTheCredentials(t *testing.T) {
+func TestLoginHandler_AMissingSessionRefusesTheSignInBeforeTheCredentials(t *testing.T) {
     passwordHash, hashErr := security.HashPassword("secret")
     if nil != hashErr {
         t.Fatalf("hash password: %v", hashErr)
@@ -484,14 +487,20 @@ func TestLoginHandler_AMissingSessionIsTheHandlersFailureNotTheCredentials(t *te
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
-    response := postLoginCredentials(t, runtimeInstance, "admin", "secret")
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", loginJsonBody(t, "admin", "secret"))
+    httpRequest.Header.Set("Content-Type", "application/json")
 
-    if nethttp.StatusInternalServerError != response.StatusCode() {
-        t.Fatalf("expected the accepted login to stop at the missing session with 500, got %d", response.StatusCode())
+    response, handlerErr := serveLoginDoor(t, runtimeInstance, melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-no-session-test", time.Now())), passwordOnlyLogin(), nil)
+    if nil != handlerErr {
+        t.Fatalf("login handler: %v", handlerErr)
     }
 
-    if 1 != len(*failureList) {
-        t.Fatalf("expected the handler's refusal raised as the firewall raises any handler's, got %d", len(*failureList))
+    if nethttp.StatusInternalServerError != response.StatusCode() {
+        t.Fatalf("expected the sign-in to stop at the missing session with 500, got %d", response.StatusCode())
+    }
+
+    if 0 != len(*failureList) {
+        t.Fatalf("expected no failed sign-in raised for credentials the door never checked, got %d", len(*failureList))
     }
 }
 
@@ -517,6 +526,7 @@ func postLoginCredentials(t *testing.T, runtimeInstance melodyruntimecontract.Ru
     httpRequest.Header.Set("Content-Type", "application/json")
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-dispatch-test", time.Now()))
+    publishSignInSession(t, request)
 
     response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
     if nil != handlerErr {
@@ -599,14 +609,21 @@ func serveLoginDoor(t *testing.T, runtimeInstance melodyruntimecontract.Runtime,
 }
 
 func getSessionFromRequest(request melodyhttpcontract.Request) melodysessioncontract.Session {
-    value, exists := request.Attributes().Get(melodyhttp.RequestAttributeSession)
-    if false == exists {
+    sessionInstance, sessionErr := melodyhttp.RequestSession(request)
+    if nil != sessionErr {
         return nil
     }
 
-    sessionInstance, _ := value.(melodysessioncontract.Session)
-
     return sessionInstance
+}
+
+func publishSignInSession(t *testing.T, request melodyhttpcontract.Request) {
+    t.Helper()
+
+    manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
+    if publishErr := melodyhttp.SetRequestSession(request, mustSession(manager.NewSession())); nil != publishErr {
+        t.Fatalf("publish the session: %v", publishErr)
+    }
 }
 
 func passwordOnlyLogin() security.LoginChain {
@@ -820,7 +837,7 @@ func (instance *secondFactorLogin) post(t *testing.T, username string, password 
     }
 
     request := melodyhttp.NewRequest(httpRequest, nil, instance.runtimeInstance, melodyhttp.NewRequestContext("login-second-factor-test", time.Now()))
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, mustSession(instance.sessionManager.NewSession()))
+    _ = melodyhttp.SetRequestSession(request, mustSession(instance.sessionManager.NewSession()))
 
     response, handlerErr := serveLoginDoor(t, instance.runtimeInstance, request, instance.authentication, instance.sessionIndexLookup)
     if nil != handlerErr {
@@ -1065,7 +1082,7 @@ func TestLogoutHandler_TheSignOutGivesTheSessionsPlaceBack(t *testing.T) {
     signedOutSessionId := sessionIdList[len(sessionIdList)-1]
 
     logoutRequest := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/logout/", nil), nil, login.runtimeInstance, melodyhttp.NewRequestContext("logout-test", time.Now()))
-    logoutRequest.Attributes().Set(melodyhttp.RequestAttributeSession, mustSession(login.sessionManager.Session(signedOutSessionId)))
+    _ = melodyhttp.SetRequestSession(logoutRequest, mustSession(login.sessionManager.Session(signedOutSessionId)))
 
     if _, logoutErr := security.NewSessionLogoutHandler(login.sessionIndexLookup).Logout(login.runtimeInstance, logoutRequest, melodysecuritycontract.LogoutInput{}); nil != logoutErr {
         t.Fatalf("logout handler: %v", logoutErr)
@@ -1092,7 +1109,7 @@ func TestLoginHandler_SigningInAgainRetiresThePlaceOfTheRotatedSession(t *testin
         httpRequest.Header.Set("Content-Type", "application/json")
 
         request := melodyhttp.NewRequest(httpRequest, nil, login.runtimeInstance, melodyhttp.NewRequestContext("login-again-test", time.Now()))
-        request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
+        _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
         response, handlerErr := serveLoginDoor(t, login.runtimeInstance, request, login.authentication, login.sessionIndexLookup)
         if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
@@ -1272,6 +1289,7 @@ func TestLoginHandler_RefusesAFormBodyWithoutAnnouncingAFailedSignIn(t *testing.
     httpRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-form-refused-test", time.Now()))
+    publishSignInSession(t, request)
 
     response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
     if nil != handlerErr {
@@ -1302,7 +1320,7 @@ func TestLoginHandler_RotatesTheSessionIdAndRetiresThePreLoginOne(t *testing.T) 
     httpRequest.Header.Set("Content-Type", "application/json")
 
     request := melodyhttp.NewRequest(httpRequest, nil, login.runtimeInstance, melodyhttp.NewRequestContext("login-rotation-test", time.Now()))
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, mustSession(login.sessionManager.Session(preLoginId)))
+    _ = melodyhttp.SetRequestSession(request, mustSession(login.sessionManager.Session(preLoginId)))
 
     response, handlerErr := serveLoginDoor(t, login.runtimeInstance, request, login.authentication, login.sessionIndexLookup)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
@@ -1333,6 +1351,7 @@ func TestLoginHandler_AnswersABodyPastTheLimit413(t *testing.T) {
     httpRequest.Body = nethttp.MaxBytesReader(recorder, httpRequest.Body, 8)
 
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("login-body-limit-test", time.Now()))
+    publishSignInSession(t, request)
 
     response, handlerErr := serveLoginDoor(t, runtimeInstance, request, passwordOnlyLogin(), nil)
     if nil != handlerErr {

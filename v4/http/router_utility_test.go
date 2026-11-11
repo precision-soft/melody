@@ -234,13 +234,14 @@ func TestWriteResponse_SetsSessionCookieWithSecureAndSameSite(t *testing.T) {
         isCleared:  false,
     }
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         nil,
         melodyRequest,
         writer,
         response,
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{
             TrustForwardedHeaders: false,
             TrustedProxyList:      []string{},
@@ -304,13 +305,14 @@ func TestWriteResponse_ClearsSessionCookieWithMaxAgeNegative(t *testing.T) {
         isCleared:  true,
     }
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         nil,
         melodyRequest,
         writer,
         response,
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{
             TrustForwardedHeaders: false,
             TrustedProxyList:      []string{},
@@ -359,13 +361,14 @@ func TestWriteResponse_ForcesTheSecureSessionCookieWhenThePolicyDemandsIt(t *tes
         isCleared:  false,
     }
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         newTestRuntime(),
         melodyRequest,
         writer,
         EmptyResponse(nethttp.StatusOK),
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{
             TrustForwardedHeaders: false,
             TrustedProxyList:      []string{},
@@ -404,13 +407,14 @@ func TestWriteResponse_SessionCookieSecureNeverOverridesTheDetectedScheme(t *tes
         isCleared:  false,
     }
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         newTestRuntime(),
         melodyRequest,
         writer,
         EmptyResponse(nethttp.StatusOK),
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{
             TrustForwardedHeaders: false,
             TrustedProxyList:      []string{},
@@ -449,13 +453,14 @@ func TestWriteResponse_DoesNotStoreASessionTheDiscardedResponseCannotAdvertise(t
         isCleared:  false,
     }
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         newTestRuntime(),
         melodyRequest,
         writer,
         EmptyResponse(nethttp.StatusOK),
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{
             TrustForwardedHeaders: false,
             TrustedProxyList:      []string{},
@@ -498,13 +503,14 @@ func TestWriteResponse_StillStoresASessionTheClientAlreadyHoldsOnADiscardedRespo
         isCleared:  false,
     }
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         newTestRuntime(),
         melodyRequest,
         writer,
         EmptyResponse(nethttp.StatusOK),
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{
             TrustForwardedHeaders: false,
             TrustedProxyList:      []string{},
@@ -538,13 +544,14 @@ func TestWriteResponse_StillDeletesAClearedSessionOnADiscardedResponse(t *testin
         isCleared:  true,
     }
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         newTestRuntime(),
         melodyRequest,
         writer,
         EmptyResponse(nethttp.StatusOK),
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{
             TrustForwardedHeaders: false,
             TrustedProxyList:      []string{},
@@ -1061,13 +1068,14 @@ func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T
         isCleared:  true,
     }
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         nil,
         melodyRequest,
         writer,
         nil,
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{
             TrustForwardedHeaders: false,
             TrustedProxyList:      []string{},
@@ -1119,13 +1127,14 @@ func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
         }
     }()
 
+    melodyRequest.Attributes().Set(requestAttributeSession, typedNilSession)
+
     writeResponse(
         nil,
         melodyRequest,
         writer,
         response,
         sessionManager,
-        typedNilSession,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
     )
@@ -1159,13 +1168,14 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
         }
     }()
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         nil,
         melodyRequest,
         writer,
         response,
         typedNilManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
     )
@@ -1190,13 +1200,14 @@ func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *tes
     }
     sessionInstance := &stubSession{id: "session-123", isModified: true}
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         nil,
         melodyRequest,
         writer,
         response,
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
     )
@@ -1246,13 +1257,14 @@ func TestWriteResponse_AnExpiringSessionCookieMarksTheResponsePrivate(t *testing
         response.Headers().Set("Cache-Control", "public, max-age=60")
         writer := httptest.NewRecorder()
 
+        melodyRequest.Attributes().Set(requestAttributeSession, arm.sessionInstance)
+
         writeResponse(
             nil,
             melodyRequest,
             writer,
             response,
             arm.sessionManager,
-            arm.sessionInstance,
             httpcontract.ForwardedHeadersPolicy{},
             httpcontract.SessionCookiePolicy{Path: "/"},
         )
@@ -1290,13 +1302,14 @@ func TestWriteResponse_ARotatedAwaySessionKeepsTheCookieAndTheResponse(t *testin
     }
     sessionInstance := &stubSession{id: "session-123", isModified: true}
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         nil,
         melodyRequest,
         writer,
         response,
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
     )
@@ -1327,13 +1340,14 @@ func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T)
     }
     sessionInstance := &stubSession{id: "session-123", isModified: true}
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         nil,
         melodyRequest,
         writer,
         response,
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
     )
@@ -1367,7 +1381,6 @@ func TestWriteResponse_ReadsATypedNilResponseAsTheEmptyDefault(t *testing.T) {
         recorder,
         unassignedResponse,
         nil,
-        nil,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
     )
@@ -1391,13 +1404,14 @@ func TestWriteResponse_ReturnsTheReplacedFiveHundredOnASaveOutage(t *testing.T) 
     }
     sessionInstance := &stubSession{id: "session-123", isModified: true}
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writtenResponse := writeResponse(
         nil,
         melodyRequest,
         writer,
         response,
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
     )
@@ -1425,7 +1439,6 @@ func TestWriteResponse_ReturnsTheCallersResponseWhenNothingReplacedIt(t *testing
         melodyRequest,
         writer,
         response,
-        nil,
         nil,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
@@ -1463,13 +1476,14 @@ func TestWriteResponse_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *tes
         },
     }
 
+    melodyRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         nil,
         melodyRequest,
         writer,
         EmptyResponse(nethttp.StatusOK),
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{
             TrustForwardedHeaders: false,
             TrustedProxyList:      []string{},
@@ -1524,7 +1538,6 @@ func TestWriteResponse_RefusesTheOutOfRangeCodeBeforeTheDelegate(t *testing.T) {
         melodyRequest,
         recorder,
         EmptyResponse(99),
-        nil,
         nil,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
@@ -1620,7 +1633,6 @@ func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T)
         writer,
         EmptyResponse(nethttp.StatusNoContent),
         nil,
-        nil,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
     )
@@ -1646,7 +1658,6 @@ func TestWriteResponse_AHijackedConnectionKeepsTheSubstituteStatus(t *testing.T)
         melodyRequest,
         writer,
         EmptyResponse(nethttp.StatusNoContent),
-        nil,
         nil,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
@@ -1710,13 +1721,15 @@ func writeResponseWithSessionOutcome(
     netRequest.RemoteAddr = "127.0.0.1:1234"
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
 
+    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
     writeResponse(
         runtimeInstance,
-        NewRequest(netRequest, nil, nil, nil),
+        sessionRequest,
         httptest.NewRecorder(),
         TextResponse(nethttp.StatusOK, "handler body"),
         sessionManager,
-        sessionInstance,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
     )
@@ -2132,7 +2145,7 @@ func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
 
-    written := writeResponse(nil, request, httptest.NewRecorder(), response, nil, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{})
+    written := writeResponse(nil, request, httptest.NewRecorder(), response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{})
 
     if nethttp.StatusInternalServerError != written.StatusCode() {
         t.Fatalf("expected the rendered 500, got %d", written.StatusCode())
@@ -2190,7 +2203,6 @@ func TestWriteResponse_AnEarlyHintLeavesTheReturnedResponseToBeWritten(t *testin
             writer,
             EmptyResponse(nethttp.StatusCreated),
             nil,
-            nil,
             httpcontract.ForwardedHeadersPolicy{
                 TrustForwardedHeaders: false,
                 TrustedProxyList:      []string{},
@@ -2223,13 +2235,15 @@ func TestWriteResponse_AClearedSessionTheRequestDoesNotNameIsNotDeleted(t *testi
     sessionManager := &stubSessionManager{}
     writer := httptest.NewRecorder()
 
+    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "0123456789abcdef0123456789abcdef", isCleared: true})
+
     writeResponse(
         nil,
-        NewRequest(netRequest, nil, nil, nil),
+        sessionRequest,
         writer,
         EmptyResponse(nethttp.StatusOK),
         sessionManager,
-        &stubSession{id: "0123456789abcdef0123456789abcdef", isCleared: true},
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
     )
@@ -2278,8 +2292,8 @@ func serveALogout(t *testing.T, storage *deleteCountingSessionStorage, cookieVal
         nethttp.MethodPost,
         "/logout",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, _ := request.Attributes().Get(RequestAttributeSession)
-            sessionValue.(contract.Session).Clear()
+            sessionInstance, _ := RequestSession(request)
+            sessionInstance.Clear()
 
             return EmptyResponse(nethttp.StatusNoContent), nil
         },
@@ -2338,13 +2352,15 @@ func sessionCookieWrittenOverPlainHttp(t *testing.T, sameSite nethttp.SameSite, 
 
     writer := httptest.NewRecorder()
 
+    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "0123456789abcdef0123456789abcdef", isModified: true})
+
     writeResponse(
         newTestRuntime(),
-        NewRequest(netRequest, nil, nil, nil),
+        sessionRequest,
         writer,
         EmptyResponse(nethttp.StatusOK),
         &stubSessionManager{},
-        &stubSession{id: "0123456789abcdef0123456789abcdef", isModified: true},
         httpcontract.ForwardedHeadersPolicy{TrustedProxyList: []string{}},
         httpcontract.SessionCookiePolicy{Path: "/", SameSite: sameSite, Secure: secure},
     )
@@ -2495,13 +2511,14 @@ func TestWriteResponse_ACyclicChainFromTheSessionSaveIsAnsweredWithAFiveHundred(
     writer := httptest.NewRecorder()
 
     assertReturnsOnACyclicChain(t, func() {
+        melodyRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "session-123", isModified: true})
+
         writeResponse(
             nil,
             melodyRequest,
             writer,
             TextResponse(nethttp.StatusOK, "welcome"),
             &stubSessionManager{saveErr: newCyclicChainError()},
-            &stubSession{id: "session-123", isModified: true},
             httpcontract.ForwardedHeadersPolicy{},
             httpcontract.SessionCookiePolicy{Path: "/"},
         )

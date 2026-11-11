@@ -32,9 +32,9 @@ func (instance *sessionLoginHandler) Login(
     request melodyhttpcontract.Request,
     input melodysecuritycontract.LoginInput,
 ) (*melodysecuritycontract.LoginResult, error) {
-    sessionInstance := getSession(request)
-    if nil == sessionInstance {
-        return nil, melodyexception.NewHttpException(http.StatusInternalServerError, "session is not available")
+    sessionInstance, sessionErr := melodyhttp.RequestSession(request)
+    if nil != sessionErr {
+        return nil, sessionErr
     }
 
     if nil == input.Token || false == input.Token.IsAuthenticated() {

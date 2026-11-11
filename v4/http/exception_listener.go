@@ -84,6 +84,10 @@ func builtInExceptionListener(runtimeInstance runtimecontract.Runtime, eventValu
 
 /* recordExceptionOccurrence files the one record of an error and answers the error to carry on: an error already logged is not filed again, the request coordinates are attached to its occurrence instead, and a new one is marked on a carrier of this occurrence, never on the error value, which another request can share. A deliberate 4xx is a warning. Through the kernel every producer logs before it dispatches; the built-in listener files what a dispatch made by hand left unfiled. */
 func recordExceptionOccurrence(loggerInstance loggingcontract.Logger, request httpcontract.Request, err error) error {
+    return recordErrorOccurrence(loggerInstance, request, err, "unhandled exception")
+}
+
+func recordErrorOccurrence(loggerInstance loggingcontract.Logger, request httpcontract.Request, err error, message string) error {
     requestId := ""
     path := ""
     method := ""
@@ -120,9 +124,9 @@ func recordExceptionOccurrence(loggerInstance loggingcontract.Logger, request ht
     )
 
     if true == isDeliberateClientFault(err) {
-        loggerInstance.Warning("unhandled exception", recordContext)
+        loggerInstance.Warning(message, recordContext)
     } else {
-        loggerInstance.Error("unhandled exception", recordContext)
+        loggerInstance.Error(message, recordContext)
     }
 
     return occurrence

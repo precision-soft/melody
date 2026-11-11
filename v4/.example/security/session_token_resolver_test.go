@@ -11,14 +11,20 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/bound"
+    melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodyconfig "github.com/precision-soft/melody/v4/config"
+    melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyevent "github.com/precision-soft/melody/v4/event"
+    melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
@@ -94,7 +100,7 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     }
 
     request := plainRequest(t)
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, restoredSession)
+    _ = melodyhttp.SetRequestSession(request, restoredSession)
 
     token := SessionTokenResolver(currentAccountLookup)(request)
 
@@ -137,9 +143,6 @@ func TestSessionTokenResolverFailsClosed(t *testing.T) {
         },
         "no session published on the request": func(t *testing.T) melodysecuritycontract.Token {
             return SessionTokenResolver(currentAccountLookup)(plainRequest(t))
-        },
-        "something that is not a session under the session attribute": func(t *testing.T) melodysecuritycontract.Token {
-            return SessionTokenResolver(currentAccountLookup)(requestCarryingSessionAttribute(t, "not a session"))
         },
         "a session with no user id": func(t *testing.T) melodysecuritycontract.Token {
             request, sessionInstance := requestCarryingSession(t)
@@ -362,7 +365,7 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
 
     manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
     sessionInstance := mustSession(manager.NewSession())
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
+    _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
     return request, sessionInstance, journal
 }
@@ -402,5 +405,64 @@ func TestSessionTokenResolver_AFailedLookupIsUnavailableAndKeepsTheSession(t *te
 
     if 0 != len(notFoundJournal.messageList) || true == notFoundSession.Has(SessionKeySecurityUserId) {
         t.Fatalf("expected an account not found cleared without a record, got %v, kept %v", notFoundJournal.messageList, notFoundSession.Has(SessionKeySecurityUserId))
+    }
+}
+
+type outageEnvironmentSource struct{}
+
+func (instance *outageEnvironmentSource) Load() (map[string]string, error) {
+    return map[string]string{melodyconfig.EnvKey: melodyconfig.EnvDevelopment}, nil
+}
+
+type outageSessionStorage struct {
+    melodysessioncontract.Storage
+}
+
+func (instance *outageSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return nil, false, errors.New("session store is down")
+}
+
+func TestSessionTokenResolver_ASessionOutageAnswersTheUnavailableToken(t *testing.T) {
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    containerInstance.MustRegister(melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+        return melodylogging.NewNopLogger(), nil
+    }, melodycontainer.RegisterOptions{})
+    containerInstance.MustRegister(melodyconfig.ServiceConfig, func(resolver melodycontainercontract.Resolver) (melodyconfigcontract.Configuration, error) {
+        environment, environmentErr := melodyconfig.NewEnvironment(&outageEnvironmentSource{})
+        if nil != environmentErr {
+            return nil, environmentErr
+        }
+
+        return melodyconfig.NewConfiguration(environment, t.TempDir())
+    }, melodycontainer.RegisterOptions{})
+    containerInstance.MustRegister(melodysession.ServiceSessionManager, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Manager, error) {
+        return melodysession.NewManager(&outageSessionStorage{Storage: melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})}, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}), nil
+    }, melodycontainer.RegisterOptions{})
+    containerInstance.MustRegister(melodyevent.ServiceEventDispatcher, func(resolver melodycontainercontract.Resolver) (melodyeventcontract.EventDispatcher, error) {
+        return melodyevent.NewEventDispatcher(melodyclock.NewSystemClock()), nil
+    }, melodycontainer.RegisterOptions{})
+
+    var token melodysecuritycontract.Token
+    router := melodyhttp.NewRouter()
+    router.Handle(nethttp.MethodGet, "/", func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        token = SessionTokenResolver(currentAccountLookup)(request)
+
+        return melodyhttp.TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    for _, withCookie := range []bool{true, false} {
+        token = nil
+
+        request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+        if true == withCookie {
+            request.AddCookie(&nethttp.Cookie{Name: melodysession.SessionCookieName, Value: "0123456789abcdef0123456789abcdef"})
+        }
+
+        melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}).ServeHttp(containerInstance).ServeHTTP(httptest.NewRecorder(), request)
+
+        cause, unavailable := melodysecurity.AuthenticationUnavailableCause(token)
+        if nil == token || true == token.IsAuthenticated() || false == unavailable || false == exception.AnswersUnavailable(cause) {
+            t.Fatalf("expected the unavailable token carrying the session outage (cookie %v), got %v %v", withCookie, token, cause)
+        }
     }
 }

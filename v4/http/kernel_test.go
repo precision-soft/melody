@@ -353,14 +353,9 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
         nethttp.MethodGet,
         "/save",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if false == exists {
+            sessionInstance, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
                 t.Fatal("expected the request to carry a session")
-            }
-
-            sessionInstance, ok := sessionValue.(sessioncontract.Session)
-            if false == ok {
-                t.Fatal("expected the session attribute to be a session")
             }
 
             sessionInstance.Set("key", "value")
@@ -822,12 +817,10 @@ func TestKernel_SessionSaveFailureAnswersFiveHundred(t *testing.T) {
         nethttp.MethodGet,
         "/session-write",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if false == exists {
+            sessionInstance, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
                 t.Fatalf("expected the session request attribute to be present")
             }
-
-            sessionInstance := sessionValue.(sessioncontract.Session)
             sessionInstance.Set("key", "value")
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
@@ -862,8 +855,7 @@ func TestKernel_SessionSaveFailureOnPanicRecoveryPathStillDelivers500(t *testing
         nethttp.MethodGet,
         "/session-write-boom",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, _ := request.Attributes().Get(RequestAttributeSession)
-            sessionInstance := sessionValue.(sessioncontract.Session)
+            sessionInstance, _ := RequestSession(request)
             sessionInstance.Set("key", "value")
 
             panic("handler exploded after touching the session")
@@ -993,14 +985,9 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
         nethttp.MethodGet,
         "/file",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if false == exists {
+            sessionInstance, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
                 t.Fatal("expected the request to carry a session")
-            }
-
-            sessionInstance, ok := sessionValue.(sessioncontract.Session)
-            if false == ok {
-                t.Fatal("expected the session attribute to be a session")
             }
 
             /* dirty the session so writeResponse persists it — and panics doing so */
@@ -1045,14 +1032,9 @@ func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit
         nethttp.MethodGet,
         "/file-then-exit",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if false == exists {
+            sessionInstance, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
                 t.Fatal("expected the request to carry a session")
-            }
-
-            sessionInstance, ok := sessionValue.(sessioncontract.Session)
-            if false == ok {
-                t.Fatal("expected the session attribute to be a session")
             }
 
             /* dirty the session so writeResponse persists it — and panics doing so, ahead of the body write */
@@ -1125,14 +1107,9 @@ func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedO
         nethttp.MethodGet,
         "/file-then-swap",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if false == exists {
+            sessionInstance, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
                 t.Fatal("expected the request to carry a session")
-            }
-
-            sessionInstance, ok := sessionValue.(sessioncontract.Session)
-            if false == ok {
-                t.Fatal("expected the session attribute to be a session")
             }
 
             /* dirty the session so writeResponse persists it — and panics doing so, ahead of the body write */
@@ -1199,14 +1176,9 @@ func TestKernel_PanicRecoveryDoesNotCloseAResponseTheRepublishHandsBack(t *testi
         nethttp.MethodGet,
         "/file-then-swap-always",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if false == exists {
+            sessionInstance, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
                 t.Fatal("expected the request to carry a session")
-            }
-
-            sessionInstance, ok := sessionValue.(sessioncontract.Session)
-            if false == ok {
-                t.Fatal("expected the session attribute to be a session")
             }
 
             sessionInstance.Set("key", "value")
@@ -1426,9 +1398,21 @@ func serveOverSessionManager(t *testing.T, sessionManager sessioncontract.Manage
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             served.handlerCalls = served.handlerCalls + 1
 
-            published, exists := request.Attributes().Get(RequestAttributeSession)
-            publishedSession, isSession := published.(sessioncontract.Session)
-            served.handlerSawSession = true == exists && true == isSession && false == internal.IsNilInterface(publishedSession)
+            publishedSession, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
+                return nil, sessionReadErr
+            }
+
+            served.handlerSawSession = false == internal.IsNilInterface(publishedSession)
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+    router.Handle(
+        nethttp.MethodGet,
+        "/quiet",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            served.handlerCalls = served.handlerCalls + 1
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
@@ -1465,15 +1449,18 @@ func serveOverSessionManager(t *testing.T, sessionManager sessioncontract.Manage
     return served
 }
 
-func TestKernel_ASessionStorageOutageAnswers503WithRetryAfter(t *testing.T) {
+func TestKernel_ASessionStorageOutageIsMetOnlyByTheRouteThatReadsIt(t *testing.T) {
     cases := map[string]struct {
         path       string
         withCookie bool
+        status     int
+        retryAfter string
     }{
-        "a routed request with a cookie":    {path: "/page", withCookie: true},
-        "a routed request without a cookie": {path: "/page", withCookie: false},
-        "an unrouted request with a cookie": {path: "/missing", withCookie: true},
-        "an unrouted request without one":   {path: "/missing", withCookie: false},
+        "a route reading the session with a cookie":    {path: "/page", withCookie: true, status: nethttp.StatusServiceUnavailable, retryAfter: "7"},
+        "a route reading the session without a cookie": {path: "/page", withCookie: false, status: nethttp.StatusServiceUnavailable, retryAfter: "7"},
+        "a route not reading it with a cookie":         {path: "/quiet", withCookie: true, status: nethttp.StatusOK},
+        "a route not reading it without a cookie":      {path: "/quiet", withCookie: false, status: nethttp.StatusOK},
+        "an unrouted request with a cookie":            {path: "/missing", withCookie: true, status: nethttp.StatusNotFound},
     }
 
     for name, testCase := range cases {
@@ -1481,12 +1468,8 @@ func TestKernel_ASessionStorageOutageAnswers503WithRetryAfter(t *testing.T) {
 
         served := serveOverSessionManager(t, sessionManager, testCase.path, testCase.withCookie)
 
-        if nethttp.StatusServiceUnavailable != served.recorder.Code || "7" != served.recorder.Header().Get("Retry-After") {
-            t.Fatalf("%s: expected 503 with Retry-After 7, got %d %q", name, served.recorder.Code, served.recorder.Header().Get("Retry-After"))
-        }
-
-        if 0 != served.handlerCalls {
-            t.Fatalf("%s: expected the handler not to run during a session storage outage", name)
+        if testCase.status != served.recorder.Code || testCase.retryAfter != served.recorder.Header().Get("Retry-After") {
+            t.Fatalf("%s: expected %d with Retry-After %q, got %d %q", name, testCase.status, testCase.retryAfter, served.recorder.Code, served.recorder.Header().Get("Retry-After"))
         }
 
         if "" != served.recorder.Header().Get("Set-Cookie") {
@@ -1523,8 +1506,8 @@ func TestKernel_ASessionLoadErrorDoesNotFallThroughToANewSession(t *testing.T) {
         t.Fatalf("expected the load error answered 503, got %d", served.recorder.Code)
     }
 
-    if 0 != sessionManager.newSessionCalls || 0 != served.handlerCalls || "" != served.recorder.Header().Get("Set-Cookie") {
-        t.Fatalf("expected no fresh session, no handler and no cookie over a failed load, got %d mints, %d handler calls, cookie %q", sessionManager.newSessionCalls, served.handlerCalls, served.recorder.Header().Get("Set-Cookie"))
+    if 0 != sessionManager.newSessionCalls || true == served.handlerSawSession || "" != served.recorder.Header().Get("Set-Cookie") {
+        t.Fatalf("expected no fresh session, none served and no cookie over a failed load, got %d mints, served %v, cookie %q", sessionManager.newSessionCalls, served.handlerSawSession, served.recorder.Header().Get("Set-Cookie"))
     }
 }
 
@@ -1540,13 +1523,22 @@ func TestKernel_AnUnmarkedManagerErrorAnswers500(t *testing.T) {
         t.Fatalf("expected an unmarked manager error answered 500 with no Retry-After, got %d %q", served.recorder.Code, served.recorder.Header().Get("Retry-After"))
     }
 
-    if 0 != served.handlerCalls || "" != served.recorder.Header().Get("Set-Cookie") {
-        t.Fatalf("expected neither the handler nor a cookie over a failed mint")
+    if true == served.handlerSawSession || "" != served.recorder.Header().Get("Set-Cookie") {
+        t.Fatalf("expected neither a session nor a cookie over a failed mint")
     }
 }
 
 func TestKernel_ASessionStorageOutageReachesTheExceptionListenersRecordedOnce(t *testing.T) {
     router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/page",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            _, sessionReadErr := RequestSession(request)
+
+            return nil, sessionReadErr
+        },
+    )
 
     countingLogger := &errorCountingLogger{}
 
@@ -1637,6 +1629,15 @@ func TestKernel_ASessionAnsweredBesideALoadErrorIsNotSavedWhenTheResponsePathPan
     }
 
     router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/page",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            _, sessionReadErr := RequestSession(request)
+
+            return nil, sessionReadErr
+        },
+    )
     serviceContainer := newHttpTestContainerWithSessionManager(sessionManager)
 
     responsePanics := true
@@ -1682,7 +1683,7 @@ func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) 
             replacement := mustSession(sessionManager.NewSession())
             replacement.Set("userId", "u-1")
 
-            request.Attributes().Set(RequestAttributeSession, replacement)
+            _ = SetRequestSession(request, replacement)
 
             republishedId = replacement.Id()
 
@@ -1718,14 +1719,9 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
         nethttp.MethodGet,
         "/login",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if false == exists {
+            sessionInstance, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
                 t.Fatal("expected the request to carry a session")
-            }
-
-            sessionInstance, ok := sessionValue.(sessioncontract.Session)
-            if false == ok {
-                t.Fatal("expected the session attribute to be a session")
             }
 
             sessionInstance.Set("userId", "u-1")
@@ -1742,7 +1738,7 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
                 return nil, rotateErr
             }
 
-            request.Attributes().Set(RequestAttributeSession, rotated)
+            _ = SetRequestSession(request, rotated)
 
             rotatedId = rotated.Id()
 
@@ -1806,14 +1802,9 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
         nethttp.MethodGet,
         "/login-without-republish",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if false == exists {
+            sessionInstance, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
                 t.Fatal("expected the request to carry a session")
-            }
-
-            sessionInstance, ok := sessionValue.(sessioncontract.Session)
-            if false == ok {
-                t.Fatal("expected the session attribute to be a session")
             }
 
             rotated, rotateErr := sessionManager.RegenerateSession(sessionInstance)
@@ -1861,14 +1852,9 @@ func TestKernel_SessionCookiePolicyWithoutSameSiteKeepsTheLaxDefault(t *testing.
         nethttp.MethodGet,
         "/session-write",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if false == exists {
+            sessionInstance, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
                 t.Fatal("expected the request to carry a session")
-            }
-
-            sessionInstance, ok := sessionValue.(sessioncontract.Session)
-            if false == ok {
-                t.Fatal("expected the session attribute to be a session")
             }
 
             sessionInstance.Set("key", "value")
@@ -1919,9 +1905,8 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
                 }
             }
 
-            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if true == exists {
-                _, observedSessionIsSession = sessionValue.(sessioncontract.Session)
+            if _, sessionReadErr := RequestSession(request); nil == sessionReadErr {
+                observedSessionIsSession = true
             }
 
             return TextResponse(200, "ok"), nil
@@ -2188,8 +2173,7 @@ func TestKernel_AListenerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testing.
         nethttp.MethodGet,
         "/session-write-then-file",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, _ := request.Attributes().Get(RequestAttributeSession)
-            sessionInstance := sessionValue.(sessioncontract.Session)
+            sessionInstance, _ := RequestSession(request)
             sessionInstance.Set("key", "value")
 
             response := &Response{
@@ -2339,14 +2323,9 @@ func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
         nethttp.MethodGet,
         "/session",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            attributeValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if false == exists {
-                return TextResponse(nethttp.StatusInternalServerError, "no session attribute"), nil
-            }
-
-            publishedSession, isSession := attributeValue.(sessioncontract.Session)
-            if false == isSession {
-                return TextResponse(nethttp.StatusInternalServerError, "not a session"), nil
+            publishedSession, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
+                return TextResponse(nethttp.StatusInternalServerError, "no session"), nil
             }
 
             /* a typed nil reaches here as a non-nil interface and panics on the first call */
@@ -2762,12 +2741,10 @@ func TestKernel_ASessionSaveOutageReachesTerminateAsTheFiveHundredTheClientRecei
         nethttp.MethodGet,
         "/login",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            sessionValue, exists := request.Attributes().Get(RequestAttributeSession)
-            if false == exists {
+            sessionInstance, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
                 t.Fatalf("expected the kernel to publish a session on the request")
             }
-
-            sessionInstance := sessionValue.(sessioncontract.Session)
             sessionInstance.Set("identity", "someone")
 
             return TextResponse(nethttp.StatusOK, "welcome"), nil
@@ -5419,5 +5396,105 @@ func TestKernel_AKernelBuiltWithoutNewKernelRendersTheDefaultDelay(t *testing.T)
     exceptionEvent := NewKernelExceptionEvent(nil, nil, errors.New("x"), KernelExceptionEventConfig{UnavailableRetryAfter: (&Kernel{}).unavailableRetryAfterLimit()})
     if config.DefaultUnavailableRetryAfter != exceptionEvent.UnavailableRetryAfter() {
         t.Fatalf("expected the default delay, got %s", exceptionEvent.UnavailableRetryAfter())
+    }
+}
+
+type operationCountingSessionStorage struct {
+    sessioncontract.Storage
+    loads   int64
+    saves   int64
+    deletes int64
+}
+
+func (instance *operationCountingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+    atomic.AddInt64(&instance.loads, 1)
+
+    return instance.Storage.Load(sessionId)
+}
+
+func (instance *operationCountingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    atomic.AddInt64(&instance.saves, 1)
+
+    return instance.Storage.Save(sessionId, data, ttl)
+}
+
+func (instance *operationCountingSessionStorage) Delete(sessionId string) error {
+    atomic.AddInt64(&instance.deletes, 1)
+
+    return instance.Storage.Delete(sessionId)
+}
+
+func TestKernel_ARouteThatNeverReadsTheSessionCostsTheStorageNothing(t *testing.T) {
+    cases := map[string]struct {
+        path       string
+        withCookie bool
+    }{
+        "a route with a cookie":        {path: "/quiet", withCookie: true},
+        "a route without a cookie":     {path: "/quiet", withCookie: false},
+        "an unrouted path with one":    {path: "/missing", withCookie: true},
+        "an unrouted path without one": {path: "/missing", withCookie: false},
+    }
+
+    for name, testCase := range cases {
+        storage := &operationCountingSessionStorage{Storage: session.NewInMemoryStorage(session.InMemoryStorageConfig{})}
+        if saveErr := storage.Storage.Save(sessionOutageTestCookieValue, map[string]any{"userId": "u-1"}, time.Minute); nil != saveErr {
+            t.Fatalf("unexpected error seeding the session: %v", saveErr)
+        }
+
+        sessionManager := session.NewManager(storage, session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)})
+
+        served := serveOverSessionManager(t, sessionManager, testCase.path, testCase.withCookie)
+
+        if 0 != atomic.LoadInt64(&storage.loads) || 0 != atomic.LoadInt64(&storage.saves) || 0 != atomic.LoadInt64(&storage.deletes) {
+            t.Fatalf("%s: expected no storage operation, got %d loads, %d saves, %d deletes", name, storage.loads, storage.saves, storage.deletes)
+        }
+
+        if "" != served.recorder.Header().Get("Set-Cookie") {
+            t.Fatalf("%s: expected no cookie, got %q", name, served.recorder.Header().Get("Set-Cookie"))
+        }
+    }
+}
+
+func TestKernel_ASessionStorageOutageFilesOneRecordForTwoReaders(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/page",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            _, sessionReadErr := RequestSession(request)
+
+            return nil, sessionReadErr
+        },
+    )
+
+    countingLogger := &errorCountingLogger{}
+
+    sessionManager := session.NewManager(&loadFailingSessionStorage{}, session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)})
+    serviceContainer := newHttpTestContainerWithSessionManager(sessionManager)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
+
+    listenerSawError := false
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelRequest,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            requestEvent := eventValue.Payload().(*KernelRequestEvent)
+
+            _, sessionReadErr := RequestSession(requestEvent.Request())
+            listenerSawError = nil != sessionReadErr
+
+            return nil
+        },
+        0,
+    )
+
+    recorder := httptest.NewRecorder()
+    NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/page", nil))
+
+    if false == listenerSawError || nethttp.StatusServiceUnavailable != recorder.Code {
+        t.Fatalf("expected both readers to meet the outage and 503, got listener %v, status %d", listenerSawError, recorder.Code)
+    }
+
+    if 1 != atomic.LoadInt64(&countingLogger.errorCount) {
+        t.Fatalf("expected one error record for two readers, got %d", atomic.LoadInt64(&countingLogger.errorCount))
     }
 }

@@ -1068,7 +1068,7 @@ func TestRouter_RegistrationGuardReadsTheServingFlagRaisedByAnotherGoroutine(t *
 }
 
 func TestRouter_RefusesAReservedAttributeKeyAtRegistration(t *testing.T) {
-    for _, key := range []string{RouteAttributeName, RouteAttributePattern, RouteAttributeMethods, RouteAttributeHost, RouteAttributeSchemes, RouteAttributeLocales, RouteAttributeLocale, RequestAttributeSession, RequestAttributeScheme, "_anything"} {
+    for _, key := range []string{RouteAttributeName, RouteAttributePattern, RouteAttributeMethods, RouteAttributeHost, RouteAttributeSchemes, RouteAttributeLocales, RouteAttributeLocale, requestAttributeSession, RequestAttributeScheme, "_anything"} {
         func() {
             defer func() {
                 recoveredErr, isError := recover().(error)

@@ -419,7 +419,7 @@ func awaitOpenRequestScopes(
     }
 }
 
-/* melody mints a session for every cookie-less request, so an unlimited ttl leaves only the count to bound the fallback storage */
+/* melody mints a session for every cookie-less request that reads the session, so an unlimited ttl leaves only the count to bound the fallback storage */
 func (instance *Application) checkDefaultSessionStorageBound() {
     if config.ModeHttp != instance.runtimeFlags.Mode() || false == instance.defaultInMemorySessionStorage {
         return
@@ -433,7 +433,7 @@ func (instance *Application) checkDefaultSessionStorageBound() {
     if true == httpConfiguration.SessionMaxSessions().Unlimited {
         exception.Panic(
             exception.NewError(
-                "the default in-memory session storage is paired with an unbounded session ttl and an unbounded session count, so every request that arrives without a session cookie can leave an entry nothing removes until this process exits; bound `"+config.HttpSessionTtlKey+"` or `"+config.HttpSessionMaxSessionsKey+"`, or register `"+session.ServiceSessionStorage+"` with a shared storage an operator can expire",
+                "the default in-memory session storage is paired with an unbounded session ttl and an unbounded session count, so every request that arrives without a session cookie and reads the session can leave an entry nothing removes until this process exits; bound `"+config.HttpSessionTtlKey+"` or `"+config.HttpSessionMaxSessionsKey+"`, or register `"+session.ServiceSessionStorage+"` with a shared storage an operator can expire",
                 exceptioncontract.Context{
                     "environmentKeys": []string{config.HttpSessionTtlKey, config.HttpSessionMaxSessionsKey},
                 },
@@ -444,7 +444,7 @@ func (instance *Application) checkDefaultSessionStorageBound() {
 
     instance.bootWarnings = append(instance.bootWarnings, internal.BootWarning{
         Name:    internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage,
-        Message: "the default in-memory session storage is paired with an unbounded session ttl, so every request that arrives without a session cookie can leave an entry no expiry removes, and once the storage holds `" + config.HttpSessionMaxSessionsKey + "` entries a new session is refused; set `" + config.HttpSessionTtlKey + "` to the lifetime this deployment wants, or register `" + session.ServiceSessionStorage + "` with a shared storage an operator can expire",
+        Message: "the default in-memory session storage is paired with an unbounded session ttl, so every request that arrives without a session cookie and reads the session can leave an entry no expiry removes, and once the storage holds `" + config.HttpSessionMaxSessionsKey + "` entries a new session is refused; set `" + config.HttpSessionTtlKey + "` to the lifetime this deployment wants, or register `" + session.ServiceSessionStorage + "` with a shared storage an operator can expire",
         Context: loggingcontract.Context{
             "configurationKey": config.HttpSessionTtlKey,
             "maxSessions":      httpConfiguration.SessionMaxSessions().Value,

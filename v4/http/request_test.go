@@ -19,8 +19,8 @@ import (
 
 /* every attribute the kernel owns carries the framework's prefix, so an application attribute cannot collide with one by name */
 func TestRequestAttributes_TheSessionAndTheSchemeCarryTheFrameworkPrefix(t *testing.T) {
-    if "_session" != RequestAttributeSession {
-        t.Fatalf("expected the session attribute under the framework prefix, got %q", RequestAttributeSession)
+    if "_session" != requestAttributeSession {
+        t.Fatalf("expected the session attribute under the framework prefix, got %q", requestAttributeSession)
     }
 
     if "_scheme" != RequestAttributeScheme {

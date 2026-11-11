@@ -80,11 +80,28 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 ### Session: `Manager.Session` and `NewSession` answer an error, and a storage outage is `503` with `Retry-After`
 
-**What changed.** [`session/contract.Manager`](../session/contract/manager.go) declares `Session(sessionId string) (Session, error)` and `NewSession() (Session, error)`. The framework's [`session.Manager`](../session/manager.go) answers a storage that could not answer, on those two doors and on `SaveSession`, `DeleteSession` and `RegenerateSession`, as an error carrying [`exception.MarkInfrastructureFailure`](../exception/infrastructure_failure.go), the storage's own error in the chain, where `Session` and `NewSession` panicked; 128 minted ids in a row already held is an unmarked error. The http kernel answers a load or mint error before the router: a marked one `503` with the kernel's `Retry-After`, any other `500`, the handler not called and no session cookie written. A firewall's sign-in door whose session rotation meets the outage refuses the sign-in `503` with the kernel's `Retry-After` before its `Handler`, with no sign-in event.
+**What changed.** [`session/contract.Manager`](../session/contract/manager.go) declares `Session(sessionId string) (Session, error)` and `NewSession() (Session, error)`. The framework's [`session.Manager`](../session/manager.go) answers a storage that could not answer, on those two doors and on `SaveSession`, `DeleteSession` and `RegenerateSession`, as an error carrying [`exception.MarkInfrastructureFailure`](../exception/infrastructure_failure.go), the storage's own error in the chain, where `Session` and `NewSession` panicked; 128 minted ids in a row already held is an unmarked error. The http kernel answers a load or mint error to the session's first reader, [`http.RequestSession`](../http/request_session.go) (the next section): a handler that returns a marked one answers `503` with the kernel's `Retry-After`, any other `500`, and no session cookie is written. A firewall's sign-in door with an `Authenticator` reads the session before it and the sign-out door before its `Handler`: a session read or rotation that meets the outage refuses the door `503` with the firewall's `Retry-After`, reason `session_unavailable`, with no sign-in event.
 
-**Symptom.** A call of `Session` or `NewSession` with one result no longer compiles, nor an out-of-tree `Manager` declaring the one-result forms. During a session storage outage every request answers `503` with `Retry-After` where it answered `500`. An error returned by `SaveSession`, `DeleteSession` or `RegenerateSession` for a storage failure is the framework's error wrapping the storage's, so a comparison by identity no longer matches; `errors.Is` still does.
+**Symptom.** A call of `Session` or `NewSession` with one result no longer compiles, nor an out-of-tree `Manager` declaring the one-result forms. During a session storage outage a request that reads the session answers `503` with `Retry-After` and one that does not is served, where every request answered `500`. An error returned by `SaveSession`, `DeleteSession` or `RegenerateSession` for a storage failure is the framework's error wrapping the storage's, so a comparison by identity no longer matches; `errors.Is` still does.
 
 **Remedy.** Read both results: `sessionInstance, loadErr := manager.Session(sessionId)`, then `nil != loadErr` before `nil == sessionInstance`. An out-of-tree manager returns its storage's error through `exception.MarkInfrastructureFailure` for an outage, and an unmarked error for a fault of its own. Compare storage errors with `errors.Is`.
+
+### Http: the session is read through `http.RequestSession`, loaded at its first read
+
+**What changed.** `http.RequestAttributeSession` is removed. [`http.RequestSession(request)`](../http/request_session.go) answers the request's session and an error, and [`http.SetRequestSession(request, session)`](../http/request_session.go) publishes one, a nil session refused. The kernel no longer loads the session before routing: the first `RequestSession` of a request loads it, or mints one when the cookie names none, once, and answers every later read the same session or the same error; a request that never reads it makes no storage call and writes no cookie. A load that failed is filed once, by the read, and every reader gets it marked logged. The response path saves the session published with `SetRequestSession`, else the one a read loaded. A firewall's sign-in door with an `Authenticator` reads the session before it, and its sign-out door before its `Handler`, both refusing a session outage `503` with the firewall's `Retry-After`, reason `session_unavailable`, [`session.ErrSessionUnavailable`](../session/manager.go) in the chain.
+
+**Symptom.** Code that names `http.RequestAttributeSession` no longer compiles. A route that does not read the session no longer asks the storage for it, so a session storage outage no longer reaches it, and its `Load` count drops to none. A sign-in door with an `Authenticator` over a request the kernel did not serve, so carrying no session, refuses `500` before its `Authenticator`, and a sign-out door refuses it `500` before its `Handler`, where it skipped the clear. A sign-in during a session storage outage is refused `503` before any credential is checked.
+
+**Remedy.** Read the session through the door and return its error:
+
+```go
+sessionInstance, sessionErr := melodyhttp.RequestSession(request)
+if nil != sessionErr {
+    return nil, sessionErr
+}
+```
+
+Publish a replacement with `melodyhttp.SetRequestSession(request, replacement)` and rotate with `melodyhttp.RegenerateRequestSession(request)`. A `securitycontract.TokenResolver` that reads the session answers `security.NewUnavailableToken(sessionErr)` for an error `exception.AnswersUnavailable` reads as unavailable, so a public route is served as not signed in and a protected one answers `503` with the firewall's `Retry-After`.
 
 ### Http: a rate limiter whose store cannot answer is `503` with `Retry-After`, not `429`
 
@@ -1526,11 +1543,11 @@ debug.NewMiddlewareCommand(
 
 ### Http: the kernel's request attributes are published after the route's, and the session is `_session`
 
-**What changed.** The kernel publishes the request attributes it owns — the session object, `_session`, and the resolved scheme, `_scheme` — after the route attributes, so a route attribute of the same name no longer replaces them. `RequestAttributeSession` takes the framework's underscore prefix, `_session`, which the third major kept at its released value `session`, so every attribute the kernel owns carries the prefix.
+**What changed.** The kernel publishes the request attributes it owns — the session, under `_session`, and the resolved scheme, `_scheme` — after the route attributes, so a route attribute of the same name no longer replaces them. The session's key takes the framework's underscore prefix, `_session`, which the third major kept at its released value `session`, so every attribute the kernel owns carries the prefix, and it is private: the session is read through `http.RequestSession`.
 
 **Symptom.** A handler that reads the session under the literal key `session` finds nothing there. A route declared with an attribute named `_session` or `_scheme` no longer reaches the handler under that name: the handler reads the kernel's session and scheme there. A route attribute named `session` reaches the handler again, as an application attribute.
 
-**Remedy.** Read the session through `http.RequestAttributeSession`, never through the literal key, and rename a route attribute that collides with `_session` or `_scheme`. A handler that rotates the session publishes the rotated one through `http.RegenerateRequestSession`, and the scheme follows the request and the kernel's `SetForwardedHeadersPolicy`, not a route.
+**Remedy.** Read the session through `http.RequestSession`, never through the literal key, and rename a route attribute that collides with `_session` or `_scheme`. A handler that rotates the session publishes the rotated one through `http.RegenerateRequestSession`, and the scheme follows the request and the kernel's `SetForwardedHeadersPolicy`, not a route.
 
 ### Http: `SetCookie` refuses a cookie name that is not a token
 
@@ -2530,11 +2547,11 @@ A policy that asks for `SameSite=None` gets a `Secure` session cookie under `Ses
 
 ### HTTP kernel: the session saved is the one published on the request
 
-**What changed.** [`republishedSession`](../http/router_utility.go) reads `RequestAttributeSession` at the moment the response is written, preferring the session a handler published over the one the kernel captured before routing.
+**What changed.** The response path reads the session published with [`http.SetRequestSession`](../http/request_session.go) at the moment the response is written, preferring the session a handler published over the one a read loaded.
 
-**Symptom.** Replacing that attribute in a handler now takes effect: the published session is what gets stored and what the `Set-Cookie` advertises. It used to be discarded.
+**Symptom.** Publishing a session in a handler now takes effect: the published session is what gets stored and what the `Set-Cookie` advertises. It used to be discarded.
 
-**Remedy.** None for a handler that wanted that. A handler that put something else under `RequestAttributeSession` as scratch space must stop — the constant is framework-owned and the response path acts on it.
+**Remedy.** None for a handler that wanted that.
 
 ### HTTP: `JsonHandler` rejects a literal `null` body
 
@@ -2885,7 +2902,9 @@ if nil != mintErr {
 
 replacement.Set(sessionKeyFlash, "you have been signed out")
 
-request.Attributes().Set(melodyhttp.RequestAttributeSession, replacement)
+if publishErr := melodyhttp.SetRequestSession(request, replacement); nil != publishErr {
+    return nil, publishErr
+}
 ```
 
 Code that calls `SaveSession` directly should treat `ErrSessionDeleted` as the session having ended rather than as a failure:

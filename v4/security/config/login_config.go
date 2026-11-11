@@ -30,7 +30,7 @@ type LoginConfig struct {
     /* Attributes are the door's route attributes, ExposedRouteAttributes among them, under the rules of a route's. */
     Attributes map[string]any
 
-    /* Authenticator reads the credentials before Handler runs, and the door then rotates the session id; nil hands Handler the token source's token, and Handler rotates. An authenticator, or a Handler, that could not check the credential is answered 503 with the firewall's Retry-After. */
+    /* Authenticator reads the credentials before Handler runs, and the door then rotates the session id; nil hands Handler the token source's token, and Handler rotates. An authenticator, or a Handler, that could not check the credential is answered 503 with the firewall's Retry-After. With an authenticator the door reads the session before it, and a session its storage could not load or rotate is answered 503 with the firewall's Retry-After, reason session_unavailable. */
     Authenticator securitycontract.Authenticator
 
     /* Methods are what the door serves, POST when left out; a safe method is refused, since a state change on one is forgeable by a link. */
@@ -49,7 +49,7 @@ type LoginConfig struct {
     LimiterConfig httpmiddleware.RateLimitConfig
 }
 
-/* LogoutConfig declares the firewall's sign-out door, on the terms of LoginConfig; the door also ends the request's session once Handler returned. */
+/* LogoutConfig declares the firewall's sign-out door, on the terms of LoginConfig; the door reads the request's session before Handler, a session its storage could not load answered 503 with the firewall's Retry-After and Handler not run, and ends it, and any session Handler rotated or published, once Handler returned. */
 type LogoutConfig struct {
     Path string
 

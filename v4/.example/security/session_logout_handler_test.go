@@ -31,7 +31,7 @@ func TestSessionLogoutHandlerLeavesEndingTheSessionToTheDoor(t *testing.T) {
     sessionId := sessionInstance.Id()
 
     request := plainRequest(t)
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
+    _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
     result, err := NewSessionLogoutHandler(nil).Logout(nil, request, melodysecuritycontract.LogoutInput{})
     if nil != err {
@@ -51,11 +51,10 @@ func TestSessionLogoutHandlerLeavesEndingTheSessionToTheDoor(t *testing.T) {
     }
 }
 
-/* a logout that arrives with no session has nothing to release */
-func TestSessionLogoutHandlerToleratesARequestCarryingNoSession(t *testing.T) {
+func TestSessionLogoutHandlerAnswersTheErrorOfARequestCarryingNoSession(t *testing.T) {
     result, err := NewSessionLogoutHandler(nil).Logout(nil, plainRequest(t), melodysecuritycontract.LogoutInput{})
-    if nil != err || nil == result {
-        t.Fatalf("expected an empty result, got %+v and %v", result, err)
+    if nil == err || nil != result {
+        t.Fatalf("expected the read's error and no result, got %+v and %v", result, err)
     }
 }
 
@@ -64,7 +63,7 @@ func TestSessionLogoutHandlerReleasesTheSessionsRow(t *testing.T) {
     request, sessionInstance := requestCarryingSession(t)
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     request = melodyhttp.NewRequest(request.HttpRequest(), nil, melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), nil)
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
+    _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
     index := &recordingSessionIndex{}
 

@@ -19,6 +19,9 @@ import (
 /* ErrSessionDeleted is the cause SaveSession carries for a session deleted while the request holding it was running. It means the session ended, not that the storage failed: the response path expires the browser cookie and serves the handler's response. */
 var ErrSessionDeleted = errors.New("session was deleted")
 
+/* ErrSessionUnavailable is what a firewall door's refusal carries in its chain, before the storage's error, when the request's session could not be loaded: the door is answered 503 with the firewall's Retry-After and reason session_unavailable. */
+var ErrSessionUnavailable = errors.New("session unavailable")
+
 /* ErrSessionRotated is the cause SaveSession carries for an id a rotation retired, beside ErrSessionDeleted. The write is refused as for a logout, but the response path keeps the browser cookie, since the identity moved to the fresh id the client is being handed. */
 var ErrSessionRotated = errors.New("session was rotated away")
 
@@ -159,7 +162,7 @@ func (instance *Manager) NewSession() (sessioncontract.Session, error) {
     }, nil
 }
 
-/* RegenerateSession rotates a session id, the defence against session fixation: the returned session carries the values under a fresh id, marked modified, and the previous entry is removed. Publishing it under http.RequestAttributeSession makes the response path store it and emit its cookie, which http.RegenerateRequestSession does. The session passed in is latched cleared, so a caller that forgets to publish the rotated one has the response path expire the cookie. An id a logout or an earlier rotation buried is refused with the error SaveSession answers for it, before anything is stored, so a copy loaded before either cannot carry its identity onto a fresh id. */
+/* RegenerateSession rotates a session id, the defence against session fixation: the returned session carries the values under a fresh id, marked modified, and the previous entry is removed. Publishing it with http.SetRequestSession makes the response path store it and emit its cookie, which http.RegenerateRequestSession does. The session passed in is latched cleared, so a caller that forgets to publish the rotated one has the response path expire the cookie. An id a logout or an earlier rotation buried is refused with the error SaveSession answers for it, before anything is stored, so a copy loaded before either cannot carry its identity onto a fresh id. */
 func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
     if true == internal.IsNilInterface(sessionInstance) {
         return nil, exception.NewError("session is nil in regenerate session", nil, nil)
