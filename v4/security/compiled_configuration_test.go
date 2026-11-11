@@ -14,6 +14,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -199,7 +200,7 @@ func (instance *compiledFirewallFailingLoginHandler) Login(
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
-    return nil, errors.New("the credentials were refused")
+    return nil, exception.Unauthorized("the credentials were refused")
 }
 
 var _ securitycontract.LoginHandler = (*compiledFirewallFailingLoginHandler)(nil)
@@ -215,7 +216,8 @@ func TestCompiledFirewall_Login_ADispatchFailureNamesTheBrokenListener(t *testin
         LoginHandler:       &compiledFirewallFailingLoginHandler{},
     })
 
-    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+    logger := &recordingLogger{}
+    runtimeInstance, dispatcher := newTokenSourceTestRuntimeLogging(t, logger)
 
     listenerFailure := errors.New("the audit sink refused the record")
     dispatcher.AddListener(
@@ -227,23 +229,17 @@ func TestCompiledFirewall_Login_ADispatchFailureNamesTheBrokenListener(t *testin
     )
 
     _, loginErr := firewall.Login(runtimeInstance, nil, securitycontract.LoginInput{})
-    if nil == loginErr {
-        t.Fatalf("expected the dispatch failure to be reported")
+    if answer := exception.AsHttpException(loginErr); nil == answer || 401 != answer.StatusCode() || true == errors.Is(loginErr, listenerFailure) {
+        t.Fatalf("expected the handler's 401 handed back as it is, got: %v", loginErr)
     }
 
-    if false == errors.Is(loginErr, listenerFailure) {
-        t.Fatalf("expected the listener's own failure to be reachable, got: %v", loginErr)
+    records := logger.recordsAtLevel(loggingcontract.LevelError)
+    if 1 != len(records) || "main" != records[0].context["firewallName"] {
+        t.Fatalf("expected one Error record of the failed dispatch naming the firewall, got %v", logger.records)
     }
 
-    logContext := exception.LogContext(loginErr, exception.LogContextConfig{})
-    rendered := fmt.Sprintf("%v", logContext)
-
-    if false == strings.Contains(rendered, "the credentials were refused") {
-        t.Fatalf("expected the login failure to stay in the record, got %s", rendered)
-    }
-
-    if false == strings.Contains(rendered, "the audit sink refused the record") {
-        t.Fatalf("expected the broken listener's own cause in the record, got %s", rendered)
+    if false == strings.Contains(fmt.Sprintf("%v", records[0].context), "the audit sink refused the record") {
+        t.Fatalf("expected the broken listener's own cause in the record, got %v", records[0].context)
     }
 }
 

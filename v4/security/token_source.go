@@ -60,24 +60,19 @@ func (instance *AuthenticatorTokenSource) Name() string {
 func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     token, usedAuthenticator, err := instance.manager.Authenticate(request)
     if nil != err {
-        /* an error answered as the unavailable token is an outage, no failed sign-in: a lockout listener must not count it */
-        if true == usedAuthenticator && false == exception.AnswersUnavailable(err) {
+        if true == usedAuthenticator && true == raisesLoginFailure(err) {
             eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
             _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
                 runtimeInstance,
                 securitycontract.EventSecurityLoginFailure,
                 NewLoginFailureEvent(request, err),
             )
-            if nil != eventSecurityLoginFailureErr {
-                /* both errors are the cause, the authentication error first: it carries the status the client should see, which errors.As reads from the first member that holds one, and the dispatch error stays reachable to errors.Is and to the record */
-                return nil, exception.NewError(
-                    "security login failure event dispatch failed",
-                    exceptioncontract.Context{
-                        "dispatchError": eventSecurityLoginFailureErr.Error(),
-                    },
-                    errors.Join(err, eventSecurityLoginFailureErr),
-                )
-            }
+            fileLoginFailureDispatchError(
+                runtimeInstance,
+                eventSecurityLoginFailureErr,
+                exception.AsHttpException(err).StatusCode(),
+                exceptioncontract.Context{"tokenSourceName": instance.Name()},
+            )
         }
 
         return nil, err

@@ -1422,8 +1422,8 @@ func TestAccessControlListener_AnUnavailableTokenOnAProtectedRouteIsRefusedWith5
                 t.Fatalf("expected the refusal's message, reason and firewall, got %v", refusal)
             }
 
-            if 1 != len(fixture.deniedCauses) || false == errors.Is(fixture.deniedCauses[0], unavailableRouteStoreErr) {
-                t.Fatalf("expected the denial to carry the cause, got %v", fixture.deniedCauses)
+            if 1 != len(fixture.deniedCauses) || false == errors.Is(fixture.deniedCauses[0], unavailableRouteStoreErr) || false == errors.Is(fixture.deniedCauses[0], ErrAuthenticationUnavailable) {
+                t.Fatalf("expected the denial to carry ErrAuthenticationUnavailable and the cause, got %v", fixture.deniedCauses)
             }
 
             errorRecords := fixture.logger.recordsAtLevel(loggingcontract.LevelError)
@@ -1497,5 +1497,175 @@ func TestAccessControlListener_AnAnonymousTokenKeepsItsEntryPoint(t *testing.T) 
 
     if 1 != len(fixture.deniedReasons) || "token_not_authenticated" != fixture.deniedReasons[0] {
         t.Fatalf("expected the not-authenticated denial, got %v", fixture.deniedReasons)
+    }
+}
+
+type decisionOutageFixture struct {
+    *unavailableRouteFixture
+    deniedHandler *accessControlListenerTestAccessDeniedHandler
+}
+
+func newDecisionOutageFixture(decisionManager securitycontract.AccessDecisionManager, retryAfter bound.Duration) *decisionOutageFixture {
+    fixture := &decisionOutageFixture{
+        unavailableRouteFixture: &unavailableRouteFixture{
+            kernel: newTestKernel(),
+            logger: &recordingLogger{},
+        },
+        deniedHandler: &accessControlListenerTestAccessDeniedHandler{response: httpPkg.TextResponse(nethttp.StatusForbidden, "denied by the handler")},
+    }
+
+    firewall := newRefusalSiteFirewall(CompiledFirewallConfig{
+        TokenSource:               &resolutionListenerTestTokenSource{resolveToken: NewAuthenticatedToken("user", []string{"ROLE_ADMIN"}, nil)},
+        AccessControl:             newRefusalSiteAccessControl(),
+        AccessDecisionManager:     decisionManager,
+        AccessDeniedHandler:       fixture.deniedHandler,
+        AccessDeniedHandlerSource: SourceFirewall,
+        UnavailableRetryAfter:     retryAfter,
+    })
+
+    registry := NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil))
+    RegisterKernelSecurityResolutionListener(fixture.kernel, registry)
+    RegisterKernelAccessControlListener(fixture.kernel, registry)
+
+    dispatcher := fixture.kernel.EventDispatcher()
+    dispatcher.AddListener(
+        securitycontract.EventSecurityAuthorizationDenied,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            deniedErr := eventValue.Payload().(*AuthorizationDeniedEvent).Err()
+            reason, _ := exception.LogContext(deniedErr, exception.LogContextConfig{})["reason"].(string)
+            fixture.deniedReasons = append(fixture.deniedReasons, reason)
+            fixture.deniedCauses = append(fixture.deniedCauses, deniedErr)
+
+            return nil
+        },
+        0,
+    )
+    dispatcher.AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            fixture.observedErr = eventValue.Payload().(*httpPkg.KernelExceptionEvent).Err()
+
+            return nil
+        },
+        10,
+    )
+
+    return fixture
+}
+
+func TestAccessControlListener_AFallibleVotersOutageIsRefusedWith503AndTheFirewallDelay(t *testing.T) {
+    decisionManager := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyAffirmative,
+        []securitycontract.Voter{
+            NewRoleVoter(),
+            &fallibleTestVoter{attribute: "ROLE_ADMIN", err: decisionStoreErr},
+        },
+    )
+    fixture := newDecisionOutageFixture(decisionManager, bound.Of(9*time.Second))
+
+    recorder, handled, _ := fixture.serve(t, "/admin")
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "9" != recorder.Header().Get("Retry-After") || true == handled {
+        t.Fatalf("expected 503 with Retry-After 9 and the route not served, got %d %q handled=%v: %s", recorder.Code, recorder.Header().Get("Retry-After"), handled, recorder.Body.String())
+    }
+
+    if 0 != fixture.deniedHandler.calls {
+        t.Fatalf("expected the access denied handler not consulted, got %d calls", fixture.deniedHandler.calls)
+    }
+
+    if 1 != len(fixture.deniedReasons) || "authorization_unavailable" != fixture.deniedReasons[0] {
+        t.Fatalf("expected one denial with reason authorization_unavailable, got %v", fixture.deniedReasons)
+    }
+
+    if false == errors.Is(fixture.deniedCauses[0], ErrAuthorizationUnavailable) || false == errors.Is(fixture.deniedCauses[0], decisionStoreErr) {
+        t.Fatalf("expected the denial to carry ErrAuthorizationUnavailable and the cause, got %v", fixture.deniedCauses[0])
+    }
+
+    if false == errors.Is(fixture.observedErr, ErrAuthorizationUnavailable) || false == errors.Is(fixture.observedErr, decisionStoreErr) || true == errors.Is(fixture.observedErr, ErrAuthenticationUnavailable) {
+        t.Fatalf("expected the refusal to carry ErrAuthorizationUnavailable and the cause only, got %v", fixture.observedErr)
+    }
+
+    refusal := exception.AsHttpException(fixture.observedErr)
+    if nil == refusal || "authorization_unavailable" != refusal.Context()["reason"] || "main" != refusal.Context()["firewallName"] {
+        t.Fatalf("expected the refusal's reason and firewall, got %v", refusal)
+    }
+
+    errorRecords := fixture.logger.recordsAtLevel(loggingcontract.LevelError)
+    if 1 != len(errorRecords) {
+        t.Fatalf("expected exactly one Error record, got %v", fixture.logger.records)
+    }
+
+    if "main" != errorRecords[0].context["firewallName"] || "GET" != errorRecords[0].context["method"] || "/admin" != errorRecords[0].context["path"] {
+        t.Fatalf("expected the record to name the firewall, the method and the path, got %v", errorRecords[0].context)
+    }
+}
+
+func TestAccessControlListener_AMarkedDecisionErrorAlreadyFiledIsNotFiledAgain(t *testing.T) {
+    alreadyFiled := exception.NewError("the policy store is down", nil, nil)
+    _ = exception.MarkLogged(alreadyFiled)
+
+    fixture := newDecisionOutageFixture(&accessControlListenerTestAccessDecisionManager{decideAllErr: exception.MarkInfrastructureFailure(alreadyFiled)}, bound.Duration{})
+
+    recorder, _, _ := fixture.serve(t, "/admin")
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "5" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with the default Retry-After, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+
+    if 0 != len(fixture.logger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatalf("expected no second record of a filed cause, got %v", fixture.logger.records)
+    }
+}
+
+func TestAccessControlListener_AnUnmarkedDecisionErrorIsRefusedAsBefore(t *testing.T) {
+    for name, decisionErr := range map[string]error{
+        "a refusal":                   exception.Forbidden("forbidden"),
+        "a store's status under mark": exception.NewHttpError(nethttp.StatusConflict, exception.HttpErrorConfig{Message: "conflict", Cause: exception.MarkInfrastructureFailure(errors.New("down"))}),
+    } {
+        t.Run(name, func(t *testing.T) {
+            fixture := newDecisionOutageFixture(&accessControlListenerTestAccessDecisionManager{decideAllErr: decisionErr}, bound.Duration{})
+
+            recorder, handled, _ := fixture.serve(t, "/admin")
+
+            if nethttp.StatusForbidden != recorder.Code || "denied by the handler" != recorder.Body.String() || true == handled {
+                t.Fatalf("expected the access denied handler's 403, got %d %q handled=%v", recorder.Code, recorder.Body.String(), handled)
+            }
+
+            if 1 != fixture.deniedHandler.calls || 0 != len(fixture.deniedReasons) {
+                t.Fatalf("expected the handler consulted once and no denial event before its response, got %d calls, %v", fixture.deniedHandler.calls, fixture.deniedReasons)
+            }
+        })
+    }
+}
+
+func TestAccessControlListener_AVotersHandMade503IsTheFirewalls503(t *testing.T) {
+    decisionManager := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyAffirmative,
+        []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", err: exception.NewHttpException(nethttp.StatusServiceUnavailable, "policy store down")}},
+    )
+    fixture := newDecisionOutageFixture(decisionManager, bound.Of(9*time.Second))
+
+    recorder, _, _ := fixture.serve(t, "/admin")
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "9" != recorder.Header().Get("Retry-After") || 0 != fixture.deniedHandler.calls {
+        t.Fatalf("expected the firewall's 503 with Retry-After 9 and no handler call, got %d %q, %d calls", recorder.Code, recorder.Header().Get("Retry-After"), fixture.deniedHandler.calls)
+    }
+}
+
+func TestAccessControlListener_AFailedDeniedDispatchForAnOutageIsTheListenersError(t *testing.T) {
+    fixture := newDecisionOutageFixture(&accessControlListenerTestAccessDecisionManager{decideAllErr: exception.MarkInfrastructureFailure(decisionStoreErr)}, bound.Duration{})
+    listenerErr := errors.New("the audit sink refused the record")
+    fixture.kernel.EventDispatcher().AddListener(
+        securitycontract.EventSecurityAuthorizationDenied,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            return listenerErr
+        },
+        1,
+    )
+
+    recorder, handled, _ := fixture.serve(t, "/admin")
+
+    if nethttp.StatusInternalServerError != recorder.Code || "" != recorder.Header().Get("Retry-After") || true == handled || 0 != fixture.deniedHandler.calls {
+        t.Fatalf("expected the failed dispatch answered 500, as every denial dispatch failure is, with no handler call, got %d %q handled=%v calls=%d", recorder.Code, recorder.Header().Get("Retry-After"), handled, fixture.deniedHandler.calls)
     }
 }

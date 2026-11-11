@@ -1,6 +1,8 @@
 package security
 
 import (
+    nethttp "net/http"
+
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -70,12 +72,23 @@ func (instance *AccessDecisionManager) DecideAll(token securitycontract.Token, a
     return nil
 }
 
+/* DecideAny grants on the first attribute granted; with none granted, the first error exception.AnswersUnavailable reads as unavailable is answered before the refusal, since its missing vote might have been the grant, and any other error is the 403 */
 func (instance *AccessDecisionManager) DecideAny(token securitycontract.Token, attributes []string, subject any) error {
+    var unavailableErr error
+
     for _, attribute := range attributes {
         err := instance.decideSingleAttribute(token, attribute, subject)
         if nil == err {
             return nil
         }
+
+        if nil == unavailableErr && true == exception.AnswersUnavailable(err) {
+            unavailableErr = err
+        }
+    }
+
+    if nil != unavailableErr {
+        return unavailableErr
     }
 
     return exception.Forbidden("forbidden")
@@ -91,7 +104,11 @@ func (instance *AccessDecisionManager) decideSingleAttribute(token securitycontr
             continue
         }
 
-        result := voter.Vote(token, attribute, subject)
+        result, voteErr := castVote(voter, token, attribute, subject)
+        if nil != voteErr {
+            return voteErr
+        }
+
         if securitycontract.VoteGranted == result {
             grantedCount = grantedCount + 1
         } else if securitycontract.VoteDenied == result {
@@ -138,6 +155,30 @@ func (instance *AccessDecisionManager) decideSingleAttribute(token securitycontr
     }
 
     return exception.Forbidden("forbidden")
+}
+
+/* castVote: a 4xx is the voter's own refusal; a 5xx or no status is a decision that could not be made, marked */
+func castVote(voter securitycontract.Voter, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
+    fallibleVoter, isFallible := voter.(securitycontract.FallibleVoter)
+    if false == isFallible {
+        return voter.Vote(token, attribute, subject), nil
+    }
+
+    result, err := fallibleVoter.VoteWithError(token, attribute, subject)
+    /* IsNilInterface: a typed nil error is no error, as the kernel reads it */
+    if true == internal.IsNilInterface(err) {
+        return result, nil
+    }
+
+    if true == exception.IsInfrastructureFailure(err) {
+        return securitycontract.VoteAbstain, err
+    }
+
+    if answer := exception.AsHttpException(err); nil != answer && nethttp.StatusInternalServerError > answer.StatusCode() {
+        return securitycontract.VoteAbstain, err
+    }
+
+    return securitycontract.VoteAbstain, exception.MarkInfrastructureFailure(err)
 }
 
 var _ securitycontract.AccessDecisionManager = (*AccessDecisionManager)(nil)

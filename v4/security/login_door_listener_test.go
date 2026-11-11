@@ -455,14 +455,23 @@ func TestLoginDoor_AFailedFailureDispatchKeepsTheRefusalAndIsFiled(t *testing.T)
     t.Fatal("expected the failed dispatch filed at error")
 }
 
-func TestLoginDoor_AHandlerErrorRefusesAndRaisesTheFailure(t *testing.T) {
+func TestLoginDoor_AHandlerErrorRefusesAndRaisesTheFailureForARefusedCredentialOnly(t *testing.T) {
     fixture := newDoorFixture(t, nil)
     fixture.login.err = exception.Conflict("taken")
 
     recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
 
-    if nethttp.StatusConflict != recorder.Code || 1 != *fixture.failures {
-        t.Fatalf("expected 409 and one failure event, got %d and %d", recorder.Code, *fixture.failures)
+    if nethttp.StatusConflict != recorder.Code || 0 != *fixture.failures {
+        t.Fatalf("expected 409 and no failure event, got %d and %d", recorder.Code, *fixture.failures)
+    }
+
+    refused := newDoorFixture(t, nil)
+    refused.login.err = exception.Forbidden("account locked")
+
+    recorder = refused.serve(t, nethttp.MethodPost, doorLoginPath, nil)
+
+    if nethttp.StatusForbidden != recorder.Code || 1 != *refused.failures {
+        t.Fatalf("expected 403 and one failure event, got %d and %d", recorder.Code, *refused.failures)
     }
 }
 
@@ -920,8 +929,8 @@ func TestLoginDoor_AHandlerThatCouldNotReachItsStoreIsRefusedWith503AndNoFailedS
         config.LoginAuthenticator = &doorAuthenticator{token: NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)}
     })
     unmarked.login.err = errors.New("handler bug")
-    if refused := unmarked.serve(t, nethttp.MethodPost, doorLoginPath, nil); nethttp.StatusInternalServerError != refused.Code || 1 != *unmarked.failures {
-        t.Fatalf("expected an unmarked handler error 500 with its failure event, got %d, %d failures", refused.Code, *unmarked.failures)
+    if refused := unmarked.serve(t, nethttp.MethodPost, doorLoginPath, nil); nethttp.StatusInternalServerError != refused.Code || 0 != *unmarked.failures {
+        t.Fatalf("expected an unmarked handler error 500 with no failure event, got %d, %d failures", refused.Code, *unmarked.failures)
     }
 }
 

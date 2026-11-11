@@ -70,6 +70,14 @@ func (instance *refusingAuthenticationRepository) FindByUsername(ctx context.Con
 func loginRuntimeForEnvironment(t *testing.T, environmentName string) melodyruntimecontract.Runtime {
     t.Helper()
 
+    runtimeInstance, _ := loginRuntimeForEnvironmentRecordingFailures(t, environmentName)
+
+    return runtimeInstance
+}
+
+func loginRuntimeForEnvironmentRecordingFailures(t *testing.T, environmentName string) (melodyruntimecontract.Runtime, *[]error) {
+    t.Helper()
+
     source := &stubAuthenticationEnvironmentSource{
         values: map[string]string{
             melodyconfig.EnvKey: environmentName,
@@ -87,6 +95,7 @@ func loginRuntimeForEnvironment(t *testing.T, environmentName string) melodyrunt
     }
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    failureList := registerLoginFailureRecorder(t, containerInstance, nil, nil)
 
     registerConfigurationErr := melodycontainer.Register[melodyconfigcontract.Configuration](
         containerInstance,
@@ -112,7 +121,7 @@ func loginRuntimeForEnvironment(t *testing.T, environmentName string) melodyrunt
         t.Fatalf("register user service: %v", registerServiceErr)
     }
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), failureList
 }
 
 func loginResponseBody(t *testing.T, runtimeInstance melodyruntimecontract.Runtime) (int, string) {
@@ -226,7 +235,7 @@ func TestLoginHandler_CarriesTheAuthenticationCauseUnderDebug(t *testing.T) {
 /* The logout doors are asked what the STORAGE holds afterwards, not what the session object says: deleting the two identity keys leaves the entry modified, so the response path saves it back under the same id and re-issues the cookie, and only a cleared session routes that path to DeleteSession. The response path is run here exactly as the kernel runs it, through SaveSession. */
 /* the credentials are read from the json body alone: a POST whose query string carries them and whose body names none answers as a request without credentials, where a query read would have authenticated — with the credentials written into every access log in front of the application. The body of the same credentials reaches the authentication, which this fixture's cache refuses, so the arms are told apart by the status; a media type parameter is read past, and any body other than json is refused 415 before the credentials are read, a cross-site form being unable to post json. */
 func TestLoginHandler_ReadsTheJsonCredentialsFromTheBodyAndRefusesAnyOtherBody(t *testing.T) {
-    runtimeInstance := loginRuntimeForEnvironment(t, melodyconfig.EnvProduction)
+    runtimeInstance, failureList := loginRuntimeForEnvironmentRecordingFailures(t, melodyconfig.EnvProduction)
 
     login := func(target string, contentType string, body string) (int, string) {
         httpRequest := httptest.NewRequest(nethttp.MethodPost, target, bytes.NewBufferString(body))
@@ -253,6 +262,10 @@ func TestLoginHandler_ReadsTheJsonCredentialsFromTheBodyAndRefusesAnyOtherBody(t
         t.Fatalf("credentials carried by the query were read: status %d, body %s", statusCode, body)
     }
 
+    if 0 != len(*failureList) {
+        t.Fatalf("expected a malformed input counted as no failed sign-in, got %v", *failureList)
+    }
+
     statusCode, body = login("/login", "application/json", `{"username":"admin","password":"secret"}`)
     if nethttp.StatusServiceUnavailable != statusCode || false == strings.Contains(body, "service unavailable") {
         t.Fatalf("credentials carried by the body did not reach the authentication: status %d, body %s", statusCode, body)
@@ -268,6 +281,10 @@ func TestLoginHandler_ReadsTheJsonCredentialsFromTheBodyAndRefusesAnyOtherBody(t
         if nethttp.StatusUnsupportedMediaType != statusCode || false == strings.Contains(body, "the sign-in reads application/json") {
             t.Fatalf("a %q body was not refused 415: status %d, body %s", contentType, statusCode, body)
         }
+    }
+
+    if 0 != len(*failureList) {
+        t.Fatalf("expected neither an outage nor a refused media type counted as a failed sign-in, got %v", *failureList)
     }
 }
 

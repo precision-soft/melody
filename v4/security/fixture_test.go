@@ -542,3 +542,26 @@ func mustSession(sessionInstance sessioncontract.Session, sessionErr error) sess
 
     return sessionInstance
 }
+
+type fallibleTestVoter struct {
+    attribute string
+    result    securitycontract.VoteResult
+    err       error
+    voteCalls int
+}
+
+func (instance *fallibleTestVoter) Supports(attribute string, subject any) bool {
+    return instance.attribute == attribute
+}
+
+func (instance *fallibleTestVoter) Vote(token securitycontract.Token, attribute string, subject any) securitycontract.VoteResult {
+    instance.voteCalls++
+
+    return securitycontract.VoteGranted
+}
+
+func (instance *fallibleTestVoter) VoteWithError(token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
+    return instance.result, instance.err
+}
+
+var _ securitycontract.FallibleVoter = (*fallibleTestVoter)(nil)

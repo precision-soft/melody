@@ -12,6 +12,9 @@ import (
 /* ErrAuthenticationUnavailable is in the cause chain of the 503 the firewall refuses an unavailable token with, so an application's kernel.exception listener recognises it. */
 var ErrAuthenticationUnavailable = errors.New("authentication unavailable")
 
+/* ErrAuthorizationUnavailable is in the cause chain of the 503 the firewall refuses a decision with that a voter or a decision manager could not make, its store unavailable. */
+var ErrAuthorizationUnavailable = errors.New("authorization unavailable")
+
 /* NewUnavailableToken answers the token of a credential whose check could not run because what it stands on did not answer; cause is that failure and is required. */
 func NewUnavailableToken(cause error) *UnavailableToken {
     if true == internal.IsNilInterface(cause) {

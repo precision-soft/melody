@@ -25,34 +25,35 @@ func newAnonymousRefusal(reason string) error {
     return refusal
 }
 
-/* authenticationUnavailableCause puts ErrAuthenticationUnavailable before the cause in one chain, so the refusal reads one line and its record names each link once */
-type authenticationUnavailableCause struct {
-    cause error
+/* unavailableCause puts a sentinel before the cause in one chain, so the refusal reads one line and its record names each link once */
+type unavailableCause struct {
+    sentinel error
+    cause    error
 }
 
-func (instance *authenticationUnavailableCause) Error() string {
-    return ErrAuthenticationUnavailable.Error()
+func (instance *unavailableCause) Error() string {
+    return instance.sentinel.Error()
 }
 
-func (instance *authenticationUnavailableCause) Is(target error) bool {
-    return ErrAuthenticationUnavailable == target
+func (instance *unavailableCause) Is(target error) bool {
+    return instance.sentinel == target
 }
 
-func (instance *authenticationUnavailableCause) Unwrap() error {
+func (instance *unavailableCause) Unwrap() error {
     return instance.cause
 }
 
-/* newUnavailableRefusal builds the 503 an unavailable token earns: ErrAuthenticationUnavailable and the cause in its chain, the firewall's Retry-After, and marked logged, since its cause was filed where it was read: by the security resolution listener, by the sign-in door or by its own producer */
-func newUnavailableRefusal(firewall *CompiledFirewall, cause error) error {
+/* newUnavailableRefusal marks the refusal logged: its cause was filed where it was read */
+func newUnavailableRefusal(firewall *CompiledFirewall, reason string, sentinel error, cause error) error {
     refusal := exception.NewHttpError(
         nethttp.StatusServiceUnavailable,
         exception.HttpErrorConfig{
             Message:    "service unavailable",
-            Cause:      &authenticationUnavailableCause{cause: cause},
+            Cause:      &unavailableCause{sentinel: sentinel, cause: cause},
             RetryAfter: firewall.UnavailableRetryAfter(),
         },
     )
-    refusal.SetContextValue("reason", "authentication_unavailable")
+    refusal.SetContextValue("reason", reason)
     refusal.SetContextValue("firewallName", firewall.Name())
 
     _ = exception.MarkLogged(refusal)
@@ -60,39 +61,16 @@ func newUnavailableRefusal(firewall *CompiledFirewall, cause error) error {
     return refusal
 }
 
-/* sessionUnavailableCause puts session.ErrSessionUnavailable before the storage's error in one chain */
-type sessionUnavailableCause struct {
-    cause error
+func newAuthenticationUnavailableRefusal(firewall *CompiledFirewall, cause error) error {
+    return newUnavailableRefusal(firewall, "authentication_unavailable", ErrAuthenticationUnavailable, cause)
 }
 
-func (instance *sessionUnavailableCause) Error() string {
-    return session.ErrSessionUnavailable.Error()
-}
-
-func (instance *sessionUnavailableCause) Is(target error) bool {
-    return session.ErrSessionUnavailable == target
-}
-
-func (instance *sessionUnavailableCause) Unwrap() error {
-    return instance.cause
-}
-
-/* newSessionUnavailableRefusal builds the 503 a firewall door answers for a session its storage could not load: session.ErrSessionUnavailable and the cause in its chain, the firewall's Retry-After, reason session_unavailable, and marked logged, since its cause was filed where it was read */
 func newSessionUnavailableRefusal(firewall *CompiledFirewall, cause error) error {
-    refusal := exception.NewHttpError(
-        nethttp.StatusServiceUnavailable,
-        exception.HttpErrorConfig{
-            Message:    "service unavailable",
-            Cause:      &sessionUnavailableCause{cause: cause},
-            RetryAfter: firewall.UnavailableRetryAfter(),
-        },
-    )
-    refusal.SetContextValue("reason", "session_unavailable")
-    refusal.SetContextValue("firewallName", firewall.Name())
+    return newUnavailableRefusal(firewall, "session_unavailable", session.ErrSessionUnavailable, cause)
+}
 
-    _ = exception.MarkLogged(refusal)
-
-    return refusal
+func newAuthorizationUnavailableRefusal(firewall *CompiledFirewall, cause error) error {
+    return newUnavailableRefusal(firewall, "authorization_unavailable", ErrAuthorizationUnavailable, cause)
 }
 
 func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, registry *FirewallRegistry) {
@@ -245,7 +223,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                             exceptioncontract.Context{
                                 "reason": "authentication_unavailable",
                             },
-                            cause,
+                            &unavailableCause{sentinel: ErrAuthenticationUnavailable, cause: cause},
                         ),
                     ),
                 )
@@ -253,7 +231,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                     return eventSecurityAuthorizationDeniedErr
                 }
 
-                requestEvent.Refuse(newUnavailableRefusal(securityContext.Firewall(), cause))
+                requestEvent.Refuse(newAuthenticationUnavailableRefusal(securityContext.Firewall(), cause))
 
                 return nil
             }
@@ -319,6 +297,49 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 )
 
                 return eventSecurityAuthorizationGrantedErr
+            }
+
+            /* not the caller's refusal: the access denied handler is not consulted */
+            if true == exception.AnswersUnavailable(decisionErr) {
+                firewall := securityContext.Firewall()
+
+                if false == exception.IsAlreadyLogged(decisionErr) {
+                    if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+                        logger.Error(
+                            "security access decision could not be made: its store is unavailable",
+                            resolutionLogContext(
+                                decisionErr,
+                                requestEvent,
+                                exceptioncontract.Context{
+                                    "firewallName": firewall.Name(),
+                                },
+                            ),
+                        )
+                    }
+                }
+
+                _, eventSecurityAuthorizationDeniedErr := eventDispatcher.DispatchName(
+                    runtimeInstance,
+                    securitycontract.EventSecurityAuthorizationDenied,
+                    NewAuthorizationDeniedEvent(
+                        requestEvent.Request(),
+                        attributes,
+                        exception.NewError(
+                            "service unavailable",
+                            exceptioncontract.Context{
+                                "reason": "authorization_unavailable",
+                            },
+                            &unavailableCause{sentinel: ErrAuthorizationUnavailable, cause: decisionErr},
+                        ),
+                    ),
+                )
+                if nil != eventSecurityAuthorizationDeniedErr {
+                    return eventSecurityAuthorizationDeniedErr
+                }
+
+                requestEvent.Refuse(newAuthorizationUnavailableRefusal(firewall, decisionErr))
+
+                return nil
             }
 
             /* IsNilInterface: the handler comes through NewCompiledFirewall unvalidated, and Handle dereferences it on the refusal path */

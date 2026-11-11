@@ -3,6 +3,8 @@ package security
 import (
     "context"
     "errors"
+    "fmt"
+    "strings"
     nethttp "net/http"
     "testing"
     "time"
@@ -27,6 +29,12 @@ import (
 func newTokenSourceTestRuntime(t *testing.T) (runtimecontract.Runtime, eventcontract.EventDispatcher) {
     t.Helper()
 
+    return newTokenSourceTestRuntimeLogging(t, logging.NewNopLogger())
+}
+
+func newTokenSourceTestRuntimeLogging(t *testing.T, logger loggingcontract.Logger) (runtimecontract.Runtime, eventcontract.EventDispatcher) {
+    t.Helper()
+
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
@@ -44,7 +52,7 @@ func newTokenSourceTestRuntime(t *testing.T) (runtimecontract.Runtime, eventcont
     loggerRegisterErr := serviceContainer.Register(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            return logging.NewNopLogger(), nil
+            return logger, nil
         },
         container.RegisterOptions{},
     )
@@ -266,7 +274,7 @@ func TestAuthenticatorTokenSource_ResolveEmitsLoginFailureAndKeepsTheError(t *te
 
     dispatchedNameList := recordSecurityLoginEvents(dispatcher)
 
-    authenticationErr := errors.New("invalid credentials")
+    authenticationErr := exception.Unauthorized("invalid credentials")
 
     tokenSource := NewAuthenticatorTokenSource(
         NewAuthenticatorManager([]securitycontract.Authenticator{
@@ -291,7 +299,8 @@ func TestAuthenticatorTokenSource_ResolveEmitsLoginFailureAndKeepsTheError(t *te
 
 /* when the failure event dispatch ITSELF fails, the authentication error survives as the cause: it carries the 401 the client should see, which a bare dispatch error would replace with a 500 while dropping the reason from the log */
 func TestAuthenticatorTokenSource_ResolveKeepsTheAuthenticationErrorWhenTheFailureDispatchFails(t *testing.T) {
-    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+    logger := &recordingLogger{}
+    runtimeInstance, dispatcher := newTokenSourceTestRuntimeLogging(t, logger)
 
     dispatcher.AddListener(
         securitycontract.EventSecurityLoginFailure,
@@ -301,7 +310,7 @@ func TestAuthenticatorTokenSource_ResolveKeepsTheAuthenticationErrorWhenTheFailu
         0,
     )
 
-    authenticationErr := errors.New("invalid credentials")
+    authenticationErr := exception.Unauthorized("invalid credentials")
 
     tokenSource := NewAuthenticatorTokenSource(
         NewAuthenticatorManager([]securitycontract.Authenticator{
@@ -315,8 +324,13 @@ func TestAuthenticatorTokenSource_ResolveKeepsTheAuthenticationErrorWhenTheFailu
     )
 
     _, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
-    if false == errors.Is(err, authenticationErr) {
-        t.Fatalf("expected the authentication error to survive as the cause, got %v", err)
+    if authenticationErr != err {
+        t.Fatalf("expected the authentication error handed back as it is, got %v", err)
+    }
+
+    records := logger.recordsAtLevel(loggingcontract.LevelError)
+    if 1 != len(records) || "security login failure event dispatch failed" != records[0].message || false == strings.Contains(fmt.Sprintf("%v", records[0].context), "event bus down") || "authenticatorManager" != records[0].context["tokenSourceName"] {
+        t.Fatalf("expected one Error record of the failed dispatch naming the source and the listener's failure, got %v", logger.records)
     }
 }
 
@@ -581,8 +595,9 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheRejectedCredentialsDispatch
     }
 }
 
-func TestAuthenticatorTokenSource_AFailedLoginFailureDispatchKeepsBothErrorsAndTheStatus(t *testing.T) {
-    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+func TestAuthenticatorTokenSource_AFailedLoginFailureDispatchKeepsTheStatusAndFilesTheListenersError(t *testing.T) {
+    logger := &recordingLogger{}
+    runtimeInstance, dispatcher := newTokenSourceTestRuntimeLogging(t, logger)
 
     listenerErr := exception.NewHttpException(503, "event bus down")
     dispatcher.AddListener(
@@ -607,13 +622,12 @@ func TestAuthenticatorTokenSource_AFailedLoginFailureDispatchKeepsBothErrorsAndT
     )
 
     _, err := tokenSource.Resolve(runtimeInstance, newFirewallTestRequest("/"))
-    if false == errors.Is(err, authenticationErr) || false == errors.Is(err, listenerErr) {
-        t.Fatalf("expected both errors in the chain, got %v", err)
+    if false == errors.Is(err, authenticationErr) || true == errors.Is(err, listenerErr) {
+        t.Fatalf("expected the authentication error alone, a listener's 503 kept out of the answer, got %v", err)
     }
 
-    httpException := exception.AsHttpException(err)
-    if nil == httpException || 401 != httpException.StatusCode() {
-        t.Fatalf("expected the authentication status kept, got %v", httpException)
+    if 1 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
+        t.Fatalf("expected the listener's failure filed at Error, got %v", logger.records)
     }
 }
 
@@ -692,8 +706,16 @@ func TestAuthenticatorTokenSource_AnAuthenticatorThatCouldNotCheckTheCredentialI
     if _, keptErr := authenticatorTokenSourceAnswering(nil, statusErr).Resolve(runtimeInstance, newFirewallTestRequest("/")); nil == keptErr {
         t.Fatal("expected the error that keeps its status handed back")
     }
+    if 0 != len(*dispatchedNameList) {
+        t.Fatalf("expected no failure event for a 429 kept around the mark, a spent budget being no refused credential, got %v", *dispatchedNameList)
+    }
+
+    refusedErr := exception.NewHttpError(nethttp.StatusUnauthorized, exception.HttpErrorConfig{Message: "refused", Cause: exception.MarkInfrastructureFailure(storeErr)})
+    if _, keptErr := authenticatorTokenSourceAnswering(nil, refusedErr).Resolve(runtimeInstance, newFirewallTestRequest("/")); nil == keptErr {
+        t.Fatal("expected the error that keeps its status handed back")
+    }
     if 1 != len(*dispatchedNameList) || securitycontract.EventSecurityLoginFailure != (*dispatchedNameList)[0] {
-        t.Fatalf("expected the failure event for an error answered with its own status, got %v", *dispatchedNameList)
+        t.Fatalf("expected the failure event for a 401 kept around the mark, got %v", *dispatchedNameList)
     }
 
     both := &unavailableAuthenticatedToken{}

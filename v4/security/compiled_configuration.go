@@ -239,7 +239,7 @@ func (instance *CompiledFirewall) LogoutPath() string {
     return instance.logoutPath
 }
 
-/* Login runs the firewall's login handler and leaves the session id as it was: the door rotates it first when it authenticated the credentials, and a handler behind a door with no authenticator that writes an identity into the session rotates the id itself, through http.RegenerateRequestSession, since only it knows when the privilege changes; a login that does not rotate is open to session fixation. A handler error answered as the unavailable token, marked with exception.MarkInfrastructureFailure, raises no security.login.failure. */
+/* Login runs the firewall's login handler and leaves the session id as it was: the door rotates it first when it authenticated the credentials, and a handler behind a door with no authenticator that writes an identity into the session rotates the id itself, through http.RegenerateRequestSession, since only it knows when the privilege changes; a login that does not rotate is open to session fixation. A handler error raises security.login.failure only when it answers 401 or 403, a refused credential, and a failed dispatch of the event is filed at Error with the refusal kept. */
 func (instance *CompiledFirewall) Login(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -258,22 +258,16 @@ func (instance *CompiledFirewall) Login(
 
     result, err := instance.loginHandler.Login(runtimeInstance, request, input)
     if nil != err {
-        /* a store the handler could not reach is no failed sign-in */
-        if true == exception.AnswersUnavailable(err) {
+        if false == raisesLoginFailure(err) {
             return nil, err
         }
 
-        dispatchErr := instance.dispatchLoginFailure(runtimeInstance, request, err)
-        if nil != dispatchErr {
-            /* both failures travel as causes: the login error first, so the client sees its reason, and the dispatch error beside it, so its context survives the render boundary */
-            return nil, exception.NewError(
-                "security login failure event dispatch failed",
-                exceptioncontract.Context{
-                    "firewallName": instance.name,
-                },
-                errors.Join(err, dispatchErr),
-            )
-        }
+        fileLoginFailureDispatchError(
+            runtimeInstance,
+            instance.dispatchLoginFailure(runtimeInstance, request, err),
+            exception.AsHttpException(err).StatusCode(),
+            exceptioncontract.Context{"firewallName": instance.name},
+        )
 
         return nil, err
     }

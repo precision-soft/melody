@@ -177,7 +177,7 @@ func serveLoginDoor(
                 return
             }
 
-            requestEvent.Refuse(newUnavailableRefusal(firewall, cause))
+            requestEvent.Refuse(newAuthenticationUnavailableRefusal(firewall, cause))
 
             return
         }
@@ -252,7 +252,7 @@ func serveLoginDoor(
     )
 }
 
-/* authenticateAtLoginDoor reads the credentials through the door's authenticator, on the token source's terms: refused credentials and a refused second factor raise security.login.failure, a second factor not yet presented is a challenge announced to nobody, and an authenticator's error, an outage or a malformed request, is no failed sign-in. An outage, a marked error with no http status around the mark or a token carrying securitycontract.AuthenticationUnavailable, is refused 503 with the firewall's Retry-After. */
+/* authenticateAtLoginDoor reads the credentials through the door's authenticator, on the token source's terms: refused credentials and a refused second factor raise security.login.failure, a second factor not yet presented is a challenge announced to nobody, and an authenticator's error is a failed sign-in only when it answers 401 or 403, a refused credential, an outage or a malformed request being none. An outage, a marked error with no http status around the mark or a token carrying securitycontract.AuthenticationUnavailable, is refused 503 with the firewall's Retry-After. */
 func authenticateAtLoginDoor(
     runtimeInstance runtimecontract.Runtime,
     requestEvent *http.KernelRequestEvent,
@@ -267,6 +267,15 @@ func authenticateAtLoginDoor(
         if nil != authenticateErr {
             if true == exception.AnswersUnavailable(authenticateErr) {
                 return nil, refuseUnavailableAtLoginDoor(runtimeInstance, requestEvent, firewall, authenticateErr)
+            }
+
+            if true == raisesLoginFailure(authenticateErr) {
+                fileLoginFailureDispatchError(
+                    runtimeInstance,
+                    firewall.dispatchLoginFailure(runtimeInstance, request, authenticateErr),
+                    exception.AsHttpException(authenticateErr).StatusCode(),
+                    exceptioncontract.Context{"firewallName": firewall.Name()},
+                )
             }
 
             return nil, authenticateErr
@@ -298,18 +307,12 @@ func authenticateAtLoginDoor(
 
     failureErr := errors.New("invalid credentials")
 
-    /* the refusal keeps its status whatever the dispatch answers, and a failed dispatch is filed here, since a 401 is not recorded at error */
-    if dispatchErr := firewall.dispatchLoginFailure(runtimeInstance, request, failureErr); nil != dispatchErr {
-        if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-            logger.Error(
-                "security login failure event dispatch failed",
-                exception.LogContext(
-                    exception.NewError("security login failure event dispatch failed", exceptioncontract.Context{"firewallName": firewall.Name()}, dispatchErr),
-                    exception.LogContextConfig{Extra: exceptioncontract.Context{"statusCode": nethttp.StatusUnauthorized}},
-                ),
-            )
-        }
-    }
+    fileLoginFailureDispatchError(
+        runtimeInstance,
+        firewall.dispatchLoginFailure(runtimeInstance, request, failureErr),
+        nethttp.StatusUnauthorized,
+        exceptioncontract.Context{"firewallName": firewall.Name()},
+    )
 
     return nil, exception.Unauthorized(failureErr.Error())
 }
@@ -337,7 +340,7 @@ func refuseUnavailableAtLoginDoor(
         }
     }
 
-    return newUnavailableRefusal(firewall, cause)
+    return newAuthenticationUnavailableRefusal(firewall, cause)
 }
 
 /* requestSessionAtFirewallDoor reads the request's session for a door and answers an unavailable session as the outage it stands for, since a sign-in has nowhere to put the identity and a sign-out cannot end what the storage cannot reach */
