@@ -530,7 +530,7 @@ func (instance *Application) verifyLazyHandles() {
     }
 }
 
-/* buildMessageBusTransportsCloser builds the closer that joins the registered message bus transports to the container's ordered teardown, for every process that never resolves the transports map itself, an http process routing through transport values among them, and declares it a teardown dependency of the buses the application registered: a bus routes through transport values its module captured, which no resolution records, so the edge is declared. Every service that publishes through a bus resolves it and closes before it, the bus before the transports, under the waves and the sequential teardown alike. A failure is a warning: the transports are optional and the names are the framework's own. */
+/* buildMessageBusTransportsCloser builds the closer that joins the registered message bus transports to the container's ordered teardown, for every process that never resolves the transports map itself, an http process routing through transport values among them, and declares it a teardown dependency of the buses the application registered: a bus routes through transport values its module captured, which no resolution records, so the edge is declared. Every service that publishes through a bus resolves it and closes before it, the bus before the transports, under the waves and the sequential teardown alike. A failure to order a bus or to build the closer fails the boot naming the service, since either leaves the transports outside the teardown. */
 func (instance *Application) buildMessageBusTransportsCloser() {
     serviceContainer := instance.kernel.ServiceContainer()
 
@@ -548,12 +548,12 @@ func (instance *Application) buildMessageBusTransportsCloser() {
 
             declareErr := declarer.DeclareTeardownDependency(busName, []string{messagebus.ServiceTransportsCloser})
             if nil != declareErr {
-                instance.bootLogger().Warning(
-                    "could not order the message bus before its transports; the transports may close while the bus still routes to them",
-                    exceptioncontract.Context{
-                        "serviceName": busName,
-                        "error":       declareErr.Error(),
-                    },
+                exception.Panic(
+                    exception.NewError(
+                        "could not order the message bus before its transports",
+                        exceptioncontract.Context{"serviceName": busName},
+                        declareErr,
+                    ),
                 )
             }
         }
@@ -565,12 +565,12 @@ func (instance *Application) buildMessageBusTransportsCloser() {
         messagebus.ServiceTransportsCloser,
     )
     if nil != closerErr {
-        instance.bootLogger().Warning(
-            "could not build the message bus transports closer; the registered transports will not be closed on shutdown",
-            exceptioncontract.Context{
-                "serviceName": messagebus.ServiceTransportsCloser,
-                "error":       closerErr.Error(),
-            },
+        exception.Panic(
+            exception.NewError(
+                "could not build the message bus transports closer",
+                exceptioncontract.Context{"serviceName": messagebus.ServiceTransportsCloser},
+                closerErr,
+            ),
         )
     }
 }

@@ -12,7 +12,6 @@ import (
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
-    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/session"
@@ -81,6 +80,18 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
     }
 
     eventDispatcher := kernelInstance.EventDispatcher()
+
+    /* without the required mark a listener that stops propagation lets a request past access control, so such a dispatcher is refused before the listener is added */
+    registrar, ok := eventDispatcher.(eventcontract.RequiredListenerRegistrar)
+    if false == ok {
+        exception.Panic(
+            exception.NewError(
+                "the event dispatcher cannot mark the access control listener required",
+                exceptioncontract.Context{"dispatcherType": fmt.Sprintf("%T", eventDispatcher)},
+                nil,
+            ),
+        )
+    }
 
     accessControlRegistration := eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -395,20 +406,6 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
         },
         KernelAccessControlListenerPriority,
     )
-
-    /* access control is a required kernel.request listener: a listener that stops propagation before it makes the dispatch fail closed. A dispatcher without that capability disarms the guarantee for the whole process, which is reported on the emergency channel because this runs before the configured logger is resolved. */
-    registrar, ok := eventDispatcher.(eventcontract.RequiredListenerRegistrar)
-    if false == ok {
-        logging.EmergencyLogger().Warning(
-            "the event dispatcher cannot mark the access control listener required",
-            loggingcontract.Context{
-                "dispatcherType": fmt.Sprintf("%T", eventDispatcher),
-                "consequence":    "a listener that stops propagation before access control lets the request reach its handler unchecked",
-            },
-        )
-
-        return
-    }
 
     registrar.MarkListenerRequired(accessControlRegistration)
 }

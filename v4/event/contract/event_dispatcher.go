@@ -14,14 +14,14 @@ type SubscriberRegistration struct {
     SubscriberId uint64
 }
 
-/* RequiredListenerRegistrar is an optional interface an EventDispatcher may implement to mark registered listeners as required. When a listener stops propagation or fails before a required listener behind it has run, the dispatch returns an error, so a caller such as the http kernel fails closed; a listener that legitimately short-circuits opts out through MarkListenerMaySkipRequiredListeners. Both marks default off, and a failure travels as the cause of the refusal. */
+/* RequiredListenerRegistrar is an interface an EventDispatcher implements to mark registered listeners as required; the security firewall refuses a kernel dispatcher without it. When a listener stops propagation or fails before a required listener behind it has run, the dispatch returns an error, so a caller such as the http kernel fails closed; a listener that legitimately short-circuits opts out through MarkListenerMaySkipRequiredListeners. Both marks default off, and a failure travels as the cause of the refusal. */
 type RequiredListenerRegistrar interface {
     MarkListenerRequired(registration ListenerRegistration)
 
     MarkListenerMaySkipRequiredListeners(registration ListenerRegistration)
 }
 
-/* PriorityFloorRegistrar is an optional interface an EventDispatcher may implement to give the bottom of one event's order to the listener that answers last, registered and reserved as one step: a later registration on that event at or below the priority could never run, so it is refused by name. A registration made before stands, and the order is not changed. A second installation on an event already holding a floor adds nothing and answers false, so kernels sharing a dispatcher install one listener. */
+/* PriorityFloorRegistrar is an interface an EventDispatcher implements to give the bottom of one event's order to the listener that answers last, registered and reserved as one step: a later registration on that event at or below the priority could never run, so it is refused by name. A registration made before stands, and the order is not changed. A second installation on an event already holding a floor adds nothing and answers false, so kernels sharing a dispatcher install one listener. The http kernel refuses, when it builds its handler, a dispatcher without it. */
 type PriorityFloorRegistrar interface {
     InstallFloorListener(eventName string, listener EventListener, priority int) (ListenerRegistration, bool)
 }

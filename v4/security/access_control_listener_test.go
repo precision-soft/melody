@@ -2,21 +2,21 @@ package security
 
 import (
     "errors"
+    "fmt"
     "io"
     nethttp "net/http"
     "net/http/httptest"
-    "os"
     "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpPkg "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
@@ -921,45 +921,32 @@ func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t 
     }
 }
 
-/* a dispatcher that cannot take the required-listener mark disarms the fail-closed guarantee for the whole process, so it is named on the emergency channel */
-func TestRegisterKernelAccessControlListener_ADispatcherWithoutTheCapabilityIsNamed(t *testing.T) {
-    readEnd, writeEnd, pipeErr := os.Pipe()
-    if nil != pipeErr {
-        t.Fatalf("unexpected pipe error: %v", pipeErr)
-    }
-
-    logging.CloseEmergencyLogger()
-
-    originalStderr := os.Stderr
-    os.Stderr = writeEnd
-    defer func() {
-        os.Stderr = originalStderr
-        logging.CloseEmergencyLogger()
-    }()
-
+func TestRegisterKernelAccessControlListener_RefusesADispatcherThatCannotMarkItRequired(t *testing.T) {
     kernel := newTestKernel()
-    kernel.eventDispatcher = &capabilitylessDispatcher{EventDispatcher: kernel.eventDispatcher}
+    innerDispatcher := kernel.eventDispatcher.(*event.EventDispatcher)
+    kernel.eventDispatcher = &capabilitylessDispatcher{EventDispatcher: innerDispatcher}
+
+    defer func() {
+        panicErr, isPanicErr := recover().(*exception.Error)
+        if false == isPanicErr || "the event dispatcher cannot mark the access control listener required" != panicErr.Message() {
+            t.Fatalf("expected the dispatcher to be refused, got %v", panicErr)
+        }
+
+        if false == strings.Contains(fmt.Sprint(panicErr.Context()["dispatcherType"]), "capabilitylessDispatcher") {
+            t.Fatalf("expected the refusal to name the dispatcher, got %v", panicErr.Context())
+        }
+
+        for _, registeredEvent := range innerDispatcher.RegisteredEvents() {
+            if kernelcontract.EventKernelRequest == registeredEvent.EventName && 0 != len(registeredEvent.Listeners) {
+                t.Fatalf("expected no listener added before the refusal, got %d", len(registeredEvent.Listeners))
+            }
+        }
+    }()
 
     RegisterKernelAccessControlListener(
         kernel,
         NewFirewallRegistry(NewCompiledConfiguration(nil, NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}))),
     )
-
-    _ = writeEnd.Close()
-    os.Stderr = originalStderr
-
-    output, readErr := io.ReadAll(readEnd)
-    if nil != readErr {
-        t.Fatalf("unexpected read error: %v", readErr)
-    }
-
-    if false == strings.Contains(string(output), "cannot mark the access control listener required") {
-        t.Fatalf("expected the degradation to be reported, got %q", string(output))
-    }
-
-    if false == strings.Contains(string(output), "capabilitylessDispatcher") {
-        t.Fatalf("expected the dispatcher to be named, got %q", string(output))
-    }
 }
 
 /* capabilitylessDispatcher is a dispatcher of the application's own: it forwards every dispatch through the published contract and carries no MarkListenerRequired, which is exactly what an implementation written against the contract looks like */

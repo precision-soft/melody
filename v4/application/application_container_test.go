@@ -1064,6 +1064,79 @@ func TestBoot_TheRegisteredBusesCloseBeforeTheTransportsTheyRouteTo(t *testing.T
     }
 }
 
+func TestBuildMessageBusTransportsCloser_FailsWhenTheBusCannotBeOrderedBeforeItsTransports(t *testing.T) {
+    for _, busName := range []string{messagebus.ServiceBus, messagebus.ServiceConsumeBus} {
+        t.Run(busName, func(t *testing.T) {
+            applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: "dev"})
+
+            applicationInstance.RegisterService(
+                busName,
+                func(resolver containercontract.Resolver) (messagebuscontract.Bus, error) {
+                    return &teardownOrderProbeBus{}, nil
+                },
+                container.RegisterOptions{TypeRegistrationDisabled: true},
+            )
+
+            /* the closer declared to close after the bus makes the framework's edge, the bus before the closer, a ring */
+            applicationInstance.RegisterService(
+                messagebus.ServiceTransportsCloser,
+                func(resolver containercontract.Resolver) (*messagebus.TransportsCloser, error) {
+                    return &messagebus.TransportsCloser{}, nil
+                },
+                container.RegisterOptions{TeardownDependencyNames: []string{busName}},
+            )
+
+            defer func() {
+                panicErr, isPanicErr := recover().(*exception.Error)
+                if false == isPanicErr || "could not order the message bus before its transports" != panicErr.Message() {
+                    t.Fatalf("expected the boot to be refused, got %v", panicErr)
+                }
+
+                if busName != panicErr.Context()["serviceName"] {
+                    t.Fatalf("expected the refusal to name the bus, got %v", panicErr.Context())
+                }
+
+                if false == errors.Is(panicErr, container.ErrCircularDependency) {
+                    t.Fatalf("expected the ring refusal in the chain, got %v", panicErr)
+                }
+            }()
+
+            applicationInstance.buildMessageBusTransportsCloser()
+        })
+    }
+}
+
+func TestBuildMessageBusTransportsCloser_FailsWhenTheTransportsCloserCannotBeBuilt(t *testing.T) {
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: "dev"})
+
+    providerErr := errors.New("transports closer provider failed")
+
+    applicationInstance.RegisterService(
+        messagebus.ServiceTransportsCloser,
+        func(resolver containercontract.Resolver) (*messagebus.TransportsCloser, error) {
+            return nil, providerErr
+        },
+        container.RegisterOptions{},
+    )
+
+    defer func() {
+        panicErr, isPanicErr := recover().(*exception.Error)
+        if false == isPanicErr || "could not build the message bus transports closer" != panicErr.Message() {
+            t.Fatalf("expected the boot to be refused, got %v", panicErr)
+        }
+
+        if messagebus.ServiceTransportsCloser != panicErr.Context()["serviceName"] {
+            t.Fatalf("expected the refusal to name the closer, got %v", panicErr.Context())
+        }
+
+        if false == errors.Is(panicErr, providerErr) {
+            t.Fatalf("expected the provider's error in the chain, got %v", panicErr)
+        }
+    }()
+
+    applicationInstance.buildMessageBusTransportsCloser()
+}
+
 /* the after-boot refusals of RegisterService and RegisterScopedService name the service that was registered too late, as the parameter and configuration siblings name theirs. */
 func TestApplicationRegisterService_AfterBootRefusalNamesTheService(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})

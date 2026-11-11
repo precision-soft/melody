@@ -1019,21 +1019,27 @@ type foreignFloorlessEventDispatcher struct {
     eventcontract.EventDispatcher
 }
 
-func TestInstallBuiltInExceptionListener_ADispatcherWithoutTheFloorDoorGetsTheListener(t *testing.T) {
+func TestInstallBuiltInExceptionListener_RefusesADispatcherWithoutTheFloor(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
-    installBuiltInExceptionListener(&foreignFloorlessEventDispatcher{EventDispatcher: dispatcher})
-
-    registeredListeners := 0
-    for _, registeredEvent := range dispatcher.RegisteredEvents() {
-        if kernelcontract.EventKernelException == registeredEvent.EventName {
-            registeredListeners = len(registeredEvent.Listeners)
+    defer func() {
+        panicErr, isPanicErr := recover().(*exception.Error)
+        if false == isPanicErr || "the event dispatcher cannot reserve the priority of the built-in exception listener" != panicErr.Message() {
+            t.Fatalf("expected the dispatcher to be refused, got %v", panicErr)
         }
-    }
 
-    if 1 != registeredListeners {
-        t.Fatalf("expected the built-in listener registered, got %d", registeredListeners)
-    }
+        if false == strings.Contains(fmt.Sprint(panicErr.Context()["dispatcherType"]), "foreignFloorlessEventDispatcher") {
+            t.Fatalf("expected the refusal to name the dispatcher, got %v", panicErr.Context())
+        }
+
+        for _, registeredEvent := range dispatcher.RegisteredEvents() {
+            if kernelcontract.EventKernelException == registeredEvent.EventName && 0 != len(registeredEvent.Listeners) {
+                t.Fatalf("expected no listener added before the refusal, got %d", len(registeredEvent.Listeners))
+            }
+        }
+    }()
+
+    installBuiltInExceptionListener(&foreignFloorlessEventDispatcher{EventDispatcher: dispatcher})
 }
 
 func TestExceptionListener_TheOccurrenceDoorsReturnOnACyclicChain(t *testing.T) {

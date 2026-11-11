@@ -4,7 +4,6 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/internal"
-    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 func TestIgnoredProcessEnvironmentBootWarnings_NamesEachKnownParameterNameOnceUnderItsCodeInOrder(t *testing.T) {
@@ -87,16 +86,4 @@ func TestIgnoredProcessEnvironmentBootWarnings_SkipsMalformedEntries(t *testing.
     if 0 != len(bootWarnings) {
         t.Fatalf("expected no boot warnings, got %d", len(bootWarnings))
     }
-}
-
-func TestBootLogger_FallsBackToTheEmergencyLoggerWhenTheContainerHasNone(t *testing.T) {
-    applicationInstance := newCollisionTestApplication(t)
-
-    logger := applicationInstance.bootLogger()
-    if nil == logger {
-        t.Fatalf("expected a logger even when the container carries none")
-    }
-
-    /* it must be usable, not merely non-nil: the warnings around the wiring are written through it */
-    logger.Warning("probe", loggingcontract.Context{})
 }

@@ -22,24 +22,20 @@ import (
 /* BuiltInExceptionListenerPriority is the floor of kernel.exception: the kernel's built-in listener answers there, and a listener registered at it once the kernel serves is refused, since it could never run. */
 const BuiltInExceptionListenerPriority = math.MinInt
 
-/* installBuiltInExceptionListener registers the default answer of kernel.exception on the floor of the event. A dispatcher without the door gets the listener on each installation, the later ones never running, and a listener at the floor stays silently dead there, which is reported on the emergency channel because this runs before a request's logger exists. */
+/* installBuiltInExceptionListener registers the default answer of kernel.exception on the floor of the event. A dispatcher without the floor door cannot keep the listener once per kernel nor refuse a listener at the floor that would never run, so it is refused before any listener is added. */
 func installBuiltInExceptionListener(eventDispatcher eventcontract.EventDispatcher) {
     registrar, ok := eventDispatcher.(eventcontract.PriorityFloorRegistrar)
-    if true == ok {
-        registrar.InstallFloorListener(kernelcontract.EventKernelException, builtInExceptionListener, BuiltInExceptionListenerPriority)
-
-        return
+    if false == ok {
+        exception.Panic(
+            exception.NewError(
+                "the event dispatcher cannot reserve the priority of the built-in exception listener",
+                exceptioncontract.Context{"dispatcherType": fmt.Sprintf("%T", eventDispatcher)},
+                nil,
+            ),
+        )
     }
 
-    eventDispatcher.AddListener(kernelcontract.EventKernelException, builtInExceptionListener, BuiltInExceptionListenerPriority)
-
-    logging.EmergencyLogger().Warning(
-        "the event dispatcher cannot reserve the priority of the built-in exception listener",
-        loggingcontract.Context{
-            "dispatcherType": fmt.Sprintf("%T", eventDispatcher),
-            "consequence":    "a kernel.exception listener registered at that priority is never run and never refused",
-        },
-    )
+    registrar.InstallFloorListener(kernelcontract.EventKernelException, builtInExceptionListener, BuiltInExceptionListenerPriority)
 }
 
 /* builtInExceptionListener journals an error no producer filed and answers with RenderExceptionResponse. Debug mode is read per dispatch from the runtime's configuration; a runtime without one renders the production body. */
