@@ -11,6 +11,7 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/internal/plaintext"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -220,7 +221,7 @@ func newErrorRendererTextAndJsonRuntime() runtimecontract.Runtime {
         logging.NewNopLogger(),
         map[string]serializercontract.Serializer{
             "application/json": serializer.NewJsonSerializer(),
-            "text/plain":       serializer.NewPlainTextSerializer(),
+            "text/plain":       serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{}),
         },
     )
 }
@@ -422,20 +423,6 @@ func TestIsPlainTextMediaType_ReadsTheMediaTypeWhateverItsParameters(t *testing.
     }
 }
 
-func TestPlainTextLabel_SpellsACamelCasedKeyAsWords(t *testing.T) {
-    cases := map[string]string{
-        "requestId":        "request id",
-        "validationErrors": "validation errors",
-        "cause":            "cause",
-    }
-
-    for key, expected := range cases {
-        if expected != plainTextLabel(key) {
-            t.Fatalf("expected %q for %q, got %q", expected, key, plainTextLabel(key))
-        }
-    }
-}
-
 type errorRendererPanickingStringer struct{}
 
 func (instance errorRendererPanickingStringer) String() string {
@@ -533,7 +520,7 @@ func TestRenderErrorResponse_AValueSpelledManyTimesOverStaysWithinTheBodyBudget(
 
         select {
         case body := <-rendered:
-            if maxPlainTextBytes+8*maxPlainTextMembers+64*1024 < len(body) || false == strings.HasSuffix(body, "...(truncated)\n") {
+            if plaintext.DefaultMaxBytes+8*plaintext.DefaultMaxMembers+64*1024 < len(body) || false == strings.HasSuffix(body, "...(truncated)\n") {
                 t.Fatalf("%s: expected the body cut at its budget, got %d bytes ending %q", name, len(body), body[max(0, len(body)-40):])
             }
         case <-time.After(10 * time.Second):
@@ -542,7 +529,7 @@ func TestRenderErrorResponse_AValueSpelledManyTimesOverStaysWithinTheBodyBudget(
     }
 }
 
-func TestRenderErrorResponse_SpellsTheMembersOfAListItemAndAStruct(t *testing.T) {
+func TestRenderErrorResponse_WritesAStructByItsJsonNamesAndAListItemBeneathItsDash(t *testing.T) {
     request := testhelper.NewHttpTestRequestWithAccept(nethttp.MethodGet, "http://example.com/fail", "text/plain")
 
     payload := map[string]any{
@@ -552,13 +539,75 @@ func TestRenderErrorResponse_SpellsTheMembersOfAListItemAndAStruct(t *testing.T)
 
     body := readResponseBody(t, renderErrorResponse(newErrorRendererTextAndJsonRuntime(), request, nethttp.StatusBadRequest, "bad request", payload))
 
-    for _, expected := range []string{"- map[field:email rule:required]", "- 7", "{Name:holder Cycle:map[]}"} {
+    for _, expected := range []string{"\nholder:\n  name: holder\n  cycle:\n", "\nitems:\n  -\n    field: email\n    rule: required\n  - 7\n"} {
         if false == strings.Contains(body, expected) {
             t.Fatalf("expected %q in the body, got %q", expected, body)
         }
     }
-    if true == strings.Contains(body, "...(truncated)") {
-        t.Fatalf("expected a body within its budget not marked truncated, got %q", body)
+    if true == strings.Contains(body, "map[") || true == strings.Contains(body, "{") || true == strings.Contains(body, "...(truncated)") {
+        t.Fatalf("expected no Go dump and a body within its budget not marked truncated, got %q", body)
+    }
+}
+
+type errorRendererHiddenFields struct {
+    Shown    string `json:"shownField"`
+    Password string `json:"-"`
+    secret   string
+}
+
+func TestPlainTextErrorResponse_WritesNoFieldAJsonClientWouldNotRead(t *testing.T) {
+    response := plainTextErrorResponse(nethttp.StatusBadRequest, "bad request", map[string]any{"context": errorRendererHiddenFields{Shown: "yes", Password: "hunter2", secret: "s3cr3t"}}, "text/plain; charset=utf-8")
+
+    body := readResponseBody(t, response)
+    if "400 bad request\ncontext:\n  shown field: yes\n" != body {
+        t.Fatalf("expected the json-named field alone, its key spelled as words, got %q", body)
+    }
+}
+
+func TestPlainTextErrorResponse_KeepsTheMessageOnTheStatusLine(t *testing.T) {
+    body := readResponseBody(t, plainTextErrorResponse(nethttp.StatusNotFound, "no route for /a\nrequest id: forged", map[string]any{"requestId": "req-1"}, "text/plain; charset=utf-8"))
+
+    if "404 no route for /a\\nrequest id: forged\nrequest id: req-1\n" != body {
+        t.Fatalf("expected the message on the status line, its control characters escaped, got %q", body)
+    }
+}
+
+func TestPlainTextErrorResponse_KeepsTheBodyOfMapsAndListsByteForByte(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        payload  map[string]any
+        expected string
+    }{
+        "envelope": {
+            payload: map[string]any{
+                "status":    "error",
+                "requestId": "req-1",
+                "time":      "2026-11-11T00:00:00Z",
+                "error":     map[string]any{"message": "bad request", "code": "E1", "detailsList": []string{"a", "b"}},
+            },
+            expected: "400 bad request\nrequest id: req-1\ntime: 2026-11-11T00:00:00Z\ncode: E1\ndetails list:\n  - a\n  - b\n",
+        },
+        "nested": {
+            payload: map[string]any{
+                "requestId": "req-2",
+                "context":   map[string]any{"limit": 3, "fieldName": "name", "route": "", "inner": map[string]any{"deepKey": map[string]any{"x": 1}}},
+                "cause":     "decoder refused the body",
+            },
+            expected: "400 bad request\nrequest id: req-2\ncause: decoder refused the body\ncontext:\n  field name: name\n  inner:\n    deep key:\n      x: 1\n  limit: 3\n  route:\n",
+        },
+        "lists": {
+            payload: map[string]any{
+                "validationErrors": []error{errors.New("name: is required"), errors.New("price: must be positive")},
+                "strings":          []string{"one", "two"},
+                "empty":            []string{},
+                "bytes":            []byte("raw"),
+            },
+            expected: "400 bad request\nbytes: [114 97 119]\nempty:\nstrings:\n  - one\n  - two\nvalidation errors:\n  - name: is required\n  - price: must be positive\n",
+        },
+    } {
+        body := readResponseBody(t, plainTextErrorResponse(nethttp.StatusBadRequest, "bad request", testCase.payload, "text/plain; charset=utf-8"))
+        if testCase.expected != body {
+            t.Fatalf("%s: expected %q, got %q", name, testCase.expected, body)
+        }
     }
 }
 

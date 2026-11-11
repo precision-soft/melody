@@ -13,7 +13,7 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-/* renderEnvelopeWith serializes an envelope through the negotiated serializer, except a refusal for a text/plain client, which is written as lines: the plain-text serializer has no shape for the envelope and would print its fields bare. A success keeps the serializer's rendering. */
+/* renderEnvelopeWith serializes an envelope through the negotiated serializer, except a refusal for a text/plain client, which leads with its status and errors on one line, as the framework's error body does, where the serializer would write the envelope's fields in their order. A success keeps the serializer's rendering. */
 func renderEnvelopeWith(
     statusCode int,
     payload apiResponse,

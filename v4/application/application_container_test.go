@@ -764,7 +764,7 @@ func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *test
 func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
-    ownSerializer := serializer.NewPlainTextSerializer()
+    ownSerializer := serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{})
 
     applicationInstance.RegisterService(
         serializer.ServiceSerializer,

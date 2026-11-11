@@ -3855,7 +3855,7 @@ func serveNegotiatedKernelProbe(t *testing.T, method string, target string, acce
         func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
             return serializer.NewSerializerManager(map[string]serializercontract.Serializer{
                 "application/json": serializer.NewJsonSerializer(),
-                "text/plain":       serializer.NewPlainTextSerializer(),
+                "text/plain":       serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{}),
             })
         },
         container.RegisterOptions{},

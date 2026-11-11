@@ -15,7 +15,7 @@ This package is responsible for transforming values to and from `[]byte` represe
 
 - Serializer implementations:
     - [`JsonSerializer`](../../serializer/serializer.go)
-    - [`PlainTextSerializer`](../../serializer/plain_text_serializer.go)
+    - [`PlainTextSerializer`](../../serializer/plain_text_serializer.go), which writes a structured value as lines
 - MIME constants:
     - [`MimeApplicationJson`](../../serializer/mime.go)
     - [`MimeTextPlain`](../../serializer/mime.go)
@@ -42,7 +42,7 @@ func serializeByAcceptHeader(acceptHeader string, value any) ([]byte, error) {
     manager, createErr := serializer.NewSerializerManager(
         map[string]serializercontract.Serializer{
             serializer.MimeApplicationJson: serializer.NewJsonSerializer(),
-            serializer.MimeTextPlain:       serializer.NewPlainTextSerializer(),
+            serializer.MimeTextPlain:       serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{}),
         },
     )
     if nil != createErr {
@@ -57,6 +57,28 @@ func serializeByAcceptHeader(acceptHeader string, value any) ([]byte, error) {
     return serializerInstance.Serialize(value)
 }
 ```
+
+## The plain-text serializer
+
+[`PlainTextSerializer`](../../serializer/plain_text_serializer.go) writes a string and a byte slice as they are, and a scalar, an `error`, an `encoding.TextMarshaler` or a `fmt.Stringer` as its text, whole, with no newline. A map, a struct or a list is written as lines, each ending with a newline, the form the framework's error body takes for a `text/plain` client:
+
+- a map is one `key: value` line per entry in key order, the key as the map holds it, a pointer key by its address;
+- a struct is written by the fields `encoding/json` writes, under their json names and in their order: an unexported field and a `json:"-"` field are left out, `omitempty` and `omitzero` are honoured and the fields of an untagged embedded struct are promoted;
+- a value is read in this order: an `error` by its message, a `json.Marshaler` by the json it writes, decoded and written as lines, so a field its `MarshalJSON` leaves out is not written and a `time.Time` reads in RFC 3339, an `encoding.TextMarshaler` by its text, a `fmt.Stringer` by its text;
+- a nested map or struct is indented beneath its key, a list is one `- item` line per member, and a map or a list inside a list is indented beneath its `-`;
+- a pointer is written as the value it holds and is no level of its own; nil is written as nothing, a bare label or a bare `-`; a byte slice inside a value is written as its numbers;
+- a control character in a key or a value written on a line is spelled as its escape, so a value cannot end its line and write an entry of its own.
+
+The walk is bounded by [`PlainTextSerializerConfig`](../../serializer/plain_text_serializer.go), each field a `bound.Count` that takes its default when left out:
+
+| Field | Default | Rule | Unlimited |
+|---|---|---|---|
+| `MaxDepth` | 8 | 1 to 1,024 | refused, since a value may hold itself |
+| `MaxLines` | 1,024 | at least 1 | admitted |
+| `MaxBytes` | 262,144 | at least 1 | admitted |
+| `MaxMembers` | 16,384 | at least 1 | admitted |
+
+A value deeper than `MaxDepth` maps, structs and lists is written as `...`, as is a chain of more pointers than `MaxDepth`, and a body that reaches another bound ends with `...(truncated)`. `MaxBytes` counts the keys and the values, not the indentation. A bound outside its rule panics at construction, naming the field. A method that panics, and a `MarshalJSON` or `MarshalText` that fails, is answered as an error from `Serialize`, not a panic.
 
 ## Footguns & caveats
 
@@ -83,7 +105,8 @@ func serializeByAcceptHeader(acceptHeader string, value any) ([]byte, error) {
 
 - [`NewJsonSerializer`](../../serializer/serializer.go)
 - [`NewPrettyJsonSerializer`](../../serializer/serializer.go)
-- [`NewPlainTextSerializer`](../../serializer/plain_text_serializer.go)
+- [`NewPlainTextSerializer(config PlainTextSerializerConfig)`](../../serializer/plain_text_serializer.go)
+- [`type PlainTextSerializerConfig`](../../serializer/plain_text_serializer.go) — the four bounds of the lines a structured value is written as
 
 ### Manager (`serializer`)
 

@@ -29,7 +29,7 @@ func textNegotiatingRequest(t *testing.T) (melodyruntimecontract.Runtime, melody
             return melodyserializer.NewSerializerManager(
                 map[string]melodyserializercontract.Serializer{
                     melodyserializer.MimeApplicationJson: melodyserializer.NewJsonSerializer(),
-                    melodyserializer.MimeTextPlain:       melodyserializer.NewPlainTextSerializer(),
+                    melodyserializer.MimeTextPlain:       melodyserializer.NewPlainTextSerializer(melodyserializer.PlainTextSerializerConfig{}),
                 },
             )
         },
@@ -117,10 +117,10 @@ func TestPlainTextRefusalListsNestedEntriesAndTheTrace(t *testing.T) {
 func TestApiSuccessKeepsTheSerializerRenderingForATextPlainClient(t *testing.T) {
     runtimeInstance, request := textNegotiatingRequest(t)
 
-    body := responseBodyOf(t, ApiSuccess(runtimeInstance, request, nethttp.StatusOK, "ready"))
+    body := responseBodyOf(t, ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"status": "ready", "checks": []string{"database"}}))
 
-    if true == strings.HasPrefix(body, "200 ") {
-        t.Fatalf("expected the success envelope left to the serializer, got %q", body)
+    if "success: true\npayload:\n  checks:\n    - database\n  status: ready\nerrors:\n" != body {
+        t.Fatalf("expected the success envelope written by the serializer as lines under its json names, got %q", body)
     }
 }
 

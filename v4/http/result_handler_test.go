@@ -44,7 +44,7 @@ func TestNormalizeResultToResponse_JoinsRepeatedAcceptLines(t *testing.T) {
             return serializer.NewSerializerManager(
                 map[string]serializercontract.Serializer{
                     serializer.MimeApplicationJson: serializer.NewJsonSerializer(),
-                    serializer.MimeTextPlain:       serializer.NewPlainTextSerializer(),
+                    serializer.MimeTextPlain:       serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{}),
                 },
             )
         },
@@ -98,6 +98,44 @@ func TestWrapResultHandler_NormalizesAPlainStringResult(t *testing.T) {
 
     if "plain text" != readResponseBody(t, response) {
         t.Fatalf("unexpected body: %q", readResponseBody(t, response))
+    }
+}
+
+func TestWrapResultHandler_ATextPlainClientReadsLines(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    container.MustRegister[*serializer.SerializerManager](
+        serviceContainer,
+        serializer.ServiceSerializerManager,
+        func(resolver containercontract.Resolver) (*serializer.SerializerManager, error) {
+            return serializer.NewSerializerManager(
+                map[string]serializercontract.Serializer{
+                    serializer.MimeApplicationJson: serializer.NewJsonSerializer(),
+                    serializer.MimeTextPlain:       serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{}),
+                },
+            )
+        },
+        container.RegisterOptions{},
+    )
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/order", nil)
+    httpRequest.Header.Set("Accept", "text/plain")
+    request := NewRequest(httpRequest, nil, runtimeInstance, NewRequestContext("test", time.Now()))
+
+    handler := WrapResultHandler(
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
+            return map[string]any{"orderId": 7, "lines": []any{map[string]any{"sku": "a-1", "quantity": 2}}}, nil
+        },
+    )
+
+    response, err := handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    body := readResponseBody(t, response)
+    if "lines:\n  -\n    quantity: 2\n    sku: a-1\norderId: 7\n" != body {
+        t.Fatalf("expected the value written as lines under its own keys, got %q", body)
     }
 }
 

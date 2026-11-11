@@ -238,7 +238,7 @@ func (instance *Application) bootContainer() {
                 return serializer.NewSerializerManager(
                     map[string]serializercontract.Serializer{
                         "application/json": serializer.NewJsonSerializer(),
-                        "text/plain":       serializer.NewPlainTextSerializer(),
+                        "text/plain":       serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{}),
                     },
                 )
             },

@@ -8,6 +8,7 @@ The `internal` package contains framework-internal helper utilities that are **n
 
 - Small shared helpers used across Melody packages.
 - Test-only helpers under [`internal/testhelper/`](../../internal/testhelper).
+- The plain-text walk under [`internal/plaintext/`](../../internal/plaintext).
 
 ## Notable semantics
 
@@ -24,6 +25,12 @@ and the typed fast path asserted the reflect path's copy — intermittently, on 
 - `MapStringString` reports a typed-nil map as **absent**, like the strict accessors beside it.
 
 ## Subpackages
+
+### plaintext
+
+Package: [`internal/plaintext/`](../../internal/plaintext)
+
+The one walk that writes a value as lines, shared by [`PlainTextSerializer`](../../serializer/plain_text_serializer.go) and the error renderer's `text/plain` body, so a success and an error read alike. `Walk` writes entries after the lines it starts from, which count toward its line bound; `Render` writes one value on its own. A struct is read by the fields and names `encoding/json` writes ([`internal/plaintext/field.go`](../../internal/plaintext/field.go)); `Options.LabelKeys` spells every key as words for the framework's own body. ([`internal/plaintext/walk.go`](../../internal/plaintext/walk.go))
 
 ### testhelper
 

@@ -5,17 +5,15 @@ import (
     "html"
     "mime"
     nethttp "net/http"
-    "reflect"
     "sort"
     "strings"
     "time"
-    "unicode"
-    "unicode/utf8"
 
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/plaintext"
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/serializer"
@@ -197,17 +195,11 @@ func isPlainTextMediaType(contentType string) bool {
     return "text/plain" == mediaType
 }
 
-const (
-    maxPlainTextDepth   = 8
-    maxPlainTextLines   = 1024
-    maxPlainTextBytes   = 256 * 1024
-    maxPlainTextMembers = 16 * 1024
-)
-
-/* plainTextErrorResponse writes the error envelope for a text/plain client as lines: the status and the message first, then the request id, the time and every other entry in key order, the error object's own entries among them, a map indented beneath its key and a list one item per line. A plain-text serializer has no shape for a map and would print a Go map dump. */
+/* plainTextErrorResponse writes the error envelope for a text/plain client as lines: the status and the message first, then the request id, the time and every other entry in key order, the error object's own entries among them, written as the plain-text serializer writes a value, its keys spelled as words. The message is one line, a control character in it spelled as its escape, as the walk spells it in every entry. */
 func plainTextErrorResponse(statusCode int, message string, payload map[string]any, contentType string) httpcontract.Response {
-    lines := []string{fmt.Sprintf("%d %s", statusCode, message)}
-    budget := &plainTextBudget{remainingBytes: maxPlainTextBytes, remainingMembers: maxPlainTextMembers}
+    options := plaintext.DefaultOptions()
+    options.LabelKeys = true
+    walk := plaintext.NewWalk(options, []string{fmt.Sprintf("%d %s", statusCode, internal.EscapeControlCharacters(message))})
 
     remaining := make(map[string]any, len(payload))
     for key, value := range payload {
@@ -233,7 +225,7 @@ func plainTextErrorResponse(statusCode int, message string, payload map[string]a
             continue
         }
 
-        lines = appendPlainTextEntry(lines, "", leadingKey, value, 0, budget)
+        walk.Entry(leadingKey, value)
         delete(remaining, leadingKey)
     }
 
@@ -244,16 +236,10 @@ func plainTextErrorResponse(statusCode int, message string, payload map[string]a
     sort.Strings(keys)
 
     for _, key := range keys {
-        lines = appendPlainTextEntry(lines, "", key, remaining[key], 0, budget)
+        walk.Entry(key, remaining[key])
     }
 
-    if maxPlainTextLines < len(lines) {
-        lines = append(lines[:maxPlainTextLines], "...(truncated)")
-    } else if true == budget.exhausted() {
-        lines = append(lines, "...(truncated)")
-    }
-
-    response := NewResponse(statusCode, []byte(strings.Join(lines, "\n")+"\n"))
+    response := NewResponse(statusCode, []byte(strings.Join(walk.Lines(), "\n")+"\n"))
     if nil == response.headers {
         response.headers = make(nethttp.Header)
     }
@@ -272,219 +258,6 @@ func plainTextErrorResponseSafely(statusCode int, message string, payload map[st
     }()
 
     return plainTextErrorResponse(statusCode, message, payload, contentType), true
-}
-
-/* appendPlainTextEntry writes one entry and the entries nested under it; a map deeper than maxPlainTextDepth, a map that holds itself among them, is written as an ellipsis, and the walk stops adding lines once the body holds more than maxPlainTextLines or has spent its budget */
-func appendPlainTextEntry(lines []string, indent string, key string, value any, depth int, budget *plainTextBudget) []string {
-    if maxPlainTextLines < len(lines) || true == budget.exhausted() {
-        return lines
-    }
-
-    budget.count()
-    label := indent + budget.spend(plainTextLabel(key)) + ":"
-
-    if nil == value {
-        return append(lines, label)
-    }
-
-    if maxPlainTextDepth <= depth {
-        return append(lines, labelled(label, "..."))
-    }
-
-    switch typedValue := value.(type) {
-    case string:
-        return append(lines, labelled(label, budget.spend(typedValue)))
-    case error:
-        return append(lines, labelled(label, budget.spend(typedValue.Error())))
-    case fmt.Stringer:
-        return append(lines, labelled(label, budget.spend(typedValue.String())))
-    }
-
-    reflected := reflect.ValueOf(value)
-    switch reflected.Kind() {
-    case reflect.Map:
-        if reflect.String != reflected.Type().Key().Kind() {
-            break
-        }
-
-        lines = append(lines, label)
-
-        mapKeys := make([]string, 0, reflected.Len())
-        for _, mapKey := range reflected.MapKeys() {
-            mapKeys = append(mapKeys, mapKey.String())
-        }
-        sort.Strings(mapKeys)
-
-        for _, mapKey := range mapKeys {
-            lines = appendPlainTextEntry(lines, indent+"  ", mapKey, reflected.MapIndex(reflect.ValueOf(mapKey).Convert(reflected.Type().Key())).Interface(), depth+1, budget)
-        }
-
-        return lines
-    case reflect.Slice, reflect.Array:
-        if reflect.Uint8 == reflected.Type().Elem().Kind() {
-            break
-        }
-
-        lines = append(lines, label)
-        for index := 0; index < reflected.Len() && maxPlainTextLines >= len(lines) && false == budget.exhausted(); index++ {
-            lines = append(lines, indent+"  - "+plainTextValue(reflected.Index(index), depth+1, budget))
-        }
-
-        return lines
-    }
-
-    return append(lines, labelled(label, plainTextValue(reflected, depth, budget)))
-}
-
-/* labelled writes an entry on its label's line, the bare label when the value is empty */
-func labelled(label string, text string) string {
-    if "" == text {
-        return label
-    }
-
-    return label + " " + text
-}
-
-/* plainTextValue spells a value the walk does not lay out as entries. It descends maps, slices, arrays, structs, pointers and interfaces itself, to maxPlainTextDepth and maxPlainTextLines members each, because fmt has no cycle detection: a value that reaches itself through a slice or a struct would overflow the stack, which no recover catches. Every value it spells spends the body's budget, since the two bounds alone let a value reaching itself through many members be spelled a number of times exponential in the depth. */
-func plainTextValue(reflected reflect.Value, depth int, budget *plainTextBudget) string {
-    if false == reflected.IsValid() {
-        return "<nil>"
-    }
-
-    if true == budget.exhausted() {
-        return "..."
-    }
-
-    budget.count()
-
-    if true == reflected.CanInterface() {
-        switch typedValue := reflected.Interface().(type) {
-        case string:
-            return budget.spend(typedValue)
-        case error:
-            return budget.spend(typedValue.Error())
-        case fmt.Stringer:
-            return budget.spend(typedValue.String())
-        }
-    }
-
-    switch reflected.Kind() {
-    case reflect.Map, reflect.Slice, reflect.Array, reflect.Struct, reflect.Pointer, reflect.Interface:
-        if maxPlainTextDepth <= depth {
-            return "..."
-        }
-    }
-
-    switch reflected.Kind() {
-    case reflect.Pointer, reflect.Interface:
-        if true == reflected.IsNil() {
-            return "<nil>"
-        }
-
-        prefix := ""
-        if reflect.Pointer == reflected.Kind() {
-            prefix = "&"
-        }
-
-        return prefix + plainTextValue(reflected.Elem(), depth+1, budget)
-    case reflect.Map:
-        members := make([]string, 0, min(reflected.Len(), maxPlainTextLines))
-        iterator := reflected.MapRange()
-        for iterator.Next() {
-            if maxPlainTextLines <= len(members) || true == budget.exhausted() {
-                break
-            }
-
-            members = append(members, plainTextValue(iterator.Key(), depth+1, budget)+":"+plainTextValue(iterator.Value(), depth+1, budget))
-        }
-        sort.Strings(members)
-
-        if len(members) < reflected.Len() {
-            members = append(members, "...")
-        }
-
-        return "map[" + strings.Join(members, " ") + "]"
-    case reflect.Slice, reflect.Array:
-        if reflect.Uint8 == reflected.Type().Elem().Kind() {
-            break
-        }
-
-        members := make([]string, 0, min(reflected.Len(), maxPlainTextLines+1))
-        for index := 0; index < reflected.Len(); index++ {
-            if maxPlainTextLines <= index || true == budget.exhausted() {
-                members = append(members, "...")
-                break
-            }
-
-            members = append(members, plainTextValue(reflected.Index(index), depth+1, budget))
-        }
-
-        return "[" + strings.Join(members, " ") + "]"
-    case reflect.Struct:
-        members := make([]string, 0, reflected.NumField())
-        for index := 0; index < reflected.NumField(); index++ {
-            if true == budget.exhausted() {
-                members = append(members, "...")
-                break
-            }
-
-            members = append(members, budget.spend(reflected.Type().Field(index).Name)+":"+plainTextValue(reflected.Field(index), depth+1, budget))
-        }
-
-        return "{" + strings.Join(members, " ") + "}"
-    }
-
-    /* every kind left is a scalar, a channel, a func or a byte sequence, none of which can reach another value */
-    return budget.spend(fmt.Sprint(reflected))
-}
-
-/* plainTextBudget is the room one text/plain body has left: every value walked counts as a member, a value cut at the depth bound included, and every text spends its length, so the walk ends past maxPlainTextMembers or maxPlainTextBytes whatever the shape of what it walks */
-type plainTextBudget struct {
-    remainingBytes   int
-    remainingMembers int
-}
-
-func (instance *plainTextBudget) count() {
-    instance.remainingMembers--
-}
-
-/* spend answers the text and takes its length out of the budget; a text that does not fit is cut on a rune boundary and ends with an ellipsis, and nothing is answered once the budget is spent */
-func (instance *plainTextBudget) spend(text string) string {
-    if true == instance.exhausted() {
-        return "..."
-    }
-
-    if len(text) <= instance.remainingBytes {
-        instance.remainingBytes -= len(text)
-
-        return text
-    }
-
-    cut := instance.remainingBytes
-    for 0 < cut && false == utf8.RuneStart(text[cut]) {
-        cut--
-    }
-
-    instance.remainingBytes = 0
-
-    return text[:cut] + "..."
-}
-
-func (instance *plainTextBudget) exhausted() bool {
-    return 0 >= instance.remainingBytes || 0 >= instance.remainingMembers
-}
-
-/* plainTextLabel spells a camel-cased body key as words: requestId reads request id. */
-func plainTextLabel(key string) string {
-    var builder strings.Builder
-    for index, character := range key {
-        if 0 < index && true == unicode.IsUpper(character) {
-            builder.WriteRune(' ')
-        }
-        builder.WriteRune(unicode.ToLower(character))
-    }
-
-    return builder.String()
 }
 
 /* setResponseHeader sets one header on a rendered response, whose headers may be nil */
