@@ -110,18 +110,25 @@ func NewManager(storage sessioncontract.Storage, config ManagerConfig) *Manager 
     }
 }
 
-func (instance *Manager) Session(sessionId string) sessioncontract.Session {
+/* Session answers the stored session, nil when the id names none, and an error carrying exception.MarkInfrastructureFailure when the storage could not answer. */
+func (instance *Manager) Session(sessionId string) (sessioncontract.Session, error) {
     if false == isValidSessionId(sessionId) {
-        return nil
+        return nil, nil
     }
 
     data, exists, err := instance.storage.Load(sessionId)
     if nil != err {
-        exception.Panic(exception.FromError(err))
+        return nil, exception.NewError(
+            "could not load the session",
+            map[string]any{
+                "sessionRef": sessionIdLogReference(sessionId),
+            },
+            exception.MarkInfrastructureFailure(err),
+        )
     }
 
     if false == exists {
-        return nil
+        return nil, nil
     }
 
     if nil == data {
@@ -133,13 +140,14 @@ func (instance *Manager) Session(sessionId string) sessioncontract.Session {
         values:   data,
         modified: false,
         cleared:  false,
-    }
+    }, nil
 }
 
-func (instance *Manager) NewSession() sessioncontract.Session {
+/* NewSession answers a session under an id the storage does not hold; a storage that could not answer a probe is an error carrying exception.MarkInfrastructureFailure, and 128 ids in a row already held is an unmarked error. */
+func (instance *Manager) NewSession() (sessioncontract.Session, error) {
     sessionId, mintErr := instance.uniqueSessionId()
     if nil != mintErr {
-        exception.Panic(exception.FromError(mintErr))
+        return nil, mintErr
     }
 
     return &Session{
@@ -148,7 +156,7 @@ func (instance *Manager) NewSession() sessioncontract.Session {
         modified: false,
         cleared:  false,
         minted:   true,
-    }
+    }, nil
 }
 
 /* RegenerateSession rotates a session id, the defence against session fixation: the returned session carries the values under a fresh id, marked modified, and the previous entry is removed. Publishing it under http.RequestAttributeSession makes the response path store it and emit its cookie, which http.RegenerateRequestSession does. The session passed in is latched cleared, so a caller that forgets to publish the rotated one has the response path expire the cookie. An id a logout or an earlier rotation buried is refused with the error SaveSession answers for it, before anything is stored, so a copy loaded before either cannot carry its identity onto a fresh id. */
@@ -255,7 +263,17 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
         concreteSession.markStored()
     }
 
-    return saveErr
+    if nil != saveErr {
+        return exception.NewError(
+            "could not save the session",
+            map[string]any{
+                "sessionRef": sessionIdLogReference(sessionId),
+            },
+            exception.MarkInfrastructureFailure(saveErr),
+        )
+    }
+
+    return nil
 }
 
 /* DeleteSession removes the session and buries its id, holding the id's stripe across the storage's Delete as SaveSession holds it across Save, bounded by the storage's own timeouts alone. */
@@ -304,7 +322,17 @@ func (instance *Manager) deleteSessionRecordingCause(sessionId string, rotated b
         }
     }
 
-    return deleteErr
+    if nil != deleteErr {
+        return exception.NewError(
+            "could not delete the session",
+            map[string]any{
+                "sessionRef": sessionIdLogReference(sessionId),
+            },
+            exception.MarkInfrastructureFailure(deleteErr),
+        )
+    }
+
+    return nil
 }
 
 /* buriedIdRefusal answers the refusal of a write to a buried id, nil for an id that is not buried. The refusal always carries ErrSessionDeleted; a rotation carries ErrSessionRotated beside it. The session lock is held. */
@@ -456,7 +484,7 @@ func (instance *Manager) isTombstonedLocked(sessionId string) bool {
     return instance.tombstoneRetention > instance.clock.Now().Sub(deletedAt)
 }
 
-/* uniqueSessionId mints an id no stored session carries, answering the storage failure of a probe rather than swallowing it: the door with an error return hands it to its caller, the door without one panics with it. */
+/* uniqueSessionId mints an id no stored session carries, answering the storage failure of a probe marked as an infrastructure failure rather than swallowing it. */
 func (instance *Manager) uniqueSessionId() (string, error) {
     maxAttempts := 128
 
@@ -465,7 +493,7 @@ func (instance *Manager) uniqueSessionId() (string, error) {
 
         _, exists, err := instance.storage.Load(candidateId)
         if nil != err {
-            return "", exception.FromError(err)
+            return "", exception.NewError("could not probe a session id", nil, exception.MarkInfrastructureFailure(err))
         }
 
         if true == exists {

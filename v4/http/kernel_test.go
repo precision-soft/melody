@@ -24,6 +24,7 @@ import (
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -1360,25 +1361,210 @@ func (instance *loadFailingSessionStorage) CloseWithContext(closeContext context
     return nil
 }
 
-func TestKernel_SessionLoadFailureIsRecoveredIntoAnInternalServerError(t *testing.T) {
+/* erroringSessionManager answers the errors it is given from its two load doors and hands every other call to the manager it wraps */
+type erroringSessionManager struct {
+    inner              sessioncontract.Manager
+    sessionErr         error
+    sessionBesideError sessioncontract.Session
+    newSessionErr      error
+    newSessionCalls    int
+}
+
+func (instance *erroringSessionManager) Session(sessionId string) (sessioncontract.Session, error) {
+    if nil != instance.sessionErr {
+        return instance.sessionBesideError, instance.sessionErr
+    }
+
+    return instance.inner.Session(sessionId)
+}
+
+func (instance *erroringSessionManager) NewSession() (sessioncontract.Session, error) {
+    instance.newSessionCalls = instance.newSessionCalls + 1
+
+    if nil != instance.newSessionErr {
+        return nil, instance.newSessionErr
+    }
+
+    return instance.inner.NewSession()
+}
+
+func (instance *erroringSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    return instance.inner.RegenerateSession(sessionInstance)
+}
+
+func (instance *erroringSessionManager) SaveSession(sessionInstance sessioncontract.Session) error {
+    return instance.inner.SaveSession(sessionInstance)
+}
+
+func (instance *erroringSessionManager) DeleteSession(sessionId string) error {
+    return instance.inner.DeleteSession(sessionId)
+}
+
+func (instance *erroringSessionManager) CloseWithContext(closeContext context.Context) error {
+    return instance.inner.CloseWithContext(closeContext)
+}
+
+const sessionOutageTestCookieValue = "0123456789abcdef0123456789abcdef"
+
+type sessionOutageServed struct {
+    recorder          *httptest.ResponseRecorder
+    handlerCalls      int
+    handlerSawSession bool
+    terminateCalls    int
+    errorRecords      int64
+}
+
+func serveOverSessionManager(t *testing.T, sessionManager sessioncontract.Manager, path string, withCookie bool) sessionOutageServed {
+    t.Helper()
+
+    served := sessionOutageServed{}
+
     router := NewRouter()
     router.Handle(
         nethttp.MethodGet,
-        "/session-load",
+        "/page",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            served.handlerCalls = served.handlerCalls + 1
+
+            published, exists := request.Attributes().Get(RequestAttributeSession)
+            publishedSession, isSession := published.(sessioncontract.Session)
+            served.handlerSawSession = true == exists && true == isSession && false == internal.IsNilInterface(publishedSession)
+
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
     )
 
-    serviceContainer := newHttpTestContainerWithSessionStorage(&loadFailingSessionStorage{})
+    countingLogger := &errorCountingLogger{}
 
-    terminateCount := 0
+    serviceContainer := newHttpTestContainerWithSessionManager(sessionManager)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
-    dispatcher.AddListener(
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelTerminate,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
-            terminateCount = terminateCount + 1
+            served.terminateCalls = served.terminateCalls + 1
+
+            return nil
+        },
+        0,
+    )
+
+    handler := NewKernel(router, KernelConfig{UnavailableRetryAfter: bound.Of(7 * time.Second)}).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, path, nil)
+    if true == withCookie {
+        request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionOutageTestCookieValue})
+    }
+
+    served.recorder = httptest.NewRecorder()
+
+    handler.ServeHTTP(served.recorder, request)
+
+    served.errorRecords = atomic.LoadInt64(&countingLogger.errorCount)
+
+    return served
+}
+
+func TestKernel_ASessionStorageOutageAnswers503WithRetryAfter(t *testing.T) {
+    cases := map[string]struct {
+        path       string
+        withCookie bool
+    }{
+        "a routed request with a cookie":    {path: "/page", withCookie: true},
+        "a routed request without a cookie": {path: "/page", withCookie: false},
+        "an unrouted request with a cookie": {path: "/missing", withCookie: true},
+        "an unrouted request without one":   {path: "/missing", withCookie: false},
+    }
+
+    for name, testCase := range cases {
+        sessionManager := session.NewManager(&loadFailingSessionStorage{}, session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)})
+
+        served := serveOverSessionManager(t, sessionManager, testCase.path, testCase.withCookie)
+
+        if nethttp.StatusServiceUnavailable != served.recorder.Code || "7" != served.recorder.Header().Get("Retry-After") {
+            t.Fatalf("%s: expected 503 with Retry-After 7, got %d %q", name, served.recorder.Code, served.recorder.Header().Get("Retry-After"))
+        }
+
+        if 0 != served.handlerCalls {
+            t.Fatalf("%s: expected the handler not to run during a session storage outage", name)
+        }
+
+        if "" != served.recorder.Header().Get("Set-Cookie") {
+            t.Fatalf("%s: expected no cookie written during a session storage outage, got %q", name, served.recorder.Header().Get("Set-Cookie"))
+        }
+
+        if 1 != served.terminateCalls {
+            t.Fatalf("%s: expected the kernel terminate event once, got %d", name, served.terminateCalls)
+        }
+    }
+}
+
+func TestKernel_ASessionStorageOutageFilesOneErrorRecord(t *testing.T) {
+    for _, withCookie := range []bool{true, false} {
+        sessionManager := session.NewManager(&loadFailingSessionStorage{}, session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)})
+
+        served := serveOverSessionManager(t, sessionManager, "/page", withCookie)
+
+        if 1 != served.errorRecords {
+            t.Fatalf("expected one error record for the outage (cookie %v), got %d", withCookie, served.errorRecords)
+        }
+    }
+}
+
+func TestKernel_ASessionLoadErrorDoesNotFallThroughToANewSession(t *testing.T) {
+    sessionManager := &erroringSessionManager{
+        inner:      session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)}),
+        sessionErr: exception.MarkInfrastructureFailure(errors.New("session store is down")),
+    }
+
+    served := serveOverSessionManager(t, sessionManager, "/page", true)
+
+    if nethttp.StatusServiceUnavailable != served.recorder.Code {
+        t.Fatalf("expected the load error answered 503, got %d", served.recorder.Code)
+    }
+
+    if 0 != sessionManager.newSessionCalls || 0 != served.handlerCalls || "" != served.recorder.Header().Get("Set-Cookie") {
+        t.Fatalf("expected no fresh session, no handler and no cookie over a failed load, got %d mints, %d handler calls, cookie %q", sessionManager.newSessionCalls, served.handlerCalls, served.recorder.Header().Get("Set-Cookie"))
+    }
+}
+
+func TestKernel_AnUnmarkedManagerErrorAnswers500(t *testing.T) {
+    sessionManager := &erroringSessionManager{
+        inner:         session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)}),
+        newSessionErr: errors.New("could not generate unique session id"),
+    }
+
+    served := serveOverSessionManager(t, sessionManager, "/page", false)
+
+    if nethttp.StatusInternalServerError != served.recorder.Code || "" != served.recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected an unmarked manager error answered 500 with no Retry-After, got %d %q", served.recorder.Code, served.recorder.Header().Get("Retry-After"))
+    }
+
+    if 0 != served.handlerCalls || "" != served.recorder.Header().Get("Set-Cookie") {
+        t.Fatalf("expected neither the handler nor a cookie over a failed mint")
+    }
+}
+
+func TestKernel_ASessionStorageOutageReachesTheExceptionListenersRecordedOnce(t *testing.T) {
+    router := NewRouter()
+
+    countingLogger := &errorCountingLogger{}
+
+    sessionManager := session.NewManager(&loadFailingSessionStorage{}, session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)})
+    serviceContainer := newHttpTestContainerWithSessionManager(sessionManager)
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
+
+    listenerCalls := 0
+    listenerSawUnavailable := false
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelException,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            exceptionEvent := eventValue.Payload().(*KernelExceptionEvent)
+
+            listenerCalls = listenerCalls + 1
+            listenerSawUnavailable = exception.AnswersUnavailable(exceptionEvent.Err())
+
+            exceptionEvent.SetResponse(TextResponse(nethttp.StatusTeapot, "answered by the application"))
 
             return nil
         },
@@ -1388,15 +1574,97 @@ func TestKernel_SessionLoadFailureIsRecoveredIntoAnInternalServerError(t *testin
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
     recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/page", nil))
 
-    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/session-load", nil))
-
-    if nethttp.StatusInternalServerError != recorder.Code {
-        t.Fatalf("expected a session-store outage to produce a 500, got %d", recorder.Code)
+    if 1 != listenerCalls || false == listenerSawUnavailable {
+        t.Fatalf("expected the application's listener to meet the marked outage once, got %d calls, unavailable %v", listenerCalls, listenerSawUnavailable)
     }
 
-    if 1 != terminateCount {
-        t.Fatalf("expected the kernel terminate event to fire once for a failed session load, got %d", terminateCount)
+    if nethttp.StatusTeapot != recorder.Code {
+        t.Fatalf("expected the listener's response served, got %d", recorder.Code)
+    }
+
+    if 1 != atomic.LoadInt64(&countingLogger.errorCount) {
+        t.Fatalf("expected the kernel to file the outage once before the listeners, got %d records", atomic.LoadInt64(&countingLogger.errorCount))
+    }
+}
+
+/* typedNilErrorSessionManager answers its manager's sessions beside a typed-nil error, which a bare comparison takes for an error */
+type typedNilErrorSessionManager struct {
+    sessioncontract.Manager
+}
+
+func (instance *typedNilErrorSessionManager) Session(sessionId string) (sessioncontract.Session, error) {
+    var typedNil *exception.Error
+
+    sessionInstance, _ := instance.Manager.Session(sessionId)
+
+    return sessionInstance, typedNil
+}
+
+func (instance *typedNilErrorSessionManager) NewSession() (sessioncontract.Session, error) {
+    var typedNil *exception.Error
+
+    sessionInstance, _ := instance.Manager.NewSession()
+
+    return sessionInstance, typedNil
+}
+
+func TestKernel_ATypedNilErrorBesideASessionIsNoError(t *testing.T) {
+    sessionManager := &typedNilErrorSessionManager{
+        Manager: session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)}),
+    }
+
+    for _, withCookie := range []bool{true, false} {
+        served := serveOverSessionManager(t, sessionManager, "/page", withCookie)
+
+        if nethttp.StatusOK != served.recorder.Code || 1 != served.handlerCalls || false == served.handlerSawSession || 0 != served.errorRecords {
+            t.Fatalf("expected a typed-nil error read as none and a session published (cookie %v), got %d, %d handler calls, session %v, %d records", withCookie, served.recorder.Code, served.handlerCalls, served.handlerSawSession, served.errorRecords)
+        }
+    }
+}
+
+func TestKernel_ASessionAnsweredBesideALoadErrorIsNotSavedWhenTheResponsePathPanics(t *testing.T) {
+    innerManager := session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)})
+
+    halfMade := mustSession(innerManager.NewSession())
+    halfMade.Set("user", "alice")
+
+    sessionManager := &erroringSessionManager{
+        inner:              innerManager,
+        sessionErr:         exception.MarkInfrastructureFailure(errors.New("session store is down")),
+        sessionBesideError: halfMade,
+    }
+
+    router := NewRouter()
+    serviceContainer := newHttpTestContainerWithSessionManager(sessionManager)
+
+    responsePanics := true
+    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        kernelcontract.EventKernelResponse,
+        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            if true == responsePanics {
+                responsePanics = false
+
+                /* an exit error is the panic the dispatcher re-raises, so it reaches the kernel's recovery with the session it holds */
+                panic(exception.NewExitError(1, exception.NewError("response listener exited", nil, nil)))
+            }
+
+            return nil
+        },
+        0,
+    )
+
+    handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/page", nil)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionOutageTestCookieValue})
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, request)
+
+    if "" != recorder.Header().Get("Set-Cookie") {
+        t.Fatalf("expected the session answered beside the error never saved nor written, got %q", recorder.Header().Get("Set-Cookie"))
     }
 }
 
@@ -1411,7 +1679,7 @@ func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) 
         nethttp.MethodGet,
         "/republish",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            replacement := sessionManager.NewSession()
+            replacement := mustSession(sessionManager.NewSession())
             replacement.Set("userId", "u-1")
 
             request.Attributes().Set(RequestAttributeSession, replacement)
@@ -1505,11 +1773,11 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
         t.Fatalf("expected a live session cookie for the republished rotation, got MaxAge %d", cookies[0].MaxAge)
     }
 
-    if nil != sessionManager.Session(preRotationId) {
+    if nil != mustSession(sessionManager.Session(preRotationId)) {
         t.Fatalf("expected the pre-rotation session to be gone from storage")
     }
 
-    reloaded := sessionManager.Session(rotatedId)
+    reloaded := mustSession(sessionManager.Session(rotatedId))
     if nil == reloaded {
         t.Fatalf("expected the rotated session to be stored")
     }
@@ -1523,7 +1791,7 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
-    existingSession := sessionManager.NewSession()
+    existingSession := mustSession(sessionManager.NewSession())
     existingSession.Set("userId", "anonymous")
 
     saveErr := sessionManager.SaveSession(existingSession)
@@ -1582,7 +1850,7 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
         t.Fatalf("expected a clearing cookie so a forgotten republish logs the client out instead of stranding it on a deleted session, got MaxAge %d", cookies[0].MaxAge)
     }
 
-    if nil != sessionManager.Session(existingId) {
+    if nil != mustSession(sessionManager.Session(existingId)) {
         t.Fatalf("expected the pre-rotation session to be gone from storage")
     }
 }
@@ -2038,13 +2306,13 @@ type typedNilReturningSessionManager struct {
 }
 
 /* Session reports "no such session" the way a careless implementation does: by returning a nil pointer of its own session type, which is not equal to nil once it is carried in the interface. */
-func (instance *typedNilReturningSessionManager) Session(sessionId string) sessioncontract.Session {
+func (instance *typedNilReturningSessionManager) Session(sessionId string) (sessioncontract.Session, error) {
     var typedNil *session.Session
 
-    return typedNil
+    return typedNil, nil
 }
 
-func (instance *typedNilReturningSessionManager) NewSession() sessioncontract.Session {
+func (instance *typedNilReturningSessionManager) NewSession() (sessioncontract.Session, error) {
     return instance.delegate.NewSession()
 }
 
@@ -2458,11 +2726,11 @@ type failingSaveSessionManager struct {
     inner sessioncontract.Manager
 }
 
-func (instance *failingSaveSessionManager) Session(sessionId string) sessioncontract.Session {
+func (instance *failingSaveSessionManager) Session(sessionId string) (sessioncontract.Session, error) {
     return instance.inner.Session(sessionId)
 }
 
-func (instance *failingSaveSessionManager) NewSession() sessioncontract.Session {
+func (instance *failingSaveSessionManager) NewSession() (sessioncontract.Session, error) {
     return instance.inner.NewSession()
 }
 

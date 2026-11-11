@@ -81,11 +81,11 @@ func TestRegenerateRequestSession_RotatesAndRepublishesInOneCall(t *testing.T) {
         t.Fatalf("expected a live session cookie, got MaxAge %d", cookies[0].MaxAge)
     }
 
-    if nil != sessionManager.Session(preRotationId) {
+    if nil != mustSession(sessionManager.Session(preRotationId)) {
         t.Fatalf("expected the pre-rotation session to be gone from storage")
     }
 
-    reloaded := sessionManager.Session(rotatedId)
+    reloaded := mustSession(sessionManager.Session(rotatedId))
     if nil == reloaded {
         t.Fatalf("expected the rotated session to be stored")
     }
@@ -126,7 +126,7 @@ func TestRegenerateRequestSession_ReturnsErrorWhenTheSessionManagerIsNotRegister
 
     request.Attributes().Set(
         RequestAttributeSession,
-        session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.UnlimitedDuration()}).NewSession(),
+        mustSession(session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.UnlimitedDuration()}).NewSession()),
     )
 
     rotated, err := RegenerateRequestSession(request)
@@ -143,7 +143,7 @@ func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *t
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
-    existingSession := sessionManager.NewSession()
+    existingSession := mustSession(sessionManager.NewSession())
     existingSession.Set("userId", "anonymous")
 
     saveErr := sessionManager.SaveSession(existingSession)
@@ -205,7 +205,7 @@ func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *t
         t.Fatalf("expected the rotated-away id not to be re-issued to the client")
     }
 
-    if nil != sessionManager.Session(existingId) {
+    if nil != mustSession(sessionManager.Session(existingId)) {
         t.Fatalf("expected the rotated-away id to stay gone from storage instead of being re-created under the authenticated identity")
     }
 }
@@ -237,7 +237,7 @@ func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
-    existingSession := sessionManager.NewSession()
+    existingSession := mustSession(sessionManager.NewSession())
     existingSession.Set("userId", "u-7")
 
     if saveErr := sessionManager.SaveSession(existingSession); nil != saveErr {
@@ -293,12 +293,12 @@ func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan
             continue
         }
 
-        if stored := sessionManager.Session(cookie.Value); nil != stored {
+        if stored := mustSession(sessionManager.Session(cookie.Value)); nil != stored {
             t.Fatalf("expected no live session cookie, got one naming a stored session holding userId %q", stored.String("userId"))
         }
     }
 
-    if nil != sessionManager.Session(existingId) {
+    if nil != mustSession(sessionManager.Session(existingId)) {
         t.Fatalf("expected the logged-out session to stay gone")
     }
 }

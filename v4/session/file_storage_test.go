@@ -1396,7 +1396,7 @@ func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *t
 
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    if nil != manager.Session(sessionId) {
+    if nil != mustSession(manager.Session(sessionId)) {
         t.Fatalf("expected the manager to answer no session instead of panicking")
     }
 }

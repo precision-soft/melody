@@ -9,6 +9,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/http"
@@ -20,6 +21,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/session"
+    sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
 const (
@@ -523,7 +525,7 @@ func TestLogoutDoor_EndsTheSessionEvenWhenTheHandlerDidNot(t *testing.T) {
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
     sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
-    live := sessionManager.NewSession()
+    live := mustSession(sessionManager.NewSession())
     live.Set("identity", "u1")
     if saveErr := sessionManager.SaveSession(live); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
@@ -545,7 +547,7 @@ func TestLogoutDoor_EndsTheSessionEvenWhenTheHandlerDidNot(t *testing.T) {
         t.Fatalf("expected the cookie expired, got %+v", cookie)
     }
 
-    if stored := sessionManager.Session(live.Id()); false == internal.IsNilInterface(stored) {
+    if stored := mustSession(sessionManager.Session(live.Id())); false == internal.IsNilInterface(stored) {
         t.Fatalf("expected the session gone, got %+v", stored)
     }
 
@@ -582,7 +584,7 @@ func TestLogoutDoor_AFailedSuccessListenerStillEndsTheSession(t *testing.T) {
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
     sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
-    live := sessionManager.NewSession()
+    live := mustSession(sessionManager.NewSession())
     live.Set("identity", "u1")
     if saveErr := sessionManager.SaveSession(live); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
@@ -599,7 +601,7 @@ func TestLogoutDoor_AFailedSuccessListenerStillEndsTheSession(t *testing.T) {
         t.Fatalf("expected the listener's error answered, got %d", recorder.Code)
     }
 
-    if stored := sessionManager.Session(live.Id()); false == internal.IsNilInterface(stored) {
+    if stored := mustSession(sessionManager.Session(live.Id())); false == internal.IsNilInterface(stored) {
         t.Fatalf("expected the session gone, got %+v", stored)
     }
 }
@@ -906,5 +908,47 @@ func TestLoginDoor_AHandlerThatCouldNotReachItsStoreIsRefusedWith503AndNoFailedS
     unmarked.login.err = errors.New("handler bug")
     if refused := unmarked.serve(t, nethttp.MethodPost, doorLoginPath, nil); nethttp.StatusInternalServerError != refused.Code || 1 != *unmarked.failures {
         t.Fatalf("expected an unmarked handler error 500 with its failure event, got %d, %d failures", refused.Code, *unmarked.failures)
+    }
+}
+
+/* rotationFailingSessionManager answers every door of the manager it wraps except the rotation, which meets a storage that could not answer */
+type rotationFailingSessionManager struct {
+    sessioncontract.Manager
+}
+
+func (instance *rotationFailingSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    return nil, exception.MarkInfrastructureFailure(exception.NewError("session store is down", nil, nil))
+}
+
+func TestLoginDoor_ARotationStorageOutageIsRefused503BeforeTheHandler(t *testing.T) {
+    authenticator := &doorAuthenticator{token: NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)}
+
+    fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.LoginAuthenticator = authenticator
+    })
+
+    serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
+    serviceContainer.MustOverrideProtectedInstance(
+        session.ServiceSessionManager,
+        &rotationFailingSessionManager{Manager: session.SessionMustFromContainer(t.Context(), serviceContainer)},
+        container.OverrideOptions{},
+    )
+
+    request := httptest.NewRequest(nethttp.MethodPost, doorLoginPath, strings.NewReader(""))
+    request.Header.Set("Accept", "application/json")
+
+    recorder := httptest.NewRecorder()
+    fixture.kernel.httpKernel.ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "5" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with the kernel's Retry-After, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+
+    if 0 != fixture.login.calls || 0 != *fixture.failures || 0 != *fixture.successes {
+        t.Fatalf("expected neither the handler nor a sign-in event, got %d calls, %d failures, %d successes", fixture.login.calls, *fixture.failures, *fixture.successes)
+    }
+
+    if "" != recorder.Header().Get("Set-Cookie") {
+        t.Fatalf("expected no session cookie on the refused sign-in, got %q", recorder.Header().Get("Set-Cookie"))
     }
 }

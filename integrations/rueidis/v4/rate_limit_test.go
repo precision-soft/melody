@@ -509,3 +509,41 @@ func (instance *rateLimiterCyclicError) Error() string {
 func (instance *rateLimiterCyclicError) Unwrap() error {
     return instance.next
 }
+
+func TestRateLimiter_AStoreFailureIsReturnedMarked(t *testing.T) {
+    for _, failureMode := range []RateLimiterFailureMode{FailureModeClosed, FailureModeOpen} {
+        limiter := NewRateLimiter(closedTestClient(t), RateLimiterConfig{Limit: 100, Window: time.Minute, FailureMode: failureMode})
+
+        allowed, allowErr := limiter.AllowWithRuntime(rateLimiterTestRuntime(), "failure:marked")
+        if false == exception.IsInfrastructureFailure(allowErr) {
+            t.Fatalf("%s: expected the store failure marked, got %v", failureMode, allowErr)
+        }
+
+        if (FailureModeOpen == failureMode) != allowed {
+            t.Fatalf("%s: expected the failure-mode answer, got allowed=%v", failureMode, allowed)
+        }
+    }
+}
+
+func TestRateLimiter_TheCallersOwnEndIsNotMarked(t *testing.T) {
+    limiter := &RateLimiter{failureMode: FailureModeClosed}
+
+    cancelled := limiter.allowFailure(context.Background(), "key", context.Canceled)
+    if nil == cancelled || true == exception.IsInfrastructureFailure(cancelled) {
+        t.Fatalf("expected the caller's cancellation unmarked, got %v", cancelled)
+    }
+
+    endedContext, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+    defer cancel()
+    <-endedContext.Done()
+
+    deadline := limiter.allowFailure(endedContext, "key", context.DeadlineExceeded)
+    if nil == deadline || true == exception.IsInfrastructureFailure(deadline) {
+        t.Fatalf("expected the caller's own deadline unmarked, got %v", deadline)
+    }
+
+    callTimeout := limiter.allowFailure(context.Background(), "key", context.DeadlineExceeded)
+    if false == exception.IsInfrastructureFailure(callTimeout) {
+        t.Fatalf("expected the call timeout of a slow store marked, got %v", callTimeout)
+    }
+}

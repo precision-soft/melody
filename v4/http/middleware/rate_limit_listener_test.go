@@ -425,3 +425,46 @@ func TestRegisterRateLimitRequestListener_AResponseBesideALimitErrorIsClosed(t *
         t.Fatalf("expected the discarded body closed once, got %d", body.closed)
     }
 }
+
+func TestRateLimitGate_AMarkedDenialRefusesWithTheMarkedErrorAndSkipsTheLimitHandler(t *testing.T) {
+    storeErr := exception.MarkInfrastructureFailure(exception.NewError("store unreachable", nil, nil))
+
+    limitHandlerCalls := 0
+    gate := NewRateLimitGate(&fakeRuntimeRateLimiter{allowed: false, err: storeErr}, RateLimitConfig{
+        OnLimitExceeded: func(request httpcontract.Request) (httpcontract.Response, error) {
+            limitHandlerCalls++
+
+            return nil, exception.TooManyRequests("too many")
+        },
+    })
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+    requestEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+
+    if false == gate.Apply(runtimeInstance, requestEvent) {
+        t.Fatalf("expected the marked denial to stop the request")
+    }
+
+    if false == exception.AnswersUnavailable(requestEvent.Refusal()) || false == errors.Is(requestEvent.Refusal(), storeErr) || nil != requestEvent.Response() {
+        t.Fatalf("expected the marked error as the refusal, got %v, %#v", requestEvent.Refusal(), requestEvent.Response())
+    }
+
+    if 0 != limitHandlerCalls {
+        t.Fatalf("expected the limit handler not to run for an outage, got %d calls", limitHandlerCalls)
+    }
+}
+
+func TestRateLimitGate_AnUnmarkedDenialBesideAnErrorStays429(t *testing.T) {
+    gate := NewRateLimitGate(&fakeRuntimeRateLimiter{allowed: false, err: exception.NewError("store unreachable", nil, nil)}, RateLimitConfig{})
+
+    runtimeInstance := newRateLimitListenerTestRuntime()
+    requestEvent := newRateLimitListenerTestRequestEvent(runtimeInstance)
+
+    if false == gate.Apply(runtimeInstance, requestEvent) {
+        t.Fatalf("expected the denial to stop the request")
+    }
+
+    if httpException := exception.AsHttpException(requestEvent.Refusal()); nil == httpException || nethttp.StatusTooManyRequests != httpException.StatusCode() {
+        t.Fatalf("expected an unmarked error beside a denial to stay 429, got %v", requestEvent.Refusal())
+    }
+}

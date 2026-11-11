@@ -3,9 +3,11 @@ package contract
 import "context"
 
 type Manager interface {
-    Session(sessionId string) Session
+    /* Session answers the stored session, nil when the id names none, and an error when the storage could not answer; an implementation marks a storage outage with exception.MarkInfrastructureFailure, which the http kernel answers 503 with Retry-After. */
+    Session(sessionId string) (Session, error)
 
-    NewSession() Session
+    /* NewSession answers a session under an id the storage does not hold, and an error when the storage could not say, marked as Session marks it. */
+    NewSession() (Session, error)
 
     SaveSession(session Session) error
 

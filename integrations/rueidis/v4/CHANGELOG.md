@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `rate_limit.go`: **Breaking**: a store failure is returned marked with `exception.MarkInfrastructureFailure` under both failure modes, so under the closed mode the fourth major's rate-limit middleware and `RateLimitGate` answer the denial `503 service unavailable` with the kernel's `Retry-After`, where they answered `429` through `OnLimitExceeded`; the caller's own cancellation or deadline is not marked and keeps its answer, and the open mode serves the request as before.
 - `cache/module.go`: **Behavioural change**: `RegisterServices` refuses a `Backend` configuration with no client, naming `ModuleConfig.Backend`, where it registered nothing; an empty `ModuleConfig{}` still registers nothing.
 - `module.go`: **Behavioural change**: `RegisterServices` refuses `AsLocker` or `AsTokenStore` with no client, and `Locker` or `TokenStore` set with its flag off, naming the field, where it registered nothing.
 - `cache/backend.go`: **Behavioural change**: the context-less `Clear` and `ClearByPrefix` spend `BackendConfig.CommandTimeout` on each `SCAN` and `DEL` round trip, so the size of a namespace is not capped by it, as the third major's optional timeout capped it over the whole walk; the `Ctx` doors keep the caller's one context over the walk.

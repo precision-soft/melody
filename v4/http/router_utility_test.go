@@ -33,9 +33,13 @@ type stubSessionManager struct {
     deleteErr    error
 }
 
-func (instance *stubSessionManager) Session(sessionId string) contract.Session { return nil }
+func (instance *stubSessionManager) Session(sessionId string) (contract.Session, error) {
+    return nil, nil
+}
 
-func (instance *stubSessionManager) NewSession() contract.Session { return nil }
+func (instance *stubSessionManager) NewSession() (contract.Session, error) {
+    return nil, nil
+}
 
 func (instance *stubSessionManager) RegenerateSession(sessionInstance contract.Session) (contract.Session, error) {
     return nil, nil

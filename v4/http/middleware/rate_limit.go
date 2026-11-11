@@ -577,7 +577,12 @@ func RateLimitMiddleware(limiter httpcontract.RateLimiter, config RateLimitConfi
 
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            allowed := allowRequestUnderLimit(settings, runtimeInstance, request)
+            allowed, unavailableErr := allowRequestUnderLimit(settings, runtimeInstance, request)
+
+            /* a denial from a store that could not answer is the limiter's outage, not the client's budget: it is answered 503 with Retry-After and the limit handler is not called */
+            if nil != unavailableErr {
+                return nil, unavailableErr
+            }
 
             if false == allowed {
                 response, limitErr := settings.onLimitExceeded(request)
@@ -679,13 +684,13 @@ func defaultOnLimitExceeded(request httpcontract.Request) (httpcontract.Response
     return nil, exception.TooManyRequests("Rate limit exceeded. Please try again later.")
 }
 
-/* allowRequestUnderLimit is the metering step the middleware and the listener doors share: the key is extracted, the limiter asked, and a store failure reported once, unless the limiter already marked it logged. The caller's own cancellation is recorded at warning. The returned value already reflects the limiter's failure policy. */
-func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance runtimecontract.Runtime, request httpcontract.Request) bool {
+/* allowRequestUnderLimit is the metering step the middleware and the listener doors share: the key is extracted, the limiter asked, and a store failure reported once, unless the limiter already marked it logged. The caller's own cancellation is recorded at warning. The returned value already reflects the limiter's failure policy; a denial whose error is answered as unavailable is returned beside it, marked logged once recorded, and an unmarked error beside a denial stays a 429. */
+func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (bool, error) {
     key := settings.keyExtractor(request)
 
     runtimeLimiter, isRuntimeLimiter := settings.limiter.(httpcontract.RuntimeRateLimiter)
     if false == isRuntimeLimiter {
-        return settings.limiter.Allow(key)
+        return settings.limiter.Allow(key), nil
     }
 
     allowed, allowErr := runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
@@ -703,8 +708,14 @@ func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance runtimec
                     exception.LogContext(allowErr, exception.LogContextConfig{Extra: exceptioncontract.Context{"key": key}}),
                 )
             }
+
+            allowErr = exception.MarkLogged(allowErr)
         }
     }
 
-    return allowed
+    if false == allowed && true == exception.AnswersUnavailable(allowErr) {
+        return false, allowErr
+    }
+
+    return allowed, nil
 }

@@ -57,11 +57,20 @@ type RateLimitGate struct {
     settings rateLimitSettings
 }
 
-/* Apply charges the request and reports whether it was over budget, in which case the event already carries the answer or the refusal. */
+/* Apply charges the request and reports whether it stops it, over budget or because a store could not answer, in which case the event already carries the answer or the refusal. */
 func (instance *RateLimitGate) Apply(runtimeInstance runtimecontract.Runtime, requestEvent *http.KernelRequestEvent) bool {
     request := requestEvent.Request()
 
-    if true == allowRequestUnderLimit(instance.settings, runtimeInstance, request) {
+    allowed, unavailableErr := allowRequestUnderLimit(instance.settings, runtimeInstance, request)
+
+    /* a denial from a store that could not answer is refused with the marked error, 503 with Retry-After, and the limit handler is not called */
+    if nil != unavailableErr {
+        requestEvent.Refuse(unavailableErr)
+
+        return true
+    }
+
+    if true == allowed {
         return false
     }
 

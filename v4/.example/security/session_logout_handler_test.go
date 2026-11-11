@@ -20,7 +20,7 @@ func TestSessionLogoutHandlerLeavesEndingTheSessionToTheDoor(t *testing.T) {
 
     manager := melodysession.NewManager(storage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
 
-    sessionInstance := manager.NewSession()
+    sessionInstance := mustSession(manager.NewSession())
     sessionInstance.Set(SessionKeySecurityUserId, "user-1")
     sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_USER"})
 

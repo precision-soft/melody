@@ -188,7 +188,7 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
     }
 
     if 0 != entry.ExpiresAt && instance.clock.Now().UnixNano() >= entry.ExpiresAt {
-        /* the flush drops the lapsed entry, and its failure is not returned: this load's answer is settled, and an error would make Manager.Session panic where a client without a cookie is served a fresh session */
+        /* the flush drops the lapsed entry, and its failure is not returned: this load's answer is settled, and an error would refuse the request 503 where a client without a cookie is served a fresh session */
         _ = instance.flushLocked()
 
         return nil, false, nil

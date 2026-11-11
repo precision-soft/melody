@@ -30,7 +30,7 @@ func TestSnapshot_AnswersTheSessionsOwnSnapshot(t *testing.T) {
 func TestSnapshot_ReadsTheFrameworkSession(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.UnlimitedDuration()})
 
-    sessionInstance := manager.NewSession()
+    sessionInstance := mustSession(manager.NewSession())
     sessionInstance.Set("key", "value")
 
     values, modified, cleared := Snapshot(sessionInstance)

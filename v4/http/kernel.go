@@ -544,16 +544,31 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, panickedResponse, sessionManager, sessionInstance, requestLogger, eventDispatcher)
         }()
 
-        /* the session is loaded after the recovery defer is installed and must stay below it: Session and NewSession turn a storage outage into a panic, which above the guard escapes ServeHttp with no response */
+        /* the session is loaded after the recovery defer is installed and must stay below it, since a replaceable manager may panic, which above the guard escapes ServeHttp with no response */
         sessionManager = session.SessionMustFromContainer(request.Context(), serviceContainer)
+
+        var sessionLoadErr error
 
         cookie, _ := request.Cookie(session.SessionCookieName)
         if nil != cookie {
-            sessionInstance = sessionManager.Session(cookie.Value)
+            sessionInstance, sessionLoadErr = sessionManager.Session(cookie.Value)
         }
-        /* IsNilInterface, since a replaceable manager may answer "not found" with a typed nil, which a bare comparison takes for a live session */
-        if true == internal.IsNilInterface(sessionInstance) {
-            sessionInstance = sessionManager.NewSession()
+        /* IsNilInterface on both, since a replaceable manager may answer "not found" with a typed-nil session, which a bare comparison takes for a live one, and "no error" with a typed-nil error, which it takes for an error */
+        if true == internal.IsNilInterface(sessionLoadErr) && true == internal.IsNilInterface(sessionInstance) {
+            sessionInstance, sessionLoadErr = sessionManager.NewSession()
+        }
+
+        /* a session the manager could not load or mint refuses the request before the router: a marked storage outage is answered 503 with Retry-After, any other error 500, and the kernel publishes, saves and writes no session */
+        if false == internal.IsNilInterface(sessionLoadErr) {
+            sessionInstance = nil
+
+            reportedErr := recordExceptionOccurrence(requestLogger, melodyRequest, sessionLoadErr)
+
+            finalResponse = instance.raiseException(runtimeInstance, melodyRequest, reportedErr, requestLogger, eventDispatcher, debugMode)
+
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, nil, requestLogger, eventDispatcher)
+
+            return
         }
 
         melodyRequest.Attributes().Set(RequestAttributeSession, sessionInstance)

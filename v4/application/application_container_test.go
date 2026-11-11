@@ -354,7 +354,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTtlToTheManager(t *tes
 
     manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
 
-    sessionInstance := manager.NewSession()
+    sessionInstance := mustSession(manager.NewSession())
     sessionInstance.Set("key", "value")
 
     saveErr := manager.SaveSession(sessionInstance)
@@ -407,13 +407,13 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
 
     manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
 
-    sessionInstance := manager.NewSession()
+    sessionInstance := mustSession(manager.NewSession())
     sessionInstance.Set("identity", "alice")
     if saveErr := manager.SaveSession(sessionInstance); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    inFlightView := manager.Session(sessionInstance.Id())
+    inFlightView := mustSession(manager.Session(sessionInstance.Id()))
     if nil == inFlightView {
         t.Fatalf("expected the session to load")
     }
@@ -457,7 +457,7 @@ func TestApplicationRegisterHttpSession_HandsAnUnlimitedTtlToTheStorageAsNoExpir
 
     manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
 
-    sessionInstance := manager.NewSession()
+    sessionInstance := mustSession(manager.NewSession())
     sessionInstance.Set("key", "value")
 
     saveErr := manager.SaveSession(sessionInstance)
@@ -1207,4 +1207,13 @@ func TestBootContainer_TheFrameworkProvidersResolveTheirKernelValues(t *testing.
             }
         }
     }
+}
+
+/* mustSession hands on the session a manager door answered, panicking with the error it answered instead */
+func mustSession(sessionInstance sessioncontract.Session, sessionErr error) sessioncontract.Session {
+    if nil != sessionErr {
+        panic(sessionErr)
+    }
+
+    return sessionInstance
 }

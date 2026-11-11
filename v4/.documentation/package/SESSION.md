@@ -54,9 +54,16 @@ func updateSession(
 ) error {
     manager := session.SessionMustFromContainer(ctx, serviceContainer)
 
-    sessionInstance := manager.Session(sessionId)
+    sessionInstance, loadErr := manager.Session(sessionId)
+    if nil != loadErr {
+        return loadErr
+    }
+
     if nil == sessionInstance {
-        sessionInstance = manager.NewSession()
+        sessionInstance, loadErr = manager.NewSession()
+        if nil != loadErr {
+            return loadErr
+        }
     }
 
     sessionInstance.Set("userId", "u-123")
@@ -106,7 +113,8 @@ The returned session is a **new object marked modified**, and the one passed in 
 - `ManagerConfig.Ttl` is a [`bound.Duration`](../../bound/limit.go): left out it is 24 hours, a value below one second **panics** at construction naming the field — such a session lapses before the client can ever come back with its cookie, and zero or a negative value is not a way to ask for no expiry — and `bound.UnlimitedDuration()` is the explicit way to ask for sessions that never lapse, which the in-process storage cannot afford on a public path.
 - **The session `RegenerateSession` returns must be republished on `RequestAttributeSession`** — [`http.RegenerateRequestSession`](../../http/session.go) does it for you, and is what a handler should call. The response path re-reads that attribute to decide what to save. A forgotten republish does not merely skip the rotation: the session that went in is latched **out of use**, so the response path takes the clearing branch, expires the browser cookie and the client is cleanly logged out, receiving a fresh session on its next request. Without that clearing the client would be left presenting an id `RegenerateSession` had already deleted, with no `Set-Cookie` to correct it — a login that loops back to the form on every attempt with nothing ever stored. Being logged out is the safe failure, not the intended outcome.
 - Write the authenticated identity to the session `RegenerateSession` **returns**. The one that went in is cleared, and `Clear` latches, so a rotated-away session cannot be resurrected by whatever is written to it afterwards: the response path still deletes the old id and emits the clearing cookie. A **foreign** `Session` implementation is cleared through its own `Clear`, which may or may not latch, so an application supplying its own `Session` should give it the same behaviour or avoid writing to the rotated-away object.
-- `RegenerateSession` **panics** rather than returning an error when storage fails while probing for a unique id, matching [`NewSession`](../../session/manager.go) — both mint through the same helper. The returned `error` covers a nil session, a malformed incoming id, an id a logout or an earlier rotation already buried, and a failure to remove the previous entry — that last path is the one the fail-safe depends on: a failed delete whose entry is still there deliberately leaves the caller a session it can keep using, while one whose entry a fresh read says is gone buries the id, so the copy in hand cannot write the ended session back. The fresh id is minted *before* the previous entry is removed, so such a failure leaves the session still in use intact.
+- **A storage that cannot answer is an error, never a panic.** [`Manager.Session`](../../session/manager.go) and [`NewSession`](../../session/manager.go) answer `nil` and the storage's error marked with [`exception.MarkInfrastructureFailure`](../../exception/infrastructure_failure.go); `SaveSession`, `DeleteSession` and `RegenerateSession` mark every error of the storage the same way, a full storage's refusal included, the storage's own error kept in the chain. 128 minted ids in a row already held is an unmarked error. The http kernel answers a load or mint failure before the router: a marked one `503` with the kernel's `Retry-After`, any other `500`, the handler not called and no cookie written. A save that fails in the response path stays the empty `500` with no cookie, since the handler already ran.
+- `RegenerateSession` mints the fresh id through the helper `NewSession` mints through, so a storage that fails while probing is the marked error. The returned `error` also covers a nil session, a malformed incoming id, an id a logout or an earlier rotation already buried, and a failure to remove the previous entry — that last path is the one the fail-safe depends on: a failed delete whose entry is still there deliberately leaves the caller a session it can keep using, while one whose entry a fresh read says is gone buries the id, so the copy in hand cannot write the ended session back. The fresh id is minted *before* the previous entry is removed, so such a failure leaves the session still in use intact.
 - Rotation carries values over with `Session.All()`, which copies maps and slices all the way down. A value of any other kind — a pointer, or a struct holding one — is still shared between the old and the new session object, and between the concurrent requests that loaded the same session; the old object is discarded, so this is normally invisible, but a pointer put into a session is shared state and mutating it concurrently is a data race the session's own lock cannot cover.
 - [`FileStorage`](../../session/file_storage.go) is recommended for development only; production deployments should use a dedicated session backend. Five things follow from how it is built, and all five are why: it reads its snapshot **once**, at construction, and every write rewrites the whole file, so two processes pointed at one path erase each other's sessions; **that whole-file rewrite is also what it costs**, since every `Save`, every `Delete` that removes an entry and every `Load` that finds a lapsed entry re-encodes and `fsync`s the entire map — measured at ~6.7ms per save over 100 sessions, ~9.1ms over 1 000 and ~30ms over 10 000, which is a ceiling of a few dozen writes a second on a store that has been up for a while, and the number of sessions it is paying for is everyone's, not the caller's; a handle given as the `File` of [`NewFileStorage`](../../session/file_storage.go) must not be shared with another writer — each write rewrites the whole snapshot from offset zero and truncates
   to its own length, so two writers interleave whole-file rewrites with no coordination — and must not be opened for appending, which is refused at construction because an appending write ignores the offset the snapshot names, nor read-only, which is refused at construction too, since it would load the sessions and then fail every save (the access mode is read from the descriptor on every Unix system — Linux, macOS, the BSDs, Solaris, illumos and AIX; on Windows, Plan 9 and WebAssembly the first save reports it); values round-trip through JSON, so a session that outlives a restart comes back with every number as a `float64` — an `int64` beyond 2^53 comes back changed; and that same handle door **cannot be atomic across a crash**, because it writes through a handle the caller owns and a rename would unlink the inode that caller still holds. It gives what it can instead: the snapshot is encoded whole before a byte is written, the write names offset zero rather than seeking to it, the write
@@ -122,8 +130,8 @@ The returned session is a **new object marked modified**, and the one passed in 
 #### Types
 
 - [`type Manager`](../../session/contract/manager.go)
-    - `Session(sessionId string) Session`
-    - `NewSession() Session`
+    - `Session(sessionId string) (Session, error)`
+    - `NewSession() (Session, error)`
     - `SaveSession(session Session) error`
     - `DeleteSession(sessionId string) error`
     - `RegenerateSession(session Session) (Session, error)`

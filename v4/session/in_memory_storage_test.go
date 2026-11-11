@@ -20,7 +20,7 @@ func TestInMemoryStorageAndManager(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance := manager.NewSession()
+    sessionInstance := mustSession(manager.NewSession())
     if "" == sessionInstance.Id() {
         t.Fatalf("expected session id")
     }
@@ -30,7 +30,7 @@ func TestInMemoryStorageAndManager(t *testing.T) {
         t.Fatalf("expected no error")
     }
 
-    loaded := manager.Session(sessionInstance.Id())
+    loaded := mustSession(manager.Session(sessionInstance.Id()))
     if nil != loaded {
         t.Fatalf("expected session not to be persisted without modifications")
     }
@@ -42,7 +42,7 @@ func TestInMemoryStorageAndManager(t *testing.T) {
         t.Fatalf("save error: %v", err)
     }
 
-    loaded = manager.Session(sessionInstance.Id())
+    loaded = mustSession(manager.Session(sessionInstance.Id()))
     if nil == loaded {
         t.Fatalf("expected loaded session")
     }
@@ -58,7 +58,7 @@ func TestInMemoryStorageAndManager(t *testing.T) {
         t.Fatalf("clear commit error: %v", err)
     }
 
-    deleted := manager.Session(sessionInstance.Id())
+    deleted := mustSession(manager.Session(sessionInstance.Id()))
     if nil != deleted {
         t.Fatalf("expected session to be deleted after clear")
     }
@@ -68,7 +68,7 @@ func TestInMemoryStorage_Delete_RemovesSession(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    sessionInstance := manager.NewSession()
+    sessionInstance := mustSession(manager.NewSession())
     sessionInstance.Set("a", "b")
 
     err := manager.SaveSession(sessionInstance)
@@ -81,7 +81,7 @@ func TestInMemoryStorage_Delete_RemovesSession(t *testing.T) {
         t.Fatalf("unexpected error")
     }
 
-    loaded := manager.Session(sessionInstance.Id())
+    loaded := mustSession(manager.Session(sessionInstance.Id()))
     if nil != loaded {
         t.Fatalf("expected nil after delete")
     }

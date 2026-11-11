@@ -78,6 +78,22 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Spell the mark `exception.MarkInfrastructureFailure` and the reader `exception.IsInfrastructureFailure`. Set `ApplicationConfig.UnavailableRetryAfter`, or the key in a deployment, for another delay than 5s. A listener that answers through `RenderExceptionResponse` passes `ExceptionRenderConfig{UnavailableRetryAfter: bound.Of(event.UnavailableRetryAfter())}`; one that builds its own response asks `exception.AnswersUnavailable(err)`, answers `503` and sets `http.SetRetryAfter(response, event.UnavailableRetryAfter())`. Pass `http.KernelExceptionEventConfig{}` to `NewKernelExceptionEvent`, or the delay an own kernel was configured with. Return an unmarked error where a `500` is the intended answer. Add `SetUnavailableRetryAfter(delay bound.Duration)` to an own http kernel and `UnavailableRetryAfter() bound.Duration`, answering `bound.Duration{}`, to an own http configuration.
 
+### Session: `Manager.Session` and `NewSession` answer an error, and a storage outage is `503` with `Retry-After`
+
+**What changed.** [`session/contract.Manager`](../session/contract/manager.go) declares `Session(sessionId string) (Session, error)` and `NewSession() (Session, error)`. The framework's [`session.Manager`](../session/manager.go) answers a storage that could not answer, on those two doors and on `SaveSession`, `DeleteSession` and `RegenerateSession`, as an error carrying [`exception.MarkInfrastructureFailure`](../exception/infrastructure_failure.go), the storage's own error in the chain, where `Session` and `NewSession` panicked; 128 minted ids in a row already held is an unmarked error. The http kernel answers a load or mint error before the router: a marked one `503` with the kernel's `Retry-After`, any other `500`, the handler not called and no session cookie written. A firewall's sign-in door whose session rotation meets the outage refuses the sign-in `503` with the kernel's `Retry-After` before its `Handler`, with no sign-in event.
+
+**Symptom.** A call of `Session` or `NewSession` with one result no longer compiles, nor an out-of-tree `Manager` declaring the one-result forms. During a session storage outage every request answers `503` with `Retry-After` where it answered `500`. An error returned by `SaveSession`, `DeleteSession` or `RegenerateSession` for a storage failure is the framework's error wrapping the storage's, so a comparison by identity no longer matches; `errors.Is` still does.
+
+**Remedy.** Read both results: `sessionInstance, loadErr := manager.Session(sessionId)`, then `nil != loadErr` before `nil == sessionInstance`. An out-of-tree manager returns its storage's error through `exception.MarkInfrastructureFailure` for an outage, and an unmarked error for a fault of its own. Compare storage errors with `errors.Is`.
+
+### Http: a rate limiter whose store cannot answer is `503` with `Retry-After`, not `429`
+
+**What changed.** The rate-limit middleware and [`RateLimitGate`](../http/middleware/rate_limit_listener.go) refuse a denial whose `AllowWithRuntime` error is answered as unavailable, one carrying [`exception.MarkInfrastructureFailure`](../exception/infrastructure_failure.go) with no http status around the mark ([`exception.AnswersUnavailable`](../exception/infrastructure_failure.go)), with that error, which the kernel answers `503` with its `Retry-After`, and do not call `OnLimitExceeded`. The Redis limiter of `integrations/rueidis/v4` marks every store failure, under both failure modes.
+
+**Symptom.** Under the closed failure mode a Redis outage answers `503` with `Retry-After` on every limited route where it answered `429`, a firewall's sign-in door limiter included, and an `OnLimitExceeded` handler is not called for it. A `kernel.exception` listener that answers every `429` no longer sees these.
+
+**Remedy.** Nothing for a limiter that answers its own denial; one of an application's own returns its store failure through `exception.MarkInfrastructureFailure` beside the denial to be answered `503`, and keeps an unmarked error for a `429`. A listener that builds its own response for a marked error sets `http.SetRetryAfter(response, event.UnavailableRetryAfter())`.
+
 ### Httpclient: a client is built from one configuration struct, and stays as built
 
 **What changed.** [`NewHttpClient`](../httpclient/http_client.go) takes an [`HttpClientConfig`](../httpclient/http_client_config.go) struct, `BaseUrl`, `Timeout`, `Headers`, `Transport`, `RedirectsDisabled` and `MaxRedirects`, and answers the client with an error; the third major took the `*HttpClientConfig` that `NewHttpClientConfig(baseUrl, timeout, headers)` built, chained `WithoutRedirects` and `WithTransport` onto it, and panicked on a refused base url or header map. `Timeout` is a [`bound.Duration`](../bound/limit.go): left out it is 30s, a value is at least 1ms, and `bound.UnlimitedDuration()` is no deadline, where a non-positive timeout read as the default. `MaxRedirects`, a `bound.Count` left out at 10, bounds the requests an exchange makes while it follows redirects, the first included as net/http counts its own cap, and is refused beside `RedirectsDisabled`. `HttpClient.SetBaseUrl` and `HttpClient.SetTimeout` are removed, and so are `DefaultTransportConfig`,
@@ -2316,7 +2332,10 @@ type CustomSessionManager struct {
 func (instance *CustomSessionManager) RegenerateSession(
     sessionInstance sessioncontract.Session,
 ) (sessioncontract.Session, error) {
-    rotatedSession := instance.NewSession()
+    rotatedSession, mintErr := instance.NewSession()
+    if nil != mintErr {
+        return nil, mintErr
+    }
 
     for key, value := range sessionInstance.All() {
         rotatedSession.Set(key, value)
@@ -2339,7 +2358,7 @@ See [`package/SESSION.md`](./package/SESSION.md) for what a rotation has to guar
 
 ### Session: `RegenerateSession` returns a failed id probe instead of panicking
 
-**What changed.** [`Manager.RegenerateSession`](../session/manager.go) returns a storage failure met while probing the fresh id as an error naming the door, with `sessionRef` and the failure as its cause, where it panicked with the raw failure. The fresh id is minted before the previous entry is removed, so the session in use stays intact. `NewSession`, which has no error return, still panics on the same failure.
+**What changed.** [`Manager.RegenerateSession`](../session/manager.go) returns a storage failure met while probing the fresh id as an error naming the door, with `sessionRef` and the failure as its cause, where it panicked with the raw failure. The fresh id is minted before the previous entry is removed, so the session in use stays intact. `NewSession` answers the same failure as its error, marked; see the section "Session: `Manager.Session` and `NewSession` answer an error".
 
 **Symptom.** A storage outage during a rotation surfaces as the error `RegenerateSession` (and `http.RegenerateRequestSession`) returns, not as a panic a recovery caught.
 
@@ -2859,7 +2878,11 @@ grammar is refused rather than surviving as literal text — nobody types `${...
 ```go
 sessionInstance.Clear()
 
-replacement := manager.NewSession()
+replacement, mintErr := manager.NewSession()
+if nil != mintErr {
+    return nil, mintErr
+}
+
 replacement.Set(sessionKeyFlash, "you have been signed out")
 
 request.Attributes().Set(melodyhttp.RequestAttributeSession, replacement)

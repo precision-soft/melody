@@ -221,14 +221,15 @@ func (instance *RateLimiter) allowFailure(parentContext context.Context, key str
         )
     }
 
+    /* a store that could not answer is marked an infrastructure failure under both modes, so a closed-mode denial is answered 503 with Retry-After, not 429 */
     return exception.NewError(
         "redis rate limiter store failure",
         map[string]any{"key": key, "failureMode": string(instance.failureMode)},
-        resultErr,
+        exception.MarkInfrastructureFailure(resultErr),
     )
 }
 
-/* reportError delivers a store failure and answers the error the caller should carry on with. An observer given by the application gets the failure untouched and unmarked, since it may be a counter rather than a journal. With no observer the failure is recorded here, on the call's logger, else the limiter's, else the emergency logger, because Allow answers a bool and Reset nothing, so an outage would otherwise reach no channel; the record takes the level the http middleware picks, a caller's own cancellation not being an outage. The error is then marked already-logged, the framework's mark the exception listener and the http kernel honour, so the middleware files nothing a second time. */
+/* reportError delivers a store failure and answers the error the caller should carry on with. An observer given by the application gets the failure untouched and not marked logged, since it may be a counter rather than a journal; a store failure carries the infrastructure mark either way. With no observer the failure is recorded here, on the call's logger, else the limiter's, else the emergency logger, because Allow answers a bool and Reset nothing, so an outage would otherwise reach no channel; the record takes the level the http middleware picks, a caller's own cancellation not being an outage. The error is then marked already-logged, the framework's mark the exception listener and the http kernel honour, so the middleware files nothing a second time. */
 func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err error) error {
     if nil != instance.onError {
         instance.onError(err)

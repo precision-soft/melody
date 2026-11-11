@@ -1503,3 +1503,91 @@ func TestRateLimitMiddleware_ACyclicChainFromTheLimiterIsRecordedAsAFailure(t *t
         t.Fatalf("expected one error and no warning, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
     }
 }
+
+func newRateLimitCaptureRuntime(capture *rateLimitCaptureLogger) runtimecontract.Runtime {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
+
+    return runtime.New(context.Background(), scope, serviceContainer)
+}
+
+func TestRateLimitMiddleware_AMarkedDenialReturnsTheUnavailableErrorAndSkipsTheLimitHandler(t *testing.T) {
+    capture := &rateLimitCaptureLogger{}
+    limiter := &fakeRuntimeRateLimiter{allowed: false, err: exception.MarkInfrastructureFailure(exception.NewError("store unreachable", nil, nil))}
+
+    limitHandlerCalls := 0
+    nextCalls := 0
+    handler := RateLimitMiddleware(limiter, RateLimitConfig{
+        OnLimitExceeded: func(request httpcontract.Request) (httpcontract.Response, error) {
+            limitHandlerCalls++
+
+            return nil, exception.TooManyRequests("too many")
+        },
+    })(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        nextCalls++
+
+        return http.TextResponse(200, "ok"), nil
+    })
+
+    request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
+    response, err := handler(newRateLimitCaptureRuntime(capture), httptest.NewRecorder(), request)
+
+    if false == exception.AnswersUnavailable(err) || nil != response {
+        t.Fatalf("expected the marked denial returned to be answered 503, got %v, %#v", err, response)
+    }
+
+    if 0 != limitHandlerCalls || 0 != nextCalls {
+        t.Fatalf("expected neither the limit handler nor the handler to run, got %d and %d", limitHandlerCalls, nextCalls)
+    }
+
+    if 1 != capture.errorCalls || false == exception.IsAlreadyLogged(err) {
+        t.Fatalf("expected the outage filed once and the returned error marked logged, got %d records, logged %v", capture.errorCalls, exception.IsAlreadyLogged(err))
+    }
+}
+
+func TestRateLimitMiddleware_AnUnmarkedDenialBesideAnErrorStays429(t *testing.T) {
+    limiter := &fakeRuntimeRateLimiter{allowed: false, err: exception.NewError("store unreachable", nil, nil)}
+
+    handler := RateLimitMiddleware(limiter, RateLimitConfig{})(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(200, "ok"), nil
+    })
+
+    request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
+    _, err := handler(nil, httptest.NewRecorder(), request)
+
+    if httpException := exception.AsHttpException(err); nil == httpException || nethttp.StatusTooManyRequests != httpException.StatusCode() || true == exception.AnswersUnavailable(err) {
+        t.Fatalf("expected an unmarked error beside a denial to stay 429, got %v", err)
+    }
+}
+
+func TestRateLimitMiddleware_AMarkedErrorBesideAnAllowanceServesTheRequest(t *testing.T) {
+    limiter := &fakeRuntimeRateLimiter{allowed: true, err: exception.MarkInfrastructureFailure(exception.NewError("store unreachable", nil, nil))}
+
+    nextCalls := 0
+    handler := RateLimitMiddleware(limiter, RateLimitConfig{})(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        nextCalls++
+
+        return http.TextResponse(200, "ok"), nil
+    })
+
+    request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
+    if _, err := handler(nil, httptest.NewRecorder(), request); nil != err || 1 != nextCalls {
+        t.Fatalf("expected the open mode to serve the request, got %v and %d calls", err, nextCalls)
+    }
+}
+
+func TestRateLimitMiddleware_AMarkedDenialNobodyRecordedIsNotMarkedLogged(t *testing.T) {
+    limiter := &fakeRuntimeRateLimiter{allowed: false, err: exception.MarkInfrastructureFailure(exception.NewError("store unreachable", nil, nil))}
+
+    handler := RateLimitMiddleware(limiter, RateLimitConfig{})(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.TextResponse(200, "ok"), nil
+    })
+
+    request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
+    _, err := handler(nil, httptest.NewRecorder(), request)
+
+    if false == exception.AnswersUnavailable(err) || true == exception.IsAlreadyLogged(err) {
+        t.Fatalf("expected the unrecorded outage returned unavailable and not marked logged, so the kernel files it, got %v, logged %v", err, exception.IsAlreadyLogged(err))
+    }
+}

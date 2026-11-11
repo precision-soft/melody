@@ -39,7 +39,7 @@ func requestCarryingSession(t *testing.T) (melodyhttpcontract.Request, melodyses
     request := plainRequest(t)
 
     manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
-    sessionInstance := manager.NewSession()
+    sessionInstance := mustSession(manager.NewSession())
 
     request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
 
@@ -178,4 +178,13 @@ func registerAdmissionClock(t *testing.T, containerInstance melodycontainercontr
     if nil != registerErr {
         t.Fatalf("register clock: %v", registerErr)
     }
+}
+
+/* mustSession hands on the session a manager door answered, panicking with the error it answered instead */
+func mustSession(sessionInstance melodysessioncontract.Session, sessionErr error) melodysessioncontract.Session {
+    if nil != sessionErr {
+        panic(sessionErr)
+    }
+
+    return sessionInstance
 }

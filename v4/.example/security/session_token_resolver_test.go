@@ -63,7 +63,7 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     }
 
     manager := melodysession.NewManager(storage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
-    sessionInstance := manager.NewSession()
+    sessionInstance := mustSession(manager.NewSession())
     sessionInstance.Set(SessionKeySecurityUserId, "user-7")
     sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_USER", "ROLE_EDITOR"})
     withCurrentCredential(sessionInstance)
@@ -84,7 +84,7 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     }
     defer restartedStorage.CloseWithContext(context.Background())
 
-    restoredSession := melodysession.NewManager(restartedStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}).Session(sessionId)
+    restoredSession := mustSession(melodysession.NewManager(restartedStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}).Session(sessionId))
     if nil == restoredSession {
         t.Fatal("the session did not survive the restart at all")
     }
@@ -361,7 +361,7 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, runtimeInstance, nil)
 
     manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
-    sessionInstance := manager.NewSession()
+    sessionInstance := mustSession(manager.NewSession())
     request.Attributes().Set(melodyhttp.RequestAttributeSession, sessionInstance)
 
     return request, sessionInstance, journal

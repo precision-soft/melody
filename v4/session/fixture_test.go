@@ -5,6 +5,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/exception"
+    sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
 func assertSessionFieldPanic(t *testing.T, expectedMessage string, expectedField string, callback func()) {
@@ -78,3 +79,12 @@ func (instance *foreignSession) Snapshot() (map[string]any, bool, bool) {
 
 /* /dev/zero takes a write at offset 0, reports size 0 and refuses truncate and fsync; /dev/null accepts all three since Linux 7.0 */
 const refusingCharacterDevice = "/dev/zero"
+
+/* mustSession hands on the session a manager door answered, panicking with the error it answered instead */
+func mustSession(sessionInstance sessioncontract.Session, sessionErr error) sessioncontract.Session {
+    if nil != sessionErr {
+        panic(sessionErr)
+    }
+
+    return sessionInstance
+}

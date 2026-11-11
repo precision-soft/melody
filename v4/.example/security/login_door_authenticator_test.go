@@ -820,7 +820,7 @@ func (instance *secondFactorLogin) post(t *testing.T, username string, password 
     }
 
     request := melodyhttp.NewRequest(httpRequest, nil, instance.runtimeInstance, melodyhttp.NewRequestContext("login-second-factor-test", time.Now()))
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, instance.sessionManager.NewSession())
+    request.Attributes().Set(melodyhttp.RequestAttributeSession, mustSession(instance.sessionManager.NewSession()))
 
     response, handlerErr := serveLoginDoor(t, instance.runtimeInstance, request, instance.authentication, instance.sessionIndexLookup)
     if nil != handlerErr {
@@ -1038,17 +1038,17 @@ func TestLoginHandler_TheSignInPastTheCapEndsTheAccountsOldestSession(t *testing
         sessionIdList = append(sessionIdList, login.signInAndStore(t, "user", nil))
     }
 
-    if nil != login.sessionManager.Session(sessionIdList[0]) {
+    if nil != mustSession(login.sessionManager.Session(sessionIdList[0])) {
         t.Fatalf("expected the oldest session of the account ended by the sign-in past the cap")
     }
 
     for _, sessionId := range sessionIdList[1:] {
-        if nil == login.sessionManager.Session(sessionId) {
+        if nil == mustSession(login.sessionManager.Session(sessionId)) {
             t.Fatalf("expected the account's %d newest sessions kept, %q is gone", repository.UserSessionCap, sessionId)
         }
     }
 
-    if nil == login.sessionManager.Session(editorSessionId) {
+    if nil == mustSession(login.sessionManager.Session(editorSessionId)) {
         t.Fatal("expected the session of another account untouched by this account's cap")
     }
 }
@@ -1065,7 +1065,7 @@ func TestLogoutHandler_TheSignOutGivesTheSessionsPlaceBack(t *testing.T) {
     signedOutSessionId := sessionIdList[len(sessionIdList)-1]
 
     logoutRequest := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/logout/", nil), nil, login.runtimeInstance, melodyhttp.NewRequestContext("logout-test", time.Now()))
-    logoutRequest.Attributes().Set(melodyhttp.RequestAttributeSession, login.sessionManager.Session(signedOutSessionId))
+    logoutRequest.Attributes().Set(melodyhttp.RequestAttributeSession, mustSession(login.sessionManager.Session(signedOutSessionId)))
 
     if _, logoutErr := security.NewSessionLogoutHandler(login.sessionIndexLookup).Logout(login.runtimeInstance, logoutRequest, melodysecuritycontract.LogoutInput{}); nil != logoutErr {
         t.Fatalf("logout handler: %v", logoutErr)
@@ -1074,7 +1074,7 @@ func TestLogoutHandler_TheSignOutGivesTheSessionsPlaceBack(t *testing.T) {
     login.signInAndStore(t, "user", nil)
 
     for _, sessionId := range sessionIdList[:len(sessionIdList)-1] {
-        if nil == login.sessionManager.Session(sessionId) {
+        if nil == mustSession(login.sessionManager.Session(sessionId)) {
             t.Fatalf("expected the sign-in after the sign-out to end none of the account's other sessions, %q is gone", sessionId)
         }
     }
@@ -1086,7 +1086,7 @@ func TestLoginHandler_SigningInAgainRetiresThePlaceOfTheRotatedSession(t *testin
 
     otherSessionId := login.signInAndStore(t, "user", nil)
 
-    sessionInstance := login.sessionManager.NewSession()
+    sessionInstance := mustSession(login.sessionManager.NewSession())
     for range repository.UserSessionCap + 1 {
         httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", bytes.NewBufferString(`{"username":"user","password":"user"}`))
         httpRequest.Header.Set("Content-Type", "application/json")
@@ -1105,7 +1105,7 @@ func TestLoginHandler_SigningInAgainRetiresThePlaceOfTheRotatedSession(t *testin
         }
     }
 
-    if nil == login.sessionManager.Session(otherSessionId) {
+    if nil == mustSession(login.sessionManager.Session(otherSessionId)) {
         t.Fatal("expected the account's other session kept: the sign-ins on one browser hold one place")
     }
 }
@@ -1128,7 +1128,7 @@ func TestLoginHandler_ASessionThatEndedElsewhereGivesItsPlaceBack(t *testing.T) 
     login.signInAndStore(t, "user", nil)
 
     for _, sessionId := range []string{sessionIdList[0], sessionIdList[1], sessionIdList[3], sessionIdList[4]} {
-        if nil == login.sessionManager.Session(sessionId) {
+        if nil == mustSession(login.sessionManager.Session(sessionId)) {
             t.Fatalf("expected no live session ended while an ended one held a place, %q is gone", sessionId)
         }
     }
@@ -1291,7 +1291,7 @@ func TestLoginHandler_RefusesAFormBodyWithoutAnnouncingAFailedSignIn(t *testing.
 func TestLoginHandler_RotatesTheSessionIdAndRetiresThePreLoginOne(t *testing.T) {
     login := newSecondFactorLogin(t)
 
-    preLogin := login.sessionManager.NewSession()
+    preLogin := mustSession(login.sessionManager.NewSession())
     preLogin.Set("example.cart", "three items")
     if saveErr := login.sessionManager.SaveSession(preLogin); nil != saveErr {
         t.Fatalf("save the pre-login session: %v", saveErr)
@@ -1302,7 +1302,7 @@ func TestLoginHandler_RotatesTheSessionIdAndRetiresThePreLoginOne(t *testing.T) 
     httpRequest.Header.Set("Content-Type", "application/json")
 
     request := melodyhttp.NewRequest(httpRequest, nil, login.runtimeInstance, melodyhttp.NewRequestContext("login-rotation-test", time.Now()))
-    request.Attributes().Set(melodyhttp.RequestAttributeSession, login.sessionManager.Session(preLoginId))
+    request.Attributes().Set(melodyhttp.RequestAttributeSession, mustSession(login.sessionManager.Session(preLoginId)))
 
     response, handlerErr := serveLoginDoor(t, login.runtimeInstance, request, login.authentication, login.sessionIndexLookup)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
@@ -1314,7 +1314,7 @@ func TestLoginHandler_RotatesTheSessionIdAndRetiresThePreLoginOne(t *testing.T) 
         t.Fatalf("expected the session id rotated away from %q, got %v", preLoginId, rotated)
     }
 
-    if nil != login.sessionManager.Session(preLoginId) {
+    if nil != mustSession(login.sessionManager.Session(preLoginId)) {
         t.Fatalf("expected the pre-login session %q retired from the storage", preLoginId)
     }
 
@@ -1390,4 +1390,13 @@ func TestLoginHandler_AnswersTheLandingPageTheRoleOpens(t *testing.T) {
     /* the editor of this fixture is enrolled, so its sign-in presents the code */
     editorResponse, _ := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: login.currentCode(t)})
     requireLoginAnswer(t, editorResponse, nethttp.StatusOK, `"redirectUrl":"/products"`)
+}
+
+/* mustSession hands on the session a manager door answered, panicking with the error it answered instead */
+func mustSession(sessionInstance melodysessioncontract.Session, sessionErr error) melodysessioncontract.Session {
+    if nil != sessionErr {
+        panic(sessionErr)
+    }
+
+    return sessionInstance
 }

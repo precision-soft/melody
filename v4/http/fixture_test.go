@@ -523,3 +523,12 @@ type cyclicBodyReader struct{}
 func (instance *cyclicBodyReader) Read(buffer []byte) (int, error) {
     return 0, newCyclicChainError()
 }
+
+/* mustSession hands on the session a manager door answered, panicking with the error it answered instead */
+func mustSession(sessionInstance sessioncontract.Session, sessionErr error) sessioncontract.Session {
+    if nil != sessionErr {
+        panic(sessionErr)
+    }
+
+    return sessionInstance
+}

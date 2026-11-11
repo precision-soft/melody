@@ -533,3 +533,12 @@ func expectAnonymousToken(t *testing.T, token securitycontract.Token) {
         t.Fatalf("expected *AnonymousToken, got %T", token)
     }
 }
+
+/* mustSession hands on the session a manager door answered, panicking with the error it answered instead */
+func mustSession(sessionInstance sessioncontract.Session, sessionErr error) sessioncontract.Session {
+    if nil != sessionErr {
+        panic(sessionErr)
+    }
+
+    return sessionInstance
+}
