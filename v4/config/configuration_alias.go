@@ -125,6 +125,10 @@ var environmentKeyAliasMap = map[string][]string{
         HttpUnavailableRetryAfterKey,
         KernelHttpUnavailableRetryAfter,
     },
+    HttpSessionEmptyOnOutageKey: {
+        HttpSessionEmptyOnOutageKey,
+        KernelHttpSessionEmptyOnOutage,
+    },
 }
 
 func (instance *Configuration) addAliasedParameterFromEnvironment(

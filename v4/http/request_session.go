@@ -4,6 +4,7 @@ import (
     "sync"
 
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -44,6 +45,7 @@ type requestSession struct {
     logger        loggingcontract.Logger
     cookieValue   string
     cookiePresent bool
+    policy        httpcontract.SessionPolicy
     loaded        bool
     session       sessioncontract.Session
     loadErr       error
@@ -55,6 +57,7 @@ func newRequestSession(
     logger loggingcontract.Logger,
     cookieValue string,
     cookiePresent bool,
+    policy httpcontract.SessionPolicy,
 ) *requestSession {
     return &requestSession{
         manager:       manager,
@@ -62,6 +65,7 @@ func newRequestSession(
         logger:        logger,
         cookieValue:   cookieValue,
         cookiePresent: cookiePresent,
+        policy:        policy,
     }
 }
 
@@ -89,12 +93,30 @@ func (instance *requestSession) load() (sessioncontract.Session, error) {
         /* a session a manager answered beside its error is half made and is neither served nor persisted */
         sessionInstance = nil
 
+        /* only an outage is served degraded under the policy; a manager's own fault stays an error */
+        servedEmpty := true == instance.policy.EmptyOnOutage && true == exception.AnswersUnavailable(loadErr)
+
         /* without a logger nothing is filed, so the error is not marked logged and its answerer files it */
         if false == internal.IsNilInterface(instance.logger) {
-            loadErr = recordErrorOccurrence(instance.logger, instance.request, loadErr, "session could not be loaded")
+            if true == servedEmpty {
+                loadErr = recordOccurrence(
+                    instance.logger,
+                    instance.request,
+                    loadErr,
+                    "session storage could not answer; readers of the session get an empty session that is not saved",
+                    occurrenceRecordConfig{Warning: true, Extra: instance.sessionReferenceContext()},
+                )
+            } else {
+                loadErr = recordErrorOccurrence(instance.logger, instance.request, loadErr, "session could not be loaded")
+            }
         }
 
         loadErr = markSessionUnavailable(loadErr)
+
+        if true == servedEmpty {
+            sessionInstance = session.NewUnavailableSession(loadErr)
+            loadErr = nil
+        }
     } else {
         loadErr = nil
 
@@ -109,6 +131,15 @@ func (instance *requestSession) load() (sessioncontract.Session, error) {
     instance.loadErr = loadErr
 
     return sessionInstance, loadErr
+}
+
+/* sessionReferenceContext names the session the cookie points at by its one-way reference, nothing without a cookie */
+func (instance *requestSession) sessionReferenceContext() exceptioncontract.Context {
+    if false == instance.cookiePresent {
+        return nil
+    }
+
+    return exceptioncontract.Context{"sessionRef": sessionIdLogReference(instance.cookieValue)}
 }
 
 /* loadedSession answers the session a reader loaded, never loading it */

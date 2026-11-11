@@ -466,3 +466,24 @@ func TestSessionTokenResolver_ASessionOutageAnswersTheUnavailableToken(t *testin
         }
     }
 }
+
+func TestSessionTokenResolver_AnUnavailableSessionAnswersTheUnavailableToken(t *testing.T) {
+    outage := exception.MarkInfrastructureFailure(errors.New("session store is down"))
+    unavailableSession := melodysession.NewUnavailableSession(outage)
+
+    request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/", nil), nil, nil, nil)
+    if publishErr := melodyhttp.SetRequestSession(request, unavailableSession); nil != publishErr {
+        t.Fatalf("unexpected publish error: %v", publishErr)
+    }
+
+    token := SessionTokenResolver(currentAccountLookup)(request)
+
+    cause, unavailable := melodysecurity.AuthenticationUnavailableCause(token)
+    if nil == token || true == token.IsAuthenticated() || false == unavailable || false == errors.Is(cause, outage) {
+        t.Fatalf("expected the unavailable token carrying the session outage, got %v %v", token, cause)
+    }
+
+    if true == unavailableSession.IsCleared() {
+        t.Fatalf("expected the unavailable session left alone")
+    }
+}

@@ -88,9 +88,9 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 ### Http: the session is read through `http.RequestSession`, loaded at its first read
 
-**What changed.** `http.RequestAttributeSession` is removed. [`http.RequestSession(request)`](../http/request_session.go) answers the request's session and an error, and [`http.SetRequestSession(request, session)`](../http/request_session.go) publishes one, a nil session refused. The kernel no longer loads the session before routing: the first `RequestSession` of a request loads it, or mints one when the cookie names none, once, and answers every later read the same session or the same error; a request that never reads it makes no storage call and writes no cookie. A load that failed is filed once, by the read, and every reader gets it marked logged. The response path saves the session published with `SetRequestSession`, else the one a read loaded. A firewall's sign-in door with an `Authenticator` reads the session before it, and its sign-out door before its `Handler`, both refusing a session outage `503` with the firewall's `Retry-After`, reason `session_unavailable`, [`session.ErrSessionUnavailable`](../session/manager.go) in the chain.
+**What changed.** `http.RequestAttributeSession` is removed. [`http.RequestSession(request)`](../http/request_session.go) answers the request's session and an error, and [`http.SetRequestSession(request, session)`](../http/request_session.go) publishes one, a nil session refused. The kernel no longer loads the session before routing: the first `RequestSession` of a request loads it, or mints one when the cookie names none, once, and answers every later read the same session or the same error; a request that never reads it makes no storage call and writes no cookie. A load that failed is filed once, by the read, and every reader gets it marked logged. The response path saves the session published with `SetRequestSession`, else the one a read loaded. A firewall's sign-in door reads the session before its `Authenticator` and its `Handler`, and its sign-out door before its `Handler`, both refusing a session outage `503` with the firewall's `Retry-After`, reason `session_unavailable`, [`session.ErrSessionUnavailable`](../session/manager.go) in the chain.
 
-**Symptom.** Code that names `http.RequestAttributeSession` no longer compiles. A route that does not read the session no longer asks the storage for it, so a session storage outage no longer reaches it, and its `Load` count drops to none. A sign-in door with an `Authenticator` over a request the kernel did not serve, so carrying no session, refuses `500` before its `Authenticator`, and a sign-out door refuses it `500` before its `Handler`, where it skipped the clear. A sign-in during a session storage outage is refused `503` before any credential is checked.
+**Symptom.** Code that names `http.RequestAttributeSession` no longer compiles. A route that does not read the session no longer asks the storage for it, so a session storage outage no longer reaches it, and its `Load` count drops to none. A sign-in door over a request the kernel did not serve, so carrying no session, refuses `500` before its `Authenticator` and its `Handler`, and a sign-out door refuses it `500` before its `Handler`, where it skipped the clear. A sign-in during a session storage outage is refused `503` before any credential is checked.
 
 **Remedy.** Read the session through the door and return its error:
 
@@ -102,6 +102,22 @@ if nil != sessionErr {
 ```
 
 Publish a replacement with `melodyhttp.SetRequestSession(request, replacement)` and rotate with `melodyhttp.RegenerateRequestSession(request)`. A `securitycontract.TokenResolver` that reads the session answers `security.NewUnavailableToken(sessionErr)` for an error `exception.AnswersUnavailable` reads as unavailable, so a public route is served as not signed in and a protected one answers `503` with the firewall's `Retry-After`.
+
+### Http: a session storage outage can serve an empty session, opt-in
+
+**What changed.** [`httpcontract.SessionPolicy{EmptyOnOutage}`](../http/contract/kernel.go), installed through `KernelConfig.SessionPolicy` or `Kernel.SetSessionPolicy`, boot-only, and under an application declared by the application, installed last so a module's setter gives way, through `ApplicationConfig.SessionEmptyOnOutage` or the new key `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE`, the key winning and a value that is not a boolean failing the boot naming the key, answers a reader of the session an empty [`session.UnavailableSession`](../session/unavailable_session.go) and no error when the storage cannot answer, where the default answers the marked error. The session has no id and keeps what the request writes for the request alone: the manager refuses to save or rotate it, marked, with `session.ErrSessionUnavailable` in the chain, and the response path writes no cookie and expires none, so the client finds its session when the storage answers again. One Warning record is filed for the request. An unmarked manager error stays an error, and the firewall's sign-in and sign-out doors refuse the empty session `503` as they refuse the outage. `httpcontract.Kernel` declares `SetSessionPolicy` and `configcontract.HttpConfiguration` declares `SessionEmptyOnOutage`.
+
+**Symptom.** An out-of-tree `httpcontract.Kernel` or `configcontract.HttpConfiguration` no longer compiles. With the policy off, one thing changes: a sign-in door without an `Authenticator` reads the session before its `Handler`, as the door with one does, so during a session storage outage it refuses `503` before the `Handler` runs, where the `Handler` ran and met the outage at its rotation.
+
+**Remedy.** Add the two methods to an out-of-tree implementation. With the policy on, a `securitycontract.TokenResolver` that reads the session answers the unavailable token for the empty session, so a protected route answers `503` rather than sending a signed-in visitor to sign in:
+
+```go
+if cause, isUnavailable := melodysession.SessionUnavailableCause(sessionInstance); true == isUnavailable {
+    return melodysecurity.NewUnavailableToken(cause)
+}
+```
+
+A handler that must not lose a write, a cart line or a consent, reads `session.SessionUnavailableCause` and returns the cause to be answered `503` with `Retry-After`. A decorator of a session forwards `SessionUnavailableCause`, since the response path and the manager read the capability on the session they are handed.
 
 ### Http: a rate limiter whose store cannot answer is `503` with `Retry-After`, not `429`
 

@@ -611,6 +611,10 @@ func (instance *Configuration) buildHttpConfiguration() error {
         return serverLimitErr
     }
 
+    if serverLimits.sessionEmptyOnOutage, serverLimitErr = checkedParameterSwitch(instance.MustGet(KernelHttpSessionEmptyOnOutage), HttpSessionEmptyOnOutageKey); nil != serverLimitErr {
+        return serverLimitErr
+    }
+
     httpConfigurationInstance, newHttpConfigurationErr := newHttpConfiguration(
         instance.MustGet(KernelHttpAddress).MustString(),
         instance.MustGet(KernelDefaultLocale).MustString(),

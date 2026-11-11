@@ -88,6 +88,16 @@ func recordExceptionOccurrence(loggerInstance loggingcontract.Logger, request ht
 }
 
 func recordErrorOccurrence(loggerInstance loggingcontract.Logger, request httpcontract.Request, err error, message string) error {
+    return recordOccurrence(loggerInstance, request, err, message, occurrenceRecordConfig{})
+}
+
+/* occurrenceRecordConfig carries what a record adds to the default: Warning files it at Warning whatever the error, Extra adds context */
+type occurrenceRecordConfig struct {
+    Warning bool
+    Extra   exceptioncontract.Context
+}
+
+func recordOccurrence(loggerInstance loggingcontract.Logger, request httpcontract.Request, err error, message string, recordConfig occurrenceRecordConfig) error {
     requestId := ""
     path := ""
     method := ""
@@ -112,18 +122,23 @@ func recordErrorOccurrence(loggerInstance loggingcontract.Logger, request httpco
     occurrence := newLoggedOccurrence(err)
     attachRequestContextToError(occurrence, requestId, method, path)
 
+    extra := exceptioncontract.Context{
+        "requestId": requestId,
+        "method":    method,
+        "path":      path,
+    }
+    for key, value := range recordConfig.Extra {
+        extra[key] = value
+    }
+
     recordContext := exception.LogContext(
         occurrence,
         exception.LogContextConfig{
-            Extra: exceptioncontract.Context{
-                "requestId": requestId,
-                "method":    method,
-                "path":      path,
-            },
+            Extra: extra,
         },
     )
 
-    if true == isDeliberateClientFault(err) {
+    if true == recordConfig.Warning || true == isDeliberateClientFault(err) {
         loggerInstance.Warning(message, recordContext)
     } else {
         loggerInstance.Error(message, recordContext)

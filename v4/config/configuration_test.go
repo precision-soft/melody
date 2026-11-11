@@ -1131,3 +1131,33 @@ func TestConfigurationScopeTeardownTimeoutRejectsAValueOutsideItsRuleNamingTheKe
         }
     }
 }
+
+func TestConfigurationSessionEmptyOnOutageIsASwitch(t *testing.T) {
+    if (configcontract.Switch{}) != newTeardownTimeoutConfiguration(t, map[string]string{}).Http().SessionEmptyOnOutage() {
+        t.Fatalf("expected the key unset when left out")
+    }
+
+    for value, expected := range map[string]configcontract.Switch{
+        "true":  {Value: true, IsSet: true},
+        "false": {Value: false, IsSet: true},
+    } {
+        configuration := newTeardownTimeoutConfiguration(t, map[string]string{HttpSessionEmptyOnOutageKey: value})
+        if expected != configuration.Http().SessionEmptyOnOutage() {
+            t.Fatalf("expected %q read as %v, got %v", value, expected, configuration.Http().SessionEmptyOnOutage())
+        }
+    }
+
+    if "true" != newTeardownTimeoutConfiguration(t, map[string]string{HttpSessionEmptyOnOutageKey: "true"}).MustGet(KernelHttpSessionEmptyOnOutage).MustString() {
+        t.Fatalf("expected the kernel alias to carry the value")
+    }
+
+    environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: map[string]string{HttpSessionEmptyOnOutageKey: "maybe"}})
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    if nil == configurationErr || HttpSessionEmptyOnOutageKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
+        t.Fatalf("expected the value refused naming the key, got %v", configurationErr)
+    }
+}

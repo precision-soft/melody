@@ -40,6 +40,8 @@ type KernelConfig struct {
 
     SessionCookiePolicy httpcontract.SessionCookiePolicy
 
+    SessionPolicy httpcontract.SessionPolicy
+
     /* Middlewares wrap the matched handler in order, as Use appends them. */
     Middlewares []httpcontract.Middleware
 
@@ -53,6 +55,7 @@ type kernelPolicies struct {
     methodPolicy           MethodPolicy
     forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy
     sessionCookiePolicy    httpcontract.SessionCookiePolicy
+    sessionPolicy          httpcontract.SessionPolicy
 }
 
 /* NewKernel builds the kernel from its configuration, installing each policy through its setter, so SetSessionCookiePolicy refuses a SameSite=None policy with Secure never here too. */
@@ -65,6 +68,7 @@ func NewKernel(router httpcontract.Router, kernelConfig KernelConfig) *Kernel {
     kernel.SetMethodPolicy(kernelConfig.MethodPolicy)
     kernel.SetForwardedHeadersPolicy(kernelConfig.ForwardedHeadersPolicy)
     kernel.SetSessionCookiePolicy(kernelConfig.SessionCookiePolicy)
+    kernel.SetSessionPolicy(kernelConfig.SessionPolicy)
     kernel.Use(kernelConfig.Middlewares)
     kernel.SetNotFoundHandler(kernelConfig.NotFoundHandler)
     kernel.SetUnavailableRetryAfter(kernelConfig.UnavailableRetryAfter)
@@ -156,6 +160,13 @@ func (instance *Kernel) SetMethodPolicy(policy httpcontract.MethodPolicy) {
     instance.refuseMutationWhileServing("SetMethodPolicy")
 
     instance.policies.methodPolicy = policy
+}
+
+/* SetSessionPolicy installs how the kernel serves the session of a request when its storage cannot answer; it is boot-only. */
+func (instance *Kernel) SetSessionPolicy(policy httpcontract.SessionPolicy) {
+    instance.refuseMutationWhileServing("SetSessionPolicy")
+
+    instance.policies.sessionPolicy = policy
 }
 
 /* SetUnavailableRetryAfter installs the Retry-After of the 503 a marked infrastructure failure renders, carried on every kernel.exception event and used by the final step; it is boot-only, and a delay outside 1s to 1h, not in whole seconds or unlimited is refused naming the field. */
@@ -552,7 +563,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             cookieValue = cookie.Value
         }
 
-        melodyRequest.Attributes().Set(requestAttributeSession, newRequestSession(sessionManager, melodyRequest, requestLogger, cookieValue, nil != cookie))
+        melodyRequest.Attributes().Set(requestAttributeSession, newRequestSession(sessionManager, melodyRequest, requestLogger, cookieValue, nil != cookie, instance.policies.sessionPolicy))
 
         /* a path that folds to a different spelling is refused after the route is matched and before it is authorized or handled, so the router, the firewall matchers and the access control never disagree about the resource; it is asked of RequestPathAsRouted, the spelling the access-control matcher reads too, and requestPathIsCanonical states the boundary. The leading form of the padded path is asked of the decoded path as well, since " /public" routes as "%20/public". A stale RawPath, left by a handler in front that rewrote Path alone, does not carry the spelling the client sent, so an encoded separator would be read as a separator: it is refused, as the first and second majors refuse on the raw path. */
         if true == pathRefused {

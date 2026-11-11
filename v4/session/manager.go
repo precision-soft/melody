@@ -168,6 +168,11 @@ func (instance *Manager) RegenerateSession(sessionInstance sessioncontract.Sessi
         return nil, exception.NewError("session is nil in regenerate session", nil, nil)
     }
 
+    /* refused before the mint probe, so no id is minted for an identity the storage cannot hold */
+    if refusalErr := refuseUnavailableSession(sessionInstance, "RegenerateSession"); nil != refusalErr {
+        return nil, refusalErr
+    }
+
     previousId := sessionInstance.Id()
     if false == isValidSessionId(previousId) {
         return nil, exception.NewError(
@@ -220,6 +225,10 @@ func (instance *Manager) SaveSession(sessionInstance sessioncontract.Session) er
     /* IsNilInterface, since a typed-nil session would panic in the snapshot below, inside the response path's recovery defer */
     if true == internal.IsNilInterface(sessionInstance) {
         return exception.NewError("session is nil in save session", nil, nil)
+    }
+
+    if refusalErr := refuseUnavailableSession(sessionInstance, "SaveSession"); nil != refusalErr {
+        return refusalErr
     }
 
     /* one snapshot pairs the branch decision with the values it acts on, so a concurrent Clear cannot land between the reads */

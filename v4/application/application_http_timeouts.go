@@ -74,6 +74,16 @@ func resolveContainerTeardownSequential(configuration configcontract.Configurati
     return applicationConfig.ContainerTeardownSequential
 }
 
+/* resolveSessionEmptyOnOutage answers the key when the deployment set it and the application's field otherwise. */
+func resolveSessionEmptyOnOutage(configuration configcontract.Configuration, applicationConfig ApplicationConfig) bool {
+    keySwitch := configuration.Http().SessionEmptyOnOutage()
+    if true == keySwitch.IsSet {
+        return keySwitch.Value
+    }
+
+    return applicationConfig.SessionEmptyOnOutage
+}
+
 func resolveTeardownTimeout(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[time.Duration], error) {
     return resolveApplicationLimit(configuration.Kernel().TeardownTimeout(), applicationConfig.TeardownTimeout, config.TeardownTimeoutRule)
 }

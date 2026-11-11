@@ -20,6 +20,19 @@ func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Ses
         return nil, currentSessionErr
     }
 
+    /* refused here and not left to the manager, which a replacement may not refuse; the kernel's cause is answered as it is, already filed, and one an application built is marked */
+    if cause, isUnavailable := session.SessionUnavailableCause(currentSession); true == isUnavailable {
+        if false == exception.AnswersUnavailable(cause) {
+            cause = exception.MarkInfrastructureFailure(cause)
+        }
+
+        if false == exception.ChainIs(cause, session.ErrSessionUnavailable) {
+            cause = markSessionUnavailable(cause)
+        }
+
+        return nil, cause
+    }
+
     runtimeInstance := request.RuntimeInstance()
     if nil == runtimeInstance {
         return nil, exception.NewError("request has no runtime in regenerate request session", nil, nil)

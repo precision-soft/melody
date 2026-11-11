@@ -350,3 +350,25 @@ func TestNewApplication_TheUnavailableRetryAfterFieldReachesTheHttpKernel(t *tes
         t.Fatalf("expected 503 with the field's Retry-After 13, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
     }
 }
+
+func TestResolveSessionEmptyOnOutage_TheKeyWinsOverTheField(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        key      string
+        field    bool
+        expected bool
+    }{
+        "neither":         {key: "", field: false, expected: false},
+        "the field alone": {key: "", field: true, expected: true},
+        "the key off":     {key: "false", field: true, expected: false},
+        "the key on":      {key: "true", field: false, expected: true},
+    } {
+        values := map[string]string{}
+        if "" != testCase.key {
+            values[config.HttpSessionEmptyOnOutageKey] = testCase.key
+        }
+
+        if testCase.expected != resolveSessionEmptyOnOutage(newLimitConfiguration(t, values), ApplicationConfig{SessionEmptyOnOutage: testCase.field}) {
+            t.Fatalf("%s: expected %v", name, testCase.expected)
+        }
+    }
+}

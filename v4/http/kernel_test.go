@@ -877,7 +877,8 @@ func TestKernel_SessionSaveFailureOnPanicRecoveryPathStillDelivers500(t *testing
 }
 
 type errorCountingLogger struct {
-    errorCount int64
+    errorCount   int64
+    warningCount int64
 }
 
 func (instance *errorCountingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
@@ -887,7 +888,9 @@ func (instance *errorCountingLogger) Debug(message string, context loggingcontra
 
 func (instance *errorCountingLogger) Info(message string, context loggingcontract.Context) {}
 
-func (instance *errorCountingLogger) Warning(message string, context loggingcontract.Context) {}
+func (instance *errorCountingLogger) Warning(message string, context loggingcontract.Context) {
+    atomic.AddInt64(&instance.warningCount, 1)
+}
 
 func (instance *errorCountingLogger) Error(message string, context loggingcontract.Context) {
     atomic.AddInt64(&instance.errorCount, 1)
@@ -3503,6 +3506,7 @@ func TestKernel_RefusesEveryConfigurationDoorOnceItStartedServing(t *testing.T) 
             kernel.SetSessionCookiePolicy(httpcontract.SessionCookiePolicy{})
         }},
         {"SetMethodPolicy", func(kernel *Kernel) { kernel.SetMethodPolicy(httpcontract.MethodPolicy{}) }},
+        {"SetSessionPolicy", func(kernel *Kernel) { kernel.SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: true}) }},
     } {
         kernel := NewKernel(NewRouter(), KernelConfig{})
 
@@ -5496,5 +5500,98 @@ func TestKernel_ASessionStorageOutageFilesOneRecordForTwoReaders(t *testing.T) {
 
     if 1 != atomic.LoadInt64(&countingLogger.errorCount) {
         t.Fatalf("expected one error record for two readers, got %d", atomic.LoadInt64(&countingLogger.errorCount))
+    }
+}
+
+type outageCountingSessionStorage struct {
+    saveCalls   int64
+    deleteCalls int64
+}
+
+func (instance *outageCountingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return nil, false, exception.NewError("session backend down", nil, nil)
+}
+
+func (instance *outageCountingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    atomic.AddInt64(&instance.saveCalls, 1)
+
+    return nil
+}
+
+func (instance *outageCountingSessionStorage) Delete(sessionId string) error {
+    atomic.AddInt64(&instance.deleteCalls, 1)
+
+    return nil
+}
+
+func (instance *outageCountingSessionStorage) CloseWithContext(closeContext context.Context) error {
+    return nil
+}
+
+func TestKernel_EmptyOnOutageServesTheRouteAndAnswersNoCookie(t *testing.T) {
+    for name, touch := range map[string]func(sessionInstance sessioncontract.Session){
+        "reads":   func(sessionInstance sessioncontract.Session) { _ = sessionInstance.Get("cart") },
+        "sets":    func(sessionInstance sessioncontract.Session) { sessionInstance.Set("cart", "one line") },
+        "clears":  func(sessionInstance sessioncontract.Session) { sessionInstance.Clear() },
+        "rotates": func(sessionInstance sessioncontract.Session) {},
+    } {
+        storage := &outageCountingSessionStorage{}
+        sessionManager := session.NewManager(storage, session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)})
+
+        router := NewRouter()
+        router.Handle(
+            nethttp.MethodGet,
+            "/page",
+            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                sessionInstance, sessionErr := RequestSession(request)
+                if nil != sessionErr {
+                    return nil, sessionErr
+                }
+
+                touch(sessionInstance)
+
+                if "rotates" == name {
+                    _, rotateErr := RegenerateRequestSession(request)
+
+                    return nil, rotateErr
+                }
+
+                if again, againErr := RequestSession(request); nil != againErr || again != sessionInstance {
+                    return nil, exception.NewError("the second read answered another session", nil, againErr)
+                }
+
+                return TextResponse(nethttp.StatusOK, "ok"), nil
+            },
+        )
+
+        countingLogger := &errorCountingLogger{}
+
+        serviceContainer := newHttpTestContainerWithSessionManager(sessionManager)
+        serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
+
+        handler := NewKernel(router, KernelConfig{SessionPolicy: httpcontract.SessionPolicy{EmptyOnOutage: true}}).ServeHttp(serviceContainer)
+
+        request := httptest.NewRequest(nethttp.MethodGet, "/page", nil)
+        request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionOutageTestCookieValue})
+
+        recorder := httptest.NewRecorder()
+        handler.ServeHTTP(recorder, request)
+
+        expectedStatus := nethttp.StatusOK
+        if "rotates" == name {
+            expectedStatus = nethttp.StatusServiceUnavailable
+        }
+
+        if expectedStatus != recorder.Code {
+            t.Fatalf("%s: expected %d, got %d", name, expectedStatus, recorder.Code)
+        }
+
+        if 0 != atomic.LoadInt64(&storage.saveCalls) || 0 != atomic.LoadInt64(&storage.deleteCalls) || "" != recorder.Header().Get("Set-Cookie") {
+            t.Fatalf("%s: expected nothing persisted and no cookie, got %d saves, %d deletes, cookie %q", name, storage.saveCalls, storage.deleteCalls, recorder.Header().Get("Set-Cookie"))
+        }
+
+        if 1 != atomic.LoadInt64(&countingLogger.warningCount) || 0 != atomic.LoadInt64(&countingLogger.errorCount) {
+            t.Fatalf("%s: expected one warning and no error record, got %d warnings and %d errors", name, countingLogger.warningCount, countingLogger.errorCount)
+        }
     }
 }

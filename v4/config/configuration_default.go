@@ -41,6 +41,7 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(HttpIdleTimeoutKey, "")
     instance.setDefaultParameter(HttpMaxHeaderBytesKey, "")
     instance.setDefaultParameter(HttpUnavailableRetryAfterKey, "")
+    instance.setDefaultParameter(HttpSessionEmptyOnOutageKey, "")
 
     instance.setDefaultParameter(CliNameKey, "melody")
 

@@ -11,6 +11,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -57,8 +58,12 @@ func newCountingSessionManager() *countingSessionManager {
 }
 
 func requestOverHandle(manager sessioncontract.Manager, logger *errorCountingLogger, cookieValue string, cookiePresent bool) *Request {
+    return requestOverHandleWithPolicy(manager, logger, cookieValue, cookiePresent, httpcontract.SessionPolicy{})
+}
+
+func requestOverHandleWithPolicy(manager sessioncontract.Manager, logger *errorCountingLogger, cookieValue string, cookiePresent bool, policy httpcontract.SessionPolicy) *Request {
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
-    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, logger, cookieValue, cookiePresent))
+    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, logger, cookieValue, cookiePresent, policy))
 
     return request
 }
@@ -148,7 +153,7 @@ func TestRequestSession_AFailedLoadWithoutALoggerIsNotMarkedLogged(t *testing.T)
     manager := &countingSessionManager{Manager: newCountingSessionManager().Manager, newSessionErr: exception.MarkInfrastructureFailure(errors.New("session store is down"))}
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
-    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, nil, "", false))
+    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, nil, "", false, httpcontract.SessionPolicy{}))
 
     _, sessionErr := RequestSession(request)
     if false == exception.AnswersUnavailable(sessionErr) || true == exception.IsAlreadyLogged(sessionErr) {
@@ -255,5 +260,101 @@ func TestRequestSession_ConcurrentReadersOfAFailingLoadFileOneRecord(t *testing.
 
     if 1 != atomic.LoadInt64(&manager.newSessionCalls) || 1 != atomic.LoadInt64(&logger.errorCount) {
         t.Fatalf("expected one mint and one record across concurrent readers, got %d mints, %d records", atomic.LoadInt64(&manager.newSessionCalls), atomic.LoadInt64(&logger.errorCount))
+    }
+}
+
+func TestRequestSession_EmptyOnOutageAnswersTheUnavailableSession(t *testing.T) {
+    storeErr := exception.MarkInfrastructureFailure(errors.New("session store is down"))
+
+    cases := map[string]struct {
+        manager       *countingSessionManager
+        cookiePresent bool
+    }{
+        "a load with a cookie":    {manager: &countingSessionManager{Manager: newCountingSessionManager().Manager, sessionErr: storeErr}, cookiePresent: true},
+        "a mint without a cookie": {manager: &countingSessionManager{Manager: newCountingSessionManager().Manager, newSessionErr: storeErr}, cookiePresent: false},
+    }
+
+    for name, testCase := range cases {
+        request := requestOverHandleWithPolicy(testCase.manager, &errorCountingLogger{}, sessionOutageTestCookieValue, testCase.cookiePresent, httpcontract.SessionPolicy{EmptyOnOutage: true})
+
+        sessionInstance, sessionErr := RequestSession(request)
+        if nil != sessionErr || nil == sessionInstance || "" != sessionInstance.Id() {
+            t.Fatalf("%s: expected an empty session with no id and no error, got %v %v", name, sessionInstance, sessionErr)
+        }
+
+        cause, isUnavailable := session.SessionUnavailableCause(sessionInstance)
+        if false == isUnavailable || false == errors.Is(cause, storeErr) || false == errors.Is(cause, session.ErrSessionUnavailable) {
+            t.Fatalf("%s: expected the session to carry the outage, got %v %v", name, cause, isUnavailable)
+        }
+
+        if false == exception.AnswersUnavailable(cause) || false == exception.IsAlreadyLogged(cause) {
+            t.Fatalf("%s: expected the cause answered unavailable and filed", name)
+        }
+
+        if sessionInstance != effectiveRequestSession(request) {
+            t.Fatalf("%s: expected the response path to read the unavailable session", name)
+        }
+    }
+}
+
+func TestRequestSession_EmptyOnOutageKeepsAnUnmarkedErrorAnError(t *testing.T) {
+    manager := &countingSessionManager{Manager: newCountingSessionManager().Manager, newSessionErr: errors.New("could not generate unique session id")}
+    logger := &errorCountingLogger{}
+    request := requestOverHandleWithPolicy(manager, logger, "", false, httpcontract.SessionPolicy{EmptyOnOutage: true})
+
+    sessionInstance, sessionErr := RequestSession(request)
+    if nil != sessionInstance || nil == sessionErr || true == exception.AnswersUnavailable(sessionErr) {
+        t.Fatalf("expected the unmarked error answered as it is, got %v %v", sessionInstance, sessionErr)
+    }
+
+    if 1 != atomic.LoadInt64(&logger.errorCount) || 0 != atomic.LoadInt64(&logger.warningCount) {
+        t.Fatalf("expected one error record and no warning, got %d errors and %d warnings", logger.errorCount, logger.warningCount)
+    }
+}
+
+func TestRequestSession_EmptyOnOutageFilesOneWarningForTheRequest(t *testing.T) {
+    manager := &countingSessionManager{Manager: newCountingSessionManager().Manager, sessionErr: exception.MarkInfrastructureFailure(errors.New("session store is down"))}
+    logger := &errorCountingLogger{}
+    request := requestOverHandleWithPolicy(manager, logger, sessionOutageTestCookieValue, true, httpcontract.SessionPolicy{EmptyOnOutage: true})
+
+    first, firstErr := RequestSession(request)
+    second, secondErr := RequestSession(request)
+    if nil != firstErr || nil != secondErr || first != second {
+        t.Fatalf("expected the same unavailable session twice, got %v %v %v %v", first, firstErr, second, secondErr)
+    }
+
+    if 1 != atomic.LoadInt64(&logger.warningCount) || 0 != atomic.LoadInt64(&logger.errorCount) {
+        t.Fatalf("expected one warning and no error record, got %d warnings and %d errors", logger.warningCount, logger.errorCount)
+    }
+
+    if 1 != atomic.LoadInt64(&manager.sessionCalls) {
+        t.Fatalf("expected the manager asked once, got %d", manager.sessionCalls)
+    }
+}
+
+func TestRequestSession_EmptyOnOutageNamesTheSessionTheCookiePointsAt(t *testing.T) {
+    for _, cookiePresent := range []bool{true, false} {
+        manager := &countingSessionManager{Manager: newCountingSessionManager().Manager, sessionErr: exception.MarkInfrastructureFailure(errors.New("session store is down")), newSessionErr: exception.MarkInfrastructureFailure(errors.New("session store is down"))}
+        logger := &warningRecordingLogger{}
+
+        request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
+        request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, logger, sessionOutageTestCookieValue, cookiePresent, httpcontract.SessionPolicy{EmptyOnOutage: true}))
+
+        if _, sessionErr := RequestSession(request); nil != sessionErr {
+            t.Fatalf("unexpected error: %v", sessionErr)
+        }
+
+        if 1 != len(logger.warningContexts) {
+            t.Fatalf("expected one warning, got %d", len(logger.warningContexts))
+        }
+
+        sessionRef, named := logger.warningContexts[0]["sessionRef"]
+        if true == cookiePresent && (false == named || sessionIdLogReference(sessionOutageTestCookieValue) != sessionRef) {
+            t.Fatalf("expected the warning to name the cookie's session, got %v", logger.warningContexts[0])
+        }
+
+        if false == cookiePresent && true == named {
+            t.Fatalf("expected no session reference without a cookie, got %v", logger.warningContexts[0])
+        }
     }
 }

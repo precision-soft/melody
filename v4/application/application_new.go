@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/kernel"
     "github.com/precision-soft/melody/v4/logging"
 )
@@ -49,6 +50,9 @@ type ApplicationConfig struct {
 
     /* ContainerTeardownSequential closes the container's services one after the other instead of in waves, for services whose Close methods touch shared external state the container cannot see; MELODY_CONTAINER_TEARDOWN_SEQUENTIAL wins over it when set. */
     ContainerTeardownSequential bool
+
+    /* SessionEmptyOnOutage answers a reader of the session an empty, unavailable session when the session storage cannot answer, where the default is a 503 with Retry-After: nothing of it is saved and no cookie is written; the firewall's sign-in and sign-out doors still refuse 503. MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE wins over it when set. */
+    SessionEmptyOnOutage bool
 }
 
 func NewApplication(
@@ -134,6 +138,7 @@ func NewApplication(
     )
 
     kernelInstance.HttpKernel().SetUnavailableRetryAfter(bound.Of(unavailableRetryAfter))
+    kernelInstance.HttpKernel().SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: resolveSessionEmptyOnOutage(configuration, applicationConfig)})
 
     httpMiddleware := NewHttpMiddleware(
         newStaticFileServerConfig(embeddedPublicFiles, configuration),

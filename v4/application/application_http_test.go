@@ -788,6 +788,9 @@ func (instance *plainHttpKernel) SetMethodPolicy(policy httpcontract.MethodPolic
 func (instance *plainHttpKernel) SetUnavailableRetryAfter(delay bound.Duration) {
 }
 
+func (instance *plainHttpKernel) SetSessionPolicy(policy httpcontract.SessionPolicy) {
+}
+
 func (instance *plainHttpKernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
     return nil
 }
@@ -1804,5 +1807,117 @@ func TestRunHttp_TheDeploymentsUnavailableDelayOutranksAModulesSetter(t *testing
 
     if nethttp.StatusServiceUnavailable != recorder.Code || "7" != recorder.Header().Get("Retry-After") {
         t.Fatalf("expected 503 with the key's Retry-After 7 over the module's 9, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+}
+
+type loadFailingApplicationSessionStorage struct{}
+
+func (instance *loadFailingApplicationSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+    return nil, false, errors.New("session store is down")
+}
+
+func (instance *loadFailingApplicationSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    return nil
+}
+
+func (instance *loadFailingApplicationSessionStorage) Delete(sessionId string) error {
+    return nil
+}
+
+func (instance *loadFailingApplicationSessionStorage) CloseWithContext(closeContext context.Context) error {
+    return nil
+}
+
+func prepareSessionReaderOverAnOutage(serviceContainer containercontract.Container, httpRouter httpcontract.Router) {
+
+    serviceContainer.MustOverrideProtectedInstance(
+        session.ServiceSessionManager,
+        session.NewManager(&loadFailingApplicationSessionStorage{}, session.ManagerConfig{Ttl: bound.Of(time.Hour)}),
+        container.OverrideOptions{},
+    )
+
+    httpRouter.Handle(
+        nethttp.MethodGet,
+        "/reads-the-session",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            if _, sessionErr := http.RequestSession(request); nil != sessionErr {
+                return nil, sessionErr
+            }
+
+            return http.TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+}
+
+func serveSessionReader(serviceContainer containercontract.Container, httpKernel httpcontract.Kernel) int {
+    request := httptest.NewRequest(nethttp.MethodGet, "/reads-the-session", nil)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+
+    recorder := httptest.NewRecorder()
+    httpKernel.ServeHttp(serviceContainer).ServeHTTP(recorder, request)
+
+    return recorder.Code
+}
+
+func TestApplication_InstallsTheSessionPolicyOnTheHttpKernel(t *testing.T) {
+    for field, expected := range map[bool]int{true: nethttp.StatusOK, false: nethttp.StatusServiceUnavailable} {
+        applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), SessionEmptyOnOutage: field})
+        serviceContainer := applicationInstance.kernel.ServiceContainer()
+
+        applicationInstance.Boot()
+
+        prepareSessionReaderOverAnOutage(serviceContainer, applicationInstance.kernel.HttpRouter())
+
+        if status := serveSessionReader(serviceContainer, applicationInstance.kernel.HttpKernel()); expected != status {
+            t.Fatalf("field %v: expected %d at construction, got %d", field, expected, status)
+        }
+
+        _ = serviceContainer.Close()
+    }
+}
+
+func TestRunHttp_TheDeploymentsSessionPolicyOutranksAModulesSetter(t *testing.T) {
+    applicationInstance := newSessionBoundTestApplication(t, config.ModeHttp, map[string]string{config.HttpSessionEmptyOnOutageKey: "true"}, &warningRecordingLogger{})
+
+    kernelInstance, ok := applicationInstance.kernel.(*testKernel)
+    if false == ok {
+        t.Fatalf("expected the test kernel, got %T", applicationInstance.kernel)
+    }
+
+    kernelInstance.httpKernel.SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: false})
+    prepareSessionReaderOverAnOutage(kernelInstance.serviceContainer, kernelInstance.httpRouter)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if runErr := applicationInstance.runHttp(cancelledContext); nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    if status := serveSessionReader(kernelInstance.serviceContainer, kernelInstance.httpKernel); nethttp.StatusOK != status {
+        t.Fatalf("expected the key's empty session over the module's refusal, got %d", status)
+    }
+}
+
+func TestRunHttp_AModulesSessionPolicyGivesWayToTheApplicationsDefault(t *testing.T) {
+    applicationInstance := newSessionBoundTestApplication(t, config.ModeHttp, map[string]string{}, &warningRecordingLogger{})
+
+    kernelInstance, ok := applicationInstance.kernel.(*testKernel)
+    if false == ok {
+        t.Fatalf("expected the test kernel, got %T", applicationInstance.kernel)
+    }
+
+    kernelInstance.httpKernel.SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: true})
+    prepareSessionReaderOverAnOutage(kernelInstance.serviceContainer, kernelInstance.httpRouter)
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if runErr := applicationInstance.runHttp(cancelledContext); nil != runErr {
+        t.Fatalf("unexpected run http error: %v", runErr)
+    }
+
+    if status := serveSessionReader(kernelInstance.serviceContainer, kernelInstance.httpKernel); nethttp.StatusServiceUnavailable != status {
+        t.Fatalf("expected the application's default, the refusal, over the module's empty session, got %d", status)
     }
 }

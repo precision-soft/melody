@@ -1844,3 +1844,79 @@ func TestManager_RegenerateSessionAnswersAStorageOutageMarked(t *testing.T) {
     _, deleteErr := writeManager.RegenerateSession(&Session{id: "0123456789abcdef0123456789abcdef", values: map[string]any{}})
     assertMarkedStorageError(t, deleteErr, errWriteStorageUnavailable)
 }
+
+type storageCallCountingStorage struct {
+    loadCalls   int
+    saveCalls   int
+    deleteCalls int
+}
+
+func (instance *storageCallCountingStorage) Load(sessionId string) (map[string]any, bool, error) {
+    instance.loadCalls++
+
+    return nil, false, nil
+}
+
+func (instance *storageCallCountingStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+    instance.saveCalls++
+
+    return nil
+}
+
+func (instance *storageCallCountingStorage) Delete(sessionId string) error {
+    instance.deleteCalls++
+
+    return nil
+}
+
+func (instance *storageCallCountingStorage) CloseWithContext(closeContext context.Context) error {
+    return nil
+}
+
+func requireUnavailableSessionRefusal(t *testing.T, refusalErr error, cause error) {
+    t.Helper()
+
+    if nil == refusalErr || false == exception.ChainIs(refusalErr, ErrSessionUnavailable) || false == exception.ChainIs(refusalErr, cause) {
+        t.Fatalf("expected the refusal to carry ErrSessionUnavailable and the outage, got %v", refusalErr)
+    }
+
+    if false == exception.IsInfrastructureFailure(refusalErr) {
+        t.Fatalf("expected the refusal marked as an infrastructure failure, got %v", refusalErr)
+    }
+}
+
+func TestManager_SaveSessionRefusesAnUnavailableSession(t *testing.T) {
+    storage := &storageCallCountingStorage{}
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Hour)})
+
+    cause := errors.New("session store is down")
+    unavailable := NewUnavailableSession(cause)
+    unavailable.Set("cart", "one line")
+
+    requireUnavailableSessionRefusal(t, manager.SaveSession(unavailable), cause)
+
+    unavailable.Clear()
+    requireUnavailableSessionRefusal(t, manager.SaveSession(unavailable), cause)
+
+    if 0 != storage.saveCalls || 0 != storage.deleteCalls || 0 != storage.loadCalls {
+        t.Fatalf("expected no storage call, got load=%d save=%d delete=%d", storage.loadCalls, storage.saveCalls, storage.deleteCalls)
+    }
+}
+
+func TestManager_RegenerateSessionRefusesAnUnavailableSession(t *testing.T) {
+    storage := &storageCallCountingStorage{}
+    manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Hour)})
+
+    cause := errors.New("session store is down")
+
+    rotated, refusalErr := manager.RegenerateSession(NewUnavailableSession(cause))
+    if nil != rotated {
+        t.Fatalf("expected no rotated session, got %v", rotated)
+    }
+
+    requireUnavailableSessionRefusal(t, refusalErr, cause)
+
+    if 0 != storage.loadCalls || 0 != storage.deleteCalls {
+        t.Fatalf("expected no probe and no delete, got load=%d delete=%d", storage.loadCalls, storage.deleteCalls)
+    }
+}

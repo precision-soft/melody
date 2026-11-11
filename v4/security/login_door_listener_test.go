@@ -1008,18 +1008,22 @@ func requireSessionUnavailableRefusal(t *testing.T, recorded *[]error) {
     }
 }
 
-func (instance *doorFixture) errorRecords() int {
+func (instance *doorFixture) recordsAt(level loggingcontract.Level, message string) int {
     instance.logger.mutex.Lock()
     defer instance.logger.mutex.Unlock()
 
     count := 0
     for _, record := range instance.logger.records {
-        if loggingcontract.LevelError == record.level {
+        if level == record.level && ("" == message || message == record.message) {
             count++
         }
     }
 
     return count
+}
+
+func (instance *doorFixture) errorRecords() int {
+    return instance.recordsAt(loggingcontract.LevelError, "")
 }
 
 func TestLoginDoor_ASessionOutageIsRefusedBeforeTheAuthenticator(t *testing.T) {
@@ -1284,5 +1288,108 @@ func TestNewSessionUnavailableRefusal_CarriesItsReasonAndTheCause(t *testing.T) 
 
     if false == exception.IsAlreadyLogged(refusal) {
         t.Fatalf("expected the refusal marked logged")
+    }
+}
+
+func TestLoginDoor_EmptyOnOutageRefusesTheSignInBeforeTheAuthenticator(t *testing.T) {
+    for name, withAuthenticator := range map[string]bool{"with an authenticator": true, "without an authenticator": false} {
+        authenticator := &doorAuthenticator{token: NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)}
+
+        fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+            if true == withAuthenticator {
+                config.LoginAuthenticator = authenticator
+            }
+            config.UnavailableRetryAfter = bound.Of(doorFirewallRetryAfter)
+        })
+        fixture.kernel.httpKernel.SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: true})
+
+        recorded := fixture.refusals()
+
+        recorder := serveDoorOverSessionManager(t, fixture, nethttp.MethodPost, doorLoginPath, func(manager sessioncontract.Manager) sessioncontract.Manager {
+            return &loadFailingSessionManager{Manager: manager, err: exception.MarkInfrastructureFailure(exception.NewError("session store is down", nil, nil))}
+        })
+
+        if nethttp.StatusServiceUnavailable != recorder.Code || "9" != recorder.Header().Get("Retry-After") {
+            t.Fatalf("%s: expected 503 with the firewall's Retry-After, got %d %q", name, recorder.Code, recorder.Header().Get("Retry-After"))
+        }
+
+        requireSessionUnavailableRefusal(t, recorded)
+
+        if 0 != authenticator.calls || 0 != fixture.login.calls || 0 != *fixture.failures || 0 != *fixture.successes {
+            t.Fatalf("%s: expected neither the authenticator, the handler nor a sign-in event, got %d authenticator calls, %d handler calls, %d failures, %d successes", name, authenticator.calls, fixture.login.calls, *fixture.failures, *fixture.successes)
+        }
+
+        outageWarnings := fixture.recordsAt(loggingcontract.LevelWarning, "session storage could not answer; readers of the session get an empty session that is not saved")
+        if 0 != fixture.errorRecords() || 1 != outageWarnings {
+            t.Fatalf("%s: expected the outage's one warning and no error record, got %d errors and %d warnings", name, fixture.errorRecords(), outageWarnings)
+        }
+
+        if "" != recorder.Header().Get("Set-Cookie") {
+            t.Fatalf("%s: expected no session cookie on the refused sign-in, got %q", name, recorder.Header().Get("Set-Cookie"))
+        }
+    }
+}
+
+func TestLogoutDoor_EmptyOnOutageRefusesTheSignOutBeforeTheHandler(t *testing.T) {
+    fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.UnavailableRetryAfter = bound.Of(doorFirewallRetryAfter)
+    })
+    fixture.kernel.httpKernel.SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: true})
+
+    recorded := fixture.refusals()
+
+    recorder := serveDoorOverSessionManager(t, fixture, nethttp.MethodPost, doorLogoutPath, func(manager sessioncontract.Manager) sessioncontract.Manager {
+        return &loadFailingSessionManager{Manager: manager, err: exception.MarkInfrastructureFailure(exception.NewError("session store is down", nil, nil))}
+    })
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "9" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with the firewall's Retry-After, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+
+    requireSessionUnavailableRefusal(t, recorded)
+
+    if 0 != fixture.logout.calls || "" != recorder.Header().Get("Set-Cookie") {
+        t.Fatalf("expected the sign-out handler not to run and no expiring cookie, got %d calls, cookie %q", fixture.logout.calls, recorder.Header().Get("Set-Cookie"))
+    }
+
+    outageWarnings := fixture.recordsAt(loggingcontract.LevelWarning, "session storage could not answer; readers of the session get an empty session that is not saved")
+    if 0 != fixture.errorRecords() || 1 != outageWarnings {
+        t.Fatalf("expected the outage's one warning and no error record, got %d errors and %d warnings", fixture.errorRecords(), outageWarnings)
+    }
+}
+
+func TestLoginDoor_WithoutAnAuthenticatorASessionOutageIsRefusedBeforeTheHandler(t *testing.T) {
+    fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.UnavailableRetryAfter = bound.Of(doorFirewallRetryAfter)
+    })
+
+    recorded := fixture.refusals()
+
+    recorder := serveDoorOverSessionManager(t, fixture, nethttp.MethodPost, doorLoginPath, func(manager sessioncontract.Manager) sessioncontract.Manager {
+        return &loadFailingSessionManager{Manager: manager, err: exception.MarkInfrastructureFailure(exception.NewError("session store is down", nil, nil))}
+    })
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "9" != recorder.Header().Get("Retry-After") || 0 != fixture.login.calls {
+        t.Fatalf("expected 503 with the firewall's Retry-After before the handler, got %d %q, %d calls", recorder.Code, recorder.Header().Get("Retry-After"), fixture.login.calls)
+    }
+
+    requireSessionUnavailableRefusal(t, recorded)
+
+    if 1 != fixture.errorRecords() {
+        t.Fatalf("expected one error record for the outage, got %d", fixture.errorRecords())
+    }
+}
+
+func TestRequestSessionAtFirewallDoor_AnApplicationsUnavailableSessionOverAnUnmarkedCauseIsAnOutage(t *testing.T) {
+    request := http.NewRequest(httptest.NewRequest(nethttp.MethodPost, doorLoginPath, nil), nil, nil, nil)
+    cause := errors.New("the application's store is down")
+
+    if publishErr := http.SetRequestSession(request, session.NewUnavailableSession(cause)); nil != publishErr {
+        t.Fatalf("unexpected publish error: %v", publishErr)
+    }
+
+    sessionInstance, sessionErr := requestSessionAtFirewallDoor(request)
+    if nil != sessionInstance || false == errors.Is(sessionErr, cause) || false == exception.AnswersUnavailable(sessionErr) {
+        t.Fatalf("expected the cause answered as an outage, got %v %v", sessionInstance, sessionErr)
     }
 }

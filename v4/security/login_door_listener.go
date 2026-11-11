@@ -15,6 +15,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/session"
+    sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
 /* CrossSitePolicy states what a firewall door does with a request a browser marks as coming from another site. */
@@ -184,15 +185,15 @@ func serveLoginDoor(
 
     previousSessionId := ""
 
+    /* read before the authenticator and the handler, so a sign-in the session storage cannot complete checks no credential, spends no second factor and writes no identity to a session nothing stores */
+    sessionInstance, sessionErr := requestSessionAtFirewallDoor(request)
+    if nil != sessionErr {
+        requestEvent.Refuse(refuseSessionErrorAtFirewallDoor(runtimeInstance, requestEvent, firewall, firewall.loginDoor.name, sessionErr))
+
+        return
+    }
+
     if false == internal.IsNilInterface(firewall.loginAuthenticator) {
-        /* read before the authenticator, so a sign-in the session storage cannot complete checks no credential and spends no second factor */
-        sessionInstance, sessionErr := http.RequestSession(request)
-        if nil != sessionErr {
-            requestEvent.Refuse(refuseSessionErrorAtFirewallDoor(runtimeInstance, requestEvent, firewall, firewall.loginDoor.name, sessionErr))
-
-            return
-        }
-
         authenticatedToken, refusal := authenticateAtLoginDoor(runtimeInstance, requestEvent, firewall)
         if nil != refusal {
             requestEvent.Refuse(refusal)
@@ -339,6 +340,25 @@ func refuseUnavailableAtLoginDoor(
     return newUnavailableRefusal(firewall, cause)
 }
 
+/* requestSessionAtFirewallDoor reads the request's session for a door and answers an unavailable session as the outage it stands for, since a sign-in has nowhere to put the identity and a sign-out cannot end what the storage cannot reach */
+func requestSessionAtFirewallDoor(request httpcontract.Request) (sessioncontract.Session, error) {
+    sessionInstance, sessionErr := http.RequestSession(request)
+    if nil != sessionErr {
+        return nil, sessionErr
+    }
+
+    if cause, isUnavailable := session.SessionUnavailableCause(sessionInstance); true == isUnavailable {
+        /* an unavailable session an application built over an unmarked cause is still an outage at the door */
+        if false == exception.AnswersUnavailable(cause) {
+            cause = exception.MarkInfrastructureFailure(cause)
+        }
+
+        return nil, cause
+    }
+
+    return sessionInstance, nil
+}
+
 /* refuseSessionErrorAtFirewallDoor answers a session a door could not load or rotate: a storage that could not answer is refused 503 with the firewall's Retry-After and reason session_unavailable, its cause filed once, and any other error is refused as it is */
 func refuseSessionErrorAtFirewallDoor(
     runtimeInstance runtimecontract.Runtime,
@@ -385,7 +405,7 @@ func serveLogoutDoor(
     }
 
     /* read before the handler: a session the storage cannot answer cannot be ended, so nothing is cleared and the client is told to come back */
-    sessionInstance, sessionErr := http.RequestSession(request)
+    sessionInstance, sessionErr := requestSessionAtFirewallDoor(request)
     if nil != sessionErr {
         requestEvent.Refuse(refuseSessionErrorAtFirewallDoor(runtimeInstance, requestEvent, firewall, firewall.logoutDoor.name, sessionErr))
 

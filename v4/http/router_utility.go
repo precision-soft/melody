@@ -349,8 +349,11 @@ func writeResponse(
     recorder, isRecorder := writer.(headerCommitRecorder)
     responseIsDiscarded := true == isRecorder && true == recorder.HeadersWritten()
 
-    /* only a session a reader loaded or published is persisted: a request that never read it leaves the storage and the cookie alone */
+    /* only a session a reader loaded or published is persisted: a request that never read it leaves the storage and the cookie alone, and so does one served the unavailable session, whose client keeps the cookie it holds */
     sessionInstance := effectiveRequestSession(request)
+    if _, isUnavailable := session.SessionUnavailableCause(sessionInstance); true == isUnavailable {
+        sessionInstance = nil
+    }
 
     if false == sessionAlreadyPersisted && false == internal.IsNilInterface(sessionManager) && false == internal.IsNilInterface(sessionInstance) {
         sessionPersistFailed := false

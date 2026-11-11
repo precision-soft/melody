@@ -8,6 +8,7 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
+    melodysession "github.com/precision-soft/melody/v4/session"
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
@@ -17,7 +18,7 @@ const (
     SessionKeySecurityCredentialVersion = "security.credentialVersion"
 )
 
-/* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session its storage could not load answers the unavailable token; any other error reading the session answers anonymous, its record filed by the read. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers the unavailable token, 503 with Retry-After on a protected page, and leaves the session alone, since the failure says nothing about the account; the framework files the cause at error. */
+/* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session its storage could not load, or the empty one served for it under MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE, answers the unavailable token; any other error reading the session answers anonymous, its record filed by the read. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers the unavailable token, 503 with Retry-After on a protected page, and leaves the session alone, since the failure says nothing about the account; the framework files the cause at error. */
 func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.TokenResolver {
     return func(request melodyhttpcontract.Request) melodysecuritycontract.Token {
         sessionInstance, sessionErr := melodyhttp.RequestSession(request)
@@ -28,6 +29,11 @@ func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.T
             }
 
             return melodysecurity.NewAnonymousToken()
+        }
+
+        /* the empty session MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE serves in an outage reads as the outage it stands for, so a signed-in visitor is answered 503 on a protected page, not sent to sign in */
+        if cause, isUnavailable := melodysession.SessionUnavailableCause(sessionInstance); true == isUnavailable {
+            return melodysecurity.NewUnavailableToken(cause)
         }
 
         userId, ok := getStringFromSession(sessionInstance, SessionKeySecurityUserId)

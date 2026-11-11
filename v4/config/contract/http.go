@@ -49,4 +49,7 @@ type HttpConfiguration interface {
 
     /* UnavailableRetryAfter is MELODY_HTTP_UNAVAILABLE_RETRY_AFTER as the deployment set it, the Retry-After of a 503 answering an infrastructure failure, absent when the key says nothing: the application decides it against its own config, the key winning. */
     UnavailableRetryAfter() bound.Duration
+
+    /* SessionEmptyOnOutage is MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE as the deployment set it, unset when the key says nothing: the application decides it against its own config, the key winning. */
+    SessionEmptyOnOutage() Switch
 }

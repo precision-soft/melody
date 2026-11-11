@@ -15,6 +15,7 @@ import (
     "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
+    sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
 func TestRegenerateRequestSession_RotatesAndRepublishesInOneCall(t *testing.T) {
@@ -306,7 +307,7 @@ func TestRegenerateRequestSession_LoadsTheSessionNothingRead(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), nil)
-    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, &errorCountingLogger{}, "", false))
+    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{}))
 
     rotated, rotateErr := RegenerateRequestSession(request)
     if nil != rotateErr || nil == rotated {
@@ -324,10 +325,63 @@ func TestRegenerateRequestSession_AnswersTheLoadErrorMarked(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), nil)
-    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, &errorCountingLogger{}, "", false))
+    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{}))
 
     rotated, rotateErr := RegenerateRequestSession(request)
     if nil != rotated || false == errors.Is(rotateErr, storeErr) || false == exception.AnswersUnavailable(rotateErr) {
         t.Fatalf("expected the marked load error and no session, got %v %v", rotated, rotateErr)
+    }
+}
+
+func TestRegenerateRequestSession_RefusesAnUnavailableSessionMarked(t *testing.T) {
+    storeErr := exception.MarkInfrastructureFailure(errors.New("session store is down"))
+    manager := &countingSessionManager{Manager: newCountingSessionManager().Manager, newSessionErr: storeErr}
+    serviceContainer := newHttpTestContainerWithSessionManager(manager)
+
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), nil)
+    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{EmptyOnOutage: true}))
+
+    rotated, rotateErr := RegenerateRequestSession(request)
+    if nil != rotated || false == errors.Is(rotateErr, storeErr) || false == errors.Is(rotateErr, session.ErrSessionUnavailable) || false == exception.AnswersUnavailable(rotateErr) {
+        t.Fatalf("expected the rotation of the unavailable session refused marked, got %v %v", rotated, rotateErr)
+    }
+
+    if false == exception.IsAlreadyLogged(rotateErr) {
+        t.Fatalf("expected the refusal to carry the filed cause, so its answerer files nothing more")
+    }
+
+    if _, isUnavailable := session.SessionUnavailableCause(effectiveRequestSession(request)); false == isUnavailable {
+        t.Fatalf("expected nothing published over the unavailable session")
+    }
+}
+
+type rotationCountingSessionManager struct {
+    sessioncontract.Manager
+    regenerateCalls int64
+}
+
+func (instance *rotationCountingSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    atomic.AddInt64(&instance.regenerateCalls, 1)
+
+    return instance.Manager.RegenerateSession(sessionInstance)
+}
+
+func TestRegenerateRequestSession_RefusesAnUnavailableSessionWithoutAskingTheManager(t *testing.T) {
+    manager := &rotationCountingSessionManager{Manager: newCountingSessionManager().Manager}
+    serviceContainer := newHttpTestContainerWithSessionManager(manager)
+
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), nil)
+    cause := errors.New("the application's store is down")
+    if publishErr := SetRequestSession(request, session.NewUnavailableSession(cause)); nil != publishErr {
+        t.Fatalf("unexpected publish error: %v", publishErr)
+    }
+
+    rotated, rotateErr := RegenerateRequestSession(request)
+    if nil != rotated || false == errors.Is(rotateErr, cause) || false == errors.Is(rotateErr, session.ErrSessionUnavailable) || false == exception.AnswersUnavailable(rotateErr) {
+        t.Fatalf("expected the rotation refused as an outage, got %v %v", rotated, rotateErr)
+    }
+
+    if 0 != atomic.LoadInt64(&manager.regenerateCalls) {
+        t.Fatalf("expected the manager not asked, got %d rotations", manager.regenerateCalls)
     }
 }

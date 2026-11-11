@@ -150,8 +150,9 @@ func (instance *Application) runHttp(
 
     httpKernel := instance.kernel.HttpKernel()
 
-    /* installed again last, so a module's own SetUnavailableRetryAfter does not outrank the deployment's key */
+    /* installed again last, so a module's own SetUnavailableRetryAfter or SetSessionPolicy does not outrank the deployment's key */
     httpKernel.SetUnavailableRetryAfter(bound.Of(unavailableRetryAfter))
+    httpKernel.SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: resolveSessionEmptyOnOutage(configuration, instance.applicationConfig)})
     instance.installHttpMiddlewares(httpKernel)
 
     httpHandler := instance.decorateHttpHandler(httpKernel.ServeHttp(instance.kernel.ServiceContainer()))
