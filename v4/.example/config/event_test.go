@@ -223,7 +223,6 @@ func TestRegisterRateLimitRequestListener_ArmsOnAPositiveBudgetAndRefusesAnyOthe
     }
 }
 
-/* the request budget is held in this process, so it tracks a bounded table of addresses, the ceiling of the example's other in-process tables: past it an unseen address is refused, the addresses already counted keep their budget */
 func TestRequestBudgetLimiter_BoundsTheAddressesItTracksByEvictingTheOldest(t *testing.T) {
     limiter := requestBudgetLimiter(1)
 

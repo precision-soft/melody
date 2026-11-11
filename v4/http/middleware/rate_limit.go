@@ -35,14 +35,11 @@ type LimiterConfig struct {
     /* Window is the span the limit is counted over, at least 1ms; a window below it is refused, since it would refill on every request and disable the limiter. */
     Window time.Duration
 
-    /* MaxKeys bounds how many distinct keys the limiter tracks, so a caller varying the key cannot grow the table without bound: 1,000,000 by default, at least 1, unlimited refused. When the table is full and the idle-entry prune, run at most once per window, frees nothing or is skipped, a request under an unseen key is denied, unless EvictOldestKeyAtCeiling is set. */
+    /* MaxKeys bounds how many distinct keys the limiter tracks, so a caller varying the key cannot grow the table without bound: 1,000,000 by default, at least 1, unlimited refused. A full table gives the slot of the key whose last request is the oldest to an unseen key, never denies it: a caller minting keys gains nothing a fresh key does not already give it, and a caller who cannot mint the key it is limited by resets it only by sending MaxKeys requests under other keys after its last one. */
     MaxKeys bound.Count
 
     /* CleanupInterval is how often the limiter forgets the keys idle past their window: 5m by default, at least 1ms, unlimited refused, so an idle key is always forgotten. */
     CleanupInterval bound.Duration
-
-    /* EvictOldestKeyAtCeiling decides what a full table answers an unseen key. Off, the default, the key is denied. On, the key whose last request is the oldest gives up its slot to it: a flood of unseen keys then costs an idle caller its remembered count, never a stranger its admission, which is what a long window needs, since an idle key is pruned only after twice the window. */
-    EvictOldestKeyAtCeiling bool
 
     /* Clock is where the limiter reads the time; nil is the system clock. */
     Clock clockcontract.Clock
@@ -65,7 +62,6 @@ type limiterSettings struct {
     window          time.Duration
     maxKeys         int
     cleanupInterval time.Duration
-    recency         *keyRecency
     clockInstance   clockcontract.Clock
 }
 
@@ -88,17 +84,11 @@ func resolveLimiterConfig(config LimiterConfig) limiterSettings {
         clockInstance = clock.NewSystemClock()
     }
 
-    var recency *keyRecency
-    if true == config.EvictOldestKeyAtCeiling {
-        recency = newKeyRecency()
-    }
-
     return limiterSettings{
         limit:           config.Limit,
         window:          config.Window,
         maxKeys:         maxKeys.Value,
         cleanupInterval: cleanupInterval.Value,
-        recency:         recency,
         clockInstance:   clockInstance,
     }
 }
@@ -134,22 +124,20 @@ func NewFixedWindowLimiter(config LimiterConfig) *FixedWindowLimiter {
         clockInstance:   settings.clockInstance,
         cleanupInterval: settings.cleanupInterval,
         maxKeys:         settings.maxKeys,
-        recency:         settings.recency,
+        recency:         newKeyRecency(),
     }
 }
 
 type FixedWindowLimiter struct {
-    mutex              sync.RWMutex
-    buckets            map[string]*fixedWindowBucket
-    rate               int
-    window             time.Duration
-    capacity           int
-    clockInstance      clockcontract.Clock
-    cleanupInterval    time.Duration
-    lastCleanupAt      time.Time
-    maxKeys            int
-    lastCeilingPruneAt time.Time
-    /* recency orders the keys by their last request when EvictOldestKeyAtCeiling is set, nil otherwise */
+    mutex           sync.RWMutex
+    buckets         map[string]*fixedWindowBucket
+    rate            int
+    window          time.Duration
+    capacity        int
+    clockInstance   clockcontract.Clock
+    cleanupInterval time.Duration
+    lastCleanupAt   time.Time
+    maxKeys         int
     recency *keyRecency
 }
 
@@ -168,22 +156,13 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
 
     bucket, exists := instance.buckets[key]
     if false == exists {
-        if instance.maxKeys <= len(instance.buckets) {
-            instance.pruneAtCeilingLocked(now)
-        }
-
-        /* a ceiling lowered under a full table is reached by evicting until a slot is free, so the stranger is admitted at once rather than one eviction per refused stranger */
-        for instance.maxKeys <= len(instance.buckets) && nil != instance.recency {
+        for instance.maxKeys <= len(instance.buckets) {
             oldestKey, held := instance.recency.oldest()
             if false == held {
                 break
             }
 
             instance.deleteLocked(oldestKey)
-        }
-
-        if instance.maxKeys <= len(instance.buckets) {
-            return false
         }
 
         bucket = &fixedWindowBucket{
@@ -193,9 +172,7 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
         instance.buckets[key] = bucket
     }
 
-    if nil != instance.recency {
-        instance.recency.touch(key)
-    }
+    instance.recency.touch(key)
 
     /* a fixed window: the allowance is restored whole at the edge, so up to twice the rate can pass across it */
     elapsed := now.Sub(bucket.lastRefill)
@@ -224,9 +201,7 @@ func (instance *FixedWindowLimiter) Reset(key string) {
 func (instance *FixedWindowLimiter) deleteLocked(key string) {
     delete(instance.buckets, key)
 
-    if nil != instance.recency {
-        instance.recency.forget(key)
-    }
+    instance.recency.forget(key)
 }
 
 func (instance *FixedWindowLimiter) cleanupIfNeededLocked(now time.Time) {
@@ -242,17 +217,6 @@ func (instance *FixedWindowLimiter) cleanupIfNeededLocked(now time.Time) {
     instance.pruneIdleLocked(now)
 
     instance.lastCleanupAt = now
-}
-
-/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window, so a flood of unseen keys does not pay a whole-map walk under the shared lock on every request; between prunes an unseen key is denied without a walk. */
-func (instance *FixedWindowLimiter) pruneAtCeilingLocked(now time.Time) {
-    if false == instance.lastCeilingPruneAt.IsZero() && instance.window > now.Sub(instance.lastCeilingPruneAt) {
-        return
-    }
-
-    instance.lastCeilingPruneAt = now
-
-    instance.pruneIdleLocked(now)
 }
 
 func (instance *FixedWindowLimiter) pruneIdleLocked(now time.Time) {
@@ -287,21 +251,19 @@ func NewSlidingWindowLimiter(config LimiterConfig) *SlidingWindowLimiter {
         clockInstance:   settings.clockInstance,
         cleanupInterval: settings.cleanupInterval,
         maxKeys:         settings.maxKeys,
-        recency:         settings.recency,
+        recency:         newKeyRecency(),
     }
 }
 
 type SlidingWindowLimiter struct {
-    mutex              sync.RWMutex
-    windows            map[string]*slidingWindow
-    limit              int
-    window             time.Duration
-    clockInstance      clockcontract.Clock
-    cleanupInterval    time.Duration
-    lastCleanupAt      time.Time
-    maxKeys            int
-    lastCeilingPruneAt time.Time
-    /* recency orders the keys by their last request when EvictOldestKeyAtCeiling is set, nil otherwise */
+    mutex           sync.RWMutex
+    windows         map[string]*slidingWindow
+    limit           int
+    window          time.Duration
+    clockInstance   clockcontract.Clock
+    cleanupInterval time.Duration
+    lastCleanupAt   time.Time
+    maxKeys         int
     recency *keyRecency
 }
 
@@ -321,12 +283,7 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
 
     window, exists := instance.windows[key]
     if false == exists {
-        if instance.maxKeys <= len(instance.windows) {
-            instance.pruneAtCeilingLocked(now)
-        }
-
-        /* a ceiling lowered under a full table is reached by evicting until a slot is free, so the stranger is admitted at once rather than one eviction per refused stranger */
-        for instance.maxKeys <= len(instance.windows) && nil != instance.recency {
+        for instance.maxKeys <= len(instance.windows) {
             oldestKey, held := instance.recency.oldest()
             if false == held {
                 break
@@ -335,19 +292,13 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
             instance.deleteLocked(oldestKey)
         }
 
-        if instance.maxKeys <= len(instance.windows) {
-            return false
-        }
-
         window = &slidingWindow{
             requests: make([]time.Time, 0),
         }
         instance.windows[key] = window
     }
 
-    if nil != instance.recency {
-        instance.recency.touch(key)
-    }
+    instance.recency.touch(key)
 
     /* the marks are in clock order, so the expired ones are a prefix trimmed by index and append reclaims the vacated head. The recorded instant is clamped to the last mark, since a clock that steps back would break the order the search needs and could drop a live mark; the clamp can only shorten a caller's budget. */
     liveFrom := sort.Search(
@@ -388,9 +339,7 @@ func (instance *SlidingWindowLimiter) Reset(key string) {
 func (instance *SlidingWindowLimiter) deleteLocked(key string) {
     delete(instance.windows, key)
 
-    if nil != instance.recency {
-        instance.recency.forget(key)
-    }
+    instance.recency.forget(key)
 }
 
 func (instance *SlidingWindowLimiter) cleanupIfNeededLocked(now time.Time) {
@@ -406,17 +355,6 @@ func (instance *SlidingWindowLimiter) cleanupIfNeededLocked(now time.Time) {
     instance.pruneIdleLocked(now)
 
     instance.lastCleanupAt = now
-}
-
-/* pruneAtCeilingLocked reclaims idle entries when the map is full, at most once per window, so a flood of unseen keys does not pay a whole-map walk under the shared lock on every request; between prunes an unseen key is denied without a walk. */
-func (instance *SlidingWindowLimiter) pruneAtCeilingLocked(now time.Time) {
-    if false == instance.lastCeilingPruneAt.IsZero() && instance.window > now.Sub(instance.lastCeilingPruneAt) {
-        return
-    }
-
-    instance.lastCeilingPruneAt = now
-
-    instance.pruneIdleLocked(now)
 }
 
 func (instance *SlidingWindowLimiter) pruneIdleLocked(now time.Time) {
@@ -555,7 +493,7 @@ func clientIpKey(clientIpResolver ClientIpResolver, request httpcontract.Request
     return clientIpRateLimitKey(DefaultClientIp(request))
 }
 
-/* clientIpRateLimitKey aggregates an IPv6 address to its /64, the block one host is routinely handed: keyed on the /128, one host rotates through 2^64 addresses, each with a budget of its own, and fills the limiter's key table, which then refuses every new client. An IPv4 address, written bare or mapped into IPv6, keys on itself; a value that is not an address is kept as it is. */
+/* clientIpRateLimitKey aggregates an IPv6 address to its /64, the block one host is routinely handed: keyed on the /128, one host rotates through 2^64 addresses, each with a budget of its own, and fills the limiter's key table, evicting every other client's count. An IPv4 address, written bare or mapped into IPv6, keys on itself; a value that is not an address is kept as it is. */
 func clientIpRateLimitKey(clientIp string) string {
     address, parseErr := netip.ParseAddr(clientIp)
     if nil != parseErr {

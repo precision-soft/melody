@@ -94,6 +94,30 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Build the kernel over `event.NewEventDispatcher`, or implement both capabilities on the dispatcher, forwarding to the one it wraps; register the transports through `messagebus.RegisterTransports`, which registers the closer beside them, and declare no teardown dependency from the closer to a bus.
 
+### Exception: an http exception answers 400 to 599
+
+**What changed.** [`NewHttpException`](../exception/http_exception_new.go) and `NewHttpError` panic on a status outside `[400, 599]`, where they admitted `[200, 599]`; the refusal names the status, the minimum and the maximum. An exception answers a client or a server error: a success or a redirect raised as one served the error body as a success.
+
+**Symptom.** A constructor called with a 2xx or a 3xx status, or with a status a handler took from a remote answer and forwarded, panics where it is made.
+
+**Remedy.** Write a success or a redirect as a response, not as an exception. A handler that forwards a remote status checks it is between 400 and 599 before it raises it, and answers any other through a response.
+
+### Http: two middleware definitions of one name must agree on duplicates
+
+**What changed.** [`Builder.Build`](../http/middleware/pipeline/builder.go) and `Describe` read every definition of a name the environment and the group admit, where only the later one's flags were read. Definitions whose `AllowDuplicates` differ are refused with `middleware definitions of one name disagree on AllowDuplicates`, naming the name and the two positions, in either order; a definition setting both `ReplaceExisting` and `AllowDuplicates` is refused whatever the environment and group, where `ReplaceExisting` was ignored; a `ReplaceExisting` definition over a name admitted more than once is refused, where it replaced the first. All allowing duplicates still run side by side, and all single still keep the earliest.
+
+**Symptom.** A pipeline where a later registrar declared a single middleware's name with `AllowDuplicates`, or the reverse, fails at the build with the refusal, where the order decided whether one or both ran.
+
+**Remedy.** Declare every definition of the name with the same `AllowDuplicates`, give the later one a name of its own, or have it set `ReplaceExisting` alone to take the earlier one's place. A name registered once per environment or group is not compared across them.
+
+### Http: a full limiter table evicts its least recently seen key
+
+**What changed.** A [`FixedWindowLimiter`](../http/middleware/rate_limit.go) or `SlidingWindowLimiter` whose table holds `MaxKeys` keys always gives the slot of the key whose last request is the oldest, a denied one included, to an unseen key, which is admitted; the evicted key comes back with a full budget. The third major denied the unseen key until an idle key was pruned, unless `SetEvictOldestKeyAtCeiling(true)` was called, and that setter has no successor. The prune that walked a full table once per window is gone; the periodic sweep every `CleanupInterval` still forgets the idle keys.
+
+**Symptom.** A limiter left at the third major's default admits an unseen key at a full table, where it answered `429`.
+
+**Remedy.** None for most applications; drop `SetEvictOldestKeyAtCeiling(true)`. A limit that must hold against a caller who can make the table cycle — `MaxKeys` requests under other keys after its last one — raises `MaxKeys` or runs the distributed limiter of `integrations/rueidis`, which keeps no table.
+
 ### Config: a process must be told its environment, and a per-environment file cannot rename it
 
 **What changed.** A process whose `MELODY_ENV` no `.env` artifact sets fails the boot in every mode, a command included, naming the key; an http process whose artifacts contributed no key at all is refused for that first. The boot warning `application.environment.defaulted` is gone with it, and `MELODY_CLI_BOOT_WARNINGS_IGNORED` naming it is refused as an unknown code. [`EnvironmentSource.Load`](../config/environment_source.go) refuses a `.env.<name>` or `.env.<name>.local` that leaves `MELODY_ENV` naming another environment than the one that selected it, once the references are expanded, naming the key, both names and the two files; repeating the name is admitted. It refuses an unquoted value that is not valid UTF-8 too, naming the key and the file and never the value; a quoted value is still kept byte for byte.
@@ -530,11 +554,11 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Http: the in-process rate limiters are built from one `LimiterConfig`, and refuse a limit or a window of zero
 
-**What changed.** [`NewFixedWindowLimiter`](../http/middleware/rate_limit.go) and `NewSlidingWindowLimiter` take one `LimiterConfig`: `Limit` and `Window` required, a limit below 1 or a window below 1ms refused naming the field; `MaxKeys`, a `bound.Count`, 1,000,000 when left out, at least 1, unlimited refused; `CleanupInterval`, a `bound.Duration`, the cadence the idle keys are forgotten at, 5m when left out, at least 1ms, unlimited refused; `EvictOldestKeyAtCeiling`; `Clock`, nil the system clock. The limiter reads the struct once, when it is built. The two `WithClock` constructors, the deprecated `TokenBucketLimiter` with its two constructors, `SetMaxKeys` and `SetEvictOldestKeyAtCeiling` are removed.
+**What changed.** [`NewFixedWindowLimiter`](../http/middleware/rate_limit.go) and `NewSlidingWindowLimiter` take one `LimiterConfig`: `Limit` and `Window` required, a limit below 1 or a window below 1ms refused naming the field; `MaxKeys`, a `bound.Count`, 1,000,000 when left out, at least 1, unlimited refused; `CleanupInterval`, a `bound.Duration`, the cadence the idle keys are forgotten at, 5m when left out, at least 1ms, unlimited refused; `Clock`, nil the system clock. The limiter reads the struct once, when it is built. The two `WithClock` constructors, the deprecated `TokenBucketLimiter` with its two constructors, `SetMaxKeys` and `SetEvictOldestKeyAtCeiling` are removed; a full table always evicts its least recently seen key (see "Http: a full limiter table evicts its least recently seen key").
 
 **Symptom.** `NewFixedWindowLimiter(100, time.Minute)`, `NewSlidingWindowLimiterWithClock(clock, 10, window)`, `limiter.SetMaxKeys(10_000)` and `limiter.SetEvictOldestKeyAtCeiling(true)` no longer compile. A limiter built with a limit or a window of 0 panics, where it limited to one request per minute; a `MaxKeys` of 0 panics, where `SetMaxKeys(0)` was ignored.
 
-**Remedy.** `NewSlidingWindowLimiter(middleware.LimiterConfig{Limit: 10, Window: window, MaxKeys: bound.Of(10_000), EvictOldestKeyAtCeiling: true, Clock: clock})`.
+**Remedy.** `NewSlidingWindowLimiter(middleware.LimiterConfig{Limit: 10, Window: window, MaxKeys: bound.Of(10_000), Clock: clock})`; drop `SetEvictOldestKeyAtCeiling(true)`, since the limiter always evicts.
 
 ### Http: the rate limit doors take the limiter positionally and a `RateLimitConfig` value read once, and the quick limit doors take a struct
 
@@ -1873,7 +1897,7 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Exception: an out-of-range status is refused at construction
 
-**What changed.** `NewHttpException` and `NewHttpError` panic on a status outside `[200, 599]`. A 1xx is no final answer, so an exception raised with 103 was served as a 200 carrying the error body; net/http's `WriteHeader` panics on a status above 999 deep in the response path, and a status the writer clamps serves an exception as success.
+**What changed.** `NewHttpException` and `NewHttpError` panic on a status outside `[400, 599]` (see "Exception: an http exception answers 400 to 599"). A 1xx is no final answer, so an exception raised with 103 was served as a 200 carrying the error body; net/http's `WriteHeader` panics on a status above 999 deep in the response path, and a status the writer clamps serves an exception as success.
 
 **Symptom.** A constructor call with a mistyped status (a `4004`, a `0`) or an informational one (a `103`) panics where it is made instead of one response write away from it.
 
@@ -3089,7 +3113,7 @@ sessionInstance.Set("profile", profile)
 
 ### Http: the default rate-limit key is the client IP alone, and the key map is bounded
 
-**What changed.** The default key extractor keys on the client IP instead of `ip:path`. Both limiters track at most `LimiterConfig.MaxKeys` distinct keys, 1,000,000 by default. Once the map is full and an idle-entry prune frees nothing, a request under an unseen key is denied — or, with `LimiterConfig.EvictOldestKeyAtCeiling`, the key least recently seen is evicted and the request admitted.
+**What changed.** The default key extractor keys on the client IP instead of `ip:path`. Both limiters track at most `LimiterConfig.MaxKeys` distinct keys, 1,000,000 by default. Once the map is full, the key least recently seen is evicted and the request under the unseen key admitted.
 
 **Symptom.** A client that stayed under the limit on each path separately is now limited across all of them.
 

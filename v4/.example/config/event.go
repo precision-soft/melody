@@ -122,13 +122,12 @@ func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodye
 /* requestBudgetWindow is the window the request budget is counted over: the switch names a budget per hour */
 const requestBudgetWindow = time.Hour
 
-/* requestBudgetLimiter is the hourly budget, held in this process and tracking at most 10,000 addresses, the ceiling of the example's other in-process tables; past it an unseen address takes the slot of the address whose last request is the oldest, which comes back with a full budget. Refusing it instead would let 10,000 addresses lock every new visitor out for the two hours an idle bucket is held over an hourly window. */
+/* requestBudgetLimiter is the hourly budget, held in this process and tracking at most 10,000 addresses, the ceiling of the example's other in-process tables; past it an unseen address takes the slot of the address whose last request is the oldest, which comes back with a full budget. */
 func requestBudgetLimiter(budget int) *melodyhttpmiddleware.FixedWindowLimiter {
     return melodyhttpmiddleware.NewFixedWindowLimiter(melodyhttpmiddleware.LimiterConfig{
-        Limit:                   budget,
-        Window:                  requestBudgetWindow,
-        MaxKeys:                 melodybound.Of(inProcessWriteThrottleMaxAddresses),
-        EvictOldestKeyAtCeiling: true,
+        Limit:   budget,
+        Window:  requestBudgetWindow,
+        MaxKeys: melodybound.Of(inProcessWriteThrottleMaxAddresses),
     })
 }
 

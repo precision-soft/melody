@@ -27,9 +27,10 @@ type HttpMiddlewareDefinition struct {
 
     Factory HttpMiddlewareFactory
 
-    /* ReplaceExisting lets this definition take the place of an earlier one of the same Name; AllowDuplicates admits a second definition of the Name beside the first. */
+    /* ReplaceExisting lets this definition take the place of the one earlier definition of the same Name the environment and the group admit; with none earlier it is admitted as a single definition; refused beside AllowDuplicates, and over a Name admitted more than once. */
     ReplaceExisting bool
 
+    /* AllowDuplicates admits another definition of the Name beside this one. Every definition of a Name the environment and the group admit must agree on it, in either order: all allowing run side by side, all single keep the earliest, and a disagreement is refused at Build and Describe. */
     AllowDuplicates bool
 
     /* FunctionName is the function a description names for this definition, the middleware or the factory that builds it, captured at registration so a description needs no factory run; "" when the registrar did not declare it. */

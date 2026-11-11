@@ -130,16 +130,26 @@ func TestBuildSecondFactorBudgetLimiter_RecordsAFailedReleaseInTheConfiguredJour
     }
 }
 
-func TestBuildSecondFactorBudgetLimiter_RefusesAnUnseenAccountPastItsCeiling(t *testing.T) {
+func TestBuildSecondFactorBudgetLimiter_GivesTheSlotOfTheAccountSeenLongestAgoPastItsCeiling(t *testing.T) {
     limiter := (&Module{}).buildSecondFactorBudgetLimiter(melodyclock.NewFrozenClock(time.Unix(1700000000, 0)), nil)
 
     for account := 0; account < inProcessWriteThrottleMaxAddresses; account++ {
-        if false == limiter.Allow(fmt.Sprintf("account-%d", account)) {
-            t.Fatalf("expected account %d admitted below the ceiling", account)
+        for attempt := 0; attempt < secondFactorBudgetAllowance; attempt++ {
+            if false == limiter.Allow(fmt.Sprintf("account-%d", account)) {
+                t.Fatalf("expected account %d attempt %d admitted below the ceiling", account, attempt)
+            }
         }
     }
 
-    if true == limiter.Allow("account-past-the-ceiling") {
-        t.Fatalf("expected an unseen account refused once %d accounts are tracked", inProcessWriteThrottleMaxAddresses)
+    if true == limiter.Allow("account-1") {
+        t.Fatal("expected a tracked account to keep its spent budget")
+    }
+
+    if false == limiter.Allow("account-past-the-ceiling") {
+        t.Fatalf("expected an unseen account admitted once %d accounts are tracked", inProcessWriteThrottleMaxAddresses)
+    }
+
+    if false == limiter.Allow("account-0") {
+        t.Fatal("expected the account seen longest ago evicted and back with a full budget")
     }
 }

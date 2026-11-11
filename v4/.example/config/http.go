@@ -187,7 +187,7 @@ func (instance *Module) buildCatalogWriteThrottle() {
     })
 }
 
-/* buildInProcessCatalogWriteThrottle arms the write budget of a process that runs without redis: a sliding window per client address held in this process, bounded in the addresses it tracks. It limits this process only — behind a balancer every replica would allow a budget of its own, which is why a deployment runs the redis budget — but a single process keeps its writes and its sign-ins throttled rather than unthrottled. Past 10,000 addresses inside the window an unseen address is refused 429 until the idle prune frees a slot, which a caller varying its address can bring about; the redis budget has no such table. */
+/* buildInProcessCatalogWriteThrottle arms the write budget of a process that runs without redis: a sliding window per client address held in this process, bounded in the addresses it tracks. It limits this process only — behind a balancer every replica would allow a budget of its own, which is why a deployment runs the redis budget — but a single process keeps its writes and its sign-ins throttled rather than unthrottled. Past 10,000 addresses an unseen address takes the slot of the address seen longest ago, which comes back with a full budget: a caller varying its address gains nothing a fresh address does not already give it; the redis budget has no such table. */
 func (instance *Module) buildInProcessCatalogWriteThrottle(clockInstance melodyclockcontract.Clock) {
     limiter := melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{
         Limit:   catalogWriteAllowance,

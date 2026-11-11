@@ -38,10 +38,26 @@ func TestNewHttpException_AnInformationalStatusIsRefused(t *testing.T) {
 }
 
 func TestNewHttpException_AcceptsTheRangeBoundaries(t *testing.T) {
-    for _, statusCode := range []int{200, 599} {
+    for _, statusCode := range []int{400, 599} {
         if statusCode != NewHttpException(statusCode, "boom").StatusCode() {
             t.Fatalf("expected status %d accepted", statusCode)
         }
+
+        if statusCode != NewHttpError(statusCode, HttpErrorConfig{Message: "boom"}).StatusCode() {
+            t.Fatalf("expected status %d accepted by NewHttpError", statusCode)
+        }
+    }
+}
+
+func TestNewHttpException_ASuccessOrRedirectStatusIsRefused(t *testing.T) {
+    for _, statusCode := range []int{200, 204, 301, 302, 399} {
+        assertPanicsWithEmergency(t, "http status code out of range", func() {
+            NewHttpException(statusCode, "boom")
+        })
+
+        assertPanicsWithEmergency(t, "http status code out of range", func() {
+            NewHttpError(statusCode, HttpErrorConfig{Message: "boom"})
+        })
     }
 }
 
@@ -229,4 +245,20 @@ func TestNewHttpError_RefusesANegativeRetryAfter(t *testing.T) {
     }()
 
     NewHttpError(nethttp.StatusServiceUnavailable, HttpErrorConfig{RetryAfter: -time.Second})
+}
+
+func TestNewHttpException_TheRefusalNamesTheStatusAndTheRange(t *testing.T) {
+    defer func() {
+        recoveredError, ok := recover().(*Error)
+        if false == ok || nil == recoveredError {
+            t.Fatalf("expected the panic to carry an *Error")
+        }
+
+        context := recoveredError.Context()
+        if 302 != context["statusCode"] || 400 != context["minimum"] || 599 != context["maximum"] {
+            t.Fatalf("expected statusCode 302, minimum 400 and maximum 599, got %v", context)
+        }
+    }()
+
+    NewHttpException(302, "boom")
 }

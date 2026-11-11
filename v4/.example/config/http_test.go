@@ -102,7 +102,7 @@ func TestBuildInProcessCatalogWriteThrottle_RefusesTheThirtyFirstWriteOfAnAddres
     }
 }
 
-func TestBuildInProcessCatalogWriteThrottle_RefusesAnUnseenAddressPastItsCeiling(t *testing.T) {
+func TestBuildInProcessCatalogWriteThrottle_GivesTheSlotOfTheAddressSeenLongestAgoPastItsCeiling(t *testing.T) {
     moduleInstance := &Module{trustedProxyResolver: newTrustedProxyResolver("", time.Now)}
     moduleInstance.buildInProcessCatalogWriteThrottle(melodyclock.NewFrozenClock(time.Unix(1700000000, 0)))
 
@@ -129,9 +129,23 @@ func TestBuildInProcessCatalogWriteThrottle_RefusesAnUnseenAddressPastItsCeiling
         }
     }
 
+    if writeErr := writeFrom("192.0.2.1"); nil != writeErr {
+        t.Fatalf("expected an unseen address admitted once %d addresses are tracked, got %v", inProcessWriteThrottleMaxAddresses, writeErr)
+    }
+
+    for attempt := 1; attempt < catalogWriteAllowance; attempt++ {
+        if writeErr := writeFrom("192.0.2.1"); nil != writeErr {
+            t.Fatalf("expected attempt %d of the admitted address inside its budget, got %v", attempt, writeErr)
+        }
+    }
+
     var httpException *melodyexception.HttpException
     if writeErr := writeFrom("192.0.2.1"); false == errors.As(writeErr, &httpException) || nethttp.StatusTooManyRequests != httpException.StatusCode() {
-        t.Fatalf("expected an unseen address refused 429 once %d addresses are tracked, got %v", inProcessWriteThrottleMaxAddresses, writeErr)
+        t.Fatalf("expected the admitted address refused 429 past its budget, got %v", writeErr)
+    }
+
+    if writeErr := writeFrom("10.0.0.1"); nil != writeErr {
+        t.Fatalf("expected the address seen longest ago evicted and back with a full budget, got %v", writeErr)
     }
 }
 

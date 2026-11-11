@@ -156,7 +156,10 @@ func (instance *Builder) selectAndOrder(
         inactive:       make([]*InactiveMiddleware, 0),
     }
 
-    selected := instance.selectDefinitions(environment, group, report)
+    selected, selectionErr := instance.selectDefinitions(environment, group, report)
+    if nil != selectionErr {
+        return nil, report, selectionErr
+    }
 
     gatingErr := validateReferenceGating(instance.definitions, group)
     if nil != gatingErr {
@@ -195,15 +198,15 @@ func (instance *Builder) selectDefinitions(
     environment string,
     group string,
     report *MiddlewareBuildReport,
-) []*HttpMiddlewareDefinition {
+) ([]*HttpMiddlewareDefinition, error) {
     if 0 == len(instance.definitions) {
-        return []*HttpMiddlewareDefinition{}
+        return []*HttpMiddlewareDefinition{}, nil
     }
 
     selected := make([]*HttpMiddlewareDefinition, 0, len(instance.definitions))
-    seen := make(map[string]int)
+    admittedByName := make(map[string]*admittedName)
 
-    for _, definition := range instance.definitions {
+    for position, definition := range instance.definitions {
         if "" == definition.Name {
             report.SetInactive(
                 append(
@@ -212,6 +215,17 @@ func (instance *Builder) selectDefinitions(
                 ),
             )
             continue
+        }
+
+        if true == definition.ReplaceExisting && true == definition.AllowDuplicates {
+            return nil, exception.NewError(
+                "middleware definition both replaces an existing one and allows duplicates",
+                exceptioncontract.Context{
+                    "middlewareName": definition.Name,
+                    "position":       position,
+                },
+                nil,
+            )
         }
 
         if false == isEnabledForEnvironment(definition, environment) {
@@ -234,29 +248,73 @@ func (instance *Builder) selectDefinitions(
             continue
         }
 
-        existingIndex, exists := seen[definition.Name]
-        if true == exists && false == definition.AllowDuplicates {
-            if true == definition.ReplaceExisting {
-                selected[existingIndex] = definition
-            } else {
-                report.SetInactive(
-                    append(
-                        report.Inactive(),
-                        NewInactiveMiddleware(definition.Name, "skipped: duplicate definition"),
-                    ),
-                )
+        admitted, exists := admittedByName[definition.Name]
+        if false == exists {
+            admittedByName[definition.Name] = &admittedName{
+                selectedIndex:   len(selected),
+                position:        position,
+                count:           1,
+                allowDuplicates: definition.AllowDuplicates,
             }
+            selected = append(selected, definition)
             continue
         }
 
-        if false == exists {
-            seen[definition.Name] = len(selected)
+        if true == definition.ReplaceExisting {
+            if 1 < admitted.count {
+                return nil, exception.NewError(
+                    "middleware definition replaces a name admitted more than once",
+                    exceptioncontract.Context{
+                        "middlewareName": definition.Name,
+                        "position":       position,
+                        "admittedCount":  admitted.count,
+                    },
+                    nil,
+                )
+            }
+
+            selected[admitted.selectedIndex] = definition
+            admitted.position = position
+            admitted.allowDuplicates = false
+            continue
         }
 
-        selected = append(selected, definition)
+        if admitted.allowDuplicates != definition.AllowDuplicates {
+            return nil, exception.NewError(
+                "middleware definitions of one name disagree on AllowDuplicates",
+                exceptioncontract.Context{
+                    "middlewareName":         definition.Name,
+                    "earlierPosition":        admitted.position,
+                    "earlierAllowDuplicates": admitted.allowDuplicates,
+                    "laterPosition":          position,
+                    "laterAllowDuplicates":   definition.AllowDuplicates,
+                },
+                nil,
+            )
+        }
+
+        if true == definition.AllowDuplicates {
+            admitted.count = admitted.count + 1
+            selected = append(selected, definition)
+            continue
+        }
+
+        report.SetInactive(
+            append(
+                report.Inactive(),
+                NewInactiveMiddleware(definition.Name, "skipped: duplicate definition"),
+            ),
+        )
     }
 
-    return selected
+    return selected, nil
+}
+
+type admittedName struct {
+    selectedIndex   int
+    position        int
+    count           int
+    allowDuplicates bool
 }
 
 func isEnabledForEnvironment(definition *HttpMiddlewareDefinition, environment string) bool {

@@ -25,7 +25,7 @@ const (
     /* the window the write allowance is counted over */
     catalogWriteWindow = time.Minute
 
-    /* the addresses the in-process budget tracks without redis; past it an unseen address is refused rather than growing the map */
+    /* the addresses the in-process budget tracks without redis; past it an unseen address takes the slot of the one seen longest ago rather than growing the map */
     inProcessWriteThrottleMaxAddresses = 10000
 )
 

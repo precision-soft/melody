@@ -7,6 +7,12 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
+const (
+    minimumHttpExceptionStatusCode = 400
+    maximumHttpExceptionStatusCode = 599
+)
+
+/* NewHttpException builds an http exception answering statusCode, refused outside 400..599: an error answers a client or a server error, never a success or a redirect. A status computed from a remote answer, as a proxying handler forwards it, is checked by its caller before it is raised. */
 func NewHttpException(statusCode int, message string) *HttpException {
     refuseStatusCodeOutOfRange(statusCode)
 
@@ -38,7 +44,7 @@ type HttpErrorConfig struct {
     RetryAfter time.Duration
 }
 
-/* NewHttpError builds an http exception answering statusCode, refused outside 200..599, with the identity the config declares: the error renderer serves code, key and parameters inside the error object beside the message, each left out when empty, so a client branches on the code and translates the key without parsing the message. The framework translates nothing. */
+/* NewHttpError builds an http exception answering statusCode, refused outside 400..599 as NewHttpException is, with the identity the config declares: the error renderer serves code, key and parameters inside the error object beside the message, each left out when empty, so a client branches on the code and translates the key without parsing the message. The framework translates nothing. */
 func NewHttpError(statusCode int, config HttpErrorConfig) *HttpException {
     refuseStatusCodeOutOfRange(statusCode)
 
@@ -67,14 +73,16 @@ func NewHttpError(statusCode int, config HttpErrorConfig) *HttpException {
     }
 }
 
-/* refuseStatusCodeOutOfRange refuses at construction a status outside 200–599, the classes an http exception can answer with: net/http's WriteHeader would panic deep in the response path below 100 and above 999, and an informational status is not a final answer, so the writer serves the error body under a 200. */
+/* a success or a redirect raised as an error would serve the error body as a success */
 func refuseStatusCodeOutOfRange(statusCode int) {
-    if 200 > statusCode || 599 < statusCode {
+    if minimumHttpExceptionStatusCode > statusCode || maximumHttpExceptionStatusCode < statusCode {
         Panic(
             NewEmergency(
                 "http status code out of range",
                 exceptioncontract.Context{
                     "statusCode": statusCode,
+                    "minimum":    minimumHttpExceptionStatusCode,
+                    "maximum":    maximumHttpExceptionStatusCode,
                 },
                 nil,
             ),

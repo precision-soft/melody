@@ -11,6 +11,7 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
+    "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
@@ -520,4 +521,192 @@ func TestNewBuilder_NilTakesNone(t *testing.T) {
     if nil != buildErr || 0 != len(middlewares) {
         t.Fatalf("expected an empty pipeline, got %d middlewares and %v", len(middlewares), buildErr)
     }
+}
+
+func definitionNamed(name string, functionName string) HttpMiddlewareDefinition {
+    return HttpMiddlewareDefinition{Name: name, Groups: []string{"http"}, Factory: passthroughFactory(), FunctionName: functionName}
+}
+
+func assertSelectionRefused(t *testing.T, refusal error, expectedMessage string, expectedContext map[string]any) {
+    t.Helper()
+
+    refusalError, ok := refusal.(*exception.Error)
+    if false == ok || nil == refusalError {
+        t.Fatalf("expected an *exception.Error, got %v", refusal)
+    }
+
+    if expectedMessage != refusalError.Message() {
+        t.Fatalf("expected message %q, got %q", expectedMessage, refusalError.Message())
+    }
+
+    for key, expected := range expectedContext {
+        if expected != refusalError.Context()[key] {
+            t.Fatalf("expected context %s = %v, got %v", key, expected, refusalError.Context())
+        }
+    }
+}
+
+func describedFunctionNames(t *testing.T, environment string, definitions ...HttpMiddlewareDefinition) []string {
+    t.Helper()
+
+    descriptions, _, describeErr := NewBuilder(definitions).Describe(environment, "http")
+    if nil != describeErr {
+        t.Fatalf("unexpected error: %v", describeErr)
+    }
+
+    functionNames := make([]string, 0, len(descriptions))
+    for _, description := range descriptions {
+        functionNames = append(functionNames, description.FunctionName)
+    }
+
+    return functionNames
+}
+
+func TestBuilder_RefusesDefinitionsThatDisagreeOnDuplicates(t *testing.T) {
+    single := definitionNamed("audit", "single")
+    duplicated := definitionNamed("audit", "duplicated")
+    duplicated.AllowDuplicates = true
+
+    for _, order := range []struct {
+        name        string
+        definitions []HttpMiddlewareDefinition
+        earlier     bool
+        later       bool
+    }{
+        {"single first", []HttpMiddlewareDefinition{single, duplicated}, false, true},
+        {"duplicated first", []HttpMiddlewareDefinition{duplicated, single}, true, false},
+    } {
+        expectedContext := map[string]any{
+            "middlewareName":         "audit",
+            "earlierPosition":        0,
+            "earlierAllowDuplicates": order.earlier,
+            "laterPosition":          1,
+            "laterAllowDuplicates":   order.later,
+        }
+
+        _, _, buildErr := NewBuilder(order.definitions).Build(&gatingTestKernel{environment: "dev"}, "http")
+        assertSelectionRefused(t, buildErr, "middleware definitions of one name disagree on AllowDuplicates", expectedContext)
+
+        _, _, describeErr := NewBuilder(order.definitions).Describe("dev", "http")
+        assertSelectionRefused(t, describeErr, "middleware definitions of one name disagree on AllowDuplicates", expectedContext)
+    }
+}
+
+func TestBuilder_ADisagreementInAnotherEnvironmentIsNotRefused(t *testing.T) {
+    developmentSingle := definitionNamed("audit", "development single")
+    developmentSingle.EnabledEnvironments = []string{"dev"}
+    duplicated := definitionNamed("audit", "duplicated")
+    duplicated.AllowDuplicates = true
+
+    functionNames := describedFunctionNames(t, "prod", developmentSingle, duplicated)
+    if 1 != len(functionNames) || "duplicated" != functionNames[0] {
+        t.Fatalf("expected only the definition production admits, got %v", functionNames)
+    }
+
+    _, _, buildErr := NewBuilder([]HttpMiddlewareDefinition{developmentSingle, duplicated}).Build(&gatingTestKernel{environment: "dev"}, "http")
+    assertSelectionRefused(t, buildErr, "middleware definitions of one name disagree on AllowDuplicates", map[string]any{"middlewareName": "audit"})
+}
+
+func TestBuilder_ADisagreementInAnotherGroupIsNotRefused(t *testing.T) {
+    otherGroupSingle := definitionNamed("audit", "other group single")
+    otherGroupSingle.Groups = []string{"api"}
+    duplicated := definitionNamed("audit", "duplicated")
+    duplicated.AllowDuplicates = true
+
+    functionNames := describedFunctionNames(t, "dev", otherGroupSingle, duplicated)
+    if 1 != len(functionNames) || "duplicated" != functionNames[0] {
+        t.Fatalf("expected only the definition the group admits, got %v", functionNames)
+    }
+}
+
+func TestBuilder_TwoSingleDefinitionsKeepTheEarlierAndReportTheLater(t *testing.T) {
+    earlier := definitionNamed("audit", "earlier")
+    later := definitionNamed("audit", "later")
+
+    descriptions, report, describeErr := NewBuilder([]HttpMiddlewareDefinition{earlier, later}).Describe("dev", "http")
+    if nil != describeErr {
+        t.Fatalf("unexpected error: %v", describeErr)
+    }
+
+    if 1 != len(descriptions) || "earlier" != descriptions[0].FunctionName {
+        t.Fatalf("expected the earlier definition alone, got %v", descriptions)
+    }
+
+    inactive := report.Inactive()
+    if 1 != len(inactive) || "audit" != inactive[0].Name() || "skipped: duplicate definition" != inactive[0].Reason() {
+        t.Fatalf("expected the later definition reported as a skipped duplicate, got %v", inactive)
+    }
+}
+
+func TestBuilder_TwoDuplicatedDefinitionsBothRun(t *testing.T) {
+    earlier := definitionNamed("audit", "earlier")
+    earlier.AllowDuplicates = true
+    later := definitionNamed("audit", "later")
+    later.AllowDuplicates = true
+
+    functionNames := describedFunctionNames(t, "dev", earlier, later)
+    if 2 != len(functionNames) || "earlier" != functionNames[0] || "later" != functionNames[1] {
+        t.Fatalf("expected both definitions in order, got %v", functionNames)
+    }
+}
+
+func TestBuilder_AReplacementTakesTheSlotOfTheEarlierDefinition(t *testing.T) {
+    replaced := definitionNamed("audit", "replaced")
+    neighbour := definitionNamed("tracing", "neighbour")
+    replacement := definitionNamed("audit", "replacement")
+    replacement.ReplaceExisting = true
+
+    functionNames := describedFunctionNames(t, "dev", replaced, neighbour, replacement)
+    if 2 != len(functionNames) || "replacement" != functionNames[0] || "neighbour" != functionNames[1] {
+        t.Fatalf("expected the replacement in the replaced definition's slot, got %v", functionNames)
+    }
+}
+
+func TestBuilder_AReplacementOfADuplicatedDefinitionAdmittedOnceIsAccepted(t *testing.T) {
+    replaced := definitionNamed("audit", "replaced")
+    replaced.AllowDuplicates = true
+    replacement := definitionNamed("audit", "replacement")
+    replacement.ReplaceExisting = true
+
+    functionNames := describedFunctionNames(t, "dev", replaced, replacement)
+    if 1 != len(functionNames) || "replacement" != functionNames[0] {
+        t.Fatalf("expected the replacement alone, got %v", functionNames)
+    }
+}
+
+func TestBuilder_RefusesAReplacementOfADuplicatedName(t *testing.T) {
+    first := definitionNamed("audit", "first")
+    first.AllowDuplicates = true
+    second := definitionNamed("audit", "second")
+    second.AllowDuplicates = true
+    replacement := definitionNamed("audit", "replacement")
+    replacement.ReplaceExisting = true
+
+    _, _, describeErr := NewBuilder([]HttpMiddlewareDefinition{first, second, replacement}).Describe("dev", "http")
+    assertSelectionRefused(t, describeErr, "middleware definition replaces a name admitted more than once", map[string]any{"middlewareName": "audit", "position": 2, "admittedCount": 2})
+}
+
+func TestBuilder_ADuplicatedDefinitionAfterAReplacementDisagreesWithIt(t *testing.T) {
+    replaced := definitionNamed("audit", "replaced")
+    replaced.AllowDuplicates = true
+    replacement := definitionNamed("audit", "replacement")
+    replacement.ReplaceExisting = true
+    duplicated := definitionNamed("audit", "duplicated")
+    duplicated.AllowDuplicates = true
+
+    _, _, describeErr := NewBuilder([]HttpMiddlewareDefinition{replaced, replacement, duplicated}).Describe("dev", "http")
+    assertSelectionRefused(t, describeErr, "middleware definitions of one name disagree on AllowDuplicates", map[string]any{"middlewareName": "audit", "earlierPosition": 1, "earlierAllowDuplicates": false, "laterPosition": 2})
+}
+
+func TestBuilder_RefusesADefinitionThatBothReplacesAndAllowsDuplicates(t *testing.T) {
+    contradictory := definitionNamed("audit", "contradictory")
+    contradictory.ReplaceExisting = true
+    contradictory.AllowDuplicates = true
+
+    _, _, buildErr := NewBuilder([]HttpMiddlewareDefinition{contradictory}).Build(&gatingTestKernel{environment: "dev"}, "http")
+    assertSelectionRefused(t, buildErr, "middleware definition both replaces an existing one and allows duplicates", map[string]any{"middlewareName": "audit", "position": 0})
+
+    contradictory.EnabledEnvironments = []string{"prod"}
+    _, _, describeErr := NewBuilder([]HttpMiddlewareDefinition{contradictory}).Describe("dev", "http")
+    assertSelectionRefused(t, describeErr, "middleware definition both replaces an existing one and allows duplicates", map[string]any{"middlewareName": "audit"})
 }

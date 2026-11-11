@@ -6,6 +6,7 @@ import (
     "math"
     nethttp "net/http"
     "net/http/httptest"
+    "strconv"
     "testing"
     "time"
 
@@ -412,126 +413,173 @@ func TestDefaultKeyExtractor_KeysOnClientIpAcrossPaths(t *testing.T) {
     }
 }
 
-func TestFixedWindowLimiter_MaxKeysDeniesUnseenKeyWhenFull(t *testing.T) {
-    frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 5, Window: time.Minute, MaxKeys: bound.Of(2)})
+type boundedLimiter struct {
+    name    string
+    limiter httpcontract.RateLimiter
+    held    func(key string) bool
+    size    func() int
+    ordered func() int
+}
 
-    if false == limiter.Allow("a") {
-        t.Fatalf("expected the first key to be admitted")
-    }
-    if false == limiter.Allow("b") {
-        t.Fatalf("expected the second key to be admitted")
-    }
+func boundedLimiters(config LimiterConfig) []boundedLimiter {
+    fixed := NewFixedWindowLimiter(config)
+    sliding := NewSlidingWindowLimiter(config)
 
-    if true == limiter.Allow("c") {
-        t.Fatalf("expected an unseen key to be denied once the map is full of active entries")
-    }
-
-    if false == limiter.Allow("a") {
-        t.Fatalf("expected an already-tracked key to keep being served")
-    }
-
-    limiter.mutex.RLock()
-    trackedKeys := len(limiter.buckets)
-    limiter.mutex.RUnlock()
-
-    if 2 != trackedKeys {
-        t.Fatalf("expected the map to stay bounded at 2 keys, got %d", trackedKeys)
+    return []boundedLimiter{
+        {
+            name:    "fixed",
+            limiter: fixed,
+            held: func(key string) bool {
+                fixed.mutex.RLock()
+                defer fixed.mutex.RUnlock()
+                _, held := fixed.buckets[key]
+                return held
+            },
+            size: func() int {
+                fixed.mutex.RLock()
+                defer fixed.mutex.RUnlock()
+                return len(fixed.buckets)
+            },
+            ordered: func() int {
+                fixed.mutex.RLock()
+                defer fixed.mutex.RUnlock()
+                return len(fixed.recency.elements)
+            },
+        },
+        {
+            name:    "sliding",
+            limiter: sliding,
+            held: func(key string) bool {
+                sliding.mutex.RLock()
+                defer sliding.mutex.RUnlock()
+                _, held := sliding.windows[key]
+                return held
+            },
+            size: func() int {
+                sliding.mutex.RLock()
+                defer sliding.mutex.RUnlock()
+                return len(sliding.windows)
+            },
+            ordered: func() int {
+                sliding.mutex.RLock()
+                defer sliding.mutex.RUnlock()
+                return len(sliding.recency.elements)
+            },
+        },
     }
 }
 
-func TestFixedWindowLimiter_MaxKeysReclaimsIdleBeforeDenying(t *testing.T) {
+func TestLimiters_AFullTableEvictsTheLeastRecentlySeenKey(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 5, Window: time.Minute, MaxKeys: bound.Of(2)})
 
-    limiter.Allow("a")
-    limiter.Allow("b")
+    for _, subject := range boundedLimiters(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(2)}) {
+        subject.limiter.Allow("a")
+        frozenClock.Advance(time.Second)
+        subject.limiter.Allow("b")
+        frozenClock.Advance(time.Second)
+        subject.limiter.Allow("a")
 
-    frozenClock.Advance(3 * time.Minute)
+        if false == subject.limiter.Allow("c") {
+            t.Fatalf("%s: expected an unseen key admitted at a full table of active keys", subject.name)
+        }
 
-    if false == limiter.Allow("c") {
-        t.Fatalf("expected an unseen key to be admitted after idle entries are reclaimed")
+        if true == subject.limiter.Allow("a") {
+            t.Fatalf("%s: expected the key seen last to keep its spent budget", subject.name)
+        }
+
+        if true == subject.held("b") || 2 != subject.size() {
+            t.Fatalf("%s: expected b, the key seen longest ago, evicted and the table held at 2, got b=%t size=%d", subject.name, subject.held("b"), subject.size())
+        }
     }
 }
 
-func TestSlidingWindowLimiter_MaxKeysDeniesUnseenKeyWhenFull(t *testing.T) {
+func TestLimiters_AnEvictedKeyComesBackWithAFullBudget(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 5, Window: time.Minute, MaxKeys: bound.Of(2)})
 
-    if false == limiter.Allow("a") {
-        t.Fatalf("expected the first key to be admitted")
-    }
-    if false == limiter.Allow("b") {
-        t.Fatalf("expected the second key to be admitted")
-    }
+    for _, subject := range boundedLimiters(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(2)}) {
+        subject.limiter.Allow("a")
+        if true == subject.limiter.Allow("a") {
+            t.Fatalf("%s: expected a's budget spent", subject.name)
+        }
 
-    if true == limiter.Allow("c") {
-        t.Fatalf("expected an unseen key to be denied once the map is full of active entries")
-    }
+        subject.limiter.Allow("b")
+        subject.limiter.Allow("c")
 
-    limiter.mutex.RLock()
-    trackedKeys := len(limiter.windows)
-    limiter.mutex.RUnlock()
+        if true == subject.held("a") {
+            t.Fatalf("%s: expected a evicted by c", subject.name)
+        }
 
-    if 2 != trackedKeys {
-        t.Fatalf("expected the map to stay bounded at 2 keys, got %d", trackedKeys)
+        if false == subject.limiter.Allow("a") {
+            t.Fatalf("%s: expected the evicted key back with a full budget", subject.name)
+        }
     }
 }
 
-/* the ceiling prune walks the whole map, so running it for every unseen key would make a full limiter cost O(tracked keys) per request under the lock all traffic shares; it runs at most once per window, and the reclaim it defers lands on the next walk */
-func TestFixedWindowLimiter_CeilingPruneRunsAtMostOncePerWindow(t *testing.T) {
+func TestLimiters_AKeySeenAgainIsNotTheOneEvicted(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 5, Window: time.Minute, MaxKeys: bound.Of(2)})
 
-    limiter.Allow("a")
-    limiter.Allow("b")
+    for _, subject := range boundedLimiters(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(2)}) {
+        subject.limiter.Allow("a")
+        subject.limiter.Allow("b")
 
-    frozenClock.Advance(110 * time.Second)
+        if true == subject.limiter.Allow("a") {
+            t.Fatalf("%s: expected a's second request denied", subject.name)
+        }
 
-    /* the first unseen key walks the map; nothing is idle yet (an entry falls idle after twice the window), so it is denied */
-    if true == limiter.Allow("c") {
-        t.Fatalf("expected an unseen key to be denied while every entry is still active")
-    }
+        subject.limiter.Allow("c")
 
-    frozenClock.Advance(20 * time.Second)
+        if false == subject.held("a") || true == subject.held("b") {
+            t.Fatalf("%s: expected b evicted and a kept, got a=%t b=%t", subject.name, subject.held("a"), subject.held("b"))
+        }
 
-    /* both entries are idle now, but the previous walk ran 20 seconds ago — inside the window — so this request is denied without paying for another walk */
-    if true == limiter.Allow("d") {
-        t.Fatalf("expected an unseen key to be denied without a second map walk inside the same window")
-    }
-
-    frozenClock.Advance(40 * time.Second)
-
-    /* a full window has passed since the last walk, so the idle entries are reclaimed and the unseen key is admitted */
-    if false == limiter.Allow("e") {
-        t.Fatalf("expected the idle entries to be reclaimed once a window has passed since the last walk")
+        if true == subject.limiter.Allow("a") {
+            t.Fatalf("%s: expected the kept key to keep its spent budget", subject.name)
+        }
     }
 }
 
-/* the sliding window limiter carries the same ceiling walk and the same once-per-window gate */
-func TestSlidingWindowLimiter_CeilingPruneRunsAtMostOncePerWindow(t *testing.T) {
+func TestLimiters_TheTableNeverHoldsMoreThanMaxKeys(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 5, Window: time.Minute, MaxKeys: bound.Of(2)})
 
-    limiter.Allow("a")
-    limiter.Allow("b")
+    for _, subject := range boundedLimiters(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(3)}) {
+        for index := 0; index < 30; index++ {
+            if false == subject.limiter.Allow(fmt.Sprintf("flood-%d", index)) {
+                t.Fatalf("%s: expected unseen key %d admitted", subject.name, index)
+            }
 
-    frozenClock.Advance(110 * time.Second)
+            if 3 < subject.size() {
+                t.Fatalf("%s: expected at most 3 keys tracked, got %d after key %d", subject.name, subject.size(), index)
+            }
+        }
 
-    if true == limiter.Allow("c") {
-        t.Fatalf("expected an unseen key to be denied while every entry is still active")
+        if 3 != subject.size() || 3 != subject.ordered() {
+            t.Fatalf("%s: expected the table and its eviction order full at 3 keys, got %d and %d", subject.name, subject.size(), subject.ordered())
+        }
+
+        for _, key := range []string{"flood-27", "flood-28", "flood-29"} {
+            if false == subject.held(key) {
+                t.Fatalf("%s: expected the three most recent keys kept, %s missing", subject.name, key)
+            }
+        }
     }
+}
 
-    frozenClock.Advance(20 * time.Second)
+func TestLimiters_AResetKeyFreesItsSlot(t *testing.T) {
+    frozenClock := clock.NewFrozenClock(time.Now())
 
-    if true == limiter.Allow("d") {
-        t.Fatalf("expected an unseen key to be denied without a second map walk inside the same window")
-    }
+    for _, subject := range boundedLimiters(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(2)}) {
+        subject.limiter.Allow("a")
+        subject.limiter.Allow("b")
+        subject.limiter.Reset("a")
+        subject.limiter.Allow("c")
 
-    frozenClock.Advance(40 * time.Second)
+        if false == subject.held("b") || false == subject.held("c") || 2 != subject.size() {
+            t.Fatalf("%s: expected the reset key's slot reused without an eviction, got b=%t c=%t size=%d", subject.name, subject.held("b"), subject.held("c"), subject.size())
+        }
 
-    if false == limiter.Allow("e") {
-        t.Fatalf("expected the idle entries to be reclaimed once a window has passed since the last walk")
+        if subject.size() != subject.ordered() {
+            t.Fatalf("%s: expected the eviction order to hold the %d tracked keys alone, got %d", subject.name, subject.size(), subject.ordered())
+        }
     }
 }
 
@@ -1315,62 +1363,6 @@ func TestRateLimitConfig_ClientIpResolver_AnIpv6AddressItResolvesKeysOnItsSlash6
     }
 }
 
-/* evicting at the ceiling admits a stranger at the cost of the key used longest ago: a key touched since keeps its spent budget, the evicted one comes back with a full one */
-func TestFixedWindowLimiter_EvictsTheOldestKeyAtTheCeiling(t *testing.T) {
-    frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(2), EvictOldestKeyAtCeiling: true})
-
-    limiter.Allow("a")
-    frozenClock.Advance(time.Second)
-    limiter.Allow("b")
-    frozenClock.Advance(time.Second)
-    limiter.Allow("a")
-
-    if false == limiter.Allow("c") {
-        t.Fatalf("expected an unseen key admitted at the ceiling")
-    }
-
-    if true == limiter.Allow("a") {
-        t.Fatalf("expected the key touched last to keep its spent budget")
-    }
-
-    limiter.mutex.RLock()
-    _, bHeld := limiter.buckets["b"]
-    trackedKeys := len(limiter.buckets)
-    limiter.mutex.RUnlock()
-
-    if true == bHeld || 2 != trackedKeys {
-        t.Fatalf("expected b, the key used longest ago, evicted and the map held at 2, got b=%t size=%d", bHeld, trackedKeys)
-    }
-}
-
-func TestSlidingWindowLimiter_EvictsTheOldestKeyAtTheCeiling(t *testing.T) {
-    frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(2), EvictOldestKeyAtCeiling: true})
-
-    limiter.Allow("a")
-    frozenClock.Advance(time.Second)
-    limiter.Allow("b")
-    frozenClock.Advance(time.Second)
-    limiter.Allow("a")
-
-    if false == limiter.Allow("c") {
-        t.Fatalf("expected an unseen key admitted at the ceiling")
-    }
-
-    if true == limiter.Allow("a") {
-        t.Fatalf("expected the key touched last to keep its spent budget")
-    }
-
-    limiter.mutex.RLock()
-    _, bHeld := limiter.windows["b"]
-    limiter.mutex.RUnlock()
-
-    if true == bHeld {
-        t.Fatalf("expected b, the key used longest ago, evicted")
-    }
-}
-
 func TestLimiters_ResolveTheMaxKeys(t *testing.T) {
     if 1_000_000 != NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}).maxKeys {
         t.Fatalf("expected the fixed window limiter's absent ceiling to read 1,000,000")
@@ -1589,5 +1581,36 @@ func TestRateLimitMiddleware_AMarkedDenialNobodyRecordedIsNotMarkedLogged(t *tes
 
     if false == exception.AnswersUnavailable(err) || true == exception.IsAlreadyLogged(err) {
         t.Fatalf("expected the unrecorded outage returned unavailable and not marked logged, so the kernel files it, got %v, logged %v", err, exception.IsAlreadyLogged(err))
+    }
+}
+
+func BenchmarkLimiters_KnownKeys(b *testing.B) {
+    keys := make([]string, 1_000)
+    for index := range keys {
+        keys[index] = strconv.Itoa(index)
+    }
+
+    for _, subject := range boundedLimiters(LimiterConfig{Limit: 1_000_000_000, Window: time.Hour, MaxKeys: bound.Of(10_000)}) {
+        b.Run(subject.name, func(b *testing.B) {
+            b.ReportAllocs()
+            for index := 0; index < b.N; index++ {
+                subject.limiter.Allow(keys[index%len(keys)])
+            }
+        })
+    }
+}
+
+func BenchmarkLimiters_UnseenKeysAtAFullTable(b *testing.B) {
+    for _, subject := range boundedLimiters(LimiterConfig{Limit: 1_000_000_000, Window: time.Hour, MaxKeys: bound.Of(10_000)}) {
+        for index := 0; index < 10_000; index++ {
+            subject.limiter.Allow("warm" + strconv.Itoa(index))
+        }
+
+        b.Run(subject.name, func(b *testing.B) {
+            b.ReportAllocs()
+            for index := 0; index < b.N; index++ {
+                subject.limiter.Allow("flood" + strconv.Itoa(index))
+            }
+        })
     }
 }
