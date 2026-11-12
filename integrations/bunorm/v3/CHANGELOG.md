@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.6] - 2026-11-12 - Unknown Seal Format Refused
+
+### Security
+
+- **Behavioural change**: `encrypt` — a stored value beginning with `<ENC>\0` under a format this build does not read, the fourth major's `gcm2` included, is `encrypted value is sealed under a format this build does not read` on `Cipher.Decrypt`, on the `Scan` of the four column types and in every `Migrator` mode, which stops at that row and leaves it as it is; a rolled-back binary no longer seals such a value again as data. See `UPGRADE.md`.
+
 ## [v3.6.5] - 2026-11-07 - Dependency Advisories
 
 ### Changed
@@ -246,7 +252,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.5...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.6...HEAD
+
+[v3.6.6]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.5...integrations/bunorm/v3.6.6
 
 [v3.6.5]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.4...integrations/bunorm/v3.6.5
 
