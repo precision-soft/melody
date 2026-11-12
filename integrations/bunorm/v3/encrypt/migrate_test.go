@@ -1488,6 +1488,28 @@ func TestMigrate_RefusesASealStoredAsDataThroughAForeignCipher(t *testing.T) {
     }
 }
 
+func TestMigrate_RefusesAMarkerFamilyPlaintextThroughAWrappedCipher(t *testing.T) {
+    packageCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1), "v2": newKey(2)}))
+
+    stored, sealErr := packageCipher.Encrypt("<ENC>\x00gcm2\x00v1:zzz")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    migrator := &Migrator{cipher: wrappedCipher{Cipher: packageCipher}}
+
+    for name, transform := range map[string]func(string) (string, error){
+        "rotation of a random column":        migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2"),
+        "rotation of a deterministic column": migrator.reencryptTransform(TableSpec{Deterministic: true}, "v2"),
+        "deterministic encrypt re-run":       migrator.encryptTransform(TableSpec{Deterministic: true}),
+    } {
+        refused, refusedErr := transform(stored)
+        if nil == refusedErr || false == strings.Contains(refusedErr.Error(), "cannot re-seal as data") {
+            t.Fatalf("%s: expected the foreign-cipher refusal, got %q (%v)", name, refused, refusedErr)
+        }
+    }
+}
+
 func TestMigrateReencrypt_RotatesASealStoredAsDataEndToEnd(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, nil)
     cipherInstance := newRotationCipher(t)
@@ -1539,6 +1561,127 @@ func TestMigrateReencrypt_RotatesASealStoredAsDataEndToEnd(t *testing.T) {
 
         if readBack := readColumnValue(t, written[index], false); testCase.applicationValue != readBack {
             t.Fatalf("%s: expected the rotated row to read back the value written, got %q", testCase.name, readBack)
+        }
+    }
+}
+
+func TestMigrator_StopsOnAnUnknownSealFormatInEveryMode(t *testing.T) {
+    for door, run := range map[string]func(migrator *Migrator, spec TableSpec) (int, error){
+        "encrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
+            return migrator.MigrateEncrypt(context.Background(), spec)
+        },
+        "reencrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
+            return migrator.MigrateReencrypt(context.Background(), spec, "v2")
+        },
+        "decrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
+            return migrator.MigrateDecrypt(context.Background(), spec)
+        },
+    } {
+        t.Run(door, func(t *testing.T) {
+            migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
+                {
+                    fragment: "information_schema.COLUMNS",
+                    columns:  []string{"DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "CHARACTER_OCTET_LENGTH"},
+                    rows:     [][]driver.Value{{"text", int64(65535), int64(65535)}},
+                },
+                {fragment: "MAX(LENGTH(", columns: []string{"longest"}, rows: [][]driver.Value{{nil}}},
+                {
+                    fragment: "ORDER BY",
+                    columns:  []string{"id", "notes"},
+                    rows:     [][]driver.Value{{"7", "<ENC>\x00gcm2\x00v1:zzz"}},
+                },
+            })
+            migrator.cipher = newRotationCipher(t)
+
+            _, runErr := run(migrator, TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+            if nil == runErr || false == exception.ChainIs(runErr, errSealFormatUnknownCause) {
+                t.Fatalf("expected the run stopped on the unknown seal format, got %v", runErr)
+            }
+
+            if "7" != exception.LogContext(runErr)["id"] {
+                t.Fatalf("expected the refusal to name the row, got %v", exception.LogContext(runErr))
+            }
+
+            for _, recorded := range stub.recorded() {
+                if true == strings.HasPrefix(recorded, "UPDATE ") {
+                    t.Fatalf("expected no update, saw: %s", recorded)
+                }
+            }
+        })
+    }
+}
+
+func TestMigrator_TheWidthProbeLeavesOutTheMarkerFamily(t *testing.T) {
+    migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
+        {
+            fragment: "information_schema.COLUMNS",
+            columns:  []string{"DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "CHARACTER_OCTET_LENGTH"},
+            rows:     [][]driver.Value{{"varchar", int64(255), int64(1020)}},
+        },
+        {fragment: "MAX(LENGTH(", columns: []string{"longest"}, rows: [][]driver.Value{{nil}}},
+        {fragment: "ORDER BY", columns: []string{"id", "notes"}, rows: [][]driver.Value{{"7", "<ENC>\x00gcm2\x00v1:zzz"}}},
+    })
+    migrator.cipher = newRotationCipher(t)
+
+    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+    if nil == runErr || false == exception.ChainIs(runErr, errSealFormatUnknownCause) {
+        t.Fatalf("expected the run stopped at the row on the unknown seal format, got %v", runErr)
+    }
+
+    probed := false
+    for _, recorded := range stub.recordedArguments() {
+        if true == strings.Contains(recorded.query, "NOT LIKE") {
+            probed = true
+            if "<ENC>\x00%" != recorded.arguments[0] {
+                t.Fatalf("expected the width probe to leave out the marker family, got %q", recorded.arguments[0])
+            }
+        }
+    }
+
+    if false == probed {
+        t.Fatalf("expected the width probe to run")
+    }
+}
+
+func TestMigrateDecrypt_StopsOnAnUnknownSealFormatThroughAPassThroughCipher(t *testing.T) {
+    migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
+        {fragment: "ORDER BY", columns: []string{"id", "notes"}, rows: [][]driver.Value{{"7", "<ENC>\x00gcm2\x00v1:zzz"}}},
+    })
+    migrator.cipher = NewFakeCipher()
+
+    _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+    if nil == runErr || false == exception.ChainIs(runErr, errSealFormatUnknownCause) {
+        t.Fatalf("expected the unknown seal format refused, got %v", runErr)
+    }
+
+    for _, recorded := range stub.recorded() {
+        if true == strings.HasPrefix(recorded, "UPDATE ") {
+            t.Fatalf("expected no update, saw: %s", recorded)
+        }
+    }
+}
+
+func TestMigrateDecrypt_StopsOnAPlaintextOfTheMarkerFamily(t *testing.T) {
+    migrator, stub := newScriptedMigrator(t, nil)
+    migrator.cipher = newRotationCipher(t)
+
+    stub.responses = []scriptedSqlResponse{
+        {fragment: "CHARACTER_SET_NAME", columns: []string{"COLUMN_NAME", "CHARACTER_SET_NAME"}},
+        {
+            fragment: "ORDER BY",
+            columns:  []string{"id", "notes"},
+            rows:     [][]driver.Value{{"4", storedColumnValue(t, "<ENC>\x00gcm2\x00v1:zzz", false)}},
+        },
+    }
+
+    _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+    if nil == runErr || false == strings.Contains(fmt.Sprint(errors.Unwrap(runErr)), "itself an encrypted value") {
+        t.Fatalf("expected the run stopped on the marker-family plaintext, got %v", runErr)
+    }
+
+    for _, recorded := range stub.recorded() {
+        if true == strings.HasPrefix(recorded, "UPDATE ") {
+            t.Fatalf("expected no update, saw: %s", recorded)
         }
     }
 }
