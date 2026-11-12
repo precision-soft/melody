@@ -6,24 +6,24 @@ import (
     "testing"
     "time"
 
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
-type spyParameterRegistrar struct {
-    names []string
+type spyEnvironmentKeyRegistrar struct {
+    keys     []string
+    defaults map[string]string
 }
 
-func (instance *spyParameterRegistrar) RegisterParameter(name string, value any) {
-    instance.names = append(instance.names, name)
-}
+func (instance *spyEnvironmentKeyRegistrar) DeclareEnvironmentKey(key configcontract.EnvironmentKey) {
+    instance.keys = append(instance.keys, key.Key)
 
-func (instance *spyParameterRegistrar) RegisterSecretParameter(name string, value any) {
-    instance.names = append(instance.names, name)
-}
-
-/* marking an existing parameter registers nothing, so the recorded names stay the set the module contributed */
-func (instance *spyParameterRegistrar) MarkParameterSecret(name string) {
+    if nil == instance.defaults {
+        instance.defaults = make(map[string]string)
+    }
+    instance.defaults[key.Key] = key.Default
 }
 
 func TestModule_NameAndDescription(t *testing.T) {
@@ -38,17 +38,25 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-func TestModule_RegisterParametersRespectsFlag(t *testing.T) {
-    registrar := &spyParameterRegistrar{}
-    NewModule(ModuleConfig{}).RegisterParameters(registrar)
-    if 0 != len(registrar.names) {
-        t.Fatalf("expected no parameters without the flag, got %v", registrar.names)
+func TestModule_DeclaresItsKeysWithoutAnOptIn(t *testing.T) {
+    registrar := &spyEnvironmentKeyRegistrar{}
+    NewModule(ModuleConfig{}).RegisterEnvironmentKeys(registrar)
+
+    if 10 != len(registrar.keys) || KeyUser != registrar.keys[0] || KeyRestartPolicy != registrar.keys[9] {
+        t.Fatalf("expected the ten keys declared, got %v", registrar.keys)
     }
 
-    registrar = &spyParameterRegistrar{}
-    NewModule(ModuleConfig{WithDefaultParameters: true}).RegisterParameters(registrar)
-    if 0 == len(registrar.names) {
-        t.Fatal("expected default parameters to be registered")
+    if _, isParameterModule := any(NewModule(ModuleConfig{})).(applicationcontract.ParameterModule); true == isParameterModule {
+        t.Fatalf("expected the module to register no parameter by hand")
+    }
+}
+
+func TestModule_DeclaresItsKeysWithTheConfiguredDefaults(t *testing.T) {
+    registrar := &spyEnvironmentKeyRegistrar{}
+    NewModule(ModuleConfig{KeyDefaults: KeyDefaults{User: "www-data", RestartPolicy: "Never"}}).RegisterEnvironmentKeys(registrar)
+
+    if "www-data" != registrar.defaults[KeyUser] || "Never" != registrar.defaults[KeyRestartPolicy] {
+        t.Fatalf("expected ModuleConfig.KeyDefaults as the declared defaults, got %v", registrar.defaults)
     }
 }
 

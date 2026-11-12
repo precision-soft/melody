@@ -109,7 +109,7 @@ The [`config/`](./config/) package keeps [`main.go`](./main.go) small by groupin
 - [`http.go`](./config/http.go) — `RegisterHttpRoutes`: named-route registration for pages and JSON APIs
 - [`cli.go`](./config/cli.go) — `RegisterCliCommands`: the application's own CLI commands, the framework's wiring generate command and the exclusive-lock wrapping of `example:exclusive:tick`; `melody:cron:generate` comes from the cron module registered in [`configure.go`](./config/configure.go)
 - [`event.go`](./config/event.go) — `RegisterEventSubscribers`: wires the example's domain event subscribers
-- [`parameter.go`](./config/parameter.go) — `RegisterParameters`: registers `melody.cron.*` parameters from `APP_CRON_*` env vars plus the example's own `app.*` parameters
+- [`parameter.go`](./config/parameter.go) — `RegisterParameters`: registers the example's own `app.*` parameters; the cron module declares its `MELODY_CRON_*` keys itself
 - [`service.go`](./config/service.go) — `RegisterServices`: container wiring for repositories, services, and the cache serializer
 - [`middleware.go`](./config/middleware.go) — example-specific HTTP middleware (`NewTimingMiddleware`)
 
@@ -144,7 +144,7 @@ the installed crontab or put its log under logrotate. `LogDisabled` is no remedy
 
 `cron.CommandName` is a generic helper that instantiates a constructor and returns the command name, so the schedule references commands by constructor instead of hardcoded strings.
 
-Cron defaults (user, logs directory, destination file, template, heartbeat) come from the parameter system in [`config/parameter.go`](./config/parameter.go). The user is sourced from `APP_CRON_USER`, and the heartbeat is enabled via the `APP_CRON_HEARTBEAT_AUTO_ENABLED` opt-in (which auto-derives `<logs-dir>/heartbeat.crontab` from `melody.cron.logs_dir`) — both env vars live in [`.env`](./.env). [`config/cron.go`](./config/cron.go) reads `app.cron.product_user` (backed by `APP_CRON_PRODUCT_USER`) at registration time and applies it as the per-command user on the `catalog:report:refresh`, `product:list` and `example:currency:refresh-rates` schedules, demonstrating how the parameter cascade feeds custom values into `cron.Configuration` entries. The fourth entry, `app:info`, declares no user and falls back to `melody.cron.user`.
+Cron defaults (user, logs directory, destination file, template, heartbeat, the k8s image, namespace and restart policy) come from the `MELODY_CRON_*` keys the cron module declares, with the module's own defaults where [`.env`](./.env) sets none. The user is sourced from `MELODY_CRON_USER`, and the heartbeat is enabled via the `MELODY_CRON_HEARTBEAT_ENABLED` opt-in (which auto-derives `<logs-dir>/heartbeat.crontab` from `melody.cron.logs_dir`); a value the key's rule refuses fails the boot naming the key. [`config/cron.go`](./config/cron.go) reads `app.cron.product_user` (backed by `APP_CRON_PRODUCT_USER`) at registration time and applies it as the per-command user on the `catalog:report:refresh`, `product:list` and `example:currency:refresh-rates` schedules, demonstrating how the parameter cascade feeds custom values into `cron.Configuration` entries. The fourth entry, `app:info`, declares no user and falls back to `melody.cron.user`.
 
 ### [`main.go`](./main.go) (why it stays small)
 
@@ -244,7 +244,7 @@ cd v4/.example
 go run . melody:cron:generate --out ./generated_conf/cron/crontab
 ```
 
-The example schedules four commands in [`config/cron.go`](./config/cron.go) (`catalog:report:refresh` hourly, `product:list` every 6 hours with `--limit=2`, `example:currency:refresh-rates` on the half hour, `app:info` every minute as the heartbeat) plus a heartbeat enabled via `APP_CRON_HEARTBEAT_AUTO_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
+The example schedules four commands in [`config/cron.go`](./config/cron.go) (`catalog:report:refresh` hourly, `product:list` every 6 hours with `--limit=2`, `example:currency:refresh-rates` on the half hour, `app:info` every minute as the heartbeat) plus a heartbeat enabled via `MELODY_CRON_HEARTBEAT_ENABLED=true` in [`.env`](./.env) (the path is auto-derived from `melody.cron.logs_dir`), so the generated crontab is not empty.
 
 The same `cron.Configuration` also drives an **in-process scheduler** for single-binary deployments with no external crontab. `melody:cron:run` ticks in-process and invokes each scheduled command when it is due; `--once` evaluates every schedule against the current time, runs the due commands and exits:
 

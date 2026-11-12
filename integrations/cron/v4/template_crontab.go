@@ -214,7 +214,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
     if true == includeUserColumn {
         if "" == entry.User {
             return "", exception.NewError(
-                fmt.Sprintf("cron: command %q has no user; set EntryConfig.User on the schedule, pass --user, or register the melody.cron.user parameter", entry.Name),
+                fmt.Sprintf("cron: command %q has no user; set EntryConfig.User on the schedule, pass --user, or set the MELODY_CRON_USER key", entry.Name),
                 exceptioncontract.Context{"entry": entry.Name},
                 ErrEntryEmptyUser,
             )

@@ -336,6 +336,36 @@ default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list 
 
 **Remedy.** The struct literal, `static.Config{PublicDir: "public", AllowedDotPrefixList: []string{".well-known", ".assets"}}`; `CacheDisabled: true` for the third major's `enableCache` false; leave `CacheMaxAge` out for the default.
 
+### Cron: the module reads `MELODY_CRON_*`
+
+**What changed.** The [cron module](../../integrations/cron/v4/README.md#keys) declares its ten keys and no longer registers parameters: `ModuleConfig.WithDefaultParameters`, `RegisterDefaultParameters` and `ParameterRegistrar` are gone, and every `melody.cron.*` parameter exists, fed by its key or taking `ModuleConfig.KeyDefaults` or the module's default. The heartbeat switch, the k8s namespace and the restart policy are judged at boot, naming the key and the `cron.KeyDefaults` field, where they were judged only when `melody:cron:generate` ran.
+
+**Symptom.** A boot whose application maps its own keys onto `melody.cron.*` is refused with `the parameter a module's environment key feeds is already registered`, or reports the mapping as a duplicate when a parameter hook registers it; a value the generator refused at its run now fails every process that registers the module. A module registered without `WithDefaultParameters` now writes the crontab to `generated_conf/cron/crontab` and redirects under `var/log/cron` (created on every run) when no `--out` or `--logs-dir` is passed, where both runs were refused.
+
+**Remedy.** Delete the hand registrations and rename the lines:
+
+| Before (the example's spelling)   | After                            |
+|-----------------------------------|----------------------------------|
+| `APP_CRON_USER`                   | `MELODY_CRON_USER`               |
+| `APP_CRON_HEARTBEAT_AUTO_ENABLED` | `MELODY_CRON_HEARTBEAT_ENABLED`  |
+| `APP_CRON_IMAGE`                  | `MELODY_CRON_K8S_IMAGE`          |
+| `APP_CRON_NAMESPACE`              | `MELODY_CRON_K8S_NAMESPACE`      |
+| `APP_CRON_RESTART_POLICY`         | `MELODY_CRON_K8S_RESTART_POLICY` |
+
+An application of another spelling maps it the same way, or keeps its line and writes `MELODY_CRON_USER=${APP_CRON_USER}` in `.env`. An application that wants the refusal without `--out` or `--logs-dir` back writes the key's line empty (`MELODY_CRON_DESTINATION_FILE=`, `MELODY_CRON_LOGS_DIR=`). An application module that builds `NewGenerateCommand` without `cron.Module` declares `cron.EnvironmentKeys(cron.KeyDefaults{})` from its `RegisterEnvironmentKeys`.
+
+**Why.** The defaults and the rules of the keys are the module's; repeating them in every application let a misspelt opt-in boot every process clean and fail at the generation.
+
+### Amqp: the module registers no parameters
+
+**What changed.** `ParameterDsn`, `ParameterExchange`, `ParameterPrefetch`, `ParameterRegistrar`, `RegisterDefaultParameters` and `ModuleConfig.WithDefaultParameters` are removed, and the module no longer implements `ParameterModule`.
+
+**Symptom.** A build that names one of them fails to compile.
+
+**Remedy.** The application reads its own key for the dsn and marks it secret, as the example does with `AMQP_DSN`, or registers a parameter of its own; a transport's prefetch is `TransportConfig.Prefetch`.
+
+**Why.** Nothing of the module read the three parameters, and the default dsn was a credential registered in clear.
+
 ### Amqp: a registered connection declares its close timeout
 
 **What changed.** [`RegisterConnectionService`](../../integrations/amqp/v4/service_resolver.go) takes a `ConnectionServiceConfig{CloseTimeout}` and `ModuleConfig` carries `CloseTimeout`, a `bound.Duration` of 30s when left out, at least 1ms, unlimited refused. The registered connection's closer read the 30s default whatever `ProviderConfig.CloseTimeout` said.

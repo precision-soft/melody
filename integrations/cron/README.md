@@ -45,6 +45,8 @@ Each binding depends on its respective melody module — `github.com/precision-s
 
 ## Configuration parameters
 
+On the fourth major the parameters below are fed by the `MELODY_CRON_*` keys the module declares, each always present with the module's default, and `RegisterDefaultParameters` does not exist: the defaults, the opt-in and the hand registrations this section and the heartbeat, template and footgun sections describe are the first three majors'. See the [v4 README](./v4/README.md#keys).
+
 The cascade for every flag is **CLI flag (explicitly set) → container parameter**. Two flags carry a final fallback inside the command itself: `--template` falls back to the crontab dialect and `--binary` falls back to the running executable's own path (see the table below). Every other flag has no hardcoded fallback; those defaults live entirely in the parameter system.
 
 The parameter names are exposed as constants:
@@ -91,6 +93,8 @@ The validation deliberately mirrors what the *generated artifact's* scheduler ac
 - a rendered entry ends up with an empty `User` under a template that renders a user column — `cron: command "X" has no user; set EntryConfig.User on the schedule, pass --user, or register the melody.cron.user parameter`
 
 ### Pre-built defaults via `RegisterDefaultParameters`
+
+On the fourth major the module declares the `MELODY_CRON_*` keys behind these parameters instead, and this helper does not exist; see the [v4 README](./v4/README.md#keys).
 
 The integration ships an opt-in helper that registers safe path/template defaults from the table above (`%kernel.project_dir%` and `%kernel.logs_dir%` are resolved by melody automatically — see [Project directory resolution](#project-directory-resolution-uncompiled-vs-compiled) below). `melody.cron.user` is **not** registered by the helper because there is no sensible default — the integration has no idea which OS user should run your crontab. Userland must register it (or supply `EntryConfig.User` / `--user`) for a template that renders a user column.
 

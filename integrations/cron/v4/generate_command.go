@@ -282,7 +282,7 @@ func (instance *GenerateCommand) resolveRunOptions(
     outputPath := resolveDefaultPath(commandContext, configuration, flagNameOutput, ParameterDestinationFile)
     if "" == outputPath {
         return nil, exception.NewError(
-            "cron: no output path configured; set the cli flag or register the parameter (see RegisterDefaultParameters)",
+            "cron: no output path configured; set the cli flag or the MELODY_CRON_DESTINATION_FILE key",
             exceptioncontract.Context{
                 "flag":      flagNameOutput,
                 "parameter": ParameterDestinationFile,
@@ -364,7 +364,7 @@ func (instance *GenerateCommand) resolveRunOptions(
 
     if true == options.heartbeatEnabled && true == rendersUserColumn && "" == options.defaultUserName {
         return nil, exception.NewError(
-            "cron: heartbeat is configured but no user is set; pass --user, register the melody.cron.user parameter, or remove the heartbeat",
+            "cron: heartbeat is configured but no user is set; pass --user, set the MELODY_CRON_USER key, or remove the heartbeat",
             exceptioncontract.Context{
                 "flag":      flagNameDefaultUser,
                 "parameter": ParameterUser,
@@ -1147,7 +1147,7 @@ func resolveEntryLogPath(
 
     if "" == logsDir {
         return "", "", exception.NewError(
-            "cron: command wants log redirection but no logs-dir is configured; set --logs-dir, register the melody.cron.logs_dir parameter, or set EntryConfig.LogDisabled=true",
+            "cron: command wants log redirection but no logs-dir is configured; set --logs-dir, set the MELODY_CRON_LOGS_DIR key, or set EntryConfig.LogDisabled=true",
             exceptioncontract.Context{
                 "command":   commandName,
                 "flag":      flagNameLogsDir,
@@ -1425,7 +1425,7 @@ func isHeartbeatAutoEnabled(configuration configcontract.Configuration) (bool, e
         return false, nil
     }
 
-    enabled, parameterBoolErr := parameter.Bool()
+    enabled, parameterBoolErr := melodyconfig.ParameterSwitch(parameter, KeyHeartbeatEnabled)
     if nil != parameterBoolErr {
         return false, exception.NewError(
             "cron: the heartbeat opt-in parameter does not hold a boolean",
@@ -1436,7 +1436,7 @@ func isHeartbeatAutoEnabled(configuration configcontract.Configuration) (bool, e
         )
     }
 
-    return enabled, nil
+    return enabled.Value, nil
 }
 
 var _ clicontract.Command = (*GenerateCommand)(nil)

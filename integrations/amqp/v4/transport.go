@@ -28,7 +28,7 @@ const (
     headerRedeliveryCount        = "x-redelivery-count"
     headerDeadLetterAttemptCount = "x-dead-letter-attempt-count"
 
-    /* defaultPrefetch is the prefetch of a transport whose config leaves it out and the value RegisterDefaultParameters registers under ParameterPrefetch. */
+    /* defaultPrefetch is the prefetch of a transport whose config leaves it out. */
     defaultPrefetch = 10
 
     /* maxPrefetch is the AMQP 0-9-1 prefetch-count wire limit: channel.Qos encodes it as uint16, so 65536 would wrap to 0, which RabbitMQ reads as unlimited. */

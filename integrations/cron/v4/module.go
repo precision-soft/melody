@@ -12,8 +12,10 @@ type ModuleConfig struct {
     Configuration *Configuration
 
     /* ConfigurationFactory builds the configuration against the booted kernel; a factory that answers nil is refused at registration as a wiring error. */
-    ConfigurationFactory  func(kernelInstance kernelcontract.Kernel) *Configuration
-    WithDefaultParameters bool
+    ConfigurationFactory func(kernelInstance kernelcontract.Kernel) *Configuration
+
+    /* KeyDefaults are the values the module's MELODY_CRON_* keys take when no .env file sets them. */
+    KeyDefaults KeyDefaults
 
     /* Runner, when it lists Commands, adds the in-process melody:cron:run scheduler beside the generator, built by NewRunnerCommand from this configuration: an entry naming a command absent from Runner.Commands, or a value outside its rule, panics at boot. Without Commands the rest of Runner is not read. */
     Runner RunnerConfig
@@ -32,15 +34,13 @@ func (instance *Module) Name() string {
 }
 
 func (instance *Module) Description() string {
-    return "registers the crontab generation command plus default parameters"
+    return "registers the crontab generation command and declares its MELODY_CRON_* keys"
 }
 
-func (instance *Module) RegisterParameters(registrar applicationcontract.ParameterRegistrar) {
-    if false == instance.config.WithDefaultParameters {
-        return
+func (instance *Module) RegisterEnvironmentKeys(registrar applicationcontract.EnvironmentKeyRegistrar) {
+    for _, key := range EnvironmentKeys(instance.config.KeyDefaults) {
+        registrar.DeclareEnvironmentKey(key)
     }
-
-    RegisterDefaultParameters(registrar)
 }
 
 func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
@@ -81,7 +81,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
 }
 
 var (
-    _ applicationcontract.Module          = (*Module)(nil)
-    _ applicationcontract.ParameterModule = (*Module)(nil)
-    _ applicationcontract.CliModule       = (*Module)(nil)
+    _ applicationcontract.Module               = (*Module)(nil)
+    _ applicationcontract.EnvironmentKeyModule = (*Module)(nil)
+    _ applicationcontract.CliModule            = (*Module)(nil)
 )

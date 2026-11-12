@@ -22,8 +22,10 @@ func (instance *Module) Description() string {
     return "billing CLI commands with cron scheduling"
 }
 
-func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.ParameterRegistrar) {
-    melodycron.RegisterDefaultParameters(registrar)
+func (instance *Module) RegisterEnvironmentKeys(registrar melodyapplicationcontract.EnvironmentKeyRegistrar) {
+    for _, key := range melodycron.EnvironmentKeys(melodycron.KeyDefaults{}) {
+        registrar.DeclareEnvironmentKey(key)
+    }
 }
 
 func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.Kernel) []melodyclicontract.Command {
@@ -42,5 +44,5 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
 }
 
 var _ melodyapplicationcontract.Module = (*Module)(nil)
-var _ melodyapplicationcontract.ParameterModule = (*Module)(nil)
+var _ melodyapplicationcontract.EnvironmentKeyModule = (*Module)(nil)
 var _ melodyapplicationcontract.CliModule = (*Module)(nil)

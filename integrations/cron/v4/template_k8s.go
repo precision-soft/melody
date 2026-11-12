@@ -73,7 +73,7 @@ func (instance *K8sTemplate) Render(entries []Entry, options RenderOptions) (str
 
     if "" == options.Image {
         return "", exception.NewError(
-            "cron: the k8s template requires a container image; pass --image or register the melody.cron.k8s.image parameter",
+            "cron: the k8s template requires a container image; pass --image or set the MELODY_CRON_K8S_IMAGE key",
             exceptioncontract.Context{
                 "flag":      flagNameImage,
                 "parameter": ParameterImage,

@@ -20,13 +20,7 @@ import amqp "github.com/precision-soft/melody/integrations/amqp/v4"
 
 ## Parameters
 
-`RegisterDefaultParameters` registers sensible defaults that userland may override; `melody.amqp.prefetch` registers the same 10 a transport whose `Prefetch` is left out takes:
-
-| Parameter              | Constant            | Default                              |
-|------------------------|---------------------|--------------------------------------|
-| `melody.amqp.dsn`      | `ParameterDsn`      | `amqp://guest:guest@localhost:5672/` |
-| `melody.amqp.prefetch` | `ParameterPrefetch` | `10`                                 |
-| `melody.amqp.exchange` | `ParameterExchange` | _(unset; direct-to-queue)_           |
+The module registers no parameter and declares no key: the application reads its own key for the dsn and builds the connection and the transports before it registers the module, and marks the key secret, since the dsn carries the credentials. A transport whose `Prefetch` is left out takes 10.
 
 ## Usage
 
@@ -35,7 +29,7 @@ import amqp "github.com/precision-soft/melody/integrations/amqp/v4"
 ```go
 provider := amqp.NewProvider(amqp.ProviderConfig{})
 
-connection, openErr := provider.Open(configuration.Get(amqp.ParameterDsn).String())
+connection, openErr := provider.Open(configuration.MustGet("AMQP_DSN").String())
 if nil != openErr {
     return openErr
 }
@@ -146,15 +140,12 @@ connection := amqp.ConnectionMustFromResolver(ctx, resolver)
 transport := amqp.TransportMustFromResolver(ctx, resolver, "async")
 ```
 
-`amqp.RegisterDefaultParameters(registrar)` registers the default `melody.amqp.*` parameters.
-
-Or bundle all of it as a self-registering application module — one `RegisterModule` call wires the connection service, the named transport services, and the default parameters:
+Or bundle all of it as a self-registering application module — one `RegisterModule` call wires the connection service and the named transport services:
 
 ```go
 app.RegisterModule(amqp.NewModule(amqp.ModuleConfig{
-    Connection:            connection,
-    Transports:            map[string]*amqp.Transport{"async": transport},
-    WithDefaultParameters: true,
+    Connection: connection,
+    Transports: map[string]*amqp.Transport{"async": transport},
 }))
 ```
 

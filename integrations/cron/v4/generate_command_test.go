@@ -801,8 +801,8 @@ func TestRunErrorsWhenParameterUserEmptyAndNoFlag(t *testing.T) {
     if false == strings.Contains(err.Error(), "has no user") {
         t.Fatalf("expected error to mention missing user, got: %v", err)
     }
-    if false == strings.Contains(err.Error(), "melody.cron.user") {
-        t.Fatalf("expected error to mention the melody.cron.user parameter, got: %v", err)
+    if false == strings.Contains(err.Error(), KeyUser) {
+        t.Fatalf("expected error to mention the MELODY_CRON_USER key, got: %v", err)
     }
 }
 

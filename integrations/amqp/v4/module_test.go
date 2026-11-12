@@ -4,6 +4,7 @@ import (
     "testing"
     "time"
 
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -28,22 +29,6 @@ func (instance *spyServiceRegistrar) MustRegister(serviceName string, provider a
     instance.RegisterService(serviceName, provider, options)
 }
 
-type spyParameterRegistrar struct {
-    names []string
-}
-
-func (instance *spyParameterRegistrar) RegisterParameter(name string, value any) {
-    instance.names = append(instance.names, name)
-}
-
-func (instance *spyParameterRegistrar) RegisterSecretParameter(name string, value any) {
-    instance.names = append(instance.names, name)
-}
-
-/* marking an existing parameter registers nothing, so the recorded names stay the set the module contributed */
-func (instance *spyParameterRegistrar) MarkParameterSecret(name string) {
-}
-
 func containsName(names []string, want string) bool {
     for _, name := range names {
         if want == name {
@@ -66,17 +51,9 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-func TestModule_RegisterParametersRespectsFlag(t *testing.T) {
-    registrar := &spyParameterRegistrar{}
-    NewModule(ModuleConfig{}).RegisterParameters(registrar)
-    if 0 != len(registrar.names) {
-        t.Fatalf("expected no parameters without the flag, got %v", registrar.names)
-    }
-
-    registrar = &spyParameterRegistrar{}
-    NewModule(ModuleConfig{WithDefaultParameters: true}).RegisterParameters(registrar)
-    if false == containsName(registrar.names, ParameterDsn) || false == containsName(registrar.names, ParameterPrefetch) {
-        t.Fatalf("expected default parameters, got %v", registrar.names)
+func TestModule_ImplementsNoParameterHook(t *testing.T) {
+    if _, isParameterModule := any(NewModule(ModuleConfig{})).(applicationcontract.ParameterModule); true == isParameterModule {
+        t.Fatalf("expected the module to register no parameter")
     }
 }
 
