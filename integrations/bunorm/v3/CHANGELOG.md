@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.6] - 2026-11-12 - Unknown Seal Format Refused
+
 ### Security
 
 - **Behavioural change**: `encrypt/cipher.go`, `encrypt/migrate.go` — a stored value beginning with the encryption marker and its glue, `<ENC>\0`, under a format this build does not read is an error on the package's `Cipher.Decrypt`, on the `Scan` of the four column types over it and in every mode of the `Migrator` whatever its cipher, which stops at the row it names with no update, its width check leaving such a value out; the format is named only when it is a lower-case token of at most 16 characters, never the key id or the body. Such a value was read as plaintext and passed through, so the next write or `encrypt` run sealed it again as data: a binary of this major rolled back over a column the fourth major had re-sealed under its bound format lost the value without an error, and kept losing it after the roll-forward. The checks that a decrypted or written value is itself marker-shaped read the same family. Through the package cipher a value an application writes in that shape is still sealed as data and reads back; through a cipher implemented outside the package a column's `Value` and the `Migrator`'s re-seal refuse it as they refuse a `gcm1` one.
@@ -250,7 +252,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.5...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.6...HEAD
+
+[v3.6.6]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.5...integrations/bunorm/v3.6.6
 
 [v3.6.5]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.4...integrations/bunorm/v3.6.5
 
