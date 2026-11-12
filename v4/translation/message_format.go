@@ -6,6 +6,9 @@ import (
     "math"
     "strconv"
     "strings"
+
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
 const maxInterpolationDepth = 32
@@ -203,6 +206,131 @@ func parseSelectors(style []rune) map[string][]rune {
     }
 
     return selectors
+}
+
+/* ValidatePattern reports the first select or plural of a message pattern whose style is not keyword-and-block pairs ending with an other block, with its rune offset and the reason; nil when every select and plural is keyword-and-block pairs with an other block. Trans renders a nesting deeper than 32 levels as its raw text, which this check does not judge. A lone brace in plain text and an unknown argument type are not refused: they render visibly. */
+func ValidatePattern(pattern string) error {
+    defect := findPatternDefect([]rune(pattern), 0)
+    if nil == defect {
+        return nil
+    }
+
+    return exception.NewError(
+        "translation message pattern is malformed",
+        exceptioncontract.Context{"offset": defect.offset, "reason": defect.reason},
+        nil,
+    )
+}
+
+const (
+    patternDefectKeywordWithoutBlock = "a selector keyword has no block"
+    patternDefectBlockWithoutKeyword = "a selector block has no keyword"
+    patternDefectWithoutOther        = "a select or plural has no other block"
+)
+
+type patternDefect struct {
+    offset int
+    reason string
+}
+
+/* findPatternDefect walks the arguments the way interpolate does, so an unmatched brace is plain text here too; base is the rune offset of runes within the whole pattern. */
+func findPatternDefect(runes []rune, base int) *patternDefect {
+    index := 0
+    for index < len(runes) {
+        if '{' != runes[index] {
+            index++
+            continue
+        }
+
+        closeIndex := matchingBrace(runes, index)
+        if -1 == closeIndex {
+            index++
+            continue
+        }
+
+        if defect := findArgumentDefect(runes[index+1:closeIndex], base+index); nil != defect {
+            return defect
+        }
+
+        index = closeIndex + 1
+    }
+
+    return nil
+}
+
+func findArgumentDefect(inner []rune, openOffset int) *patternDefect {
+    name, remainder, hasType := splitFirstComma(inner)
+    if false == hasType {
+        return nil
+    }
+
+    argType, style, hasStyle := splitFirstComma(remainder)
+    if false == hasStyle {
+        return nil
+    }
+
+    switch strings.TrimSpace(string(argType)) {
+    case "plural", "select":
+        styleOffset := openOffset + 1 + len(name) + 1 + len(argType) + 1
+        return findSelectorDefect(style, styleOffset, openOffset)
+    default:
+        return nil
+    }
+}
+
+func findSelectorDefect(style []rune, base int, argumentOffset int) *patternDefect {
+    hasOther := false
+
+    index := 0
+    for index < len(style) {
+        for index < len(style) && true == isSpace(style[index]) {
+            index++
+        }
+
+        if index >= len(style) {
+            break
+        }
+
+        keywordStart := index
+        for index < len(style) && false == isSpace(style[index]) && '{' != style[index] {
+            index++
+        }
+        keyword := string(style[keywordStart:index])
+
+        for index < len(style) && true == isSpace(style[index]) {
+            index++
+        }
+
+        if "" == keyword {
+            return &patternDefect{offset: base + index, reason: patternDefectBlockWithoutKeyword}
+        }
+
+        if index >= len(style) || '{' != style[index] {
+            return &patternDefect{offset: base + keywordStart, reason: patternDefectKeywordWithoutBlock}
+        }
+
+        /* unreachable while the argument's braces are matched by depth, kept so a change there cannot slice past the style */
+        closeIndex := matchingBrace(style, index)
+        if -1 == closeIndex {
+            return &patternDefect{offset: base + keywordStart, reason: patternDefectKeywordWithoutBlock}
+        }
+
+        if "other" == keyword {
+            hasOther = true
+        }
+
+        if defect := findPatternDefect(style[index+1:closeIndex], base+index+1); nil != defect {
+            return defect
+        }
+
+        index = closeIndex + 1
+    }
+
+    if false == hasOther {
+        return &patternDefect{offset: argumentOffset, reason: patternDefectWithoutOther}
+    }
+
+    return nil
 }
 
 func splitFirstComma(value []rune) ([]rune, []rune, bool) {

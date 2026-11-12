@@ -412,6 +412,10 @@ func TestLocalStorage_Get_ErrorOnDirectoryKey(t *testing.T) {
         }
         t.Fatalf("Get on a directory key must return an error, but returned nil error")
     }
+
+    if false == exception.ChainIs(getErr, storagecontract.ErrKeyIsDirectory) {
+        t.Fatalf("expected the refusal to carry ErrKeyIsDirectory, the cause Delete refuses with, got %v", getErr)
+    }
 }
 
 func TestLocalStorage_ExistsReturnsFalseForDirectoryKey(t *testing.T) {
@@ -816,21 +820,69 @@ func TestLocalStorage_PutRefusesANilReaderBeforeCreatingAnything(t *testing.T) {
     }
 }
 
-/* a key naming an empty directory is a prefix, not an object: Delete leaves it in place and answers nil, as Get refuses it and Exists answers false */
-func TestLocalStorage_DeleteOfAKeyNamingADirectoryDeletesNothing(t *testing.T) {
+/* a key naming a directory is a prefix, not an object: Delete refuses it with ErrKeyIsDirectory and removes nothing, an empty directory included, which Remove alone would delete */
+func TestLocalStorage_DeleteOfAKeyNamingADirectoryIsRefused(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
 
-    if mkdirErr := os.MkdirAll(filepath.Join(base, "prefix"), 0o750); nil != mkdirErr {
-        t.Fatalf("mkdir: %v", mkdirErr)
+    if putErr := local.Put(runtimeInstance, "prefix/object.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
     }
 
-    if deleteErr := local.Delete(testRuntime(), "prefix"); nil != deleteErr {
-        t.Fatalf("expected nil, got %v", deleteErr)
+    deleteErr := local.Delete(runtimeInstance, "prefix")
+    if false == exception.ChainIs(deleteErr, storagecontract.ErrKeyIsDirectory) {
+        t.Fatalf("expected the refusal to carry ErrKeyIsDirectory, got %v", deleteErr)
+    }
+
+    if "prefix" != exception.FromError(deleteErr).Context()["key"] {
+        t.Fatalf("expected the refusal to name the key, got %v", exception.FromError(deleteErr).Context())
     }
 
     if info, statErr := os.Stat(filepath.Join(base, "prefix")); nil != statErr || false == info.IsDir() {
         t.Fatalf("expected the directory left in place, stat answered %v", statErr)
+    }
+
+    if _, statErr := os.Stat(filepath.Join(base, "prefix", "object.txt")); nil != statErr {
+        t.Fatalf("expected the object under the directory left in place, stat answered %v", statErr)
+    }
+    if mkdirErr := os.MkdirAll(filepath.Join(base, "empty"), 0o750); nil != mkdirErr {
+        t.Fatalf("mkdir: %v", mkdirErr)
+    }
+
+    if emptyErr := local.Delete(runtimeInstance, "empty"); false == exception.ChainIs(emptyErr, storagecontract.ErrKeyIsDirectory) {
+        t.Fatalf("expected the empty directory refused with ErrKeyIsDirectory, got %v", emptyErr)
+    }
+
+    if info, statErr := os.Stat(filepath.Join(base, "empty")); nil != statErr || false == info.IsDir() {
+        t.Fatalf("expected the empty directory left in place, stat answered %v", statErr)
+    }
+}
+
+/* the leaf is read without following a symlink: a link to a directory inside the base is an object of its own and is removed as a link, its target kept */
+func TestLocalStorage_DeleteRemovesASymlinkToADirectoryAsALink(t *testing.T) {
+    base := t.TempDir()
+    local := NewLocalStorage(base, LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "target/object.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    if linkErr := os.Symlink("target", filepath.Join(base, "link")); nil != linkErr {
+        t.Skipf("symlinks not supported: %v", linkErr)
+    }
+
+    if deleteErr := local.Delete(runtimeInstance, "link"); nil != deleteErr {
+        t.Fatalf("expected the link deleted, got %v", deleteErr)
+    }
+
+    if _, lstatErr := os.Lstat(filepath.Join(base, "link")); false == os.IsNotExist(lstatErr) {
+        t.Fatalf("expected the link gone, lstat answered %v", lstatErr)
+    }
+
+    if _, statErr := os.Stat(filepath.Join(base, "target", "object.txt")); nil != statErr {
+        t.Fatalf("expected the link's target kept, stat answered %v", statErr)
     }
 }
 

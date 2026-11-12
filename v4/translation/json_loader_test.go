@@ -129,3 +129,26 @@ func TestJsonDirectoryLoader_MissingDirectoryReturnsError(t *testing.T) {
         t.Fatalf("expected an error for a missing directory")
     }
 }
+
+func TestJsonDirectoryLoader_NamesTheFileTheMessageAndTheOffset(t *testing.T) {
+    directory := t.TempDir()
+    writeCatalogFile(t, directory, "a.en.json", `{"greeting": "Hello"}`)
+    writeCatalogFile(t, directory, "errors.ro.json", `{"a_valid": "{n, plural, one {# eroare} other {# erori}}", "c_broken": "{g, select, male {el}}", "b_broken": "{n, plural, one {# eroare} other}"}`)
+
+    /* map order is random: the first defect in sorted message ids is the one named, on every load */
+    for attempt := 0; attempt < 20; attempt++ {
+        catalogs, loadErr := NewJsonDirectoryLoader(directory).Load()
+        if nil == loadErr {
+            t.Fatalf("expected the loader to refuse a plural whose other has no block")
+        }
+
+        if nil != catalogs {
+            t.Fatalf("expected no catalogs beside the refusal, the valid file read first included, got %d", len(catalogs))
+        }
+
+        context := exception.FromError(loadErr).Context()
+        if "errors.ro.json" != context["file"] || directory != context["directory"] || "ro" != context["locale"] || "errors" != context["domain"] || "b_broken" != context["messageId"] || 27 != context["offset"] || patternDefectKeywordWithoutBlock != context["reason"] {
+            t.Fatalf("expected the file, the directory, the locale, the domain, the message id, the offset and the reason named, got %v", context)
+        }
+    }
+}

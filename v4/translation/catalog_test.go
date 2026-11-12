@@ -2,6 +2,8 @@ package translation
 
 import (
     "testing"
+
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 /* the empty domain is the caller saying "the ordinary one", not a domain of its own: Add and Get must fold it to the same default, or a message added without a domain would be unreachable through a read that also omits it */
@@ -76,4 +78,31 @@ func TestMapCatalog_ReportsItsLocaleAndChainsAdd(t *testing.T) {
     if message, _ := catalog.Get("greeting", "messages"); "bună" != message {
         t.Fatalf("expected the last message added to win, got %q", message)
     }
+}
+
+func TestMapCatalog_AddRefusesAMalformedPattern(t *testing.T) {
+    catalog := NewMapCatalog("ro")
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected Add to refuse a select without other")
+        }
+
+        refusal, isError := recovered.(*exception.Error)
+        if false == isError {
+            t.Fatalf("expected an *exception.Error, got %T", recovered)
+        }
+
+        context := refusal.Context()
+        if "ro" != context["locale"] || DefaultDomain != context["domain"] || "pronoun" != context["messageId"] || 3 != context["offset"] || patternDefectWithoutOther != context["reason"] {
+            t.Fatalf("expected the locale, the domain, the message id, the offset and the reason named, got %v", context)
+        }
+
+        if _, found := catalog.Get("pronoun", ""); true == found {
+            t.Fatalf("expected the refused message not stored")
+        }
+    }()
+
+    catalog.Add("", "pronoun", "El {g, select, male {el}}")
 }

@@ -4,6 +4,7 @@ import (
     "encoding/json"
     "os"
     "path/filepath"
+    "sort"
     "strings"
 
     "github.com/precision-soft/melody/v4/exception"
@@ -74,6 +75,22 @@ func (instance *JsonDirectoryLoader) Load() ([]translationcontract.Catalog, erro
         if false == exists {
             catalog = NewMapCatalog(locale)
             catalogsByLocale[locale] = catalog
+        }
+
+        messageIds := make([]string, 0, len(messages))
+        for messageId := range messages {
+            messageIds = append(messageIds, messageId)
+        }
+        sort.Strings(messageIds)
+
+        for _, messageId := range messageIds {
+            if defect := findPatternDefect([]rune(messages[messageId]), 0); nil != defect {
+                context := malformedPatternContext(locale, domain, messageId, defect)
+                context["file"] = name
+                context["directory"] = instance.directory
+
+                return nil, exception.NewError("translation message pattern is malformed", context, nil)
+            }
         }
 
         for messageId, message := range messages {

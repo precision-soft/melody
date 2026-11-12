@@ -110,6 +110,22 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Write `NewPlainTextSerializer(serializer.PlainTextSerializerConfig{})` for the defaults, or set a bound. A client that needs a value's exact Go spelling is served a string the handler formats itself. A struct whose plain-text form must leave a field out tags it `json:"-"` or writes its own json, as it does for json.
 
+### Translation: a catalog refuses a select or plural that is not keyword-and-block pairs
+
+**What changed.** [`MapCatalog.Add`](../translation/catalog.go) panics on a message whose `plural` or `select` style has a selector keyword with no block, a block with no keyword, or no `other` block, nested blocks included, naming the locale, the domain, the message id, the rune offset and the reason; [`JsonDirectoryLoader.Load`](../translation/json_loader.go) returns the same refusal naming the file and the directory too, and loads no catalog. Such a message rendered without an error: a keyword with no block ended the parse and dropped every later selector, a block with no keyword was dropped, and a style with no matching branch rendered the empty string. [`ValidatePattern`](../translation/message_format.go) is the check, exported for a catalog of the application's own; `Trans` renders as before, since it has no error to return.
+
+**Symptom.** A boot that loads a catalog holding such a message fails, naming the message and the offset, where `Trans` answered an empty or partial string for it, or the whole message with the stray keyword or block ignored. A `select` or a `plural` written without `other`, relying on the empty string for an unmatched value, is refused.
+
+**Remedy.** Give every selector its block and every style an `other` block (`other {}` for an empty answer). A catalog of the application's own runs each pattern through `translation.ValidatePattern` when it is built. A lone brace in plain text and an unknown argument type are admitted, as they render visibly.
+
+### Storage: deleting a key that names a directory is an error
+
+**What changed.** [`LocalStorage.Delete`](../storage/local.go) of a key that resolves to a directory refuses with [`storagecontract.ErrKeyIsDirectory`](../storage/contract/error.go) in the chain and removes nothing, where it answered `nil` and removed nothing. `Get`'s refusal of such a key carries the same cause, where it was a message alone; `Exists` still answers `false` without an error, since a directory is not an object. A symlink under the key is still removed as a link. The S3 storage has no directories and never answers it.
+
+**Symptom.** A `Delete` of a prefix, which removed nothing and reported success, returns an error.
+
+**Remedy.** Delete the objects under the prefix one by one; a caller that treated the prefix as removable checks `exception.ChainIs(err, storagecontract.ErrKeyIsDirectory)` on the `Delete` error where it means "nothing to delete".
+
 ### Http: two middleware definitions of one name must agree on duplicates
 
 **What changed.** [`Builder.Build`](../http/middleware/pipeline/builder.go) and `Describe` read every definition of a name the environment and the group admit, where only the later one's flags were read. Definitions whose `AllowDuplicates` differ are refused with `middleware definitions of one name disagree on AllowDuplicates`, naming the name and the two positions, in either order; a definition setting both `ReplaceExisting` and `AllowDuplicates` is refused whatever the environment and group, where `ReplaceExisting` was ignored; a `ReplaceExisting` definition over a name admitted more than once is refused, where it replaced the first. All allowing duplicates still run side by side, and all single still keep the earliest.
@@ -1084,7 +1100,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **What changed.** [`LocalStorage`](../storage/local.go) treats a key that resolves to a directory, a named pipe or a device as no object, and a key that runs through a regular file (`object.bin/child`) as absent. Shipped in `v3.14.2`.
 
-**Symptom.** `Delete` of a key naming an empty directory leaves the directory in place, where it removed it. `Exists` and `Delete` of a key under a regular file answer `false` and `nil`, where they answered a "not a directory" error. `Get` of a named pipe answers an error at once, where it blocked, and `Exists` answers `false` for it.
+**Symptom.** `Delete` of a key naming an empty directory leaves the directory in place, where it removed it; in this major it also refuses the key (the section "Storage: deleting a key that names a directory is an error"). `Exists` and `Delete` of a key under a regular file answer `false` and `nil`, where they answered a "not a directory" error. `Get` of a named pipe answers an error at once, where it blocked, and `Exists` answers `false` for it.
 
 **Remedy.** None for an application that stores objects through `Put`. One that removed directories through `Delete` removes them itself.
 

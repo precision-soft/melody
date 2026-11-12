@@ -322,7 +322,7 @@ func (instance *LocalStorage) Get(
 
     if true == info.IsDir() {
         _ = file.Close()
-        return nil, exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, nil)
+        return nil, exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, storagecontract.ErrKeyIsDirectory)
     }
 
     if false == info.Mode().IsRegular() {
@@ -352,9 +352,9 @@ func (instance *LocalStorage) Delete(
     }
     defer root.Close()
 
-    /* a directory is a prefix of other keys, not an object, so deleting the key it names deletes nothing, as Get refuses it and Exists answers false; the leaf is read without following a symlink, which Remove deletes itself */
+    /* a directory is a prefix of other keys, not an object, so the key it names is refused and nothing is removed, as Get refuses it; the leaf is read without following a symlink, which Remove deletes itself */
     if info, lstatErr := root.Lstat(relativeKey); nil == lstatErr && true == info.IsDir() {
-        return nil
+        return exception.NewError("could not delete the storage object", map[string]any{"key": key}, storagecontract.ErrKeyIsDirectory)
     }
 
     removeErr := root.Remove(relativeKey)
