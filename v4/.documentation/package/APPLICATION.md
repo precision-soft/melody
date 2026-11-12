@@ -12,7 +12,7 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 ## Subpackages
 
 - [`application/contract`](../../application/contract)
-  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `MiddlewareRegistration`, `MiddlewareFactory`, `HttpHandlerDecoratorModule`, `CliModule`, `EventModule`, `ConfigModule`, `BootWarningModule`, `BootWarningRegistrar`, `BootWarning`).
+  Public module contracts (`Module`, `ModuleProvider`, `ParameterModule`, `ServiceModule`, `HttpModule`, `HttpMiddlewareModule`, `HttpMiddlewareRegistrar`, `MiddlewareRegistration`, `MiddlewareFactory`, `HttpHandlerDecoratorModule`, `CliModule`, `EventModule`, `ConfigModule`, `BootWarningModule`, `BootWarningRegistrar`, `BootWarning`, `EnvironmentKeyModule`, `EnvironmentKeyRegistrar`).
 
 ## Responsibilities
 
@@ -27,7 +27,7 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 
 The application boot is split around configuration resolve:
 
-1. **Pre-resolve**: modules may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go), then declare their boot warning codes and add their boot warnings via [`BootWarningModule`](../../application/contract/boot_warning_module.go).
+1. **Pre-resolve**: modules declare the `.env` keys they own via [`EnvironmentKeyModule`](../../application/contract/environment_key_module.go), before any other hook, then may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go), then declare their boot warning codes and add their boot warnings via [`BootWarningModule`](../../application/contract/boot_warning_module.go).
 2. **Resolve**: application configuration is resolved.
 3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then register security, event subscribers, HTTP middlewares, HTTP handler decorators, HTTP routes and, last, CLI commands.
 
@@ -306,6 +306,10 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
   `DeclareBootWarning(name, writtenInCli)` and `AddBootWarning(warning)`. A name the framework or another module holds, a warning under a name the module did not declare and an empty message fail the boot, naming the module.
 - [`BootWarning`](../../application/contract/boot_warning_module.go)\
   `Name`, `Message` and `Context`; the context names the configuration and never a value that may be a secret.
+- [`EnvironmentKeyModule`](../../application/contract/environment_key_module.go)\
+  `RegisterEnvironmentKeys(registrar)` runs first in `Boot`, before any parameter hook, and declares the module's `.env` keys; it declares and must not read. A declaration the configuration refuses fails the boot naming the module, the key and the field, and after the resolve a value its rule refuses fails it as `a module's environment key is refused`. A configuration without [`EnvironmentKeyDeclarer`](../../config/contract/environment_key.go) is refused as soon as a module declares over it, naming the module and the configuration's type. See [CONFIG](CONFIG.md#module-keys).
+- [`EnvironmentKeyRegistrar`](../../application/contract/environment_key_module.go)\
+  `DeclareEnvironmentKey(key)`, one [`EnvironmentKey`](../../config/contract/environment_key.go) per key.
 - [`HttpModule`](../../application/contract/http_module.go)
 - [`HttpMiddlewareModule`](../../application/contract/http_middleware_module.go)
 - [`HttpMiddlewareRegistrar`](../../application/contract/http_middleware_module.go)

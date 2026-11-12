@@ -87,6 +87,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     configuration := instance.configuration
 
+    instance.bootModuleEnvironmentKeys()
+
     instance.bootModulesPreConfigurationResolve()
 
     instance.bootModuleBootWarnings()
@@ -117,6 +119,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     instance.refuseBootWithDefaultedEnvironment()
     instance.refuseCliBootWarningKeysInHttp()
     instance.refuseUnknownCliBootWarningCodes()
+    instance.collectUndeclaredEnvironmentKeys()
+    instance.refuseModuleEnvironmentKeys()
 
     instance.ensureRuntimeDirectories()
 

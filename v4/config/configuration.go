@@ -93,6 +93,10 @@ type Configuration struct {
 
     /* written and read under the configuration write lock, so a MarkServing racing a Resolve either waits for the rewrite or lands first and the rewrite is refused; the atomic wrapper is for a lock-free reader, not the synchronization */
     serving atomic.Bool
+
+    /* per instance, so two configurations of one process never share a declaration */
+    declaredEnvironmentKeys       map[string]declaredEnvironmentKey
+    declaredEnvironmentParameters map[string]string
 }
 
 /* MarkServing records that the wiring phase is over and the application has started running. From that point Resolve is refused: services built during boot hold the values they read, so re-resolving reconfigures nothing and only rewrites the parameter store under readers that expect it settled. Registering a parameter still works — it resolves itself on registration — which is what keeps a late module functioning. */
@@ -284,7 +288,7 @@ func (instance *Configuration) MarkSecret(name string) bool {
 /* propagateSecretMarkLocked marks every parameter whose raw template reads the named one, through %env(NAME)%, the default processor's fallback or a %NAME% reference, under every spelling the name answers to, and follows the marking to a fixpoint. A match inside doubled-percent escaped text over-marks, which errs toward redacting more. */
 func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
     /* seeded with every spelling the marked parameter answers to, since a kernel-aliased parameter is one object under two names */
-    markedNames := aliasesOfName(markedName)
+    markedNames := instance.aliasesOfName(markedName)
 
     for 0 < len(markedNames) {
         currentName := markedNames[0]
@@ -302,7 +306,7 @@ func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
 
             if true == templateReadsName(templateValue, currentName) {
                 parameter.isSecret.Store(true)
-                markedNames = append(markedNames, aliasesOfName(name)...)
+                markedNames = append(markedNames, instance.aliasesOfName(name)...)
             }
         }
 
@@ -317,7 +321,7 @@ func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
                 assembledParameter.isSecret.Store(true)
             }
 
-            markedNames = append(markedNames, aliasesOfName(assembledKey)...)
+            markedNames = append(markedNames, instance.aliasesOfName(assembledKey)...)
         }
     }
 }

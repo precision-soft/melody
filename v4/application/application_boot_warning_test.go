@@ -165,7 +165,7 @@ func TestBootModuleBootWarnings_AdmitsTheSameModuleRegisteredTwice(t *testing.T)
         t.Fatalf("expected a second instance of one module admitted, got %v", refusal)
     }
 
-    if cliNames := applicationInstance.bootWarningRegistryOf().CliNames(); 4 != len(cliNames) || "test.module.hazard" != cliNames[3] {
+    if cliNames := applicationInstance.bootWarningRegistryOf().CliNames(); 5 != len(cliNames) || "test.module.hazard" != cliNames[4] {
         t.Fatalf("expected the code declared once, got %v", cliNames)
     }
 }
@@ -253,6 +253,7 @@ func TestRefuseUnknownCliBootWarningCodes_JudgesEachCodeAgainstTheFrameworkAndTh
         {"a cli framework code", internal.BootWarningNameFirewallDoorReachUnknown, nil, ""},
         {"the ignored process variable code", internal.BootWarningNameProcessEnvironmentVariableIgnored, nil, ""},
         {"the unmatched secret mark code", internal.BootWarningNameSecretMarkUnmatched, nil, ""},
+        {"the undeclared environment key code", internal.BootWarningNameEnvironmentUndeclaredKey, nil, ""},
         {"a cli module code", "test.module.hazard", []applicationcontract.Module{newModuleHazardModule("storage")}, ""},
     } {
         applicationInstance := newCacheWarningTestApplicationOver(t, config.ModeCli, map[string]string{config.CliBootWarningsIgnoredKey: "  " + testCase.code}, &warningRecordingLogger{})

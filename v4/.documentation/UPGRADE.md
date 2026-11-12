@@ -120,6 +120,26 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Why.** A module is a piece of the application's wiring: a second registration either collided on every service, parameter and command it registers, scattered across the report under names that hid the cause, or, for a module whose hooks register nothing by name, ran them again silently: middlewares installed twice, a process-wide table half overwritten.
 
+### Application: a module declares the `.env` keys it owns
+
+**What changed.** A module can declare its keys through [`EnvironmentKeyModule`](../application/contract/environment_key_module.go): `RegisterEnvironmentKeys(registrar)` runs first in `Boot`, before any parameter hook, and hands one [`EnvironmentKey`](../config/contract/environment_key.go) per key — the `MELODY_<MODULE>_<NAME>` key, the parameter its code reads, the field a refusal names, the default, the secret mark and a rule built with `LimitKeyRule`, `SwitchKeyRule` or `ChoiceKeyRule`. The key and the parameter become one parameter, which takes the default when no `.env` file sets the key; after the resolve each declared key is judged on its resolved value in every mode, as the framework's keys are. A module's key had no default, no rule, no secret mark and no refusal naming it: the application mapped it by hand onto the module's parameter, and a value the module could not use was found at its first read.
+
+**Symptom.** None for an application whose modules declare nothing. An application that registers, before `Boot`, the parameter a module now declares is refused with `the parameter a module's environment key feeds is already registered`, naming the key, the parameter and the module; a parameter hook that registers it is the duplicate of the aggregated boot report. A configuration double that stands in for [`Configuration`](../config/configuration.go) beside a module that declares keys is refused naming its type.
+
+**Remedy.** Delete the hand mapping and set the module's key in `.env`; an application that keeps its own spelling writes the module's key from it, `MELODY_CRON_USER=${APP_CRON_USER}`; a secret key's mark reaches the values assembled from it, not its source, so the application marks a secret source itself with `MarkParameterSecret`. A configuration double implements [`EnvironmentKeyDeclarer`](../config/contract/environment_key.go), or delegates to a `*config.Configuration`.
+
+**Why.** A key judged only where the module reads it fails a command or a request long after the boot that could have named it, and a hand mapping repeats in every application the default and the rule the module alone knows.
+
+### Config: `MELODY_` is the framework's and the modules' namespace
+
+**What changed.** Every loaded key in the `MELODY_` namespace that is neither the framework's nor declared by a registered module is named, sorted, in one boot warning `application.environment.undeclaredKey` (context `environmentKeys`, names only) and marked secret. A command leaves it out under `MELODY_CLI_BOOT_WARNINGS_IGNORED=application.environment.undeclaredKey`. Such a key booted without a word and was printed in clear by `debug:parameters`.
+
+**Symptom.** A new `WARNING` at boot naming keys, and those keys rendered `********` by `debug:parameters`: an application key spelt `MELODY_*`, a misspelt framework key (`MELODY_HTTP_ADRESS`), or the key of a module the process does not register.
+
+**Remedy.** Rename the application's own key outside the namespace, correct the misspelling, or register the module in the process that reads its key. A key that belongs to a module registered only in another process of the same `.env` stays named; a command lists the code in `MELODY_CLI_BOOT_WARNINGS_IGNORED`.
+
+**Why.** A misspelt key is a configuration the deployment believes it set; and a credential of a module the process does not register is a value nobody marked.
+
 ### Http: a route is registered through `Handle` or `HandleWithOptions`
 
 **What changed.** [`RouteHandler`](../http/contract/router.go), the registration surface of a router and of a group, declares two doors, `Handle(method, pattern, handler)` and `HandleWithOptions(pattern, handler, RouteOptions)`; `HandleNamed`, `HandleController` and `HandleNamedController` are gone from the interface, `Router` and `RouteGroup`. [`ControllerHandler`](../http/router_utility.go) builds the handler a controller function is registered as, with the argument resolution and the shape refusals the controller doors applied, and refuses a nil controller and a nil function with a panic naming it, where the doors panicked with a reflection error on a nil and admitted a nil function that panicked at each request. [`ServerSentEventHub.ClearBackplaneWithContext`](../http/server_sent_event_hub.go) is named `ClearBackplane`; it had no context-less twin, and it behaves as before.

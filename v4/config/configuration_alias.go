@@ -171,14 +171,22 @@ func (instance *Configuration) mapEnvironmentKeyToParameterNames(
     }
 }
 
-/* aliasesOfName lists every name the parameter behind this one answers to: a kernel-aliased key is one *Parameter stored under its MELODY_* key and its kernel.* spelling, and a template may read either, so the secret propagation scans both. A name in no alias group answers only to itself. */
-func aliasesOfName(name string) []string {
+/* aliasesOfName lists every name the parameter behind this one answers to: a kernel-aliased key is one *Parameter stored under its MELODY_* key and its kernel.* spelling, a module's declared key one stored under its key and its parameter name, and a template may read either, so the secret propagation scans both. A name in no alias group answers only to itself. */
+func (instance *Configuration) aliasesOfName(name string) []string {
     for _, group := range environmentKeyAliasMap {
         for _, aliasName := range group {
             if name == aliasName {
                 return group
             }
         }
+    }
+
+    if declared, isDeclared := instance.declaredEnvironmentKeys[name]; true == isDeclared {
+        return []string{name, declared.declaration.Parameter}
+    }
+
+    if feedingKey, isFed := instance.declaredEnvironmentParameters[name]; true == isFed {
+        return []string{feedingKey, name}
     }
 
     return []string{name}

@@ -53,7 +53,7 @@ A present key with an empty string value is considered **present** (it is a vali
 
 ### Environment variable keys
 
-All recognised `.env` keys and their defaults live in [`config/environment.go`](../../config/environment.go) and [`config/configuration_default.go`](../../config/configuration_default.go):
+All recognised `.env` keys and their defaults live in [`config/environment.go`](../../config/environment.go) and [`config/configuration_default.go`](../../config/configuration_default.go). The table holds the framework's keys; a module declares its own (see [Module keys](#module-keys)) and its README lists them:
 
 | Env key                                   | Parameter name                            | Default                                      |
 |-------------------------------------------|-------------------------------------------|----------------------------------------------|
@@ -103,6 +103,18 @@ Every key that holds a limit or a timeout is read as a [`bound`](../../bound/lim
 
 The keys marked "the application's" are absent unless the deployment sets them — the eight limit keys here, the teardown switch described under [Container teardown order](#container-teardown-order) and the session switch described under [Session storage outage](#session-storage-outage): the application's [`ApplicationConfig`](../../application/application_new.go) states its own default for each, and the key wins over it (see the application document's [Server limits](APPLICATION.md#server-limits)). [`HttpConfiguration`](../../config/contract/http.go) answers those five server keys, and [`KernelConfiguration.TeardownTimeout()`](../../config/contract/kernel.go), [`ScopeTeardownTimeout()`](../../config/contract/kernel.go) and [`ContainerCreationWaiters()`](../../config/contract/kernel.go) the teardown, the scope teardown and the creation waiters keys, as the deployment set them; the other limits it answers resolved, a [`bound.Resolved`](../../bound/resolve.go) holding the value or `Unlimited`.
 
+### Module keys
+
+A module owns its `.env` keys through [`EnvironmentKeyModule`](../../application/contract/environment_key_module.go): first in `Boot`, before any parameter hook, it hands the framework one [`EnvironmentKey`](../../config/contract/environment_key.go) per key — the key, the parameter its code reads, the field a refusal names, the default, the secret mark and the rule. The key and the parameter are then one parameter, as `MELODY_HTTP_ADDRESS` and `kernel.http_address` are, so `%MELODY_CRON_USER%` and `%melody.cron.user%` resolve to the same value whether or not a `.env` file sets the key. `%env(MELODY_CRON_USER)%` reads the loaded environment, as it does for a framework key, and stays undefined when no file sets the key: reference a declared key as a parameter.
+
+- **Precedence.** The `.env` line wins, then the default the module declared; a module that takes the value as a config field too passes that field as the default, so the key wins over the field, which wins over the rule's default.
+- **Rules.** [`LimitKeyRule`](../../config/environment_key_rule.go) reads a limit as the [Limit keys](#limit-keys) above are read, [`SwitchKeyRule`](../../config/environment_key_rule.go) a boolean, [`ChoiceKeyRule`](../../config/environment_key_rule.go) one of a list compared exactly. Under any of them a present, empty line is absent and takes the declared default; a free-text key keeps the empty value. The module reads a limit through [`ResolveLimitParameter`](../../config/environment_key_rule.go) and a boolean through [`ParameterSwitch`](../../config/environment_key_rule.go), the parsers the boot check runs.
+- **Refusals at declaration.** The boot fails naming the module, the key and the field for a key that is not `MELODY_` followed by upper-case letters, digits and underscores, a key the framework or another declaration holds, a parameter name that is empty, padded, in `kernel.` or the key itself, a parameter another key feeds or the application already registered, a secret key with a default and a literal default its own rule refuses. A parameter hook that registers a declared parameter by hand is the duplicate of the aggregated boot report.
+- **Refusal of the value.** After the resolve and the framework's own refusals, every declared key is judged on its resolved value, in every mode and role in which the module is registered: `invalid environment value` naming `environmentKey`, `module`, `field` and `parameterName`, the rule's error in the chain, withheld for a secret key.
+- **Inactive modules.** A module the process does not register declares nothing: its key is a plain parameter of its own name, with no default and no rule.
+
+The `MELODY_` namespace belongs to the framework and the modules. Every loaded `MELODY_*` key that is neither the framework's nor declared is named, sorted, in one boot warning `application.environment.undeclaredKey` and marked secret, since it may be misspelt or belong to a module this process does not register.
+
 ### Environment / mode / role constants
 
 - [`EnvDevelopment` (`"dev"`) / `EnvProduction` (`"prod"`)](../../config/environment.go)
@@ -129,6 +141,8 @@ values, a braced `${...}` reference whose name is outside the key grammar (`${DB
 A parameter may be declared as holding a credential so that the commands rendering the configuration redact it — the value reaching the services is untouched, this governs display only. Declare one through the module registrar with [`RegisterSecretParameter`](../../application/contract/parameter_module.go), or mark one melody auto-registered from the `.env` artifacts with [`MarkParameterSecret`](../../application/contract/parameter_module.go). The marking travels with the value: a parameter whose template reads a secret (a dsn assembling a password, through `%parameter%` or `%env(KEY)%`) becomes secret itself. [`Parameter.IsSecret`](../../config/parameter.go) reports the marking; `debug:parameters` renders a marked parameter as `********` (`(empty)` when its value is empty, so an unset secret is told apart from a set one).
 
 A parameter loaded from the `.env` artifacts is not marked by its name: melody does not guess which keys hold a credential, so `debug:parameters` renders `DATABASE_PASSWORD` as it renders `APP_NAME` until it is marked. Mark each credential with `MarkParameterSecret` from a parameter module; an application whose keys follow a naming convention (`SECRET`, `PASSWORD`, `TOKEN`, `DSN` in the name) can mark them in one sweep before `Run`, reading [`Application.Configuration`](../../application/application.go)`().Names()` and passing each match to `Application.MarkParameterSecret`. A parameter whose template reads a marked one is marked with it, so marking the password covers the dsn assembled from it.
+
+A module's key declared `Secret` is marked under both of its names with no call of the application's, and takes no default, since a default credential is shared by every deployment that forgot the line; a `MELODY_*` key nobody declared is marked too (see [Module keys](#module-keys)).
 
 ### Session ttl
 
@@ -275,7 +289,7 @@ What a command writes of the [boot warnings](SECURITY.md#boot-warnings) the boot
 | `MELODY_CLI_BOOT_WARNINGS_IGNORED`  | `kernel.cli_boot_warnings_ignored`  | `""`           |
 | `MELODY_CLI_BOOT_WARNINGS_DISABLED` | `kernel.cli_boot_warnings_disabled` | `""` (`false`) |
 
-A command writes every boot warning it collected once, before its own output, into its configured journal, stderr when `MELODY_LOG_PATH` is empty; a process that dies before then writes them before its exit record, under the same two keys. `MELODY_CLI_BOOT_WARNINGS_IGNORED` is a comma-separated list of codes a command leaves out; `MELODY_CLI_BOOT_WARNINGS_DISABLED=true` writes none. The configuration refuses, naming the key and the index, an empty or repeated code and a list beside `DISABLED=true`; the boot refuses, after every module declared its codes, a code neither the framework nor a registered module writes and a code only an http process writes, since each would silence nothing. The codes a command can write are those the [Boot warnings](SECURITY.md#boot-warnings) table marks for cli, plus those a registered [`BootWarningModule`](APPLICATION.md) declares for cli. Both keys belong to the command's environment: an http process that sets either is refused at boot. A module's service built outside the module, which names its hazard at its first use, honours both keys too.
+A command writes every boot warning it collected once, before its own output, into its configured journal, stderr when `MELODY_LOG_PATH` is empty; a process that dies before then writes them before its exit record, under the same two keys. `MELODY_CLI_BOOT_WARNINGS_IGNORED` is a comma-separated list of codes a command leaves out; `MELODY_CLI_BOOT_WARNINGS_DISABLED=true` writes none. The configuration refuses, naming the key and the index, an empty or repeated code and a list beside `DISABLED=true`; the boot refuses, after every module declared its codes, a code neither the framework nor a registered module writes and a code only an http process writes, since each would silence nothing. The codes a command can write are those the [Boot warnings](SECURITY.md#boot-warnings) table marks for cli, `application.environment.undeclaredKey` among them, plus those a registered [`BootWarningModule`](APPLICATION.md) declares for cli. Both keys belong to the command's environment: an http process that sets either is refused at boot. A module's service built outside the module, which names its hazard at its first use, honours both keys too.
 
 ### Typed accessors
 
@@ -398,6 +412,9 @@ func example() configcontract.Configuration {
     - `Kernel() configcontract.KernelConfiguration`
     - `Http() configcontract.HttpConfiguration`
     - `Cli() configcontract.CliConfiguration`
+    - [`DeclareEnvironmentKey(owner string, key configcontract.EnvironmentKey) error` / `CheckEnvironmentKeys() error` / `UndeclaredEnvironmentKeys() []string`](../../config/environment_key.go) — the keys a module declares, judged after the resolve, and the `MELODY_*` keys nobody declared (see [Module keys](#module-keys))
+- [`LimitKeyRule[T bound.Unit](bound.Rule[T])`, `SwitchKeyRule()`, `ChoiceKeyRule([]string)`](../../config/environment_key_rule.go) — the rules of a module's key
+- [`ResolveLimitParameter[T bound.Unit](configcontract.Parameter, string, bound.Rule[T]) (bound.Resolved[T], error)`, `ParameterSwitch(configcontract.Parameter, string) (configcontract.Switch, error)`](../../config/environment_key_rule.go) — the module's read of a limit and of a boolean, the parsers the boot check runs
 - [`type Environment`](../../config/environment.go)
     - [`NewEnvironment(configcontract.EnvironmentSource) (*Environment, error)`](../../config/environment.go)
     - [`All() map[string]string` / `Get(key string) (string, bool)`](../../config/environment.go) — the loaded `.env` keys, and one of them with the presence flag that tells an empty value apart from an absent one
@@ -437,3 +454,4 @@ func example() configcontract.Configuration {
 - [`type CliConfiguration`](../../config/contract/cli.go)
 - [`type EnvironmentSource`](../../config/contract/environment_source.go)
 - [`type Parameter`](../../config/contract/parameter.go)
+- [`type EnvironmentKey`, `type EnvironmentKeyRule`, `type EnvironmentKeyDeclarer`](../../config/contract/environment_key.go) — a module's key, its rule, and the capability of a configuration that holds them; `Configuration` does not demand it

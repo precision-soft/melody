@@ -12,6 +12,7 @@ const (
     BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage = "http.session.unboundedTtlOnBoundedDefaultStorage"
     BootWarningNameProcessEnvironmentVariableIgnored          = "application.environment.processVariableIgnored"
     BootWarningNameSecretMarkUnmatched                        = "application.secretMark.unmatched"
+    BootWarningNameEnvironmentUndeclaredKey                   = "application.environment.undeclaredKey"
 )
 
 type bootWarningRegistration struct {
@@ -32,6 +33,7 @@ func NewBootWarningRegistry() *BootWarningRegistry {
             {name: BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage, writtenInCli: false},
             {name: BootWarningNameProcessEnvironmentVariableIgnored, writtenInCli: true},
             {name: BootWarningNameSecretMarkUnmatched, writtenInCli: true},
+            {name: BootWarningNameEnvironmentUndeclaredKey, writtenInCli: true},
         },
     }
 }
