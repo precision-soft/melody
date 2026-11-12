@@ -18,14 +18,40 @@ import (
     bun "github.com/uptrace/bun"
 )
 
-/* Enrollment is a user's TOTP second factor, its secret and its recovery codes, an encrypted JSON array, encrypted at rest through bunorm's EncryptedString. */
+/* SecretColumn binds the enrollment's secret to its column: the seal opens through this column alone, so a seal copied in from another bound column does not read. */
+type SecretColumn struct {
+    melodyencrypt.DefaultCipherRef
+}
+
+func (instance SecretColumn) SealBinding() string {
+    return "melody_example_v4_two_factor.secret"
+}
+
+/* RecoveryCodesColumn binds the enrollment's recovery codes to their column, as SecretColumn binds the secret. */
+type RecoveryCodesColumn struct {
+    melodyencrypt.DefaultCipherRef
+}
+
+func (instance RecoveryCodesColumn) SealBinding() string {
+    return "melody_example_v4_two_factor.recovery_codes"
+}
+
+/* SealBindings declares the two bound columns to the encrypt module. Both refuse an unbound value, which holds for a database whose every enrollment was written through the bound types; an enrollment written before the columns were bound is refused and is cleared with example:twofactor:reset or example:db:reset --force. */
+func SealBindings() []melodyencrypt.SealBindingConfig {
+    return []melodyencrypt.SealBindingConfig{
+        {Ref: SecretColumn{}, RefuseUnbound: true},
+        {Ref: RecoveryCodesColumn{}, RefuseUnbound: true},
+    }
+}
+
+/* Enrollment is a user's TOTP second factor, its secret and its recovery codes, an encrypted JSON array, encrypted at rest through bunorm's EncryptedStringFor, each sealed bound to its column. */
 type Enrollment struct {
     bun.BaseModel `bun:"table:melody_example_v4_two_factor"`
 
-    UserIdentifier string                        `bun:"user_identifier,pk"`
-    Secret         melodyencrypt.EncryptedString `bun:"secret,type:varbinary(512),notnull"`
-    RecoveryCodes  melodyencrypt.EncryptedString `bun:"recovery_codes,type:varbinary(2048),notnull"`
-    CreatedAt      time.Time                     `bun:"created_at,notnull"`
+    UserIdentifier string                                                `bun:"user_identifier,pk"`
+    Secret         melodyencrypt.EncryptedStringFor[SecretColumn]        `bun:"secret,type:varbinary(512),notnull"`
+    RecoveryCodes  melodyencrypt.EncryptedStringFor[RecoveryCodesColumn] `bun:"recovery_codes,type:varbinary(2048),notnull"`
+    CreatedAt      time.Time                                             `bun:"created_at,notnull"`
 }
 
 func NewStore(database *bun.DB) *Store {
@@ -84,8 +110,8 @@ func (instance *Store) Enroll(
 
     enrollment := &Enrollment{
         UserIdentifier: userIdentifier,
-        Secret:         melodyencrypt.EncryptedString(secret),
-        RecoveryCodes:  melodyencrypt.EncryptedString(encodedCodes),
+        Secret:         melodyencrypt.EncryptedStringFor[SecretColumn](secret),
+        RecoveryCodes:  melodyencrypt.EncryptedStringFor[RecoveryCodesColumn](encodedCodes),
         CreatedAt:      time.Now(),
     }
 
@@ -132,7 +158,7 @@ func (instance *Store) enrollmentDelete(userIdentifier string) *bun.DeleteQuery 
         Where("user_identifier = ?", userIdentifier)
 }
 
-/* FindTotpSecret implements securitycontract.TwoFactorEnrollmentStore, decrypting the stored secret through EncryptedString. */
+/* FindTotpSecret implements securitycontract.TwoFactorEnrollmentStore, decrypting the stored secret through its bound column type. */
 func (instance *Store) FindTotpSecret(
     runtimeInstance melodyruntimecontract.Runtime,
     userIdentifier string,
@@ -214,7 +240,7 @@ func (instance *Store) RedeemRecoveryCode(
                 return marshalErr
             }
 
-            enrollment.RecoveryCodes = melodyencrypt.EncryptedString(encodedCodes)
+            enrollment.RecoveryCodes = melodyencrypt.EncryptedStringFor[RecoveryCodesColumn](encodedCodes)
 
             _, updateErr := tx.NewUpdate().
                 Model(enrollment).

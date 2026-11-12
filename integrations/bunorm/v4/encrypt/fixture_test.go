@@ -18,8 +18,12 @@ import (
     "github.com/uptrace/bun/dialect/mysqldialect"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
@@ -397,4 +401,170 @@ func (instance *capturingCommand) Run(
 /* wrappedCipher forwards every door to the package cipher it embeds, the shape of an application's metrics or tracing wrapper: it carries none of the package's unexported doors */
 type wrappedCipher struct {
     Cipher
+}
+
+/* accountsNotesBinding is the default cipher's marker of accounts.notes, the column the bound Migrator and command pins run over */
+type accountsNotesBinding struct {
+    DefaultCipherRef
+}
+
+func (instance accountsNotesBinding) SealBinding() string {
+    return "accounts.notes"
+}
+
+/* accountsBodyBinding is a second declared label of the default cipher on the same table */
+type accountsBodyBinding struct {
+    DefaultCipherRef
+}
+
+func (instance accountsBodyBinding) SealBinding() string {
+    return "accounts.body"
+}
+
+/* accountsNotesSealBinding is that column's binding as the cipher reads it */
+var accountsNotesSealBinding = sealBinding{label: "accounts.notes"}
+
+/* scriptedNotesTable answers a run over accounts(id, notes) holding the given rows, wide enough for any seal and its width probes empty */
+func scriptedNotesTable(rows [][]driver.Value) []scriptedSqlResponse {
+    return []scriptedSqlResponse{
+        {
+            fragment: "information_schema.COLUMNS",
+            columns:  []string{"DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "CHARACTER_OCTET_LENGTH"},
+            rows:     [][]driver.Value{{"text", int64(65535), int64(65535)}},
+        },
+        {fragment: "MAX(LENGTH(", columns: []string{"longest"}, rows: [][]driver.Value{{nil}}},
+        {fragment: "ORDER BY", columns: []string{"id", "notes"}, rows: rows},
+    }
+}
+
+/* updatedValues answers, per row id, the value the run's update wrote into its one column */
+func updatedValues(stub *scriptedSqlDriver) map[string]string {
+    written := make(map[string]string)
+
+    for _, recorded := range stub.recordedArguments() {
+        if false == strings.HasPrefix(recorded.query, "UPDATE ") {
+            continue
+        }
+
+        written[fmt.Sprint(recorded.arguments[1])] = fmt.Sprint(recorded.arguments[0])
+    }
+
+    return written
+}
+
+/* boundNotesSpec is the spec of accounts.notes bound to its label */
+func boundNotesSpec(refuseUnbound bool, deterministic bool) TableSpec {
+    return TableSpec{
+        Table:         "accounts",
+        PrimaryKey:    "id",
+        Columns:       []string{"notes"},
+        Deterministic: deterministic,
+        SealBindings:  map[string]ColumnSealBinding{"notes": {Label: "accounts.notes", RefuseUnbound: refuseUnbound}},
+    }
+}
+
+/* migrateModeRuns are the three modes of a run, the rotation onto v2 */
+var migrateModeRuns = map[string]func(migrator *Migrator, spec TableSpec) (int, error){
+    "encrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
+        return migrator.MigrateEncrypt(context.Background(), spec)
+    },
+    "reencrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
+        return migrator.MigrateReencrypt(context.Background(), spec, "v2")
+    },
+    "decrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
+        return migrator.MigrateDecrypt(context.Background(), spec)
+    },
+}
+
+/* runQueries answers the queries a run sent, leaving out the version probe bun sends when the handle is built */
+func runQueries(stub *scriptedSqlDriver) []string {
+    var queries []string
+
+    for _, recorded := range stub.recorded() {
+        if "SELECT version()" != recorded {
+            queries = append(queries, recorded)
+        }
+    }
+
+    return queries
+}
+
+/* recordingLogger keeps every record it is handed, for a pin on what a run logs */
+type recordingLogger struct {
+    mutex   sync.Mutex
+    records []recordedLog
+}
+
+type recordedLog struct {
+    message string
+    context loggingcontract.Context
+}
+
+func (instance *recordingLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.records = append(instance.records, recordedLog{message: message, context: context})
+}
+
+func (instance *recordingLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+
+func (instance *recordingLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+
+func (instance *recordingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+
+func (instance *recordingLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+
+func (instance *recordingLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log("", message, context)
+}
+
+/* runCommandLine runs one command line through the command's own flags under a runtime whose logger is the one given, and answers the command's error */
+func runCommandLine(t *testing.T, command *EncryptDatabaseCommand, logger loggingcontract.Logger, arguments ...string) error {
+    t.Helper()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    if registerErr := serviceContainer.Register(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+        return logger, nil
+    }, container.RegisterOptions{}); nil != registerErr {
+        t.Fatalf("register: %v", registerErr)
+    }
+
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    var runErr error
+    engineCommand := &clicontract.CommandContext{
+        Name:      command.Name(),
+        Flags:     command.Flags(),
+        Writer:    io.Discard,
+        ErrWriter: io.Discard,
+        ExitErrHandler: func(context.Context, *clicontract.CommandContext, error) {
+        },
+        Action: func(_ context.Context, actionCommand *clicontract.CommandContext) error {
+            runErr = command.Run(runtimeInstance, actionCommand)
+
+            return runErr
+        },
+    }
+
+    _ = engineCommand.Run(context.Background(), append([]string{command.Name()}, arguments...))
+
+    return runErr
+}
+
+/* newScriptedNotesCommand builds the bulk command over a scripted accounts table holding the rows, handed the declarations */
+func newScriptedNotesCommand(t *testing.T, cipherInstance Cipher, rows [][]driver.Value, sealBindings ...SealBindingConfig) (*EncryptDatabaseCommand, *scriptedSqlDriver) {
+    t.Helper()
+
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable(rows))
+
+    return NewEncryptDatabaseCommand(cipherInstance, EncryptDatabaseCommandConfig{Database: migrator.db, SealBindings: sealBindings}), stub
 }

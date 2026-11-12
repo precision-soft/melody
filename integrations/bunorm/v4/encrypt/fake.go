@@ -47,6 +47,10 @@ func (instance *fakeCipher) sealBoundValue(plaintext string, binding sealBinding
     return plaintext, nil
 }
 
+func (instance *fakeCipher) sealBoundValueWithKeyId(plaintext string, keyId string, binding sealBinding, deterministic bool) (string, error) {
+    return plaintext, nil
+}
+
 func (instance *fakeCipher) openStored(stored string, binding sealBinding) (openedSeal, error) {
     return openedSeal{plaintext: stored}, nil
 }

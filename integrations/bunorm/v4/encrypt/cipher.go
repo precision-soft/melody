@@ -166,9 +166,19 @@ func (instance *aes256Cipher) authenticatedSeal(value string) (openedSeal, bool)
         return openedSeal{}, false
     }
 
-    opened, openErr := instance.openSeal(value)
+    opened, openErr := instance.openUnboundSeal(value)
     if nil != openErr {
         return openedSeal{}, false
+    }
+
+    return opened, true
+}
+
+/* openUnboundSeal opens a gcm1 seal and reads its mode back, the one classification behind the write side's authenticatedSeal and the bound reader's admission of an unbound seal */
+func (instance *aes256Cipher) openUnboundSeal(value string) (openedSeal, error) {
+    opened, openErr := instance.openSeal(value)
+    if nil != openErr {
+        return openedSeal{}, openErr
     }
 
     return openedSeal{
@@ -179,7 +189,7 @@ func (instance *aes256Cipher) authenticatedSeal(value string) (openedSeal, bool)
             deterministicNonceFrom(opened.material.nonceKey, opened.plaintext, opened.material.gcm.NonceSize()),
         ),
         format: formatGcmV1,
-    }, true
+    }, nil
 }
 
 type openedBody struct {
@@ -297,6 +307,9 @@ type sealBinding struct {
 type bindingSealer interface {
     sealBoundValue(plaintext string, binding sealBinding, deterministic bool) (string, error)
 
+    /* sealBoundValueWithKeyId is the Migrator's door: a value re-sealed under the binding keeps the key it was read under, or takes the rotation's target */
+    sealBoundValueWithKeyId(plaintext string, keyId string, binding sealBinding, deterministic bool) (string, error)
+
     /* openStored reads a stored value as the column of the binding does: a gcm2 seal under its label, and a gcm1 seal or a value without the marker only while the binding admits them, refused before any key is asked for otherwise */
     openStored(stored string, binding sealBinding) (openedSeal, error)
 
@@ -305,6 +318,10 @@ type bindingSealer interface {
 
 func (instance *aes256Cipher) sealBoundValue(plaintext string, binding sealBinding, deterministic bool) (string, error) {
     return instance.sealUnder(plaintext, instance.keys.CurrentKeyId(), deterministic, &binding)
+}
+
+func (instance *aes256Cipher) sealBoundValueWithKeyId(plaintext string, keyId string, binding sealBinding, deterministic bool) (string, error) {
+    return instance.sealUnder(plaintext, keyId, deterministic, &binding)
 }
 
 func (instance *aes256Cipher) openStored(stored string, binding sealBinding) (openedSeal, error) {
@@ -323,17 +340,7 @@ func (instance *aes256Cipher) openStored(stored string, binding sealBinding) (op
     }
 
     if sealShapeGcmV1 == shape {
-        opened, openErr := instance.openSeal(stored)
-        if nil != openErr {
-            return openedSeal{}, openErr
-        }
-
-        return openedSeal{
-            plaintext:     opened.plaintext,
-            keyId:         opened.keyId,
-            deterministic: hmac.Equal(opened.nonce, deterministicNonceFrom(opened.material.nonceKey, opened.plaintext, opened.material.gcm.NonceSize())),
-            format:        formatGcmV1,
-        }, nil
+        return instance.openUnboundSeal(stored)
     }
 
     opened, openErr := instance.openSealUnder(stored, &binding)

@@ -1664,14 +1664,7 @@ func TestMigrator_StopsOnABoundSealInAColumnTheSpecDoesNotBind(t *testing.T) {
     cipherInstance := newRotationCipher(t)
     bound, _ := cipherInstance.(*aes256Cipher).sealBoundValue("my notes", sealBinding{label: "accounts.notes"}, false)
 
-    for door, run := range map[string]func(migrator *Migrator, spec TableSpec) (int, error){
-        "encrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
-            return migrator.MigrateEncrypt(context.Background(), spec)
-        },
-        "decrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
-            return migrator.MigrateDecrypt(context.Background(), spec)
-        },
-    } {
+    for door, run := range migrateModeRuns {
         t.Run(door, func(t *testing.T) {
             migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
                 {
@@ -1687,6 +1680,11 @@ func TestMigrator_StopsOnABoundSealInAColumnTheSpecDoesNotBind(t *testing.T) {
             _, runErr := run(migrator, TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
             if nil == runErr || false == exception.ChainIs(runErr, ErrSealBound) {
                 t.Fatalf("expected the run stopped with ErrSealBound, got %v", runErr)
+            }
+
+            /* the key is there and the row is intact: the message points at the binding */
+            if chain := strings.Join(exception.BuildCauseChain(runErr, 8), ": "); false == strings.Contains(chain, "TableSpec.SealBindings") {
+                t.Fatalf("expected the refusal to name TableSpec.SealBindings, got %q", chain)
             }
 
             for _, recorded := range stub.recorded() {
@@ -2022,4 +2020,488 @@ func TestClassifyRunError_ReturnsOnACyclicChain(t *testing.T) {
             t.Error("expected the failure")
         }
     })
+}
+
+/* assertBoundSeal checks a written value is a gcm2 seal of the plaintext under accounts.notes, with the key id and mode expected */
+func assertBoundSeal(t *testing.T, cipherInstance Cipher, written string, plaintext string, keyId string, deterministic bool) {
+    t.Helper()
+
+    if false == strings.HasPrefix(written, boundMarkerPrefix) {
+        t.Fatalf("expected a gcm2 seal, got %q", written)
+    }
+
+    opened, openErr := cipherInstance.(*aes256Cipher).openStored(written, accountsNotesSealBinding)
+    if nil != openErr {
+        t.Fatalf("expected the seal to open under accounts.notes: %v", openErr)
+    }
+
+    if plaintext != opened.plaintext || keyId != opened.keyId || deterministic != opened.deterministic {
+        t.Fatalf("expected %q under %s deterministic=%v, got %q under %s deterministic=%v", plaintext, keyId, deterministic, opened.plaintext, opened.keyId, opened.deterministic)
+    }
+}
+
+func assertNoUpdate(t *testing.T, stub *scriptedSqlDriver) {
+    t.Helper()
+
+    for _, recorded := range stub.recorded() {
+        if true == strings.HasPrefix(recorded, "UPDATE ") {
+            t.Fatalf("expected no update, saw: %s", recorded)
+        }
+    }
+}
+
+func TestMigrator_EncryptSealsABoundColumnUnderItsBinding(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", "my notes"}}))
+    migrator.cipher = cipherInstance
+
+    if _, runErr := migrator.MigrateEncrypt(context.Background(), boundNotesSpec(false, false)); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    assertBoundSeal(t, cipherInstance, updatedValues(stub)["1"], "my notes", "v1", false)
+}
+
+/* the gcm1 to gcm2 path: each seal keeps the key it carries, v2 not being the current key, and its mode */
+func TestMigrator_EncryptRebindsAGcm1SealKeepingItsKeyAndMode(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    randomUnderV2, _ := cipherInstance.EncryptWithKeyId("random v2", "v2")
+    deterministicUnderV1, _ := cipherInstance.EncryptDeterministicWithKeyId("deterministic v1", "v1")
+    deterministicUnderV2, _ := cipherInstance.EncryptDeterministicWithKeyId("deterministic v2", "v2")
+
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{
+        {"1", randomUnderV2},
+        {"2", deterministicUnderV1},
+        {"3", deterministicUnderV2},
+    }))
+    migrator.cipher = cipherInstance
+
+    if _, runErr := migrator.MigrateEncrypt(context.Background(), boundNotesSpec(false, false)); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    written := updatedValues(stub)
+    assertBoundSeal(t, cipherInstance, written["1"], "random v2", "v2", false)
+    assertBoundSeal(t, cipherInstance, written["2"], "deterministic v1", "v1", true)
+    assertBoundSeal(t, cipherInstance, written["3"], "deterministic v2", "v2", true)
+}
+
+func TestMigrator_EncryptLeavesABoundSealUntouched(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    randomUnderV2, _ := cipherInstance.(*aes256Cipher).sealBoundValueWithKeyId("random", "v2", accountsNotesSealBinding, false)
+    deterministicUnderV1, _ := cipherInstance.(*aes256Cipher).sealBoundValueWithKeyId("deterministic", "v1", accountsNotesSealBinding, true)
+
+    for name, testCase := range map[string]struct {
+        deterministic bool
+        rows          [][]driver.Value
+    }{
+        "random column":        {deterministic: false, rows: [][]driver.Value{{"1", randomUnderV2}, {"2", deterministicUnderV1}}},
+        "deterministic column": {deterministic: true, rows: [][]driver.Value{{"2", deterministicUnderV1}}},
+    } {
+        t.Run(name, func(t *testing.T) {
+            migrator, stub := newScriptedMigrator(t, scriptedNotesTable(testCase.rows))
+            migrator.cipher = cipherInstance
+
+            if _, runErr := migrator.MigrateEncrypt(context.Background(), boundNotesSpec(false, testCase.deterministic)); nil != runErr {
+                t.Fatalf("unexpected run error: %v", runErr)
+            }
+
+            assertNoUpdate(t, stub)
+        })
+    }
+}
+
+/* Deterministic converts a random bound seal under the key it carries, as on an unbound column */
+func TestMigrator_EncryptDeterministicConvertsARandomBoundSeal(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    randomUnderV2, _ := cipherInstance.(*aes256Cipher).sealBoundValueWithKeyId("random", "v2", accountsNotesSealBinding, false)
+
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", randomUnderV2}}))
+    migrator.cipher = cipherInstance
+
+    if _, runErr := migrator.MigrateEncrypt(context.Background(), boundNotesSpec(false, true)); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    assertBoundSeal(t, cipherInstance, updatedValues(stub)["1"], "random", "v2", true)
+}
+
+func TestMigrator_EncryptOverAnUnboundColumnLeavesAGcm1SealUntouched(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    sealed, _ := cipherInstance.EncryptWithKeyId("my notes", "v2")
+
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", sealed}}))
+    migrator.cipher = cipherInstance
+
+    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    assertNoUpdate(t, stub)
+}
+
+func TestMigrator_ReencryptWritesABoundColumnUnderItsBinding(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    unboundRandom, _ := cipherInstance.EncryptWithKeyId("unbound random", "v1")
+    boundDeterministic, _ := cipherInstance.(*aes256Cipher).sealBoundValueWithKeyId("bound deterministic", "v1", accountsNotesSealBinding, true)
+
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{
+        {"1", unboundRandom},
+        {"2", boundDeterministic},
+        {"3", "plain"},
+    }))
+    migrator.cipher = cipherInstance
+
+    if _, runErr := migrator.MigrateReencrypt(context.Background(), boundNotesSpec(false, false), "v2"); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    written := updatedValues(stub)
+    assertBoundSeal(t, cipherInstance, written["1"], "unbound random", "v2", false)
+    assertBoundSeal(t, cipherInstance, written["2"], "bound deterministic", "v2", true)
+    assertBoundSeal(t, cipherInstance, written["3"], "plain", "v2", false)
+}
+
+/* a gcm1 seal under the target key is not yet the target, so it is re-sealed with its mode kept, never taken for the same-key conversion to random; a bound random seal under the target key is the target */
+func TestMigrator_ReencryptOntoTheCarriedKeyKeepsTheModeOfAGcm1Seal(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    unboundDeterministic, _ := cipherInstance.EncryptDeterministicWithKeyId("deterministic", "v2")
+    boundRandom, _ := cipherInstance.(*aes256Cipher).sealBoundValueWithKeyId("random", "v2", accountsNotesSealBinding, false)
+    boundDeterministic, _ := cipherInstance.(*aes256Cipher).sealBoundValueWithKeyId("bound deterministic", "v2", accountsNotesSealBinding, true)
+
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{
+        {"1", unboundDeterministic},
+        {"2", boundRandom},
+        {"3", boundDeterministic},
+    }))
+    migrator.cipher = cipherInstance
+
+    if _, runErr := migrator.MigrateReencrypt(context.Background(), boundNotesSpec(false, false), "v2"); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    written := updatedValues(stub)
+    assertBoundSeal(t, cipherInstance, written["1"], "deterministic", "v2", true)
+
+    if _, rewritten := written["2"]; true == rewritten {
+        t.Fatalf("expected the bound random seal under the target key left as it is, got %q", written["2"])
+    }
+
+    assertBoundSeal(t, cipherInstance, written["3"], "bound deterministic", "v2", false)
+}
+
+func TestMigrator_DecryptOpensABoundColumn(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    bound, _ := cipherInstance.(*aes256Cipher).sealBoundValue("bound", accountsNotesSealBinding, false)
+    unbound, _ := cipherInstance.Encrypt("unbound")
+
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", bound}, {"2", unbound}}))
+    migrator.cipher = cipherInstance
+
+    if _, runErr := migrator.MigrateDecrypt(context.Background(), boundNotesSpec(false, false)); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    written := updatedValues(stub)
+    if "bound" != written["1"] || "unbound" != written["2"] {
+        t.Fatalf("expected the bare values written, got %v", written)
+    }
+}
+
+func TestMigrator_StopsOnASealOfAnotherBinding(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    foreign, _ := cipherInstance.(*aes256Cipher).sealBoundValue("leads", sealBinding{label: "leads.notes"}, false)
+
+    for door, run := range migrateModeRuns {
+        t.Run(door, func(t *testing.T) {
+            migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"7", foreign}}))
+            migrator.cipher = cipherInstance
+
+            _, runErr := run(migrator, boundNotesSpec(false, false))
+            if nil == runErr {
+                t.Fatal("expected the run stopped on another binding's seal")
+            }
+
+            if "7" != exception.LogContext(runErr, exception.LogContextConfig{})["id"] {
+                t.Fatalf("expected the refusal to name the row, got %v", exception.LogContext(runErr, exception.LogContextConfig{}))
+            }
+
+            assertNoUpdate(t, stub)
+        })
+    }
+}
+
+/* the Migrator honours RefuseUnbound on what it reads, else a relocated gcm1 seal would be re-sealed bound by the next run */
+func TestMigrator_RefusingUnboundStopsOnAGcm1SealAndOnPlaintext(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    unbound, _ := cipherInstance.Encrypt("unbound")
+
+    for _, door := range []string{"encrypt", "reencrypt"} {
+        run := migrateModeRuns[door]
+        for stored, value := range map[string]string{"gcm1": unbound, "plaintext": "plain"} {
+            t.Run(door+"/"+stored, func(t *testing.T) {
+                migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"7", value}}))
+                migrator.cipher = cipherInstance
+
+                _, runErr := run(migrator, boundNotesSpec(true, false))
+                if nil == runErr || false == exception.ChainIs(runErr, ErrUnboundValueRefused) {
+                    t.Fatalf("expected ErrUnboundValueRefused, got %v", runErr)
+                }
+
+                assertNoUpdate(t, stub)
+            })
+        }
+    }
+}
+
+/* a seal an application stored as data in a bound column stays data across a re-seal: the row reads back as the seal string */
+func TestMigrator_ASealStoredAsDataInABoundColumnStaysData(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    sealer := cipherInstance.(*aes256Cipher)
+    seal, _ := cipherInstance.Encrypt("someone else's row")
+    boundData, _ := sealer.sealBoundValue(seal, accountsNotesSealBinding, false)
+    unboundData, _ := sealer.sealValue(seal, false)
+
+    for name, testCase := range map[string]struct {
+        run    func(migrator *Migrator, spec TableSpec) (int, error)
+        stored string
+        spec   TableSpec
+    }{
+        "encrypt converting a bound seal": {run: migrateModeRuns["encrypt"], stored: boundData, spec: boundNotesSpec(false, true)},
+        "encrypt rebinding a gcm1 seal":   {run: migrateModeRuns["encrypt"], stored: unboundData, spec: boundNotesSpec(false, false)},
+        "reencrypt":                       {run: migrateModeRuns["reencrypt"], stored: boundData, spec: boundNotesSpec(false, false)},
+    } {
+        t.Run(name, func(t *testing.T) {
+            migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", testCase.stored}}))
+            migrator.cipher = cipherInstance
+
+            if _, runErr := testCase.run(migrator, testCase.spec); nil != runErr {
+                t.Fatalf("unexpected run error: %v", runErr)
+            }
+
+            written, updated := updatedValues(stub)["1"]
+            if false == updated {
+                t.Fatal("expected the row re-sealed")
+            }
+
+            opened, openErr := sealer.openStored(written, accountsNotesSealBinding)
+            if nil != openErr || seal != opened.plaintext {
+                t.Fatalf("expected the row to read back as the seal string, got %q, %v", opened.plaintext, openErr)
+            }
+        })
+    }
+}
+
+func TestMigrator_RefusesASpecItCannotBind(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+
+    for name, testCase := range map[string]struct {
+        cipher Cipher
+        spec   TableSpec
+    }{
+        "an unlisted column": {
+            cipher: cipherInstance,
+            spec:   TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}, SealBindings: map[string]ColumnSealBinding{"body": {Label: "accounts.body"}}},
+        },
+        "a label outside the grammar": {
+            cipher: cipherInstance,
+            spec:   TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}, SealBindings: map[string]ColumnSealBinding{"notes": {Label: "notes"}}},
+        },
+        "a wrapped cipher": {
+            cipher: wrappedCipher{Cipher: cipherInstance},
+            spec:   boundNotesSpec(false, false),
+        },
+    } {
+        for door, run := range migrateModeRuns {
+            t.Run(name+"/"+door, func(t *testing.T) {
+                migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", "plain"}}))
+                migrator.cipher = testCase.cipher
+
+                _, runErr := run(migrator, testCase.spec)
+                if nil == runErr || "TableSpec.SealBindings" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+                    t.Fatalf("expected a refusal naming TableSpec.SealBindings, got %v", runErr)
+                }
+
+                if queries := runQueries(stub); 0 != len(queries) {
+                    t.Fatalf("expected no query before the refusal, saw %v", queries)
+                }
+            })
+        }
+    }
+}
+
+/* the rotation's width probe of sealed values reads both formats, so a column of gcm2 seals is sized as sealed */
+func TestMigrator_CapacityCountsABoundSealAsSealed(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable(nil))
+    migrator.cipher = cipherInstance
+
+    if _, runErr := migrator.MigrateReencrypt(context.Background(), boundNotesSpec(false, false), "v2"); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    probed := false
+    for _, recorded := range stub.recordedArguments() {
+        if false == strings.Contains(recorded.query, "SUBSTRING_INDEX") {
+            continue
+        }
+
+        probed = true
+        arguments := fmt.Sprint(recorded.arguments)
+        if false == strings.Contains(arguments, markerPrefix+"%") || false == strings.Contains(arguments, boundMarkerPrefix+"%") {
+            t.Fatalf("expected the probe to name both prefixes, got %q", arguments)
+        }
+    }
+
+    if false == probed {
+        t.Fatal("expected the sealed width probe to run")
+    }
+}
+
+func TestMigrator_CountsWhatItBoundAndWhatItSealed(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    unbound, _ := cipherInstance.Encrypt("unbound")
+    bound, _ := cipherInstance.(*aes256Cipher).sealBoundValue("bound", accountsNotesSealBinding, false)
+
+    migrator, _ := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", "plain"}, {"2", unbound}, {"3", bound}, {"4", "other plain"}}))
+    migrator.cipher = cipherInstance
+
+    stats, runErr := migrator.migrateEncrypt(context.Background(), boundNotesSpec(false, false))
+    if nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    if (migrateStats{rows: 4, boundFromUnbound: 1, sealedFromPlaintext: 2}) != stats {
+        t.Fatalf("expected 4 rows, 1 bound from unbound, 2 sealed from plaintext, got %+v", stats)
+    }
+}
+
+/* a rewrite that keeps a seal unbound, a random seal converted on an unbound column, is not counted as bound */
+func TestMigrator_CountsNoBindingOnAnUnboundColumn(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    random, _ := cipherInstance.Encrypt("random")
+
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", random}}))
+    migrator.cipher = cipherInstance
+
+    stats, runErr := migrator.migrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}, Deterministic: true})
+    if nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    if _, rewritten := updatedValues(stub)["1"]; false == rewritten {
+        t.Fatal("expected the random seal converted")
+    }
+
+    if (migrateStats{rows: 1}) != stats {
+        t.Fatalf("expected one row and nothing bound or sealed, got %+v", stats)
+    }
+}
+
+/* a bound row whose value is itself a seal stays sealed: written bare it would be read as one */
+func TestMigrator_DecryptStopsOnABoundSealOfASeal(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    seal, _ := cipherInstance.Encrypt("someone else's row")
+    boundData, _ := cipherInstance.(*aes256Cipher).sealBoundValue(seal, accountsNotesSealBinding, false)
+
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"7", boundData}}))
+    migrator.cipher = cipherInstance
+
+    _, runErr := migrator.MigrateDecrypt(context.Background(), boundNotesSpec(false, false))
+    if nil == runErr || "7" != exception.LogContext(runErr, exception.LogContextConfig{})["id"] {
+        t.Fatalf("expected the run stopped at the row, got %v", runErr)
+    }
+
+    assertNoUpdate(t, stub)
+}
+
+/* Deterministic converts a bound column to searchable while rotating, a gcm1 random seal and a bound random one under the target key alike */
+func TestMigrator_ReencryptDeterministicConvertsABoundColumn(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    unboundRandom, _ := cipherInstance.EncryptWithKeyId("unbound random", "v1")
+    boundRandom, _ := cipherInstance.(*aes256Cipher).sealBoundValueWithKeyId("bound random", "v2", accountsNotesSealBinding, false)
+
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", unboundRandom}, {"2", boundRandom}}))
+    migrator.cipher = cipherInstance
+
+    if _, runErr := migrator.MigrateReencrypt(context.Background(), boundNotesSpec(false, true), "v2"); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    written := updatedValues(stub)
+    assertBoundSeal(t, cipherInstance, written["1"], "unbound random", "v2", true)
+    assertBoundSeal(t, cipherInstance, written["2"], "bound random", "v2", true)
+}
+
+/* a column refusing unbound values could not read the bare values decrypt writes, nor could a re-run resume over them, so the run is refused before its first query */
+func TestMigrator_DecryptRefusesARefusingBindingBeforeAnyQuery(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    bound, _ := cipherInstance.(*aes256Cipher).sealBoundValue("bound", accountsNotesSealBinding, false)
+
+    migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", bound}}))
+    migrator.cipher = cipherInstance
+
+    _, runErr := migrator.MigrateDecrypt(context.Background(), boundNotesSpec(true, false))
+    if nil == runErr || "TableSpec.SealBindings" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected a refusal naming TableSpec.SealBindings, got %v", runErr)
+    }
+
+    if queries := runQueries(stub); 0 != len(queries) {
+        t.Fatalf("expected no query before the refusal, saw %v", queries)
+    }
+}
+
+/* one spec binding one column and leaving the other unbound runs each under its own kind */
+func TestMigrator_ASpecBindsItsBoundColumnAlone(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
+        {
+            fragment: "information_schema.COLUMNS",
+            columns:  []string{"DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "CHARACTER_OCTET_LENGTH"},
+            rows:     [][]driver.Value{{"text", int64(65535), int64(65535)}},
+        },
+        {fragment: "MAX(LENGTH(", columns: []string{"longest"}, rows: [][]driver.Value{{nil}}},
+        {fragment: "ORDER BY", columns: []string{"id", "notes", "body"}, rows: [][]driver.Value{{"1", "plain notes", "plain body"}}},
+    })
+    migrator.cipher = cipherInstance
+
+    spec := boundNotesSpec(false, false)
+    spec.Columns = []string{"notes", "body"}
+
+    if _, runErr := migrator.MigrateEncrypt(context.Background(), spec); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    var update recordedScriptedQuery
+    for _, recorded := range stub.recordedArguments() {
+        if true == strings.HasPrefix(recorded.query, "UPDATE ") {
+            update = recorded
+        }
+    }
+
+    if 2 > len(update.arguments) {
+        t.Fatalf("expected one update writing both columns, got %v", update)
+    }
+
+    assertBoundSeal(t, cipherInstance, fmt.Sprint(update.arguments[0]), "plain notes", "v1", false)
+
+    if body := fmt.Sprint(update.arguments[1]); false == strings.HasPrefix(body, markerPrefix) {
+        t.Fatalf("expected the unbound column sealed gcm1, got %q", body)
+    }
+}
+
+/* the fake cipher carries the binding door as the identity, so a bound spec over it changes nothing */
+func TestMigrator_ABoundSpecOverTheFakeCipherIsTheIdentity(t *testing.T) {
+    for door, run := range migrateModeRuns {
+        t.Run(door, func(t *testing.T) {
+            migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", "plain"}}))
+            migrator.cipher = NewFakeCipher()
+
+            if _, runErr := run(migrator, boundNotesSpec(false, false)); nil != runErr {
+                t.Fatalf("unexpected run error: %v", runErr)
+            }
+
+            assertNoUpdate(t, stub)
+        })
+    }
 }

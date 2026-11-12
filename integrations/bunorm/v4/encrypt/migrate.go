@@ -25,6 +25,15 @@ type TableSpec struct {
     BatchSize bound.Count
 
     Deterministic bool
+
+    /* SealBindings names, per column, the binding its seals are opened and written under; a column left out is unbound. A key that is not one of Columns, a label outside <table>.<column> with each part of [A-Za-z0-9_]{1,64} and any binding over a cipher implemented outside the package are refused before the run's first query, naming the field. */
+    SealBindings map[string]ColumnSealBinding
+}
+
+/* ColumnSealBinding is one column's binding as a run reads it: the label, and whether the run stops on a value that is not bound to it, a seal without a binding or a value without the marker, before any key is asked for. */
+type ColumnSealBinding struct {
+    Label         string
+    RefuseUnbound bool
 }
 
 var tableSpecBatchSizeRule = bound.Rule[int]{
@@ -40,6 +49,49 @@ func resolveBatchSize(spec TableSpec) (int, error) {
     }
 
     return resolved.Value, nil
+}
+
+/* resolveSpecBindings reads TableSpec.SealBindings into the bindings the run's transforms take, refusing a spec it cannot bind before any query is sent */
+func (instance *Migrator) resolveSpecBindings(spec TableSpec) (map[string]sealBinding, error) {
+    if 0 == len(spec.SealBindings) {
+        return nil, nil
+    }
+
+    listed := make(map[string]bool, len(spec.Columns))
+    for _, column := range spec.Columns {
+        listed[column] = true
+    }
+
+    if _, carriesBinding := instance.cipher.(bindingSealer); false == carriesBinding {
+        return nil, exception.NewError(
+            "migrate seal binding needs the package cipher; a cipher implemented outside the package, a wrapper included, cannot bind a seal",
+            map[string]any{"field": "TableSpec.SealBindings", "table": spec.Table},
+            nil,
+        )
+    }
+
+    bindings := make(map[string]sealBinding, len(spec.SealBindings))
+    for column, columnBinding := range spec.SealBindings {
+        if false == listed[column] {
+            return nil, exception.NewError(
+                "migrate seal binding names a column the spec does not list",
+                map[string]any{"field": "TableSpec.SealBindings", "table": spec.Table, "column": column},
+                nil,
+            )
+        }
+
+        if false == sealBindingLabelPattern.MatchString(columnBinding.Label) {
+            return nil, exception.NewError(
+                "migrate seal binding label must match "+sealBindingLabelPattern.String(),
+                map[string]any{"field": "TableSpec.SealBindings", "table": spec.Table, "column": column, "sealBinding": columnBinding.Label},
+                nil,
+            )
+        }
+
+        bindings[column] = sealBinding{label: columnBinding.Label, refuseUnbound: columnBinding.RefuseUnbound}
+    }
+
+    return bindings, nil
 }
 
 type Migrator struct {
@@ -67,66 +119,233 @@ func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
     return &Migrator{db: db, cipher: cipher}
 }
 
-/* MigrateEncrypt runs EnsureColumnCapacity before the first write, so a programmatic caller gets the width check the command runs. */
+/* MigrateEncrypt runs EnsureColumnCapacity before the first write, so a programmatic caller gets the width check the command runs. Over a column TableSpec.SealBindings binds, a value without the marker is sealed under the binding and a seal without one is re-sealed under it, its key and mode kept, so the run brings the column to the form its bound type writes. */
 func (instance *Migrator) MigrateEncrypt(ctx context.Context, spec TableSpec) (int, error) {
+    stats, runErr := instance.migrateEncrypt(ctx, spec)
+
+    return stats.rows, runErr
+}
+
+func (instance *Migrator) migrateEncrypt(ctx context.Context, spec TableSpec) (migrateStats, error) {
     batchSize, batchSizeErr := resolveBatchSize(spec)
     if nil != batchSizeErr {
-        return 0, batchSizeErr
+        return migrateStats{}, batchSizeErr
+    }
+
+    bindings, bindingsErr := instance.resolveSpecBindings(spec)
+    if nil != bindingsErr {
+        return migrateStats{}, bindingsErr
     }
 
     /* the width check's queries are the run's first, so a cancellation landing on one is named an interruption, as one landing inside the run */
     if capacityErr := instance.ensureColumnCapacity(ctx, spec, ""); nil != capacityErr {
-        return 0, instance.classifyRunError(spec, 0, "", capacityErr)
+        return migrateStats{}, instance.classifyRunError(spec, 0, "", capacityErr)
     }
 
-    return instance.run(ctx, spec, batchSize, instance.encryptTransform(spec))
+    return instance.run(ctx, spec, batchSize, columnTransform(bindings, instance.encryptTransform(spec), instance.encryptBoundTransform(spec)))
 }
 
-/* MigrateReencrypt runs its own EnsureColumnCapacityForReencrypt first, for the reason on MigrateEncrypt. */
+/* MigrateReencrypt runs its own EnsureColumnCapacityForReencrypt first, for the reason on MigrateEncrypt. Over a bound column every value it writes is sealed under the binding, and a stored seal is already the target only when it is bound and under the target key. */
 func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (int, error) {
+    stats, runErr := instance.migrateReencrypt(ctx, spec, targetKeyId)
+
+    return stats.rows, runErr
+}
+
+func (instance *Migrator) migrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (migrateStats, error) {
     batchSize, batchSizeErr := resolveBatchSize(spec)
     if nil != batchSizeErr {
-        return 0, batchSizeErr
+        return migrateStats{}, batchSizeErr
     }
 
     if "" == targetKeyId {
-        return 0, exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": spec.Table}, nil)
+        return migrateStats{}, exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": spec.Table}, nil)
+    }
+
+    bindings, bindingsErr := instance.resolveSpecBindings(spec)
+    if nil != bindingsErr {
+        return migrateStats{}, bindingsErr
     }
 
     if capacityErr := instance.ensureColumnCapacity(ctx, spec, targetKeyId); nil != capacityErr {
-        return 0, instance.classifyRunError(spec, 0, "", capacityErr)
+        return migrateStats{}, instance.classifyRunError(spec, 0, "", capacityErr)
     }
 
-    return instance.run(ctx, spec, batchSize, instance.reencryptTransform(spec, targetKeyId))
+    return instance.run(ctx, spec, batchSize, columnTransform(bindings, instance.reencryptTransform(spec, targetKeyId), instance.reencryptBoundTransform(spec, targetKeyId)))
 }
 
-/* MigrateDecrypt stops the run on a row whose stored value is of a seal format this build does not read, whatever the cipher's Decrypt answers for it, and on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. */
+/* MigrateDecrypt stops the run on a row whose stored value is of a seal format this build does not read, whatever the cipher's Decrypt answers for it, and on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. A bound column is opened under its binding. */
 func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
+    stats, runErr := instance.migrateDecrypt(ctx, spec)
+
+    return stats.rows, runErr
+}
+
+func (instance *Migrator) migrateDecrypt(ctx context.Context, spec TableSpec) (migrateStats, error) {
     batchSize, batchSizeErr := resolveBatchSize(spec)
     if nil != batchSizeErr {
-        return 0, batchSizeErr
+        return migrateStats{}, batchSizeErr
     }
 
-    return instance.run(ctx, spec, batchSize, func(value string) (string, error) {
+    bindings, bindingsErr := instance.resolveSpecBindings(spec)
+    if nil != bindingsErr {
+        return migrateStats{}, bindingsErr
+    }
+
+    /* a column that refuses unbound values cannot read the bare values this run writes, nor could a re-run resume over them, so the switch comes off before the column is decrypted */
+    for column, binding := range bindings {
+        if true == binding.refuseUnbound {
+            return migrateStats{}, exception.NewError(
+                "migrate decrypt cannot write bare values into a column that refuses unbound values; deploy the binding without RefuseUnbound first",
+                map[string]any{"field": "TableSpec.SealBindings", "table": spec.Table, "column": column, "sealBinding": binding.label},
+                nil,
+            )
+        }
+    }
+
+    return instance.run(ctx, spec, batchSize, columnTransform(bindings, instance.decryptTransform(), instance.decryptBoundTransform()))
+}
+
+func (instance *Migrator) decryptTransform() func(string) (string, error) {
+    return func(value string) (string, error) {
         if _, _, keyIdErr := keyIdOf(value); nil != keyIdErr {
             return "", keyIdErr
         }
 
         plaintext, decryptErr := instance.cipher.Decrypt(value)
         if nil != decryptErr {
-            return "", decryptErr
+            return "", errUnboundRunOverABoundSeal(decryptErr)
         }
 
         if true == carriesMarkerFamily(plaintext) {
-            return "", exception.NewError(
-                "migrate decrypt found a stored value whose plaintext is itself an encrypted value; written bare it would be read as one, so the row is left sealed",
-                map[string]any{"mode": "decrypt"},
-                nil,
-            )
+            return "", errDecryptedValueIsASeal()
         }
 
         return plaintext, nil
-    })
+    }
+}
+
+/* errUnboundRunOverABoundSeal says what to do when a run over a column its spec leaves unbound meets a bound seal: the key is there and the row is intact, the column is to be bound */
+func errUnboundRunOverABoundSeal(cause error) error {
+    if false == exception.ChainIs(cause, ErrSealBound) {
+        return cause
+    }
+
+    return exception.NewError(
+        "migrate found a seal bound to a column in a column the run leaves unbound; bind the column through TableSpec.SealBindings, or --seal-binding on the command",
+        nil,
+        cause,
+    )
+}
+
+func errDecryptedValueIsASeal() error {
+    return exception.NewError(
+        "migrate decrypt found a stored value whose plaintext is itself an encrypted value; written bare it would be read as one, so the row is left sealed",
+        map[string]any{"mode": "decrypt"},
+        nil,
+    )
+}
+
+/* columnTransform hands each column's value to the transform of its kind: the unbound one for a column the spec leaves out of SealBindings, the bound one under the column's binding otherwise */
+func columnTransform(
+    bindings map[string]sealBinding,
+    unbound func(string) (string, error),
+    bound func(sealBinding, string) (string, error),
+) func(string, string) (string, error) {
+    return func(column string, value string) (string, error) {
+        binding, isBound := bindings[column]
+        if false == isBound {
+            return unbound(value)
+        }
+
+        return bound(binding, value)
+    }
+}
+
+/* openBoundStored reads a stored value of a bound column as its column type does, refusing an unknown format and, under RefuseUnbound, an unbound value before any key is asked for; a marked value that does not open under the binding is another binding's seal, damage or a retired key, and the run stops on it */
+func (instance *Migrator) openBoundStored(binding sealBinding, value string) (openedSeal, error) {
+    opened, openErr := instance.cipher.(bindingSealer).openStored(value, binding)
+    if nil == openErr {
+        return opened, nil
+    }
+
+    if true == exception.ChainIs(openErr, ErrSealFormatUnknown) || true == exception.ChainIs(openErr, ErrUnboundValueRefused) {
+        return openedSeal{}, openErr
+    }
+
+    keyId, _, _ := keyIdOf(value)
+
+    return openedSeal{}, exception.NewError(
+        "migrate found a stored encrypted value that does not open under its column's binding: another binding's seal, damage or a retired key; restore the key or repair the row before re-running",
+        map[string]any{"keyId": keyId, "sealBinding": binding.label},
+        openErr,
+    )
+}
+
+/* encryptBoundTransform brings a bound column to the form its type writes: a value without the marker sealed under the binding and the current key, a seal without a binding re-sealed under it with the key it carries and its mode kept, a bound seal left as it is; Deterministic converts a random seal, as on an unbound column. The value opened is sealed as data, so a seal stored as data stays data. */
+func (instance *Migrator) encryptBoundTransform(spec TableSpec) func(sealBinding, string) (string, error) {
+    return func(binding sealBinding, value string) (string, error) {
+        opened, openErr := instance.openBoundStored(binding, value)
+        if nil != openErr {
+            return "", openErr
+        }
+
+        sealer := instance.cipher.(bindingSealer)
+
+        switch opened.format {
+        case formatGcmV1:
+            return sealer.sealBoundValueWithKeyId(opened.plaintext, opened.keyId, binding, true == opened.deterministic || true == spec.Deterministic)
+        case formatGcmV2:
+            if false == spec.Deterministic || true == opened.deterministic {
+                return value, nil
+            }
+
+            return sealer.sealBoundValueWithKeyId(opened.plaintext, opened.keyId, binding, true)
+        }
+
+        return sealer.sealBoundValue(opened.plaintext, binding, spec.Deterministic)
+    }
+}
+
+/* reencryptBoundTransform is reencryptTransform over a bound column: every value it writes is sealed under the binding and the target key, and a stored seal is already the target only when it is bound and under that key, so a seal without a binding under the target key is re-sealed with its mode kept, never taken for the same-key conversion to random */
+func (instance *Migrator) reencryptBoundTransform(spec TableSpec, targetKeyId string) func(sealBinding, string) (string, error) {
+    return func(binding sealBinding, value string) (string, error) {
+        opened, openErr := instance.openBoundStored(binding, value)
+        if nil != openErr {
+            return "", openErr
+        }
+
+        sealer := instance.cipher.(bindingSealer)
+
+        if true == spec.Deterministic {
+            return sealer.sealBoundValueWithKeyId(opened.plaintext, targetKeyId, binding, true)
+        }
+
+        if formatGcmV2 == opened.format && targetKeyId == opened.keyId {
+            if false == opened.deterministic {
+                return value, nil
+            }
+
+            return sealer.sealBoundValueWithKeyId(opened.plaintext, targetKeyId, binding, false)
+        }
+
+        return sealer.sealBoundValueWithKeyId(opened.plaintext, targetKeyId, binding, opened.deterministic)
+    }
+}
+
+func (instance *Migrator) decryptBoundTransform() func(sealBinding, string) (string, error) {
+    return func(binding sealBinding, value string) (string, error) {
+        opened, openErr := instance.openBoundStored(binding, value)
+        if nil != openErr {
+            return "", openErr
+        }
+
+        if true == carriesMarkerFamily(opened.plaintext) {
+            return "", errDecryptedValueIsASeal()
+        }
+
+        return opened.plaintext, nil
+    }
 }
 
 /* errSealStoredAsDataThroughForeignCipher stops a run on a row whose decrypted value is itself marker-shaped when the cipher is implemented outside this package: its public doors may pass such a value through, which would store the seal bare, so the row is left as it is. */
@@ -157,6 +376,10 @@ func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string,
         }
 
         plaintext, decryptErr := instance.cipher.Decrypt(value)
+        if true == exception.ChainIs(decryptErr, ErrSealBound) {
+            return "", errUnboundRunOverABoundSeal(decryptErr)
+        }
+
         if nil != decryptErr {
             return "", exception.NewError(
                 "migrate found a stored encrypted value that no longer decrypts; restore the key or repair the row before re-running",
@@ -200,7 +423,7 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
 
         plaintext, decryptErr := instance.cipher.Decrypt(value)
         if nil != decryptErr {
-            return "", decryptErr
+            return "", errUnboundRunOverABoundSeal(decryptErr)
         }
 
         if true == isSealer {
@@ -375,19 +598,21 @@ func (instance *Migrator) longestUnsealedLength(ctx context.Context, table strin
     return int(longest.Int64), true, nil
 }
 
-/* longestSealedLengthWithoutKeyId reports, in bytes, the widest sealed value with its key id taken out, and whether one exists; adding another key id's length gives its width after rotation. The key id ends at the first colon, since neither the key id alphabet nor base64 carries one, and the column is read as bytes so the substring offset matches LENGTH. */
+/* longestSealedLengthWithoutKeyId reports, in bytes, the widest sealed value, bound or not, with its key id taken out, and whether one exists; adding another key id's length gives its width after rotation. The key id ends at the first colon, since neither the key id alphabet nor base64 carries one, and the column is read as bytes so the substring offset matches LENGTH. */
 func (instance *Migrator) longestSealedLengthWithoutKeyId(ctx context.Context, table string, column string, charset string) (int, bool, error) {
     probeSql := fmt.Sprintf(
-        "SELECT MAX(LENGTH(%s) - LENGTH(SUBSTRING_INDEX(SUBSTRING(%s, ?), ':', 1))) FROM %s WHERE %s LIKE ?",
+        "SELECT MAX(LENGTH(%s) - LENGTH(SUBSTRING_INDEX(SUBSTRING(%s, ?), ':', 1))) FROM %s WHERE %s LIKE ? OR %s LIKE ?",
         columnBytes(column, charset),
         binaryComparison(column, charset),
         quoteIdentifier(table),
+        binaryComparison(column, charset),
         binaryComparison(column, charset),
     )
 
     var longest sql.NullInt64
 
-    scanErr := instance.db.DB.QueryRowContext(ctx, probeSql, len(markerPrefix)+1, markerPrefix+"%").Scan(&longest)
+    /* a bound and an unbound prefix are equally long, so one offset skips either */
+    scanErr := instance.db.DB.QueryRowContext(ctx, probeSql, len(markerPrefix)+1, markerPrefix+"%", boundMarkerPrefix+"%").Scan(&longest)
     if nil != scanErr {
         return 0, false, exception.NewError(
             "migrate could not measure the widest encrypted value of the target column",
@@ -487,9 +712,16 @@ func (instance *Migrator) sealedProbeLength(plaintextByteLength int, keyId strin
 
 const skippedSampleSize = 10
 
-func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int, transform func(string) (string, error)) (int, error) {
+/* migrateStats is what a run did, for the command's closing record: the rows it processed, and, counted per column value, the seals without a binding it re-sealed under one and the values without the marker it sealed */
+type migrateStats struct {
+    rows                int
+    boundFromUnbound    int
+    sealedFromPlaintext int
+}
+
+func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int, transform func(string, string) (string, error)) (migrateStats, error) {
     if "" == spec.Table || "" == spec.PrimaryKey || 0 == len(spec.Columns) {
-        return 0, exception.NewError("migrate spec needs a table, primary key and at least one column", nil, nil)
+        return migrateStats{}, exception.NewError("migrate spec needs a table, primary key and at least one column", nil, nil)
     }
 
     selectColumns := append([]string{spec.PrimaryKey}, spec.Columns...)
@@ -510,7 +742,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int
 
     charsetByColumn, charsetErr := instance.columnCharsets(ctx, spec.Table)
     if nil != charsetErr {
-        return 0, instance.classifyRunError(spec, 0, "", charsetErr)
+        return migrateStats{}, instance.classifyRunError(spec, 0, "", charsetErr)
     }
 
     guardByColumn := make([]string, 0, len(spec.Columns))
@@ -520,7 +752,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int
 
     var cursor any
     hasCursor := false
-    processed := 0
+    stats := migrateStats{}
     skippedCount := 0
     skippedSample := make([]string, 0, skippedSampleSize)
 
@@ -535,14 +767,14 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int
             rows, queryErr = instance.db.DB.QueryContext(ctx, nextSelectSql, cursor, batchSize)
         }
         if nil != queryErr {
-            return processed, instance.classifyRunError(spec, processed, "migrate select failed", queryErr)
+            return stats, instance.classifyRunError(spec, stats.rows, "migrate select failed", queryErr)
         }
 
         batch, scanErr := scanMigrateRows(rows, len(spec.Columns))
         rows.Close()
         if nil != scanErr {
             /* a cancellation landing during a page's iteration surfaces through Rows.Err; it is named as an interruption like one landing on the select or the update */
-            return processed, instance.classifyRunError(spec, processed, "", scanErr)
+            return stats, instance.classifyRunError(spec, stats.rows, "", scanErr)
         }
 
         if 0 == len(batch) {
@@ -553,9 +785,9 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int
             cursor = row.primaryKeyArgument
             hasCursor = true
 
-            applied, updateErr := instance.applyRow(ctx, spec, guardByColumn, row, transform)
+            applied, changes, updateErr := instance.applyRow(ctx, spec, guardByColumn, row, transform)
             if nil != updateErr {
-                return processed, instance.classifyRunError(spec, processed, "", updateErr)
+                return stats, instance.classifyRunError(spec, stats.rows, "", updateErr)
             }
 
             if false == applied {
@@ -567,7 +799,9 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int
                 continue
             }
 
-            processed++
+            stats.rows++
+            stats.boundFromUnbound += changes.boundFromUnbound
+            stats.sealedFromPlaintext += changes.sealedFromPlaintext
         }
 
         if len(batch) < batchSize {
@@ -577,7 +811,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int
 
     /* a guarded update that matched no row left the column in its original state, so reporting success would let a deployment gated on the exit code proceed over values that were never migrated; the run is reported as incomplete and a re-run picks the rows up under their new values */
     if 0 < skippedCount {
-        return processed, exception.NewError(
+        return stats, exception.NewError(
             "migrate left rows untouched because they changed under the run; re-run to pick them up",
             map[string]any{
                 "table":             spec.Table,
@@ -588,7 +822,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int
         )
     }
 
-    return processed, nil
+    return stats, nil
 }
 
 /* classifyRunError separates a run the operator stopped from one that broke: both are errors, but an interruption names itself and carries how far the run got. An empty message hands a pre-wrapped error through unchanged. */
@@ -608,11 +842,13 @@ func (instance *Migrator) classifyRunError(spec TableSpec, processed int, messag
     return exception.NewError(message, map[string]any{"table": spec.Table}, cause)
 }
 
-func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByColumn []string, row migrateRow, transform func(string) (string, error)) (bool, error) {
+/* applyRow answers, beside whether the row was written, what its update changed: a seal without a binding written bound, a value without the marker written sealed */
+func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByColumn []string, row migrateRow, transform func(string, string) (string, error)) (bool, migrateStats, error) {
     assignments := make([]string, 0, len(spec.Columns))
     setArguments := make([]any, 0, len(spec.Columns))
     valuePredicates := make([]string, 0, len(spec.Columns))
     valueArguments := make([]any, 0, len(spec.Columns))
+    changes := migrateStats{}
 
     for index, column := range spec.Columns {
         value := row.values[index]
@@ -620,13 +856,20 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByC
             continue
         }
 
-        transformed, transformErr := transform(value.String)
+        transformed, transformErr := transform(column, value.String)
         if nil != transformErr {
-            return false, exception.NewError("migrate transform failed", map[string]any{"table": spec.Table, "column": column, "id": row.primaryKey}, transformErr)
+            return false, migrateStats{}, exception.NewError("migrate transform failed", map[string]any{"table": spec.Table, "column": column, "id": row.primaryKey}, transformErr)
         }
 
         if transformed == value.String {
             continue
+        }
+
+        switch storedShape := sealShapeOf(value.String); {
+        case sealShapeNone == storedShape:
+            changes.sealedFromPlaintext++
+        case sealShapeGcmV1 == storedShape && sealShapeGcmV2 == sealShapeOf(transformed):
+            changes.boundFromUnbound++
         }
 
         assignments = append(assignments, quoteIdentifier(column)+" = ?")
@@ -636,7 +879,7 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByC
     }
 
     if 0 == len(assignments) {
-        return true, nil
+        return true, changes, nil
     }
 
     arguments := make([]any, 0, len(setArguments)+1+len(valueArguments))
@@ -659,16 +902,16 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByC
 
     result, execErr := instance.db.DB.ExecContext(ctx, updateSql, arguments...)
     if nil != execErr {
-        return false, exception.NewError("migrate update failed", map[string]any{"table": spec.Table, "id": row.primaryKey}, execErr)
+        return false, migrateStats{}, exception.NewError("migrate update failed", map[string]any{"table": spec.Table, "id": row.primaryKey}, execErr)
     }
 
     /* a driver that cannot report the affected count is treated as having applied the update: reporting a false skip would fail a run that in fact completed */
     affected, affectedErr := result.RowsAffected()
     if nil != affectedErr {
-        return true, nil
+        return true, changes, nil
     }
 
-    return 0 < affected, nil
+    return 0 < affected, changes, nil
 }
 
 type migrateRow struct {

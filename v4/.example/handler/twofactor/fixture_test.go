@@ -33,7 +33,7 @@ func useFixtureCipher() melodyencrypt.Cipher {
         CurrentKeyId: fixtureCipherKeyId,
         Keys:         map[string][]byte{fixtureCipherKeyId: []byte("two-factor-handler-test-key-32by")},
     }))
-    melodyencrypt.NewModule(melodyencrypt.ModuleConfig{Cipher: cipher}).RegisterServices(fixtureServiceRegistrar{Container: melodycontainer.NewContainer(melodycontainer.ContainerConfig{})})
+    melodyencrypt.NewModule(melodyencrypt.ModuleConfig{Cipher: cipher, SealBindings: store2fa.SealBindings()}).RegisterServices(fixtureServiceRegistrar{Container: melodycontainer.NewContainer(melodycontainer.ContainerConfig{})})
 
     return cipher
 }
@@ -161,22 +161,23 @@ func (instance *enrollmentRows) Next(destination []driver.Value) error {
 func enrolledStore(t *testing.T, enrolledIdentifier string, secret string) (*store2fa.Store, *enrollmentConnector) {
     t.Helper()
 
-    cipher := useFixtureCipher()
+    useFixtureCipher()
 
     connector := &enrollmentConnector{enrolledIdentifier: enrolledIdentifier}
     if "" != enrolledIdentifier {
-        sealedSecret, secretErr := cipher.Encrypt(secret)
+        /* sealed through the column types, as the store writes them: each column refuses a value not bound to it */
+        sealedSecret, secretErr := melodyencrypt.EncryptedStringFor[store2fa.SecretColumn](secret).Value()
         if nil != secretErr {
             t.Fatalf("sealing the fixture secret failed: %v", secretErr)
         }
 
-        sealedCodes, codesErr := cipher.Encrypt(`["recovery-one"]`)
+        sealedCodes, codesErr := melodyencrypt.EncryptedStringFor[store2fa.RecoveryCodesColumn](`["recovery-one"]`).Value()
         if nil != codesErr {
             t.Fatalf("sealing the fixture recovery codes failed: %v", codesErr)
         }
 
-        connector.sealedSecret = sealedSecret
-        connector.sealedCodes = sealedCodes
+        connector.sealedSecret = string(sealedSecret.([]byte))
+        connector.sealedCodes = string(sealedCodes.([]byte))
     }
 
     database := bun.NewDB(sql.OpenDB(connector), mysqldialect.New())

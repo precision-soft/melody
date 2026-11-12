@@ -29,6 +29,9 @@ type EncryptDatabaseCommandConfig struct {
     Database         *bun.DB
     DatabaseResolver func(ctx context.Context) (*bun.DB, error)
     CommandName      string
+
+    /* SealBindings are the bound columns of the command's compartment, the module handing each command its own: a --column whose <table>.<column> is a declared label runs bound, and --seal-binding column=label binds a column of a table spelled otherwise to a declared label. A nil Ref and a label declared twice are refused at construction, naming the field and the index. */
+    SealBindings []SealBindingConfig
 }
 
 /* NewEncryptDatabaseCommand builds the bulk encrypt, re-encrypt and decrypt command; a nil or typed-nil cipher and a config with both or neither database field panic, and so does a Database that is not a MySQL dialect, at construction. */
@@ -47,10 +50,33 @@ func NewEncryptDatabaseCommand(cipher Cipher, config EncryptDatabaseCommandConfi
         )
     }
 
+    sealBindingsByLabel := make(map[string]SealBindingConfig, len(config.SealBindings))
+    for position, bindingConfig := range config.SealBindings {
+        if true == isNilSealBindingRef(bindingConfig.Ref) {
+            exception.Panic(exception.NewError(
+                "encrypt database command seal binding has no Ref",
+                map[string]any{"field": "EncryptDatabaseCommandConfig.SealBindings", "index": position},
+                nil,
+            ))
+        }
+
+        label := bindingConfig.Ref.SealBinding()
+        if _, repeated := sealBindingsByLabel[label]; true == repeated {
+            exception.Panic(exception.NewError(
+                "encrypt database command seal binding declares a label twice",
+                map[string]any{"field": "EncryptDatabaseCommandConfig.SealBindings", "index": position, "sealBinding": label},
+                nil,
+            ))
+        }
+
+        sealBindingsByLabel[label] = bindingConfig
+    }
+
     command := &EncryptDatabaseCommand{
-        databaseResolver: config.DatabaseResolver,
-        cipher:           cipher,
-        commandName:      config.CommandName,
+        databaseResolver:    config.DatabaseResolver,
+        cipher:              cipher,
+        commandName:         config.CommandName,
+        sealBindingsByLabel: sealBindingsByLabel,
     }
 
     if nil != config.Database {
@@ -61,11 +87,12 @@ func NewEncryptDatabaseCommand(cipher Cipher, config EncryptDatabaseCommandConfi
 }
 
 type EncryptDatabaseCommand struct {
-    migrator         *Migrator
-    databaseResolver func(ctx context.Context) (*bun.DB, error)
-    cipher           Cipher
-    commandName      string
-    resolveMutex     sync.Mutex
+    migrator            *Migrator
+    databaseResolver    func(ctx context.Context) (*bun.DB, error)
+    cipher              Cipher
+    commandName         string
+    sealBindingsByLabel map[string]SealBindingConfig
+    resolveMutex        sync.Mutex
 }
 
 /* resolveMigrator runs the resolver under the lock, so racing runs cannot each open a database and leak the loser's pool; a success is memoized and a failure is retried on the next run. */
@@ -107,7 +134,8 @@ func (instance *EncryptDatabaseCommand) Flags() []clicontract.Flag {
         &clicontract.StringFlag{Name: "mode", Value: migrateModeEncrypt, Usage: "encrypt | reencrypt | decrypt"},
         &clicontract.StringFlag{Name: "target-key", Usage: "key id to re-encrypt under (mode=reencrypt)"},
         &clicontract.IntFlag{Name: "batch", Value: defaultMigrateBatchSize, Usage: "rows per batch", Config: output.DecimalIntegerConfig},
-        &clicontract.BoolFlag{Name: "deterministic", Usage: "seal the columns deterministically (searchable); without it a rotation keeps each stored value's mode, and a run onto the current key converts a deterministic column to random"},
+        &clicontract.BoolFlag{Name: "deterministic", Usage: "seal the columns deterministically (searchable); without it a rotation keeps each stored value's mode, and a run onto the key a bound seal or an unbound column's seal already carries converts it to random"},
+        &clicontract.StringSliceFlag{Name: "seal-binding", Usage: "column=label binding a --column to a declared seal binding whose label is not <table>.<column> (repeatable)"},
     }
 }
 
@@ -150,20 +178,29 @@ func (instance *EncryptDatabaseCommand) Run(
         return exception.NewError("mode reencrypt requires --target-key", nil, nil)
     }
 
+    sealBindings, sealBindingsErr := instance.resolveSealBindings(spec.Table, spec.Columns, commandContext.StringSlice("seal-binding"))
+    if nil != sealBindingsErr {
+        return sealBindingsErr
+    }
+
+    spec.SealBindings = sealBindings
+
     /* both writing modes size their columns inside the run, since a non-strict sql_mode keeps an overflowing ciphertext that never authenticates; decrypting only shortens a value, so it needs no room */
-    var processed int
+    var stats migrateStats
     var runErr error
 
     switch mode {
     case migrateModeEncrypt:
-        processed, runErr = migrator.MigrateEncrypt(ctx, spec)
+        stats, runErr = migrator.migrateEncrypt(ctx, spec)
     case migrateModeReencrypt:
-        processed, runErr = migrator.MigrateReencrypt(ctx, spec, targetKey)
+        stats, runErr = migrator.migrateReencrypt(ctx, spec, targetKey)
     case migrateModeDecrypt:
-        processed, runErr = migrator.MigrateDecrypt(ctx, spec)
+        stats, runErr = migrator.migrateDecrypt(ctx, spec)
     default:
         return exception.NewError("unknown mode", map[string]any{"mode": mode}, nil)
     }
+
+    processed := stats.rows
 
     if nil != runErr {
         /* the reason of a refused run — an unknown or narrow column, an unlisted key — lives in the cause chain, which the process's exit line does not print, so the run writes it on the error stream, where the engine reports a failure and never where the command's document goes, escaped as the engine escapes its own banner since a driver refusal echoes the values it is handed; the error keeps its message, which the journal records */
@@ -181,10 +218,116 @@ func (instance *EncryptDatabaseCommand) Run(
     }
 
     if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-        logger.Info("encrypt database migration finished", map[string]any{"table": spec.Table, "mode": mode, "rows": processed})
+        logger.Info(
+            "encrypt database migration finished",
+            map[string]any{
+                "table":               spec.Table,
+                "mode":                mode,
+                "rows":                processed,
+                "boundFromUnbound":    stats.boundFromUnbound,
+                "sealedFromPlaintext": stats.sealedFromPlaintext,
+                "sealBindings":        boundLabels(spec.SealBindings),
+            },
+        )
     }
 
     return nil
+}
+
+/* resolveSealBindings binds each --column whose label is declared: the label --seal-binding names for it, <table>.<column> otherwise; a column with no declared label runs unbound. A pair that is not column=label, a column that is not one of --column or named twice, and a label the command was not handed are refused naming the flag before any query, since an unbound column run bound would write seals its plain type refuses. */
+func (instance *EncryptDatabaseCommand) resolveSealBindings(table string, columns []string, flagValues []string) (map[string]ColumnSealBinding, error) {
+    listed := make(map[string]bool, len(columns))
+    for _, column := range columns {
+        listed[column] = true
+    }
+
+    labelByColumn := make(map[string]string, len(flagValues))
+    for _, flagValue := range flagValues {
+        column, label, paired := strings.Cut(flagValue, "=")
+        if false == paired || "" == column || "" == label {
+            return nil, exception.NewError("--seal-binding must be column=label", map[string]any{"sealBinding": flagValue}, nil)
+        }
+
+        if false == listed[column] {
+            return nil, exception.NewError("--seal-binding names a column that is not one of --column", map[string]any{"sealBinding": flagValue, "column": column}, nil)
+        }
+
+        if _, repeated := labelByColumn[column]; true == repeated {
+            return nil, exception.NewError("--seal-binding names a column twice", map[string]any{"sealBinding": flagValue, "column": column}, nil)
+        }
+
+        if _, declared := instance.sealBindingsByLabel[label]; false == declared {
+            return nil, exception.NewError("--seal-binding names a label that is not a declared seal binding of this command", map[string]any{"sealBinding": flagValue, "label": label}, nil)
+        }
+
+        /* the flag is for a table spelled otherwise than its label; a column whose own <table>.<column> is declared is bound by that declaration alone */
+        if canonical := table + "." + column; canonical != label {
+            if _, declared := instance.sealBindingsByLabel[canonical]; true == declared {
+                return nil, exception.NewError("--seal-binding names a label other than the column's own declared seal binding", map[string]any{"sealBinding": flagValue, "declared": canonical}, nil)
+            }
+        }
+
+        labelByColumn[column] = label
+    }
+
+    var bindings map[string]ColumnSealBinding
+
+    for _, column := range columns {
+        label, named := labelByColumn[column]
+        if false == named {
+            label = table + "." + column
+        }
+
+        bindingConfig, declared := instance.sealBindingsByLabel[label]
+        if false == declared {
+            /* MySQL folds the case of a column name, the label does not: a --column spelled with another case would run unbound without a word */
+            if foldedLabel := instance.declaredLabelFolding(label); "" != foldedLabel {
+                return nil, exception.NewError("--table and --column differ only by case from a declared seal binding; spell them as the label does", map[string]any{"column": column, "sealBinding": foldedLabel}, nil)
+            }
+
+            continue
+        }
+
+        if nil == bindings {
+            bindings = make(map[string]ColumnSealBinding, len(columns))
+        }
+
+        bindings[column] = ColumnSealBinding{Label: label, RefuseUnbound: bindingConfig.RefuseUnbound}
+    }
+
+    return bindings, nil
+}
+
+/* declaredLabelFolding answers the declared label equal to the given one under case folding, empty when none is */
+func (instance *EncryptDatabaseCommand) declaredLabelFolding(label string) string {
+    for declared := range instance.sealBindingsByLabel {
+        if true == strings.EqualFold(declared, label) {
+            return declared
+        }
+    }
+
+    return ""
+}
+
+/* isNilSealBindingRef answers true for a typed nil behind the interface too, whose SealBinding would panic */
+func isNilSealBindingRef(ref SealBindingRef) bool {
+    if nil == ref {
+        return true
+    }
+
+    reflected := reflect.ValueOf(ref)
+
+    return reflect.Pointer == reflected.Kind() && true == reflected.IsNil()
+}
+
+/* boundLabels answers the label each bound column ran under, empty when the run bound none, so the closing record tells a bound run from an unbound one */
+func boundLabels(sealBindings map[string]ColumnSealBinding) map[string]string {
+    labels := make(map[string]string, len(sealBindings))
+    for column, columnBinding := range sealBindings {
+        labels[column] = columnBinding.Label
+    }
+
+    return labels
 }
 
 func batchSizeOf(flagValue int) bound.Count {

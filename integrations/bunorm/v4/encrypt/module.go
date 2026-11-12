@@ -31,7 +31,7 @@ type ModuleConfig struct {
     SealBindings []SealBindingConfig
 }
 
-/* SealBindingConfig declares one bound column. Ref is the marker value its column type is parameterized by. RefuseUnbound, false when left out, makes the column read nothing but a seal bound to it: a seal without a binding and a value without the marker are refused, on the column's Scan and in its equality candidates. Leave it out until every value of the column is a bound seal; the bulk Migrator does not re-seal an unbound one yet. A declaration the module cannot hold is refused at registration naming ModuleConfig.SealBindings and the index: a nil, typed-nil or pointer-form Ref, a label outside <table>.<column> with each part of [A-Za-z0-9_]{1,64}, a cipher name the module installs no cipher under, a marker with fields, with SealBinding on its pointer receiver or embedding DefaultCipherRef by pointer, a marker declared twice, a label declared twice over one cipher instance under one name or two, and a cipher implemented outside the package. A later registration replaces the binding of each marker it declares and keeps the others, as it does a context's cipher. */
+/* SealBindingConfig declares one bound column. Ref is the marker value its column type is parameterized by. RefuseUnbound, false when left out, makes the column read nothing but a seal bound to it: a seal without a binding and a value without the marker are refused, on the column's Scan and in its equality candidates. Leave it out until every value of the column is a bound seal: deploy the declaration, run melody:encrypt:database --mode encrypt over the column, which seals its plain values and re-seals its unbound seals under the binding, then set it. A declaration the module cannot hold is refused at registration naming ModuleConfig.SealBindings and the index: a nil, typed-nil or pointer-form Ref, a label outside <table>.<column> with each part of [A-Za-z0-9_]{1,64}, a cipher name the module installs no cipher under, a marker with fields, with SealBinding on its pointer receiver or embedding DefaultCipherRef by pointer, a marker declared twice, a label declared twice over one cipher instance under one name or two, and a cipher implemented outside the package. A later registration replaces the binding of each marker it declares and keeps the others, as it does a context's cipher. */
 type SealBindingConfig struct {
     Ref           SealBindingRef
     RefuseUnbound bool
@@ -109,6 +109,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
                 kernelInstance,
                 "",
                 "",
+                instance.sealBindingsOf(defaultCipherName),
             ),
         )
     }
@@ -127,6 +128,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
                 kernelInstance,
                 contextConfig.Name,
                 "melody:encrypt:database:"+contextConfig.Name,
+                instance.sealBindingsOf(contextConfig.Name),
             ),
         )
     }
@@ -308,9 +310,10 @@ func (instance *Module) buildCommand(
     kernelInstance kernelcontract.Kernel,
     contextName string,
     commandName string,
+    sealBindings []SealBindingConfig,
 ) clicontract.Command {
     if nil == factory {
-        return NewEncryptDatabaseCommand(cipher, EncryptDatabaseCommandConfig{Database: database, CommandName: commandName})
+        return NewEncryptDatabaseCommand(cipher, EncryptDatabaseCommandConfig{Database: database, CommandName: commandName, SealBindings: sealBindings})
     }
 
     if nil == kernelInstance {
@@ -363,7 +366,20 @@ func (instance *Module) buildCommand(
         return resolved, nil
     }
 
-    return NewEncryptDatabaseCommand(cipher, EncryptDatabaseCommandConfig{DatabaseResolver: databaseResolver, CommandName: commandName})
+    return NewEncryptDatabaseCommand(cipher, EncryptDatabaseCommandConfig{DatabaseResolver: databaseResolver, CommandName: commandName, SealBindings: sealBindings})
+}
+
+/* sealBindingsOf answers the declarations of one compartment, the ones a command over its cipher reads */
+func (instance *Module) sealBindingsOf(cipherName string) []SealBindingConfig {
+    var sealBindings []SealBindingConfig
+
+    for _, bindingConfig := range instance.config.SealBindings {
+        if cipherName == bindingConfig.Ref.CipherName() {
+            sealBindings = append(sealBindings, bindingConfig)
+        }
+    }
+
+    return sealBindings
 }
 
 var (

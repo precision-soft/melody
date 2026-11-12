@@ -13,6 +13,7 @@ import (
     melodyoutbox "github.com/precision-soft/melody/integrations/outbox/v4"
     melodywebsocket "github.com/precision-soft/melody/integrations/websocket/v4"
     "github.com/precision-soft/melody/v4/.example/migration"
+    "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyapplication "github.com/precision-soft/melody/v4/application"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
@@ -51,6 +52,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
     app.RegisterModule(melodyencrypt.NewModule(melodyencrypt.ModuleConfig{
         DatabaseFactory: moduleInstance.encryptDatabaseFactory,
         Cipher:          moduleInstance.cipher,
+        SealBindings:    twofactor.SealBindings(),
     }))
 
     /* the outbox store and relay are service providers that resolve the shared *bun.DB at first use, so registering the module touches neither the outbox schema nor the transport. */

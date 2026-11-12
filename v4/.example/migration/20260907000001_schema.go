@@ -136,7 +136,7 @@ const createCatalogJournalTableSql = "CREATE TABLE IF NOT EXISTS `melody_example
     "`recorded_at` DATETIME(6) NOT NULL, " +
     "PRIMARY KEY (`id`))"
 
-/* the two secret columns are VARBINARY because bunorm's EncryptedString writes a sealed byte string, not text, and the widths hold the sealed spelling. The identifier references the user table, so the row goes with its account: a surviving row would name an account that is gone, and the database releases it whether or not the deletion subscriber runs. Both columns compare under utf8mb4_bin, which is what lets the key be declared. */
+/* the two secret columns are VARBINARY because bunorm's EncryptedStringFor writes a sealed byte string, not text, and the widths hold the sealed spelling. The identifier references the user table, so the row goes with its account: a surviving row would name an account that is gone, and the database releases it whether or not the deletion subscriber runs. Both columns compare under utf8mb4_bin, which is what lets the key be declared. */
 const createTwoFactorTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v4_two_factor` (" +
     "`user_identifier` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
     "`secret` VARBINARY(512) NOT NULL, " +

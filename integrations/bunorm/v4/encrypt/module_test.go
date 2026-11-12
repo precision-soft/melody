@@ -8,6 +8,7 @@ import (
     "fmt"
     "io"
     "reflect"
+    "sort"
     "strings"
     "testing"
 
@@ -905,4 +906,54 @@ func TestModule_AdmitsOneLabelUnderTwoCiphers(t *testing.T) {
     installSealBinding(t, secondCompartmentIbanBinding{}, false)
 
     NewModule(config).RegisterServices(newModuleRegistrar())
+}
+
+func TestModule_HandsEachCommandTheBindingsOfItsCompartment(t *testing.T) {
+    database := newMysqlDatabase()
+
+    module := NewModule(ModuleConfig{
+        Database: database,
+        Cipher:   NewFakeCipher(),
+        Contexts: []CommandContextConfig{
+            {Name: "test:crm", Database: database, Cipher: NewFakeCipher()},
+        },
+        SealBindings: []SealBindingConfig{
+            {Ref: defaultSecretBinding{}},
+            {Ref: crmIbanBinding{}, RefuseUnbound: true},
+            {Ref: crmEmailBinding{}},
+        },
+    })
+
+    labelsByCommand := make(map[string][]string)
+    for _, command := range module.RegisterCliCommands(nil) {
+        labels := make([]string, 0)
+        for label := range command.(*EncryptDatabaseCommand).sealBindingsByLabel {
+            labels = append(labels, label)
+        }
+
+        sort.Strings(labels)
+        labelsByCommand[command.Name()] = labels
+    }
+
+    if "[users.secret]" != fmt.Sprint(labelsByCommand["melody:encrypt:database"]) {
+        t.Fatalf("expected the default command handed the default cipher's binding alone, got %v", labelsByCommand)
+    }
+
+    if "[customer.email customer.iban]" != fmt.Sprint(labelsByCommand["melody:encrypt:database:test:crm"]) {
+        t.Fatalf("expected the crm command handed its own bindings, got %v", labelsByCommand)
+    }
+
+    if true != labelsByCommandRefuseUnbound(module, "melody:encrypt:database:test:crm", "customer.iban") {
+        t.Fatal("expected the crm command to carry the declaration's RefuseUnbound")
+    }
+}
+
+func labelsByCommandRefuseUnbound(module *Module, commandName string, label string) bool {
+    for _, command := range module.RegisterCliCommands(nil) {
+        if commandName == command.Name() {
+            return command.(*EncryptDatabaseCommand).sealBindingsByLabel[label].RefuseUnbound
+        }
+    }
+
+    return false
 }

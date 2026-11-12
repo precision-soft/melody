@@ -22,6 +22,7 @@ import (
 
     melodycli "github.com/precision-soft/melody/v4/cli"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/logging"
 )
 
 /* the in-process cron runner dispatches overlapping executions of one command, so concurrent first runs must share one memoized migrator and run the database resolver exactly once — an unsynchronized memo races, and every loser opens a connection pool nothing ever closes. */
@@ -364,5 +365,177 @@ func TestEncryptDatabaseCommand_RefusesANegativeBatchBeforeResolvingTheDatabase(
 
     if 0 != resolverCalls {
         t.Fatalf("expected the resolver untouched, got %d calls", resolverCalls)
+    }
+}
+
+func TestEncryptDatabaseCommand_BindsADeclaredColumn(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    command, stub := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Ref: accountsNotesBinding{}})
+
+    if runErr := runCommandLine(t, command, logging.NewNopLogger(), "--table", "accounts", "--column", "notes"); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    assertBoundSeal(t, cipherInstance, updatedValues(stub)["1"], "plain", "v1", false)
+}
+
+func TestEncryptDatabaseCommand_RunsAnUndeclaredColumnUnbound(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    command, stub := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Ref: defaultSecretBinding{}})
+
+    if runErr := runCommandLine(t, command, logging.NewNopLogger(), "--table", "accounts", "--column", "notes"); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    if written := updatedValues(stub)["1"]; false == strings.HasPrefix(written, markerPrefix) {
+        t.Fatalf("expected an unbound gcm1 seal, got %q", written)
+    }
+}
+
+/* a physical table spelled otherwise than the label binds its column through the flag */
+func TestEncryptDatabaseCommand_SealBindingFlagNamesTheLabel(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    command, stub := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Ref: accountsNotesBinding{}, RefuseUnbound: true})
+
+    if runErr := runCommandLine(t, command, logging.NewNopLogger(), "--table", "accounts_archive", "--column", "notes", "--seal-binding", "notes=accounts.notes"); nil == runErr || false == exception.ChainIs(runErr, ErrUnboundValueRefused) {
+        t.Fatalf("expected the flag to carry the declaration's RefuseUnbound onto the plaintext row, got %v", runErr)
+    }
+
+    command, stub = newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Ref: accountsNotesBinding{}})
+
+    if runErr := runCommandLine(t, command, logging.NewNopLogger(), "--table", "accounts_archive", "--column", "notes", "--seal-binding", "notes=accounts.notes"); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    assertBoundSeal(t, cipherInstance, updatedValues(stub)["1"], "plain", "v1", false)
+}
+
+func TestEncryptDatabaseCommand_RefusesASealBindingFlagItCannotResolve(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+
+    for name, testCase := range map[string]struct {
+        flagValues []string
+        message    string
+    }{
+        "no separator":        {flagValues: []string{"notes"}, message: "--seal-binding must be column=label"},
+        "no column":           {flagValues: []string{"=accounts.notes"}, message: "--seal-binding must be column=label"},
+        "no label":            {flagValues: []string{"notes="}, message: "--seal-binding must be column=label"},
+        "an unlisted column":  {flagValues: []string{"body=accounts.notes"}, message: "--seal-binding names a column that is not one of --column"},
+        "an undeclared label": {flagValues: []string{"notes=leads.notes"}, message: "--seal-binding names a label that is not a declared seal binding of this command"},
+        "a column twice":      {flagValues: []string{"notes=accounts.notes", "notes=accounts.notes"}, message: "--seal-binding names a column twice"},
+        "another label over the column's own": {flagValues: []string{"notes=accounts.body"}, message: "--seal-binding names a label other than the column's own declared seal binding"},
+    } {
+        t.Run(name, func(t *testing.T) {
+            flagValues := testCase.flagValues
+            command, stub := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Ref: accountsNotesBinding{}}, SealBindingConfig{Ref: accountsBodyBinding{}})
+
+            arguments := []string{"--table", "accounts", "--column", "notes"}
+            for _, flagValue := range flagValues {
+                arguments = append(arguments, "--seal-binding", flagValue)
+            }
+
+            runErr := runCommandLine(t, command, logging.NewNopLogger(), arguments...)
+            /* the flag's refusal is read on the terminal, so its message is what says which part of the line is wrong */
+            if nil == runErr || testCase.message != runErr.Error() {
+                t.Fatalf("expected %q, got %v", testCase.message, runErr)
+            }
+
+            if queries := runQueries(stub); 0 != len(queries) {
+                t.Fatalf("expected no query before the refusal, saw %v", queries)
+            }
+        })
+    }
+}
+
+func TestEncryptDatabaseCommand_LogsWhatItBound(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    unbound, _ := cipherInstance.Encrypt("unbound")
+    command, _ := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}, {"2", unbound}, {"3", unbound}}, SealBindingConfig{Ref: accountsNotesBinding{}})
+
+    logger := &recordingLogger{}
+    if runErr := runCommandLine(t, command, logger, "--table", "accounts", "--column", "notes"); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    for _, record := range logger.records {
+        if "encrypt database migration finished" != record.message {
+            continue
+        }
+
+        if 3 != record.context["rows"] || 2 != record.context["boundFromUnbound"] || 1 != record.context["sealedFromPlaintext"] {
+            t.Fatalf("expected rows 3, boundFromUnbound 2, sealedFromPlaintext 1, got %v", record.context)
+        }
+
+        if "map[notes:accounts.notes]" != fmt.Sprint(record.context["sealBindings"]) {
+            t.Fatalf("expected the record to name the bound column, got %v", record.context["sealBindings"])
+        }
+
+        return
+    }
+
+    t.Fatalf("expected the closing record, got %v", logger.records)
+}
+
+func TestEncryptDatabaseCommand_RefusesASealBindingWithoutARef(t *testing.T) {
+    var typedNil *pointerBinding
+
+    for name, ref := range map[string]SealBindingRef{"nil": nil, "typed nil": typedNil} {
+        t.Run(name, func(t *testing.T) {
+            refusalContext := recoverRefusalContext(t, func() {
+                NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{Database: newMysqlDatabase(), SealBindings: []SealBindingConfig{{Ref: accountsNotesBinding{}}, {Ref: ref}}})
+            })
+
+            if "EncryptDatabaseCommandConfig.SealBindings" != refusalContext["field"] || 1 != refusalContext["index"] {
+                t.Fatalf("expected the refusal to name the field and index 1, got %v", refusalContext)
+            }
+        })
+    }
+}
+
+/* a run that bound nothing says so on its closing record, so step two of the roll-out is checkable */
+func TestEncryptDatabaseCommand_LogsAnUnboundRunAsBindingNothing(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    command, _ := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}})
+
+    logger := &recordingLogger{}
+    if runErr := runCommandLine(t, command, logger, "--table", "accounts", "--column", "notes"); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    for _, record := range logger.records {
+        if "encrypt database migration finished" == record.message {
+            if "map[]" != fmt.Sprint(record.context["sealBindings"]) {
+                t.Fatalf("expected no bound column on the record, got %v", record.context["sealBindings"])
+            }
+
+            return
+        }
+    }
+
+    t.Fatalf("expected the closing record, got %v", logger.records)
+}
+
+/* MySQL folds the case of a column name and the label does not, so a --column spelled otherwise is refused rather than run unbound */
+func TestEncryptDatabaseCommand_RefusesAColumnDifferingFromItsLabelByCase(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    command, stub := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Ref: accountsNotesBinding{}})
+
+    runErr := runCommandLine(t, command, logging.NewNopLogger(), "--table", "accounts", "--column", "NOTES")
+    if nil == runErr || "--table and --column differ only by case from a declared seal binding; spell them as the label does" != runErr.Error() {
+        t.Fatalf("expected the case refusal, got %v", runErr)
+    }
+
+    if queries := runQueries(stub); 0 != len(queries) {
+        t.Fatalf("expected no query before the refusal, saw %v", queries)
+    }
+}
+
+func TestEncryptDatabaseCommand_RefusesALabelDeclaredTwice(t *testing.T) {
+    refusalContext := recoverRefusalContext(t, func() {
+        NewEncryptDatabaseCommand(NewFakeCipher(), EncryptDatabaseCommandConfig{Database: newMysqlDatabase(), SealBindings: []SealBindingConfig{{Ref: accountsNotesBinding{}}, {Ref: accountsNotesBinding{}, RefuseUnbound: true}}})
+    })
+
+    if "EncryptDatabaseCommandConfig.SealBindings" != refusalContext["field"] || 1 != refusalContext["index"] || "accounts.notes" != refusalContext["sealBinding"] {
+        t.Fatalf("expected the refusal to name the field, index 1 and the label, got %v", refusalContext)
     }
 }

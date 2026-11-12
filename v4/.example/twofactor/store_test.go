@@ -2,6 +2,7 @@ package twofactor
 
 import (
     "context"
+    "errors"
     "strings"
     "testing"
     "time"
@@ -20,8 +21,8 @@ func renderedEnrollmentUpsert(t *testing.T) string {
 
     return store.enrollmentUpsert(&Enrollment{
         UserIdentifier: "user-2",
-        Secret:         melodyencrypt.EncryptedString("zz-secret"),
-        RecoveryCodes:  melodyencrypt.EncryptedString(`["zz-one"]`),
+        Secret:         melodyencrypt.EncryptedStringFor[SecretColumn]("zz-secret"),
+        RecoveryCodes:  melodyencrypt.EncryptedStringFor[RecoveryCodesColumn](`["zz-one"]`),
         CreatedAt:      time.Unix(1, 0),
     }).String()
 }
@@ -105,5 +106,47 @@ func TestRecoveryCodeMatches_FoldsCaseAndDropsTheSeparators(t *testing.T) {
 
     if false == recoveryCodeMatches("ABCDE-12345", "abcde12345") {
         t.Fatalf("expected a hand-edited stored code compared in its canonical form")
+    }
+}
+
+/* the two columns seal bound to their own labels and refuse anything else: the secret's seal copied into the recovery codes column does not read, and neither does an unbound seal */
+func TestEnrollment_SecretAndRecoveryCodesAreBoundToTheirColumns(t *testing.T) {
+    cipher := melodyencrypt.NewCipher(melodyencrypt.NewStaticKeyProvider(melodyencrypt.KeyRing{
+        CurrentKeyId: "two-factor-store-test",
+        Keys:         map[string][]byte{"two-factor-store-test": []byte("two-factor-store-test-key-32byte")},
+    }))
+    melodyencrypt.NewModule(melodyencrypt.ModuleConfig{Cipher: cipher, SealBindings: SealBindings()}).RegisterServices(
+        moduleRegistrar{Container: melodycontainer.NewContainer(melodycontainer.ContainerConfig{})},
+    )
+
+    sealedSecret, secretErr := melodyencrypt.EncryptedStringFor[SecretColumn]("zz-secret").Value()
+    if nil != secretErr {
+        t.Fatalf("sealing the secret failed: %v", secretErr)
+    }
+
+    sealedCodes, codesErr := melodyencrypt.EncryptedStringFor[RecoveryCodesColumn](`["zz-one"]`).Value()
+    if nil != codesErr {
+        t.Fatalf("sealing the recovery codes failed: %v", codesErr)
+    }
+
+    for name, sealed := range map[string]any{"secret": sealedSecret, "recovery codes": sealedCodes} {
+        if false == strings.HasPrefix(string(sealed.([]byte)), "<ENC>\x00gcm2\x00") {
+            t.Fatalf("expected the %s sealed bound, got %q", name, sealed)
+        }
+    }
+
+    var secret melodyencrypt.EncryptedStringFor[SecretColumn]
+    if scanErr := secret.Scan(sealedSecret); nil != scanErr || "zz-secret" != string(secret) {
+        t.Fatalf("expected the secret to read back through its column, got %q, %v", secret, scanErr)
+    }
+
+    var codes melodyencrypt.EncryptedStringFor[RecoveryCodesColumn]
+    if scanErr := codes.Scan(sealedSecret); nil == scanErr {
+        t.Fatalf("expected the secret's seal refused by the recovery codes column, read %q", codes)
+    }
+
+    unbound, _ := cipher.Encrypt("zz-secret")
+    if scanErr := secret.Scan(unbound); nil == scanErr || false == errors.Is(scanErr, melodyencrypt.ErrUnboundValueRefused) {
+        t.Fatalf("expected an unbound seal refused by the secret column, got %v", scanErr)
     }
 }

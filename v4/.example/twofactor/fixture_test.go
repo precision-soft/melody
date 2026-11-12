@@ -3,6 +3,8 @@ package twofactor
 import (
     "database/sql"
 
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/feature"
@@ -69,3 +71,12 @@ func newRenderingDatabase() *bun.DB {
 }
 
 var _ schema.Dialect = (*renderingDialect)(nil)
+
+/* moduleRegistrar hands the encrypt module's services to a container, as the application's registration does at boot */
+type moduleRegistrar struct {
+    melodycontainercontract.Container
+}
+
+func (instance moduleRegistrar) RegisterService(serviceName string, provider any, options melodycontainercontract.RegisterOptions) {
+    instance.MustRegister(serviceName, provider, options)
+}
