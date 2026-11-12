@@ -35,17 +35,7 @@ func (instance *EncryptedDeterministicStringFor[R]) UnmarshalJSON(data []byte) e
 }
 
 func (instance EncryptedDeterministicStringFor[R]) Value() (driver.Value, error) {
-    cipherInstance, cipherErr := refCipher[R]()
-    if nil != cipherErr {
-        return nil, cipherErr
-    }
-
-    encoded, encryptErr := sealColumnValue(cipherInstance, string(instance), true)
-    if nil != encryptErr {
-        return nil, encryptErr
-    }
-
-    return []byte(encoded), nil
+    return sealRefColumnValue[R](string(instance), true)
 }
 
 func (instance *EncryptedDeterministicStringFor[R]) Scan(source any) error {
@@ -59,12 +49,7 @@ func (instance *EncryptedDeterministicStringFor[R]) Scan(source any) error {
         return nil
     }
 
-    cipherInstance, cipherErr := refCipher[R]()
-    if nil != cipherErr {
-        return cipherErr
-    }
-
-    plaintext, plaintextErr := cipherInstance.Decrypt(raw)
+    plaintext, plaintextErr := openRefColumnValue[R](raw)
     if nil != plaintextErr {
         return plaintextErr
     }

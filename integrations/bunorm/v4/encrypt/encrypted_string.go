@@ -18,6 +18,7 @@ type EncryptedColumn interface {
     encryptedColumn()
 }
 
+/* EncryptedString is a column sealed under the default cipher with a random nonce, written as gcm1; a bound column is an EncryptedStringFor over a SealBindingRef, and this type reads a bound seal as ErrSealBound. */
 type EncryptedString string
 
 func (instance EncryptedString) encryptedColumn() {}

@@ -1,6 +1,7 @@
 package encrypt
 
 import (
+    "database/sql/driver"
     "encoding/json"
     "fmt"
     "strings"
@@ -273,7 +274,7 @@ func TestEncryptedStringFor_FormatRedactsNumericVerbs(t *testing.T) {
 func TestEncryptedStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
     useCompartmentCiphers(t)
 
-    crmCipher, cipherErr := refCipher[crmCipherRef]()
+    crmCipher, _, cipherErr := refColumn[crmCipherRef]()
     if nil != cipherErr {
         t.Fatalf("cipher: %v", cipherErr)
     }
@@ -322,15 +323,238 @@ func TestEncryptedStringFor_AnInterfaceMarkerIsRefusedWithoutAPanic(t *testing.T
 
 /* the refusal of a marker that is a pointer or an interface names the marker's TYPE: %T of a nil interface spelled "<nil>", which named nothing. */
 func TestRefCipher_RefusalNamesThePointerAndTheInterfaceMarker(t *testing.T) {
-    _, interfaceErr := refCipher[CipherRef]()
+    _, _, interfaceErr := refColumn[CipherRef]()
     interfaceRefusal, isInterfaceRefusal := interfaceErr.(*exception.Error)
     if false == isInterfaceRefusal || "encrypt.CipherRef" != interfaceRefusal.Context()["cipherRef"] {
         t.Fatalf("expected the interface marker named, got %v", interfaceErr)
     }
 
-    _, pointerErr := refCipher[*crmCipherRef]()
+    _, _, pointerErr := refColumn[*crmCipherRef]()
     pointerRefusal, isPointerRefusal := pointerErr.(*exception.Error)
     if false == isPointerRefusal || "*encrypt.crmCipherRef" != pointerRefusal.Context()["cipherRef"] {
         t.Fatalf("expected the pointer marker named, got %v", pointerErr)
     }
+}
+
+/* a bound marker's column writes gcm2 under its label, whatever the switch says, and reads it back */
+func TestEncryptedStringFor_ValueSealsUnderTheBindingOfItsMarker(t *testing.T) {
+    cipherInstance := newCrmCipher(t)
+
+    for _, refuseUnbound := range []bool{false, true} {
+        installSealBinding(t, crmIbanBinding{}, refuseUnbound)
+
+        for name, value := range map[string]func() (driver.Value, error){
+            "random":        EncryptedStringFor[crmIbanBinding]("RO49AAAA1B31007593840000").Value,
+            "deterministic": EncryptedDeterministicStringFor[crmIbanBinding]("RO49AAAA1B31007593840000").Value,
+        } {
+            stored, valueErr := value()
+            if nil != valueErr || false == strings.HasPrefix(string(stored.([]byte)), "<ENC>\x00gcm2\x00crm-v2:") {
+                t.Fatalf("%s refuseUnbound=%v: expected a gcm2 seal under the current key, got %q (%v)", name, refuseUnbound, stored, valueErr)
+            }
+
+            opened, openErr := cipherInstance.(*aes256Cipher).openStored(string(stored.([]byte)), sealBinding{label: "customer.iban"})
+            if nil != openErr || "RO49AAAA1B31007593840000" != opened.plaintext {
+                t.Fatalf("%s: expected the seal to open under the label, got %q (%v)", name, opened.plaintext, openErr)
+            }
+
+            var scanned EncryptedStringFor[crmIbanBinding]
+            if scanErr := scanned.Scan(stored); nil != scanErr || "RO49AAAA1B31007593840000" != string(scanned) {
+                t.Fatalf("%s: expected the column to read it back, got %q (%v)", name, string(scanned), scanErr)
+            }
+        }
+    }
+}
+
+/* a marker without a binding is unchanged: its column still writes gcm1 */
+func TestEncryptedStringFor_AMarkerWithoutABindingStillSealsGcm1(t *testing.T) {
+    newCrmCipher(t)
+
+    stored, valueErr := EncryptedStringFor[crmCipherRef]("RO49AAAA1B31007593840000").Value()
+    if nil != valueErr || false == strings.HasPrefix(string(stored.([]byte)), "<ENC>\x00gcm1\x00") {
+        t.Fatalf("expected a gcm1 seal, got %q (%v)", stored, valueErr)
+    }
+}
+
+/* while the binding admits them, a gcm1 seal and a value without the marker are read */
+func TestBoundColumn_AdmitsAnUnboundSealAndPlaintextByDefault(t *testing.T) {
+    cipherInstance := newCrmCipher(t)
+    installSealBinding(t, crmIbanBinding{}, false)
+
+    unbound, _ := cipherInstance.Encrypt("RO49AAAA1B31007593840000")
+
+    for _, stored := range []string{unbound, "RO49AAAA1B31007593840000"} {
+        var scanned EncryptedStringFor[crmIbanBinding]
+        if scanErr := scanned.Scan([]byte(stored)); nil != scanErr || "RO49AAAA1B31007593840000" != string(scanned) {
+            t.Fatalf("expected %q admitted, got %q (%v)", stored, string(scanned), scanErr)
+        }
+    }
+}
+
+/* a binding that refuses unbound values refuses a gcm1 seal on its format alone, before any key is asked for */
+func TestBoundColumn_RefusingUnboundRefusesAGcm1Seal(t *testing.T) {
+    provider := &countingKeyProvider{KeyProvider: NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v2", Keys: map[string][]byte{"crm-v2": newKey(12)}})}
+    cipherInstance := NewCipher(provider)
+    installCipher(t, crmCipherRef{}.CipherName(), cipherInstance)
+    installSealBinding(t, crmIbanBinding{}, true)
+
+    unbound, _ := cipherInstance.Encrypt("RO49AAAA1B31007593840000")
+    provider.calls = 0
+
+    var scanned EncryptedStringFor[crmIbanBinding]
+    scanErr := scanned.Scan([]byte(unbound))
+    if nil == scanErr || false == exception.ChainIs(scanErr, ErrUnboundValueRefused) || "customer.iban" != exception.FromError(scanErr).Context()["sealBinding"] {
+        t.Fatalf("expected ErrUnboundValueRefused naming the binding, got %v", scanErr)
+    }
+
+    if 0 != provider.calls {
+        t.Fatalf("expected no key asked for, got %d lookups", provider.calls)
+    }
+}
+
+/* the same switch refuses a value without the marker, so a bare value written into the column is not served */
+func TestBoundColumn_RefusingUnboundRefusesAValueWithoutTheMarker(t *testing.T) {
+    newCrmCipher(t)
+    installSealBinding(t, crmIbanBinding{}, true)
+
+    var scanned EncryptedDeterministicStringFor[crmIbanBinding]
+    if scanErr := scanned.Scan([]byte("RO49AAAA1B31007593840000")); nil == scanErr || false == exception.ChainIs(scanErr, ErrUnboundValueRefused) {
+        t.Fatalf("expected ErrUnboundValueRefused, got %v", scanErr)
+    }
+}
+
+/* a bound column reads the marker family as the plain ones do: a format this build does not read is ErrSealFormatUnknown, while the binding admits unbound values too */
+func TestBoundColumn_RefusesAnUnknownSealFormat(t *testing.T) {
+    newCrmCipher(t)
+
+    for _, refuseUnbound := range []bool{false, true} {
+        installSealBinding(t, crmIbanBinding{}, refuseUnbound)
+
+        var scanned EncryptedStringFor[crmIbanBinding]
+        if scanErr := scanned.Scan([]byte("<ENC>\x00gcm9\x00crm-v2:zzz")); nil == scanErr || false == exception.ChainIs(scanErr, ErrSealFormatUnknown) {
+            t.Fatalf("refuseUnbound=%v: expected ErrSealFormatUnknown, got %v", refuseUnbound, scanErr)
+        }
+    }
+}
+
+type pointerReceiverBinding struct{}
+
+func (instance pointerReceiverBinding) CipherName() string {
+    return "test:crm"
+}
+
+func (instance *pointerReceiverBinding) SealBinding() string {
+    return "customer.pointer_receiver"
+}
+
+/* a marker whose SealBinding is on the pointer receiver would leave its value type unbound, so its column refuses instead of writing gcm1; DefaultCipherRef embedded by pointer is refused as an error, never a nil dereference */
+func TestRefColumn_RefusesAMarkerThatCannotCarryItsBinding(t *testing.T) {
+    newCrmCipher(t)
+    installCipher(t, defaultCipherName, NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})))
+
+    if stored, valueErr := EncryptedStringFor[pointerReceiverBinding]("value").Value(); nil == valueErr || false == strings.Contains(valueErr.Error(), "pointer receiver") {
+        t.Fatalf("expected the pointer-receiver marker refused, stored %q (%v)", stored, valueErr)
+    }
+
+    if stored, valueErr := EncryptedStringFor[pointerDefaultBinding]("value").Value(); nil == valueErr || false == strings.Contains(valueErr.Error(), "by pointer") {
+        t.Fatalf("expected DefaultCipherRef by pointer refused, stored %q (%v)", stored, valueErr)
+    }
+}
+
+/* a seal written through one marker does not read through another marker of the same compartment */
+func TestBoundColumn_RefusesASealRelocatedFromAnotherBinding(t *testing.T) {
+    newCrmCipher(t)
+    installSealBinding(t, crmIbanBinding{}, false)
+    installSealBinding(t, crmEmailBinding{}, false)
+
+    stored, _ := EncryptedStringFor[crmIbanBinding]("RO49AAAA1B31007593840000").Value()
+
+    var relocated EncryptedStringFor[crmEmailBinding]
+    if scanErr := relocated.Scan(stored); nil == scanErr || false == strings.Contains(scanErr.Error(), "could not decrypt value") {
+        t.Fatalf("expected the relocated seal refused, got %q (%v)", string(relocated), scanErr)
+    }
+
+    var own EncryptedStringFor[crmIbanBinding]
+    if scanErr := own.Scan(stored); nil != scanErr || "RO49AAAA1B31007593840000" != string(own) {
+        t.Fatalf("expected the seal to read through its own marker, got %q (%v)", string(own), scanErr)
+    }
+}
+
+/* a value that is itself a seal, of either format, is sealed as data under the binding and reads back as that string */
+func TestEncryptedStringFor_ASealWrittenAsDataRoundTripsUnderABinding(t *testing.T) {
+    cipherInstance := newCrmCipher(t)
+    installSealBinding(t, crmIbanBinding{}, true)
+    installSealBinding(t, crmEmailBinding{}, false)
+
+    unbound, _ := cipherInstance.Encrypt("another customer's iban")
+    bound, _ := EncryptedStringFor[crmEmailBinding]("another customer's email").Value()
+
+    for _, applicationValue := range []string{unbound, string(bound.([]byte))} {
+        stored, valueErr := EncryptedStringFor[crmIbanBinding](applicationValue).Value()
+        if nil != valueErr {
+            t.Fatalf("value: %v", valueErr)
+        }
+
+        var scanned EncryptedStringFor[crmIbanBinding]
+        if scanErr := scanned.Scan(stored); nil != scanErr || applicationValue != string(scanned) {
+            t.Fatalf("expected the seal stored as data to read back as itself, got %q (%v)", string(scanned), scanErr)
+        }
+    }
+}
+
+/* a bound marker that was never declared is refused at its first use, naming the marker and the field that declares it */
+func TestEncryptedStringFor_AnUndeclaredBindingIsRefused(t *testing.T) {
+    newCrmCipher(t)
+
+    _, valueErr := EncryptedStringFor[undeclaredBinding]("value").Value()
+
+    var scanned EncryptedDeterministicStringFor[undeclaredBinding]
+    scanErr := scanned.Scan([]byte("value"))
+
+    for _, refusal := range []error{valueErr, scanErr} {
+        if nil == refusal {
+            t.Fatalf("expected the undeclared binding refused")
+        }
+
+        context := exception.FromError(refusal).Context()
+        if "ModuleConfig.SealBindings" != context["field"] || false == strings.Contains(fmt.Sprint(context["cipherRef"]), "undeclaredBinding") {
+            t.Fatalf("expected the refusal to name the marker and the field, got %v", context)
+        }
+    }
+}
+
+/* a wrapped cipher installed behind the declaration's back is refused by the bound column, which never seals unbound in its place */
+func TestBoundColumn_AWrappedCipherIsRefused(t *testing.T) {
+    installCipher(t, crmCipherRef{}.CipherName(), wrappedCipher{Cipher: NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v2", Keys: map[string][]byte{"crm-v2": newKey(12)}}))})
+    installSealBinding(t, crmIbanBinding{}, false)
+
+    if stored, valueErr := EncryptedStringFor[crmIbanBinding]("value").Value(); nil == valueErr || false == strings.Contains(valueErr.Error(), "needs the package cipher") {
+        t.Fatalf("expected the wrapped cipher refused, stored %q (%v)", stored, valueErr)
+    }
+
+    var scanned EncryptedStringFor[crmIbanBinding]
+    if scanErr := scanned.Scan([]byte("value")); nil == scanErr || false == strings.Contains(scanErr.Error(), "needs the package cipher") {
+        t.Fatalf("expected the wrapped cipher refused on Scan, got %v", scanErr)
+    }
+}
+
+/* DefaultCipherRef selects the default cipher for a bound marker; a marker naming the empty compartment without it is still refused */
+func TestDefaultCipherRef_SelectsTheDefaultCipher(t *testing.T) {
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
+    installCipher(t, defaultCipherName, cipherInstance)
+    installSealBinding(t, defaultSecretBinding{}, true)
+
+    stored, valueErr := EncryptedStringFor[defaultSecretBinding]("totp secret").Value()
+    if nil != valueErr || false == strings.HasPrefix(string(stored.([]byte)), "<ENC>\x00gcm2\x00v1:") {
+        t.Fatalf("expected a gcm2 seal under the default cipher, got %q (%v)", stored, valueErr)
+    }
+
+    if _, _, resolveErr := refColumn[emptyNameRef](); nil == resolveErr || false == strings.Contains(resolveErr.Error(), "name is empty") {
+        t.Fatalf("expected the empty name refused without DefaultCipherRef, got %v", resolveErr)
+    }
+}
+
+type emptyNameRef struct{}
+
+func (instance emptyNameRef) CipherName() string {
+    return ""
 }

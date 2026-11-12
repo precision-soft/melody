@@ -118,6 +118,44 @@ type Customer struct {
 The marker parameterizes the generic column types `EncryptedStringFor[R]` and
 `EncryptedDeterministicStringFor[R]`, so the binding lives in the Go type — the only channel available, because `database/sql` gives `Value()`/`Scan()` no context. Compartments are isolated only as far as their keys are: the name selects the registry entry and is not bound into the ciphertext, so two compartments whose providers hold the same key under the same id decrypt each other's ciphertext. Give each compartment keys of its own. Key rotation inside one compartment keeps working through the key id embedded in each ciphertext. The plain `EncryptedString` keeps using the default cipher.
 
+## Binding a seal to its column
+
+A marker that also implements `SealBinding()` binds its columns' seals to a label, `<table>.<column>` with each part `[A-Za-z0-9_]{1,64}`. Its `EncryptedStringFor[R]` and `EncryptedDeterministicStringFor[R]` write the format `gcm2`: the label, the key id and the format are authenticated as associated data, and the deterministic nonce is taken over them too, so the seal opens through a column of that marker alone and equal values of two bound columns are not equal seals. A seal without a binding, `gcm1`, is what every unbound column and the third major write, and still opens. Embed `DefaultCipherRef` to bind a column of the default cipher; any other marker naming the empty compartment is refused.
+
+```go
+type CustomerIban struct{}
+
+func (instance CustomerIban) CipherName() string {
+    return "crm"
+}
+
+func (instance CustomerIban) SealBinding() string {
+    return "customer.iban"
+}
+
+app.RegisterModule(encrypt.NewModule(encrypt.ModuleConfig{
+    Contexts:     []encrypt.CommandContextConfig{{Name: "crm", Cipher: crmCipher}},
+    SealBindings: []encrypt.SealBindingConfig{{Ref: CustomerIban{}}},
+}))
+
+type Customer struct {
+    Iban encrypt.EncryptedStringFor[CustomerIban] `bun:"iban"`
+}
+```
+
+Every bound marker is declared in `ModuleConfig.SealBindings`, a zero-size value type whose methods have value receivers, `DefaultCipherRef` embedded by value. A declaration the module cannot hold is refused at registration, naming the field and the index: a nil or pointer `Ref`, a label outside the grammar, a cipher name the module installs no cipher under, a marker with fields or with `SealBinding` on its pointer receiver, a marker declared twice, a label declared twice over one cipher instance under one name or two, or a cipher implemented outside the package, a wrapper included, since sealing unbound would drop the binding without a word. An undeclared bound marker is refused at its column's first `Value` or `Scan`.
+
+`SealBindingConfig.RefuseUnbound`, false when left out, is the switch that closes the downgrade: until it is set, the column also reads a `gcm1` seal and a value without the marker, so a `gcm1` seal of the same key written into the column by someone who can write the database still opens there. Set, the column refuses both with `ErrUnboundValueRefused`, on the format alone and before any key is asked for; a non-NULL empty string is a value without the marker too, so a `NOT NULL DEFAULT ''` column needs its empty values sealed. The bulk `Migrator` does not re-seal a `gcm1` seal under a binding yet, so for now the switch is for a column whose every value was written through the bound type. `Cipher.Decrypt` and the plain column types refuse a bound seal with `ErrSealBound`.
+
+| An attacker who can write the database… | Unbound column | Bound, admitting | Bound, `RefuseUnbound` |
+|---|---|---|---|
+| moves a seal from another column or table of the key | opens | a bound one fails; an unbound one opens | fails |
+| moves a seal between two rows of the same column | opens | opens | opens |
+| writes a bare value into the column | served | served | refused |
+| compares equal values across two deterministic columns | equal seals | different seals for bound rows; the `gcm1` rows still equal | different seals |
+
+A key per compartment gives the cross-column separation without any of this. The bulk `Migrator` does not read a binding yet: over a bound column it stops on the first `gcm2` row with `ErrSealBound`.
+
 Two designs were considered and rejected: per-column key ids over one merged `KeyProvider` (the compartments stay merged — either context can decrypt the other's rows, exactly the isolation loss the feature exists to prevent) and a cipher per `bunorm.Manager` (a `driver.Valuer` has no manager context; bun query hooks would miss raw SQL paths).
 
 For the bulk command with several compartments, give the contexts their databases — each context with a `Database` or a `DatabaseFactory` gets its own `melody:encrypt:database:<name>`, and one with neither registers no command:
@@ -145,13 +183,15 @@ candidates, _ := cipher.CiphertextCandidates("user@example.com")
 db.NewSelect().Model(&user).Where("email IN (?)", bun.In(candidates)).Scan(ctx)
 ```
 
+For an `EncryptedDeterministicStringFor[R]` column, `encrypt.CiphertextCandidatesFor[R]("user@example.com")` reads the cipher, the binding and its switch from where the column reads them: a bound marker answers a `gcm2` candidate per active key, followed by the `gcm1` ones while its binding admits unbound values. `Cipher.CiphertextCandidates` answers `gcm1` alone and finds no row a bound column wrote.
+
 `CiphertextCandidates` returns `[][]byte` (not `[]string`) on purpose: the ciphertext marker carries `\0`
 glue bytes, and bun inlines a `string` argument into the SQL text through a formatter that drops embedded NUL bytes — which would corrupt the right-hand side and break the match. As `[][]byte` each candidate is emitted as an `X'…'` binary literal, so every byte survives and the lookup compares equal to the stored
 `EncryptedDeterministicString` column (whose `Value()` is likewise a binary `[]byte`).
 
 > ⚠️ Deterministic mode **reveals plaintext equality** (equal values produce identical ciphertext). The
-> nonce is keyed only by `(key, plaintext)`, so equal plaintext yields byte-identical ciphertext **across
-> every deterministic column and table under the same key** — an observer of the stored values can correlate
+> nonce of an unbound column is keyed only by `(key, plaintext)`, so equal plaintext yields byte-identical ciphertext **across
+> every unbound deterministic column and table under the same key**; a bound column's nonce takes its label, so equality shows within that column alone — an observer of the stored values can correlate
 > equal values across rows and tables, not just within one column. Use it only on low-entropy lookup fields,
 > never on secrets where cross-column equality must stay hidden. Use `EncryptedString` (random nonce) everywhere else.
 

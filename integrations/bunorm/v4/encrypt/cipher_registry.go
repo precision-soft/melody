@@ -2,6 +2,7 @@ package encrypt
 
 import (
     "reflect"
+    "regexp"
     "sync"
 
     "github.com/precision-soft/melody/v4/exception"
@@ -12,8 +13,77 @@ type CipherRef interface {
     CipherName() string
 }
 
+/* SealBindingRef is a CipherRef whose columns are sealed bound to a label, <table>.<column>: the label is authenticated in each seal and taken into the deterministic nonce, so a seal opens through a column of this marker alone and equal values of two bound columns are not equal seals. Every such marker is declared in ModuleConfig.SealBindings; an undeclared one is refused at its column's first Value or Scan. */
+type SealBindingRef interface {
+    CipherRef
+
+    SealBinding() string
+}
+
+/* DefaultCipherRef, embedded by value in a marker type, selects the cipher installed as ModuleConfig.Cipher, so a bound column can use the default cipher; any other marker naming the empty compartment is refused. */
+type DefaultCipherRef struct{}
+
+func (instance DefaultCipherRef) CipherName() string {
+    return defaultCipherName
+}
+
+func (instance DefaultCipherRef) defaultCipherRef() {}
+
+/* defaultCipherSelector is promoted by embedding DefaultCipherRef, and is the one way a marker may name the empty compartment */
+type defaultCipherSelector interface {
+    defaultCipherRef()
+}
+
+var sealBindingRefType = reflect.TypeOf((*SealBindingRef)(nil)).Elem()
+
+var defaultCipherRefPointerType = reflect.TypeOf((*DefaultCipherRef)(nil))
+
+/* markerShapeDefect answers why a marker type cannot carry a binding, empty when it can: a marker holds no state, since the column reads the zero value of its type; a SealBinding on the pointer receiver would leave the value type unbound without a word; and DefaultCipherRef embedded by pointer promotes its methods over a nil pointer */
+func markerShapeDefect(marker reflect.Type) string {
+    if _, isBound := reflect.Zero(marker).Interface().(SealBindingRef); false == isBound && true == reflect.PointerTo(marker).Implements(sealBindingRefType) {
+        return "cipher reference declares SealBinding on its pointer receiver; a marker's methods must have value receivers"
+    }
+
+    if reflect.Struct == marker.Kind() {
+        for index := 0; index < marker.NumField(); index++ {
+            if field := marker.Field(index); true == field.Anonymous && defaultCipherRefPointerType == field.Type {
+                return "cipher reference embeds DefaultCipherRef by pointer; embed it by value"
+            }
+        }
+    }
+
+    if _, isBound := reflect.Zero(marker).Interface().(SealBindingRef); true == isBound && 0 != marker.Size() {
+        return "cipher reference of a seal binding holds fields; a marker must be a zero-size value type, since its column reads the zero value"
+    }
+
+    return ""
+}
+
 /* defaultCipherName is the entry ModuleConfig.Cipher is installed under; a context's name is never empty */
 const defaultCipherName = ""
+
+/* sealBindingLabelPattern is the label grammar, one canonical spelling per column, so two spellings of one column cannot silently be two bindings */
+var sealBindingLabelPattern = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}\.[A-Za-z0-9_]{1,64}$`)
+
+var sealBindingRegistryMutex sync.RWMutex
+var sealBindingRegistry = map[reflect.Type]sealBinding{}
+
+/* storeSealBinding replaces an earlier entry of the same marker, as storeCipher does, so the switch follows the last registration that declares it; a marker a later registration leaves out keeps its entry, as a context's cipher does */
+func storeSealBinding(marker reflect.Type, binding sealBinding) {
+    sealBindingRegistryMutex.Lock()
+    defer sealBindingRegistryMutex.Unlock()
+
+    sealBindingRegistry[marker] = binding
+}
+
+func sealBindingOf(marker reflect.Type) (sealBinding, bool) {
+    sealBindingRegistryMutex.RLock()
+    defer sealBindingRegistryMutex.RUnlock()
+
+    binding, declared := sealBindingRegistry[marker]
+
+    return binding, declared
+}
 
 /* a process-wide table, since database/sql hands Value and Scan no context */
 var cipherRegistryMutex sync.RWMutex

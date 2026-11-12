@@ -114,7 +114,7 @@ func TestEncryptedDeterministicStringFor_FormatRedactsNumericVerbs(t *testing.T)
 func TestEncryptedDeterministicStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
     useCompartmentCiphers(t)
 
-    crmCipher, cipherErr := refCipher[crmCipherRef]()
+    crmCipher, _, cipherErr := refColumn[crmCipherRef]()
     if nil != cipherErr {
         t.Fatalf("cipher: %v", cipherErr)
     }

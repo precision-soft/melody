@@ -1,6 +1,7 @@
 package encrypt
 
 import (
+    "bytes"
     "encoding/base64"
     "strings"
     "sync"
@@ -962,12 +963,12 @@ func BenchmarkNonceSubKey(b *testing.B) {
     b.ResetTimer()
 
     for iteration := 0; iteration < b.N; iteration++ {
-        nonceSubKey(key)
+        nonceSubKey(key, deterministicNonceLabel)
     }
 }
 
 func BenchmarkDeterministicNonceFrom(b *testing.B) {
-    nonceKey := nonceSubKey(newKey(1))
+    nonceKey := nonceSubKey(newKey(1), deterministicNonceLabel)
 
     b.ReportAllocs()
     b.ResetTimer()
@@ -1087,4 +1088,235 @@ func TestCipher_DecryptRefusesAKeyIdOutsideTheGrammarWithoutAskingTheProvider(t 
     if 1 != provider.calls {
         t.Fatalf("expected an id in the grammar handed to the provider once, got %d lookups", provider.calls)
     }
+}
+
+func newBindingCipher(t *testing.T) *aes256Cipher {
+    t.Helper()
+
+    return NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})).(*aes256Cipher)
+}
+
+/* the associated data is one spelling: the domain, the format, the key id and the label, NUL-separated, in that order */
+func TestSealAssociatedData_Layout(t *testing.T) {
+    expected := "melody/encrypt/seal-binding\x00gcm2\x00v1\x00users.email"
+    if associatedData := string(sealAssociatedData(formatGcmV2, "v1", "users.email")); expected != associatedData {
+        t.Fatalf("expected %q, got %q", expected, associatedData)
+    }
+}
+
+/* derived outside the package from the layout and the nonce rule alone, so the wire format, the associated data and the bound nonce are locked at once */
+func TestCipher_BoundSealKnownAnswer(t *testing.T) {
+    sealed, sealErr := newBindingCipher(t).sealBoundValue("alice@example.com", sealBinding{label: "users.email"}, true)
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    if expected := "<ENC>\x00gcm2\x00v1:QvkXvo6EIGKZ/rmT7V+L3USgYdW2/1zsQC3NlaH0ZIuyfNFgxvvcVdJeaRyr"; expected != sealed {
+        t.Fatalf("expected the known answer %q, got %q", expected, sealed)
+    }
+}
+
+/* written by the third major's cipher: an unbound seal of before still opens, and a deterministic unbound seal of today is the same bytes */
+func TestCipher_UnboundSealKnownAnswer(t *testing.T) {
+    cipherInstance := newBindingCipher(t)
+    thirdMajorSeal := "<ENC>\x00gcm1\x00v1:8cyuhVEhdNBBCceRMZoI11bDAOT1L1HOehEfFPR/sh2Rrn1YrXDEyjliXEwx"
+
+    if decrypted, decryptErr := cipherInstance.Decrypt(thirdMajorSeal); nil != decryptErr || "alice@example.com" != decrypted {
+        t.Fatalf("expected the third major's seal to open, got %q (%v)", decrypted, decryptErr)
+    }
+
+    if sealed, sealErr := cipherInstance.EncryptDeterministic("alice@example.com"); nil != sealErr || thirdMajorSeal != sealed {
+        t.Fatalf("expected today's unbound deterministic seal to be the third major's bytes, got %q (%v)", sealed, sealErr)
+    }
+}
+
+/* the associated data adds no byte and the format token is as long, so the width rules of the column hold for both formats */
+func TestCipher_BoundSealIsAsLongAsTheUnboundOne(t *testing.T) {
+    cipherInstance := newBindingCipher(t)
+
+    for _, deterministic := range []bool{false, true} {
+        bound, boundErr := cipherInstance.sealBoundValue("alice@example.com", sealBinding{label: "users.email"}, deterministic)
+        unbound, unboundErr := cipherInstance.sealValue("alice@example.com", deterministic)
+        if nil != boundErr || nil != unboundErr {
+            t.Fatalf("seal: %v %v", boundErr, unboundErr)
+        }
+
+        if len(bound) != len(unbound) || false == strings.HasPrefix(bound, "<ENC>\x00gcm2\x00") || false == strings.HasPrefix(unbound, "<ENC>\x00gcm1\x00") {
+            t.Fatalf("expected equal lengths under gcm2 and gcm1, got %q and %q", bound, unbound)
+        }
+    }
+}
+
+/* a bound seal opens under its own label; another label fails authentication, and the unbound reader refuses it as bound */
+func TestCipher_BoundSealOpensUnderItsBindingAlone(t *testing.T) {
+    cipherInstance := newBindingCipher(t)
+
+    sealed, sealErr := cipherInstance.sealBoundValue("alice@example.com", sealBinding{label: "users.email"}, false)
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    if opened, openErr := cipherInstance.openStored(sealed, sealBinding{label: "users.email"}); nil != openErr || "alice@example.com" != opened.plaintext {
+        t.Fatalf("expected the own label to open, got %q (%v)", opened.plaintext, openErr)
+    }
+
+    _, otherErr := cipherInstance.openStored(sealed, sealBinding{label: "leads.email"})
+    if nil == otherErr || false == strings.Contains(otherErr.Error(), "could not decrypt value") || "leads.email" != exception.FromError(otherErr).Context()["sealBinding"] {
+        t.Fatalf("expected another label to fail authentication naming it, got %v", otherErr)
+    }
+
+    if _, decryptErr := cipherInstance.Decrypt(sealed); nil == decryptErr || false == exception.ChainIs(decryptErr, ErrSealBound) {
+        t.Fatalf("expected the unbound reader to answer ErrSealBound, got %v", decryptErr)
+    }
+}
+
+/* the key id in the header is authenticated by a bound seal: rewritten to another id holding the same bytes, it fails to open, where an unbound seal opens */
+func TestCipher_BoundSealAuthenticatesItsKeyId(t *testing.T) {
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1), "v1copy": newKey(1)}})).(*aes256Cipher)
+
+    bound, _ := cipherInstance.sealBoundValue("alice@example.com", sealBinding{label: "users.email"}, false)
+    unbound, _ := cipherInstance.sealValue("alice@example.com", false)
+
+    if _, openErr := cipherInstance.openStored(strings.Replace(bound, "\x00v1:", "\x00v1copy:", 1), sealBinding{label: "users.email"}); nil == openErr {
+        t.Fatalf("expected the rewritten key id of a bound seal to fail authentication")
+    }
+
+    if decrypted, decryptErr := cipherInstance.Decrypt(strings.Replace(unbound, "\x00v1:", "\x00v1copy:", 1)); nil != decryptErr || "alice@example.com" != decrypted {
+        t.Fatalf("expected the rewritten key id of an unbound seal to open, the difference the binding makes, got %q (%v)", decrypted, decryptErr)
+    }
+}
+
+/* the bound nonce takes the label: one key, one plaintext, two labels give two nonces and two bodies, not the same body under two tags */
+func TestCipher_BoundDeterministicSealDiffersPerBinding(t *testing.T) {
+    cipherInstance := newBindingCipher(t)
+
+    first, _ := cipherInstance.sealBoundValue("alice@example.com", sealBinding{label: "users.email"}, true)
+    second, _ := cipherInstance.sealBoundValue("alice@example.com", sealBinding{label: "leads.email"}, true)
+
+    firstPayload := decodedPayload(t, first)
+    secondPayload := decodedPayload(t, second)
+    nonceSize := minNonceSize
+    bodyEnd := len(firstPayload) - gcmTagOverhead
+
+    if true == bytes.Equal(firstPayload[:nonceSize], secondPayload[:nonceSize]) || true == bytes.Equal(firstPayload[nonceSize:bodyEnd], secondPayload[nonceSize:bodyEnd]) {
+        t.Fatalf("expected different nonces and bodies for two labels, got %q and %q", first, second)
+    }
+}
+
+/* the bound nonce is domain-separated from the unbound one, is stable for equal input, and its mode reads back */
+func TestCipher_BoundDeterministicSealDiffersFromTheUnboundOneAndIsStable(t *testing.T) {
+    cipherInstance := newBindingCipher(t)
+    binding := sealBinding{label: "users.email"}
+
+    bound, _ := cipherInstance.sealBoundValue("alice@example.com", binding, true)
+    again, _ := cipherInstance.sealBoundValue("alice@example.com", binding, true)
+    unbound, _ := cipherInstance.sealValue("alice@example.com", true)
+
+    if bound != again {
+        t.Fatalf("expected equal input to give an equal bound seal, got %q and %q", bound, again)
+    }
+
+    if true == bytes.Equal(decodedPayload(t, bound)[:minNonceSize], decodedPayload(t, unbound)[:minNonceSize]) {
+        t.Fatalf("expected the bound nonce to differ from the unbound one")
+    }
+
+    random, _ := cipherInstance.sealBoundValue("alice@example.com", binding, false)
+    for value, deterministic := range map[string]bool{bound: true, random: false} {
+        opened, openErr := cipherInstance.openStored(value, binding)
+        if nil != openErr || deterministic != opened.deterministic || formatGcmV2 != opened.format {
+            t.Fatalf("expected the mode %v read back under gcm2, got %+v (%v)", deterministic, opened, openErr)
+        }
+    }
+}
+
+/* the unbound reader keeps its rows: a gcm1 seal and a value without the marker are read as before */
+func TestCipher_DecryptStillOpensAnUnboundSealBesideABoundOne(t *testing.T) {
+    cipherInstance := newBindingCipher(t)
+
+    unbound, _ := cipherInstance.sealValue("alice@example.com", false)
+    if decrypted, decryptErr := cipherInstance.Decrypt(unbound); nil != decryptErr || "alice@example.com" != decrypted {
+        t.Fatalf("expected the unbound seal to open, got %q (%v)", decrypted, decryptErr)
+    }
+}
+
+func decodedPayload(t *testing.T, sealed string) []byte {
+    t.Helper()
+
+    payload, decodeErr := base64.RawStdEncoding.DecodeString(sealed[strings.IndexByte(sealed, ':')+1:])
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    return payload
+}
+
+/* the unbound write doors treat a gcm2 value as data: it does not open without its label, so it is sealed again, never handed back bare */
+func TestCipher_TheUnboundDoorsSealABoundSealAsData(t *testing.T) {
+    cipherInstance := newBindingCipher(t)
+
+    bound, _ := cipherInstance.sealBoundValue("another column's secret", sealBinding{label: "users.email"}, false)
+
+    for name, seal := range map[string]func(string) (string, error){
+        "Encrypt":   cipherInstance.Encrypt,
+        "sealValue": func(value string) (string, error) { return cipherInstance.sealValue(value, false) },
+    } {
+        sealed, sealErr := seal(bound)
+        if nil != sealErr || false == strings.HasPrefix(sealed, "<ENC>\x00gcm1\x00") {
+            t.Fatalf("%s: expected the bound seal sealed as data, got %q (%v)", name, sealed, sealErr)
+        }
+
+        if decrypted, decryptErr := cipherInstance.Decrypt(sealed); nil != decryptErr || bound != decrypted {
+            t.Fatalf("%s: expected the bound seal back as data, got %q (%v)", name, decrypted, decryptErr)
+        }
+    }
+}
+
+/* a bound reader reads the mode of an admitted gcm1 seal as the unbound reader does, and a failed bound open names the key id beside the binding */
+func TestCipher_OpenStoredReadsTheModeOfAGcm1SealAndNamesTheKeyOfAFailure(t *testing.T) {
+    cipherInstance := newBindingCipher(t)
+    binding := sealBinding{label: "users.email"}
+
+    deterministic, _ := cipherInstance.sealValue("alice@example.com", true)
+    random, _ := cipherInstance.sealValue("alice@example.com", false)
+    for value, expected := range map[string]bool{deterministic: true, random: false} {
+        opened, openErr := cipherInstance.openStored(value, binding)
+        if nil != openErr || expected != opened.deterministic || formatGcmV1 != opened.format || "v1" != opened.keyId {
+            t.Fatalf("expected the gcm1 mode %v read back, got %+v (%v)", expected, opened, openErr)
+        }
+    }
+
+    bound, _ := cipherInstance.sealBoundValue("alice@example.com", binding, false)
+    _, openErr := cipherInstance.openStored(bound, sealBinding{label: "leads.email"})
+    if context := exception.FromError(openErr).Context(); "v1" != context["keyId"] || "leads.email" != context["sealBinding"] {
+        t.Fatalf("expected the failure to name the key id and the binding, got %v", context)
+    }
+}
+
+/* bound seals and opens share the memoized key material across goroutines */
+func TestCipher_ConcurrentBoundSealsAndOpensShareTheKeyMaterial(t *testing.T) {
+    cipherInstance := newBindingCipher(t)
+    binding := sealBinding{label: "users.email"}
+
+    var waitGroup sync.WaitGroup
+    for worker := 0; worker < 8; worker++ {
+        waitGroup.Add(1)
+        go func() {
+            defer waitGroup.Done()
+
+            for iteration := 0; iteration < 50; iteration++ {
+                sealed, sealErr := cipherInstance.sealBoundValue("alice@example.com", binding, 0 == iteration%2)
+                if nil != sealErr {
+                    t.Errorf("seal: %v", sealErr)
+                    return
+                }
+
+                if opened, openErr := cipherInstance.openStored(sealed, binding); nil != openErr || "alice@example.com" != opened.plaintext {
+                    t.Errorf("open: %q %v", opened.plaintext, openErr)
+                    return
+                }
+            }
+        }()
+    }
+
+    waitGroup.Wait()
 }

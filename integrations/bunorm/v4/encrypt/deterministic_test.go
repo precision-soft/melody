@@ -209,3 +209,16 @@ func TestEncryptedDeterministicString_ASealWrittenAsDataIsSealedAndReadBackAsThe
         t.Fatalf("expected the column to read back the seal it was given, got %q", string(loaded))
     }
 }
+
+/* the deterministic plain column refuses a bound seal the same way */
+func TestEncryptedDeterministicString_ScanRefusesABoundSeal(t *testing.T) {
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
+    installCipher(t, defaultCipherName, cipherInstance)
+
+    bound, _ := cipherInstance.(*aes256Cipher).sealBoundValue("personal data", sealBinding{label: "users.email"}, true)
+
+    var scanned EncryptedDeterministicString
+    if scanErr := scanned.Scan([]byte(bound)); nil == scanErr || false == exception.ChainIs(scanErr, ErrSealBound) {
+        t.Fatalf("expected ErrSealBound, got %q (%v)", string(scanned), scanErr)
+    }
+}

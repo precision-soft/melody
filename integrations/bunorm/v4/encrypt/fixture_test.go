@@ -8,6 +8,7 @@ import (
     "errors"
     "fmt"
     "io"
+    "reflect"
     "strings"
     "sync"
     "sync/atomic"
@@ -18,6 +19,7 @@ import (
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
@@ -39,6 +41,99 @@ func installCipher(t *testing.T, name string, cipherInstance Cipher) {
 
         uninstallCipher(name)
     })
+}
+
+/* the bound markers of the pins: two columns of the crm compartment, one of the default cipher, and one never declared */
+type crmIbanBinding struct{}
+
+func (instance crmIbanBinding) CipherName() string {
+    return "test:crm"
+}
+
+func (instance crmIbanBinding) SealBinding() string {
+    return "customer.iban"
+}
+
+type crmEmailBinding struct{}
+
+func (instance crmEmailBinding) CipherName() string {
+    return "test:crm"
+}
+
+func (instance crmEmailBinding) SealBinding() string {
+    return "customer.email"
+}
+
+type defaultSecretBinding struct {
+    DefaultCipherRef
+}
+
+func (instance defaultSecretBinding) SealBinding() string {
+    return "users.secret"
+}
+
+type undeclaredBinding struct{}
+
+func (instance undeclaredBinding) CipherName() string {
+    return "test:crm"
+}
+
+func (instance undeclaredBinding) SealBinding() string {
+    return "customer.undeclared"
+}
+
+/* installSealBinding declares a marker's binding for one test, the earlier entry restored after it */
+func installSealBinding(t *testing.T, ref SealBindingRef, refuseUnbound bool) {
+    t.Helper()
+
+    marker := reflect.TypeOf(ref)
+    previous, existed := sealBindingOf(marker)
+
+    storeSealBinding(marker, sealBinding{label: ref.SealBinding(), refuseUnbound: refuseUnbound})
+
+    t.Cleanup(func() {
+        if true == existed {
+            storeSealBinding(marker, previous)
+            return
+        }
+
+        sealBindingRegistryMutex.Lock()
+        defer sealBindingRegistryMutex.Unlock()
+
+        delete(sealBindingRegistry, marker)
+    })
+}
+
+/* newCrmCipher installs a package cipher of two keys, crm-v2 current, under the crm compartment for one test */
+func newCrmCipher(t *testing.T) Cipher {
+    t.Helper()
+
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v2", Keys: map[string][]byte{"crm-v1": newKey(11), "crm-v2": newKey(12)}}))
+    installCipher(t, crmCipherRef{}.CipherName(), cipherInstance)
+
+    return cipherInstance
+}
+
+/* recoverRefusalContext runs a callback that must panic with a melody error and answers that error's context */
+func recoverRefusalContext(t *testing.T, callback func()) map[string]any {
+    t.Helper()
+
+    var refusalContext map[string]any
+    func() {
+        defer func() {
+            recovered := recover()
+            refusalErr, isErr := recovered.(error)
+            if false == isErr {
+                t.Fatalf("expected a panic with an error, got %v", recovered)
+            }
+
+            refusalContext = exception.FromError(refusalErr).Context()
+        }()
+
+        callback()
+    }()
+
+    return refusalContext
 }
 
 func uninstallCipher(name string) {

@@ -1659,6 +1659,45 @@ func TestMigrator_StopsOnAnUnknownSealFormatInEveryMode(t *testing.T) {
     }
 }
 
+/* a run over a column the spec does not bind stops at a bound seal, never reads it as unsealed and seals it again */
+func TestMigrator_StopsOnABoundSealInAColumnTheSpecDoesNotBind(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    bound, _ := cipherInstance.(*aes256Cipher).sealBoundValue("my notes", sealBinding{label: "accounts.notes"}, false)
+
+    for door, run := range map[string]func(migrator *Migrator, spec TableSpec) (int, error){
+        "encrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
+            return migrator.MigrateEncrypt(context.Background(), spec)
+        },
+        "decrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
+            return migrator.MigrateDecrypt(context.Background(), spec)
+        },
+    } {
+        t.Run(door, func(t *testing.T) {
+            migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
+                {
+                    fragment: "information_schema.COLUMNS",
+                    columns:  []string{"DATA_TYPE", "CHARACTER_MAXIMUM_LENGTH", "CHARACTER_OCTET_LENGTH"},
+                    rows:     [][]driver.Value{{"text", int64(65535), int64(65535)}},
+                },
+                {fragment: "MAX(LENGTH(", columns: []string{"longest"}, rows: [][]driver.Value{{nil}}},
+                {fragment: "ORDER BY", columns: []string{"id", "notes"}, rows: [][]driver.Value{{"7", bound}}},
+            })
+            migrator.cipher = cipherInstance
+
+            _, runErr := run(migrator, TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+            if nil == runErr || false == exception.ChainIs(runErr, ErrSealBound) {
+                t.Fatalf("expected the run stopped with ErrSealBound, got %v", runErr)
+            }
+
+            for _, recorded := range stub.recorded() {
+                if true == strings.HasPrefix(recorded, "UPDATE ") {
+                    t.Fatalf("expected no update, saw: %s", recorded)
+                }
+            }
+        })
+    }
+}
+
 /* the width probe leaves out the whole marker family, so a row of an unknown format is not sized as plaintext and the run reaches it, stopping there */
 func TestMigrator_TheWidthProbeLeavesOutTheMarkerFamily(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{

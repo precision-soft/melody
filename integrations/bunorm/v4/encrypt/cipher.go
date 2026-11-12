@@ -19,8 +19,13 @@ const (
     encryptionMarker = "<ENC>"
     markerGlue       = "\x00"
     formatGcmV1      = "gcm1"
+    formatGcmV2      = "gcm2"
 
     deterministicNonceLabel = "melody/encrypt/deterministic-nonce/v1"
+
+    boundDeterministicNonceLabel = "melody/encrypt/deterministic-nonce/v2"
+
+    sealBindingDomain = "melody/encrypt/seal-binding"
 
     minNonceSize = 12
 
@@ -28,6 +33,8 @@ const (
 )
 
 var markerPrefix = encryptionMarker + markerGlue + formatGcmV1 + markerGlue
+
+var boundMarkerPrefix = encryptionMarker + markerGlue + formatGcmV2 + markerGlue
 
 var markerFamily = encryptionMarker + markerGlue
 
@@ -42,6 +49,7 @@ type Cipher interface {
 
     EncryptDeterministicWithKeyId(plaintext string, keyId string) (string, error)
 
+    /* CiphertextCandidates answers the unbound gcm1 candidates, one per active key; a bound column writes gcm2, which none of them matches, so its lookup goes through CiphertextCandidatesFor */
     CiphertextCandidates(plaintext string) ([][]byte, error)
 
     Decrypt(encoded string) (string, error)
@@ -65,11 +73,12 @@ type aes256Cipher struct {
     materialByKeyId map[string]*keyMaterial
 }
 
-/* keyMaterial memoizes, per key id, the AEAD and the sub-key the deterministic nonce is taken under. The key bytes are compared on every read, because a KeyProvider may answer different bytes under the same id. Entries are never evicted, so a provider that rotates to new key ids keeps every retired key resident for the life of the cipher. */
+/* keyMaterial memoizes, per key id, the AEAD and the two sub-keys the deterministic nonces of an unbound and of a bound seal are taken under. The key bytes are compared on every read, because a KeyProvider may answer different bytes under the same id. Entries are never evicted, so a provider that rotates to new key ids keeps every retired key resident for the life of the cipher. */
 type keyMaterial struct {
-    key      []byte
-    gcm      cipher.AEAD
-    nonceKey []byte
+    key           []byte
+    gcm           cipher.AEAD
+    nonceKey      []byte
+    boundNonceKey []byte
 }
 
 func (instance *aes256Cipher) material(keyId string) (*keyMaterial, error) {
@@ -92,9 +101,10 @@ func (instance *aes256Cipher) material(keyId string) (*keyMaterial, error) {
     }
 
     built := &keyMaterial{
-        key:      bytes.Clone(key),
-        gcm:      gcm,
-        nonceKey: nonceSubKey(key),
+        key:           bytes.Clone(key),
+        gcm:           gcm,
+        nonceKey:      nonceSubKey(key, deterministicNonceLabel),
+        boundNonceKey: nonceSubKey(key, boundDeterministicNonceLabel),
     }
 
     instance.materialMutex.Lock()
@@ -147,6 +157,7 @@ type openedSeal struct {
     plaintext     string
     keyId         string
     deterministic bool
+    format        string
 }
 
 /* authenticatedSeal is the write side's classification: every failure answers "not a seal", so a marker-shaped string is read as application data (see isPassThroughCiphertext). */
@@ -167,19 +178,31 @@ func (instance *aes256Cipher) authenticatedSeal(value string) (openedSeal, bool)
             opened.nonce,
             deterministicNonceFrom(opened.material.nonceKey, opened.plaintext, opened.material.gcm.NonceSize()),
         ),
+        format: formatGcmV1,
     }, true
 }
 
 type openedBody struct {
-    plaintext string
-    keyId     string
-    material  *keyMaterial
-    nonce     []byte
+    plaintext      string
+    keyId          string
+    material       *keyMaterial
+    nonce          []byte
+    associatedData []byte
 }
 
-/* openSeal is the opener behind both sides. The caller establishes the marker first, since the write side reads its absence as "not a seal" and the read side as plaintext to pass through. */
+/* openSeal is the opener behind both sides for an unbound seal. The caller establishes the marker first, since the write side reads its absence as "not a seal" and the read side as plaintext to pass through. */
 func (instance *aes256Cipher) openSeal(encoded string) (openedBody, error) {
-    keyId, payload, decodeErr := decodeEncrypted(encoded)
+    return instance.openSealUnder(encoded, nil)
+}
+
+/* openSealUnder opens a gcm1 seal with no associated data when binding is nil, and a gcm2 seal under the binding's associated data otherwise; GCM cannot tell a seal relocated from another binding from a damaged one, so both answer the same error naming the key id and the binding */
+func (instance *aes256Cipher) openSealUnder(encoded string, binding *sealBinding) (openedBody, error) {
+    prefix := markerPrefix
+    if nil != binding {
+        prefix = boundMarkerPrefix
+    }
+
+    keyId, payload, decodeErr := decodeEncrypted(encoded, prefix)
     if nil != decodeErr {
         return openedBody{}, decodeErr
     }
@@ -189,18 +212,26 @@ func (instance *aes256Cipher) openSeal(encoded string) (openedBody, error) {
         return openedBody{}, materialErr
     }
 
+    var associatedData []byte
+    openContext := map[string]any{"keyId": keyId}
+    if nil != binding {
+        associatedData = sealAssociatedData(formatGcmV2, keyId, binding.label)
+        openContext["sealBinding"] = binding.label
+    }
+
     nonce := payload[:material.gcm.NonceSize()]
 
-    plaintext, openErr := material.gcm.Open(nil, nonce, payload[material.gcm.NonceSize():], nil)
+    plaintext, openErr := material.gcm.Open(nil, nonce, payload[material.gcm.NonceSize():], associatedData)
     if nil != openErr {
-        return openedBody{}, exception.NewError("could not decrypt value", map[string]any{"keyId": keyId}, openErr)
+        return openedBody{}, exception.NewError("could not decrypt value", openContext, openErr)
     }
 
     return openedBody{
-        plaintext: string(plaintext),
-        keyId:     keyId,
-        material:  material,
-        nonce:     nonce,
+        plaintext:      string(plaintext),
+        keyId:          keyId,
+        material:       material,
+        nonce:          nonce,
+        associatedData: associatedData,
     }, nil
 }
 
@@ -220,14 +251,15 @@ func (instance *aes256Cipher) CiphertextCandidates(plaintext string) ([][]byte, 
     return candidates, nil
 }
 
-/* Decrypt returns the plaintext of a value this cipher sealed and passes a value without the marker straight through, so a column can be converted one write at a time. A value that carries the marker but whose body does not parse or authenticate is an error, never plaintext, since only seal writes the marker, and so is a value of the marker family under a format this build does not read, ErrSealFormatUnknown in its chain. */
+/* Decrypt returns the plaintext of a value this cipher sealed and passes a value without the marker straight through, so a column can be converted one write at a time. A value that carries the marker but whose body does not parse or authenticate is an error, never plaintext, since only seal writes the marker, and so is a value of the marker family under a format this build does not read, ErrSealFormatUnknown in its chain, and a seal bound to a column, ErrSealBound in its chain, since it opens under its column's binding alone. */
 func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
-    if false == hasEncryptionMarker(encoded) {
-        if true == carriesMarkerFamily(encoded) {
-            return "", errSealFormatUnknown(encoded)
-        }
-
+    switch sealShapeOf(encoded) {
+    case sealShapeNone:
         return encoded, nil
+    case sealShapeGcmV2:
+        return "", errSealBound()
+    case sealShapeUnknown:
+        return "", errSealFormatUnknown(encoded)
     }
 
     opened, openErr := instance.openSeal(encoded)
@@ -253,6 +285,84 @@ func (instance *aes256Cipher) sealValue(plaintext string, deterministic bool) (s
 
 func (instance *aes256Cipher) sealValueWithKeyId(plaintext string, keyId string, deterministic bool) (string, error) {
     return instance.seal(plaintext, keyId, deterministic)
+}
+
+/* sealBinding is a declared binding as a column reads it: the label its seals are bound to, and whether the column refuses a value that is not bound to it */
+type sealBinding struct {
+    label         string
+    refuseUnbound bool
+}
+
+/* bindingSealer is the door a bound column type seals, opens and looks up through, carried by the package cipher and the fake; a Cipher implemented outside the package does not carry it, and a bound column over one is refused, since sealing unbound would drop the binding without a word */
+type bindingSealer interface {
+    sealBoundValue(plaintext string, binding sealBinding, deterministic bool) (string, error)
+
+    /* openStored reads a stored value as the column of the binding does: a gcm2 seal under its label, and a gcm1 seal or a value without the marker only while the binding admits them, refused before any key is asked for otherwise */
+    openStored(stored string, binding sealBinding) (openedSeal, error)
+
+    boundCandidates(plaintext string, binding sealBinding) ([][]byte, error)
+}
+
+func (instance *aes256Cipher) sealBoundValue(plaintext string, binding sealBinding, deterministic bool) (string, error) {
+    return instance.sealUnder(plaintext, instance.keys.CurrentKeyId(), deterministic, &binding)
+}
+
+func (instance *aes256Cipher) openStored(stored string, binding sealBinding) (openedSeal, error) {
+    shape := sealShapeOf(stored)
+
+    if sealShapeUnknown == shape {
+        return openedSeal{}, errSealFormatUnknown(stored)
+    }
+
+    if sealShapeGcmV2 != shape && true == binding.refuseUnbound {
+        return openedSeal{}, errUnboundValueRefused(binding)
+    }
+
+    if sealShapeNone == shape {
+        return openedSeal{plaintext: stored}, nil
+    }
+
+    if sealShapeGcmV1 == shape {
+        opened, openErr := instance.openSeal(stored)
+        if nil != openErr {
+            return openedSeal{}, openErr
+        }
+
+        return openedSeal{
+            plaintext:     opened.plaintext,
+            keyId:         opened.keyId,
+            deterministic: hmac.Equal(opened.nonce, deterministicNonceFrom(opened.material.nonceKey, opened.plaintext, opened.material.gcm.NonceSize())),
+            format:        formatGcmV1,
+        }, nil
+    }
+
+    opened, openErr := instance.openSealUnder(stored, &binding)
+    if nil != openErr {
+        return openedSeal{}, openErr
+    }
+
+    return openedSeal{
+        plaintext:     opened.plaintext,
+        keyId:         opened.keyId,
+        deterministic: hmac.Equal(opened.nonce, boundDeterministicNonceFrom(opened.material.boundNonceKey, opened.associatedData, opened.plaintext, opened.material.gcm.NonceSize())),
+        format:        formatGcmV2,
+    }, nil
+}
+
+func (instance *aes256Cipher) boundCandidates(plaintext string, binding sealBinding) ([][]byte, error) {
+    keyIds := instance.keys.ActiveKeyIds()
+
+    candidates := make([][]byte, 0, len(keyIds))
+    for _, keyId := range keyIds {
+        candidate, sealErr := instance.sealUnder(plaintext, keyId, true, &binding)
+        if nil != sealErr {
+            return nil, sealErr
+        }
+
+        candidates = append(candidates, []byte(candidate))
+    }
+
+    return candidates, nil
 }
 
 /* sealColumnValue seals the value a column type writes, through valueSealer when the cipher carries it */
@@ -294,6 +404,11 @@ func (instance *aes256Cipher) isPassThroughCiphertext(value string) bool {
 }
 
 func (instance *aes256Cipher) seal(plaintext string, keyId string, deterministic bool) (string, error) {
+    return instance.sealUnder(plaintext, keyId, deterministic, nil)
+}
+
+/* sealUnder writes a gcm1 seal with no associated data when binding is nil, and a gcm2 seal under the binding's associated data otherwise, its deterministic nonce taken over that associated data too: GCM with one nonce over two associated data writes the same body, so a nonce of the plaintext alone would still show equal values across bound columns and reuse the nonce */
+func (instance *aes256Cipher) sealUnder(plaintext string, keyId string, deterministic bool, binding *sealBinding) (string, error) {
     /* the key id is part of the wire format, in front of a ":" separator, and a custom KeyProvider's id reaches this door unchecked: an empty id or one carrying a colon would write a value that can never be split back apart */
     if false == keyIdPattern.MatchString(keyId) {
         return "", exception.NewError("encryption key id must match "+keyIdPattern.String(), map[string]any{"keyId": keyId}, nil)
@@ -304,8 +419,17 @@ func (instance *aes256Cipher) seal(plaintext string, keyId string, deterministic
         return "", materialErr
     }
 
+    prefix := markerPrefix
+    var associatedData []byte
+    if nil != binding {
+        prefix = boundMarkerPrefix
+        associatedData = sealAssociatedData(formatGcmV2, keyId, binding.label)
+    }
+
     var nonce []byte
-    if true == deterministic {
+    if true == deterministic && nil != binding {
+        nonce = boundDeterministicNonceFrom(material.boundNonceKey, associatedData, plaintext, material.gcm.NonceSize())
+    } else if true == deterministic {
         nonce = deterministicNonceFrom(material.nonceKey, plaintext, material.gcm.NonceSize())
     } else {
         nonce = make([]byte, material.gcm.NonceSize())
@@ -314,9 +438,9 @@ func (instance *aes256Cipher) seal(plaintext string, keyId string, deterministic
         }
     }
 
-    ciphertext := material.gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+    ciphertext := material.gcm.Seal(nonce, nonce, []byte(plaintext), associatedData)
 
-    return markerPrefix + keyId + ":" + base64.RawStdEncoding.EncodeToString(ciphertext), nil
+    return prefix + keyId + ":" + base64.RawStdEncoding.EncodeToString(ciphertext), nil
 }
 
 func gcmForKey(key []byte, keyId string) (cipher.AEAD, error) {
@@ -343,15 +467,17 @@ func gcmForKey(key []byte, keyId string) (cipher.AEAD, error) {
 
 /* keyIdOf reports the key id a stored value was sealed under. A value without the marker reports none, and a marker whose payload does not parse, or a marker family under a format this build does not read, is an error, so a migration stops on it instead of sealing it again. */
 func keyIdOf(encoded string) (string, bool, error) {
-    if false == hasEncryptionMarker(encoded) {
-        if true == carriesMarkerFamily(encoded) {
-            return "", false, errSealFormatUnknown(encoded)
-        }
-
+    prefix := markerPrefix
+    switch sealShapeOf(encoded) {
+    case sealShapeNone:
         return "", false, nil
+    case sealShapeUnknown:
+        return "", false, errSealFormatUnknown(encoded)
+    case sealShapeGcmV2:
+        prefix = boundMarkerPrefix
     }
 
-    keyId, _, decodeErr := decodeEncrypted(encoded)
+    keyId, _, decodeErr := decodeEncrypted(encoded, prefix)
     if nil != decodeErr {
         return "", false, decodeErr
     }
@@ -359,10 +485,10 @@ func keyIdOf(encoded string) (string, bool, error) {
     return keyId, true, nil
 }
 
-/* nonceSubKey derives the sub-key the deterministic nonce is taken under; it reads the key alone, so it is memoized in keyMaterial. */
-func nonceSubKey(key []byte) []byte {
+/* nonceSubKey derives a sub-key a deterministic nonce is taken under, one per label so an unbound and a bound nonce are never the same function of the same input; it reads the key alone, so it is memoized in keyMaterial. */
+func nonceSubKey(key []byte, label string) []byte {
     subKeyMac := hmac.New(sha256.New, key)
-    subKeyMac.Write([]byte(deterministicNonceLabel))
+    subKeyMac.Write([]byte(label))
 
     return subKeyMac.Sum(nil)
 }
@@ -374,6 +500,44 @@ func deterministicNonceFrom(nonceKey []byte, plaintext string, size int) []byte 
     return nonceMac.Sum(nil)[:size]
 }
 
+/* boundDeterministicNonceFrom takes the nonce over the associated data and the plaintext, the NUL after the associated data ending it, since the label it closes on carries none */
+func boundDeterministicNonceFrom(boundNonceKey []byte, associatedData []byte, plaintext string, size int) []byte {
+    nonceMac := hmac.New(sha256.New, boundNonceKey)
+    nonceMac.Write(associatedData)
+    nonceMac.Write([]byte(markerGlue))
+    nonceMac.Write([]byte(plaintext))
+
+    return nonceMac.Sum(nil)[:size]
+}
+
+/* sealAssociatedData is the one spelling of a bound seal's associated data, read by the sealer, the opener and the nonce: the domain, the format, the key id and the label, NUL-separated; none of the four carries a NUL, so the split is unique */
+func sealAssociatedData(format string, keyId string, label string) []byte {
+    return []byte(sealBindingDomain + markerGlue + format + markerGlue + keyId + markerGlue + label)
+}
+
+type sealShape int
+
+const (
+    sealShapeNone sealShape = iota
+    sealShapeGcmV1
+    sealShapeGcmV2
+    sealShapeUnknown
+)
+
+/* sealShapeOf classifies a stored value once: no marker, an unbound gcm1 seal, a bound gcm2 seal, or the marker family under a format this build does not read */
+func sealShapeOf(value string) sealShape {
+    switch {
+    case true == strings.HasPrefix(value, markerPrefix):
+        return sealShapeGcmV1
+    case true == strings.HasPrefix(value, boundMarkerPrefix):
+        return sealShapeGcmV2
+    case true == strings.HasPrefix(value, markerFamily):
+        return sealShapeUnknown
+    default:
+        return sealShapeNone
+    }
+}
+
 /* hasEncryptionMarker reports whether a value carries the marker, which only seal writes: its presence is a claim of provenance, and the body behind it must then be a well-formed seal. */
 func hasEncryptionMarker(value string) bool {
     return strings.HasPrefix(value, markerPrefix)
@@ -382,6 +546,14 @@ func hasEncryptionMarker(value string) bool {
 /* carriesMarkerFamily reports whether a value begins with the marker and its glue, whatever format follows: no text carries that NUL by accident, so such a value is a seal of some format, never plaintext. */
 func carriesMarkerFamily(value string) bool {
     return strings.HasPrefix(value, markerFamily)
+}
+
+func errSealBound() error {
+    return exception.NewError(ErrSealBound.Error(), nil, ErrSealBound)
+}
+
+func errUnboundValueRefused(binding sealBinding) error {
+    return exception.NewError(ErrUnboundValueRefused.Error(), map[string]any{"sealBinding": binding.label}, ErrUnboundValueRefused)
 }
 
 /* errSealFormatUnknown names the format only when it is a token a build could have written, and never the key id or the body behind it */
@@ -397,8 +569,8 @@ func errSealFormatUnknown(value string) error {
 }
 
 /* decodeEncrypted splits the body behind an established marker into its key id and payload, and refuses a body that is not one. The payload floor is the nonce plus the authentication tag, the length of a seal of the empty string, so a shortfall is damage rather than an authentication failure. */
-func decodeEncrypted(value string) (string, []byte, error) {
-    body := value[len(markerPrefix):]
+func decodeEncrypted(value string, prefix string) (string, []byte, error) {
+    body := value[len(prefix):]
 
     separator := strings.IndexByte(body, ':')
     if -1 == separator || 0 == separator {
@@ -430,3 +602,5 @@ func decodeEncrypted(value string) (string, []byte, error) {
 }
 
 var _ Cipher = (*aes256Cipher)(nil)
+
+var _ bindingSealer = (*aes256Cipher)(nil)

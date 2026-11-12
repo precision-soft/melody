@@ -7,6 +7,7 @@ import (
     "errors"
     "fmt"
     "io"
+    "reflect"
     "strings"
     "testing"
 
@@ -686,4 +687,222 @@ func TestModule_TheFactoryResolvesUnderTheRunsContext(t *testing.T) {
     if "run" != <-observed {
         t.Fatalf("expected the factory to receive the run's context")
     }
+}
+
+/* labelBinding carries its label as a field, the shape a marker may not have, since its column reads the zero value */
+type labelBinding struct {
+    label string
+}
+
+func (instance labelBinding) CipherName() string {
+    return "test:crm"
+}
+
+func (instance labelBinding) SealBinding() string {
+    return instance.label
+}
+
+type pointerBinding struct{}
+
+func (instance *pointerBinding) CipherName() string {
+    return "test:crm"
+}
+
+func (instance *pointerBinding) SealBinding() string {
+    return "customer.pointer"
+}
+
+type otherCompartmentBinding struct{}
+
+func (instance otherCompartmentBinding) CipherName() string {
+    return "test:other"
+}
+
+func (instance otherCompartmentBinding) SealBinding() string {
+    return "customer.other"
+}
+
+type emptyNameBinding struct{}
+
+func (instance emptyNameBinding) CipherName() string {
+    return ""
+}
+
+func (instance emptyNameBinding) SealBinding() string {
+    return "customer.empty"
+}
+
+type badLabelBinding struct{}
+
+func (instance badLabelBinding) CipherName() string {
+    return "test:crm"
+}
+
+func (instance badLabelBinding) SealBinding() string {
+    return "users"
+}
+
+type pointerDefaultBinding struct {
+    *DefaultCipherRef
+}
+
+func (instance pointerDefaultBinding) SealBinding() string {
+    return "users.pointer_default"
+}
+
+type secondCompartmentIbanBinding struct{}
+
+func (instance secondCompartmentIbanBinding) CipherName() string {
+    return "test:crm2"
+}
+
+func (instance secondCompartmentIbanBinding) SealBinding() string {
+    return "customer.iban"
+}
+
+type sameLabelBinding struct{}
+
+func (instance sameLabelBinding) CipherName() string {
+    return "test:crm"
+}
+
+func (instance sameLabelBinding) SealBinding() string {
+    return "customer.iban"
+}
+
+func withDefaultCipher(config ModuleConfig) ModuleConfig {
+    config.Cipher = NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
+
+    return config
+}
+
+func newBindingModuleConfig(bindings ...SealBindingConfig) ModuleConfig {
+    return ModuleConfig{
+        Contexts:     []CommandContextConfig{{Name: "test:crm", Cipher: NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v1", Keys: map[string][]byte{"crm-v1": newKey(11)}}))}},
+        SealBindings: bindings,
+    }
+}
+
+/* a declaration the module cannot hold is refused at registration naming the field and the index */
+func TestModule_RefusesASealBindingItCannotHold(t *testing.T) {
+    valid := SealBindingConfig{Ref: crmIbanBinding{}}
+
+    cases := map[string]ModuleConfig{
+        "a nil Ref":                         newBindingModuleConfig(valid, SealBindingConfig{}),
+        "a typed nil Ref":                   newBindingModuleConfig(valid, SealBindingConfig{Ref: (*pointerBinding)(nil)}),
+        "a pointer marker":                  newBindingModuleConfig(valid, SealBindingConfig{Ref: &pointerBinding{}}),
+        "an unknown cipher name":            newBindingModuleConfig(valid, SealBindingConfig{Ref: otherCompartmentBinding{}}),
+        "an empty name without the default": withDefaultCipher(newBindingModuleConfig(valid, SealBindingConfig{Ref: emptyNameBinding{}})),
+        "the default with no Cipher":        newBindingModuleConfig(valid, SealBindingConfig{Ref: defaultSecretBinding{}}),
+        "the marker twice":                  newBindingModuleConfig(valid, SealBindingConfig{Ref: crmIbanBinding{}, RefuseUnbound: true}),
+        "a marker with fields":              newBindingModuleConfig(valid, SealBindingConfig{Ref: labelBinding{label: "customer.fields"}}),
+        "DefaultCipherRef by pointer":       withDefaultCipher(newBindingModuleConfig(valid, SealBindingConfig{Ref: pointerDefaultBinding{}})),
+        "a label outside the grammar":       newBindingModuleConfig(valid, SealBindingConfig{Ref: badLabelBinding{}}),
+        "the label twice in a compartment":  newBindingModuleConfig(valid, SealBindingConfig{Ref: sameLabelBinding{}}),
+    }
+
+    oneCipherTwoNames := newBindingModuleConfig(valid, SealBindingConfig{Ref: secondCompartmentIbanBinding{}})
+    oneCipherTwoNames.Contexts = append(oneCipherTwoNames.Contexts, CommandContextConfig{Name: "test:crm2", Cipher: oneCipherTwoNames.Contexts[0].Cipher})
+    cases["the label twice over one cipher under two names"] = oneCipherTwoNames
+
+    wrapped := newBindingModuleConfig(valid)
+    wrapped.Contexts[0].Cipher = wrappedCipher{Cipher: wrapped.Contexts[0].Cipher}
+    cases["a wrapped cipher"] = ModuleConfig{Contexts: wrapped.Contexts, SealBindings: []SealBindingConfig{valid}}
+
+    reasons := map[string]string{
+        "a nil Ref":                                       "has no Ref",
+        "a typed nil Ref":                                 "is a pointer",
+        "a pointer marker":                                "is a pointer",
+        "an unknown cipher name":                          "does not install",
+        "an empty name without the default":               "without embedding DefaultCipherRef",
+        "the default with no Cipher":                      "does not install",
+        "the marker twice":                                "declares a marker twice",
+        "the label twice in a compartment":                "declares a label twice",
+        "a wrapped cipher":                                "needs the package cipher",
+        "a marker with fields":                            "holds fields",
+        "DefaultCipherRef by pointer":                     "embeds DefaultCipherRef by pointer",
+        "a label outside the grammar":                     "label must match",
+        "the label twice over one cipher under two names": "declares a label twice",
+    }
+
+    for name, config := range cases {
+        t.Run(name, func(t *testing.T) {
+            reason := reasons[name]
+
+            assertPanicsWithMessage(t, reason, func() {
+                NewModule(config).RegisterServices(newModuleRegistrar())
+            })
+
+            expectedIndex := 1
+            if "a wrapped cipher" == name {
+                expectedIndex = 0
+            }
+
+            refusalContext := recoverRefusalContext(t, func() {
+                NewModule(config).RegisterServices(newModuleRegistrar())
+            })
+
+            if "ModuleConfig.SealBindings" != refusalContext["field"] || expectedIndex != refusalContext["index"] {
+                t.Fatalf("expected the refusal to name ModuleConfig.SealBindings at %d, got %v", expectedIndex, refusalContext)
+            }
+        })
+    }
+}
+
+/* a refused declaration installs nothing: no cipher and no binding */
+func TestModule_InstallsNothingWhenASealBindingIsRefused(t *testing.T) {
+    previous := NewFakeCipher()
+    installCipher(t, "test:crm", previous)
+
+    recoverRefusalContext(t, func() {
+        NewModule(newBindingModuleConfig(SealBindingConfig{Ref: crmIbanBinding{}}, SealBindingConfig{Ref: badLabelBinding{}})).RegisterServices(newModuleRegistrar())
+    })
+
+    if resolved, _ := cipherByName("test:crm"); previous != resolved {
+        t.Fatalf("expected the cipher table left as it was")
+    }
+
+    if _, declared := sealBindingOf(reflect.TypeOf(crmIbanBinding{})); true == declared {
+        t.Fatalf("expected no binding installed")
+    }
+}
+
+/* a later registration replaces a binding, so the switch follows the last one */
+func TestModule_ALaterRegistrationReplacesABinding(t *testing.T) {
+    installCipher(t, "test:crm", NewFakeCipher())
+    installSealBinding(t, crmIbanBinding{}, false)
+
+    NewModule(newBindingModuleConfig(SealBindingConfig{Ref: crmIbanBinding{}, RefuseUnbound: true})).RegisterServices(newModuleRegistrar())
+
+    if binding, declared := sealBindingOf(reflect.TypeOf(crmIbanBinding{})); false == declared || false == binding.refuseUnbound || "customer.iban" != binding.label {
+        t.Fatalf("expected the later registration's binding, got %+v (declared %v)", binding, declared)
+    }
+}
+
+/* the label grammar is <table>.<column>, each part [A-Za-z0-9_]{1,64}, one spelling per column */
+func TestSealBindingLabelPattern_AdmitsOneSpellingPerColumn(t *testing.T) {
+    for _, label := range []string{"users.email", "melody_example_v4_two_factor.secret", strings.Repeat("a", 64) + "." + strings.Repeat("b", 64)} {
+        if false == sealBindingLabelPattern.MatchString(label) {
+            t.Fatalf("expected %q admitted", label)
+        }
+    }
+
+    for _, label := range []string{"", "users", ".email", "users.", "users.email.x", "us ers.email", "users.e-mail", strings.Repeat("a", 65) + ".email", "users." + strings.Repeat("b", 65)} {
+        if true == sealBindingLabelPattern.MatchString(label) {
+            t.Fatalf("expected %q refused", label)
+        }
+    }
+}
+
+/* one label under two compartments of their own ciphers is two bindings, not a collision */
+func TestModule_AdmitsOneLabelUnderTwoCiphers(t *testing.T) {
+    config := newBindingModuleConfig(SealBindingConfig{Ref: crmIbanBinding{}}, SealBindingConfig{Ref: secondCompartmentIbanBinding{}})
+    config.Contexts = append(config.Contexts, CommandContextConfig{Name: "test:crm2", Cipher: NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm2-v1", Keys: map[string][]byte{"crm2-v1": newKey(13)}}))})
+
+    installCipher(t, "test:crm", NewFakeCipher())
+    installCipher(t, "test:crm2", NewFakeCipher())
+    installSealBinding(t, crmIbanBinding{}, false)
+    installSealBinding(t, secondCompartmentIbanBinding{}, false)
+
+    NewModule(config).RegisterServices(newModuleRegistrar())
 }

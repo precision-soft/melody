@@ -373,3 +373,16 @@ func TestEncryptedString_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testi
         t.Fatalf("expected the column to read back the seal it was given, got %q", string(loaded))
     }
 }
+
+/* a plain column has no binding, so a bound seal moved into it is refused, never served */
+func TestEncryptedString_ScanRefusesABoundSeal(t *testing.T) {
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
+    installCipher(t, defaultCipherName, cipherInstance)
+
+    bound, _ := cipherInstance.(*aes256Cipher).sealBoundValue("personal data", sealBinding{label: "users.email"}, false)
+
+    var scanned EncryptedString
+    if scanErr := scanned.Scan([]byte(bound)); nil == scanErr || false == exception.ChainIs(scanErr, ErrSealBound) {
+        t.Fatalf("expected ErrSealBound, got %q (%v)", string(scanned), scanErr)
+    }
+}
