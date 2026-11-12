@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- http: `ControllerHandler`, the handler a controller function is registered as through `Handle` or `HandleWithOptions`, its arguments resolved and its shape refused as the controller doors did, a nil controller and a nil function refused too, where the doors panicked with a reflection error on a nil and admitted a nil function that panicked at each request.
 - translation: `ValidatePattern`, the check a catalog runs on each message: the first `plural` or `select` whose style is not keyword-and-block pairs ending with an `other` block, naming the rune offset and the reason.
 - storage: `storagecontract.ErrKeyIsDirectory`, the cause of a refusal of a key that names a directory.
 - security: a firewall serves the doors it declares: `LoginConfig` and `LogoutConfig` on `FirewallConfig`, `CrossSitePolicy`, `FirewallDoor`, `CompiledFirewall.Doors`, `FirewallDoorPathForm`, `ErrSecondFactorRequired`, `LoginInput.PreviousSessionId`, `LogoutInput.Token`, `PathPrefixMatcher.ClaimsPath` and `SegmentPrefixMatcher.ClaimsPath`, and the boot warning `security.firewallDoorReachUnknown`.
@@ -70,6 +71,7 @@ the session apart, `session.NewUnavailableSession` builds one.
 
 ### Changed
 
+- http: **Breaking**: the hub's `ClearBackplaneWithContext` is named `ClearBackplane`, unchanged otherwise; it had no context-less twin.
 - translation: **Breaking**: `MapCatalog.Add` panics on a message whose `plural` or `select` style has a selector keyword with no block, a block with no keyword, or no `other` block, nested blocks included, naming the locale, the domain, the message id, the rune offset and the reason, and `JsonDirectoryLoader.Load` returns that refusal naming the file and the directory too, where such a message was stored and `Trans` rendered it with no error, as an empty or partial string or whole with the stray keyword or block ignored; `Trans` over a catalog of the application's own renders as before.
 - storage: **Breaking**: `LocalStorage.Delete` of a key that resolves to a directory refuses with `storagecontract.ErrKeyIsDirectory` in the chain and removes nothing, where it answered `nil`; `Get`'s refusal of such a key carries the same cause, and `Exists` still answers `false` without an error.
 - exception: **Breaking**: `NewHttpException` and `NewHttpError` refuse a status outside 400 to 599 at construction, naming the status, the minimum and the maximum, where they admitted 200 to 599: a success or a redirect raised as an exception served the error body as a success.
@@ -207,6 +209,7 @@ could not answer, at either door or through a sign-in door's `Handler` or token 
 
 ### Removed
 
+- http: **Breaking**: `HandleNamed`, `HandleController` and `HandleNamedController`, from `RouteHandler`, `Router` and `RouteGroup`: a route is registered through `Handle(method, pattern, handler)` or `HandleWithOptions(pattern, handler, RouteOptions)`, a name through `RouteOptions.Name`, and a controller through `ControllerHandler`.
 - application: **Breaking**: the boot warning `application.environment.defaulted` is removed, since a defaulted `MELODY_ENV` now fails the boot; `MELODY_CLI_BOOT_WARNINGS_IGNORED` naming it is refused as an unknown code.
 - http: `Kernel.SetErrorHandler`, `Kernel.HasErrorHandler`, `KernelConfig.ErrorHandler`, `httpcontract.ErrorHandler`, `RegisterKernelExceptionListener` and `KernelExceptionListenerPriority`: a `kernel.exception` listener takes their place.
 - cli: **Breaking**: `output.DefaultOption`, the deprecated `Option.Fields` and `Option.SortKey`, the `--fields` and `--sort` flags with `FlagNameFields` and `FlagNameSortKey`, `SplitFields` and the envelope's `fields` and `sortKey` keys are removed, as the third major's deprecation notices announced.

@@ -110,6 +110,14 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Write `NewPlainTextSerializer(serializer.PlainTextSerializerConfig{})` for the defaults, or set a bound. A client that needs a value's exact Go spelling is served a string the handler formats itself. A struct whose plain-text form must leave a field out tags it `json:"-"` or writes its own json, as it does for json.
 
+### Http: a route is registered through `Handle` or `HandleWithOptions`
+
+**What changed.** [`RouteHandler`](../http/contract/router.go), the registration surface of a router and of a group, declares two doors, `Handle(method, pattern, handler)` and `HandleWithOptions(pattern, handler, RouteOptions)`; `HandleNamed`, `HandleController` and `HandleNamedController` are gone from the interface, `Router` and `RouteGroup`. [`ControllerHandler`](../http/router_utility.go) builds the handler a controller function is registered as, with the argument resolution and the shape refusals the controller doors applied, and refuses a nil controller and a nil function with a panic naming it, where the doors panicked with a reflection error on a nil and admitted a nil function that panicked at each request. [`ServerSentEventHub.ClearBackplaneWithContext`](../http/server_sent_event_hub.go) is named `ClearBackplane`; it had no context-less twin, and it behaves as before.
+
+**Symptom.** A call of `HandleNamed`, `HandleController`, `HandleNamedController` or `ClearBackplaneWithContext` does not compile. A type that implements `RouteHandler` still compiles with the three doors left on it, but nothing calls them: a double or a decorator that intercepted `HandleNamed` is passed over, and the framework's `HandleWithOptions` reaches what it wraps, a nil embedded router included.
+
+**Remedy.** `router.HandleNamed(name, method, pattern, handler)` is `router.HandleWithOptions(pattern, handler, http.RouteOptions{Name: name, Methods: []string{method}})`; a controller is `router.Handle(method, pattern, http.ControllerHandler(controller))`, or `HandleWithOptions` with its handler built the same way when it is named; `hub.ClearBackplaneWithContext(ctx)` is `hub.ClearBackplane(ctx)`. A double or a decorator of a router intercepts `HandleWithOptions` where it intercepted `HandleNamed`.
+
 ### Translation: a catalog refuses a select or plural that is not keyword-and-block pairs
 
 **What changed.** [`MapCatalog.Add`](../translation/catalog.go) panics on a message whose `plural` or `select` style has a selector keyword with no block, a block with no keyword, or no `other` block, nested blocks included, naming the locale, the domain, the message id, the rune offset and the reason; [`JsonDirectoryLoader.Load`](../translation/json_loader.go) returns the same refusal naming the file and the directory too, and loads no catalog. Such a message rendered without an error: a keyword with no block ended the parse and dropped every later selector, a block with no keyword was dropped, and a style with no matching branch rendered the empty string. [`ValidatePattern`](../translation/message_format.go) is the check, exported for a catalog of the application's own; `Trans` renders as before, since it has no error to return.
@@ -2525,8 +2533,8 @@ router.HandleWithOptions(
 )
 
 /* accepted: the long and the short pattern registered as two routes */
-router.HandleNamed("blog.posts", nethttp.MethodGet, "/blog/posts", blogHandler)
-router.HandleNamed("blog.posts.locale", nethttp.MethodGet, "/blog/:locale/posts", blogHandler)
+router.HandleWithOptions("/blog/posts", blogHandler, http.RouteOptions{Name: "blog.posts", Methods: []string{nethttp.MethodGet}})
+router.HandleWithOptions("/blog/:locale/posts", blogHandler, http.RouteOptions{Name: "blog.posts.locale", Methods: []string{nethttp.MethodGet}})
 ```
 
 An empty default does not lift the refusal: it would emit an empty segment, which no longer satisfies a parameter.

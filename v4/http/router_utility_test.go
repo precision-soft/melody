@@ -662,7 +662,7 @@ func assertPanicWithExceptionMessage(t *testing.T, callback func(), expectedMess
     callback()
 }
 
-func TestWrapControllerWithContainer_AutowiresDependenciesByType(t *testing.T) {
+func TestControllerHandler_ResolvesTheControllersArgumentsFromTheContainer(t *testing.T) {
     dependencyInstance := &dependencyA{Value: "ok"}
 
     scope := &testScope{
@@ -680,7 +680,7 @@ func TestWrapControllerWithContainer_AutowiresDependenciesByType(t *testing.T) {
         return EmptyResponse(200), nil
     }
 
-    handler := wrapControllerWithContainer(controller)
+    handler := ControllerHandler(controller)
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
     request := NewRequest(netRequest, nil, runtimeInstance, nil)
@@ -707,7 +707,7 @@ func TestWrapControllerWithContainer_AutowiresDependenciesByType(t *testing.T) {
     }
 }
 
-func TestWrapControllerWithContainer_InsertsRuntimeWhenControllerRequestsRuntimeParameter(t *testing.T) {
+func TestControllerHandler_InsertsRuntimeWhenControllerRequestsRuntimeParameter(t *testing.T) {
     dependencyInstance := &dependencyA{Value: "ok"}
 
     scope := &testScope{
@@ -728,7 +728,7 @@ func TestWrapControllerWithContainer_InsertsRuntimeWhenControllerRequestsRuntime
         return EmptyResponse(200), nil
     }
 
-    handler := wrapControllerWithContainer(controller)
+    handler := ControllerHandler(controller)
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
     request := NewRequest(netRequest, nil, runtimeInstance, nil)
@@ -759,12 +759,12 @@ func TestWrapControllerWithContainer_InsertsRuntimeWhenControllerRequestsRuntime
     }
 }
 
-func TestWrapControllerWithContainer_ReturnsErrorWhenRuntimeIsNil(t *testing.T) {
+func TestControllerHandler_ReturnsErrorWhenRuntimeIsNil(t *testing.T) {
     controller := func(request *Request) (*Response, error) {
         return EmptyResponse(200), nil
     }
 
-    handler := wrapControllerWithContainer(controller)
+    handler := ControllerHandler(controller)
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
     request := NewRequest(netRequest, nil, nil, nil)
@@ -779,7 +779,7 @@ func TestWrapControllerWithContainer_ReturnsErrorWhenRuntimeIsNil(t *testing.T) 
     }
 }
 
-func TestWrapControllerWithContainer_PropagatesScopeGetByTypeError(t *testing.T) {
+func TestControllerHandler_PropagatesScopeGetByTypeError(t *testing.T) {
     expectedErr := errors.New("scope error")
 
     scope := &testScope{
@@ -792,7 +792,7 @@ func TestWrapControllerWithContainer_PropagatesScopeGetByTypeError(t *testing.T)
         return EmptyResponse(200), nil
     }
 
-    handler := wrapControllerWithContainer(controller)
+    handler := ControllerHandler(controller)
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
     request := NewRequest(netRequest, nil, runtimeInstance, nil)
@@ -807,14 +807,14 @@ func TestWrapControllerWithContainer_PropagatesScopeGetByTypeError(t *testing.T)
     }
 }
 
-func TestWrapControllerWithContainer_ReturnsControllerErrorAndNilResponse(t *testing.T) {
+func TestControllerHandler_ReturnsControllerErrorAndNilResponse(t *testing.T) {
     expectedErr := errors.New("controller failed")
 
     controller := func(request *Request) (*Response, error) {
         return nil, expectedErr
     }
 
-    handler := wrapControllerWithContainer(controller)
+    handler := ControllerHandler(controller)
 
     runtimeInstance := &testRuntime{scope: &testScope{}}
 
@@ -831,12 +831,12 @@ func TestWrapControllerWithContainer_ReturnsControllerErrorAndNilResponse(t *tes
     }
 }
 
-func TestWrapControllerWithContainer_ReturnsNilResponseWhenControllerReturnsNilResponseAndNilError(t *testing.T) {
+func TestControllerHandler_ReturnsNilResponseWhenControllerReturnsNilResponseAndNilError(t *testing.T) {
     controller := func(request *Request) (*Response, error) {
         return nil, nil
     }
 
-    handler := wrapControllerWithContainer(controller)
+    handler := ControllerHandler(controller)
 
     runtimeInstance := &testRuntime{scope: &testScope{}}
 
@@ -853,61 +853,83 @@ func TestWrapControllerWithContainer_ReturnsNilResponseWhenControllerReturnsNilR
     }
 }
 
-func TestWrapControllerWithContainer_PanicsWhenControllerIsNotAFunction(t *testing.T) {
+func TestControllerHandler_PanicsWhenControllerIsNotAFunction(t *testing.T) {
     assertPanicWithExceptionMessage(
         t,
         func() {
-            _ = wrapControllerWithContainer(123)
+            _ = ControllerHandler(123)
         },
         "controller must be a function",
     )
 }
 
-func TestWrapControllerWithContainer_PanicsWhenControllerHasNoArguments(t *testing.T) {
+func TestControllerHandler_PanicsWhenControllerIsNil(t *testing.T) {
     assertPanicWithExceptionMessage(
         t,
         func() {
-            _ = wrapControllerWithContainer(func() (*Response, error) { return EmptyResponse(200), nil })
+            _ = ControllerHandler(nil)
+        },
+        "controller must be a function",
+    )
+}
+
+func TestControllerHandler_PanicsWhenControllerIsANilFunction(t *testing.T) {
+    var controller func(request *Request) (*Response, error)
+
+    assertPanicWithExceptionMessage(
+        t,
+        func() {
+            _ = ControllerHandler(controller)
+        },
+        "controller is a nil function",
+    )
+}
+
+func TestControllerHandler_PanicsWhenControllerHasNoArguments(t *testing.T) {
+    assertPanicWithExceptionMessage(
+        t,
+        func() {
+            _ = ControllerHandler(func() (*Response, error) { return EmptyResponse(200), nil })
         },
         "controller must have at least one argument",
     )
 }
 
-func TestWrapControllerWithContainer_PanicsWhenFirstArgumentIsNotRequest(t *testing.T) {
+func TestControllerHandler_PanicsWhenFirstArgumentIsNotRequest(t *testing.T) {
     assertPanicWithExceptionMessage(
         t,
         func() {
-            _ = wrapControllerWithContainer(func(value string) (*Response, error) { return EmptyResponse(200), nil })
+            _ = ControllerHandler(func(value string) (*Response, error) { return EmptyResponse(200), nil })
         },
         "first controller argument must implement http request contract",
     )
 }
 
-func TestWrapControllerWithContainer_PanicsWhenControllerDoesNotReturnTwoResults(t *testing.T) {
+func TestControllerHandler_PanicsWhenControllerDoesNotReturnTwoResults(t *testing.T) {
     assertPanicWithExceptionMessage(
         t,
         func() {
-            _ = wrapControllerWithContainer(func(request *Request) *Response { return EmptyResponse(200) })
+            _ = ControllerHandler(func(request *Request) *Response { return EmptyResponse(200) })
         },
         "controller must return two results, a response and an error",
     )
 }
 
-func TestWrapControllerWithContainer_PanicsWhenFirstResultIsNotResponsePointer(t *testing.T) {
+func TestControllerHandler_PanicsWhenFirstResultIsNotResponsePointer(t *testing.T) {
     assertPanicWithExceptionMessage(
         t,
         func() {
-            _ = wrapControllerWithContainer(func(request *Request) (int, error) { return 1, nil })
+            _ = ControllerHandler(func(request *Request) (int, error) { return 1, nil })
         },
         "controller must return response contract as first result",
     )
 }
 
-func TestWrapControllerWithContainer_PanicsWhenSecondResultIsNotError(t *testing.T) {
+func TestControllerHandler_PanicsWhenSecondResultIsNotError(t *testing.T) {
     assertPanicWithExceptionMessage(
         t,
         func() {
-            _ = wrapControllerWithContainer(func(request *Request) (*Response, string) { return EmptyResponse(200), "" })
+            _ = ControllerHandler(func(request *Request) (*Response, string) { return EmptyResponse(200), "" })
         },
         "controller must return error as second result",
     )
@@ -999,7 +1021,7 @@ func TestMatchPath_ParamLocale_SetsLocaleParam(t *testing.T) {
     }
 }
 
-func TestWrapControllerWithContainer_PanicsWhenDependencyIsNilFromScope(t *testing.T) {
+func TestControllerHandler_PanicsWhenDependencyIsNilFromScope(t *testing.T) {
     scope := &testScope{
         values: map[reflect.Type]any{
             reflect.TypeOf((*dependencyA)(nil)): nil,
@@ -1016,7 +1038,7 @@ func TestWrapControllerWithContainer_PanicsWhenDependencyIsNilFromScope(t *testi
         return EmptyResponse(200), nil
     }
 
-    handler := wrapControllerWithContainer(controller)
+    handler := ControllerHandler(controller)
 
     netRequest := httptest.NewRequest("GET", "http://example.com/", nil)
     request := NewRequest(netRequest, nil, runtimeInstance, nil)
@@ -2410,7 +2432,7 @@ func TestMarkResponsePrivateForSessionCookie_ABalancedQuoteKeepsItsMembers(t *te
 }
 
 /* every signature refusal past the function check carries the controller's signature under `type`; the argument-count and result-count refusals count what they refuse. */
-func TestWrapControllerWithContainer_SignatureRefusalsCarryTheSignature(t *testing.T) {
+func TestControllerHandler_SignatureRefusalsCarryTheSignature(t *testing.T) {
     t.Run("first argument", func(t *testing.T) {
         defer func() {
             panicErr, isPanicErr := recover().(*exception.Error)
@@ -2423,7 +2445,7 @@ func TestWrapControllerWithContainer_SignatureRefusalsCarryTheSignature(t *testi
             }
         }()
 
-        _ = wrapControllerWithContainer(func(value string) (*Response, error) { return EmptyResponse(200), nil })
+        _ = ControllerHandler(func(value string) (*Response, error) { return EmptyResponse(200), nil })
     })
 
     t.Run("result count", func(t *testing.T) {
@@ -2438,7 +2460,7 @@ func TestWrapControllerWithContainer_SignatureRefusalsCarryTheSignature(t *testi
             }
         }()
 
-        _ = wrapControllerWithContainer(func(request *Request) *Response { return EmptyResponse(200) })
+        _ = ControllerHandler(func(request *Request) *Response { return EmptyResponse(200) })
     })
 
     signatureCases := map[string]struct {
@@ -2469,7 +2491,7 @@ func TestWrapControllerWithContainer_SignatureRefusalsCarryTheSignature(t *testi
                 }
             }()
 
-            _ = wrapControllerWithContainer(signatureCase.controller)
+            _ = ControllerHandler(signatureCase.controller)
         })
     }
 }

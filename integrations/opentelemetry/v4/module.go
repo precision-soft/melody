@@ -98,11 +98,10 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel)
         routeName = defaultMetricsRouteName
     }
 
-    kernelInstance.HttpRouter().HandleNamed(
-        routeName,
-        "GET",
+    kernelInstance.HttpRouter().HandleWithOptions(
         instance.config.MetricsPath,
         MetricsRouteHandler(instance.config.MetricsHandler),
+        httpcontract.RouteOptions{Name: routeName, Methods: []string{"GET"}},
     )
 }
 

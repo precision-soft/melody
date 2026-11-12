@@ -249,3 +249,64 @@ func TestBuildOutboxTransport_RefusesWithoutAmqpDsnNamingTheKey(t *testing.T) {
     }
     _ = transport.CloseWithContext(t.Context())
 }
+
+/* the doors registered by name and method: each name answers its pattern under its one method, as the access control, the url generator and the frontend manifest read them */
+func TestRegisterHttpRoutes_RegistersEachNamedDoorUnderItsPatternAndMethod(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.trustedProxyResolver = newTrustedProxyResolver("", time.Now)
+    moduleInstance.catalogueWired = true
+    moduleInstance.eventStreamSlots = handlerevent.NewStreamSlots(1, 1)
+
+    client, clientErr := melodyawss3.NewClient(melodyawss3.Config{Endpoint: "127.0.0.1:9", AccessKey: "test", SecretKey: "test", Region: "us-east-1", Insecure: true})
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+    moduleInstance.storage = melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{})
+
+    router := melodyhttp.NewRouter()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.Close() })
+    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
+
+    doors := []struct {
+        name    string
+        method  string
+        pattern string
+    }{
+        {name: "example.platform.check", method: "GET", pattern: "/platform/check"},
+        {name: "example.messagebus.dispatch", method: "POST", pattern: "/messagebus/dispatch"},
+        {name: "example.encrypt.roundtrip", method: "GET", pattern: "/encrypt/roundtrip"},
+        {name: route.AccessTokenIssueName, method: "POST", pattern: route.AccessTokenIssuePattern},
+        {name: route.AccessTokenRevokeDeviceName, method: "POST", pattern: route.AccessTokenRevokeDevicePattern},
+        {name: route.AccessTokenRevokeUserName, method: "POST", pattern: route.AccessTokenRevokeUserPattern},
+        {name: route.DeviceIdentityName, method: "GET", pattern: route.DeviceIdentityPattern},
+        {name: route.LoginPageName, method: "GET", pattern: route.LoginPagePattern},
+        {name: route.SecureMeName, method: "GET", pattern: route.SecureMePattern},
+        {name: route.InternalWhoamiName, method: "POST", pattern: route.InternalWhoamiPattern},
+        {name: "example.twofactor.enroll", method: "POST", pattern: "/twofactor/enroll"},
+        {name: "example.twofactor.verify", method: "POST", pattern: "/twofactor/verify"},
+        {name: "example.outbox.enqueue", method: "POST", pattern: "/outbox/enqueue"},
+        {name: "example.outbox.relay", method: "POST", pattern: "/outbox/relay"},
+        {name: "example.outbox.status", method: "GET", pattern: "/outbox/status"},
+        {name: "example.storage.put", method: "POST", pattern: "/storage/object"},
+        {name: "example.storage.get", method: "GET", pattern: "/storage/object"},
+        {name: "example.storage.link", method: "GET", pattern: "/storage/object/link"},
+        {name: route.EventsStreamName, method: "GET", pattern: route.EventsStreamPattern},
+        {name: route.EventsPublishName, method: "POST", pattern: route.EventsPublishPattern},
+    }
+
+    for _, door := range doors {
+        definition, found := router.RouteDefinition(door.name)
+        if false == found {
+            t.Fatalf("expected a route named %s", door.name)
+        }
+
+        if strings.TrimSuffix(door.pattern, "/") != strings.TrimSuffix(definition.Pattern(), "/") {
+            t.Fatalf("%s: expected the pattern %s, got %s", door.name, door.pattern, definition.Pattern())
+        }
+
+        if 1 != len(definition.Methods()) || door.method != definition.Methods()[0] {
+            t.Fatalf("%s: expected the one method %s, got %v", door.name, door.method, definition.Methods())
+        }
+    }
+}

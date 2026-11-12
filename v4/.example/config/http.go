@@ -53,7 +53,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         melodyhttp.RouteOptions{Name: "example.openapi", Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
     )
 
-    router.HandleNamed("example.platform.check", "GET", "/platform/check", handler.PlatformCheckHandler())
+    router.HandleWithOptions("/platform/check", handler.PlatformCheckHandler(), melodyhttp.RouteOptions{Name: "example.platform.check", Methods: []string{"GET"}})
 
     /* the write budget is built before the first door it guards */
     if nil != instance.redisClient {
@@ -62,18 +62,18 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         instance.buildInProcessCatalogWriteThrottle(kernelInstance.Clock())
     }
 
-    router.HandleNamed("example.messagebus.dispatch", "POST", "/messagebus/dispatch", instance.throttledWrite(handler.WelcomeEmailDispatchHandler("" != instance.environmentValue(environmentKeyAmqpDsn))))
+    router.HandleWithOptions("/messagebus/dispatch", instance.throttledWrite(handler.WelcomeEmailDispatchHandler("" != instance.environmentValue(environmentKeyAmqpDsn))), melodyhttp.RouteOptions{Name: "example.messagebus.dispatch", Methods: []string{"POST"}})
 
     /* the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
 
-    router.HandleNamed("example.encrypt.roundtrip", "GET", "/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher))
+    router.HandleWithOptions("/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher), melodyhttp.RouteOptions{Name: "example.encrypt.roundtrip", Methods: []string{"GET"}})
 
-    router.HandleNamed(route.AccessTokenIssueName, "POST", route.AccessTokenIssuePattern, accesstoken.IssueHandler())
-    router.HandleNamed(route.AccessTokenRevokeDeviceName, "POST", route.AccessTokenRevokeDevicePattern, accesstoken.RevokeDeviceHandler())
-    router.HandleNamed(route.AccessTokenRevokeUserName, "POST", route.AccessTokenRevokeUserPattern, accesstoken.RevokeUserHandler())
-    router.HandleNamed(route.DeviceIdentityName, "GET", route.DeviceIdentityPattern, handlersecure.MeHandler())
+    router.HandleWithOptions(route.AccessTokenIssuePattern, accesstoken.IssueHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenIssueName, Methods: []string{"POST"}})
+    router.HandleWithOptions(route.AccessTokenRevokeDevicePattern, accesstoken.RevokeDeviceHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeDeviceName, Methods: []string{"POST"}})
+    router.HandleWithOptions(route.AccessTokenRevokeUserPattern, accesstoken.RevokeUserHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeUserName, Methods: []string{"POST"}})
+    router.HandleWithOptions(route.DeviceIdentityPattern, handlersecure.MeHandler(), melodyhttp.RouteOptions{Name: route.DeviceIdentityName, Methods: []string{"GET"}})
 
-    router.HandleNamed(route.LoginPageName, "GET", route.LoginPagePattern, handler.LoginPageHandler())
+    router.HandleWithOptions(route.LoginPagePattern, handler.LoginPageHandler(), melodyhttp.RouteOptions{Name: route.LoginPageName, Methods: []string{"GET"}})
 
     secondFactorReplayGuard := instance.buildSecondFactorReplayGuard(kernelInstance.Clock())
 
@@ -86,14 +86,14 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleWithOptions(route.RoutesPattern, handler.RoutesHandler(), frontendRoute(route.RoutesName, "GET"))
     router.HandleWithOptions(route.CataloguePagePattern, handler.CataloguePageHandler(), frontendRoute(route.CataloguePageName, "GET"))
 
-    router.HandleNamed(route.SecureMeName, "GET", route.SecureMePattern, handlersecure.MeHandler())
+    router.HandleWithOptions(route.SecureMePattern, handlersecure.MeHandler(), melodyhttp.RouteOptions{Name: route.SecureMeName, Methods: []string{"GET"}})
 
-    router.HandleNamed(route.InternalWhoamiName, "POST", route.InternalWhoamiPattern, handlerinternalauth.WhoamiHandler())
+    router.HandleWithOptions(route.InternalWhoamiPattern, handlerinternalauth.WhoamiHandler(), melodyhttp.RouteOptions{Name: route.InternalWhoamiName, Methods: []string{"POST"}})
 
     /* the two doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts. The verification door, and the enrollment door when it replaces an enrollment, burn an accepted code in the memory the sign-in reads, so a code is spent once across all three. */
     if true == instance.catalogueWired {
-        router.HandleNamed("example.twofactor.enroll", "POST", "/twofactor/enroll", handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard))
-        router.HandleNamed("example.twofactor.verify", "POST", "/twofactor/verify", handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard))
+        router.HandleWithOptions("/twofactor/enroll", handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard), melodyhttp.RouteOptions{Name: "example.twofactor.enroll", Methods: []string{"POST"}})
+        router.HandleWithOptions("/twofactor/verify", handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard), melodyhttp.RouteOptions{Name: "example.twofactor.verify", Methods: []string{"POST"}})
     }
 
     /* the outbox handlers hold container.Lazy handles built at route-registration time: the store and relay services (provided by the outbox module's factories, see configure.go) are resolved at the first request, so registering the routes never touches the outbox schema or the transport. */
@@ -103,15 +103,15 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
         catalogueDatabase := melodycontainer.Lazy[*bun.DB](kernelInstance.ServiceContainer(), serviceDatabase)
 
-        router.HandleNamed("example.outbox.enqueue", "POST", "/outbox/enqueue", instance.throttledWrite(handleroutbox.EnqueueHandler(catalogueDatabase, outboxStore)))
-        router.HandleNamed("example.outbox.relay", "POST", "/outbox/relay", instance.throttledWrite(handleroutbox.RelayHandler(outboxRelay)))
-        router.HandleNamed("example.outbox.status", "GET", "/outbox/status", handleroutbox.StatusHandler(catalogueDatabase, outboxStore))
+        router.HandleWithOptions("/outbox/enqueue", instance.throttledWrite(handleroutbox.EnqueueHandler(catalogueDatabase, outboxStore)), melodyhttp.RouteOptions{Name: "example.outbox.enqueue", Methods: []string{"POST"}})
+        router.HandleWithOptions("/outbox/relay", instance.throttledWrite(handleroutbox.RelayHandler(outboxRelay)), melodyhttp.RouteOptions{Name: "example.outbox.relay", Methods: []string{"POST"}})
+        router.HandleWithOptions("/outbox/status", handleroutbox.StatusHandler(catalogueDatabase, outboxStore), melodyhttp.RouteOptions{Name: "example.outbox.status", Methods: []string{"GET"}})
     }
 
     if nil != instance.storage {
-        router.HandleNamed("example.storage.put", "POST", "/storage/object", instance.throttledWrite(handlerstorage.PutHandler(instance.storage)))
-        router.HandleNamed("example.storage.get", "GET", "/storage/object", handlerstorage.GetHandler(instance.storage))
-        router.HandleNamed("example.storage.link", "GET", "/storage/object/link", handlerstorage.LinkHandler(instance.storage))
+        router.HandleWithOptions("/storage/object", instance.throttledWrite(handlerstorage.PutHandler(instance.storage)), melodyhttp.RouteOptions{Name: "example.storage.put", Methods: []string{"POST"}})
+        router.HandleWithOptions("/storage/object", handlerstorage.GetHandler(instance.storage), melodyhttp.RouteOptions{Name: "example.storage.get", Methods: []string{"GET"}})
+        router.HandleWithOptions("/storage/object/link", handlerstorage.LinkHandler(instance.storage), melodyhttp.RouteOptions{Name: "example.storage.link", Methods: []string{"GET"}})
     }
 
     router.HandleWithOptions(
@@ -120,8 +120,8 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         melodyhttp.RouteOptions{Name: route.I18nGreetingName, Methods: []string{"GET"}, Locales: route.I18nGreetingLocaleList()},
     )
 
-    router.HandleNamed(route.EventsStreamName, "GET", route.EventsStreamPattern, handlerevent.StreamHandler(instance.eventStreamSlots))
-    router.HandleNamed(route.EventsPublishName, "POST", route.EventsPublishPattern, instance.throttledWrite(handlerevent.PublishHandler(instance.messageBusDispatch)))
+    router.HandleWithOptions(route.EventsStreamPattern, handlerevent.StreamHandler(instance.eventStreamSlots), melodyhttp.RouteOptions{Name: route.EventsStreamName, Methods: []string{"GET"}})
+    router.HandleWithOptions(route.EventsPublishPattern, instance.throttledWrite(handlerevent.PublishHandler(instance.messageBusDispatch)), melodyhttp.RouteOptions{Name: route.EventsPublishName, Methods: []string{"POST"}})
 
     /* every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make the client throw "unknown route". */
     router.HandleWithOptions(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))

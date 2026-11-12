@@ -31,9 +31,7 @@ func newRouterTestRuntime(routeCount int) *testRuntime {
     router := http.NewRouter()
 
     for index := 0; index < routeCount; index++ {
-        router.HandleNamed(
-            fmt.Sprintf("route.%02d", index),
-            nethttp.MethodGet,
+        router.HandleWithOptions(
             fmt.Sprintf("/route/%02d", index),
             func(
                 runtimeInstance runtimecontract.Runtime,
@@ -42,6 +40,7 @@ func newRouterTestRuntime(routeCount int) *testRuntime {
             ) (httpcontract.Response, error) {
                 return nil, nil
             },
+            http.RouteOptions{Name: fmt.Sprintf("route.%02d", index), Methods: []string{nethttp.MethodGet}},
         )
     }
 

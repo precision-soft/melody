@@ -25,10 +25,10 @@ func TestRouteRegistry_RefusesAnExactDispatchDuplicate(t *testing.T) {
 func TestRouteRegistry_RefusesADuplicateThatDiffersOnlyInName(t *testing.T) {
     router := NewRouter()
 
-    router.HandleNamed("first.name", nethttp.MethodGet, "/named", routeRegistryTestHandler())
+    router.HandleWithOptions("/named", routeRegistryTestHandler(), RouteOptions{Name: "first.name", Methods: []string{nethttp.MethodGet}})
 
     testhelper.AssertPanicsWithError(t, func() {
-        router.HandleNamed("second.name", nethttp.MethodGet, "/named", routeRegistryTestHandler())
+        router.HandleWithOptions("/named", routeRegistryTestHandler(), RouteOptions{Name: "second.name", Methods: []string{nethttp.MethodGet}})
     }, "route already registered")
 }
 
@@ -78,8 +78,8 @@ func TestRouteRegistry_ARecorderDefersTheNameDuplicateAndBothRoutesStayDispatcha
         recorded = append(recorded, [2]string{kind, name})
     })
 
-    router.HandleNamed("claimed.name", nethttp.MethodGet, "/first", routeRegistryTestHandler())
-    router.HandleNamed("claimed.name", nethttp.MethodGet, "/second", routeRegistryTestHandler())
+    router.HandleWithOptions("/first", routeRegistryTestHandler(), RouteOptions{Name: "claimed.name", Methods: []string{nethttp.MethodGet}})
+    router.HandleWithOptions("/second", routeRegistryTestHandler(), RouteOptions{Name: "claimed.name", Methods: []string{nethttp.MethodGet}})
 
     if 1 != len(recorded) {
         t.Fatalf("expected exactly one recorded collision, got %d", len(recorded))
@@ -322,7 +322,7 @@ func TestDeclareRouteDefinition_RefusesAReservedAttributeAndADuplicateName(t *te
         }()
 
         router.Handle(nethttp.MethodGet, "/elsewhere", routeRegistryTestHandler())
-        router.HandleNamed("door", nethttp.MethodGet, "/other", routeRegistryTestHandler())
+        router.HandleWithOptions("/other", routeRegistryTestHandler(), RouteOptions{Name: "door", Methods: []string{nethttp.MethodGet}})
     }()
 }
 
@@ -345,10 +345,10 @@ func TestDeclareRouteDefinition_TwoOnOnePathAnswerTheirOwnMethodsAndCarryTheirAt
 func TestRoutesClaimingPath_AnswersEveryRouteThatMatchesWhateverItsMethodHostOrScheme(t *testing.T) {
     router := NewRouter()
     router.DeclareRouteDefinition("/login/check", httpcontract.RouteOptions{Name: "door.login", Methods: []string{nethttp.MethodPost}})
-    router.HandleNamed("literal", nethttp.MethodGet, "/login/check/", routeRegistryTestHandler())
-    router.HandleNamed("parameter", nethttp.MethodPut, "/login/:step", routeRegistryTestHandler())
+    router.HandleWithOptions("/login/check/", routeRegistryTestHandler(), RouteOptions{Name: "literal", Methods: []string{nethttp.MethodGet}})
+    router.HandleWithOptions("/login/:step", routeRegistryTestHandler(), RouteOptions{Name: "parameter", Methods: []string{nethttp.MethodPut}})
     router.HandleWithOptions("/*rest...", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "catchAll", Host: "other.example", Methods: []string{nethttp.MethodGet}})
-    router.HandleNamed("elsewhere", nethttp.MethodGet, "/login", routeRegistryTestHandler())
+    router.HandleWithOptions("/login", routeRegistryTestHandler(), RouteOptions{Name: "elsewhere", Methods: []string{nethttp.MethodGet}})
     router.HandleWithOptions("/login/:digits", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "constrained", Requirements: map[string]string{"digits": "[0-9]+"}})
     router.HandleWithOptions("/:_locale/check", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "localized", Locales: []string{"en"}})
 

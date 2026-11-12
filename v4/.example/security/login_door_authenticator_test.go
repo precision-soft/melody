@@ -1410,8 +1410,8 @@ func landingPageRouter() *melodyhttp.Router {
         return nil, nil
     }
 
-    router.HandleNamed(route.ProductsListPageName, "GET", route.ProductsListPagePattern, landingPage)
-    router.HandleNamed(route.CataloguePageName, "GET", route.CataloguePagePattern, landingPage)
+    router.HandleWithOptions(route.ProductsListPagePattern, landingPage, melodyhttp.RouteOptions{Name: route.ProductsListPageName, Methods: []string{"GET"}})
+    router.HandleWithOptions(route.CataloguePagePattern, landingPage, melodyhttp.RouteOptions{Name: route.CataloguePageName, Methods: []string{"GET"}})
 
     return router
 }

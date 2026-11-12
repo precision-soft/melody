@@ -221,9 +221,7 @@ func (instance *demoModule) RegisterServices(
 func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
     router := kernelInstance.HttpRouter()
 
-    router.HandleNamed(
-        "health",
-        nethttp.MethodGet,
+    router.HandleWithOptions(
         "/health",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             _ = runtimeInstance
@@ -235,6 +233,7 @@ func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Ker
                 []byte("ok"),
             ), nil
         },
+        melodyhttp.RouteOptions{Name: "health", Methods: []string{nethttp.MethodGet}},
     )
 }
 

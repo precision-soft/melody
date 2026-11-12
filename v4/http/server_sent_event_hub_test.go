@@ -884,7 +884,7 @@ func TestServerSentEventHub_CloseWithContextClosesTheBackplaneInPlaceUnderACance
     }
 }
 
-func TestServerSentEventHub_ClearBackplaneWithContextEndsWithTheDeadlineWhileAPublishIsInside(t *testing.T) {
+func TestServerSentEventHub_ClearBackplaneEndsWithTheDeadlineWhileAPublishIsInside(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     backplane := newGatedBackplane()
     hub.SetBackplane(backplane)
@@ -898,7 +898,7 @@ func TestServerSentEventHub_ClearBackplaneWithContextEndsWithTheDeadlineWhileAPu
     defer cancel()
 
     answered := make(chan error, 1)
-    go func() { answered <- hub.ClearBackplaneWithContext(clearContext) }()
+    go func() { answered <- hub.ClearBackplane(clearContext) }()
 
     select {
     case clearErr := <-answered:
@@ -910,14 +910,14 @@ func TestServerSentEventHub_ClearBackplaneWithContextEndsWithTheDeadlineWhileAPu
     }
 }
 
-func TestServerSentEventHub_ClearBackplaneWithContextAnswersAtOnceWithNothingInFlight(t *testing.T) {
+func TestServerSentEventHub_ClearBackplaneAnswersAtOnceWithNothingInFlight(t *testing.T) {
     hub := NewServerSentEventHub(ServerSentEventHubConfig{})
     hub.SetBackplane(newGatedBackplane())
 
     spentContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    if clearErr := hub.ClearBackplaneWithContext(spentContext); nil != clearErr {
+    if clearErr := hub.ClearBackplane(spentContext); nil != clearErr {
         t.Fatalf("expected a clear with nothing in flight to succeed even under a spent context, got %v", clearErr)
     }
 }
@@ -1001,7 +1001,7 @@ func TestServerSentEventHub_AClearWaitsOnTheBackplaneItRemovedAloneUnderNewPubli
         clearContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
         clearDone := make(chan error, 1)
         go func() {
-            clearDone <- hub.ClearBackplaneWithContext(clearContext)
+            clearDone <- hub.ClearBackplane(clearContext)
         }()
 
         /* the storm starts once the clear has removed the blocking generation and is waiting on it, so every SetBackplane below installs the next backplane or finds it installed */

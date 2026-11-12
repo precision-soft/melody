@@ -25,7 +25,7 @@ type ServerSentEventHubConfig struct {
     /* SubscriberBuffer is the capacity of every subscriber's channel, the events a slow reader can lag behind before the hub drops for it: 16 by default, at least 1, unlimited refused. */
     SubscriberBuffer bound.Count
 
-    /* BackplaneClearTimeout bounds the wait of SetBackplane(nil) for the publishes still holding the backplane it clears: 30s by default, at least 1ms, unlimited refused; ClearBackplaneWithContext is the clear under a deadline of the caller's. */
+    /* BackplaneClearTimeout bounds the wait of SetBackplane(nil) for the publishes still holding the backplane it clears: 30s by default, at least 1ms, unlimited refused; ClearBackplane is the clear under a deadline of the caller's. */
     BackplaneClearTimeout bound.Duration
 }
 
@@ -180,7 +180,7 @@ func (instance *ServerSentEventHub) Unsubscribe(subscriber *ServerSentEventSubsc
     }
 }
 
-/* SetBackplane installs the cross-node fan-out, or clears it when handed nil or a typed nil. Installing a different backplane over a live one, or any backplane into a hub that has shut down, is refused — re-installing the very one already installed changes nothing —: clear first, close what was taken out, then install. Clearing is always allowed, since a shipped backplane's CloseWithContext clears itself from the hub through ClearBackplaneWithContext under its own deadline, and it waits for the publishes holding the backplane, so the caller closes it with nothing inside; the wait of a SetBackplane(nil) is bounded by the hub's BackplaneClearTimeout, thirty seconds by default, past which a warning names the publishes still inside and the clear returns, the backplane's own Publish being what holds them. ClearBackplaneWithContext is the clear under a deadline of the caller's. Clearing from inside the backplane's own Publish waits on itself until that bound. */
+/* SetBackplane installs the cross-node fan-out, or clears it when handed nil or a typed nil. Installing a different backplane over a live one, or any backplane into a hub that has shut down, is refused — re-installing the very one already installed changes nothing —: clear first, close what was taken out, then install. Clearing is always allowed, since a shipped backplane's CloseWithContext clears itself from the hub through ClearBackplane under its own deadline, and it waits for the publishes holding the backplane, so the caller closes it with nothing inside; the wait of a SetBackplane(nil) is bounded by the hub's BackplaneClearTimeout, thirty seconds by default, past which a warning names the publishes still inside and the clear returns, the backplane's own Publish being what holds them. ClearBackplane is the clear under a deadline of the caller's. Clearing from inside the backplane's own Publish waits on itself until that bound. */
 func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackplane) {
     if true == internal.IsNilInterface(backplane) {
         clearContext, cancel := context.WithTimeout(context.Background(), instance.clearTimeout())
@@ -231,8 +231,8 @@ func (instance *ServerSentEventHub) SetBackplane(backplane ServerSentEventBackpl
     instance.generation = &serverSentEventBackplaneGeneration{backplane: backplane}
 }
 
-/* ClearBackplaneWithContext clears the backplane and waits, under the caller's deadline, for the publishes that read it before the clear, so the caller closes it with nothing inside. A wait the deadline ended answers an error carrying the context's: publishes are still inside the backplane, which takes no context, and closing it under them is the caller's decision. */
-func (instance *ServerSentEventHub) ClearBackplaneWithContext(clearContext context.Context) error {
+/* ClearBackplane clears the backplane and waits, under the caller's deadline, for the publishes that read it before the clear, so the caller closes it with nothing inside. A wait the deadline ended answers an error carrying the context's: publishes are still inside the backplane, which takes no context, and closing it under them is the caller's decision. */
+func (instance *ServerSentEventHub) ClearBackplane(clearContext context.Context) error {
     _, clearErr := instance.clearBackplane(clearContext)
 
     return clearErr

@@ -61,7 +61,7 @@ func TestRouteRegistryMustFromContainer_ResolvesTheRegisteredRegistry(t *testing
 func TestUrlGeneratorMustFromContainer_ResolvesTheRegisteredGenerator(t *testing.T) {
     serviceContainer, _, router := newRoutingServiceContainer()
 
-    router.HandleNamed("article.show", "GET", "/articles/:id", routeRegistryTestHandler())
+    router.HandleWithOptions("/articles/:id", routeRegistryTestHandler(), RouteOptions{Name: "article.show", Methods: []string{"GET"}})
 
     resolved := UrlGeneratorMustFromContainer(t.Context(), serviceContainer)
 

@@ -195,7 +195,7 @@ func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.
     var closeErrs []error
 
     /* the hub's clear waits for the broadcasts holding this backplane under the same deadline, so a broadcast the hub cannot end does not hold the close past it */
-    if clearErr := instance.hub.ClearBackplaneWithContext(closeContext); nil != clearErr {
+    if clearErr := instance.hub.ClearBackplane(closeContext); nil != clearErr {
         closeErrs = append(closeErrs, clearErr)
     }
 

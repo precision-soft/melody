@@ -45,51 +45,6 @@ func (instance *RouteGroup) Handle(method string, pattern string, handler httpco
     )
 }
 
-func (instance *RouteGroup) HandleNamed(name string, method string, pattern string, handler httpcontract.Handler) {
-    instance.HandleWithOptions(
-        pattern,
-        handler,
-        RouteOptions{
-            Name:    name,
-            Methods: []string{method},
-        },
-    )
-}
-
-func (instance *RouteGroup) HandleController(
-    method string,
-    pattern string,
-    controller any,
-) {
-    handler := wrapControllerWithContainer(controller)
-
-    instance.HandleWithOptions(
-        pattern,
-        handler,
-        RouteOptions{
-            Methods: []string{method},
-        },
-    )
-}
-
-func (instance *RouteGroup) HandleNamedController(
-    name string,
-    method string,
-    pattern string,
-    controller any,
-) {
-    handler := wrapControllerWithContainer(controller)
-
-    instance.HandleWithOptions(
-        pattern,
-        handler,
-        RouteOptions{
-            Name:    name,
-            Methods: []string{method},
-        },
-    )
-}
-
 func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) {
     if nil == instance.router {
         exception.Panic(

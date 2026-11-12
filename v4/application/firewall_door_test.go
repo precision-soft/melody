@@ -85,7 +85,7 @@ func TestFirewallDoor_AnyRouteThatClaimsItsPathIsReported(t *testing.T) {
             application, router := newFirewallDoorTestApplication(t)
 
             application.declareFirewallDoorRoutes()
-            router.HandleNamed("colliding", nethttp.MethodGet, pattern, bootCollisionTestHandler())
+            router.HandleWithOptions(pattern, bootCollisionTestHandler(), http.RouteOptions{Name: "colliding", Methods: []string{nethttp.MethodGet}})
             application.recordFirewallDoorRouteCollisions()
 
             if 1 != len(application.bootCollisions) || bootCollisionKindFirewallDoorRoute != application.bootCollisions[0].kind {
@@ -103,7 +103,7 @@ func TestFirewallDoor_ARouteOnAnotherPathIsAdmitted(t *testing.T) {
     application, router := newFirewallDoorTestApplication(t)
 
     application.declareFirewallDoorRoutes()
-    router.HandleNamed("page", nethttp.MethodGet, "/login", bootCollisionTestHandler())
+    router.HandleWithOptions("/login", bootCollisionTestHandler(), http.RouteOptions{Name: "page", Methods: []string{nethttp.MethodGet}})
     application.recordFirewallDoorRouteCollisions()
 
     if 0 != len(application.bootCollisions) {
@@ -132,7 +132,7 @@ func (instance *firewallDoorTestModule) RegisterSecurity(builder *securityconfig
 
 func (instance *firewallDoorTestModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
     if "" != instance.pattern {
-        kernelInstance.HttpRouter().HandleNamed("colliding", nethttp.MethodGet, instance.pattern, bootCollisionTestHandler())
+        kernelInstance.HttpRouter().HandleWithOptions(instance.pattern, bootCollisionTestHandler(), http.RouteOptions{Name: "colliding", Methods: []string{nethttp.MethodGet}})
     }
 }
 
@@ -176,7 +176,7 @@ func TestInstallHttpMiddlewares_RefusesARouteAFactoryPutOnADoorsPath(t *testing.
     application.RegisterModule(&firewallDoorTestModule{fakeModule: fakeModule{name: "door"}})
     application.RegisterHttpMiddlewareFactories([]applicationcontract.MiddlewareFactory{
         func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
-            kernelInstance.HttpRouter().HandleNamed("late", nethttp.MethodGet, "/login/:step", bootCollisionTestHandler())
+            kernelInstance.HttpRouter().HandleWithOptions("/login/:step", bootCollisionTestHandler(), http.RouteOptions{Name: "late", Methods: []string{nethttp.MethodGet}})
 
             return func(next httpcontract.Handler) httpcontract.Handler {
                 return next

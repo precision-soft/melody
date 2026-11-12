@@ -3538,7 +3538,7 @@ func TestKernel_LeavesTheRouteTableReadableAfterItStartedServing(t *testing.T) {
     router := NewRouter()
     kernel := NewKernel(router, KernelConfig{})
 
-    router.HandleNamed("article.show", nethttp.MethodGet, "/articles/:id", routeRegistryTestHandler())
+    router.HandleWithOptions("/articles/:id", routeRegistryTestHandler(), RouteOptions{Name: "article.show", Methods: []string{nethttp.MethodGet}})
 
     _ = kernel.ServeHttp(newHttpTestContainer())
 
@@ -3742,7 +3742,7 @@ func TestKernel_RefusesARawPathAFrontHandlerLeftStale(t *testing.T) {
 
 func TestKernel_ARefusedStaleRawPathCarriesNoRouteAndLogsTheRawPath(t *testing.T) {
     router := NewRouter()
-    router.HandleNamed("admin_users", nethttp.MethodGet, "/admin/users", routeRegistryTestHandler())
+    router.HandleWithOptions("/admin/users", routeRegistryTestHandler(), RouteOptions{Name: "admin_users", Methods: []string{nethttp.MethodGet}})
 
     recordingLogger := &warningRecordingLogger{}
 
@@ -3792,7 +3792,7 @@ func TestKernel_ARefusedStaleRawPathCarriesNoRouteAndLogsTheRawPath(t *testing.T
 
 func TestKernel_AStaleRawPathLeavesOnlyTheRefusalWarning(t *testing.T) {
     router := NewRouter()
-    router.HandleNamed("admin_users", nethttp.MethodGet, "/admin/users", routeRegistryTestHandler())
+    router.HandleWithOptions("/admin/users", routeRegistryTestHandler(), RouteOptions{Name: "admin_users", Methods: []string{nethttp.MethodGet}})
 
     recordingLogger := &warningRecordingLogger{}
 
@@ -3821,8 +3821,8 @@ func TestKernel_AStaleRawPathLeavesOnlyTheRefusalWarning(t *testing.T) {
 func TestRouter_EqualPriorityIsWonByTheFirstRegistration(t *testing.T) {
     router := NewRouter()
 
-    router.HandleNamed("first", nethttp.MethodGet, "/users/:id", routeRegistryTestHandler())
-    router.HandleNamed("second", nethttp.MethodGet, "/users/new", routeRegistryTestHandler())
+    router.HandleWithOptions("/users/:id", routeRegistryTestHandler(), RouteOptions{Name: "first", Methods: []string{nethttp.MethodGet}})
+    router.HandleWithOptions("/users/new", routeRegistryTestHandler(), RouteOptions{Name: "second", Methods: []string{nethttp.MethodGet}})
 
     _, params, attributes := router.match(nethttp.MethodGet, "/users/new", "", "https")
 

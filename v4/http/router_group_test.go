@@ -229,7 +229,7 @@ func TestRouteGroup_TheZeroConfigRegistersThePatternAndTheNameAsGiven(t *testing
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
 
-    router.Group(GroupConfig{}).HandleNamed("plain", nethttp.MethodGet, "/plain/:id", newRouteGroupTestHandler())
+    router.Group(GroupConfig{}).HandleWithOptions("/plain/:id", newRouteGroupTestHandler(), RouteOptions{Name: "plain", Methods: []string{nethttp.MethodGet}})
 
     pathValue, err := NewUrlGenerator(routeRegistry).GeneratePath("plain", map[string]string{"id": "1"})
     if nil != err {
@@ -265,7 +265,7 @@ func TestRouteGroup_KeepsItsOwnCopyOfTheMaps(t *testing.T) {
     requirements["id"] = "[a-z]+"
     defaults["page"] = "9"
 
-    group.HandleNamed("user", nethttp.MethodGet, "/user/:id/:page?", newRouteGroupTestHandler())
+    group.HandleWithOptions("/user/:id/:page?", newRouteGroupTestHandler(), RouteOptions{Name: "user", Methods: []string{nethttp.MethodGet}})
 
     _, err := NewUrlGenerator(routeRegistry).GeneratePath("user", map[string]string{"id": "abc"})
     if nil == err {

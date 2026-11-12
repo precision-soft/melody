@@ -29,10 +29,21 @@ import (
 
 const sessionCookieSameSiteUnset = nethttp.SameSite(0)
 
-func wrapControllerWithContainer(
+/* ControllerHandler adapts a controller function to a Handler: its first argument takes the request, a runtimecontract.Runtime argument takes the runtime itself, every other one is resolved by its type from the runtime scope at each request, and its results are a response and an error; a function of another shape, a nil function, or a value that is no function, nil included, is refused here with a panic. */
+func ControllerHandler(
     controller any,
 ) httpcontract.Handler {
     controllerValue := reflect.ValueOf(controller)
+    if false == controllerValue.IsValid() {
+        exception.Panic(
+            exception.NewError(
+                "controller must be a function",
+                exceptioncontract.Context{"type": "nil"},
+                nil,
+            ),
+        )
+    }
+
     controllerType := controllerValue.Type()
 
     if reflect.Func != controllerType.Kind() {
@@ -40,6 +51,16 @@ func wrapControllerWithContainer(
             exception.NewError(
                 "controller must be a function",
                 exceptioncontract.Context{"type": controllerType.Kind().String()},
+                nil,
+            ),
+        )
+    }
+
+    if true == controllerValue.IsNil() {
+        exception.Panic(
+            exception.NewError(
+                "controller is a nil function",
+                exceptioncontract.Context{"type": controllerType.String()},
                 nil,
             ),
         )

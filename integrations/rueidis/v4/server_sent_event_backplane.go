@@ -134,7 +134,7 @@ func (instance *ServerSentEventBackplane) Publish(topic string, event melodyhttp
 func (instance *ServerSentEventBackplane) CloseWithContext(closeContext context.Context) error {
     var closeErrs []error
 
-    if clearErr := instance.hub.ClearBackplaneWithContext(closeContext); nil != clearErr {
+    if clearErr := instance.hub.ClearBackplane(closeContext); nil != clearErr {
         closeErrs = append(closeErrs, clearErr)
     }
 

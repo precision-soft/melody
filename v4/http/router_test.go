@@ -588,15 +588,15 @@ func TestRouter_AllowHeaderRespectsMethodPolicy(t *testing.T) {
     }
 }
 
-func TestRouter_HandleControllerRegistersTheControllerUnderItsMethod(t *testing.T) {
+func TestControllerHandler_RegistersTheControllerUnderItsMethod(t *testing.T) {
     router := NewRouter()
 
-    router.HandleController(
+    router.Handle(
         nethttp.MethodGet,
         "/articles",
-        func(request httpcontract.Request) (httpcontract.Response, error) {
+        ControllerHandler(func(request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "from the controller"), nil
-        },
+        }),
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -620,18 +620,17 @@ func TestRouter_HandleControllerRegistersTheControllerUnderItsMethod(t *testing.
     }
 }
 
-func TestRouter_HandleNamedControllerRegistersTheNameTheGeneratorResolves(t *testing.T) {
+func TestControllerHandler_ANamedRouteServesTheControllerUnderTheNameTheGeneratorResolves(t *testing.T) {
     router := NewRouter()
 
-    router.HandleNamedController(
-        "article.show",
-        nethttp.MethodGet,
+    router.HandleWithOptions(
         "/articles/:id",
-        func(request httpcontract.Request) (httpcontract.Response, error) {
+        ControllerHandler(func(request httpcontract.Request) (httpcontract.Response, error) {
             identifier, _ := request.Param("id")
 
             return TextResponse(nethttp.StatusOK, identifier), nil
-        },
+        }),
+        RouteOptions{Name: "article.show", Methods: []string{nethttp.MethodGet}},
     )
 
     definition, found := router.RouteDefinition("article.show")
@@ -653,21 +652,11 @@ func TestRouter_HandleNamedControllerRegistersTheNameTheGeneratorResolves(t *tes
     }
 }
 
-func TestRouter_HandleControllerRefusesSomethingThatIsNotAFunction(t *testing.T) {
-    defer func() {
-        if nil == recover() {
-            t.Fatalf("expected a non-function controller to be refused at registration")
-        }
-    }()
-
-    NewRouter().HandleController(nethttp.MethodGet, "/articles", "not a function")
-}
-
 func TestRouter_RouteRegistryIsTheOneItRegistersInto(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
 
-    router.HandleNamed("article.show", nethttp.MethodGet, "/articles", routeRegistryTestHandler())
+    router.HandleWithOptions("/articles", routeRegistryTestHandler(), RouteOptions{Name: "article.show", Methods: []string{nethttp.MethodGet}})
 
     if routeRegistry != router.RouteRegistry() {
         t.Fatalf("expected the router to report the registry it was built with")

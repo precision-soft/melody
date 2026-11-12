@@ -44,51 +44,6 @@ func (instance *Router) Handle(method string, pattern string, handler httpcontra
     )
 }
 
-func (instance *Router) HandleNamed(name string, method string, pattern string, handler httpcontract.Handler) {
-    instance.HandleWithOptions(
-        pattern,
-        handler,
-        RouteOptions{
-            Name:    name,
-            Methods: []string{method},
-        },
-    )
-}
-
-func (instance *Router) HandleController(
-    method string,
-    pattern string,
-    controller any,
-) {
-    handler := wrapControllerWithContainer(controller)
-
-    instance.HandleWithOptions(
-        pattern,
-        handler,
-        RouteOptions{
-            Methods: []string{method},
-        },
-    )
-}
-
-func (instance *Router) HandleNamedController(
-    name string,
-    method string,
-    pattern string,
-    controller any,
-) {
-    handler := wrapControllerWithContainer(controller)
-
-    instance.HandleWithOptions(
-        pattern,
-        handler,
-        RouteOptions{
-            Name:    name,
-            Methods: []string{method},
-        },
-    )
-}
-
 func (instance *Router) HandleWithOptions(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) {
     instance.addRoute(pattern, handler, options)
 }

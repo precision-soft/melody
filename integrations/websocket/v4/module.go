@@ -33,7 +33,7 @@ func (instance *Module) Description() string {
     return "registers the websocket stream route bridged onto a server-sent-event hub"
 }
 
-/* a missing path is refused at boot rather than skipped, since an unregistered route has no later consumer to fail loudly; a nil hub is already refused by name inside NewStreamHandler, which HandleNamed reaches at the same boot moment */
+/* a missing path is refused at boot rather than skipped, since an unregistered route has no later consumer to fail loudly; a nil hub is already refused by name inside NewStreamHandler, which the registration below reaches at the same boot moment */
 func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
     if "" == instance.config.Path {
         exception.Panic(exception.NewError("websocket module path is empty - typically a missing configuration key; the stream route cannot be registered without one", nil, nil))
@@ -44,11 +44,10 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel)
         routeName = defaultStreamRouteName
     }
 
-    kernelInstance.HttpRouter().HandleNamed(
-        routeName,
-        "GET",
+    kernelInstance.HttpRouter().HandleWithOptions(
         instance.config.Path,
         NewStreamHandler(instance.config.Hub, instance.config.Options),
+        melodyhttp.RouteOptions{Name: routeName, Methods: []string{"GET"}},
     )
 }
 

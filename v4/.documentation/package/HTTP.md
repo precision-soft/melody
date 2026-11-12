@@ -76,7 +76,7 @@ When a controller function declares a parameter of type
 
 This allows controllers to access request-scoped state via `runtimeInstance.Scope()` without registering `runtimecontract.Runtime` as a service.
 
-Implementation detail: see [`wrapControllerWithContainer`](../../http/router_utility.go).
+A controller is registered as the handler [`ControllerHandler`](../../http/router_utility.go) builds from it: `router.Handle(nethttp.MethodGet, "/articles", http.ControllerHandler(showArticles))`.
 
 ## Request body limits
 
@@ -131,7 +131,7 @@ router.HandleWithOptions(
     },
 )
 
-router.HandleNamed("product.show", nethttp.MethodGet, "/products/:id?", showProductHandler)
+router.HandleWithOptions("/products/:id?", showProductHandler, http.RouteOptions{Name: "product.show", Methods: []string{nethttp.MethodGet}})
 ```
 
 Two routes may share one **pattern** as long as the matcher can tell them apart. Collisions are checked twice at registration ([`registerRoute`](../../http/route_registry.go)): a duplicate name, and a route identical to a registered one in everything the matcher discriminates on — pattern, methods, host, schemes, locales, requirements and priority — because the later one could never be dispatched and would be shadowed silently. Either collision panics at the registration site, with `route name already exists` or with the refusal naming the identical discriminators; an application that prefers one aggregated report over dying at the first duplicate arms [`RouteRegistry.SetBootCollisionRecorder`](../../http/route_registry.go) for its boot window, under which the first registration wins — and on a name collision the route itself stays registered and dispatchable, only the name keeps pointing at the first claimant. The name and the defaults are not part of the dispatch identity: neither
@@ -172,7 +172,7 @@ A request target that is not a path is not path-routed at all. net/http hands th
 
 ### Registration is boot-only
 
-Every registration door — `Handle`, `HandleNamed`, `HandleController`, `HandleNamedController`, `HandleWithOptions`, and the same set on a [`RouteGroup`](../../http/router_group.go) — is **boot-only**, and refuses by name once [`Kernel.ServeHttp`](../../http/kernel.go) has built the handler. The same holds for the kernel's own configuration doors: `Use`, `SetNotFoundHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy`, `SetMethodPolicy`, `SetSessionPolicy` and `SetUnavailableRetryAfter`.
+Every registration door — `Handle`, `HandleWithOptions`, and the same pair on a [`RouteGroup`](../../http/router_group.go) — is **boot-only**, and refuses by name once [`Kernel.ServeHttp`](../../http/kernel.go) has built the handler. The same holds for the kernel's own configuration doors: `Use`, `SetNotFoundHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy`, `SetMethodPolicy`, `SetSessionPolicy` and `SetUnavailableRetryAfter`.
 
 The route table is a tree of plain maps that every request goroutine reads, so writing to it while requests are in flight is an unrecoverable fatal error rather than a torn read; the kernel's fields are an unsynchronized read on every request. Configuration is compiled once and then served. The **reading** doors are untouched and stay open for the life of the process — [`RouteDefinitions`](../../http/router_introspection.go), `RouteDefinition`, `RouteRegistry` and the introspection surface are read from inside handlers, which is how the openapi document and the route manifest are served.
 
@@ -208,7 +208,7 @@ That static middleware is contributed as a default definition ([`defaultDefiniti
 
 ## Controller return contract
 
-Controller functions wired through [`wrapControllerWithContainer`](../../http/router_utility.go) must return a first result that implements [`httpcontract.Response`](../../http/contract/response.go). The first result is not restricted to the concrete [`Response`](../../http/response.go) type; any implementation of the response contract is accepted.
+Controller functions wired through [`ControllerHandler`](../../http/router_utility.go) must return a first result that implements [`httpcontract.Response`](../../http/contract/response.go). The first result is not restricted to the concrete [`Response`](../../http/response.go) type; any implementation of the response contract is accepted.
 
 For JSON-body endpoints, [`JsonHandler[Req](handle, JsonHandlerConfig)`](../../http/typed_handler.go) wraps a handler so the framework decodes the request body into `Req` and runs the container validator before calling `handle(runtime, request, body)`; a decode/validation failure returns an error, or a caller-supplied response shape via `JsonHandlerConfig.ErrorResponder`, whose responder is handed the status, the message and the failure itself. This removes the per-handler decode-and-validate block. The body is read through the same door `Request.BindJson` is, so the configured body limit answers 413, the decoder's own diagnosis travels as the refusal's cause, and a nil or empty body is refused by name. Validation travels the error body: the per-field detail reaches the client under `validationErrors` and a rule-wiring fault is recorded at error rather than at warning.
 The responder runs under the kernel's containment discipline, and cannot turn a refusal into a success — a responder that answers no response leaves the original refusal standing, where returning `(nil, nil)` used to be read by the kernel as a handler that answered nothing and served an empty 204. A nil handle is refused at construction, a nil `ErrorResponder` leaves the refusals to the framework, and a `null` body is read as empty for every nilable kind rather than for pointers alone.
@@ -296,18 +296,16 @@ func (instance *ExampleHttpModule) RegisterHttpRoutes(kernelInstance kernelcontr
         },
     )
 
-    api.HandleNamed(
-        "ping",
-        "GET",
+    api.HandleWithOptions(
         "/ping",
         handlePing(),
+        http.RouteOptions{Name: "ping", Methods: []string{"GET"}},
     )
 
-    api.HandleNamed(
-        "redirect_to_ping",
-        "GET",
+    api.HandleWithOptions(
         "/go-to-ping",
         handleRedirectToPing(),
+        http.RouteOptions{Name: "redirect_to_ping", Methods: []string{"GET"}},
     )
 }
 
@@ -408,8 +406,8 @@ The example application wires an `ServerSentEventHub`, an `/events/stream` Serve
 
 ### Behind a load balancer
 
-`ServerSentEventHub` keeps its subscribers in process, so a plain `Broadcast` only reaches clients connected to **this** instance. When the application runs on several instances behind a load balancer, attach an [`ServerSentEventBackplane`](../../http/server_sent_event_hub.go) with [`SetBackplane`](../../http/server_sent_event_hub.go): `Broadcast` then also replicates the event to the other instances, each of which delivers it to its own subscribers via [`DeliverLocal`](../../http/server_sent_event_hub.go). The backplane tags every event with a per-instance origin and ignores the echo of its own broadcasts, so nothing is delivered twice. Clearing the backplane — `SetBackplane(nil)`, which the rueidis backplane's `Close` does, while the amqp backplane clears through `ClearBackplaneWithContext` under the deadline its `CloseWithContext` is given (`Close` gives none) — waits for the broadcasts still inside it, so it can be closed with nothing inside; that wait is bounded by thirty seconds,
-past which a warning names how many publishes were still inside and the clear returns, and [`ClearBackplaneWithContext`](../../http/server_sent_event_hub.go) is the same clear under a deadline of the caller's, answering the context's error when the deadline ended it. Concrete backplanes ship in [`integrations/rueidis`](../../../integrations/rueidis) (Redis pub/sub) and [`integrations/amqp`](../../../integrations/amqp) (fanout exchange); the WebSocket integration shares the same hub, so it fans out the same way. Without a backplane, pin clients to an instance with sticky sessions and accept that an event only
+`ServerSentEventHub` keeps its subscribers in process, so a plain `Broadcast` only reaches clients connected to **this** instance. When the application runs on several instances behind a load balancer, attach an [`ServerSentEventBackplane`](../../http/server_sent_event_hub.go) with [`SetBackplane`](../../http/server_sent_event_hub.go): `Broadcast` then also replicates the event to the other instances, each of which delivers it to its own subscribers via [`DeliverLocal`](../../http/server_sent_event_hub.go). The backplane tags every event with a per-instance origin and ignores the echo of its own broadcasts, so nothing is delivered twice. Clearing the backplane — `SetBackplane(nil)`, or `ClearBackplane` under the deadline a shipped backplane's `CloseWithContext` is given — waits for the broadcasts still inside it, so it can be closed with nothing inside; that wait is bounded by thirty seconds,
+past which a warning names how many publishes were still inside and the clear returns, and [`ClearBackplane`](../../http/server_sent_event_hub.go) is the same clear under a deadline of the caller's, answering the context's error when the deadline ended it. Concrete backplanes ship in [`integrations/rueidis`](../../../integrations/rueidis) (Redis pub/sub) and [`integrations/amqp`](../../../integrations/amqp) (fanout exchange); the WebSocket integration shares the same hub, so it fans out the same way. Without a backplane, pin clients to an instance with sticky sessions and accept that an event only
 reaches that instance. Replication is best-effort like local delivery; [`BackplaneFailures`](../../http/server_sent_event_hub.go) counts broadcasts that could not be replicated. After [`Shutdown`](../../http/server_sent_event_hub.go) the hub stops replicating — a `Broadcast` during or after a graceful stop delivers to nobody locally and is not pushed to the backplane.
 
 ## Route manifest
@@ -637,6 +635,7 @@ Where the list itself comes from is the application's business — a constant as
 - Router and registry:
     - [`NewRouter()`](../../http/router.go)
     - [`NewRouterWithRouteRegistry(httpcontract.RouteRegistry)`](../../http/router.go)
+    - [`ControllerHandler(controller any) httpcontract.Handler`](../../http/router_utility.go) — a controller function as a handler, its first argument the request, every later one resolved by its type from the runtime scope at each request; a function of another shape is refused with a panic where it is built
     - [`NewRouteRegistry()`](../../http/route_registry.go)
     - [`NewRouteGroup(router httpcontract.Router, groupConfig httpcontract.GroupConfig) httpcontract.RouteGroup`](../../http/router_group.go) — `Router.Group(groupConfig)` is the same door on a router; `PathPrefix`, `NamePrefix`, `Requirements` and `Defaults`, the maps copied, and the group takes no setting once built
     - [`type RouteOptions`](../../http/contract/route_option.go) — `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority` and `Attributes`, the zero value a route under no name for every method, host and scheme; `HandleWithOptions` takes it by value and copies its lists and maps
@@ -656,7 +655,7 @@ Where the list itself comes from is the application's business — a constant as
 - Server-Sent Events:
     - [`type ServerSentEvent`](../../http/server_sent_event.go)
     - [`type ServerSentEventWriter`](../../http/server_sent_event.go) with [`NewServerSentEventWriter(nethttp.ResponseWriter, ServerSentEventWriterConfig) (*ServerSentEventWriter, error)`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Send(ServerSentEvent) error`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Comment(string) error`](../../http/server_sent_event.go), [`(*ServerSentEventWriter).Ping() error`](../../http/server_sent_event.go). Both `Send` (`Id`/`Event`/`Data`) and `Comment` strip `CR`/`LF` from caller-supplied text so a dynamic value cannot inject extra Server-Sent Events fields or events; `Send` additionally treats a bare `CR`, `LF`, or `CRLF` inside `Data` as a data-line boundary per the EventSource specification.
-    - [`type ServerSentEventHub`](../../http/server_sent_event_hub.go) with [`NewServerSentEventHub(ServerSentEventHubConfig)`](../../http/server_sent_event_hub.go), [`Subscribe(topic string) *ServerSentEventSubscriber`](../../http/server_sent_event_hub.go), [`Unsubscribe(*ServerSentEventSubscriber)`](../../http/server_sent_event_hub.go), [`Broadcast(topic string, event ServerSentEvent) int`](../../http/server_sent_event_hub.go), [`DeliverLocal(topic string, event ServerSentEvent) int`](../../http/server_sent_event_hub.go), [`SubscriberCount(topic string) int`](../../http/server_sent_event_hub.go), [`DroppedEventCount() uint64`](../../http/server_sent_event_hub.go), and the cross-instance backplane/shutdown surface [`SetBackplane(ServerSentEventBackplane)`](../../http/server_sent_event_hub.go), [`ClearBackplaneWithContext(context.Context) error`](../../http/server_sent_event_hub.go), [`BackplaneFailures() uint64`](../../http/server_sent_event_hub.go), [
+    - [`type ServerSentEventHub`](../../http/server_sent_event_hub.go) with [`NewServerSentEventHub(ServerSentEventHubConfig)`](../../http/server_sent_event_hub.go), [`Subscribe(topic string) *ServerSentEventSubscriber`](../../http/server_sent_event_hub.go), [`Unsubscribe(*ServerSentEventSubscriber)`](../../http/server_sent_event_hub.go), [`Broadcast(topic string, event ServerSentEvent) int`](../../http/server_sent_event_hub.go), [`DeliverLocal(topic string, event ServerSentEvent) int`](../../http/server_sent_event_hub.go), [`SubscriberCount(topic string) int`](../../http/server_sent_event_hub.go), [`DroppedEventCount() uint64`](../../http/server_sent_event_hub.go), and the cross-instance backplane/shutdown surface [`SetBackplane(ServerSentEventBackplane)`](../../http/server_sent_event_hub.go), [`ClearBackplane(context.Context) error`](../../http/server_sent_event_hub.go), [`BackplaneFailures() uint64`](../../http/server_sent_event_hub.go), [
       `Shutdown()`](../../http/server_sent_event_hub.go), [`CloseWithContext(context.Context) error`](../../http/server_sent_event_hub.go), [`IsClosed() bool`](../../http/server_sent_event_hub.go), [`SetLogger(loggingcontract.Logger)`](../../http/server_sent_event_hub.go)
     - [`type ServerSentEventSubscriber`](../../http/server_sent_event_hub.go) with [`(*ServerSentEventSubscriber).Events() <-chan ServerSentEvent`](../../http/server_sent_event_hub.go), [`(*ServerSentEventSubscriber).DroppedCount() uint64`](../../http/server_sent_event_hub.go), [`(*ServerSentEventSubscriber).Topic() string`](../../http/server_sent_event_hub.go)
 

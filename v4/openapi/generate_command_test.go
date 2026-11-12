@@ -37,13 +37,12 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpe
     t.Helper()
 
     router := melodyhttp.NewRouter()
-    router.HandleNamed(
-        "products.create",
-        "POST",
+    router.HandleWithOptions(
         "/products/api/create/",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
+        melodyhttp.RouteOptions{Name: "products.create", Methods: []string{"POST"}},
     )
 
     environment, environmentErr := config.NewEnvironment(&commandEmptyEnvironmentSource{})

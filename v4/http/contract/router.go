@@ -21,13 +21,9 @@ type MatchResult struct {
 
 /* RouteHandler is the registration surface of a router and of every group carved out of one. Among routes that all match a request, priority decides first and registration order second, the first declared winning; specificity is not a factor, so "/users/new" registered after "/users/:id" is answered by "/users/:id". Every door is boot-only; see Router. */
 type RouteHandler interface {
+    /* Handle registers handler for one method and pattern, every other option of the route left at its zero value. */
     Handle(method string, pattern string, handler Handler)
 
-    HandleNamed(name string, method string, pattern string, handler Handler)
-
-    HandleController(method string, pattern string, controller any)
-
-    HandleNamedController(name string, method string, pattern string, controller any)
-
+    /* HandleWithOptions registers handler for pattern with what the options declare: a name, the methods, every method when they are empty, and the rest of RouteOptions. */
     HandleWithOptions(pattern string, handler Handler, options RouteOptions)
 }
