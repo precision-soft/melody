@@ -11,6 +11,7 @@ import (
 )
 
 const (
+    bootCollisionKindModule            = "module"
     bootCollisionKindService           = "service"
     bootCollisionKindServiceType       = "serviceType"
     bootCollisionKindScopedService     = "scopedService"
@@ -63,6 +64,17 @@ func (instance *Application) panicOnBootCollisions() {
             nil,
         ),
     )
+}
+
+/* refuseDuplicateModules raises the report at the start of Boot when a module was registered twice: the duplicate booted nothing, so a phase that panics over what it would have wired must not be the only record the process leaves */
+func (instance *Application) refuseDuplicateModules() {
+    for _, collision := range instance.bootCollisions {
+        if bootCollisionKindModule == collision.kind {
+            instance.panicOnBootCollisions()
+
+            return
+        }
+    }
 }
 
 /* routeCollisionRecorderSetter is the part of a route registry that can defer its duplicate refusals to the aggregated boot report; a registry without it keeps its immediate panic. */

@@ -39,13 +39,17 @@ The handler upgrades the connection, subscribes to the resolved topic, writes ea
 
 ### Register as a module
 
-Bundle the stream route as a self-registering application module — one `RegisterModule` call registers the route on the configured hub. A nil hub or an empty path is refused at boot: an unregistered route has no later consumer to fail loudly, so the missing wiring would otherwise surface only as client 404s under a healthy-looking boot.
+Bundle the stream routes as a self-registering application module — one `RegisterModule` call registers every declared stream, each on its own hub. An application registers the module once, since a module's name is its identity, so two endpoints are two entries in `ModuleConfig.Streams`, not two modules. Refused at boot, naming the field and the stream's index: a module with no stream, a stream with a nil hub or an empty path, and, on a module declaring more than one stream, an empty `RouteName`, since the default `melody.websocket` names a single route; an option outside its rule is refused by `NewStreamHandler`, naming the option. An unregistered route has no later consumer to fail loudly, so the missing wiring would otherwise surface only as client 404s under a healthy-looking boot. Every stream is judged and its handler built before the first route registers, so a refused module leaves no route behind.
 
 ```go
 app.RegisterModule(melodywebsocket.NewModule(melodywebsocket.ModuleConfig{
-    Hub:     hub,
-    Path:    "/ws",
-    Options: melodywebsocket.Options{IdleTimeout: bound.Of(15 * time.Second), OriginPatterns: []string{"*"}},
+    Streams: []melodywebsocket.StreamConfig{
+        {
+            Hub:     hub,
+            Path:    "/ws",
+            Options: melodywebsocket.Options{IdleTimeout: bound.Of(15 * time.Second), OriginPatterns: []string{"*"}},
+        },
+    },
 }))
 ```
 

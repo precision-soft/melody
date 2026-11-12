@@ -68,14 +68,6 @@ var sealBindingLabelPattern = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}\.[A-Za-z0-
 var sealBindingRegistryMutex sync.RWMutex
 var sealBindingRegistry = map[reflect.Type]sealBinding{}
 
-/* storeSealBinding replaces an earlier entry of the same marker, as storeCipher does, so the switch follows the last registration that declares it; a marker a later registration leaves out keeps its entry, as a context's cipher does */
-func storeSealBinding(marker reflect.Type, binding sealBinding) {
-    sealBindingRegistryMutex.Lock()
-    defer sealBindingRegistryMutex.Unlock()
-
-    sealBindingRegistry[marker] = binding
-}
-
 func sealBindingOf(marker reflect.Type) (sealBinding, bool) {
     sealBindingRegistryMutex.RLock()
     defer sealBindingRegistryMutex.RUnlock()
@@ -89,16 +81,16 @@ func sealBindingOf(marker reflect.Type) (sealBinding, bool) {
 var cipherRegistryMutex sync.RWMutex
 var cipherRegistry = map[string]Cipher{}
 
-/* storeCipher replaces an earlier entry, so a later application in the process installs its own cipher; a nil cipher is refused, since database/sql would dereference it at the first column write */
-func storeCipher(name string, cipherInstance Cipher) {
-    if true == isNilCipher(cipherInstance) {
-        exception.Panic(exception.NewError("cipher instance is nil", map[string]any{"cipherName": name}, nil))
-    }
-
+/* replaceRegistries installs one registration's whole state: the cipher table and the binding table are replaced, never merged, so a later application in the process keeps no cipher name and no marker of an earlier one; validateConfig has refused a nil cipher before */
+func replaceRegistries(ciphers map[string]Cipher, bindings map[reflect.Type]sealBinding) {
     cipherRegistryMutex.Lock()
     defer cipherRegistryMutex.Unlock()
 
-    cipherRegistry[name] = cipherInstance
+    sealBindingRegistryMutex.Lock()
+    defer sealBindingRegistryMutex.Unlock()
+
+    cipherRegistry = ciphers
+    sealBindingRegistry = bindings
 }
 
 func isNilCipher(cipherInstance Cipher) bool {

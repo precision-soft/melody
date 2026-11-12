@@ -47,6 +47,55 @@ func installCipher(t *testing.T, name string, cipherInstance Cipher) {
     })
 }
 
+/* storeSealBinding sets one entry of the binding table, where the module replaces the whole table */
+func storeSealBinding(marker reflect.Type, binding sealBinding) {
+    sealBindingRegistryMutex.Lock()
+    defer sealBindingRegistryMutex.Unlock()
+
+    sealBindingRegistry[marker] = binding
+}
+
+/* storeCipher sets one entry of the cipher table, where the module replaces the whole table; a nil cipher is refused, as validateConfig refuses it */
+func storeCipher(name string, cipherInstance Cipher) {
+    if true == isNilCipher(cipherInstance) {
+        exception.Panic(exception.NewError("cipher instance is nil", map[string]any{"cipherName": name}, nil))
+    }
+
+    cipherRegistryMutex.Lock()
+    defer cipherRegistryMutex.Unlock()
+
+    cipherRegistry[name] = cipherInstance
+}
+
+/* preserveRegistries restores both whole tables when the test ends, since a module registration replaces them */
+func preserveRegistries(t *testing.T) {
+    t.Helper()
+
+    cipherRegistryMutex.RLock()
+    sealBindingRegistryMutex.RLock()
+    ciphers := make(map[string]Cipher, len(cipherRegistry))
+    for name, cipherInstance := range cipherRegistry {
+        ciphers[name] = cipherInstance
+    }
+    bindings := make(map[reflect.Type]sealBinding, len(sealBindingRegistry))
+    for marker, binding := range sealBindingRegistry {
+        bindings[marker] = binding
+    }
+    sealBindingRegistryMutex.RUnlock()
+    cipherRegistryMutex.RUnlock()
+
+    t.Cleanup(func() {
+        cipherRegistryMutex.Lock()
+        defer cipherRegistryMutex.Unlock()
+
+        sealBindingRegistryMutex.Lock()
+        defer sealBindingRegistryMutex.Unlock()
+
+        cipherRegistry = ciphers
+        sealBindingRegistry = bindings
+    })
+}
+
 /* the bound markers of the pins: two columns of the crm compartment, one of the default cipher, and one never declared */
 type crmIbanBinding struct{}
 

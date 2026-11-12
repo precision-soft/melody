@@ -1,8 +1,6 @@
 package application
 
 import (
-    "reflect"
-
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
@@ -35,22 +33,25 @@ func (instance *Application) registerModuleAtDepth(moduleInstance applicationcon
         )
     }
 
-    /* a module's identity is its instance, so one instance reached through two providers boots once, its children included; Name stays informative, and two distinct instances sharing one name stay two modules. Comparability is asked of the value, not the type, as the container's isComparableValue does: an interface field holding a map would panic as a map key. */
-    if false == reflect.ValueOf(moduleInstance).Comparable() {
-        instance.appendModule(moduleInstance, depth)
+    moduleName := moduleInstance.Name()
+    if "" == moduleName {
+        exception.Panic(
+            exception.NewError("module name may not be empty; a module's name is its identity in the application", nil, nil),
+        )
+    }
+
+    /* a module's identity is its name: a second registration under a name already registered, the same instance reached again included, is a duplicate recorded for the aggregated boot report, and neither it nor the modules it provides boots */
+    if nil == instance.registeredModuleNames {
+        instance.registeredModuleNames = make(map[string]struct{})
+    }
+
+    if _, exists := instance.registeredModuleNames[moduleName]; true == exists {
+        instance.recordBootCollision(bootCollisionKindModule, moduleName)
 
         return
     }
 
-    if nil == instance.registeredModuleInstances {
-        instance.registeredModuleInstances = make(map[applicationcontract.Module]struct{})
-    }
-
-    if _, exists := instance.registeredModuleInstances[moduleInstance]; true == exists {
-        return
-    }
-
-    instance.registeredModuleInstances[moduleInstance] = struct{}{}
+    instance.registeredModuleNames[moduleName] = struct{}{}
 
     instance.appendModule(moduleInstance, depth)
 }

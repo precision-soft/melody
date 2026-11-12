@@ -62,6 +62,7 @@ func newModuleRegistrar() moduleRegistrar {
 }
 
 func TestModule_RefusesAConfigWithNoCipherAndNoContexts(t *testing.T) {
+    preserveRegistries(t)
     assertPanicsWithMessage(t, "encrypt module needs a cipher or at least one context", func() {
         NewModule(ModuleConfig{}).RegisterServices(newModuleRegistrar())
     })
@@ -108,6 +109,7 @@ func newForeignDatabase() *bun.DB {
 }
 
 func TestModule_RefusesAForeignDialectBeforeInstallingAnything(t *testing.T) {
+    preserveRegistries(t)
     previousDefault := NewFakeCipher()
     previousNamed := NewFakeCipher()
     installCipher(t, defaultCipherName, previousDefault)
@@ -132,6 +134,7 @@ func TestModule_RefusesAForeignDialectBeforeInstallingAnything(t *testing.T) {
 }
 
 func TestModule_ASecondModuleWithACipherInOneApplicationInstallsNothing(t *testing.T) {
+    preserveRegistries(t)
     installCipher(t, defaultCipherName, NewFakeCipher())
     first := NewFakeCipher()
     registrar := newModuleRegistrar()
@@ -153,6 +156,7 @@ func TestModule_ASecondModuleWithACipherInOneApplicationInstallsNothing(t *testi
 }
 
 func TestModule_RefusesATypedNilCipher(t *testing.T) {
+    preserveRegistries(t)
     var cipherInstance *fakeCipher
 
     assertPanicsWithMessage(t, "encrypt module cipher is a typed nil", func() {
@@ -161,6 +165,7 @@ func TestModule_RefusesATypedNilCipher(t *testing.T) {
 }
 
 func TestModule_RefusesARepeatedContextName(t *testing.T) {
+    preserveRegistries(t)
     assertPanicsWithMessage(t, "encrypt module context name is repeated", func() {
         NewModule(ModuleConfig{
             Contexts: []CommandContextConfig{
@@ -172,6 +177,7 @@ func TestModule_RefusesARepeatedContextName(t *testing.T) {
 }
 
 func TestModule_ACipherWithoutADatabaseInstallsTheCipherAndRegistersNoCommand(t *testing.T) {
+    preserveRegistries(t)
     installCipher(t, defaultCipherName, NewFakeCipher())
     cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
     module := NewModule(ModuleConfig{Cipher: cipher})
@@ -203,6 +209,7 @@ func TestModule_ACipherWithoutADatabaseInstallsTheCipherAndRegistersNoCommand(t 
 }
 
 func TestModule_PublishesTheDefaultCipherAsAService(t *testing.T) {
+    preserveRegistries(t)
     installCipher(t, defaultCipherName, NewFakeCipher())
     cipher := NewFakeCipher()
     registrar := newModuleRegistrar()
@@ -216,6 +223,7 @@ func TestModule_PublishesTheDefaultCipherAsAService(t *testing.T) {
 }
 
 func TestModule_ASecondRegistrationReplacesTheDefaultCipher(t *testing.T) {
+    preserveRegistries(t)
     installCipher(t, defaultCipherName, NewFakeCipher())
     first := NewFakeCipher()
     second := NewFakeCipher()
@@ -230,8 +238,7 @@ func TestModule_ASecondRegistrationReplacesTheDefaultCipher(t *testing.T) {
 }
 
 func TestModule_AContextWithoutADatabaseInstallsItsCipherAndRegistersNoCommand(t *testing.T) {
-    defaultCipher := NewFakeCipher()
-    installCipher(t, defaultCipherName, defaultCipher)
+    preserveRegistries(t)
     installCipher(t, "crm", NewFakeCipher())
     cipher := NewFakeCipher()
     module := NewModule(ModuleConfig{Contexts: []CommandContextConfig{{Name: "crm", Cipher: cipher}}})
@@ -243,17 +250,51 @@ func TestModule_AContextWithoutADatabaseInstallsItsCipherAndRegistersNoCommand(t
         t.Fatalf("expected the context's cipher under its name: %v %v", resolved, resolveErr)
     }
 
-    resolvedDefault, defaultErr := cipherByName(defaultCipherName)
-    if nil != defaultErr || defaultCipher != resolvedDefault {
-        t.Fatalf("expected the default entry left as it was: %v %v", resolvedDefault, defaultErr)
-    }
-
     if commands := module.RegisterCliCommands(nil); nil != commands {
         t.Fatalf("expected no command for a context without a database, got %d", len(commands))
     }
 }
 
+/* a registration installs its whole state: a later application in the process keeps no cipher name and no marker of an earlier one, where a merge left the earlier compartment and binding readable through the later application's columns */
+func TestModule_ASecondRegistrationReplacesTheWholeCipherAndBindingTables(t *testing.T) {
+    preserveRegistries(t)
+
+    first := NewFakeCipher()
+    NewModule(ModuleConfig{
+        Cipher:       first,
+        Contexts:     []CommandContextConfig{{Name: "test:crm", Cipher: NewFakeCipher()}},
+        SealBindings: []SealBindingConfig{{Ref: crmIbanBinding{}}, {Ref: defaultSecretBinding{}}},
+    }).RegisterServices(newModuleRegistrar())
+
+    crmCipher := NewFakeCipher()
+    NewModule(ModuleConfig{
+        Contexts:     []CommandContextConfig{{Name: "test:crm", Cipher: crmCipher}},
+        SealBindings: []SealBindingConfig{{Ref: crmEmailBinding{}}},
+    }).RegisterServices(newModuleRegistrar())
+
+    if _, defaultErr := cipherByName(defaultCipherName); nil == defaultErr {
+        t.Fatalf("expected the earlier registration's default cipher gone")
+    }
+
+    if resolved, resolveErr := cipherByName("test:crm"); nil != resolveErr || crmCipher != resolved {
+        t.Fatalf("expected the later registration's compartment: %v %v", resolved, resolveErr)
+    }
+
+    if _, declared := sealBindingOf(reflect.TypeOf(crmIbanBinding{})); true == declared {
+        t.Fatalf("expected the earlier registration's binding gone")
+    }
+
+    if _, declared := sealBindingOf(reflect.TypeOf(defaultSecretBinding{})); true == declared {
+        t.Fatalf("expected the earlier registration's default binding gone")
+    }
+
+    if binding, declared := sealBindingOf(reflect.TypeOf(crmEmailBinding{})); false == declared || "customer.email" != binding.label {
+        t.Fatalf("expected the later registration's binding: %+v %v", binding, declared)
+    }
+}
+
 func TestModule_ARefusedRegistrationInstallsNothing(t *testing.T) {
+    preserveRegistries(t)
     previous := NewFakeCipher()
     installCipher(t, "crm", previous)
 
@@ -786,6 +827,7 @@ func newBindingModuleConfig(bindings ...SealBindingConfig) ModuleConfig {
 
 /* a declaration the module cannot hold is refused at registration naming the field and the index */
 func TestModule_RefusesASealBindingItCannotHold(t *testing.T) {
+    preserveRegistries(t)
     valid := SealBindingConfig{Ref: crmIbanBinding{}}
 
     cases := map[string]ModuleConfig{
@@ -852,6 +894,7 @@ func TestModule_RefusesASealBindingItCannotHold(t *testing.T) {
 
 /* a refused declaration installs nothing: no cipher and no binding */
 func TestModule_InstallsNothingWhenASealBindingIsRefused(t *testing.T) {
+    preserveRegistries(t)
     previous := NewFakeCipher()
     installCipher(t, "test:crm", previous)
 
@@ -870,6 +913,7 @@ func TestModule_InstallsNothingWhenASealBindingIsRefused(t *testing.T) {
 
 /* a later registration replaces a binding, so the switch follows the last one */
 func TestModule_ALaterRegistrationReplacesABinding(t *testing.T) {
+    preserveRegistries(t)
     installCipher(t, "test:crm", NewFakeCipher())
     installSealBinding(t, crmIbanBinding{}, false)
 
@@ -897,6 +941,7 @@ func TestSealBindingLabelPattern_AdmitsOneSpellingPerColumn(t *testing.T) {
 
 /* one label under two compartments of their own ciphers is two bindings, not a collision */
 func TestModule_AdmitsOneLabelUnderTwoCiphers(t *testing.T) {
+    preserveRegistries(t)
     config := newBindingModuleConfig(SealBindingConfig{Ref: crmIbanBinding{}}, SealBindingConfig{Ref: secondCompartmentIbanBinding{}})
     config.Contexts = append(config.Contexts, CommandContextConfig{Name: "test:crm2", Cipher: NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm2-v1", Keys: map[string][]byte{"crm2-v1": newKey(13)}}))})
 

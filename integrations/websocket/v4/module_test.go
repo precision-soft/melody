@@ -48,17 +48,13 @@ func TestModule_NameAndDescription(t *testing.T) {
     }
 }
 
-/* an unregistered route has no later consumer to fail loudly, since clients get 404 while boot reads healthy, so a missing hub or path is refused at boot. The nil hub is refused by NewStreamHandler's own guard, which registration reaches at the same boot moment; the module carries no shadowed sister in front of it. */
+/* an unregistered route has no later consumer to fail loudly, since clients get 404 while boot reads healthy, so a missing hub is refused at boot; the module refuses it before NewStreamHandler's own guard, so the refusal names the stream's index */
 func TestModule_RegisterHttpRoutesRefusesAMissingHubAtBoot(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
-    defer func() {
-        if nil == recover() {
-            t.Fatal("expected the nil hub to be refused at boot instead of silently registering no route")
-        }
-    }()
-
-    NewModule(ModuleConfig{Path: "/stream"}).RegisterHttpRoutes(kernel)
+    assertRefusalNamesField(t, "ModuleConfig.Streams[0].Hub", func() {
+        NewModule(ModuleConfig{Streams: []StreamConfig{{Path: "/stream"}}}).RegisterHttpRoutes(kernel)
+    })
 }
 
 /* the options carry a VALID IdleTimeout deliberately: with the zero value, NewStreamHandler's own panic would answer for a disarmed path guard and the mutant would survive shadowed — the empty path must be the only refusal candidate. */
@@ -77,20 +73,20 @@ func TestModule_RegisterHttpRoutesRefusesAnEmptyPathAtBoot(t *testing.T) {
         }
     }()
 
-    NewModule(ModuleConfig{
+    NewModule(ModuleConfig{Streams: []StreamConfig{{
         Hub:     melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Options: Options{IdleTimeout: bound.Of(30 * time.Second)},
-    }).RegisterHttpRoutes(kernel)
+    }}}).RegisterHttpRoutes(kernel)
 }
 
 func TestModule_RegisterHttpRoutesUsesDefaultName(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
-    NewModule(ModuleConfig{
+    NewModule(ModuleConfig{Streams: []StreamConfig{{
         Hub:     melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Path:    "/stream",
         Options: Options{IdleTimeout: bound.Of(30 * time.Second)},
-    }).RegisterHttpRoutes(kernel)
+    }}}).RegisterHttpRoutes(kernel)
 
     if 1 != len(kernel.router.handled) || defaultStreamRouteName+" GET /stream" != kernel.router.handled[0] {
         t.Fatalf("expected the default stream route, got %v", kernel.router.handled)
@@ -100,12 +96,12 @@ func TestModule_RegisterHttpRoutesUsesDefaultName(t *testing.T) {
 func TestModule_RegisterHttpRoutesHonoursCustomName(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
-    NewModule(ModuleConfig{
+    NewModule(ModuleConfig{Streams: []StreamConfig{{
         Hub:       melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Path:      "/stream",
         RouteName: "custom.stream",
         Options:   Options{IdleTimeout: bound.Of(30 * time.Second)},
-    }).RegisterHttpRoutes(kernel)
+    }}}).RegisterHttpRoutes(kernel)
 
     if 1 != len(kernel.router.handled) || "custom.stream GET /stream" != kernel.router.handled[0] {
         t.Fatalf("expected the custom stream route, got %v", kernel.router.handled)
@@ -115,10 +111,10 @@ func TestModule_RegisterHttpRoutesHonoursCustomName(t *testing.T) {
 func TestModule_RegisterHttpRoutesAcceptsEmptyOptions(t *testing.T) {
     kernel := &spyKernel{router: &spyRouter{}}
 
-    NewModule(ModuleConfig{
+    NewModule(ModuleConfig{Streams: []StreamConfig{{
         Hub:  melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Path: "/stream",
-    }).RegisterHttpRoutes(kernel)
+    }}}).RegisterHttpRoutes(kernel)
 
     if 1 != len(kernel.router.handled) {
         t.Fatalf("expected the stream route registered, got %v", kernel.router.handled)
@@ -144,9 +140,116 @@ func TestModule_RegisterHttpRoutesRefusesASubSecondIdleTimeout(t *testing.T) {
 
     kernel := &spyKernel{router: &spyRouter{}}
 
-    NewModule(ModuleConfig{
+    NewModule(ModuleConfig{Streams: []StreamConfig{{
         Hub:     melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}),
         Options: Options{IdleTimeout: bound.Of(500 * time.Millisecond)},
         Path:    "/stream",
-    }).RegisterHttpRoutes(kernel)
+    }}}).RegisterHttpRoutes(kernel)
+}
+
+func TestModule_RegisterHttpRoutesRefusesAModuleWithoutAStream(t *testing.T) {
+    kernel := &spyKernel{router: &spyRouter{}}
+
+    assertRefusalNamesField(t, "ModuleConfig.Streams", func() {
+        NewModule(ModuleConfig{}).RegisterHttpRoutes(kernel)
+    })
+
+    if 0 != len(kernel.router.handled) {
+        t.Fatalf("expected no route, got %v", kernel.router.handled)
+    }
+}
+
+/* the second stream's defect is judged before the first stream registers, so a refused module leaves no route behind */
+func TestModule_RegisterHttpRoutesRefusesAStreamWithoutAPathNamingItsIndex(t *testing.T) {
+    kernel := &spyKernel{router: &spyRouter{}}
+
+    assertRefusalNamesField(t, "ModuleConfig.Streams[1].Path", func() {
+        NewModule(ModuleConfig{Streams: []StreamConfig{
+            {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Path: "/a", RouteName: "stream.a"},
+            {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), RouteName: "stream.b"},
+        }}).RegisterHttpRoutes(kernel)
+    })
+
+    if 0 != len(kernel.router.handled) {
+        t.Fatalf("expected no route, got %v", kernel.router.handled)
+    }
+}
+
+func TestModule_RegisterHttpRoutesRefusesAnUnnamedStreamAmongSeveral(t *testing.T) {
+    kernel := &spyKernel{router: &spyRouter{}}
+
+    assertRefusalNamesField(t, "ModuleConfig.Streams[1].RouteName", func() {
+        NewModule(ModuleConfig{Streams: []StreamConfig{
+            {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Path: "/a", RouteName: "stream.a"},
+            {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Path: "/b"},
+        }}).RegisterHttpRoutes(kernel)
+    })
+
+    if 0 != len(kernel.router.handled) {
+        t.Fatalf("expected no route, got %v", kernel.router.handled)
+    }
+}
+
+/* a later stream's nil hub and invalid option are refused before the first stream registers, the hub naming its index */
+func TestModule_RegisterHttpRoutesRefusesALaterStreamsHubAndOptionsBeforeAnyRoute(t *testing.T) {
+    kernel := &spyKernel{router: &spyRouter{}}
+
+    assertRefusalNamesField(t, "ModuleConfig.Streams[1].Hub", func() {
+        NewModule(ModuleConfig{Streams: []StreamConfig{
+            {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Path: "/a", RouteName: "stream.a"},
+            {Path: "/b", RouteName: "stream.b"},
+        }}).RegisterHttpRoutes(kernel)
+    })
+
+    func() {
+        defer func() {
+            if nil == recover() {
+                t.Fatal("expected the sub-second IdleTimeout refused")
+            }
+        }()
+
+        NewModule(ModuleConfig{Streams: []StreamConfig{
+            {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Path: "/a", RouteName: "stream.a"},
+            {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Path: "/b", RouteName: "stream.b", Options: Options{IdleTimeout: bound.Of(500 * time.Millisecond)}},
+        }}).RegisterHttpRoutes(kernel)
+    }()
+
+    if 0 != len(kernel.router.handled) {
+        t.Fatalf("expected no route, got %v", kernel.router.handled)
+    }
+}
+
+func TestModule_RegisterHttpRoutesRegistersEveryStream(t *testing.T) {
+    kernel := &spyKernel{router: &spyRouter{}}
+
+    NewModule(ModuleConfig{Streams: []StreamConfig{
+        {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Path: "/a", RouteName: "stream.a"},
+        {Hub: melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{}), Path: "/b", RouteName: "stream.b"},
+    }}).RegisterHttpRoutes(kernel)
+
+    if 2 != len(kernel.router.handled) || "stream.a GET /a" != kernel.router.handled[0] || "stream.b GET /b" != kernel.router.handled[1] {
+        t.Fatalf("expected both stream routes, got %v", kernel.router.handled)
+    }
+}
+
+func assertRefusalNamesField(t *testing.T, field string, register func()) {
+    t.Helper()
+
+    defer func() {
+        recovered := recover()
+        if nil == recovered {
+            t.Fatalf("expected a refusal naming %s", field)
+        }
+
+        recoveredErr, isError := recovered.(error)
+        if false == isError {
+            t.Fatalf("expected the panic value to be an error, got %T", recovered)
+        }
+
+        if field != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name %s, got %v", field, exception.LogContext(recoveredErr, exception.LogContextConfig{}))
+        }
+    }()
+
+    register()
 }

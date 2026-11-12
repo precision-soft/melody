@@ -39,8 +39,8 @@ type Application struct {
     kernel              kernelcontract.Kernel
     embeddedPublicFiles fs.FS
     modules             []applicationcontract.Module
-    /* the identity set behind the module dedup: one instance reached through two providers boots once. Populated lazily, since tests assemble a bare Application without the constructor. */
-    registeredModuleInstances map[applicationcontract.Module]struct{}
+    /* the names registered so far, a module's name being its identity. Populated lazily, since tests assemble a bare Application without the constructor. */
+    registeredModuleNames map[string]struct{}
     cliCommands               []clicontract.Command
     httpRouteRegistrars       []RouteRegistrar
     httpMiddlewares           *HttpMiddleware
@@ -82,6 +82,8 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     instance.booting = true
 
     defer instance.logOnRecoverAndExit()
+
+    instance.refuseDuplicateModules()
 
     configuration := instance.configuration
 

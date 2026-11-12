@@ -110,7 +110,12 @@ func TestWebsocketModuleConfig_ServesTheModulesHubWithAThirtySecondKeepalive(t *
     moduleInstance := &Module{}
     moduleInstance.buildServerSentEvent()
 
-    config := moduleInstance.websocketModuleConfig()
+    moduleConfig := moduleInstance.websocketModuleConfig()
+    if 1 != len(moduleConfig.Streams) {
+        t.Fatalf("expected one stream, got %d", len(moduleConfig.Streams))
+    }
+
+    config := moduleConfig.Streams[0]
 
     if moduleInstance.serverSentEventHub != config.Hub || nil == config.Hub {
         t.Fatal("expected the feed to serve the module's hub")

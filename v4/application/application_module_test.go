@@ -1,7 +1,11 @@
 package application
 
 import (
+    "context"
     nethttp "net/http"
+    "os"
+    "os/exec"
+    "strings"
     "testing"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
@@ -32,8 +36,7 @@ func (instance fakeModule) Description() string {
     return instance.name
 }
 
-/* a module registered as a struct VALUE whose field is an interface: comparable as a type, comparable as a
-value only when the field holds something hashable */
+/* a module registered as a struct VALUE whose field is an interface, which may hold something unhashable */
 type payloadCarryingModule struct {
     fakeModule
     payload any
@@ -65,7 +68,7 @@ func (instance bareModuleProvider) Modules() []applicationcontract.Module {
     return instance.children
 }
 
-/* mintingModuleProvider yields a freshly named child on every expansion, so instance identity can never break the cycle and only the depth guard is left to stop it */
+/* mintingModuleProvider yields a freshly named child on every expansion, so the name can never break the cycle and only the depth guard is left to stop it */
 type mintingModuleProvider struct {
     fakeModule
 }
@@ -74,7 +77,7 @@ func (instance mintingModuleProvider) Modules() []applicationcontract.Module {
     return []applicationcontract.Module{mintingModuleProvider{fakeModule{name: instance.name + "+"}}}
 }
 
-/* uncomparableModule cannot be a map key, so it exercises the branch that keeps the pre-deduplication behavior instead of letting the identity set panic at insertion */
+/* uncomparableModule cannot be a map key, so it proves the identity never hashes the module itself */
 type uncomparableModule struct {
     fakeModule
     tags []string
@@ -90,6 +93,26 @@ func assertModuleNames(t *testing.T, modules []applicationcontract.Module, expec
     for index := range expected {
         if expected[index] != modules[index].Name() {
             t.Fatalf("expected module %d to be %q, got %q", index, expected[index], modules[index].Name())
+        }
+    }
+}
+
+/* assertModuleCollisions reads the duplicates a registration recorded for the aggregated boot report, each with an origin in this file */
+func assertModuleCollisions(t *testing.T, instance *Application, expected []string) {
+    t.Helper()
+
+    if len(expected) != len(instance.bootCollisions) {
+        t.Fatalf("expected %d recorded collisions, got %d: %+v", len(expected), len(instance.bootCollisions), instance.bootCollisions)
+    }
+
+    for index := range expected {
+        collision := instance.bootCollisions[index]
+        if bootCollisionKindModule != collision.kind || expected[index] != collision.name {
+            t.Fatalf("expected collision %d to be module %q, got %+v", index, expected[index], collision)
+        }
+
+        if false == strings.Contains(collision.origin, "application_module_test.go") {
+            t.Fatalf("expected collision %d to name the caller's file, got %q", index, collision.origin)
         }
     }
 }
@@ -132,16 +155,17 @@ func TestRegisterModule_ExpandsNestedProviders(t *testing.T) {
     assertModuleNames(t, instance.modules, []string{"outer", "inner", "leaf"})
 }
 
-/* the provider hands over the same instance it is, so identity breaks the cycle before the depth guard is ever needed: the module registers once and the expansion simply stops */
-func TestRegisterModule_ASelfReferencingProviderRegistersOnce(t *testing.T) {
+/* the provider hands over the same instance it is, so the name breaks the cycle before the depth guard is ever needed: the module boots once and the instance reached again is a duplicate in the report */
+func TestRegisterModule_ASelfReferencingProviderIsRecordedAsADuplicate(t *testing.T) {
     instance := &Application{}
 
     instance.RegisterModule(selfReferencingModuleProvider{fakeModule: fakeModule{name: "cyclic"}})
 
     assertModuleNames(t, instance.modules, []string{"cyclic"})
+    assertModuleCollisions(t, instance, []string{"cyclic"})
 }
 
-/* a cycle of ever-fresh instances is invisible to the identity set, and without the depth guard the expansion recurses until the stack dies */
+/* a cycle of ever-freshly named instances never repeats a name, and without the depth guard the expansion recurses until the stack dies */
 func TestRegisterModule_PanicsOnProviderCycleOfDistinctInstances(t *testing.T) {
     instance := &Application{}
 
@@ -175,7 +199,8 @@ func TestRegisterModuleProvider_AProviderThatIsAModuleBootsAsThatModule(t *testi
     assertModuleNames(t, instance.modules, []string{"provider", "child-a", "child-b"})
 }
 
-func TestRegisterModule_TheSameInstanceThroughTwoProvidersBootsOnce(t *testing.T) {
+/* a module's identity is its name, so the same instance reached through two providers is a duplicate: the first boots, the second is recorded where it was registered */
+func TestRegisterModule_TheSameInstanceThroughTwoProvidersIsRecordedAsADuplicate(t *testing.T) {
     instance := &Application{}
 
     sharedInstance := &hookRecordingModule{fakeModule: fakeModule{name: "shared"}}
@@ -184,20 +209,21 @@ func TestRegisterModule_TheSameInstanceThroughTwoProvidersBootsOnce(t *testing.T
     instance.RegisterModuleProvider(bareModuleProvider{children: []applicationcontract.Module{sharedInstance}})
 
     assertModuleNames(t, instance.modules, []string{"shared"})
+    assertModuleCollisions(t, instance, []string{"shared"})
 }
 
-/* identity is the interface value, not the label: two distinct instances sharing a name stay two modules */
-func TestRegisterModule_TwoDistinctInstancesSharingANameStayTwoModules(t *testing.T) {
+func TestRegisterModule_TwoDistinctInstancesSharingANameAreRecordedAsADuplicate(t *testing.T) {
     instance := &Application{}
 
     instance.RegisterModule(&hookRecordingModule{fakeModule: fakeModule{name: "twin"}})
     instance.RegisterModule(&hookRecordingModule{fakeModule: fakeModule{name: "twin"}})
 
-    assertModuleNames(t, instance.modules, []string{"twin", "twin"})
+    assertModuleNames(t, instance.modules, []string{"twin"})
+    assertModuleCollisions(t, instance, []string{"twin"})
 }
 
-/* an instance of an uncomparable type cannot enter the identity set; the guard keeps it on the pre-deduplication path instead of letting the map insertion panic */
-func TestRegisterModule_AnUncomparableModuleKeepsThePreDeduplicationBehavior(t *testing.T) {
+/* an instance of an uncomparable type is judged by its name like any other, so registering it twice is a duplicate rather than a map insertion that panics */
+func TestRegisterModule_AnUncomparableModuleRegisteredTwiceIsRecordedAsADuplicate(t *testing.T) {
     instance := &Application{}
 
     moduleValue := uncomparableModule{fakeModule: fakeModule{name: "uncomparable"}, tags: []string{"tag"}}
@@ -205,7 +231,60 @@ func TestRegisterModule_AnUncomparableModuleKeepsThePreDeduplicationBehavior(t *
     instance.RegisterModule(moduleValue)
     instance.RegisterModule(moduleValue)
 
-    assertModuleNames(t, instance.modules, []string{"uncomparable", "uncomparable"})
+    assertModuleNames(t, instance.modules, []string{"uncomparable"})
+    assertModuleCollisions(t, instance, []string{"uncomparable"})
+}
+
+/* a duplicate provider expands nothing: its children would otherwise boot under it, or land in the report as duplicates of the first provider's children and bury the one collision that names the cause */
+func TestRegisterModule_ADuplicateProviderDoesNotExpandItsChildren(t *testing.T) {
+    instance := &Application{}
+
+    instance.RegisterModule(fakeModuleProvider{
+        fakeModule: fakeModule{name: "provider"},
+        children:   []applicationcontract.Module{fakeModule{name: "child-a"}},
+    })
+    instance.RegisterModule(fakeModuleProvider{
+        fakeModule: fakeModule{name: "provider"},
+        children:   []applicationcontract.Module{fakeModule{name: "child-a"}, fakeModule{name: "child-b"}},
+    })
+
+    assertModuleNames(t, instance.modules, []string{"provider", "child-a"})
+    assertModuleCollisions(t, instance, []string{"provider"})
+}
+
+/* the duplicate runs none of its hooks, so the report names the module once instead of every service it would have registered a second time */
+func TestRegisterModule_ADuplicateRunsNoHook(t *testing.T) {
+    instance := newCollisionTestApplication(t)
+
+    first := &hookRecordingModule{fakeModule: fakeModule{name: "twin"}}
+    second := &hookRecordingModule{fakeModule: fakeModule{name: "twin"}}
+
+    instance.RegisterModule(first)
+    instance.RegisterModule(second)
+
+    instance.bootModulesPreConfigurationResolve()
+    instance.bootModulesPostConfigurationResolve()
+
+    if false == first.servicesRegistered || false == first.parametersRegistered {
+        t.Fatalf("expected the first registration to boot")
+    }
+
+    if true == second.configurationsRegistered || true == second.parametersRegistered || true == second.servicesRegistered {
+        t.Fatalf("expected the duplicate to run no hook")
+    }
+
+    assertModuleCollisions(t, instance, []string{"twin"})
+}
+
+/* the name is the identity, so an empty one could not tell two modules apart; it is refused where it is registered */
+func TestRegisterModule_RefusesAnEmptyName(t *testing.T) {
+    testhelper.AssertPanicsWithError(t, func() {
+        (&Application{}).RegisterModule(fakeModule{name: ""})
+    }, "module name may not be empty")
+
+    testhelper.AssertPanicsWithError(t, func() {
+        (&Application{}).RegisterModuleProvider(bareModuleProvider{children: []applicationcontract.Module{fakeModule{name: ""}}})
+    }, "module name may not be empty")
 }
 
 /* both module doors close for the boot window: the phase loops iterate a snapshot of the module list, so a module registered from inside a boot hook would boot by whatever fraction of the lifecycle had not run yet and report success */
@@ -500,12 +579,7 @@ func TestApplication_RegisterScopedServicesHookRunsForScopedServiceModules(t *te
     }
 }
 
-/* A module carrying an `any` field is comparable as a TYPE — an interface field counts as comparable at
-that level whatever it ends up holding — while the value is only comparable if what the field holds is.
-Asking the type therefore admitted a module to the identity map and then panicked hashing it, with exactly
-the "hash of unhashable type" the guard was written to avoid, for any module registered as a struct value
-whose field holds a map, a slice or a func. Such a module keeps the uncomparable path: registered, named,
-never a map key. */
+/* a module registered as a struct value whose field holds a map is registered by its name, never hashed */
 func TestRegisterModule_AValueModuleCarryingAnUnhashableFieldIsRegisteredInsteadOfPanicking(t *testing.T) {
     instance := &Application{}
 
@@ -515,21 +589,7 @@ func TestRegisterModule_AValueModuleCarryingAnUnhashableFieldIsRegisteredInstead
     })
 
     assertModuleNames(t, instance.modules, []string{"carrier"})
-}
-
-/* the comparable half of the same shape stays on the identity path, so the skip is narrowed, not removed: one instance reached twice still boots once. */
-func TestRegisterModule_AValueModuleCarryingAHashableFieldKeepsItsIdentity(t *testing.T) {
-    instance := &Application{}
-
-    moduleInstance := payloadCarryingModule{
-        fakeModule: fakeModule{name: "carrier"},
-        payload:    "hashable",
-    }
-
-    instance.RegisterModule(moduleInstance)
-    instance.RegisterModule(moduleInstance)
-
-    assertModuleNames(t, instance.modules, []string{"carrier"})
+    assertModuleCollisions(t, instance, []string{})
 }
 
 type unclaimedDoorMatcher struct{}
@@ -608,4 +668,75 @@ func TestCollectModuleHttpHandlerDecorators_ANilDecoratorIsRefusedNamingTheModul
     }()
 
     applicationInstance.collectModuleHttpHandlerDecorators()
+}
+
+/* the duplicate is raised at the start of Boot, before any phase can fail over what it would have wired, and its line in the report names the kind, the name and the caller */
+func TestRefuseDuplicateModules_RaisesTheReportNamingTheModuleAndItsCaller(t *testing.T) {
+    instance := newCollisionTestApplication(t)
+
+    instance.RegisterModule(fakeModule{name: "twin"})
+    instance.RegisterModule(fakeModule{name: "twin"})
+
+    recovered := func() (recovered any) {
+        defer func() {
+            recovered = recover()
+        }()
+
+        instance.refuseDuplicateModules()
+
+        return nil
+    }()
+
+    report, isError := recovered.(error)
+    if false == isError {
+        t.Fatalf("expected the report to panic with an error, got %v", recovered)
+    }
+
+    collisions, _ := exception.LogContext(report, exception.LogContextConfig{})["collisions"].([]string)
+    if 1 != len(collisions) || false == strings.HasPrefix(collisions[0], `module "twin" registered at `) || false == strings.Contains(collisions[0], "application_module_test.go") {
+        t.Fatalf("expected one module line naming the caller, got %v", collisions)
+    }
+}
+
+/* a collision of another kind recorded before Boot waits for the aggregated report at the end of the boot, as before */
+func TestRefuseDuplicateModules_LeavesOtherCollisionsToTheAggregatedReport(t *testing.T) {
+    instance := newCollisionTestApplication(t)
+
+    instance.RegisterService("service.test.value", stringProvider("first"), container.RegisterOptions{})
+    instance.RegisterService("service.test.value", stringProvider("second"), container.RegisterOptions{})
+
+    instance.refuseDuplicateModules()
+}
+
+const duplicateModuleBootChildVariable = "MELODY_TEST_DUPLICATE_MODULE_BOOT_CHILD"
+
+/* panickingParameterModule fails the first boot phase, the way a module fails over a service the dropped duplicate would have registered */
+type panickingParameterModule struct {
+    fakeModule
+}
+
+func (instance *panickingParameterModule) RegisterParameters(registrar applicationcontract.ParameterRegistrar) {
+    exception.Panic(exception.NewError("the first boot phase failed over a missing wiring", nil, nil))
+}
+
+/* Boot reports a refusal and exits the process, so the boot runs in a child of the test binary; the duplicate is the record it leaves, not the phase that failed after it */
+func TestBoot_RefusesADuplicateModuleBeforeAnyPhaseRuns(t *testing.T) {
+    if "1" == os.Getenv(duplicateModuleBootChildVariable) {
+        application := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+        application.RegisterModule(fakeModule{name: "twin"})
+        application.RegisterModule(fakeModule{name: "twin"})
+        application.RegisterModule(&panickingParameterModule{fakeModule: fakeModule{name: "failing"}})
+        application.Boot()
+
+        return
+    }
+
+    command := exec.Command(os.Args[0], "-test.run=^TestBoot_RefusesADuplicateModuleBeforeAnyPhaseRuns$")
+    command.Env = append(os.Environ(), duplicateModuleBootChildVariable+"=1")
+
+    output, runErr := command.CombinedOutput()
+
+    if nil == runErr || false == strings.Contains(string(output), "duplicate registrations detected at boot") || true == strings.Contains(string(output), "the first boot phase failed") {
+        t.Fatalf("expected the boot refused in the collision report before the failing phase, got %v: %s", runErr, output[max(0, len(output)-400):])
+    }
 }

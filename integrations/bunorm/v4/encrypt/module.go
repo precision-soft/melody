@@ -16,7 +16,7 @@ import (
 /* ServiceCipher is the service the module publishes its default cipher under, for a component that takes the cipher by injection; a compartment's cipher is reached through its CipherRef only. */
 const ServiceCipher = "service.encrypt.cipher"
 
-/* ModuleConfig wires the encrypt module. Cipher is the cipher every EncryptedString and EncryptedDeterministicString column seals and opens through, installed when the module registers its services, so every process that loads the module, http, worker and cli alike, reads its columns. Database or DatabaseFactory, at most one, is the database of the melody:encrypt:database bulk command, a factory evaluated at the first command run so a process in another mode never opens it; with neither, no unsuffixed command is registered, and either one needs the Cipher; a prebuilt Database not of the MySQL dialect is refused. Contexts adds one key compartment each. A module with no Cipher and no Contexts is refused at registration, naming the two fields. An application registers at most one module with a Cipher, since the container refuses ServiceCipher twice; a later application in the same process replaces the earlier one's ciphers. */
+/* ModuleConfig wires the encrypt module. Cipher is the cipher every EncryptedString and EncryptedDeterministicString column seals and opens through, installed when the module registers its services, so every process that loads the module, http, worker and cli alike, reads its columns. Database or DatabaseFactory, at most one, is the database of the melody:encrypt:database bulk command, a factory evaluated at the first command run so a process in another mode never opens it; with neither, no unsuffixed command is registered, and either one needs the Cipher; a prebuilt Database not of the MySQL dialect is refused. Contexts adds one key compartment each. A module with no Cipher and no Contexts is refused at registration, naming the two fields. An application registers the module once, since a module's name is its identity, so every compartment and every binding is declared on one ModuleConfig; a later application in the same process replaces the whole cipher and binding tables of the earlier one, which keeps none of its names or markers. */
 type ModuleConfig struct {
     Cipher Cipher
 
@@ -31,7 +31,7 @@ type ModuleConfig struct {
     SealBindings []SealBindingConfig
 }
 
-/* SealBindingConfig declares one bound column. Ref is the marker value its column type is parameterized by. RefuseUnbound, false when left out, makes the column read nothing but a seal bound to it: a seal without a binding and a value without the marker are refused, on the column's Scan and in its equality candidates. Leave it out until every value of the column is a bound seal: deploy the declaration, run melody:encrypt:database --mode encrypt over the column, which seals its plain values and re-seals its unbound seals under the binding, then set it. A declaration the module cannot hold is refused at registration naming ModuleConfig.SealBindings and the index: a nil, typed-nil or pointer-form Ref, a label outside <table>.<column> with each part of [A-Za-z0-9_]{1,64}, a cipher name the module installs no cipher under, a marker with fields, with SealBinding on its pointer receiver or embedding DefaultCipherRef by pointer, a marker declared twice, a label declared twice over one cipher instance under one name or two, and a cipher implemented outside the package. A later registration replaces the binding of each marker it declares and keeps the others, as it does a context's cipher. */
+/* SealBindingConfig declares one bound column. Ref is the marker value its column type is parameterized by. RefuseUnbound, false when left out, makes the column read nothing but a seal bound to it: a seal without a binding and a value without the marker are refused, on the column's Scan and in its equality candidates. Leave it out until every value of the column is a bound seal: deploy the declaration, run melody:encrypt:database --mode encrypt over the column, which seals its plain values and re-seals its unbound seals under the binding, then set it. A declaration the module cannot hold is refused at registration naming ModuleConfig.SealBindings and the index: a nil, typed-nil or pointer-form Ref, a label outside <table>.<column> with each part of [A-Za-z0-9_]{1,64}, a cipher name the module installs no cipher under, a marker with fields, with SealBinding on its pointer receiver or embedding DefaultCipherRef by pointer, a marker declared twice, a label declared twice over one cipher instance under one name or two, and a cipher implemented outside the package. A later registration replaces the whole binding table, so a marker it does not declare is unbound. */
 type SealBindingConfig struct {
     Ref           SealBindingRef
     RefuseUnbound bool
@@ -61,11 +61,10 @@ func (instance *Module) Description() string {
     return "installs the ciphers the encrypted columns read and registers the melody:encrypt:database command for bulk encrypt, re-encrypt and decrypt"
 }
 
-/* RegisterServices installs the module's ciphers, the default one and one per context, for the columns of this process, a cipher installed under the same name by an earlier registration replaced, and publishes the default cipher as ServiceCipher. A config outside the rules on ModuleConfig and CommandContextConfig panics naming the field. */
+/* RegisterServices installs the module's ciphers, the default one and one per context, and its seal bindings for the columns of this process, replacing the whole tables an earlier registration installed, and publishes the default cipher as ServiceCipher. A config outside the rules on ModuleConfig and CommandContextConfig panics naming the field. */
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
     instance.validateConfig()
 
-    /* registered first, so a second module with a Cipher, which the container refuses, installs nothing */
     if nil != instance.config.Cipher {
         cipher := instance.config.Cipher
         registrar.RegisterService(
@@ -77,21 +76,22 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
         )
     }
 
+    ciphers := make(map[string]Cipher, len(instance.config.Contexts)+1)
     for _, contextConfig := range instance.config.Contexts {
-        storeCipher(contextConfig.Name, contextConfig.Cipher)
+        ciphers[contextConfig.Name] = contextConfig.Cipher
     }
 
     if nil != instance.config.Cipher {
-        storeCipher(defaultCipherName, instance.config.Cipher)
+        ciphers[defaultCipherName] = instance.config.Cipher
     }
 
+    bindings := make(map[reflect.Type]sealBinding, len(instance.config.SealBindings))
     for _, bindingConfig := range instance.config.SealBindings {
         marker := reflect.TypeOf(bindingConfig.Ref)
-        storeSealBinding(
-            marker,
-            sealBinding{label: reflect.Zero(marker).Interface().(SealBindingRef).SealBinding(), refuseUnbound: bindingConfig.RefuseUnbound},
-        )
+        bindings[marker] = sealBinding{label: reflect.Zero(marker).Interface().(SealBindingRef).SealBinding(), refuseUnbound: bindingConfig.RefuseUnbound}
     }
+
+    replaceRegistries(ciphers, bindings)
 }
 
 func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
