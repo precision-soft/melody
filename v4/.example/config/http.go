@@ -81,7 +81,14 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     secondFactorBudgetLogger, _ := melodylogging.LoggerFromResolver(kernelInstance.Context(), kernelInstance.ServiceContainer())
 
     /* the sign-in door is declared in RegisterSecurity, before the kernel-built parts of its chain exist, so they are handed over here */
-    instance.loginDoorAuthenticator.Bind(instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard, secondFactorBudgetLogger))
+    loginAuthentication := instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard, secondFactorBudgetLogger)
+    instance.loginDoorAuthenticator.Bind(loginAuthentication)
+
+    /* handed over as the interface only when there is one, so a sign-in without a budget is no typed nil behind it */
+    var secondFactorBudget handlertwofactor.FactorBudget
+    if budget := loginAuthentication.Budget(); nil != budget {
+        secondFactorBudget = budget
+    }
 
     router.HandleWithOptions(route.RoutesPattern, handler.RoutesHandler(), frontendRoute(route.RoutesName, "GET"))
     router.HandleWithOptions(route.CataloguePagePattern, handler.CataloguePageHandler(), frontendRoute(route.CataloguePageName, "GET"))
@@ -90,10 +97,10 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleWithOptions(route.InternalWhoamiPattern, handlerinternalauth.WhoamiHandler(), melodyhttp.RouteOptions{Name: route.InternalWhoamiName, Methods: []string{"POST"}})
 
-    /* the two doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts. The verification door, and the enrollment door when it replaces an enrollment, burn an accepted code in the memory the sign-in reads, so a code is spent once across all three. */
+    /* the two doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts. The verification door, and the enrollment door when it replaces an enrollment, burn an accepted code in the memory the sign-in reads, so a code is spent once across all three, and count every presented factor against the account's budget the sign-in spends. */
     if true == instance.catalogueWired {
-        router.HandleWithOptions("/twofactor/enroll", handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard), melodyhttp.RouteOptions{Name: "example.twofactor.enroll", Methods: []string{"POST"}})
-        router.HandleWithOptions("/twofactor/verify", handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard), melodyhttp.RouteOptions{Name: "example.twofactor.verify", Methods: []string{"POST"}})
+        router.HandleWithOptions("/twofactor/enroll", handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), melodyhttp.RouteOptions{Name: "example.twofactor.enroll", Methods: []string{"POST"}})
+        router.HandleWithOptions("/twofactor/verify", handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), melodyhttp.RouteOptions{Name: "example.twofactor.verify", Methods: []string{"POST"}})
     }
 
     /* the outbox handlers hold container.Lazy handles built at route-registration time: the store and relay services (provided by the outbox module's factories, see configure.go) are resolved at the first request, so registering the routes never touches the outbox schema or the transport. */

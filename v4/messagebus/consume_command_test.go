@@ -154,6 +154,43 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
     }
 }
 
+func TestConsume_AMessageExhaustedOnTheFailureTransportItselfIsNotSentBackToIt(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    failure := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
+
+    exhausted := NewEnvelope(consumeTestMessage{Value: 7}, []messagebuscontract.Stamp{RedeliveryStamp{Count: 2}})
+    if sendErr := failure.Send(runtimeInstance, exhausted); nil != sendErr {
+        t.Fatalf("unexpected send error: %v", sendErr)
+    }
+
+    var attempts int
+    locator := NewHandlerLocator()
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        attempts++
+        return exception.NewError("handler always fails", nil, nil)
+    })
+
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
+    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{Retry: RetryPolicy{MaxRetries: bound.Of(2), FailureTransport: failure, BaseDelay: bound.Of(time.Millisecond), MaxDeadLetterAttempts: bound.UnlimitedCount()}})
+
+    if consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, failure, 1, 1); nil != consumeErr {
+        t.Fatalf("unexpected consume error: %v", consumeErr)
+    }
+
+    if 1 != attempts {
+        t.Fatalf("expected the exhausted message handled once and not cycled through its own transport, got %d attempts", attempts)
+    }
+
+    failureQueue, _ := failure.Receive(runtimeInstance)
+    select {
+    case leftover := <-failureQueue:
+        t.Fatalf("expected the message not sent back to the failure transport, found %v", leftover.Message())
+    default:
+    }
+}
+
 func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)

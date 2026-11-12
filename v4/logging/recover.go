@@ -324,7 +324,20 @@ func runExitStepShieldedWithin(budget time.Duration, stepName string, step func(
         return stepCompleted
 
     case <-budgetExpired:
-        _, _ = fmt.Fprintf(os.Stderr, "melody: %s did not return within %s during the exit handler; abandoning it\n", stepName, budget)
+        /* echoed beside the wait, so a stderr nobody drains cannot hold the exit the abandonment exists for */
+        echoDone := make(chan struct{})
+
+        go func() {
+            defer close(echoDone)
+
+            _, _ = fmt.Fprintf(os.Stderr, "melody: %s did not return within %s during the exit handler; abandoning it\n", stepName, budget)
+        }()
+
+        select {
+        case <-echoDone:
+
+        case <-time.After(exitStepBudget):
+        }
 
         return false
     }

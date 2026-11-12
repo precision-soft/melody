@@ -4,8 +4,6 @@ import (
     "context"
     "fmt"
     "sort"
-    "strconv"
-    "strings"
 
     "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
@@ -244,7 +242,7 @@ func (instance *Manager) GetCounter(key string) (int64, bool, error) {
         return 0, false, nil
     }
 
-    parsedValue, parseErr := strconv.ParseInt(strings.TrimSpace(string(payload)), 10, 64)
+    parsedValue, parseErr := parseCanonicalCounterPayload(string(payload))
     if nil != parseErr {
         return 0, false, exception.NewError(
             "cache value is not a valid int64",

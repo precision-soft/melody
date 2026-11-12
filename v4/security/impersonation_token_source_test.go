@@ -570,3 +570,13 @@ func TestImpersonation_ConcurrentBindsAgreeOnOneWinner(t *testing.T) {
         t.Fatalf("expected exactly one of the different hierarchies bound, got %d", admitted)
     }
 }
+
+func TestNewImpersonationTokenSource_RefusesAnUnknownRoleMode(t *testing.T) {
+    expectPanicNamingField(t, "ImpersonationTokenSourceConfig.RoleMode", func() {
+        NewImpersonationTokenSource(ImpersonationTokenSourceConfig{
+            Inner:    &fixedTokenSource{token: NewAnonymousToken()},
+            Users:    &mapUserResolver{},
+            RoleMode: ImpersonationRoleMode(7),
+        })
+    })
+}

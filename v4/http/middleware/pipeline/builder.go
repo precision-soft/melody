@@ -340,8 +340,8 @@ func isEnabledForGroup(definition *HttpMiddlewareDefinition, group string) bool 
         return true
     }
 
-    for _, g := range definition.Groups {
-        if g == group {
+    for _, definitionGroup := range definition.Groups {
+        if definitionGroup == group {
             return true
         }
     }
@@ -701,16 +701,16 @@ func uniqueSorted(values []string) []string {
     }
 
     unique := make(map[string]struct{})
-    for _, v := range values {
-        if "" == v {
+    for _, value := range values {
+        if "" == value {
             continue
         }
-        unique[v] = struct{}{}
+        unique[value] = struct{}{}
     }
 
     result := make([]string, 0, len(unique))
-    for k := range unique {
-        result = append(result, k)
+    for uniqueValue := range unique {
+        result = append(result, uniqueValue)
     }
 
     sort.Strings(result)

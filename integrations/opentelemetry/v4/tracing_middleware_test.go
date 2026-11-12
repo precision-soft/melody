@@ -1,6 +1,7 @@
 package opentelemetry
 
 import (
+    "context"
     "errors"
     "io"
     nethttp "net/http"
@@ -12,9 +13,11 @@ import (
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
     "go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+    "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/runtime"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "go.opentelemetry.io/otel/codes"
 )
@@ -301,5 +304,52 @@ func TestTracingMiddleware_RecordsTheStatusAHandlerCommitsDirectly(t *testing.T)
                 t.Fatalf("expected the span in error only for a server status, got %v for %d", spans[0].Status().Code, scenario.expected)
             }
         })
+    }
+}
+
+func TestTracingMiddleware_ASpanAlreadyInTheContextStaysTheParentOverATraceparentHeader(t *testing.T) {
+    recorder := tracetest.NewSpanRecorder()
+    provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+    tracer := provider.Tracer("melody-test")
+
+    lifecycleContext, lifecycleSpan := tracer.Start(context.Background(), "lifecycle")
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.New(lifecycleContext, serviceContainer.NewScope(), serviceContainer)
+
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/orders/42", nil)
+    httpRequest.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
+
+    if _, handlerErr := NewTracingMiddleware(tracer, nil)(okHandler())(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
+        t.Fatalf("handler: %v", handlerErr)
+    }
+
+    lifecycleSpan.End()
+
+    spans := recorder.Ended()
+    if 2 != len(spans) {
+        t.Fatalf("expected the middleware span and the lifecycle span, got %d", len(spans))
+    }
+
+    if lifecycleSpan.SpanContext().SpanID() != spans[0].Parent().SpanID() {
+        t.Fatalf("expected the middleware span to be the child of the span in the context, got parent %s", spans[0].Parent().SpanID())
+    }
+}
+
+func TestTracingMiddleware_ATraceparentHeaderIsTheParentWhenTheContextHoldsNoSpan(t *testing.T) {
+    recorder := tracetest.NewSpanRecorder()
+    tracer := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)).Tracer("melody-test")
+
+    request, runtimeInstance := testRequestAndRuntime()
+    request.HttpRequest().Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+
+    if _, handlerErr := NewTracingMiddleware(tracer, nil)(okHandler())(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
+        t.Fatalf("handler: %v", handlerErr)
+    }
+
+    spans := recorder.Ended()
+    if 1 != len(spans) || "00f067aa0ba902b7" != spans[0].Parent().SpanID().String() {
+        t.Fatalf("expected the remote span as the parent, got %v", spans)
     }
 }

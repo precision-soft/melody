@@ -4,6 +4,12 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
+type AuthorizationDeniedEvent struct {
+    request    httpcontract.Request
+    attributes []string
+    err        error
+}
+
 func NewAuthorizationDeniedEvent(request httpcontract.Request, attributes []string, err error) *AuthorizationDeniedEvent {
     return &AuthorizationDeniedEvent{
         request:    request,

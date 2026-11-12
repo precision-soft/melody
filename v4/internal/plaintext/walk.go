@@ -144,10 +144,23 @@ func isComposite(reflected reflect.Value) bool {
     return layoutScalar != layout(reflected)
 }
 
+/* methodCandidate answers the value whose methods the walk reads: the pointer to an addressable value, as encoding/json reads a field of a struct behind a pointer or an element of a list, so a method declared on the pointer receiver is not walked past. */
+func methodCandidate(reflected reflect.Value) (any, bool) {
+    if false == reflected.IsValid() || false == reflected.CanInterface() {
+        return nil, false
+    }
+
+    if reflect.Pointer != reflected.Kind() && reflect.Interface != reflected.Kind() && true == reflected.CanAddr() {
+        return reflected.Addr().Interface(), true
+    }
+
+    return reflected.Interface(), true
+}
+
 /* methodText answers the text a value gives itself, in the order the walk reads it: an error's message, an encoding.TextMarshaler's text, a fmt.Stringer's text, then a string as it is; a json.Marshaler is read before it, by resolve. The method of a value read through an unexported field is not called. A MarshalText that fails panics with its error. */
 func methodText(reflected reflect.Value) (string, bool) {
-    if true == reflected.CanInterface() {
-        switch typedValue := reflected.Interface().(type) {
+    if candidate, readable := methodCandidate(reflected); true == readable {
+        switch typedValue := candidate.(type) {
         case error:
             return typedValue.Error(), true
         case encoding.TextMarshaler:
@@ -171,11 +184,11 @@ func methodText(reflected reflect.Value) (string, bool) {
 
 /* jsonMarshaler answers the marshaler of a value that writes its own json and is not an error, whose message the walk reads first */
 func jsonMarshaler(reflected reflect.Value) (json.Marshaler, bool) {
-    if false == reflected.CanInterface() {
+    candidate, readable := methodCandidate(reflected)
+    if false == readable {
         return nil, false
     }
 
-    candidate := reflected.Interface()
     if _, isError := candidate.(error); true == isError {
         return nil, false
     }
@@ -215,11 +228,12 @@ func (instance *Walk) resolve(value reflect.Value, depth int) (reflect.Value, in
 
 /* hasOwnForm answers whether a value writes itself, so the walk stops following a pointer at it */
 func hasOwnForm(reflected reflect.Value) bool {
-    if false == reflected.CanInterface() {
+    candidate, readable := methodCandidate(reflected)
+    if false == readable {
         return false
     }
 
-    switch reflected.Interface().(type) {
+    switch candidate.(type) {
     case error, encoding.TextMarshaler, fmt.Stringer, json.Marshaler:
         return true
     }

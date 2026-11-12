@@ -1753,3 +1753,66 @@ func TestCompressionMiddleware_CompressesAnAnonymousResponse(t *testing.T) {
         t.Fatalf("expected an anonymous response compressed, another cookie beside it")
     }
 }
+
+func compressionTestResponse(headers map[string]string) httpcontract.Handler {
+    return func(
+        runtimeInstance runtimecontract.Runtime,
+        writer nethttp.ResponseWriter,
+        request httpcontract.Request,
+    ) (httpcontract.Response, error) {
+        response := &http.Response{}
+        response.SetStatusCode(nethttp.StatusOK)
+        responseHeaders := make(nethttp.Header)
+        responseHeaders.Set("Content-Type", "text/plain")
+        for name, value := range headers {
+            responseHeaders.Set(name, value)
+        }
+        response.SetHeaders(responseHeaders)
+        response.SetBodyReader(bytes.NewReader([]byte(strings.Repeat("melody ", 200))))
+
+        return response, nil
+    }
+}
+
+func TestCompressionMiddleware_LeavesAPartialResponseUncompressed(t *testing.T) {
+    handler := CompressionMiddleware(CompressionConfig{MinSize: bound.Of(10)})(compressionTestResponse(map[string]string{"Content-Range": "bytes 0-1399/5000"}))
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+    request.Header.Set("Accept-Encoding", "gzip")
+
+    resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if "" != resultResponse.Headers().Get("Content-Encoding") {
+        t.Fatalf("expected the ranged body left as identity, got Content-Encoding %q", resultResponse.Headers().Get("Content-Encoding"))
+    }
+}
+
+func TestCompressionMiddleware_WeakensAStrongEntityTagOfACompressedResponse(t *testing.T) {
+    for declared, expected := range map[string]string{
+        `"v1"`:   `W/"v1"`,
+        `W/"v1"`: `W/"v1"`,
+    } {
+        handler := CompressionMiddleware(CompressionConfig{MinSize: bound.Of(10)})(compressionTestResponse(map[string]string{"ETag": declared}))
+
+        request := httptest.NewRequest(nethttp.MethodGet, "/", nil)
+        request.Header.Set("Accept-Encoding", "gzip")
+
+        resultResponse, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+        if nil != err {
+            t.Fatalf("unexpected error: %v", err)
+        }
+
+        if "gzip" != resultResponse.Headers().Get("Content-Encoding") {
+            t.Fatalf("expected the response compressed, got %q", resultResponse.Headers().Get("Content-Encoding"))
+        }
+
+        if expected != resultResponse.Headers().Get("ETag") {
+            t.Fatalf("expected ETag %s for %s, got %s", expected, declared, resultResponse.Headers().Get("ETag"))
+        }
+
+        _, _ = io.Copy(io.Discard, resultResponse.BodyReader())
+    }
+}

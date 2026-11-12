@@ -138,6 +138,10 @@ func (instance *LocalStorage) Put(
     /* written to a temporary object and renamed over the key once flushed, so a failed write never destroys the stored object; the rename is atomic within the pinned root */
     writeStartedAt := time.Now()
 
+    if info, statErr := root.Lstat(relativeKey); nil == statErr && true == info.IsDir() {
+        return exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, storagecontract.ErrKeyIsDirectory)
+    }
+
     tempKey, file, createErr := createStorageTempFile(root, relativeKey)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
@@ -308,7 +312,7 @@ func (instance *LocalStorage) Get(
     }
     defer root.Close()
 
-    /* opened non-blocking, so a named pipe or a device under the key answers at once and is refused below, where a blocking open of a pipe waited for a writer forever */
+    /* opened non-blocking, so a named pipe or a device under the key answers at once and is refused below; a blocking open of a pipe waits for a writer forever */
     file, openErr := root.OpenFile(relativeKey, os.O_RDONLY|syscall.O_NONBLOCK, 0)
     if nil != openErr {
         return nil, exception.NewError("could not open the storage object", map[string]any{"key": key}, openErr)

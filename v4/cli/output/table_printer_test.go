@@ -762,3 +762,11 @@ func TestTablePrinter_MeasuresAMultiLineColumnHeaderByItsWidestLine(t *testing.T
         t.Fatalf("expected the multi-line header measured by its widest line (5), got %q", separator)
     }
 }
+
+func TestTablePrinter_ACellOfOneColumnWidthStillBreaksAtItsNewlines(t *testing.T) {
+    lines := (&TablePrinter{}).wrapCellValue("1\r\n2\n3", 1)
+
+    if 3 != len(lines) || "1" != lines[0] || "2" != lines[1] || "3" != lines[2] {
+        t.Fatalf("expected one line per newline, got %q", lines)
+    }
+}

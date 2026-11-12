@@ -280,7 +280,7 @@ func (instance *jsonLogger) Emergency(message string, context loggingcontract.Co
     instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
-/* CloseWithContext takes the lock the writes take, since a goroutine outliving the teardown can still be inside Write; the writer's close takes no context. The process console, recognized by identity as os.Stdout or os.Stderr, is left open, and the flag is set only where the writer was really closed. */
+/* CloseWithContext takes the lock the writes take, since a goroutine outliving the teardown can still be inside Write; a writer carrying CloseWithContext is closed under the context, any other through Close. The process console, recognized by identity as os.Stdout or os.Stderr, is left open, and the flag is set only where the writer was really closed. */
 func (instance *jsonLogger) CloseWithContext(closeContext context.Context) error {
     instance.writeMutex.Lock()
     defer instance.writeMutex.Unlock()
@@ -299,6 +299,13 @@ func (instance *jsonLogger) CloseWithContext(closeContext context.Context) error
     }
 
     instance.closed.Store(true)
+
+    /* a writer that bounds its own close, the reopenable file writer joining its watcher, is closed under the teardown's deadline */
+    if contextCloser, isContextCloser := instance.output.(interface {
+        CloseWithContext(closeContext context.Context) error
+    }); true == isContextCloser && nil != closeContext {
+        return contextCloser.CloseWithContext(closeContext)
+    }
 
     return closer.Close()
 }

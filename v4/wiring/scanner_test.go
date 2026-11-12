@@ -679,3 +679,39 @@ func TestScan_RefusesANilPackageBinding(t *testing.T) {
         t.Fatalf("expected the refusal to name the missing binding, got %q", scanErr.Error())
     }
 }
+
+func TestScan_RefusesADirectiveDetachedFromItsConstructor(t *testing.T) {
+    for name, source := range map[string]string{
+        "a blank line under the directive": "package domain\n\n//melody:scoped\n\nfunc NewDetached() *Detached {\n    return &Detached{}\n}\n\ntype Detached struct {\n}\n",
+        "a directive above the doc comment": "package domain\n\n//melody:ignore\n\n/* NewDetached builds one. */\nfunc NewDetached() *Detached {\n    return &Detached{}\n}\n\ntype Detached struct {\n}\n",
+        "a directive inside the body":      "package domain\n\nfunc NewDetached() *Detached {\n    //melody:service ServiceDetached\n    return &Detached{}\n}\n\ntype Detached struct {\n}\n",
+    } {
+        projectDirectory := t.TempDir()
+
+        writeFixtureFile(t, projectDirectory, "domain/service.go", source)
+
+        _, scanErr := Scan(ScanRequest{ProjectDirectory: projectDirectory, PackageBinding: NewBindSet().Package("github.com/acme/app/domain", "domain")})
+
+        var directiveErr *exception.Error
+        if false == errors.As(errors.Unwrap(scanErr), &directiveErr) || false == strings.Contains(directiveErr.Error(), "attached to no function") {
+            t.Fatalf("expected %s refused, got %v", name, scanErr)
+        }
+    }
+}
+
+func TestScan_SkipsANestedModule(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    writeFixtureFile(t, projectDirectory, "domain/service.go", "package domain\n\nfunc NewKept() *Kept {\n    return &Kept{}\n}\n\ntype Kept struct {\n}\n")
+    writeFixtureFile(t, projectDirectory, "domain/tool/go.mod", "module github.com/acme/tool\n")
+    writeFixtureFile(t, projectDirectory, "domain/tool/service.go", "package tool\n\nfunc NewForeign() *Foreign {\n    return &Foreign{}\n}\n\ntype Foreign struct {\n}\n")
+
+    scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: projectDirectory, PackageBinding: NewBindSet().Package("github.com/acme/app/domain", "domain")})
+    if nil != scanErr {
+        t.Fatalf("unexpected scan error: %v", scanErr)
+    }
+
+    if nil == constructorByName(scanResult, "NewKept") || nil != constructorByName(scanResult, "NewForeign") {
+        t.Fatalf("expected the nested module left out, got %v", scanResult.Constructors)
+    }
+}

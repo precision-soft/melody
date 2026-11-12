@@ -1161,3 +1161,27 @@ func TestConfigurationSessionEmptyOnOutageIsASwitch(t *testing.T) {
         t.Fatalf("expected the value refused naming the key, got %v", configurationErr)
     }
 }
+
+func TestConfigurationStaticEnableCacheReadsAnEmptyLineAsUnset(t *testing.T) {
+    for value, expected := range map[string]bool{
+        "":      true,
+        "  ":    true,
+        "true":  true,
+        "false": false,
+    } {
+        configuration := newTeardownTimeoutConfiguration(t, map[string]string{StaticEnableCacheKey: value})
+        if expected != configuration.Http().StaticEnableCache() {
+            t.Fatalf("expected %q read as %v, got %v", value, expected, configuration.Http().StaticEnableCache())
+        }
+    }
+
+    environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: map[string]string{StaticEnableCacheKey: "maybe"}})
+    if nil != environmentErr {
+        t.Fatalf("new environment error: %v", environmentErr)
+    }
+
+    _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    if nil == configurationErr || StaticEnableCacheKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
+        t.Fatalf("expected the value refused naming the key, got %v", configurationErr)
+    }
+}

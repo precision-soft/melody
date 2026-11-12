@@ -7,6 +7,8 @@ models. Go-native equivalent of a Doctrine unit-of-work audit listener.
 
 `ChangeSet(before, after)` diffs two struct values by `bun` column name, recording only changed fields (relations and `bun.BaseModel` are skipped; the exported fields of other embedded structs are flattened in, matching how bun promotes their columns). Sensitive fields are recorded as changed but masked to `<redacted>`:
 
+The `changes` column the schema helper creates is `text`, which MySQL caps at 65,535 bytes, and a change set stores the old and the new value of every changed field: an entity with a large text or json column either lists it in `IgnoredFields` or has its audit table declared by hand with `LONGTEXT`, since a strict server refuses the longer entry and a tracked write rolls back with it.
+
 - tag a field `audit:"redact"`, or
 - type it as any encrypted column type — `encrypt.EncryptedString`, `encrypt.EncryptedDeterministicString`, or the compartment-bound `encrypt.EncryptedStringFor[R]` / `EncryptedDeterministicStringFor[R]` forms — all recognised through the `encrypt.EncryptedColumn` marker interface (auto-redacted).
 

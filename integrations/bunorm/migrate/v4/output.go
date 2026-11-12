@@ -373,7 +373,7 @@ func (instance *commandOutput) printDetailsBlock(fields map[string]string) {
 
     keys := []string{"manager", "group", "applied", "status", "name"}
     for _, key := range keys {
-        if value, exists := fields[key]; exists {
+        if value, exists := fields[key]; true == exists {
             _, _ = fmt.Fprintf(instance.writer, "| %-7s | %-49s |\n", key, truncateString(escapeControlCharacters(value, false), 49))
         }
     }
@@ -427,20 +427,20 @@ func (instance *commandOutput) newline() {
     _, _ = fmt.Fprintln(instance.writer)
 }
 
-/* truncateString bounds the cell to maxLen runes, not bytes: the format widths in the blocks above pad by rune count, so a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune. A budget with no room for the ellipsis answers the clipped runes alone rather than slicing negative. */
-func truncateString(s string, maxLen int) string {
-    if 0 >= maxLen {
+/* truncateString bounds the cell to maxLength runes, not bytes: the format widths in the blocks above pad by rune count, so a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune. A budget with no room for the ellipsis answers the clipped runes alone rather than slicing negative. */
+func truncateString(value string, maxLength int) string {
+    if 0 >= maxLength {
         return ""
     }
 
-    runes := []rune(s)
-    if len(runes) <= maxLen {
-        return s
+    runes := []rune(value)
+    if len(runes) <= maxLength {
+        return value
     }
 
-    if 3 >= maxLen {
-        return string(runes[:maxLen])
+    if 3 >= maxLength {
+        return string(runes[:maxLength])
     }
 
-    return string(runes[:maxLen-3]) + "..."
+    return string(runes[:maxLength-3]) + "..."
 }

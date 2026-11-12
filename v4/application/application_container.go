@@ -279,10 +279,7 @@ func (instance *Application) bootContainer() {
 
     instance.registerHttpSession()
 
-    securityErr := instance.registerSecurity()
-    if nil != securityErr {
-        exception.Panic(exception.FromError(securityErr))
-    }
+    instance.registerSecurity()
 
     /* the logger is resolved once, eagerly, whoever registered it, so a failing provider fails the boot step that owns it instead of the first run that resolves it; the container memoizes the built logger, so the log file is opened once */
     _, loggerProbeErr := logging.LoggerFromContainer(instance.ctx, serviceContainer)
@@ -471,9 +468,9 @@ func (instance *Application) registerHttpSession() {
 }
 
 /* registerSecurity wires what a compiled security configuration means for this process. The firewall manager is registered in every mode, since it is a plain view of the configuration; the two kernel listeners are the enforcement and stay http-only. */
-func (instance *Application) registerSecurity() error {
+func (instance *Application) registerSecurity() {
     if nil == instance.securityConfiguration {
-        return nil
+        return
     }
 
     serviceContainer := instance.kernel.ServiceContainer()
@@ -489,7 +486,7 @@ func (instance *Application) registerSecurity() error {
     }
 
     if config.ModeHttp != instance.runtimeFlags.Mode() {
-        return nil
+        return
     }
 
     registry := security.NewFirewallRegistry(instance.securityConfiguration)
@@ -499,7 +496,6 @@ func (instance *Application) registerSecurity() error {
     security.RegisterKernelSecurityResolutionListener(kernelInstance, registry)
     security.RegisterKernelAccessControlListener(kernelInstance, registry)
 
-    return nil
 }
 
 /* verifyDeclaredTeardownDependencies refuses the boot when a declared teardown dependency does not name one container service — nothing, a scoped service or a type several services stand for — once every module and the framework registered and declared theirs: the waves would close the two services the declaration meant to order at once, and a wiring mistake is answered before Run rather than at the teardown. */

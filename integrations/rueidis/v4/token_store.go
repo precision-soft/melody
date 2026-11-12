@@ -400,26 +400,31 @@ func (instance *RedisTokenStore) deleteTokenBatch(indexKey string, userIdentifie
 /* PurgeExpired drops the index entries of tokens that already expired, walking every user's index set in bounded batches. A set's own expiry bounds only a set whose members all died, since an account that keeps logging in keeps raising its deadline. The outer SCAN finds the user sets, walked one at a time, and each set is pruned by its own SSCAN, the results sliced to the batch size since the count is a hint, each slice tested by one purge script under DeleteByUser's bound, so no script's hold on the server depends on the largest account; the script drops only the members whose token is gone, a live token keeping its entry. Pruning while scanning is what SSCAN tolerates: a present member is returned at least once, and a re-visit is harmless. */
 func (instance *RedisTokenStore) PurgeExpired() int {
     pruned := 0
-    cursor := uint64(0)
+    pattern := escapeRedisGlobMeta(instance.userKeyPrefix()) + "*"
 
-    for {
-        scanContext, scanCancel := instance.callContext()
-        scan, scanErr := instance.client.Do(
-            scanContext,
-            instance.client.B().Scan().Cursor(cursor).Match(escapeRedisGlobMeta(instance.userKeyPrefix())+"*").Count(int64(instance.scanCount)).Build(),
-        ).AsScanEntry()
-        scanCancel()
-        if nil != scanErr {
-            exception.Panic(exception.NewError("redis token store purge scan failed", nil, scanErr))
-        }
+    /* every node is walked on its own cursor: a cluster client routes a keyless SCAN to an arbitrary node on each call, and one node's cursor means nothing to another */
+    for _, node := range instance.client.Nodes() {
+        cursor := uint64(0)
 
-        for _, setKey := range scan.Elements {
-            pruned += instance.purgeUserIndex(setKey)
-        }
+        for {
+            scanContext, scanCancel := instance.callContext()
+            scan, scanErr := node.Do(
+                scanContext,
+                node.B().Scan().Cursor(cursor).Match(pattern).Count(int64(instance.scanCount)).Build(),
+            ).AsScanEntry()
+            scanCancel()
+            if nil != scanErr {
+                exception.Panic(exception.NewError("redis token store purge scan failed", nil, scanErr))
+            }
 
-        cursor = scan.Cursor
-        if 0 == cursor {
-            break
+            for _, setKey := range scan.Elements {
+                pruned += instance.purgeUserIndex(setKey)
+            }
+
+            cursor = scan.Cursor
+            if 0 == cursor {
+                break
+            }
         }
     }
 

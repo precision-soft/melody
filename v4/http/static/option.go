@@ -117,6 +117,19 @@ func resolveFileServerConfig(config Config) *fileServerConfig {
         mode = ModeFilesystem
     }
 
+    if ModeFilesystem != mode && ModeEmbedded != mode {
+        exception.Panic(
+            exception.NewError(
+                "the static mode is unknown",
+                exceptioncontract.Context{
+                    "field": "Config.Mode",
+                    "mode":  string(mode),
+                },
+                nil,
+            ),
+        )
+    }
+
     indexFile := config.IndexFile
     if "" == indexFile {
         indexFile = "index.html"

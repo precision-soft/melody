@@ -999,78 +999,11 @@ func sanitizeErrorContextSlice(value []any, seen map[errorContextVisitKey]struct
     return result
 }
 
-func toLowerAscii(value string) string {
-    if "" == value {
-        return ""
-    }
-
-    bytesValue := []byte(value)
-
-    for index := 0; index < len(bytesValue); index++ {
-        character := bytesValue[index]
-
-        if character >= 'A' && character <= 'Z' {
-            bytesValue[index] = character + ('a' - 'A')
-        }
-    }
-
-    return string(bytesValue)
-}
-
 /* shouldDropErrorContextKey names diagnostic noise, not secrets: stack and trace entries are dropped below full verbosity. Nothing else is redacted. */
 func shouldDropErrorContextKey(key string) bool {
-    if "trace" == key {
-        return true
-    }
-    if "stack" == key {
-        return true
-    }
-    if "stackTrace" == key {
-        return true
-    }
-    if "stacktrace" == key {
-        return true
-    }
-    if "traceString" == key {
-        return true
-    }
-    if "trace_string" == key {
-        return true
-    }
-    if "panicStack" == key {
-        return true
-    }
+    lowerKey := strings.ToLower(key)
 
-    lowerKey := toLowerAscii(key)
-
-    if true == containsSubstring(lowerKey, "trace") {
-        return true
-    }
-    if true == containsSubstring(lowerKey, "stack") {
-        return true
-    }
-
-    return false
-}
-
-func containsSubstring(value string, needle string) bool {
-    if "" == needle {
-        return true
-    }
-    if "" == value {
-        return false
-    }
-    if len(value) < len(needle) {
-        return false
-    }
-
-    for index := 0; index <= len(value)-len(needle); index++ {
-        if value[index:index+len(needle)] == needle {
-            return true
-        }
-    }
-
-    return false
+    return true == strings.Contains(lowerKey, "trace") || true == strings.Contains(lowerKey, "stack")
 }
 
 func truncateTableCellValue(value string) string {

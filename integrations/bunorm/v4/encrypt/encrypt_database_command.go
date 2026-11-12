@@ -178,6 +178,14 @@ func (instance *EncryptDatabaseCommand) Run(
         return exception.NewError("mode reencrypt requires --target-key", nil, nil)
     }
 
+    if migrateModeReencrypt != mode && "" != targetKey {
+        return exception.NewError("--target-key is read by mode reencrypt alone", map[string]any{"mode": mode}, nil)
+    }
+
+    if migrateModeDecrypt == mode && true == spec.Deterministic {
+        return exception.NewError("--deterministic is not read by mode decrypt", map[string]any{"mode": mode}, nil)
+    }
+
     sealBindings, sealBindingsErr := instance.resolveSealBindings(spec.Table, spec.Columns, commandContext.StringSlice("seal-binding"))
     if nil != sealBindingsErr {
         return sealBindingsErr
@@ -264,6 +272,12 @@ func (instance *EncryptDatabaseCommand) resolveSealBindings(table string, column
         if canonical := table + "." + column; canonical != label {
             if _, declared := instance.sealBindingsByLabel[canonical]; true == declared {
                 return nil, exception.NewError("--seal-binding names a label other than the column's own declared seal binding", map[string]any{"sealBinding": flagValue, "declared": canonical}, nil)
+            }
+        }
+
+        for boundColumn, boundLabel := range labelByColumn {
+            if label == boundLabel {
+                return nil, exception.NewError("--seal-binding names one label for two columns", map[string]any{"sealBinding": flagValue, "label": label, "column": boundColumn}, nil)
             }
         }
 

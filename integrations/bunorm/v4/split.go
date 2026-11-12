@@ -141,13 +141,22 @@ func (instance *ReadWriteSplitter) primaryInPlaceOf(readerName string, replicaEr
     return primary, nil
 }
 
-/* rememberedUnreachable answers the failure of a replica still inside its retry interval, and nil for a replica to dial */
+/* rememberedUnreachable answers the failure of a replica still inside its retry interval, and nil for a replica to dial, once per lapsed interval */
 func (instance *ReadWriteSplitter) rememberedUnreachable(replicaName string) error {
     instance.unreachableMutex.Lock()
     defer instance.unreachableMutex.Unlock()
 
     remembered, isRemembered := instance.unreachableReplicas[replicaName]
-    if false == isRemembered || instance.replicaRetryInterval <= instance.now().Sub(remembered.failedAt) {
+    if false == isRemembered {
+        return nil
+    }
+
+    now := instance.now()
+    if instance.replicaRetryInterval <= now.Sub(remembered.failedAt) {
+        /* the reader that finds the interval lapsed dials alone: the failure is dated again, so the readers beside it keep the primary instead of waiting on its open */
+        remembered.failedAt = now
+        instance.unreachableReplicas[replicaName] = remembered
+
         return nil
     }
 

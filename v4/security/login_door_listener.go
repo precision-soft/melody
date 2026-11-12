@@ -193,6 +193,8 @@ func serveLoginDoor(
         return
     }
 
+    sessionIdAtDoor := sessionInstance.Id()
+
     if false == internal.IsNilInterface(firewall.loginAuthenticator) {
         authenticatedToken, refusal := authenticateAtLoginDoor(runtimeInstance, requestEvent, firewall)
         if nil != refusal {
@@ -204,7 +206,7 @@ func serveLoginDoor(
         token = authenticatedToken
 
         /* rotated before the handler writes the identity: an id the client held before signing in must not carry it */
-        previousSessionId = sessionInstance.Id()
+        previousSessionId = sessionIdAtDoor
 
         if _, regenerateErr := http.RegenerateRequestSession(request); nil != regenerateErr {
             requestEvent.Refuse(refuseSessionErrorAtFirewallDoor(runtimeInstance, requestEvent, firewall, firewall.loginDoor.name, regenerateErr))
@@ -215,11 +217,9 @@ func serveLoginDoor(
 
     result, loginErr := firewall.Login(runtimeInstance, request, securitycontract.LoginInput{Token: token, PreviousSessionId: previousSessionId})
     if nil != loginErr {
-        /* the handler may have written the identity on the session the door rotated, and a refused sign-in must not leave it usable */
-        if "" != previousSessionId {
-            if sessionInstance, sessionErr := http.RequestSession(request); nil == sessionErr {
-                sessionInstance.Clear()
-            }
+        /* a session rotated since the door read it, by the door or by the handler, may carry the identity, and a refused sign-in must not leave it usable */
+        if currentSession, currentSessionErr := http.RequestSession(request); nil == currentSessionErr && sessionIdAtDoor != currentSession.Id() {
+            currentSession.Clear()
         }
 
         /* a handler that rotated the session itself, the door without an authenticator, meets a session outage under its own reason */

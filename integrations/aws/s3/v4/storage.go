@@ -142,7 +142,7 @@ func (instance *Storage) Put(
         normalizedKey,
         boundedPutReader(body, size),
         size,
-        minio.PutObjectOptions{ContentType: options.ContentType},
+        putObjectOptions(size, options.ContentType),
     )
     if nil != putErr {
         instance.abortOrphanedMultipartUpload(runtimeInstance.Context(), normalizedKey, size)
@@ -158,8 +158,18 @@ func (instance *Storage) Put(
     return nil
 }
 
-/* minioPartSize is minio's part size for every put, since the storage sets none: a body of a known size below it goes up as one request, anything else multipart */
+/* minioPartSize is the part size of every put: minio's own for a body of a known size, which goes up as one request below it and multipart above, and the one the storage names for a body of unknown size */
 const minioPartSize = 16 * 1024 * 1024
+
+/* putObjectOptions names the part size of a body of unknown size: left to minio, it is sized for the largest object s3 holds, one buffer of about 528 MiB a put, where a named part bounds the buffer and the object at ten thousand parts of it. */
+func putObjectOptions(size int64, contentType string) minio.PutObjectOptions {
+    options := minio.PutObjectOptions{ContentType: contentType}
+    if 0 > size {
+        options.PartSize = minioPartSize
+    }
+
+    return options
+}
 
 /* abortOrphanedMultipartUpload removes the multipart upload a failed Put leaves behind when the request context killed it: minio aborts on that same context, already cancelled, so the abort runs on a detached context under StorageConfig.MultipartAbortTimeout. Only a multipart body can leave anything behind, and a live request context needs nothing. The abort is addressed by key, since minio never hands back the upload id, so a concurrent upload of the same key is aborted too; a failed abort is not reported. */
 func (instance *Storage) abortOrphanedMultipartUpload(ctx context.Context, normalizedKey string, size int64) {

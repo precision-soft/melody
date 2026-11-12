@@ -407,3 +407,45 @@ func TestGeneratePath_ASingleSegmentWildcardSuppliedEmptyTakesTheDefaultOrIsRefu
         t.Fatalf("expected the default to fill the empty wildcard, got %q", pathValue)
     }
 }
+
+func TestGeneratePath_RefusesAPathTheKernelWouldRefuseAsNonCanonical(t *testing.T) {
+    routeRegistry := NewRouteRegistry()
+    router := NewRouterWithRouteRegistry(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry)
+
+    handler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return EmptyResponse(200), nil
+    }
+    router.HandleWithOptions("/file/:name", handler, RouteOptions{Name: "file", Methods: []string{nethttp.MethodGet}})
+    router.HandleWithOptions("/tree/*rest...", handler, RouteOptions{Name: "tree", Methods: []string{nethttp.MethodGet}})
+
+    for _, testCase := range []struct {
+        routeName string
+        params    map[string]string
+    }{
+        {"file", map[string]string{"name": ".."}},
+        {"file", map[string]string{"name": "."}},
+        {"file", map[string]string{"name": "report "}},
+        {"tree", map[string]string{"rest": "a/../b"}},
+    } {
+        generated, err := urlGenerator.GeneratePath(testCase.routeName, testCase.params)
+        if nil == err || false == strings.Contains(err.Error(), "not one the router serves") {
+            t.Fatalf("expected %v refused as a path the router does not serve, generated %q, error %v", testCase.params, generated, err)
+        }
+    }
+
+    for _, testCase := range []struct {
+        routeName string
+        params    map[string]string
+        path      string
+    }{
+        {"file", map[string]string{"name": "a b"}, "/file/a%20b"},
+        {"file", map[string]string{"name": "..report"}, "/file/..report"},
+        {"tree", map[string]string{"rest": "a/b"}, "/tree/a/b"},
+    } {
+        generated, err := urlGenerator.GeneratePath(testCase.routeName, testCase.params)
+        if nil != err || testCase.path != generated {
+            t.Fatalf("expected %q, got %q, error %v", testCase.path, generated, err)
+        }
+    }
+}

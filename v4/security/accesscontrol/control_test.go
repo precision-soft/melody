@@ -1,6 +1,7 @@
 package accesscontrol
 
 import (
+    "strings"
     "testing"
 )
 
@@ -38,5 +39,54 @@ func TestControl_MatchRuleAnswersTheRuleMatchRuleIndexResolves(t *testing.T) {
     _, unmatchedIndex, unmatched := control.MatchRule("/elsewhere")
     if true == unmatched || -1 != unmatchedIndex {
         t.Fatalf("expected no rule to claim an unclaimed path, got index %d (%t)", unmatchedIndex, unmatched)
+    }
+}
+
+func TestNewControl_RefusesARegexRuleBesideARootPrefixRule(t *testing.T) {
+    regexRule := NewRegexRule("^/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
+
+    for name, rootRule := range map[string]Rule{
+        "segment prefix": NewSegmentPrefixRule("/", RuleConfig{Attributes: []string{"ROLE_USER"}}),
+        "raw prefix":     NewRawPrefixRule("/", RuleConfig{Attributes: []string{"ROLE_USER"}}),
+    } {
+        for order, rules := range map[string][]Rule{
+            "prefix first": {rootRule, regexRule},
+            "regex first":  {regexRule, rootRule},
+        } {
+            t.Run(name+", "+order, func(t *testing.T) {
+                defer func() {
+                    recovered := recover()
+                    if nil == recovered {
+                        t.Fatalf("expected the regex rule beside the root prefix to be refused")
+                    }
+
+                    recoveredErr, isError := recovered.(error)
+                    if false == isError || false == strings.Contains(recoveredErr.Error(), "never decides") {
+                        t.Fatalf("expected the refusal to say the regex never decides, got %v", recovered)
+                    }
+                }()
+
+                _ = NewControl(rules)
+            })
+        }
+    }
+}
+
+func TestNewControl_AdmitsARegexRuleBesideTheOtherCatchAlls(t *testing.T) {
+    regexRule := NewRegexRule("^/admin", RuleConfig{Attributes: []string{"ROLE_ADMIN"}})
+
+    for name, neighbour := range map[string]Rule{
+        "empty raw prefix": NewRawPrefixRule("", RuleConfig{Attributes: []string{"ROLE_USER"}}),
+        "exact root":       NewExactRule("/", RuleConfig{Attributes: []string{"ROLE_USER"}}),
+        "deeper prefix":    NewSegmentPrefixRule("/api", RuleConfig{Attributes: []string{"ROLE_USER"}}),
+    } {
+        t.Run(name, func(t *testing.T) {
+            control := NewControl([]Rule{neighbour, regexRule})
+
+            attributes, matched := control.Match("/admin/users")
+            if false == matched || 1 != len(attributes) || "ROLE_ADMIN" != attributes[0] {
+                t.Fatalf("expected the regex rule to decide /admin/users, got %v %v", attributes, matched)
+            }
+        })
     }
 }

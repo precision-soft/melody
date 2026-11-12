@@ -938,3 +938,23 @@ func TestLocalStorage_ATempLostOnAShortWriteIsNotBlamedOnTheSweep(t *testing.T) 
         t.Fatalf("expected a short write not to blame the stale sweep, got %v", putErr)
     }
 }
+
+func TestLocalStorage_Put_RefusesADirectoryKeyWithItsCause(t *testing.T) {
+    local := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
+    runtimeInstance := testRuntime()
+
+    if putErr := local.Put(runtimeInstance, "subdir/file.txt", strings.NewReader("x"), 1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    putErr := local.Put(runtimeInstance, "subdir", strings.NewReader("y"), 1, storagecontract.PutOptions{})
+    if false == exception.ChainIs(putErr, storagecontract.ErrKeyIsDirectory) {
+        t.Fatalf("expected the refusal to carry ErrKeyIsDirectory, got %v", putErr)
+    }
+
+    reader, getErr := local.Get(runtimeInstance, "subdir/file.txt")
+    if nil != getErr {
+        t.Fatalf("expected the object under the prefix kept, got %v", getErr)
+    }
+    _ = reader.Close()
+}

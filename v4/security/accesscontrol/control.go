@@ -26,9 +26,47 @@ func NewControl(rules []Rule) *Control {
         }
     }
 
+    refuseRegexBesideRootPrefix(rules)
+
     return &Control{
         rules: append([]Rule{}, rules...),
     }
+}
+
+/* refuseRegexBesideRootPrefix refuses a regex rule in a control that holds a "/" prefix rule: every prefix beats every regex and "/" claims every path, so the regex would never decide. */
+func refuseRegexBesideRootPrefix(rules []Rule) {
+    rootPrefixIndex := -1
+    regexIndex := -1
+
+    for ruleIndex, rule := range rules {
+        if true == rule.isRegex {
+            if -1 == regexIndex {
+                regexIndex = ruleIndex
+            }
+
+            continue
+        }
+
+        if false == rule.isExact && "/" == rule.pathPrefix && -1 == rootPrefixIndex {
+            rootPrefixIndex = ruleIndex
+        }
+    }
+
+    if -1 == rootPrefixIndex || -1 == regexIndex {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "access control regex rule never decides beside a \"/\" prefix rule; declare the catch-all as the empty raw prefix or as a last \"^/\" regex rule",
+            map[string]any{
+                "ruleIndex":       regexIndex,
+                "pattern":         rules[regexIndex].regexPattern,
+                "prefixRuleIndex": rootPrefixIndex,
+            },
+            nil,
+        ),
+    )
 }
 
 /* Rules answers a copy of the rules the control was built with, in declaration order. */

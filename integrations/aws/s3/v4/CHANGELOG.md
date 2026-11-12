@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `storage.go`: `Put` of a body of unknown size, a negative `size`, names a part size of 16 MiB, where the part size was left to the client, which sizes it for the largest object s3 holds and allocated a buffer of about 528 MiB for every such put; an object put this way is bounded at ten thousand parts, 160 GiB.
 - `plaintext_endpoint.go`: the plaintext endpoint warning names `Config.Insecure`, where it told the reader to set `Secure`, a field the fourth major no longer has.
 - `plaintext_endpoint.go`: the plaintext endpoint warning is written once per endpoint host per process, where each storage over the same client wrote its own, so an application registering the module and building a storage of its own over one client wrote it twice.
 - storage: an upload body's read error whose `Unwrap` chain reaches itself no longer holds the goroutine that checks the body's end.

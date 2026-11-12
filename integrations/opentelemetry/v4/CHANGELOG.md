@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `tracing_middleware.go`: a span already in the request's context, the lifecycle span of `NewHandlerDecorator`, stays the parent of the middleware's span, where a request carrying `traceparent` had the remote span extracted over it and the two spans became siblings.
 - metrics: a handler's error whose `Unwrap` chain reaches itself no longer holds the request in the status classification, and a writer's flush or hijack failure of that shape no longer holds the response writer.
 
 ### Security

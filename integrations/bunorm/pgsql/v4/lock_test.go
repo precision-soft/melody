@@ -5,6 +5,7 @@ import (
     "database/sql"
     "errors"
     "os"
+    "strings"
     "testing"
     "time"
 
@@ -424,5 +425,19 @@ func TestPgsqlLock_ANilOrTypedNilRuntimeReleasesOnTheLockersBudget(t *testing.T)
 func TestLocker_DeclaresNoLeaseMarkSoASessionGateIsAdmitted(t *testing.T) {
     if _, isLeaseLocker := any(&Locker{}).(lockcontract.LeaseLocker); true == isLeaseLocker {
         t.Fatalf("expected a session-style locker not to declare the lease mark")
+    }
+}
+
+func TestPgsqlLock_AnUnlockTheServerAnswersFalseIsAnErrorAndEndsTheSession(t *testing.T) {
+    connector := &releaseRecordingConnector{unlockAnswersFalse: true}
+    lock, _ := acquireOnTheRecordingDouble(t, connector, LockerConfig{})
+
+    releaseErr := lock.Release(newReleaseRuntime(context.Background()))
+    if nil == releaseErr || nil == errors.Unwrap(releaseErr) || false == strings.Contains(errors.Unwrap(releaseErr).Error(), "does not hold the lock") {
+        t.Fatalf("expected the release refused as a lock this session does not hold, got %v", releaseErr)
+    }
+
+    if _, closes, releases := connector.counts(); 1 != releases || 1 != closes {
+        t.Fatalf("expected one unlock and the session ended, got %d unlocks and %d closes", releases, closes)
     }
 }

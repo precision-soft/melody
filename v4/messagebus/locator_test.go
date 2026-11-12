@@ -55,3 +55,14 @@ func TestFunctionHandler_RefusesANilMessageWithoutPanicking(t *testing.T) {
         t.Fatalf("expected the actual type spelled <nil>, got %v", melodyErr.Context())
     }
 }
+
+func TestRegisterHandler_RefusesANilHandlerFunction(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError || "message handler function is nil" != recoveredErr.Error() {
+            t.Fatalf("expected the nil handler refused at registration, got %v", recoveredErr)
+        }
+    }()
+
+    RegisterHandler[consumeTestMessage](NewHandlerLocator(), nil)
+}

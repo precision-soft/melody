@@ -247,12 +247,12 @@ func (instance *EventDispatcherAdapter) RegisteredEvents() []eventcontract.Regis
         /* equal priorities break the tie by the wrapped dispatcher's listener id, as dispatch does; an adapter-side counter is issued under another lock and could report an order dispatch never uses */
         sort.SliceStable(
             listenerList,
-            func(i int, j int) bool {
-                if listenerList[i].priority == listenerList[j].priority {
-                    return listenerList[i].registration.ListenerId < listenerList[j].registration.ListenerId
+            func(leftIndex int, rightIndex int) bool {
+                if listenerList[leftIndex].priority == listenerList[rightIndex].priority {
+                    return listenerList[leftIndex].registration.ListenerId < listenerList[rightIndex].registration.ListenerId
                 }
 
-                return listenerList[i].priority > listenerList[j].priority
+                return listenerList[leftIndex].priority > listenerList[rightIndex].priority
             },
         )
 

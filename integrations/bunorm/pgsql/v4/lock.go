@@ -215,13 +215,22 @@ func releaseContextFor(runtimeInstance runtimecontract.Runtime, releaseTimeout t
     return context.WithDeadline(base, deadline)
 }
 
-/* releaseLockedConnection releases the advisory lock on the release context and returns the connection to the pool; when pg_advisory_unlock cannot be issued the session is ended instead, which releases every advisory lock server-side. It returns the unlock error, or else the pool-return error. */
+/* releaseLockedConnection releases the advisory lock on the release context and returns the connection to the pool; when pg_advisory_unlock cannot be issued the session is ended instead, which releases every advisory lock server-side, and so it is when the server answers that the session does not hold the lock. It returns the unlock error, that refusal, or else the pool-return error. */
 func releaseLockedConnection(releaseCtx context.Context, connection *sql.Conn, keyHigh int32, keyLow int32) error {
-    _, unlockErr := connection.ExecContext(releaseCtx, "SELECT pg_advisory_unlock($1, $2)", keyHigh, keyLow)
+    released := false
+
+    unlockErr := connection.QueryRowContext(releaseCtx, "SELECT pg_advisory_unlock($1, $2)", keyHigh, keyLow).Scan(&released)
     if nil != unlockErr {
         discardConnection(connection)
 
         return unlockErr
+    }
+
+    /* false is a session that does not hold the lock, a pooler having routed the unlock elsewhere: the session is ended rather than returned, so whatever it holds is freed with it */
+    if false == released {
+        discardConnection(connection)
+
+        return exception.NewError("pgsql advisory unlock answered that this session does not hold the lock; a transaction-pooling proxy cannot carry a session lock", nil, nil)
     }
 
     return connection.Close()

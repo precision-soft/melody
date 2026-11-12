@@ -99,6 +99,7 @@ type releaseRecordingConnector struct {
     closes            int
     releases          int
     releaseContextErr error
+    unlockAnswersFalse bool
 }
 
 func (instance *releaseRecordingConnector) Connect(context.Context) (driver.Conn, error) {
@@ -147,14 +148,15 @@ func (instance *releaseRecordingConnection) QueryContext(ctx context.Context, qu
         return &singleValueRows{value: "8.0.36"}, nil
     }
 
-    return &singleValueRows{value: true}, nil
-}
+    if false == strings.Contains(query, "pg_advisory_unlock") {
+        return &singleValueRows{value: true}, nil
+    }
 
-func (instance *releaseRecordingConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
     instance.connector.mutex.Lock()
     instance.connector.releases++
     instance.connector.releaseContextErr = ctx.Err()
     stall := instance.connector.stallRelease
+    released := false == instance.connector.unlockAnswersFalse
     instance.connector.mutex.Unlock()
 
     /* the drivers refuse a statement whose context is already done before any packet, and so does the double */
@@ -168,6 +170,10 @@ func (instance *releaseRecordingConnection) ExecContext(ctx context.Context, que
         return nil, ctx.Err()
     }
 
+    return &singleValueRows{value: released}, nil
+}
+
+func (instance *releaseRecordingConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
     return driver.RowsAffected(0), nil
 }
 

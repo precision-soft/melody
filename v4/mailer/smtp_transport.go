@@ -8,6 +8,7 @@ import (
     "net/smtp"
     "strings"
     "time"
+    "unicode"
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
@@ -50,6 +51,23 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
         host = hostFromAddress(config.Address)
     }
 
+    localName := config.LocalName
+    if "" == localName {
+        localName = smtpClientLocalName
+    }
+
+    if true == strings.ContainsFunc(localName, func(character rune) bool {
+        return true == unicode.IsSpace(character) || true == unicode.IsControl(character)
+    }) {
+        exception.Panic(
+            exception.NewError(
+                "smtp local name holds whitespace or a control character",
+                exceptioncontract.Context{"field": "SmtpConfig.LocalName"},
+                nil,
+            ),
+        )
+    }
+
     dialTimeout, dialTimeoutErr := bound.Resolve(config.DialTimeout, smtpDialTimeoutRule)
     if nil != dialTimeoutErr {
         exception.Panic(exception.FromError(dialTimeoutErr))
@@ -77,6 +95,7 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
         dialTimeout:            dialTimeout.Value,
         commandTimeout:         commandTimeout,
         dataTerminationTimeout: dataTerminationTimeout,
+        localName:              localName,
     }
 }
 
@@ -89,6 +108,9 @@ type SmtpConfig struct {
     RequireAuth bool
     ImplicitTls bool
     TlsConfig   *tls.Config
+
+    /* LocalName is the client name sent in the hello; "localhost" when left out, the default net/smtp uses, and a name holding whitespace or a control character is refused. A relay that judges the hello wants the host's own name. */
+    LocalName string
 
     /* DialTimeout bounds the tcp connect, the tls handshake and the server's opening greeting; 30s when left out, at least 1ms, unlimited refused. */
     DialTimeout bound.Duration
@@ -120,7 +142,7 @@ var smtpDataTerminationTimeoutRule = bound.Rule[time.Duration]{
 /* smtpDataTerminationTimeoutMinimum floors the derived dot-acknowledgment ceiling, so a tight per-step Timeout still leaves a scanning relay a realistic acceptance window. */
 const smtpDataTerminationTimeoutMinimum = 2 * time.Minute
 
-/* smtpClientLocalName is the client name sent in the hello, the same default net/smtp uses when the hello is left implicit. */
+/* smtpClientLocalName is the default client name of the hello, the one net/smtp uses when the hello is left implicit. */
 const smtpClientLocalName = "localhost"
 
 func resolveSmtpCommandTimeout(timeout bound.Duration, dialTimeout time.Duration) (time.Duration, error) {
@@ -167,12 +189,18 @@ type SmtpTransport struct {
     dialTimeout            time.Duration
     commandTimeout         time.Duration
     dataTerminationTimeout time.Duration
+    localName              string
 }
 
 func (instance *SmtpTransport) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
     /* the runtime's context drives cancellation, so a nil or typed-nil runtime is refused before the dial */
     if true == internal.IsNilInterface(runtimeInstance) {
         return exception.NewError("runtime may not be nil", nil, nil)
+    }
+
+    /* judged here as well as in the manager, since the envelope writes each address between angle brackets as it is */
+    if validationErr := validateAddresses(message); nil != validationErr {
+        return validationErr
     }
 
     payload, renderErr := RenderMessage(message)
@@ -214,7 +242,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         return deadlineErr
     }
 
-    if helloErr := client.Hello(smtpClientLocalName); nil != helloErr {
+    if helloErr := client.Hello(instance.localName); nil != helloErr {
         return exception.NewError("smtp hello failed", map[string]any{"address": instance.address}, helloErr)
     }
 

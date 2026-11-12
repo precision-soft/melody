@@ -23,9 +23,3 @@ func (instance *AuthorizationGrantedEvent) Request() httpcontract.Request {
 func (instance *AuthorizationGrantedEvent) Attributes() []string {
     return append([]string{}, instance.attributes...)
 }
-
-type AuthorizationDeniedEvent struct {
-    request    httpcontract.Request
-    attributes []string
-    err        error
-}

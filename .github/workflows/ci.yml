@@ -233,6 +233,8 @@ jobs:
         timeout-minutes: 20
         steps:
             -   uses: actions/checkout@v4
+                with:
+                    fetch-depth: 0
             -   name: govulncheck over every module against the vulncheck baseline
                 run: .dev/validate/all.sh --vulncheck
 
@@ -253,6 +255,8 @@ jobs:
         timeout-minutes: 25
         steps:
             -   uses: actions/checkout@v4
+                with:
+                    fetch-depth: 0
             -   name: integration modules against the version each go.mod pins
                 run: .dev/validate/all.sh --compatibility
 

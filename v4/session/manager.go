@@ -475,14 +475,7 @@ func (instance *Manager) tombstoneStateOf(sessionId string) (bool, bool) {
     return true, instance.wasRotatedAwayLocked(sessionId)
 }
 
-func (instance *Manager) isTombstoned(sessionId string) bool {
-    instance.tombstoneMutex.Lock()
-    defer instance.tombstoneMutex.Unlock()
-
-    return instance.isTombstonedLocked(sessionId)
-}
-
-/* wasRotatedAwayLocked answers why an id is buried, meaningful only for an id isTombstoned reported. The record lock is held. */
+/* wasRotatedAwayLocked answers why an id is buried, meaningful only for an id isTombstonedLocked reported. The record lock is held. */
 func (instance *Manager) wasRotatedAwayLocked(sessionId string) bool {
     return instance.rotatedAwayIds[sessionId]
 }

@@ -571,3 +571,129 @@ func TestAllImplementing_RefusesAClosedScopeThroughAProvidersResolver(t *testing
         t.Fatalf("expected the refusal to carry ErrScopeClosed, got %v", allImplementingErr)
     }
 }
+
+func TestAllImplementing_ATypedNilResolverIsRefusedInsteadOfDereferenced(t *testing.T) {
+    var typedNilResolver *container
+
+    for name, resolver := range map[string]containercontract.Resolver{
+        "untyped nil": nil,
+        "typed nil":   typedNilResolver,
+    } {
+        _, allImplementingErr := AllImplementing[collectableHandler](t.Context(), resolver)
+        if nil == allImplementingErr || "resolver is nil" != allImplementingErr.Error() {
+            t.Fatalf("expected the %s resolver refused as nil, got %v", name, allImplementingErr)
+        }
+    }
+}
+
+func TestAllImplementing_ExcludesTheScopedServiceBeingCreatedByType(t *testing.T) {
+    serviceContainer := newCollectionContainer(t)
+
+    MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*compositeDispatcher, error) {
+        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
+        if nil != allImplementingErr {
+            return nil, allImplementingErr
+        }
+
+        return &compositeDispatcher{handlers: handlers}, nil
+    }, RegisterOptions{})
+
+    scopeInstance := serviceContainer.NewScope()
+    defer func() {
+        _ = scopeInstance.Close()
+    }()
+
+    dispatcher, getErr := FromResolverByType[*compositeDispatcher](t.Context(), scopeInstance)
+    if nil != getErr {
+        t.Fatalf("expected the scoped composite dispatcher to resolve, got %v", getErr)
+    }
+
+    if 2 != len(dispatcher.handlers) {
+        t.Fatalf("expected the dispatcher to collect the other handlers, got %d", len(dispatcher.handlers))
+    }
+}
+
+func TestAllImplementing_ExcludesTheScopedServiceBeingCreatedByName(t *testing.T) {
+    serviceContainer := newCollectionContainer(t)
+
+    MustRegisterScoped(serviceContainer, "dispatcher.request", func(resolver containercontract.Resolver) (*compositeDispatcher, error) {
+        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
+        if nil != allImplementingErr {
+            return nil, allImplementingErr
+        }
+
+        return &compositeDispatcher{handlers: handlers}, nil
+    }, RegisterOptions{})
+
+    scopeInstance := serviceContainer.NewScope()
+    defer func() {
+        _ = scopeInstance.Close()
+    }()
+
+    dispatcher, getErr := FromResolver[*compositeDispatcher](t.Context(), scopeInstance, "dispatcher.request")
+    if nil != getErr {
+        t.Fatalf("expected the scoped composite dispatcher to resolve, got %v", getErr)
+    }
+
+    if 2 != len(dispatcher.handlers) {
+        t.Fatalf("expected the dispatcher to collect the other handlers, got %d", len(dispatcher.handlers))
+    }
+}
+
+type replacementNotHandler struct {
+}
+
+func TestAllImplementing_AScopedReplacementOutsideTheInterfaceHidesTheContainerRegistration(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    MustRegister(serviceContainer, "handler.invoice", func(resolver containercontract.Resolver) (*invoiceHandler, error) {
+        return &invoiceHandler{}, nil
+    }, RegisterOptions{})
+    MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
+        return &auditHandler{}, nil
+    }, RegisterOptions{})
+
+    MustRegisterScoped(serviceContainer, "handler.invoice", func(resolver containercontract.Resolver) (*replacementNotHandler, error) {
+        return &replacementNotHandler{}, nil
+    }, RegisterOptions{ReplacesContainerService: true, TypeRegistrationDisabled: true})
+
+    scopeInstance := serviceContainer.NewScope()
+    defer func() {
+        _ = scopeInstance.Close()
+    }()
+
+    handlers, err := AllImplementing[collectableHandler](t.Context(), scopeInstance)
+    if nil != err {
+        t.Fatalf("unexpected collection error: %v", err)
+    }
+
+    if 1 != len(handlers) || "audit" != handlers[0].Handle() {
+        t.Fatalf("expected the audit handler alone, got %v", handlers)
+    }
+}
+
+func TestAllImplementing_AScopedReplacementInsideTheInterfaceIsCollectedInItsPlace(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    MustRegister(serviceContainer, "handler.invoice", func(resolver containercontract.Resolver) (*invoiceHandler, error) {
+        return &invoiceHandler{}, nil
+    }, RegisterOptions{})
+
+    MustRegisterScoped(serviceContainer, "handler.invoice", func(resolver containercontract.Resolver) (*requestHandler, error) {
+        return &requestHandler{}, nil
+    }, RegisterOptions{ReplacesContainerService: true})
+
+    scopeInstance := serviceContainer.NewScope()
+    defer func() {
+        _ = scopeInstance.Close()
+    }()
+
+    handlers, err := AllImplementing[collectableHandler](t.Context(), scopeInstance)
+    if nil != err {
+        t.Fatalf("unexpected collection error: %v", err)
+    }
+
+    if 1 != len(handlers) || "request" != handlers[0].Handle() {
+        t.Fatalf("expected the replacement alone, got %v", handlers)
+    }
+}

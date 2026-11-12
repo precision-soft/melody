@@ -539,3 +539,26 @@ func TestEncryptDatabaseCommand_RefusesALabelDeclaredTwice(t *testing.T) {
         t.Fatalf("expected the refusal to name the field, index 1 and the label, got %v", refusalContext)
     }
 }
+
+func TestEncryptDatabaseCommand_RefusesOneLabelForTwoColumns(t *testing.T) {
+    command, _ := newScriptedNotesCommand(t, newRotationCipher(t), [][]driver.Value{{"1", "plain"}}, SealBindingConfig{Ref: accountsNotesBinding{}})
+
+    _, resolveErr := command.resolveSealBindings("archive", []string{"notes", "body"}, []string{"notes=accounts.notes", "body=accounts.notes"})
+    if nil == resolveErr || "--seal-binding names one label for two columns" != resolveErr.Error() {
+        t.Fatalf("expected the label named twice refused, got %v", resolveErr)
+    }
+}
+
+func TestEncryptDatabaseCommand_RefusesAFlagItsModeDoesNotRead(t *testing.T) {
+    for message, arguments := range map[string][]string{
+        "--target-key is read by mode reencrypt alone": {"--table", "accounts", "--column", "notes", "--mode", "encrypt", "--target-key", "k2"},
+        "--deterministic is not read by mode decrypt":  {"--table", "accounts", "--column", "notes", "--mode", "decrypt", "--deterministic"},
+    } {
+        command, _ := newScriptedNotesCommand(t, newRotationCipher(t), [][]driver.Value{{"1", "plain"}})
+
+        runErr := runCommandLine(t, command, logging.NewNopLogger(), arguments...)
+        if nil == runErr || message != runErr.Error() {
+            t.Fatalf("expected %q, got %v", message, runErr)
+        }
+    }
+}

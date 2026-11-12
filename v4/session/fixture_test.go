@@ -88,3 +88,10 @@ func mustSession(sessionInstance sessioncontract.Session, sessionErr error) sess
 
     return sessionInstance
 }
+
+func (instance *Manager) isTombstoned(sessionId string) bool {
+    instance.tombstoneMutex.Lock()
+    defer instance.tombstoneMutex.Unlock()
+
+    return instance.isTombstonedLocked(sessionId)
+}

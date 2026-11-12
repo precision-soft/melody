@@ -776,3 +776,23 @@ func TestManager_SetMultipleCarriesTheReasonOfEveryRefusedKey(t *testing.T) {
         t.Fatalf("expected the two reasons to be the ones their own keys raised, got %v", causeByKey)
     }
 }
+
+func TestManager_GetCounterRefusesWhatIncrementRefuses(t *testing.T) {
+    backend := NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
+    manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
+    defer manager.CloseWithContext(context.Background())
+
+    for _, payload := range []string{" 7", "+7", "07", "7\n"} {
+        if setErr := backend.Set("visits", []byte(payload), bound.UnlimitedDuration()); nil != setErr {
+            t.Fatalf("unexpected set error: %v", setErr)
+        }
+
+        if _, _, getCounterErr := manager.GetCounter("visits"); nil == getCounterErr {
+            t.Fatalf("expected %q refused as no counter", payload)
+        }
+
+        if _, incrementErr := manager.Increment("visits", 1); nil == incrementErr {
+            t.Fatalf("expected Increment to refuse %q as well", payload)
+        }
+    }
+}

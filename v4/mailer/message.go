@@ -74,7 +74,7 @@ func RenderMessage(message mailercontract.Message) ([]byte, error) {
     }
 
     for rawKey, value := range message.Headers {
-        /* the key is emitted as it is judged, trimmed, and refused when no parser reads it as a field name, where " X-C " went out as a continuation of the previous header and "" as a line with no name */
+        /* the key is emitted as it is judged, trimmed, and refused when no parser reads it as a field name: " X-C " would read as a continuation of the previous header and "" as a line with no name */
         key := strings.TrimSpace(rawKey)
         if nameErr := validateHeaderName(key); nil != nameErr {
             return nil, nameErr
@@ -490,7 +490,6 @@ func writeAttachment(builder *strings.Builder, attachment mailercontract.Attachm
     builder.WriteString(lineBreak)
 }
 
-/* validateStructuredIdentifierHeader refuses a Message-ID, In-Reply-To, References or Content-ID header that the msg-id grammar cannot carry intact: any control or whitespace rune but the single space between tokens, which writeHeader would not strip, and a token too long for a continuation line, which folding would split mid-token. */
 /* validateHeaderName refuses a field name that is empty or carries a byte outside RFC 5322 ftext, the printable characters other than the colon */
 func validateHeaderName(name string) error {
     if "" == name {
@@ -510,6 +509,7 @@ func validateHeaderName(name string) error {
     return nil
 }
 
+/* validateStructuredIdentifierHeader refuses a Message-ID, In-Reply-To, References or Content-ID header that the msg-id grammar cannot carry intact: any control or whitespace rune but the single space between tokens, which writeHeader would not strip, and a token too long for a continuation line, which folding would split mid-token. */
 func validateStructuredIdentifierHeader(name string, value string) error {
     for _, runeValue := range value {
         if '\t' == runeValue || '\r' == runeValue || '\n' == runeValue || runeValue < 0x20 || 0x7F == runeValue {
@@ -565,7 +565,7 @@ func bracketContentId(contentId string) string {
     return bracketed
 }
 
-/* dispositionHeaderLine omits the filename parameter when the name is empty, or empty once the characters a quoted name cannot carry are dropped, where filename="" was written, which some clients render as a blank name */
+/* dispositionHeaderLine omits the filename parameter when the name is empty, or empty once the characters a quoted name cannot carry are dropped, since some clients render filename="" as a blank name */
 func dispositionHeaderLine(disposition string, filename string) string {
     if "" == filename || (true == isPrintableAscii(filename) && "" == filenameSanitizer.Replace(filename)) {
         return "Content-Disposition: " + disposition

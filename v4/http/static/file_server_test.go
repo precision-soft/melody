@@ -223,6 +223,15 @@ func TestNewFileServer_RefusesANegativeCacheMaxAge(t *testing.T) {
     )
 }
 
+func TestNewFileServer_RefusesAnUnknownMode(t *testing.T) {
+    assertRefusedNamingField(
+        t,
+        Config{Mode: Mode("embed"), FileSystem: fstest.MapFS{}, PublicDir: "public"},
+        "the static mode is unknown",
+        "Config.Mode",
+    )
+}
+
 func TestNewFileServer_RefusesAnUnlimitedCacheMaxAge(t *testing.T) {
     assertRefusedNamingField(
         t,

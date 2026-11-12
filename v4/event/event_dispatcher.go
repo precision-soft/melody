@@ -112,12 +112,12 @@ func (instance *EventDispatcher) appendListenerLocked(
 
     sort.SliceStable(
         instance.listeners[eventName],
-        func(i int, j int) bool {
-            if instance.listeners[eventName][i].priority == instance.listeners[eventName][j].priority {
-                return instance.listeners[eventName][i].listenerId < instance.listeners[eventName][j].listenerId
+        func(leftIndex int, rightIndex int) bool {
+            if instance.listeners[eventName][leftIndex].priority == instance.listeners[eventName][rightIndex].priority {
+                return instance.listeners[eventName][leftIndex].listenerId < instance.listeners[eventName][rightIndex].listenerId
             }
 
-            return instance.listeners[eventName][i].priority > instance.listeners[eventName][j].priority
+            return instance.listeners[eventName][leftIndex].priority > instance.listeners[eventName][rightIndex].priority
         },
     )
 
@@ -571,7 +571,6 @@ func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtim
     return eventValue, nil
 }
 
-/* listenerNameOf answers the qualified function name of a listener, and the dash for one the runtime cannot name or for nil. It is called only where the name is used, since the reflection behind it runs per listener per dispatch. */
 func isEventPropagationStopped(eventValue eventcontract.Event) bool {
     if true == eventValue.IsPropagationStopped() {
         return true
@@ -582,6 +581,7 @@ func isEventPropagationStopped(eventValue eventcontract.Event) bool {
     return true == isStopper && false == internal.IsNilInterface(stopper) && true == stopper.IsPropagationStopped()
 }
 
+/* listenerNameOf answers the qualified function name of a listener, and the dash for one the runtime cannot name or for nil. It is called only where the name is used, since the reflection behind it runs per listener per dispatch. */
 func listenerNameOf(listener eventcontract.EventListener) string {
     if nil == listener {
         return "-"

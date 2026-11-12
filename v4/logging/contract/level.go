@@ -18,12 +18,12 @@ const (
     LevelEmergency Level = "emergency"
 )
 
-func LevelLabelFromString(s string) LevelLabel {
-    return LevelLabel{value: s}
+func LevelLabelFromString(label string) LevelLabel {
+    return LevelLabel{value: label}
 }
 
-func LevelLabelFromInt(i int) LevelLabel {
-    return LevelLabel{value: i}
+func LevelLabelFromInt(label int) LevelLabel {
+    return LevelLabel{value: label}
 }
 
 type LevelLabel struct {
@@ -31,13 +31,13 @@ type LevelLabel struct {
 }
 
 func (instance LevelLabel) String() string {
-    switch v := instance.value.(type) {
+    switch typedValue := instance.value.(type) {
     case int:
-        return strconv.Itoa(v)
+        return strconv.Itoa(typedValue)
     case string:
-        return v
+        return typedValue
     default:
-        return fmt.Sprintf("%v", v)
+        return fmt.Sprintf("%v", typedValue)
     }
 }
 

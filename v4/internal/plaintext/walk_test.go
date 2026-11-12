@@ -333,3 +333,45 @@ func TestRender_AnErrorIsWrittenByItsMessageAndATextMarshalerByItsText(t *testin
         t.Fatalf("expected the error's message before its json and the text a MarshalText writes, got %q", body)
     }
 }
+
+type walkTestPointerRedacted struct {
+    Name   string
+    Secret string
+}
+
+func (instance *walkTestPointerRedacted) MarshalJSON() ([]byte, error) {
+    return json.Marshal(map[string]any{"name": instance.Name})
+}
+
+type walkTestPointerText struct {
+    Secret string
+}
+
+func (instance *walkTestPointerText) MarshalText() ([]byte, error) {
+    return []byte("redacted"), nil
+}
+
+type walkTestHolder struct {
+    User  walkTestPointerRedacted
+    Token walkTestPointerText
+}
+
+func TestRender_AnAddressableValueIsWrittenByTheMethodsOfItsPointerAsEncodingJsonWritesIt(t *testing.T) {
+    for name, value := range map[string]any{
+        "a field of a struct behind a pointer": &walkTestHolder{User: walkTestPointerRedacted{Name: "ana", Secret: "hunter2"}, Token: walkTestPointerText{Secret: "hunter2"}},
+        "an element of a list":                 []walkTestPointerRedacted{{Name: "ana", Secret: "hunter2"}},
+        "an element of a list in a map":        map[string]any{"users": []walkTestPointerRedacted{{Name: "ana", Secret: "hunter2"}}, "tokens": []walkTestPointerText{{Secret: "hunter2"}}},
+        "a pointer":                            &walkTestPointerRedacted{Name: "ana", Secret: "hunter2"},
+    } {
+        body := Render(value, DefaultOptions())
+
+        if true == strings.Contains(body, "hunter2") || false == strings.Contains(body, "ana") {
+            t.Fatalf("expected %s written by its pointer's MarshalJSON, got %q", name, body)
+        }
+
+        encoded, marshalErr := json.Marshal(value)
+        if nil != marshalErr || true == strings.Contains(string(encoded), "hunter2") {
+            t.Fatalf("expected encoding/json to redact %s too, got %s (%v)", name, encoded, marshalErr)
+        }
+    }
+}

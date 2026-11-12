@@ -1,6 +1,7 @@
 package http
 
 import (
+    "slices"
     "sort"
     "strconv"
     "strings"
@@ -181,7 +182,8 @@ func (instance *RouteRegistry) registerDefinitionOnly(routeValue route) {
 /* definitionOnlyFor answers the definition no handler answers declared on these path segments for this method. */
 func (instance *RouteRegistry) definitionOnlyFor(method string, pathSegments []string) (route, bool) {
     for _, routeValue := range instance.definitionOnlyByPath[strings.Join(pathSegments, "\x00")] {
-        if true == matchesMethod(routeValue.methods, method) {
+        /* the key joins the segments with a byte a request segment can carry, so the segments are compared too */
+        if true == slices.Equal(routeValue.parts, pathSegments) && true == matchesMethod(routeValue.methods, method) {
             return routeValue, true
         }
     }

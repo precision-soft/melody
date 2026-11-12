@@ -37,7 +37,7 @@ func AllImplementing[T any](ctx context.Context, resolver containercontract.Reso
         )
     }
 
-    if nil == resolver {
+    if true == internal.IsNilInterface(resolver) {
         return nil, exception.NewError("resolver is nil", nil, nil)
     }
 

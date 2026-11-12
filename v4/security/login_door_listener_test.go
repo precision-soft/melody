@@ -650,6 +650,28 @@ func TestLoginDoor_ARefusedSignInEndsTheSessionTheDoorRotated(t *testing.T) {
     }
 }
 
+func TestLoginDoor_ARefusedSignInEndsTheSessionTheHandlerRotated(t *testing.T) {
+    fixture := newDoorFixture(t, nil)
+    fixture.login.rotate = true
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginSuccess, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        return errors.New("audit unavailable")
+    }, 100)
+
+    recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the refusal, got %d", recorder.Code)
+    }
+
+    if 1 != fixture.login.calls {
+        t.Fatalf("expected the handler to have run, got %d calls", fixture.login.calls)
+    }
+
+    if cookie := doorSessionCookie(recorder); nil != cookie && 0 <= cookie.MaxAge {
+        t.Fatalf("expected no usable session cookie, got %+v", cookie)
+    }
+}
+
 func TestLogoutDoor_AHandlerErrorKeepsTheSession(t *testing.T) {
     fixture := newDoorFixture(t, nil)
     fixture.logout.err = exception.Conflict("cannot")

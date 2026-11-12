@@ -22,6 +22,14 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Security: a regex access control rule beside a `"/"` prefix rule is refused
+
+**What changed.** Access control resolves every prefix rule ahead of every regex rule, and a `"/"` prefix rule, segment or raw, claims every path. [`accesscontrol.NewControl`](../security/accesscontrol/control.go) now refuses a control holding both, where the regex rule was accepted and never decided. See [the match priority](package/SECURITY.md).
+
+**Symptom.** The boot panics with `access control regex rule never decides beside a "/" prefix rule`, naming `ruleIndex`, `pattern` and `prefixRuleIndex`. The pair can come from one list or from a firewall's rules merged with the global ones.
+
+**Remedy.** Declare the catch-all as the empty raw prefix, `NewRawPrefixRule("", ...)`, or as a last `^/` regex rule, both of which answer only what no other rule claimed. Read the regex rules again before the release: each one starts deciding the paths it names.
+
 ### Security: a firewall serves the sign-in and sign-out doors it declares
 
 **What changed.** The third major validated `LoginPath`, `LogoutPath`, `LoginHandler` and `LogoutHandler` and consumed none of them: a POST on the login path reached the router. A firewall now serves them on `kernel.request`, before access control. [`FirewallConfig`](../security/config/security_module.go) carries a [`LoginConfig`](../security/config/login_config.go) and a [`LogoutConfig`](../security/config/login_config.go), each declared by `Path` and `Handler` on its own, with `Methods` (`POST`), `TargetPath` (`/`), `CrossSite` (refused) and `Name`, `Attributes`; `LoginConfig` also has `Authenticator`, `Limiter`, `LimiterConfig`. `LoginInput` gains `PreviousSessionId`, `LogoutInput` gains `Token`. See [the doors](package/SECURITY.md#sign-in-and-sign-out-doors).

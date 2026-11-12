@@ -619,7 +619,7 @@ func UserRateLimit(config UserLimitConfig) httpcontract.Middleware {
 }
 
 func defaultOnLimitExceeded(request httpcontract.Request) (httpcontract.Response, error) {
-    return nil, exception.TooManyRequests("Rate limit exceeded. Please try again later.")
+    return nil, exception.TooManyRequests("rate limit exceeded")
 }
 
 /* allowRequestUnderLimit is the metering step the middleware and the listener doors share: the key is extracted, the limiter asked, and a store failure reported once, unless the limiter already marked it logged. The caller's own cancellation is recorded at warning. The returned value already reflects the limiter's failure policy; a denial whose error is answered as unavailable is returned beside it, marked logged once recorded, and an unmarked error beside a denial stays a 429. */

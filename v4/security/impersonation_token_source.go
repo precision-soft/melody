@@ -44,6 +44,19 @@ func NewImpersonationTokenSource(config ImpersonationTokenSourceConfig) *Imperso
         exception.Panic(exception.NewError("impersonation user resolver is nil", nil, nil))
     }
 
+    if RoleModeImpersonated != config.RoleMode && RoleModeImpersonator != config.RoleMode {
+        exception.Panic(
+            exception.NewError(
+                "impersonation role mode is unknown",
+                exceptioncontract.Context{
+                    "field":    "ImpersonationTokenSourceConfig.RoleMode",
+                    "roleMode": int(config.RoleMode),
+                },
+                nil,
+            ),
+        )
+    }
+
     headerName := config.HeaderName
     if "" == headerName {
         headerName = DefaultSwitchUserHeaderName

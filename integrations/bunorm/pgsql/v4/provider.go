@@ -99,7 +99,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
             if 1 < attempt {
                 logger.Info(
                     "database connection successful after retry",
-                    map[string]interface{}{
+                    map[string]any{
                         "attempt": attempt,
                     },
                 )

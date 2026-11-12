@@ -358,7 +358,7 @@ func (instance *MiddlewareCommand) runBuildProviderRecovered() (middlewares []ht
 
         /* a factory ending the command with an exit code is the exit owner's, re-raised whole */
         if exitErr, isExitError := internal.RecoveredExitError(recovered); true == isExitError {
-            panic(exitErr)
+            exception.Exit(exitErr)
         }
 
         middlewares = nil

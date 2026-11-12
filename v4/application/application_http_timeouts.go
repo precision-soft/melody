@@ -110,9 +110,6 @@ func refuseScopeTeardownOutlastingHttpShutdown(configuration configcontract.Conf
     }
 
     httpShutdownTimeout := configuration.Http().ShutdownTimeout()
-    if true == httpShutdownTimeout.Unlimited {
-        return nil
-    }
 
     if false == scopeTeardownTimeout.Unlimited && scopeTeardownTimeout.Value < httpShutdownTimeout.Value {
         return nil

@@ -243,7 +243,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         close(newState.waitChannel)
     }()
 
-    createdValue, err, debugInfo := func() (createdValue any, err error, debugInfo *providerDebugInfo) {
+    createdValue, err := func() (createdValue any, err error) {
         defer func() {
             recoveredValue := recover()
             if nil == recoveredValue {
@@ -288,6 +288,8 @@ func (instance *container) serviceWithCreationGuardLocked(
         }()
 
         /* the view is marked the moment the provider leaves, however it leaves, so a view it retained never pushes onto the live chain after it */
+        var debugInfo *providerDebugInfo
+
         createdValue, err, debugInfo = func() (any, error, *providerDebugInfo) {
             defer providerResolver.markProviderReturned()
 
@@ -297,7 +299,7 @@ func (instance *container) serviceWithCreationGuardLocked(
         if true == internal.IsNilInterface(createdValue) {
             /* a nil value with an error is the provider's reason, and is kept; the generic report is for a silent (nil, nil) */
             if nil != err {
-                return nil, err, debugInfo
+                return nil, err
             }
 
             return nil, exception.NewError(
@@ -331,50 +333,14 @@ func (instance *container) serviceWithCreationGuardLocked(
                     }(),
                 },
                 nil,
-            ), nil
+            )
         }
 
-        return createdValue, err, debugInfo
+        return createdValue, err
     }()
     providerLeft = true
 
     instance.mutex.Lock()
-
-    if nil == createdValue && nil == err {
-        providerTypeString := ""
-        providerFunctionString := ""
-
-        if nil != debugInfo {
-            providerTypeString = debugInfo.providerTypeString
-            providerFunctionString = debugInfo.providerFunctionString
-        }
-
-        if "" == providerTypeString {
-            providerTypeString = reflect.TypeOf(create).String()
-        }
-
-        if "" == providerFunctionString {
-            createPointer := reflect.ValueOf(create).Pointer()
-            if 0 != createPointer {
-                createFunction := runtime.FuncForPC(createPointer)
-                if nil != createFunction {
-                    providerFunctionString = createFunction.Name()
-                }
-            }
-        }
-
-        err = exception.NewError(
-            "service provider returned nil for created value",
-            exceptioncontract.Context{
-                "requestedKey": requestedKey,
-                "creatingKey":  creatingKey,
-                "providerType": providerTypeString,
-                "providerFunc": providerFunctionString,
-                "stack":        resolver.stackStringWithRepeat(creatingKey),
-            },
-            nil,
-        )
-    }
 
     /* the closer the registration declared, read under the lock for the best-effort closes below */
     createdCloser := instance.closerByNodeKey[creation.ownerNodeKey]

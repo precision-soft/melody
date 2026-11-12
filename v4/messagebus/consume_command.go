@@ -4,6 +4,7 @@ import (
     "context"
     "os"
     "os/signal"
+    "reflect"
     "runtime/debug"
     "sync"
     "sync/atomic"
@@ -330,7 +331,7 @@ func (instance *consumeSession) consumeFrom(
             defer wait.Done()
 
             for {
-                /* read before the select, where a stop and a waiting delivery are both ready and Go picks between them at random, so a stopped worker took on average one more delivery per turn */
+                /* read before the select, where a stop and a waiting delivery are both ready and Go picks between them at random, so a stopped worker would take on average one more delivery per turn */
                 if nil != workerContext.Err() {
                     return
                 }
@@ -451,6 +452,22 @@ func (instance *consumeSession) consume(
 
     instance.logError(runtimeInstance, "message handling exhausted retries", dispatchErr)
 
+    /* a message exhausted on the failure transport itself is not sent back to it: it would be received exhausted again, without end */
+    if true == isSameTransport(instance.retryPolicy.FailureTransport, transport) {
+        if logger := logging.LoggerFromRuntime(runtimeInstance); false == internal.IsNilInterface(logger) {
+            logger.Warning(
+                "the message is exhausted on the failure transport itself; it is discarded unless the transport dead-letters it",
+                nil,
+            )
+        }
+
+        if nackErr := transport.Nack(runtimeInstance, envelopeInstance, false); nil != nackErr {
+            instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
+        }
+
+        return
+    }
+
     if false == internal.IsNilInterface(instance.retryPolicy.FailureTransport) {
         if sendErr := instance.retryPolicy.FailureTransport.Send(runtimeInstance, envelopeInstance); nil != sendErr {
             instance.logError(runtimeInstance, "could not route the exhausted message to the failure transport", sendErr)
@@ -494,6 +511,21 @@ func (instance *consumeSession) consume(
     if nackErr := transport.Nack(runtimeInstance, envelopeInstance, false); nil != nackErr {
         instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
     }
+}
+
+/* isSameTransport reports two transports that are one pointer; a transport of another kind is never read as the same. */
+func isSameTransport(first messagebuscontract.Transport, second messagebuscontract.Transport) bool {
+    if true == internal.IsNilInterface(first) || true == internal.IsNilInterface(second) {
+        return false
+    }
+
+    firstValue := reflect.ValueOf(first)
+    secondValue := reflect.ValueOf(second)
+    if reflect.Pointer != firstValue.Kind() || reflect.Pointer != secondValue.Kind() {
+        return false
+    }
+
+    return firstValue.Type() == secondValue.Type() && firstValue.Pointer() == secondValue.Pointer()
 }
 
 /* messageRuntime gives each delivery its own container scope and a logger keyed by MessageIdStamp, as the http kernel scopes a request, so scope state cannot leak between in-flight messages. Without a resolvable container the shared runtime is returned untouched. */

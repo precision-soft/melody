@@ -381,31 +381,10 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     }
 
     valueType := reflect.TypeOf(value)
-    if nil == valueType {
-        return exception.NewError(
-            "service type is nil in override instance",
-            map[string]any{
-                "serviceName": serviceName,
-            },
-            nil,
-        )
-    }
 
     /* the container closes what it installs, so a value carrying Close alone is refused unless the registration's closer takes it */
     if true == closeOnlyValueRefused(value, instance.closerByNodeKey[containerNameNodeKey(serviceName)]) {
         return newCloseDoorRequiredError("the override's value carries Close without CloseWithContext", serviceName, valueType)
-    }
-
-    canonicalType := canonicalServiceType(valueType)
-    if nil == canonicalType {
-        return exception.NewError(
-            "canonical type is nil in override instance",
-            map[string]any{
-                "serviceName": serviceName,
-                "valueType":   valueType.String(),
-            },
-            nil,
-        )
     }
 
     /* the override reaches every type this name is registered under, so a value the registered type cannot hold is refused before anything is written */

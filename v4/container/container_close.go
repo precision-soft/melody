@@ -1157,7 +1157,7 @@ func closeServiceValueWithin(closeContext context.Context, closeable containerco
 }
 
 /* containedClose contains a panicking close as a recorded failure, so the teardown still closes the rest; it is the one containment for every close. An error-shaped panic value travels as the cause, and the stack is captured inside the recover. */
-func containedClose(close func() error) (closeErr error) {
+func containedClose(closeFunction func() error) (closeErr error) {
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -1176,7 +1176,7 @@ func containedClose(close func() error) (closeErr error) {
     }()
 
     /* a typed nil is a successful close */
-    closeErr = close()
+    closeErr = closeFunction()
     if true == internal.IsNilInterface(closeErr) {
         return nil
     }

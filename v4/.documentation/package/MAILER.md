@@ -100,7 +100,7 @@ Because the deadline is re-armed per step and per payload chunk, `Timeout` measu
 ### Types and constructors (`mailer`)
 
 - [`Manager`](../../mailer/manager.go) — [`NewManager(transport mailercontract.Transport) *Manager`](../../mailer/manager.go)
-- [`SmtpTransport`](../../mailer/smtp_transport.go) / [`SmtpConfig`](../../mailer/smtp_transport.go) — [`NewSmtpTransport(config SmtpConfig) *SmtpTransport`](../../mailer/smtp_transport.go)
+- [`SmtpTransport`](../../mailer/smtp_transport.go) / [`SmtpConfig`](../../mailer/smtp_transport.go) — [`NewSmtpTransport(config SmtpConfig) *SmtpTransport`](../../mailer/smtp_transport.go); `SmtpConfig.LocalName` is the client name of the hello, `localhost` when left out, a name holding whitespace or a control character refused; `Send` refuses an address that is not a bare addr-spec itself, as the manager does
 - [`InMemoryTransport`](../../mailer/in_memory_transport.go) — [`NewInMemoryTransport() *InMemoryTransport`](../../mailer/in_memory_transport.go), [`(*InMemoryTransport).Sent() []mailercontract.Message`](../../mailer/in_memory_transport.go)
 - [`LogTransport`](../../mailer/log_transport.go) — [`NewLogTransport(logger loggingcontract.Logger) *LogTransport`](../../mailer/log_transport.go); logs each message's recipients (To, Cc, Bcc), subject, both the text and HTML bodies, and per-attachment metadata (filename, content type, Content-ID, inline flag, byte size — never the raw content) at info level instead of delivering it (development aid). With a `nil` logger it resolves the request-scoped logger from the runtime, and is a safe no-op when neither is available.
 - [`RenderMessage(message mailercontract.Message) ([]byte, error)`](../../mailer/message.go)

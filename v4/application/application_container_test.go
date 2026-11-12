@@ -219,9 +219,7 @@ func TestRegisterSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *testin
 
     listenersBefore := registeredListenerCount(t, applicationInstance)
 
-    if wiringErr := applicationInstance.registerSecurity(); nil != wiringErr {
-        t.Fatalf("unexpected wiring error: %v", wiringErr)
-    }
+    applicationInstance.registerSecurity()
 
     if false == applicationInstance.kernel.ServiceContainer().Has(security.ServiceFirewallManager) {
         t.Fatalf("expected the firewall manager to be registered")
@@ -239,9 +237,7 @@ func TestRegisterSecurity_AConsoleProcessResolvesTheManagerAndWiresNoListeners(t
 
     listenersBefore := registeredListenerCount(t, cliApplication)
 
-    if wiringErr := cliApplication.registerSecurity(); nil != wiringErr {
-        t.Fatalf("unexpected wiring error: %v", wiringErr)
-    }
+    cliApplication.registerSecurity()
 
     if false == cliApplication.kernel.ServiceContainer().Has(security.ServiceFirewallManager) {
         t.Fatalf("expected a console process with security configured to resolve the firewall manager")
@@ -255,9 +251,7 @@ func TestRegisterSecurity_AConsoleProcessResolvesTheManagerAndWiresNoListeners(t
     unconfiguredApplication := newCollisionTestApplication(t)
     unconfiguredApplication.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
 
-    if wiringErr := unconfiguredApplication.registerSecurity(); nil != wiringErr {
-        t.Fatalf("unexpected wiring error: %v", wiringErr)
-    }
+    unconfiguredApplication.registerSecurity()
 
     if true == unconfiguredApplication.kernel.ServiceContainer().Has(security.ServiceFirewallManager) {
         t.Fatalf("expected an application that declared no security to wire no firewall manager")

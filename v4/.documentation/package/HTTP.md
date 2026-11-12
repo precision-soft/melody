@@ -178,7 +178,7 @@ The route table is a tree of plain maps that every request goroutine reads, so w
 
 ## Url generation
 
-[`UrlGenerator.GeneratePath`](../../http/url_generator.go) builds a path from a route name and a parameter map, and a route's `Defaults` ([`RouteOptions`](../../http/contract/route_option.go)) fill the gaps:
+[`UrlGenerator.GeneratePath`](../../http/url_generator.go) builds a path from a route name and a parameter map, and a route's `Defaults` ([`RouteOptions`](../../http/contract/route_option.go)) fill the gaps. A path the kernel would refuse as non-canonical, a parameter of `.` or `..` or a last value ending in a space, is answered as an error rather than minted:
 
 - A parameter the caller **omits** — a `:name`, a single-segment `*name` wildcard or a catch-all — takes the route default, whatever that default is.
 - A `:name` or single-segment `*name` parameter the caller supplies **empty** takes the route default when that default is non-empty; a catch-all supplied empty is emitted empty. This is what keeps a non-trailing optional segment — the shape [`rejectNonTrailingOptionalParameter`](../../http/router.go) admits precisely because its default keeps the segment present — generating a path the matcher answers: `/:locale?/list/:page` with `{"locale": "", "page": "2"}` yields `/en/list/2` under a `locale` default of `en`, not the `/list/2` the router replies to with a `404`.
@@ -712,7 +712,7 @@ Where the list itself comes from is the application's business — a constant as
 
 - Compression:
     - [`type CompressionConfig`](../../http/middleware/compression.go) — `CompressAuthenticatedResponses`, off by default; `Level`, gzip's level, 0 and -1 the default, -2 to 9 kept, any other value refused; `MinSize`, a [`bound.Count`](../../bound/limit.go), 1024 left out, at least 1, unlimited refused, held in memory per response of unknown length before the middleware decides; `ExcludedContentTypes`, nil the media and archive family (`image/`, `video/`, `audio/`, `application/zip`, `application/gzip`, `application/x-gzip`), an empty list none; `ExcludedPaths`. The zero value is the default configuration
-    - [`CompressionMiddleware(config CompressionConfig)`](../../http/middleware/compression.go) — resolves and copies the configuration when it is built, panicking naming a field it refuses; the answer to a request carrying the session cookie or an `Authorization` header stays uncompressed unless `CompressAuthenticatedResponses` is set, because of the BREACH class; the session cookie means any session holder, logged in or not; a token source reading another cookie or header, `HmacTokenSource` and `ImpersonationTokenSource` among them, is not seen, and excludes its paths through `ExcludedPaths`; `Vary` still names `Accept-Encoding` alone, so a shared cache must not store an authenticated response
+    - [`CompressionMiddleware(config CompressionConfig)`](../../http/middleware/compression.go) — resolves and copies the configuration when it is built, panicking naming a field it refuses; the answer to a request carrying the session cookie or an `Authorization` header stays uncompressed unless `CompressAuthenticatedResponses` is set, because of the BREACH class; the session cookie means any session holder, logged in or not; a token source reading another cookie or header, `HmacTokenSource` and `ImpersonationTokenSource` among them, is not seen, and excludes its paths through `ExcludedPaths`; a response carrying `Content-Range` stays uncompressed, since its ranges name bytes of the identity body, and a strong `ETag` of a compressed response is made weak; `Vary` still names `Accept-Encoding` alone, so a shared cache must not store an authenticated response
     - Honors `Accept-Encoding` q-values (RFC 7231) — a header of more than sixty-four members is read as unparsable and the response is not compressed, since the members past the cap can carry the refusal the members before it do not, and a legitimate header never reaches the cap —, emits `Vary: Accept-Encoding`, and streams the gzip output through [`io.Pipe`](https://pkg.go.dev/io#Pipe) so response bodies never fully land in memory.
 
 - Rate limiting:
@@ -749,6 +749,6 @@ Where the list itself comes from is the application's business — a constant as
     - `AllowedDotPrefixList` names the dot-prefixed **first** path elements the server may retrieve; `nil` reads as [`DefaultAllowedDotPrefix`](../../http/static/option.go) (`.well-known`) alone, an empty list refuses every dot-prefixed path
     - `ExcludedPathList` names the path prefixes the server declines without touching the disk, compared against the request path as it arrived; the built-in server is given [`HttpConfiguration.StaticExcludedPaths()`](../../config/contract/http.go)
 
-- [`type Mode`](../../http/static/option.go) — `ModeFilesystem` / `ModeEmbedded`
+- [`type Mode`](../../http/static/option.go) — `ModeFilesystem` / `ModeEmbedded`; the zero value is `ModeFilesystem`, any other value is refused at construction naming `Config.Mode`
 
 - [`GenerateEtag`](../../http/static/etag.go)

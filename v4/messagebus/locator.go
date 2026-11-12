@@ -44,6 +44,10 @@ func RegisterHandler[T any](
     locator *HandlerLocator,
     handle func(runtimeInstance runtimecontract.Runtime, message T) error,
 ) {
+    if nil == handle {
+        exception.Panic(exception.NewError("message handler function is nil", map[string]any{"messageType": reflect.TypeOf((*T)(nil)).Elem().String()}, nil))
+    }
+
     messageType := reflect.TypeOf((*T)(nil)).Elem()
     locator.Register(messageType, &functionHandler[T]{handle: handle})
 }

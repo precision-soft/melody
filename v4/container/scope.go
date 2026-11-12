@@ -309,16 +309,6 @@ func (instance *scope) OverrideProtectedInstance(serviceName string, value any, 
         )
     }
 
-    if nil == value {
-        return exception.NewError(
-            "value is nil in override instance",
-            map[string]any{
-                "serviceName": serviceName,
-            },
-            nil,
-        )
-    }
-
     if true == internal.IsNilInterface(value) {
         return exception.NewError(
             "value is nil in override instance",
@@ -787,10 +777,17 @@ func (instance *scope) ReferencesImplementing(interfaceType reflect.Type) []cont
 
     references := instance.scopedPrioritizedReferences(interfaceType)
 
-    scopedServiceNames := make(map[string]struct{}, len(references))
-    for _, entry := range references {
-        scopedServiceNames[entry.reference.ServiceName] = struct{}{}
+    /* every name the scope registers, not only those implementing the interface: the scope answers such a name with its own registration */
+    scopedServiceNames := make(map[string]struct{}, len(instance.plan.providers))
+    for serviceName := range instance.plan.providers {
+        scopedServiceNames[serviceName] = struct{}{}
     }
+
+    instance.mutex.RLock()
+    for serviceName := range instance.ownProviders {
+        scopedServiceNames[serviceName] = struct{}{}
+    }
+    instance.mutex.RUnlock()
 
     containerInstance.mutex.RLock()
     for registeredType, registeredServiceNames := range containerInstance.typeRegistrationNamesByType {
@@ -859,12 +856,12 @@ func (instance *scope) scopedPrioritizedReferences(interfaceType reflect.Type) [
             return instance.ownCollectionPriorityByName[serviceName]
         })
     }
-    instance.mutex.RUnlock()
 
-    ownServiceNames := make(map[string]struct{}, len(references))
-    for _, entry := range references {
-        ownServiceNames[entry.reference.ServiceName] = struct{}{}
+    ownServiceNames := make(map[string]struct{}, len(instance.ownProviders))
+    for serviceName := range instance.ownProviders {
+        ownServiceNames[serviceName] = struct{}{}
     }
+    instance.mutex.RUnlock()
 
     for registeredType, registeredServiceNames := range instance.plan.typeRegistrationNamesByType {
         plannedServiceNames := make([]string, 0, len(registeredServiceNames))

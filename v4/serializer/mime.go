@@ -111,8 +111,8 @@ func parseAcceptHeader(acceptHeader string) ([]acceptedMime, bool) {
         })
     }
 
-    sort.SliceStable(result, func(i int, j int) bool {
-        return result[i].qualityValue > result[j].qualityValue
+    sort.SliceStable(result, func(leftIndex int, rightIndex int) bool {
+        return result[leftIndex].qualityValue > result[rightIndex].qualityValue
     })
 
     return result, false

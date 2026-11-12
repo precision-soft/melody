@@ -1307,3 +1307,15 @@ func TestSizeCheckedReader_ReturnsOnACyclicChainFromTheBody(t *testing.T) {
         }
     })
 }
+
+func TestPutObjectOptions_NamesThePartSizeOfABodyOfUnknownSize(t *testing.T) {
+    if unknown := putObjectOptions(-1, "text/plain"); minioPartSize != unknown.PartSize || "text/plain" != unknown.ContentType {
+        t.Fatalf("expected a body of unknown size put in parts of %d, got %d (%q)", minioPartSize, unknown.PartSize, unknown.ContentType)
+    }
+
+    for _, size := range []int64{0, 1, minioPartSize, 10 * minioPartSize} {
+        if known := putObjectOptions(size, ""); 0 != known.PartSize {
+            t.Fatalf("expected the part size of a body of %d bytes left to minio, got %d", size, known.PartSize)
+        }
+    }
+}

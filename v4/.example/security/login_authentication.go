@@ -16,6 +16,11 @@ type LoginAuthentication struct {
     budget  *SecondFactorBudget
 }
 
+/* Budget answers the per-account second factor budget the sign-in spends, nil without one, for the other doors that read a second factor to spend the same one. */
+func (instance *LoginAuthentication) Budget() *SecondFactorBudget {
+    return instance.budget
+}
+
 /* Authenticate answers the manager's token; an authenticated one that presented a second factor gives its account the budget back. */
 func (instance *LoginAuthentication) Authenticate(request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
     token, _, authenticateErr := instance.manager.Authenticate(request)

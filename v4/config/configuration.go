@@ -555,16 +555,13 @@ func (instance *Configuration) buildHttpConfiguration() error {
         return staticCacheMaxAgeErr
     }
 
-    staticEnableCache, staticEnableCacheErr := instance.MustGet(KernelStaticEnableCache).Bool()
+    staticEnableCacheSwitch, staticEnableCacheErr := checkedParameterSwitch(instance.MustGet(KernelStaticEnableCache), StaticEnableCacheKey)
     if nil != staticEnableCacheErr {
-        return exception.NewError(
-            "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": StaticEnableCacheKey,
-            },
-            staticEnableCacheErr,
-        )
+        return staticEnableCacheErr
     }
+
+    /* an empty line is unset, as on every other switch key, and the default is on */
+    staticEnableCache := false == staticEnableCacheSwitch.IsSet || true == staticEnableCacheSwitch.Value
 
     staticExcludedPaths := splitConfigurationList(instance.MustGet(KernelStaticExcludedPaths).MustString())
 

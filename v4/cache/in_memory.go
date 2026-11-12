@@ -173,7 +173,7 @@ func emptyKeyError() error {
     )
 }
 
-func refuseEmptyKeyList(keys []string) error {
+func refuseInvalidKeyList(keys []string) error {
     for _, key := range keys {
         if keyErr := validateKey(key); nil != keyErr {
             return keyErr
@@ -345,7 +345,7 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
         return nil, closedBackendError()
     }
 
-    if refuseErr := refuseEmptyKeyList(keys); nil != refuseErr {
+    if refuseErr := refuseInvalidKeyList(keys); nil != refuseErr {
         instance.mutex.RUnlock()
         return nil, refuseErr
     }
@@ -451,7 +451,7 @@ func (instance *InMemoryBackend) DeleteMultiple(keys []string) error {
         return closedBackendError()
     }
 
-    if refuseErr := refuseEmptyKeyList(keys); nil != refuseErr {
+    if refuseErr := refuseInvalidKeyList(keys); nil != refuseErr {
         return refuseErr
     }
 

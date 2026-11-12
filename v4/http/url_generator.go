@@ -275,7 +275,21 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
         return "/", nil
     }
 
-    return "/" + strings.Join(resultParts, "/"), nil
+    generatedPath := "/" + strings.Join(resultParts, "/")
+
+    /* a "." or ".." segment, or a space at the path's end, is a path the kernel refuses as non-canonical */
+    if decodedPath, decodeErr := url.PathUnescape(generatedPath); nil != decodeErr || false == requestPathIsCanonical(decodedPath) {
+        return "", exception.NewError(
+            "generated path is not one the router serves",
+            exceptioncontract.Context{
+                "routeName": routeName,
+                "path":      generatedPath,
+            },
+            nil,
+        )
+    }
+
+    return generatedPath, nil
 }
 
 func (instance *UrlGenerator) GenerateUrl(routeName string, params map[string]string, queryParams map[string]string) (string, error) {

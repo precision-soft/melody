@@ -5,6 +5,7 @@ import (
     "errors"
     "fmt"
     "strings"
+    "sync/atomic"
     "testing"
     "time"
 
@@ -462,4 +463,82 @@ func TestReadWriteSplitter_ReaderReturnsOnACyclicChainFromAProvider(t *testing.T
             t.Error("expected the provider's refusal")
         }
     })
+}
+
+type stallingSplitProvider struct {
+    stall   chan struct{}
+    entered chan struct{}
+    opens   atomic.Int64
+}
+
+func (instance *stallingSplitProvider) Open(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    if 1 < instance.opens.Add(1) {
+        instance.entered <- struct{}{}
+        <-instance.stall
+    }
+
+    return nil, exception.NewError("database connection failed", nil, DatabaseUnreachable(errors.New("replica is down")))
+}
+
+func TestReadWriteSplitter_OneReaderProbesALapsedReplicaWhileTheOthersKeepThePrimary(t *testing.T) {
+    replica := &stallingSplitProvider{stall: make(chan struct{}), entered: make(chan struct{}, 1)}
+    registry, registryErr := NewManagerRegistry(
+        context.Background(),
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: replica, Params: testConnectionParameters},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry: %v", registryErr)
+    }
+
+    var clock atomic.Int64
+    start := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+    splitter := NewReadWriteSplitter(registry, "primary", SplitterConfig{ReplicaNames: []string{"replica"}, ReplicaRetryInterval: bound.Of(time.Minute)})
+    splitter.now = func() time.Time { return start.Add(time.Duration(clock.Load())) }
+
+    if _, readerErr := splitter.Reader(); nil != readerErr {
+        t.Fatalf("expected the primary served in place of the replica, got: %v", readerErr)
+    }
+
+    clock.Store(int64(time.Minute))
+
+    probed := make(chan error, 1)
+    go func() {
+        _, probeErr := splitter.Reader()
+        probed <- probeErr
+    }()
+
+    select {
+    case <-replica.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the lapsed interval dialled no probe")
+    }
+
+    served := make(chan error, 1)
+    go func() {
+        _, readerErr := splitter.Reader()
+        served <- readerErr
+    }()
+
+    select {
+    case readerErr := <-served:
+        if nil != readerErr {
+            t.Fatalf("expected the primary served beside the probe, got: %v", readerErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("a reader beside the probe waited on the replica's open")
+    }
+
+    close(replica.stall)
+
+    if probeErr := <-probed; nil != probeErr {
+        t.Fatalf("expected the probe served by the primary once its dial failed, got: %v", probeErr)
+    }
+
+    if 2 != replica.opens.Load() {
+        t.Fatalf("expected one dial for the lapsed interval, got %d", replica.opens.Load()-1)
+    }
 }

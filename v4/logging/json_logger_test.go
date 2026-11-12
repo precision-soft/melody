@@ -1944,3 +1944,38 @@ func TestJsonLogger_AWriterThatPanicsLeavesTheLockFreeForTheNextRecord(t *testin
         t.Fatalf("expected the second record, got %q", writer.written.String())
     }
 }
+
+type contextClosingWriter struct {
+    closedWith  context.Context
+    plainCloses int
+}
+
+func (instance *contextClosingWriter) Write(data []byte) (int, error) {
+    return len(data), nil
+}
+
+func (instance *contextClosingWriter) Close() error {
+    instance.plainCloses++
+
+    return nil
+}
+
+func (instance *contextClosingWriter) CloseWithContext(closeContext context.Context) error {
+    instance.closedWith = closeContext
+
+    return nil
+}
+
+func TestJsonLogger_CloseHandsTheContextToAWriterThatTakesOne(t *testing.T) {
+    writer := &contextClosingWriter{}
+    closeContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    if closeErr := newJsonLogger(writer, JsonLoggerConfig{}).CloseWithContext(closeContext); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    if closeContext != writer.closedWith || 0 != writer.plainCloses {
+        t.Fatalf("expected the writer closed under the teardown's context alone, got context %v and %d plain closes", writer.closedWith, writer.plainCloses)
+    }
+}

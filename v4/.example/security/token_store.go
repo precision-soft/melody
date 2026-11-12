@@ -6,6 +6,7 @@ import (
 
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -22,7 +23,7 @@ func (instance ResolvedTokenStore) Lookup(
 }
 
 func (instance ResolvedTokenStore) RevokeBefore(userIdentifier string, deviceIdentifier string, instant time.Time) {
-    panic("a revocation boundary is published through the store resolved from the container, not through this adapter")
+    melodyexception.Panic(melodyexception.NewError("a revocation boundary is published through the store resolved from the container, not through this adapter", nil, nil))
 }
 
 func (instance ResolvedTokenStore) RevocationEpoch(

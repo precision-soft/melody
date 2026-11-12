@@ -10,11 +10,13 @@ import (
     "testing"
     "time"
 
+    examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     store2fa "github.com/precision-soft/melody/v4/.example/twofactor"
     "github.com/precision-soft/melody/v4/bound"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
+    melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/security/totp"
 )
 
@@ -22,14 +24,14 @@ import (
 func TestEnrollHandlerRefusesACallerWithoutAToken(t *testing.T) {
     request, runtimeInstance := twoFactorRequest(t, "/twofactor/enroll?user=admin")
 
-    response, handlerErr := EnrollHandler(nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := EnrollHandler(nil, nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
     assertTwoFactorUnauthorized(t, "the enrollment door", response, handlerErr)
 }
 
 func TestVerifyHandlerRefusesACallerWithoutAToken(t *testing.T) {
     request, runtimeInstance := twoFactorRequest(t, "/twofactor/verify?user=admin")
 
-    response, handlerErr := VerifyHandler(nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := VerifyHandler(nil, nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
     assertTwoFactorUnauthorized(t, "the verification door", response, handlerErr)
 }
 
@@ -54,7 +56,7 @@ func TestEnrollHandlerWritesTheTokensRowWhateverTheRequestNames(t *testing.T) {
     store, connector := enrolledStore(t, "", "")
     request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll?user=admin", "alice", nil)
 
-    response, handlerErr := EnrollHandler(fixedStore(store), nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := EnrollHandler(fixedStore(store), nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the enrollment to answer 200, got %v, %v", response, handlerErr)
     }
@@ -106,7 +108,7 @@ func TestVerifyHandlerChecksTheTokensEnrollmentWhateverTheRequestNames(t *testin
         map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code},
     )
 
-    response, handlerErr := VerifyHandler(fixedStore(store), nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := VerifyHandler(fixedStore(store), nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the token's own code to verify with 200, got %v, %v, reads %q", response, handlerErr, connector.recorded())
     }
@@ -128,7 +130,7 @@ func TestVerifyHandlerRedeemsAgainstTheTokensEnrollmentWhateverTheRequestNames(t
         map[string]string{melodysecurity.DefaultTotpRecoveryHeaderName: "recovery-one"},
     )
 
-    response, handlerErr := VerifyHandler(fixedStore(store), nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := VerifyHandler(fixedStore(store), nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the token's own recovery code to be redeemed with 200, got %v, %v, statements %q", response, handlerErr, connector.recorded())
     }
@@ -161,7 +163,7 @@ func healingStore(store *store2fa.Store, refusal error) (store2fa.StoreSource, *
 func TestEnrollHandlerAnswersAStoreRefusalWith503AndEnrollsOnceItHeals(t *testing.T) {
     store, connector := enrolledStore(t, "", "")
     storeSource, calls := healingStore(store, errors.New("the catalogue database refused the migration"))
-    handler := EnrollHandler(storeSource, nil)
+    handler := EnrollHandler(storeSource, nil, nil)
 
     request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", nil)
     response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
@@ -199,7 +201,7 @@ func TestVerifyHandlerAnswersAStoreRefusalWith503AndVerifiesOnceItHeals(t *testi
 
     store, _ := enrolledStore(t, "alice", secret)
     storeSource, _ := healingStore(store, errors.New("the catalogue database refused the migration"))
-    handler := VerifyHandler(storeSource, nil)
+    handler := VerifyHandler(storeSource, nil, nil)
 
     headers := map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code}
 
@@ -241,7 +243,7 @@ func TestVerifyHandlerRefusesACodeTheSignInAlreadyBurnedInTheSharedGuard(t *test
         t.Fatalf("burning the code as the sign-in does failed: %v %v", seen, rememberErr)
     }
 
-    response, handlerErr := VerifyHandler(fixedStore(store), sharedGuard)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := VerifyHandler(fixedStore(store), sharedGuard, nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusUnauthorized != response.StatusCode() {
         t.Fatalf("expected a code the shared guard holds refused with 401, got %v, %v", response, handlerErr)
     }
@@ -262,7 +264,7 @@ func TestEnrollHandlerRefusesToReplaceAnEnrollmentWithoutACurrentFactor(t *testi
         store, connector := enrolledStore(t, "alice", secret)
         request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", headers)
 
-        response, handlerErr := EnrollHandler(fixedStore(store), nil)(runtimeInstance, httptest.NewRecorder(), request)
+        response, handlerErr := EnrollHandler(fixedStore(store), nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
         if nil != handlerErr || nil == response || nethttp.StatusUnauthorized != response.StatusCode() {
             t.Fatalf("%v: expected a replacement without a current factor refused with 401, got %v, %v", headers, response, handlerErr)
         }
@@ -297,7 +299,7 @@ func TestEnrollHandlerReplacesWithACurrentCodeAndBurnsItAcrossTheDoors(t *testin
 
     store, connector := enrolledStore(t, "alice", secret)
     request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", headers)
-    response, handlerErr := EnrollHandler(fixedStore(store), sharedGuard)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := EnrollHandler(fixedStore(store), sharedGuard, nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected a current code to replace the enrollment with 200, got %v, %v", response, handlerErr)
     }
@@ -307,7 +309,7 @@ func TestEnrollHandlerReplacesWithACurrentCodeAndBurnsItAcrossTheDoors(t *testin
     }
 
     request, runtimeInstance = authenticatedTwoFactorRequest(t, "/twofactor/verify", "alice", headers)
-    response, handlerErr = VerifyHandler(fixedStore(store), sharedGuard)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr = VerifyHandler(fixedStore(store), sharedGuard, nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusUnauthorized != response.StatusCode() {
         t.Fatalf("expected the code the replacement spent refused at the verification door, got %v, %v", response, handlerErr)
     }
@@ -318,7 +320,7 @@ func TestEnrollHandlerReplacesWithARecoveryCodeRedeemedFirst(t *testing.T) {
     store, connector := enrolledStore(t, "alice", "JBSWY3DPEHPK3PXP")
     request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", map[string]string{melodysecurity.DefaultTotpRecoveryHeaderName: "recovery-one"})
 
-    response, handlerErr := EnrollHandler(fixedStore(store), nil)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := EnrollHandler(fixedStore(store), nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected a recovery code to replace the enrollment with 200, got %v, %v, statements %q", response, handlerErr, connector.recorded())
     }
@@ -373,7 +375,7 @@ func TestVerifyHandler_BurnsTheCodeForTheWholeValidityWindow(t *testing.T) {
 
     guard := &recordingNonceGuard{}
 
-    response, handlerErr := VerifyHandler(fixedStore(store), guard)(runtimeInstance, httptest.NewRecorder(), request)
+    response, handlerErr := VerifyHandler(fixedStore(store), guard, nil)(runtimeInstance, httptest.NewRecorder(), request)
     if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
         t.Fatalf("expected the code accepted, got %v, %v", response, handlerErr)
     }
@@ -381,5 +383,61 @@ func TestVerifyHandler_BurnsTheCodeForTheWholeValidityWindow(t *testing.T) {
     window, windowErr := totpCodeValidityWindow()
     if nil != windowErr || 1 != len(guard.ttlList) || bound.Of(window) != guard.ttlList[0] || bound.Of(90*time.Second) != guard.ttlList[0] {
         t.Fatalf("expected the code burned once for the 90 s validity window, got %v", guard.ttlList)
+    }
+}
+
+type countingFactorBudget struct {
+    allowance int
+    spent     int
+    releases  int
+}
+
+func (instance *countingFactorBudget) Spend(melodyruntimecontract.Runtime, string) error {
+    instance.spent++
+    if instance.allowance < instance.spent {
+        return examplesecurity.ErrSecondFactorBudgetSpent
+    }
+
+    return nil
+}
+
+func (instance *countingFactorBudget) Release(string) {
+    instance.releases++
+    instance.spent = 0
+}
+
+func TestTheSecondFactorDoorsSpendTheAccountsBudgetOnEveryPresentedFactor(t *testing.T) {
+    secret, secretErr := totp.GenerateSecret()
+    if nil != secretErr {
+        t.Fatalf("generating the fixture secret failed: %v", secretErr)
+    }
+
+    for name, door := range map[string]func(store2fa.StoreSource, melodysecuritycontract.NonceGuard, FactorBudget) melodyhttpcontract.Handler{
+        "verify": VerifyHandler,
+        "enroll": EnrollHandler,
+    } {
+        store, _ := enrolledStore(t, "alice", secret)
+        budget := &countingFactorBudget{allowance: 2}
+        handler := door(fixedStore(store), nil, budget)
+
+        statuses := make([]int, 0, 3)
+        for range 3 {
+            request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/"+name, "alice", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: "000000"})
+
+            response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+            if nil != handlerErr || nil == response {
+                t.Fatalf("%s: unexpected answer %v, %v", name, response, handlerErr)
+            }
+
+            statuses = append(statuses, response.StatusCode())
+        }
+
+        if nethttp.StatusUnauthorized != statuses[0] || nethttp.StatusUnauthorized != statuses[1] || nethttp.StatusTooManyRequests != statuses[2] {
+            t.Fatalf("%s: expected two refused guesses then 429, got %v", name, statuses)
+        }
+
+        if 0 != budget.releases {
+            t.Fatalf("%s: expected a refused factor to give nothing back, got %d releases", name, budget.releases)
+        }
     }
 }

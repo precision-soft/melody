@@ -206,8 +206,9 @@ func buildRouteValue(pattern string, handler httpcontract.Handler, options httpc
         attributes[RouteAttributeName] = options.Name
     }
     attributes[RouteAttributePattern] = normalizedPattern
-    if 0 < len(options.Methods) {
-        attributes[RouteAttributeMethods] = append([]string{}, options.Methods...)
+    methods := normalizeRouteMethods(options.Methods)
+    if 0 < len(methods) {
+        attributes[RouteAttributeMethods] = append([]string{}, methods...)
     }
     if "" != options.Host {
         attributes[RouteAttributeHost] = options.Host
@@ -224,7 +225,7 @@ func buildRouteValue(pattern string, handler httpcontract.Handler, options httpc
         pattern:            normalizedPattern,
         parts:              parts,
         handler:            handler,
-        methods:            append([]string{}, options.Methods...),
+        methods:            methods,
         host:               options.Host,
         schemes:            append([]string{}, options.Schemes...),
         requirements:       requirements,
@@ -234,6 +235,17 @@ func buildRouteValue(pattern string, handler httpcontract.Handler, options httpc
         priority:           options.Priority,
         attributes:         attributes,
     }
+}
+
+/* normalizeRouteMethods answers the declared methods in the upper case the kernel's HEAD fallback, its Allow header and the duplicate check compare them in. */
+func normalizeRouteMethods(declaredMethods []string) []string {
+    methods := make([]string, 0, len(declaredMethods))
+
+    for _, declaredMethod := range declaredMethods {
+        methods = append(methods, strings.ToUpper(strings.TrimSpace(declaredMethod)))
+    }
+
+    return methods
 }
 
 /* rejectDuplicateParameterName refuses a pattern that names one parameter twice, since the handler could read only one of the two values, and a parameter with no name, which would bind nothing. */

@@ -21,6 +21,16 @@ func TestRouteRegistry_RefusesAnExactDispatchDuplicate(t *testing.T) {
     }, "route already registered")
 }
 
+func TestRouteRegistry_RefusesADuplicateThatDiffersOnlyInTheCaseOfItsMethod(t *testing.T) {
+    router := NewRouter()
+
+    router.HandleWithOptions("/cased", routeRegistryTestHandler(), RouteOptions{Methods: []string{"get"}})
+
+    testhelper.AssertPanicsWithError(t, func() {
+        router.HandleWithOptions("/cased", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
+    }, "route already registered")
+}
+
 /* the name stays out of the dispatch identity on purpose: two differently named routes the matcher cannot tell apart are still one route at dispatch, and the later one is still dead. */
 func TestRouteRegistry_RefusesADuplicateThatDiffersOnlyInName(t *testing.T) {
     router := NewRouter()
@@ -285,6 +295,7 @@ func TestDeclareRouteDefinition_AnswersOnlyItsMethodAndItsSegments(t *testing.T)
     }{
         {nethttp.MethodGet, "/login/check"},
         {nethttp.MethodPost, "/login%2Fcheck"},
+        {nethttp.MethodPost, "/login%00check"},
         {nethttp.MethodPost, "/login"},
     } {
         matchResult, _ := router.Match(testCase.method, testCase.path, "", "http")

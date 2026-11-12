@@ -184,11 +184,10 @@ func (instance *RateLimiter) Reset(key string) {
     }
 }
 
-/* allow runs the fixed-window counter; on a store failure the returned allowed value is the failure-mode default, so callers can honor it even when the error is also returned. */
 /* errCallerDeadline marks a round trip the caller's own deadline ended, told apart from a store failure by reportError. */
 var errCallerDeadline = errors.New("the caller's deadline ended the rate limiter call")
 
-/* allow runs the window script under callContext; parentContext is the caller's own, read to tell its deadline from the call timeout. */
+/* allow runs the window script under callContext; parentContext is the caller's own, read to tell its deadline from the call timeout. On a store failure the allowed value is the failure-mode default, answered beside the error. */
 func (instance *RateLimiter) allow(parentContext context.Context, callContext context.Context, key string) (bool, error) {
     milliseconds := strconv.FormatInt(instance.window.Milliseconds(), 10)
 

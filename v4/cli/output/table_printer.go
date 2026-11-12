@@ -388,14 +388,13 @@ func (instance *TablePrinter) wrapCellValue(value string, width int) []string {
     if "" == value {
         return []string{""}
     }
-    if 1 >= width {
-        return []string{value}
-    }
-
     normalized := strings.ReplaceAll(value, "\r\n", "\n")
     normalized = strings.ReplaceAll(normalized, "\r", "\n")
 
     split := strings.Split(normalized, "\n")
+    if 1 >= width {
+        return split
+    }
     if 0 == len(split) {
         return []string{""}
     }

@@ -100,13 +100,13 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
         }
 
         if nil != effectiveRoleHierarchy && false == internal.IsNilInterface(effectiveDecisionManager) {
-            if dm, ok := effectiveDecisionManager.(*security.AccessDecisionManager); true == ok {
-                upgradedVoters := make([]securitycontract.Voter, 0, len(dm.Voters()))
+            if decisionManager, ok := effectiveDecisionManager.(*security.AccessDecisionManager); true == ok {
+                upgradedVoters := make([]securitycontract.Voter, 0, len(decisionManager.Voters()))
                 upgraded := false
 
-                for _, voter := range dm.Voters() {
-                    if rv, isRoleVoter := voter.(*security.RoleVoter); true == isRoleVoter {
-                        upgradedVoters = append(upgradedVoters, security.NewRoleHierarchyVoter(effectiveRoleHierarchy, rv))
+                for _, voter := range decisionManager.Voters() {
+                    if roleVoter, isRoleVoter := voter.(*security.RoleVoter); true == isRoleVoter {
+                        upgradedVoters = append(upgradedVoters, security.NewRoleHierarchyVoter(effectiveRoleHierarchy, roleVoter))
                         upgraded = true
                     } else {
                         upgradedVoters = append(upgradedVoters, voter)
@@ -114,7 +114,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
                 }
 
                 if true == upgraded {
-                    effectiveDecisionManager = security.NewAccessDecisionManager(dm.Strategy(), upgradedVoters)
+                    effectiveDecisionManager = security.NewAccessDecisionManager(decisionManager.Strategy(), upgradedVoters)
                 }
             }
         }

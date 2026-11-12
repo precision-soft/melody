@@ -962,7 +962,7 @@ func (instance *resolverContext) isResolvingReference(reference containercontrac
     topType := instance.stack.types[topIndex]
     instance.stack.mutex.Unlock()
 
-    if containerNameNodeKey(reference.ServiceName) == topKey {
+    if containerNameNodeKey(reference.ServiceName) == topKey || scopedNameNodeKey(reference.ServiceName) == topKey {
         return true
     }
 

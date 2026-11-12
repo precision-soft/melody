@@ -6,6 +6,7 @@ import (
 
     "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -56,32 +57,41 @@ func (instance *SecondFactorBudget) Authenticate(request melodyhttpcontract.Requ
         return token, nil
     }
 
-    key := secondFactorBudgetKey(token.UserIdentifier())
-
-    if runtimeLimiter, isRuntimeLimiter := instance.limiter.(melodyhttpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
-        allowed, allowErr := runtimeLimiter.AllowWithRuntime(request.RuntimeInstance(), key)
-        if nil != allowErr {
-            /* the limiter answers its failure mode beside the failure: a fail-open limiter lets the code be read uncounted */
-            if true == allowed {
-                return token, nil
-            }
-
-            /* joined rather than wrapped in a melody error, so the limiter's already-logged mark stays the nearest one in the chain and the door files nothing a second time */
-            return nil, exception.MarkInfrastructureFailure(fmt.Errorf("%w: %w", ErrSecondFactorBudgetUnavailable, allowErr))
-        }
-
-        if false == allowed {
-            return nil, ErrSecondFactorBudgetSpent
-        }
-
-        return token, nil
-    }
-
-    if false == instance.limiter.Allow(key) {
-        return nil, ErrSecondFactorBudgetSpent
+    if spendErr := instance.Spend(request.RuntimeInstance(), token.UserIdentifier()); nil != spendErr {
+        return nil, spendErr
     }
 
     return token, nil
+}
+
+/* Spend counts one presented second factor against the account, at the sign-in and at every other door that reads one, and answers ErrSecondFactorBudgetSpent past the allowance; a budget that cannot be read answers ErrSecondFactorBudgetUnavailable marked as an outage, unless the limiter is fail-open. */
+func (instance *SecondFactorBudget) Spend(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string) error {
+    key := secondFactorBudgetKey(userIdentifier)
+
+    if runtimeLimiter, isRuntimeLimiter := instance.limiter.(melodyhttpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
+        allowed, allowErr := runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
+        if nil != allowErr {
+            /* the limiter answers its failure mode beside the failure: a fail-open limiter lets the code be read uncounted */
+            if true == allowed {
+                return nil
+            }
+
+            /* joined rather than wrapped in a melody error, so the limiter's already-logged mark stays the nearest one in the chain and the door files nothing a second time */
+            return exception.MarkInfrastructureFailure(fmt.Errorf("%w: %w", ErrSecondFactorBudgetUnavailable, allowErr))
+        }
+
+        if false == allowed {
+            return ErrSecondFactorBudgetSpent
+        }
+
+        return nil
+    }
+
+    if false == instance.limiter.Allow(key) {
+        return ErrSecondFactorBudgetSpent
+    }
+
+    return nil
 }
 
 /* Release asks the store to give an account its whole budget back once a second factor it presented was accepted, so the codes a user mistyped before the right one do not count against the next sign-in. A store that cannot is journaled by the limiter, and the mistyped codes then count until the window lapses. */

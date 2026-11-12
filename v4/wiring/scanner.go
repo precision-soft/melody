@@ -6,6 +6,7 @@ import (
     "go/parser"
     "go/token"
     "io/fs"
+    "os"
     "path"
     "path/filepath"
     "sort"
@@ -172,6 +173,11 @@ func Scan(request ScanRequest) (*ScanResult, error) {
                 return filepath.SkipDir
             }
 
+            /* a nested module is another import path root, and no part of the package tree being scanned */
+            if _, statErr := os.Stat(filepath.Join(currentPath, "go.mod")); nil == statErr {
+                return filepath.SkipDir
+            }
+
             return nil
         }
 
@@ -250,6 +256,10 @@ func scanFile(
             },
             parseErr,
         )
+    }
+
+    if detachedErr := refuseDetachedDirectives(fileSet, currentPath, fileNode); nil != detachedErr {
+        return detachedErr
     }
 
     /* a main package is not importable, so its candidates are reported as skipped for --strict to surface and //melody:ignore to acknowledge */
@@ -337,6 +347,42 @@ func scanFile(
         constructor.Line = position.Line
 
         result.Constructors = append(result.Constructors, constructor)
+    }
+
+    return nil
+}
+
+/* refuseDetachedDirectives refuses a directive no function's doc comment holds, a blank line under it being enough to detach it: the scan reads directives from the doc comment alone, and a dropped one fails open as a typo does. */
+func refuseDetachedDirectives(fileSet *token.FileSet, currentPath string, fileNode *ast.File) error {
+    documentationGroups := make(map[*ast.CommentGroup]struct{})
+    for _, declaration := range fileNode.Decls {
+        functionDeclaration, isFunction := declaration.(*ast.FuncDecl)
+        if true == isFunction && nil != functionDeclaration.Doc {
+            documentationGroups[functionDeclaration.Doc] = struct{}{}
+        }
+    }
+
+    for _, commentGroup := range fileNode.Comments {
+        if _, isDocumentation := documentationGroups[commentGroup]; true == isDocumentation {
+            continue
+        }
+
+        for _, comment := range commentGroup.List {
+            text := strings.TrimSpace(comment.Text)
+            if false == strings.HasPrefix(text, directivePrefix) {
+                continue
+            }
+
+            return exception.NewError(
+                "a melody directive is attached to no function; write it in the doc comment directly above its constructor",
+                map[string]any{
+                    "directive": text,
+                    "file":      currentPath,
+                    "line":      fileSet.Position(comment.Pos()).Line,
+                },
+                nil,
+            )
+        }
     }
 
     return nil

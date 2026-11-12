@@ -1,6 +1,7 @@
 package twofactor
 
 import (
+    "errors"
     "time"
 
     nethttp "net/http"
@@ -39,7 +40,7 @@ type enrollPayload struct {
 }
 
 /* EnrollHandler enrolls the caller's TOTP second factor: it generates a secret and single-use recovery codes, persists them encrypted, and answers the secret, the otpauth URI and the recovery codes once, to the account they belong to. A first enrollment needs the session alone. Enrolling again REPLACES the secret and its unused recovery codes, so it asks for a factor of the enrollment it replaces — a TOTP code on X-2FA-Code or a recovery code on X-2FA-Recovery-Code, checked and spent as the verification door spends them — and answers 401 with the challenge without one: a session alone, stolen or left open, must not become a second factor of the thief's. An account whose authenticator and codes are both lost is reset from the console (example:twofactor:reset). A nil guard is one of this door's own. */
-func EnrollHandler(storeSource store2fa.StoreSource, replayGuard melodysecuritycontract.NonceGuard) melodyhttpcontract.Handler {
+func EnrollHandler(storeSource store2fa.StoreSource, replayGuard melodysecuritycontract.NonceGuard, budget FactorBudget) melodyhttpcontract.Handler {
     if nil == replayGuard {
         replayGuard = melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{})
     }
@@ -61,7 +62,7 @@ func EnrollHandler(storeSource store2fa.StoreSource, replayGuard melodysecurityc
         }
 
         if true == enrolled {
-            _, refusal := currentFactor(runtimeInstance, request, store, user, replayGuard, func() melodyhttpcontract.Response {
+            _, refusal := currentFactor(runtimeInstance, request, store, user, replayGuard, budget, func() melodyhttpcontract.Response {
                 return presenter.ApiErrorWithPayload(runtimeInstance, request, nethttp.StatusUnauthorized, map[string]any{"factor": "totp"}, "second factor required")
             })
             if nil != refusal {
@@ -84,7 +85,7 @@ func EnrollHandler(storeSource store2fa.StoreSource, replayGuard melodysecurityc
 }
 
 /* VerifyHandler verifies a second factor for the caller's own enrollment: a TOTP code on X-2FA-Code against the stored secret, or a single-use recovery code on X-2FA-Recovery-Code redeemed atomically; 200 on success, 401 on a wrong or replayed factor. An accepted code is burned in the replay guard keyed on the normalized code, since Verify normalizes before comparing, under the nonce the framework's second-factor authenticator writes: handed the guard the sign-in reads, a code is spent once across both doors. A nil guard is one of this door's own. */
-func VerifyHandler(storeSource store2fa.StoreSource, replayGuard melodysecuritycontract.NonceGuard) melodyhttpcontract.Handler {
+func VerifyHandler(storeSource store2fa.StoreSource, replayGuard melodysecuritycontract.NonceGuard, budget FactorBudget) melodyhttpcontract.Handler {
     if nil == replayGuard {
         replayGuard = melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{})
     }
@@ -100,7 +101,7 @@ func VerifyHandler(storeSource store2fa.StoreSource, replayGuard melodysecurityc
             return unavailableStore(runtimeInstance, request, storeErr), nil
         }
 
-        factor, refusal := currentFactor(runtimeInstance, request, store, user, replayGuard, func() melodyhttpcontract.Response {
+        factor, refusal := currentFactor(runtimeInstance, request, store, user, replayGuard, budget, func() melodyhttpcontract.Response {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "a TOTP code or recovery code header is required")
         })
         if nil != refusal {
@@ -128,8 +129,57 @@ func currentFactor(
     store *store2fa.Store,
     user string,
     replayGuard melodysecuritycontract.NonceGuard,
+    budget FactorBudget,
     absent func() melodyhttpcontract.Response,
 ) (string, melodyhttpcontract.Response) {
+    factor, refusal := presentedFactor(runtimeInstance, request, store, user, replayGuard, budget, absent)
+    if nil == refusal && nil != budget {
+        budget.Release(user)
+    }
+
+    return factor, refusal
+}
+
+/* FactorBudget is the per-account allowance of presented second factors the sign-in spends too, so a session cannot walk the codes at these doors: Spend counts one, Release gives the allowance back once a factor was accepted. */
+type FactorBudget interface {
+    Spend(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string) error
+
+    Release(userIdentifier string)
+}
+
+/* refuseOverBudget counts the presented factor and answers the refusal of an account past its allowance, 429, or of a budget that cannot be read, 503. */
+func refuseOverBudget(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, user string, budget FactorBudget) melodyhttpcontract.Response {
+    if nil == budget {
+        return nil
+    }
+
+    spendErr := budget.Spend(runtimeInstance, user)
+    if nil == spendErr {
+        return nil
+    }
+
+    if true == errors.Is(spendErr, examplesecurity.ErrSecondFactorBudgetSpent) {
+        return presenter.ApiError(runtimeInstance, request, nethttp.StatusTooManyRequests, "too many attempts")
+    }
+
+    return unavailableStore(runtimeInstance, request, spendErr)
+}
+
+func presentedFactor(
+    runtimeInstance melodyruntimecontract.Runtime,
+    request melodyhttpcontract.Request,
+    store *store2fa.Store,
+    user string,
+    replayGuard melodysecuritycontract.NonceGuard,
+    budget FactorBudget,
+    absent func() melodyhttpcontract.Response,
+) (string, melodyhttpcontract.Response) {
+    if "" != request.Header(melodysecurity.DefaultTotpRecoveryHeaderName) || "" != request.Header(melodysecurity.DefaultTotpCodeHeaderName) {
+        if refusal := refuseOverBudget(runtimeInstance, request, user, budget); nil != refusal {
+            return "", refusal
+        }
+    }
+
     if recoveryCode := request.Header(melodysecurity.DefaultTotpRecoveryHeaderName); "" != recoveryCode {
         redeemed, redeemErr := store.RedeemRecoveryCode(runtimeInstance, user, recoveryCode)
         if nil != redeemErr {

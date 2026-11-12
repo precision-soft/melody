@@ -109,7 +109,7 @@ func NewExactRule(path string, config RuleConfig) Rule {
     }
 }
 
-/* NewSegmentPrefixRule builds a rule bounded to a path segment: "/admin" governs "/admin" and "/admin/panel" but not "/administrator". An empty path is refused rather than made a catch-all; a global rule declares "/". The path is written as the router reads it, decoded, with %2F for a separator inside a segment: a percent escape other than %2F claims only a resource whose name holds the percent sign literally. A declared path holding one is named in a boot warning. */
+/* NewSegmentPrefixRule builds a rule bounded to a path segment: "/admin" governs "/admin" and "/admin/panel" but not "/administrator". An empty path is refused rather than made a catch-all; a global rule declares "/", which NewControl refuses beside a regex rule. The path is written as the router reads it, decoded, with %2F for a separator inside a segment: a percent escape other than %2F claims only a resource whose name holds the percent sign literally. A declared path holding one is named in a boot warning. */
 func NewSegmentPrefixRule(path string, config RuleConfig) Rule {
     normalizedPrefix := normalizePathPrefix(path)
     if "" == normalizedPrefix {

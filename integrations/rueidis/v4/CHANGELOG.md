@@ -50,5 +50,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `token_store.go`: `PurgeExpired` walks every node of the client on that node's own cursor, as the cache backend does, where a cluster client routed each step of the one `SCAN` to an arbitrary node and stale index members were left behind.
 - rate limit: a store failure whose `Unwrap` chain reaches itself no longer holds the limiter that classifies it. The provider's open returns on such a failure too, from a TLS verifier for one.
 

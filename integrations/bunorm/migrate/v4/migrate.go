@@ -121,7 +121,7 @@ type migrationPrinter struct {
 func (instance *migrationPrinter) printExecuting(prefix string, queryName string) {
     escapedQueryName := escapeControlCharacters(queryName, false)
 
-    if instance.noColor {
+    if true == instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s executing: %s\n", prefix, escapedQueryName)
         return
     }
@@ -132,7 +132,7 @@ func (instance *migrationPrinter) printExecuting(prefix string, queryName string
 func (instance *migrationPrinter) printCompleted(prefix string, queryName string) {
     escapedQueryName := escapeControlCharacters(queryName, false)
 
-    if instance.noColor {
+    if true == instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s completed: %s\n", prefix, escapedQueryName)
         return
     }
@@ -146,7 +146,7 @@ func (instance *migrationPrinter) printFailed(prefix string, queryName string, e
     escapedErrorMessage := escapeControlCharacters(err.Error(), false)
     escapedSql := escapeControlCharacters(sql, true)
 
-    if instance.noColor {
+    if true == instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s FAILED: %s\n", prefix, escapedQueryName)
         _, _ = fmt.Fprintf(instance.writer, "%s ERROR: %s\n", prefix, escapedErrorMessage)
         _, _ = fmt.Fprintf(instance.writer, "%s QUERY:\n%s\n", prefix, formatQueryForLog(escapedSql))
@@ -176,7 +176,7 @@ func (instance *migrationPrinter) printEmpty(direction string, migrationName str
         return
     }
 
-    if instance.noColor {
+    if true == instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s\n", message)
         return
     }
@@ -187,7 +187,7 @@ func (instance *migrationPrinter) printEmpty(direction string, migrationName str
 func (instance *migrationPrinter) printSuccess(direction string, migrationName string, total int) {
     message := fmt.Sprintf("[migration:%s] %s: all %d queries executed successfully", escapeControlCharacters(direction, false), escapeControlCharacters(migrationName, false), total)
 
-    if instance.noColor {
+    if true == instance.noColor {
         _, _ = fmt.Fprintf(instance.writer, "%s\n", message)
         return
     }

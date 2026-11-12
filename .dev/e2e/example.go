@@ -22,7 +22,7 @@ const exampleMajorListVariable = "MELODY_E2E_MAJORS"
 
 const exampleMajorListDefault = "1 2 3 4"
 
-/* the shared credentials the three example applications seed identically (repository/seed.go): "user" holds ROLE_USER only, which is what makes the admin route below answer 403 rather than 200. */
+/* the shared credentials the four example applications seed identically (repository/seed.go): "user" holds ROLE_USER only, which is what makes the admin route below answer 403 rather than 200. */
 const (
     exampleUsername       = "user"
     examplePassword       = "user"
@@ -63,7 +63,7 @@ var exampleMajorCatalog = []exampleMajor{
     {number: 4, label: "v4", relativeDirectory: "v4/.example", port: 18094, integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true, firewallDoors: true},
 }
 
-/* exampleMysqlDsn answers the dsn of one major's own database. The three examples share the development mysql but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one the supervised sections use, and this swaps the database segment of it for the major being driven.
+/* exampleMysqlDsn answers the dsn of one major's own database. The four examples share the development mysql but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one the supervised sections use, and this swaps the database segment of it for the major being driven.
 
    An empty dsn stays empty: it is how a caller says there is no database to reach, and the sections that receive it already announce their out-of-band half as skipped. A dsn with no database segment is answered unchanged rather than repaired — the caller configured it, and silently pointing it somewhere else would hide that. */
 func exampleMysqlDsn(major exampleMajor, mysqlDsn string) string {

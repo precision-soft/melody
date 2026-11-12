@@ -4401,6 +4401,31 @@ func TestNewKernel_TheZeroConfigServesHeadThroughTheGetRoute(t *testing.T) {
     }
 }
 
+func TestNewKernel_ARouteDeclaredWithALowercaseMethodServesHeadAndAdvertisesTheMethodInUpperCase(t *testing.T) {
+    router := NewRouter()
+    router.HandleWithOptions(
+        "/articles",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return TextResponse(nethttp.StatusOK, "articles"), nil
+        },
+        RouteOptions{Methods: []string{" get "}},
+    )
+    kernelInstance := NewKernel(router, KernelConfig{})
+
+    if recorder := serveKernelConfigTestRequest(kernelInstance, nethttp.MethodHead, "/articles"); nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected HEAD served through the route declared as get, got %d", recorder.Code)
+    }
+
+    recorder := serveKernelConfigTestRequest(kernelInstance, nethttp.MethodPost, "/articles")
+    if nethttp.StatusMethodNotAllowed != recorder.Code {
+        t.Fatalf("expected 405, got %d", recorder.Code)
+    }
+
+    if allow := recorder.Header().Get("Allow"); "GET, HEAD, OPTIONS" != allow {
+        t.Fatalf("expected Allow: GET, HEAD, OPTIONS, got %q", allow)
+    }
+}
+
 func TestNewKernel_HeadFallbackDisabledRefusesTheFallback(t *testing.T) {
     kernelInstance := NewKernel(
         newKernelConfigTestRouter(),

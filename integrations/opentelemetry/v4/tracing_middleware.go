@@ -29,7 +29,11 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             httpRequest := request.HttpRequest()
 
-            parentContext := propagator.Extract(runtimeInstance.Context(), propagation.HeaderCarrier(httpRequest.Header))
+            /* a span already in the context, the lifecycle span of the handler decorator, is the parent; extracting the headers over it would put the remote span in its place and make the two siblings */
+            parentContext := runtimeInstance.Context()
+            if false == trace.SpanContextFromContext(parentContext).IsValid() {
+                parentContext = propagator.Extract(parentContext, propagation.HeaderCarrier(httpRequest.Header))
+            }
 
             spanContext, span := tracer.Start(
                 parentContext,

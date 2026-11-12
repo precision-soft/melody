@@ -171,6 +171,11 @@ func CompressionMiddleware(config CompressionConfig) httpcontract.Middleware {
                 return response, nil
             }
 
+            /* a partial response names byte positions of the identity representation */
+            if "" != response.Headers().Get("Content-Range") {
+                return response, nil
+            }
+
             contentType := response.Headers().Get("Content-Type")
             for _, excludedContentType := range settings.excludedContentTypes {
                 if "" != excludedContentType && true == strings.HasPrefix(contentType, excludedContentType) {
@@ -277,6 +282,10 @@ func CompressionMiddleware(config CompressionConfig) httpcontract.Middleware {
             response.SetBodyReader(pipeReader)
             response.Headers().Set("Content-Encoding", "gzip")
             response.Headers().Del("Content-Length")
+            /* the gzip representation is not byte-equal to the identity one a strong validator names */
+            if entityTag := response.Headers().Get("ETag"); "" != entityTag && false == strings.HasPrefix(entityTag, "W/") {
+                response.Headers().Set("ETag", "W/"+entityTag)
+            }
 
             return response, nil
         }

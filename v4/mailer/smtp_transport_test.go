@@ -1474,3 +1474,65 @@ func TestSmtpTransport_EnvelopeRefusalsCarryTheAddressAndTheDotVerdictIsNamed(t 
         }
     })
 }
+
+func TestNewSmtpTransport_LocalNameDefaultsToLocalhostAndRefusesWhitespace(t *testing.T) {
+    if "localhost" != NewSmtpTransport(SmtpConfig{Address: "smtp:25"}).localName {
+        t.Fatal("expected the hello name to default to localhost")
+    }
+
+    for _, localName := range []string{"mail example", "mail\r\nMAIL FROM:<a@b>", " "} {
+        testhelper.AssertPanicsWithError(t, func() {
+            NewSmtpTransport(SmtpConfig{Address: "smtp:25", LocalName: localName})
+        }, "smtp local name holds whitespace or a control character")
+    }
+}
+
+func TestSmtpTransport_SendsTheConfiguredLocalNameInTheHello(t *testing.T) {
+    listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+    if nil != listenErr {
+        t.Fatalf("listen: %v", listenErr)
+    }
+    defer listener.Close()
+
+    hello := make(chan string, 1)
+    go func() {
+        connection, acceptErr := listener.Accept()
+        if nil != acceptErr {
+            return
+        }
+        defer connection.Close()
+
+        reader := bufio.NewReader(connection)
+        _, _ = connection.Write([]byte("220 fake ESMTP\r\n"))
+
+        line, _ := reader.ReadString('\n')
+        hello <- strings.TrimSpace(line)
+    }()
+
+    _ = NewSmtpTransport(SmtpConfig{Address: listener.Addr().String(), LocalName: "mail.example.com", Timeout: bound.Of(time.Second)}).Send(testRuntime(), mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "ada@example.com"}},
+        Text: "body",
+    })
+
+    select {
+    case line := <-hello:
+        if "EHLO mail.example.com" != line {
+            t.Fatalf("expected the configured name in the hello, got %q", line)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the server saw no hello")
+    }
+}
+
+func TestSmtpTransport_RefusesAnAddressThatIsNotABareAddrSpecBeforeTheDial(t *testing.T) {
+    sendErr := NewSmtpTransport(SmtpConfig{Address: "127.0.0.1:1"}).Send(testRuntime(), mailercontract.Message{
+        From: mailercontract.Address{Email: "shop@example.com"},
+        To:   []mailercontract.Address{{Email: "a@x.com>, <b@y.com"}},
+        Text: "body",
+    })
+
+    if nil == sendErr || false == strings.Contains(sendErr.Error(), "mailer message") {
+        t.Fatalf("expected the address refused by the transport itself, got %v", sendErr)
+    }
+}

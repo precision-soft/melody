@@ -1593,3 +1593,51 @@ func TestDescribeRecoveredValue_RendersACyclicPanicValueWithTheCycleMarker(t *te
         t.Fatalf("expected the cyclic panic value named with the cycle marker, got %q", describeRecoveredValue(cyclic))
     }
 }
+
+func TestRunShieldedStep_AnAbandonmentOnAStalledStderrStillReturns(t *testing.T) {
+    originalBudget := exitStepBudget
+    exitStepBudget = 30 * time.Millisecond
+    originalStderr := os.Stderr
+    defer func() {
+        exitStepBudget = originalBudget
+        os.Stderr = originalStderr
+    }()
+
+    reader, writer, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("pipe: %v", pipeErr)
+    }
+    defer reader.Close()
+    defer writer.Close()
+
+    filled := make(chan struct{})
+    go func() {
+        defer close(filled)
+        _, _ = writer.Write(make([]byte, 1<<20))
+    }()
+    select {
+    case <-filled:
+    case <-time.After(200 * time.Millisecond):
+    }
+
+    os.Stderr = writer
+
+    release := make(chan struct{})
+    defer close(release)
+
+    returned := make(chan bool, 1)
+    go func() {
+        returned <- RunShieldedStep("a step that never returns", ShieldedStepConfig{Budget: bound.Of(20 * time.Millisecond)}, func(_ context.Context) {
+            <-release
+        })
+    }()
+
+    select {
+    case completed := <-returned:
+        if true == completed {
+            t.Fatal("expected the step reported as abandoned")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("the abandonment's echo on a stalled stderr held the shield")
+    }
+}

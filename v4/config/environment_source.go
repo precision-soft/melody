@@ -4,7 +4,7 @@ import (
     "bufio"
     "bytes"
     "io/fs"
-    "path/filepath"
+    "path"
     "sort"
     "strings"
     "unicode"
@@ -107,13 +107,13 @@ func refuseEnvironmentRename(values map[string]string, environmentName string, a
 }
 
 func (instance *EnvironmentSource) loadDotEnvFiles(values map[string]string) (string, error) {
-    dotEnvPath := filepath.Join(instance.baseDir, ".env")
+    dotEnvPath := path.Join(instance.baseDir, ".env")
     loadOptionalDotEnvFileErr := instance.loadOptionalDotEnvFile(values, dotEnvPath)
     if nil != loadOptionalDotEnvFileErr {
         return "", loadOptionalDotEnvFileErr
     }
 
-    dotEnvLocalPath := filepath.Join(instance.baseDir, ".env.local")
+    dotEnvLocalPath := path.Join(instance.baseDir, ".env.local")
     loadOptionalDotEnvFileErr = instance.loadOptionalDotEnvFile(values, dotEnvLocalPath)
     if nil != loadOptionalDotEnvFileErr {
         return "", loadOptionalDotEnvFileErr
@@ -155,13 +155,13 @@ func (instance *EnvironmentSource) loadDotEnvEnvironmentFiles(
 ) error {
     baseName := ".env." + environmentName
 
-    environmentPath := filepath.Join(instance.baseDir, baseName)
+    environmentPath := path.Join(instance.baseDir, baseName)
     loadOptionalDotEnvFileErr := instance.loadOptionalDotEnvFile(values, environmentPath)
     if nil != loadOptionalDotEnvFileErr {
         return loadOptionalDotEnvFileErr
     }
 
-    environmentLocalPath := filepath.Join(instance.baseDir, baseName+".local")
+    environmentLocalPath := path.Join(instance.baseDir, baseName+".local")
     loadOptionalDotEnvFileErr = instance.loadOptionalDotEnvFile(values, environmentLocalPath)
     if nil != loadOptionalDotEnvFileErr {
         return loadOptionalDotEnvFileErr
