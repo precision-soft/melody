@@ -34,7 +34,6 @@ var markerFamily = encryptionMarker + markerGlue
 
 var reportableSealFormatPattern = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
 
-/* errSealFormatUnknownCause is the cause of a refusal of a stored value that carries the encryption marker under a format this build does not read, such as a seal a later major wrote; such a value is never served or migrated as plaintext */
 var errSealFormatUnknownCause = errors.New("encrypted value is sealed under a format this build does not read")
 
 type Cipher interface {
@@ -383,7 +382,7 @@ func hasEncryptionMarker(value string) bool {
     return strings.HasPrefix(value, markerPrefix)
 }
 
-/* carriesMarkerFamily reports whether a value begins with the marker and its glue, whatever format follows: no text carries that NUL by accident, so such a value is a seal of some format, never plaintext. */
+/* no text carries the NUL after the marker by accident, so a value behind it is a seal of some format, never plaintext */
 func carriesMarkerFamily(value string) bool {
     return strings.HasPrefix(value, markerFamily)
 }

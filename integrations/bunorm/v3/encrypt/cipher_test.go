@@ -399,7 +399,6 @@ func TestCipher_DecryptStillPassesGenuinePlaintextThrough(t *testing.T) {
     }
 }
 
-/* a value of the marker family under a format this build does not read is a seal of another build, never text: served as plaintext it would be re-sealed as data on the next write and its content lost */
 func TestCipher_DecryptRefusesAnUnknownSealFormat(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
 
@@ -423,7 +422,6 @@ func TestCipher_DecryptRefusesAnUnknownSealFormat(t *testing.T) {
     }
 }
 
-/* the format is named only when it is a token a build could have written, so a value of the family whose token is absent, empty, unterminated, too long or of another case is refused without one */
 func TestCipher_DecryptRefusesAMarkerFamilyValueOfNoFormat(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
 
@@ -439,7 +437,6 @@ func TestCipher_DecryptRefusesAMarkerFamilyValueOfNoFormat(t *testing.T) {
     }
 }
 
-/* the write side stays lenient: an unknown-format value an application writes is data, sealed and read back byte for byte */
 func TestCipher_EncryptSealsAnUnknownFormatValueAsData(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
     UseCipher(cipherInstance)
@@ -482,7 +479,6 @@ func TestCipher_EncryptSealsAnUnknownFormatValueAsData(t *testing.T) {
     }
 }
 
-/* keyIdOf classifies rows for the bulk migrator: an unknown format is an error, so encrypt does not seal it as data and reencrypt does not seal it under the target key */
 func TestKeyIdOf_ReportsAnUnknownSealFormatAsAnError(t *testing.T) {
     keyId, encrypted, keyIdErr := keyIdOf("<ENC>\x00gcm2\x00v1:zzz")
     if nil == keyIdErr || false == exception.ChainIs(keyIdErr, errSealFormatUnknownCause) || true == encrypted || "" != keyId {
@@ -490,7 +486,6 @@ func TestKeyIdOf_ReportsAnUnknownSealFormatAsAnError(t *testing.T) {
     }
 }
 
-/* a value of the marker family through a wrapped cipher is refused as a marker-shaped one is, whatever format it names */
 func TestEncryptedString_AMarkerFamilyValueThroughAWrappedCipherIsRefused(t *testing.T) {
     packageCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))
     UseCipher(wrappedCipher{Cipher: packageCipher})

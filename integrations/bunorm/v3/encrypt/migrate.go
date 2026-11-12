@@ -69,7 +69,7 @@ func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, 
     return instance.run(ctx, spec, instance.reencryptTransform(spec, targetKeyId))
 }
 
-/* MigrateDecrypt stops the run on a row whose stored value is of a seal format this build does not read, or whose marker body does not parse, whatever the cipher's Decrypt answers for it, and on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. */
+/* MigrateDecrypt reads the stored format before the cipher does, so a pass-through cipher cannot turn an unknown seal into plaintext, and stops on a decrypted value of the marker family, which written bare would read back as a seal. */
 func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
     return instance.run(ctx, spec, func(value string) (string, error) {
         if _, _, keyIdErr := keyIdOf(value); nil != keyIdErr {
@@ -307,7 +307,7 @@ func (instance *Migrator) ensureColumnCapacity(ctx context.Context, spec TableSp
 }
 
 func (instance *Migrator) longestUnsealedLength(ctx context.Context, table string, column string, charset string) (int, bool, error) {
-    /* the cast keeps a case-insensitive collation from reading a plaintext that merely looks like the marker as already sealed; the probe leaves out the whole marker family, since a value of a format this build does not read stops the run at its row instead of being sized as plaintext, and markerFamily carries no LIKE metacharacter, so the pattern needs no escaping */
+    /* the binary cast defeats a case-insensitive collation; the whole family is left out because such a row stops the run instead of being sized */
     probeSql := fmt.Sprintf(
         "SELECT MAX(LENGTH(%s)) FROM %s WHERE %s NOT LIKE ?",
         columnBytes(column, charset),

@@ -1488,7 +1488,6 @@ func TestMigrate_RefusesASealStoredAsDataThroughAForeignCipher(t *testing.T) {
     }
 }
 
-/* through a wrapped cipher the plaintext checks read the marker family, so a stored seal whose plaintext is a value of another format is refused as a seal is, never handed to the public doors */
 func TestMigrate_RefusesAMarkerFamilyPlaintextThroughAWrappedCipher(t *testing.T) {
     packageCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1), "v2": newKey(2)}))
 
@@ -1566,7 +1565,6 @@ func TestMigrateReencrypt_RotatesASealStoredAsDataEndToEnd(t *testing.T) {
     }
 }
 
-/* a stored value of an unknown seal format, the fourth major's bound seal included, stops every mode on its row, which the error names, and no update is sent: encrypt would seal it as data, reencrypt under the target key, decrypt would write it back as plaintext */
 func TestMigrator_StopsOnAnUnknownSealFormatInEveryMode(t *testing.T) {
     for door, run := range map[string]func(migrator *Migrator, spec TableSpec) (int, error){
         "encrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
@@ -1613,7 +1611,6 @@ func TestMigrator_StopsOnAnUnknownSealFormatInEveryMode(t *testing.T) {
     }
 }
 
-/* the width probe leaves out the whole marker family, so a row of an unknown format is not sized as plaintext and the run reaches it, stopping there */
 func TestMigrator_TheWidthProbeLeavesOutTheMarkerFamily(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
         {
@@ -1646,7 +1643,6 @@ func TestMigrator_TheWidthProbeLeavesOutTheMarkerFamily(t *testing.T) {
     }
 }
 
-/* a decrypt run reads the stored value's format before the cipher does, so a cipher whose Decrypt passes it through does not turn it into a plaintext */
 func TestMigrateDecrypt_StopsOnAnUnknownSealFormatThroughAPassThroughCipher(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
         {fragment: "ORDER BY", columns: []string{"id", "notes"}, rows: [][]driver.Value{{"7", "<ENC>\x00gcm2\x00v1:zzz"}}},
@@ -1665,7 +1661,6 @@ func TestMigrateDecrypt_StopsOnAnUnknownSealFormatThroughAPassThroughCipher(t *t
     }
 }
 
-/* the plaintext check of a decrypt run reads the marker family, not the one format: a decrypted value of any format of the family, written bare, would be refused or read as a seal on the next read */
 func TestMigrateDecrypt_StopsOnAPlaintextOfTheMarkerFamily(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, nil)
     migrator.cipher = newRotationCipher(t)

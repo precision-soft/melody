@@ -142,7 +142,6 @@ func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
     }
 }
 
-/* every column type reads through Decrypt, so a stored value of an unknown seal format, the fourth major's bound seal included, is an error on Scan and the destination keeps what it held */
 func TestEncryptedColumn_ScanRefusesAnUnknownSealFormat(t *testing.T) {
     UseCipher(NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})))
     defer UseCipher(nil)
