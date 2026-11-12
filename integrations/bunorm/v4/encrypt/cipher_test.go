@@ -386,7 +386,7 @@ func TestCipher_DecryptStillPassesGenuinePlaintextThrough(t *testing.T) {
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})
     cipher := NewCipher(provider)
 
-    for _, plaintext := range []string{"", "alice@example.com", "<ENC>", "<ENC>\x00gcm2\x00v1:zzz", "not encrypted at all"} {
+    for _, plaintext := range []string{"", "alice@example.com", "<ENC>", "<ENC>gcm1v1:zzz", "not encrypted at all"} {
         decrypted, decryptErr := cipher.Decrypt(plaintext)
         if nil != decryptErr {
             t.Fatalf("expected %q to pass through, got %v", plaintext, decryptErr)
@@ -395,6 +395,91 @@ func TestCipher_DecryptStillPassesGenuinePlaintextThrough(t *testing.T) {
         if plaintext != decrypted {
             t.Fatalf("expected %q to pass through unchanged, got %q", plaintext, decrypted)
         }
+    }
+}
+
+/* a value of the marker family under a format this build does not read is a seal of another build, never text: served as plaintext it would be re-sealed as data on the next write and its content lost */
+func TestCipher_DecryptRefusesAnUnknownSealFormat(t *testing.T) {
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
+
+    body := "c2VhbGVkLXBheWxvYWQtb2YtZW5vdWdoLWxlbmd0aA"
+    _, decryptErr := cipherInstance.Decrypt("<ENC>\x00gcm9\x00v1:" + body)
+    if nil == decryptErr || false == exception.ChainIs(decryptErr, ErrSealFormatUnknown) {
+        t.Fatalf("expected ErrSealFormatUnknown, got %v", decryptErr)
+    }
+
+    if context := exception.FromError(decryptErr).Context(); 1 != len(context) || "gcm9" != context["format"] {
+        t.Fatalf("expected the context to name the format alone, got %v", context)
+    }
+
+    sixteen := strings.Repeat("a", 16)
+    if _, longestErr := cipherInstance.Decrypt("<ENC>\x00" + sixteen + "\x00v1:" + body); sixteen != exception.FromError(longestErr).Context()["format"] {
+        t.Fatalf("expected a 16-character format named, got %v", longestErr)
+    }
+
+    if true == strings.Contains(decryptErr.Error(), "v1") || true == strings.Contains(decryptErr.Error(), body) {
+        t.Fatalf("expected the refusal to carry neither the key id nor the body, got %q", decryptErr.Error())
+    }
+}
+
+/* the format is named only when it is a token a build could have written, so a value of the family whose token is absent, empty, unterminated, too long or of another case is refused without one */
+func TestCipher_DecryptRefusesAMarkerFamilyValueOfNoFormat(t *testing.T) {
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
+
+    for _, stored := range []string{"<ENC>\x00", "<ENC>\x00zzz", "<ENC>\x00\x00", "<ENC>\x00GCM1\x00v1:x", "<ENC>\x00" + strings.Repeat("a", 17) + "\x00v1:x"} {
+        _, decryptErr := cipherInstance.Decrypt(stored)
+        if nil == decryptErr || false == exception.ChainIs(decryptErr, ErrSealFormatUnknown) {
+            t.Fatalf("expected %q refused with ErrSealFormatUnknown, got %v", stored, decryptErr)
+        }
+
+        if _, named := exception.FromError(decryptErr).Context()["format"]; true == named {
+            t.Fatalf("expected %q refused without a format, got %v", stored, exception.FromError(decryptErr).Context())
+        }
+    }
+}
+
+/* the write side stays lenient: an unknown-format value an application writes is data, sealed and read back byte for byte */
+func TestCipher_EncryptSealsAnUnknownFormatValueAsData(t *testing.T) {
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
+    installCipher(t, defaultCipherName, cipherInstance)
+
+    applicationValue := "<ENC>\x00gcm9\x00v1:zzz"
+
+    sealed, encryptErr := cipherInstance.Encrypt(applicationValue)
+    if nil != encryptErr || true == strings.HasPrefix(sealed, "<ENC>\x00gcm9") {
+        t.Fatalf("expected the value sealed as data, got %q (%v)", sealed, encryptErr)
+    }
+
+    if decrypted, decryptErr := cipherInstance.Decrypt(sealed); nil != decryptErr || applicationValue != decrypted {
+        t.Fatalf("expected the value back byte for byte, got %q (%v)", decrypted, decryptErr)
+    }
+
+    stored, valueErr := EncryptedString(applicationValue).Value()
+    if nil != valueErr {
+        t.Fatalf("value: %v", valueErr)
+    }
+
+    var scanned EncryptedString
+    if scanErr := scanned.Scan(stored); nil != scanErr || applicationValue != string(scanned) {
+        t.Fatalf("expected the column to read the value back, got %q (%v)", string(scanned), scanErr)
+    }
+}
+
+/* keyIdOf classifies rows for the bulk migrator: an unknown format is an error, so encrypt does not seal it as data and reencrypt does not seal it under the target key */
+func TestKeyIdOf_ReportsAnUnknownSealFormatAsAnError(t *testing.T) {
+    keyId, encrypted, keyIdErr := keyIdOf("<ENC>\x00gcm9\x00v1:zzz")
+    if nil == keyIdErr || false == exception.ChainIs(keyIdErr, ErrSealFormatUnknown) || true == encrypted || "" != keyId {
+        t.Fatalf("expected ErrSealFormatUnknown, got %q %v %v", keyId, encrypted, keyIdErr)
+    }
+}
+
+/* a value of the marker family through a wrapped cipher is refused as a marker-shaped one is, whatever format it names */
+func TestEncryptedString_AMarkerFamilyValueThroughAWrappedCipherIsRefused(t *testing.T) {
+    packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}}))
+    installCipher(t, defaultCipherName, wrappedCipher{Cipher: packageCipher})
+
+    if stored, valueErr := EncryptedString("<ENC>\x00gcm9\x00v1:zzz").Value(); nil == valueErr || false == strings.Contains(valueErr.Error(), "encryption marker") {
+        t.Fatalf("expected the foreign-cipher refusal of the marker-family value, stored %q (%v)", stored, valueErr)
     }
 }
 

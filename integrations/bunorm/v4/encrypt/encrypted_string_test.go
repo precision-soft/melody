@@ -12,6 +12,8 @@ import (
     _ "github.com/go-sql-driver/mysql"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
+
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 func TestEncryptedString_MarshalJSONRedactsPlaintext(t *testing.T) {
@@ -135,6 +137,37 @@ func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
 
     if "" != string(scanned) {
         t.Fatalf("expected no value on a failed scan, got %q", string(scanned))
+    }
+}
+
+/* every column type reads through Decrypt, so a stored value of an unknown seal format is an error on Scan and the destination keeps what it held */
+func TestEncryptedColumn_ScanRefusesAnUnknownSealFormat(t *testing.T) {
+    installCipher(t, defaultCipherName, NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}})))
+    installCipher(t, crmCipherRef{}.CipherName(), NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v1", Keys: map[string][]byte{"crm-v1": newKey(11)}})))
+
+    stored := []byte("<ENC>\x00gcm9\x00v1:zzz")
+
+    encryptedString := EncryptedString("kept")
+    deterministicString := EncryptedDeterministicString("kept")
+    encryptedStringFor := EncryptedStringFor[crmCipherRef]("kept")
+    deterministicStringFor := EncryptedDeterministicStringFor[crmCipherRef]("kept")
+
+    for name, column := range map[string]struct {
+        scan func(any) error
+        read func() string
+    }{
+        "EncryptedString":                 {scan: encryptedString.Scan, read: func() string { return string(encryptedString) }},
+        "EncryptedDeterministicString":    {scan: deterministicString.Scan, read: func() string { return string(deterministicString) }},
+        "EncryptedStringFor":              {scan: encryptedStringFor.Scan, read: func() string { return string(encryptedStringFor) }},
+        "EncryptedDeterministicStringFor": {scan: deterministicStringFor.Scan, read: func() string { return string(deterministicStringFor) }},
+    } {
+        if scanErr := column.scan(stored); nil == scanErr || false == exception.ChainIs(scanErr, ErrSealFormatUnknown) {
+            t.Fatalf("%s: expected ErrSealFormatUnknown, got %v", name, scanErr)
+        }
+
+        if "kept" != column.read() {
+            t.Fatalf("%s: expected the destination left as it was, got %q", name, column.read())
+        }
     }
 }
 

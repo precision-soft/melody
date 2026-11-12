@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `audit/config.go`, `audit/recorder.go`, `audit/async_storage.go`: `RegistryConfig`, `RecorderConfig` and `AsyncStorageConfig`, the one struct each is built from; `AsyncStorageConfig.CloseGrace` gives the close's grace a door, 5s when left out as the constant was, at least 1ms, unlimited refused.
 - `encrypt/module.go`: the module is a `ServiceModule`; `RegisterServices` installs `ModuleConfig.Cipher` and each context's `Cipher` under its name for the columns of the process, in every process mode, and publishes the default cipher as `ServiceCipher`; a module with a `Cipher` and no database installs it and registers no command, and so does a context without a database.
 - `encrypt/encrypt_database_command.go`, `encrypt/key_provider.go`: `EncryptDatabaseCommandConfig` and `KeyRing`, the one struct each door takes.
+- `encrypt/errors.go`: `ErrSealFormatUnknown`, the cause of the refusal of a stored value that carries the encryption marker under a format this build does not read.
 
 ### Changed
 
@@ -35,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `encrypt/encrypted_string.go`, `deterministic.go`, `encrypted_string_for.go`, `deterministic_for.go`, `key_provider.go`: the deprecated `GoString` of the four column types and of `StaticKeyProvider` is removed; `Format` answers `%#v` and keeps the redaction.
 - **Breaking** — `encrypt/key_provider.go`: `NewStaticKeyProvider` takes a `KeyRing{CurrentKeyId, Keys}`, its five refusals naming `KeyRing.CurrentKeyId` or `KeyRing.Keys`.
 - **Breaking** — `encrypt/migrate.go`: `TableSpec.BatchSize` is a `bound.Count`, 500 when left out, at least 1, unlimited refused, a run outside the rule refused before its first query naming the field, where a zero or negative size took 500; `--batch -1` is refused naming the flag and the field.
+- **Breaking** — `encrypt/cipher.go`, `encrypt/migrate.go`: a stored value beginning with the encryption marker and its glue under a format this build does not read is an error, `ErrSealFormatUnknown` in its chain and the format named when it is one a build could have written, on the package's `Cipher.Decrypt`, on the `Scan` of the four column types over it and in every mode of the `Migrator` whatever its cipher, which stops at the row with no update, its width check leaving such a value out, where it was read as plaintext, passed through, and sealed again as data by the next write or the next `encrypt` run; the checks that a decrypted or written value is itself marker-shaped read the same family; through the package cipher a value an application writes in that shape is still sealed as data and reads back, and through a cipher implemented outside the package a column's `Value` and the `Migrator`'s re-seal refuse it as they refuse a `gcm1` one.
 - `audit/async_storage.go` and `audit/recorder.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
 
 ### Fixed

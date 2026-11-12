@@ -100,7 +100,7 @@ func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, 
     return instance.run(ctx, spec, batchSize, instance.reencryptTransform(spec, targetKeyId))
 }
 
-/* MigrateDecrypt stops the run on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. */
+/* MigrateDecrypt stops the run on a row whose stored value is of a seal format this build does not read, whatever the cipher's Decrypt answers for it, and on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. */
 func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
     batchSize, batchSizeErr := resolveBatchSize(spec)
     if nil != batchSizeErr {
@@ -108,12 +108,16 @@ func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (i
     }
 
     return instance.run(ctx, spec, batchSize, func(value string) (string, error) {
+        if _, _, keyIdErr := keyIdOf(value); nil != keyIdErr {
+            return "", keyIdErr
+        }
+
         plaintext, decryptErr := instance.cipher.Decrypt(value)
         if nil != decryptErr {
             return "", decryptErr
         }
 
-        if true == hasEncryptionMarker(plaintext) {
+        if true == carriesMarkerFamily(plaintext) {
             return "", exception.NewError(
                 "migrate decrypt found a stored value whose plaintext is itself an encrypted value; written bare it would be read as one, so the row is left sealed",
                 map[string]any{"mode": "decrypt"},
@@ -166,7 +170,7 @@ func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string,
         }
 
         if false == isSealer {
-            if true == hasEncryptionMarker(plaintext) {
+            if true == carriesMarkerFamily(plaintext) {
                 return "", errSealStoredAsDataThroughForeignCipher(keyId)
             }
 
@@ -217,7 +221,7 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
             return sealer.sealValueWithKeyId(plaintext, targetKeyId, stored.deterministic)
         }
 
-        if true == hasEncryptionMarker(plaintext) {
+        if true == carriesMarkerFamily(plaintext) {
             return "", errSealStoredAsDataThroughForeignCipher(currentKeyId)
         }
 
@@ -345,7 +349,7 @@ func (instance *Migrator) ensureColumnCapacity(ctx context.Context, spec TableSp
 
 /* longestUnsealedLength reports, in bytes, the length of the longest value not already sealed and whether one exists; bytes are the unit the seal expands over, counted in the utf8mb4 the cipher reads whatever the column's charset. */
 func (instance *Migrator) longestUnsealedLength(ctx context.Context, table string, column string, charset string) (int, bool, error) {
-    /* the cast keeps a case-insensitive collation from reading a plaintext that merely looks like the marker as already sealed; markerPrefix carries no LIKE metacharacter, so the pattern needs no escaping */
+    /* the cast keeps a case-insensitive collation from reading a plaintext that merely looks like the marker as already sealed; the probe leaves out the whole marker family, since a value of a format this build does not read stops the run at its row instead of being sized as plaintext, and markerFamily carries no LIKE metacharacter, so the pattern needs no escaping */
     probeSql := fmt.Sprintf(
         "SELECT MAX(LENGTH(%s)) FROM %s WHERE %s NOT LIKE ?",
         columnBytes(column, charset),
@@ -355,7 +359,7 @@ func (instance *Migrator) longestUnsealedLength(ctx context.Context, table strin
 
     var longest sql.NullInt64
 
-    scanErr := instance.db.DB.QueryRowContext(ctx, probeSql, markerPrefix+"%").Scan(&longest)
+    scanErr := instance.db.DB.QueryRowContext(ctx, probeSql, markerFamily+"%").Scan(&longest)
     if nil != scanErr {
         return 0, false, exception.NewError(
             "migrate could not measure the widest value of the target column",

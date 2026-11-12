@@ -8,6 +8,7 @@ import (
     "crypto/rand"
     "crypto/sha256"
     "encoding/base64"
+    "regexp"
     "strings"
     "sync"
 
@@ -27,6 +28,10 @@ const (
 )
 
 var markerPrefix = encryptionMarker + markerGlue + formatGcmV1 + markerGlue
+
+var markerFamily = encryptionMarker + markerGlue
+
+var reportableSealFormatPattern = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
 
 type Cipher interface {
     Encrypt(plaintext string) (string, error)
@@ -215,9 +220,13 @@ func (instance *aes256Cipher) CiphertextCandidates(plaintext string) ([][]byte, 
     return candidates, nil
 }
 
-/* Decrypt returns the plaintext of a value this cipher sealed and passes a value without the marker straight through, so a column can be converted one write at a time. A value that carries the marker but whose body does not parse or authenticate is an error, never plaintext, since only seal writes the marker. */
+/* Decrypt returns the plaintext of a value this cipher sealed and passes a value without the marker straight through, so a column can be converted one write at a time. A value that carries the marker but whose body does not parse or authenticate is an error, never plaintext, since only seal writes the marker, and so is a value of the marker family under a format this build does not read, ErrSealFormatUnknown in its chain. */
 func (instance *aes256Cipher) Decrypt(encoded string) (string, error) {
     if false == hasEncryptionMarker(encoded) {
+        if true == carriesMarkerFamily(encoded) {
+            return "", errSealFormatUnknown(encoded)
+        }
+
         return encoded, nil
     }
 
@@ -253,7 +262,7 @@ func sealColumnValue(cipherInstance Cipher, plaintext string, deterministic bool
         return sealer.sealValue(plaintext, deterministic)
     }
 
-    if true == hasEncryptionMarker(plaintext) {
+    if true == carriesMarkerFamily(plaintext) {
         return "", errSealWrittenAsDataThroughForeignCipher()
     }
 
@@ -332,9 +341,13 @@ func gcmForKey(key []byte, keyId string) (cipher.AEAD, error) {
     return gcm, nil
 }
 
-/* keyIdOf reports the key id a stored value was sealed under. A value without the marker reports none, and a marker whose payload does not parse is an error, so a migration stops on it instead of sealing it again. */
+/* keyIdOf reports the key id a stored value was sealed under. A value without the marker reports none, and a marker whose payload does not parse, or a marker family under a format this build does not read, is an error, so a migration stops on it instead of sealing it again. */
 func keyIdOf(encoded string) (string, bool, error) {
     if false == hasEncryptionMarker(encoded) {
+        if true == carriesMarkerFamily(encoded) {
+            return "", false, errSealFormatUnknown(encoded)
+        }
+
         return "", false, nil
     }
 
@@ -364,6 +377,23 @@ func deterministicNonceFrom(nonceKey []byte, plaintext string, size int) []byte 
 /* hasEncryptionMarker reports whether a value carries the marker, which only seal writes: its presence is a claim of provenance, and the body behind it must then be a well-formed seal. */
 func hasEncryptionMarker(value string) bool {
     return strings.HasPrefix(value, markerPrefix)
+}
+
+/* carriesMarkerFamily reports whether a value begins with the marker and its glue, whatever format follows: no text carries that NUL by accident, so such a value is a seal of some format, never plaintext. */
+func carriesMarkerFamily(value string) bool {
+    return strings.HasPrefix(value, markerFamily)
+}
+
+/* errSealFormatUnknown names the format only when it is a token a build could have written, and never the key id or the body behind it */
+func errSealFormatUnknown(value string) error {
+    var context map[string]any
+
+    remainder := value[len(markerFamily):]
+    if glue := strings.Index(remainder, markerGlue); -1 != glue && true == reportableSealFormatPattern.MatchString(remainder[:glue]) {
+        context = map[string]any{"format": remainder[:glue]}
+    }
+
+    return exception.NewError(ErrSealFormatUnknown.Error(), context, ErrSealFormatUnknown)
 }
 
 /* decodeEncrypted splits the body behind an established marker into its key id and payload, and refuses a body that is not one. The payload floor is the nonce plus the authentication tag, the length of a seal of the empty string, so a shortfall is damage rather than an authentication failure. */
