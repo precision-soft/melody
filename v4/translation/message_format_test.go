@@ -179,6 +179,41 @@ func TestValidatePattern_AdmitsWhatTransRendersWhole(t *testing.T) {
     }
 }
 
+/* the bound is the renderer's: 32 nested selects render whole, the 33rd's blocks render as raw text, so the validator refuses that one at its own offset */
+func TestValidatePattern_RefusesTheSelectNestedPastTheLevelsTransRenders(t *testing.T) {
+    nested := func(levels int) string {
+        return strings.Repeat("{g, select, other {", levels) + "{g}" + strings.Repeat("}}", levels)
+    }
+
+    deepPlural := strings.Repeat("{n, plural, other {", maxInterpolationDepth+1) + "#" + strings.Repeat("}}", maxInterpolationDepth+1)
+    if validateErr := ValidatePattern(deepPlural); nil == validateErr || patternDefectNestedTooDeep != exception.FromError(validateErr).Context()["reason"] {
+        t.Fatalf("expected %d nested plurals refused for their depth, got %v", maxInterpolationDepth+1, validateErr)
+    }
+
+    if rendered := formatMessage(nested(maxInterpolationDepth), map[string]any{"g": "a"}, "en"); "a" != rendered {
+        t.Fatalf("expected %d nested selects rendered whole, got %q", maxInterpolationDepth, rendered)
+    }
+
+    if validateErr := ValidatePattern(nested(maxInterpolationDepth)); nil != validateErr {
+        t.Fatalf("expected %d nested selects admitted, got %v", maxInterpolationDepth, exception.FromError(validateErr).Context())
+    }
+
+    if rendered := formatMessage(nested(maxInterpolationDepth+1), map[string]any{"g": "a"}, "en"); "{g}" != rendered {
+        t.Fatalf("expected the renderer to write the block past %d levels as raw text, got %q", maxInterpolationDepth, rendered)
+    }
+
+    validateErr := ValidatePattern(nested(maxInterpolationDepth + 1))
+    if nil == validateErr {
+        t.Fatalf("expected %d nested selects refused", maxInterpolationDepth+1)
+    }
+
+    context := exception.FromError(validateErr).Context()
+    expectedOffset := maxInterpolationDepth * len([]rune("{g, select, other {"))
+    if expectedOffset != context["offset"] || patternDefectNestedTooDeep != context["reason"] {
+        t.Fatalf("expected offset %d reason %q, got %v", expectedOffset, patternDefectNestedTooDeep, context)
+    }
+}
+
 /* a catalog of its own is not validated by Trans, which has no error to return: its malformed select renders leniently */
 func TestTrans_ACustomCatalogsMalformedPatternStillRenders(t *testing.T) {
     manager := NewManager([]translationcontract.Catalog{unvalidatedCatalog{locale: "en", message: "{g, select, male {he} female other {they}}"}}, "en", nil)

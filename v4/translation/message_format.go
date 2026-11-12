@@ -208,7 +208,7 @@ func parseSelectors(style []rune) map[string][]rune {
     return selectors
 }
 
-/* ValidatePattern reports the first select or plural of a message pattern whose style is not keyword-and-block pairs ending with an other block, with its rune offset and the reason; nil when every select and plural is keyword-and-block pairs with an other block. Trans renders a nesting deeper than 32 levels as its raw text, which this check does not judge. A lone brace in plain text and an unknown argument type are not refused: they render visibly. */
+/* ValidatePattern reports the first select or plural of a message pattern whose style is not keyword-and-block pairs ending with an other block, with its rune offset and the reason; nil when every select and plural is keyword-and-block pairs with an other block. A select or plural nested deeper than the 32 levels Trans renders, the level whose blocks it would write as raw text, is reported at its own offset. A lone brace in plain text and an unknown argument type are not refused: they render visibly. */
 func ValidatePattern(pattern string) error {
     defect := findPatternDefect([]rune(pattern), 0)
     if nil == defect {
@@ -226,6 +226,7 @@ const (
     patternDefectKeywordWithoutBlock = "a selector keyword has no block"
     patternDefectBlockWithoutKeyword = "a selector block has no keyword"
     patternDefectWithoutOther        = "a select or plural has no other block"
+    patternDefectNestedTooDeep       = "a select or plural is nested deeper than 32 levels"
 )
 
 type patternDefect struct {
@@ -235,6 +236,11 @@ type patternDefect struct {
 
 /* findPatternDefect walks the arguments the way interpolate does, so an unmatched brace is plain text here too; base is the rune offset of runes within the whole pattern. */
 func findPatternDefect(runes []rune, base int) *patternDefect {
+    return findPatternDefectAtDepth(runes, base, 0)
+}
+
+/* depth is the one interpolate renders runes at, so a selector whose blocks it would render past maxInterpolationDepth is refused */
+func findPatternDefectAtDepth(runes []rune, base int, depth int) *patternDefect {
     index := 0
     for index < len(runes) {
         if '{' != runes[index] {
@@ -248,7 +254,7 @@ func findPatternDefect(runes []rune, base int) *patternDefect {
             continue
         }
 
-        if defect := findArgumentDefect(runes[index+1:closeIndex], base+index); nil != defect {
+        if defect := findArgumentDefect(runes[index+1:closeIndex], base+index, depth); nil != defect {
             return defect
         }
 
@@ -258,7 +264,7 @@ func findPatternDefect(runes []rune, base int) *patternDefect {
     return nil
 }
 
-func findArgumentDefect(inner []rune, openOffset int) *patternDefect {
+func findArgumentDefect(inner []rune, openOffset int, depth int) *patternDefect {
     name, remainder, hasType := splitFirstComma(inner)
     if false == hasType {
         return nil
@@ -272,13 +278,17 @@ func findArgumentDefect(inner []rune, openOffset int) *patternDefect {
     switch strings.TrimSpace(string(argType)) {
     case "plural", "select":
         styleOffset := openOffset + 1 + len(name) + 1 + len(argType) + 1
-        return findSelectorDefect(style, styleOffset, openOffset)
+        return findSelectorDefect(style, styleOffset, openOffset, depth)
     default:
         return nil
     }
 }
 
-func findSelectorDefect(style []rune, base int, argumentOffset int) *patternDefect {
+func findSelectorDefect(style []rune, base int, argumentOffset int, depth int) *patternDefect {
+    if depth+1 > maxInterpolationDepth {
+        return &patternDefect{offset: argumentOffset, reason: patternDefectNestedTooDeep}
+    }
+
     hasOther := false
 
     index := 0
@@ -319,7 +329,7 @@ func findSelectorDefect(style []rune, base int, argumentOffset int) *patternDefe
             hasOther = true
         }
 
-        if defect := findPatternDefect(style[index+1:closeIndex], base+index+1); nil != defect {
+        if defect := findPatternDefectAtDepth(style[index+1:closeIndex], base+index+1, depth+1); nil != defect {
             return defect
         }
 

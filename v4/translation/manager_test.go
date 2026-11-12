@@ -178,6 +178,7 @@ func TestTrans_RussianPluralCategories(t *testing.T) {
     }
 }
 
+/* MapCatalog.Add refuses such a nesting, so the renderer's own bound is reached through a catalog that does not validate */
 func TestTrans_PathologicallyNestedPluralDoesNotOverflow(t *testing.T) {
     var builder strings.Builder
     const nesting = 200
@@ -189,10 +190,7 @@ func TestTrans_PathologicallyNestedPluralDoesNotOverflow(t *testing.T) {
         builder.WriteString("}}")
     }
 
-    catalog := NewMapCatalog("en")
-    catalog.Add("messages", "deep", builder.String())
-
-    manager := NewManager([]translationcontract.Catalog{catalog}, "en", nil)
+    manager := NewManager([]translationcontract.Catalog{unvalidatedCatalog{locale: "en", message: builder.String()}}, "en", nil)
 
     result := manager.Trans("deep", map[string]any{"count": 1}, "messages", "en")
     if "" == result {
