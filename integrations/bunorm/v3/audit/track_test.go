@@ -34,6 +34,28 @@ func newTestDatabase() *bun.DB {
     return bun.NewDB(sql.OpenDB(fakeConnector{}), mysqldialect.New())
 }
 
+type embeddedPrimaryKey struct {
+    Id int64 `bun:"id,pk"`
+}
+
+type embeddedPrimaryKeyEntity struct {
+    bun.BaseModel `bun:"table:before_image_embedded_key"`
+    *embeddedPrimaryKey
+    Name string `bun:"name"`
+}
+
+func TestBeforeImageModel_LeavesANilEmbeddedKeyOfTheCallersModelNil(t *testing.T) {
+    model := &embeddedPrimaryKeyEntity{Name: "new"}
+
+    if _, imageErr := beforeImageModel(newTestDatabase(), model); nil != imageErr {
+        t.Fatalf("before image: %v", imageErr)
+    }
+
+    if nil != model.embeddedPrimaryKey {
+        t.Fatalf("expected the caller's nil embedded key left nil, got %+v", model.embeddedPrimaryKey)
+    }
+}
+
 func TestBeforeImageModel_HoldsThePrimaryKeyAndNothingElseOfTheModel(t *testing.T) {
     type entity struct {
         bun.BaseModel `bun:"table:before_image_entity"`

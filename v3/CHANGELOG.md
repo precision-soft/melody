@@ -17,7 +17,7 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ### Fixed
 
-- `http/server_sent_event.go`: `NewServerSentEventWriter` refuses a writer chain whose `Unwrap` reaches itself, `response writer chain reaches itself`, or runs past 65,536 links, `response writer chain is longer than the limit`, before it commits a header, where the walk had no bound and a ring held the handler forever.
+- `http/server_sent_event.go`: `NewServerSentEventWriter` refuses a writer chain whose `Unwrap` reaches itself, `response writer chain reaches itself`, or runs past 65,536 links, `response writer chain is longer than the limit`, where a ring held the handler forever.
 
 ## [v3.14.4] - 2026-11-06 - Build Version Matches the Release
 

@@ -1303,3 +1303,27 @@ func TestUnknownSizePutReader_ALongerBodyFailsTheMultipartUploadInsteadOfComplet
         t.Fatalf("expected the upload aborted and never completed, got %d completed and %d aborted", server.completed, server.aborted)
     }
 }
+
+func TestPutFailedError_NamesTheRefusalOfABodyOfUnknownSizeLongerThanTheLimit(t *testing.T) {
+    server := newMultipartPutServer(t)
+    client := server.newClient(t)
+
+    body := newUnknownSizePutReader(&sequentialReader{reader: strings.NewReader(strings.Repeat("x", 2*putSpoolLimit+1))}, 2*putSpoolLimit)
+
+    _, putErr := client.PutObject(context.Background(), "melody-test", "uploads/unknown.bin", body, -1, putObjectOptions(-1, ""))
+
+    var refused *exception.Error
+    if false == errors.As(putFailedError("uploads/unknown.bin", "melody-test", putErr), &refused) {
+        t.Fatalf("expected an exception error, got %v", putErr)
+    }
+
+    if "object storage put of unknown size is longer than the limit" != refused.Message() || "uploads/unknown.bin" != refused.Context()["key"] || "melody-test" != refused.Context()["bucket"] || int64(unknownSizePutLimit) != refused.Context()["limit"] {
+        t.Fatalf("expected the refusal named with its key, bucket and limit, got %q %v", refused.Message(), refused.Context())
+    }
+
+    other := errors.New("connection reset")
+    var failed *exception.Error
+    if false == errors.As(putFailedError("uploads/unknown.bin", "melody-test", other), &failed) || "object storage put failed" != failed.Message() || false == errors.Is(failed, other) {
+        t.Fatalf("expected any other failure wrapped as a failed put, got %v", failed)
+    }
+}

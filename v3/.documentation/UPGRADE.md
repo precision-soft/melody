@@ -1032,13 +1032,13 @@ package, a column's `Value` and the `Migrator`'s re-seal refuse a value of the f
 
 **Remedy.** Read and migrate such a column with the build that wrote it, or restore the damaged rows; the rows are those whose bytes begin with `<ENC>\0` and not with `<ENC>\0gcm1\0`. A value that begins with `<ENC>` without the NUL glue, as bun's formatter leaves one inlined as a `string`, is still plaintext.
 
-### Bunorm audit: a change set leaves out scan-only fields and a shadowed embedded field
+### Bunorm audit: a change set leaves out scan-only fields, relations and the embedded fields bun drops
 
-**What changed.** [`ChangeSet`](../../integrations/bunorm/v3/audit/change.go) leaves out a field whose `bun` tag carries the `scanonly` option, and a field of an embedded struct whose column a field nearer the root already holds, as bun leaves both out of the row it writes. The [`Tracker`](../../integrations/bunorm/v3/audit/track.go) reads the before image of an update, and of a delete under `CaptureDeleteBeforeImage`, into a model holding the primary key alone, where it read it into a copy of the passed model. Shipped in `integrations/bunorm/v3` `v3.6.7`.
+**What changed.** [`ChangeSet`](../../integrations/bunorm/v3/audit/change.go) leaves out a field whose `bun` tag carries the `scanonly` option, a relation whose `rel` or `m2m` option follows the column name, and a field of an embedded struct bun leaves out of the row it writes: one whose column a field nearer the root holds, or one whose column another embedded field of the same level holds, unless it is the only tagged field of that column. The [`Tracker`](../../integrations/bunorm/v3/audit/track.go) reads the before image of an update, and of a delete under `CaptureDeleteBeforeImage`, into a model holding the primary key alone, where it read it into a copy of the passed model; a `BeforeSelect`, `BeforeScanRow` or `AfterScanRow` hook of the model that reads a field other than the key sees its zero value during that read. Shipped in `integrations/bunorm/v3` `v3.6.7`.
 
 **Symptom.** A direct `ChangeSet(before, after)` caller comparing two loaded models gets no entry for such a field where it got one when the field differed. On the `Tracker` path, an update that only added a key to a json map column is recorded with that key, where it was recorded with an empty change set.
 
-**Remedy.** None needed: neither field is a column of the row. Read a scan-only value from the query that selects it, not from the audit trail.
+**Remedy.** None needed for the change set: none of these fields is a column of the row. Read a scan-only value from the query that selects it, not from the audit trail. A model hook that scopes or checks the select by a field other than the primary key takes that value from the context instead.
 
 ### Object storage: `awss3` `Put` of unknown size goes up in parts of 16 MiB and is refused past ten thousand of them
 

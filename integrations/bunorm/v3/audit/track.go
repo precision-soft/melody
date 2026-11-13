@@ -179,7 +179,7 @@ func escapeEntityIdPart(part string) string {
     return strings.ReplaceAll(part, ":", `\:`)
 }
 
-/* the primary key alone: a field copied from the new model survives the read where the column decodes into it, a json map keeping the new keys */
+/* the primary key alone: a copied field survives the read wherever the column decodes into it, as a json map does */
 func beforeImageModel(database *bun.DB, model any) (any, error) {
     value := reflect.ValueOf(model)
     if reflect.Pointer != value.Kind() || true == value.IsNil() || reflect.Struct != value.Elem().Kind() {
@@ -190,7 +190,11 @@ func beforeImageModel(database *bun.DB, model any) (any, error) {
     image := reflect.New(source.Type())
 
     for _, primaryKeyField := range database.Table(source.Type()).PKs {
-        sourceValue := primaryKeyField.Value(source)
+        /* bun's Value allocates a nil embedded pointer on the way, which would write into the caller's model */
+        sourceValue, fieldErr := source.FieldByIndexErr(primaryKeyField.Index)
+        if nil != fieldErr {
+            continue
+        }
 
         /* the read scans through a pointer key, so a shared pointee would rewrite the caller's key */
         if reflect.Pointer == sourceValue.Kind() && false == sourceValue.IsNil() {

@@ -92,7 +92,7 @@ func (instance *Storage) Put(
             return declaredSizeMismatchError(key, size)
         }
 
-        return exception.NewError("object storage put failed", map[string]any{"key": key, "bucket": instance.bucket}, putErr)
+        return putFailedError(key, instance.bucket, putErr)
     }
 
     return nil
@@ -301,6 +301,18 @@ func seekableRemainingLength(seeker io.Seeker) (int64, bool, error) {
     return end - current, true, nil
 }
 
+func putFailedError(key string, bucket string, putErr error) error {
+    if true == exception.ChainIs(putErr, errUnknownSizePutTooLong) {
+        return exception.NewError(
+            "object storage put of unknown size is longer than the limit",
+            map[string]any{"key": key, "bucket": bucket, "limit": int64(unknownSizePutLimit)},
+            nil,
+        )
+    }
+
+    return exception.NewError("object storage put failed", map[string]any{"key": key, "bucket": bucket}, putErr)
+}
+
 func declaredSizeMismatchError(key string, size int64) error {
     return exception.NewError(
         "storage object size does not match the declared size",
@@ -323,7 +335,7 @@ const unknownSizePutLimit = putSpoolLimit * 10000
 
 var errUnknownSizePutTooLong = exception.NewError(
     "object storage put of unknown size is longer than the limit",
-    map[string]any{"limit": unknownSizePutLimit},
+    map[string]any{"limit": int64(unknownSizePutLimit)},
     nil,
 )
 

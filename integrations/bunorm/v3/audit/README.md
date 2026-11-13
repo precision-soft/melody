@@ -5,7 +5,7 @@ models. Go-native equivalent of a Doctrine unit-of-work audit listener.
 
 ## Change set
 
-`ChangeSet(before, after)` diffs two struct values by `bun` column name, recording only changed fields (relations, `scanonly` fields and `bun.BaseModel` are skipped; the exported fields of other embedded structs are flattened in, matching how bun promotes their columns, and one whose column a field nearer the root holds is left out, as bun leaves it out). Sensitive fields are recorded as changed but masked to `<redacted>`:
+`ChangeSet(before, after)` diffs two struct values by `bun` column name, recording only changed fields (relations, `scanonly` fields and `bun.BaseModel` are skipped; the exported fields of other embedded structs are flattened in, matching how bun promotes their columns, and one bun leaves out of the row, because a field nearer the root or another embedded field holds its column, is left out too). Sensitive fields are recorded as changed but masked to `<redacted>`:
 
 - tag a field `audit:"redact"`, or
 - type it as any encrypted column type — `encrypt.EncryptedString`, `encrypt.EncryptedDeterministicString`, or the compartment-bound `encrypt.EncryptedStringFor[R]` / `EncryptedDeterministicStringFor[R]` forms — all recognised through the `encrypt.EncryptedColumn` marker interface (auto-redacted).

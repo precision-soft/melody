@@ -2000,7 +2000,6 @@ func TestFileServer_Serve_ANilRequestIsRefusedAndRecorded(t *testing.T) {
     }
 }
 
-/* the resolution's own nil check is reached only white-box, because the door refuses first */
 func TestFileServer_TheResolutionRefusesANilRequestWithoutRecordingItTwice(t *testing.T) {
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
@@ -2522,7 +2521,6 @@ func TestFileServer_ServeReader_StripPrefixServesTheFileBeneathTheMount(t *testi
     }
 }
 
-/* the "/" substitution is shadowed by the anchoring below, so this test is not its proof; the inversion proves it */
 func TestFileServer_ServeReader_TheMountPointAloneResolvesToTheIndexFile(t *testing.T) {
     server := NewFileServer(
         NewOptions(
@@ -2569,7 +2567,6 @@ func TestFileServer_ServeReader_TheMountPointAloneResolvesToTheIndexFile(t *test
     }
 }
 
-/* the decline is shadowed by the canonical rebuild, so the empty warning list, not the verdict, says the mount declined */
 func TestFileServer_ServeReader_APathOutsideTheMountIsDeclined(t *testing.T) {
     logger := &levelRecordingLogger{Logger: logging.NewNopLogger()}
 
