@@ -27,6 +27,8 @@ type bootCollision struct {
     kind   string
     name   string
     origin string
+    /* registeredAs is the spelling already registered when it differs from name, so the report names both modules */
+    registeredAs string
 }
 
 /* recordBootCollision defers a duplicate registration to the aggregated report that Boot raises. */
@@ -38,6 +40,16 @@ func (instance *Application) recordBootCollision(kind string, name string) {
     })
 }
 
+/* recordModuleCollision defers a duplicate module to the aggregated report with the spelling already registered, so a name differing only by case names both modules. */
+func (instance *Application) recordModuleCollision(moduleName string, registeredName string) {
+    instance.bootCollisions = append(instance.bootCollisions, bootCollision{
+        kind:         bootCollisionKindModule,
+        name:         moduleName,
+        origin:       callerOrigin(),
+        registeredAs: registeredName,
+    })
+}
+
 /* panicOnBootCollisions raises one error naming every duplicate registration recorded during boot; it runs after the cli boot phase, when every registration channel, the http routes included, has run. */
 func (instance *Application) panicOnBootCollisions() {
     if 0 == len(instance.bootCollisions) {
@@ -46,10 +58,7 @@ func (instance *Application) panicOnBootCollisions() {
 
     collisions := make([]string, 0, len(instance.bootCollisions))
     for _, collision := range instance.bootCollisions {
-        collisions = append(
-            collisions,
-            fmt.Sprintf("%s %q registered at %s", collision.kind, collision.name, collision.origin),
-        )
+        collisions = append(collisions, collision.describe())
     }
 
     sort.Strings(collisions)
@@ -64,6 +73,14 @@ func (instance *Application) panicOnBootCollisions() {
             nil,
         ),
     )
+}
+
+func (instance bootCollision) describe() string {
+    if "" == instance.registeredAs || instance.name == instance.registeredAs {
+        return fmt.Sprintf("%s %q registered at %s", instance.kind, instance.name, instance.origin)
+    }
+
+    return fmt.Sprintf("%s %q registered at %s, already registered as %q", instance.kind, instance.name, instance.origin, instance.registeredAs)
 }
 
 /* refuseDuplicateModules raises the report at the start of Boot when a module was registered twice: the duplicate booted nothing, so a phase that panics over what it would have wired must not be the only record the process leaves */

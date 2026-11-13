@@ -18,42 +18,42 @@ func finishFileAtomically(destination string, content []byte) error {
     directory := filepath.Dir(destination)
 
     /* the temp name does not carry the destination's basename, which may fill the 255 bytes of a path component on its own */
-    tmpFile, tmpErr := os.CreateTemp(directory, ".melody-migrate-*.tmp")
-    if nil != tmpErr {
-        return fmt.Errorf("could not create the temporary file beside %s: %w", destination, tmpErr)
+    temporaryFile, temporaryErr := os.CreateTemp(directory, ".melody-migrate-*.tmp")
+    if nil != temporaryErr {
+        return fmt.Errorf("could not create the temporary file beside %s: %w", destination, temporaryErr)
     }
 
-    tmpPath := tmpFile.Name()
+    temporaryPath := temporaryFile.Name()
     renamed := false
     defer func() {
         if false == renamed {
-            _ = os.Remove(tmpPath)
+            _ = os.Remove(temporaryPath)
         }
     }()
 
-    if _, writeErr := tmpFile.Write(content); nil != writeErr {
-        _ = tmpFile.Close()
+    if _, writeErr := temporaryFile.Write(content); nil != writeErr {
+        _ = temporaryFile.Close()
 
-        return fmt.Errorf("could not write the temporary file %s: %w", tmpPath, writeErr)
+        return fmt.Errorf("could not write the temporary file %s: %w", temporaryPath, writeErr)
     }
 
-    if syncErr := tmpFile.Sync(); nil != syncErr {
-        _ = tmpFile.Close()
+    if syncErr := temporaryFile.Sync(); nil != syncErr {
+        _ = temporaryFile.Close()
 
-        return fmt.Errorf("could not fsync the temporary file %s: %w", tmpPath, syncErr)
+        return fmt.Errorf("could not fsync the temporary file %s: %w", temporaryPath, syncErr)
     }
 
-    if closeErr := tmpFile.Close(); nil != closeErr {
-        return fmt.Errorf("could not close the temporary file %s: %w", tmpPath, closeErr)
+    if closeErr := temporaryFile.Close(); nil != closeErr {
+        return fmt.Errorf("could not close the temporary file %s: %w", temporaryPath, closeErr)
     }
 
     /* CreateTemp makes the file 0600, and the destination's own mode is what the rewrite keeps; the constant is the fallback for a destination that cannot be read */
-    if chmodErr := os.Chmod(tmpPath, destinationFileMode(destination)); nil != chmodErr {
-        return fmt.Errorf("could not chmod the temporary file %s: %w", tmpPath, chmodErr)
+    if chmodErr := os.Chmod(temporaryPath, destinationFileMode(destination)); nil != chmodErr {
+        return fmt.Errorf("could not chmod the temporary file %s: %w", temporaryPath, chmodErr)
     }
 
-    if renameErr := os.Rename(tmpPath, destination); nil != renameErr {
-        return fmt.Errorf("could not rename %s over %s: %w", tmpPath, destination, renameErr)
+    if renameErr := os.Rename(temporaryPath, destination); nil != renameErr {
+        return fmt.Errorf("could not rename %s over %s: %w", temporaryPath, destination, renameErr)
     }
 
     renamed = true

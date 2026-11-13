@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - This major includes every change of the third major, `integrations/awss3/v3`, up to v3.1.0; that history is in the third major's changelog.
 - `storage.go`, `provider.go`, `module.go`: `StorageConfig` of `PutSpoolLimit`, what a `Put` may hold in memory, 16 MiB when left out as the constant was, at least 1, unlimited refused, and `MultipartAbortTimeout`, the bound of the detached abort, 10s when left out as the constant was, at least 1ms, unlimited refused; `EnsureBucketConfig` of `Region`; `ModuleConfig.Storage`.
-- `module.go`, `plaintext_endpoint.go`: the module is a `BootWarningModule`: it declares `awss3.plaintextEndpoint`, exported as `PlaintextEndpointBootWarningName`, as a boot warning a command writes, and over a plaintext client off this machine adds the warning at boot, so `MELODY_CLI_BOOT_WARNINGS_IGNORED` accepts the code and both cli keys silence it; a storage built with `NewStorage` honours the two keys at its first use.
+- `module.go`, `plaintext_endpoint.go`: the module is a `BootWarningModule`: it declares `aws.s3.plaintextEndpoint`, exported as `PlaintextEndpointBootWarningName`, as a boot warning a command writes, and over a plaintext client off this machine adds the warning at boot, so `MELODY_CLI_BOOT_WARNINGS_IGNORED` accepts the code and both cli keys silence it; a storage built with `NewStorage` honours the two keys at its first use.
 
 ### Changed
 
@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.
 - **Breaking** — `provider.go`: `Config.Secure` is replaced by `Config.Insecure`, so a configuration that names neither dials https where it dialed plaintext http; the refusals of an empty endpoint or credential name the field.
 - **Breaking** — `provider.go`, `storage.go`, `service_resolver.go`: `EnsureBucket` takes an `EnsureBucketConfig` after the bucket where it took the region, `NewStorage` a `StorageConfig` after the bucket, refused naming the field, and `RegisterStorageService` a `StorageConfig` resolved at the call, so a refused value fails the registration.
+- **Breaking** — `module.go`, `plaintext_endpoint.go`, `provider.go`: the module is named `aws.s3`, its boot warning `aws.s3.plaintextEndpoint`, and a `Config` prints as `aws.s3.Config{…}`, after the module's path, where they said `awss3`, so a journal filter on `awss3.plaintextEndpoint` matches nothing and `MELODY_CLI_BOOT_WARNINGS_IGNORED` naming it is refused at boot as an unknown code. The Go package stays `awss3`.
 
 ### Fixed
 

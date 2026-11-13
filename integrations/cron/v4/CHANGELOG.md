@@ -20,11 +20,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `runner_command.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
 - **Breaking** — `runner_command.go`, `runner_config.go`, `configuration.go`, `module.go`: `NewRunnerCommand` takes the configuration and one `RunnerConfig` of `Dialect`, `Commands`, `OutputCaptureLimit`, `ClockJumpResetThreshold`, `Timeout` and `GracefulTimeout`, resolved once, a value outside its rule panicking naming the field, where it took the dialect and a variadic command list; `ModuleConfig.Runner` replaces `RunnerCommands` and `RunnerDialect`. `Configuration.Schedule` takes the `EntryConfig` by value and `ScheduledCommand.Config` is a value; `EntryConfig.Instances` is a `bound.Count`, 1 when left out, at least 1, unlimited refused, a negative one refused naming the field by the generator and by `NewRunnerCommand` where it was read as 1; `EntryConfig.Timeout` and `EntryConfig.GracefulTimeout` are `bound.Duration`, the runner's when left out, at least 1ms, an unlimited timeout admitted, an unlimited window refused, an entry refusal naming the field and the command, where a negative timeout meant no deadline and a non-positive window the default.
 - **Behavioural change** — `runner_config.go`: an entry that names no timeout is cancelled after one hour, `RunnerConfig.Timeout`'s default, where it ran with no deadline; an entry that wants none writes `Timeout: bound.UnlimitedDuration()`, and a runner that wants none for every such entry writes it on `RunnerConfig.Timeout`.
+- **Breaking** — `entry.go`, `template_k8s.go`: `Entry.Args` is renamed `Entry.Arguments`, and the k8s template's refusal of an empty token names the field `Arguments`; nothing else changes.
 
 ### Removed
 
 - **Breaking** — `parameter.go`, `module.go`: `ParameterRegistrar`, `RegisterDefaultParameters` and `ModuleConfig.WithDefaultParameters`; the module no longer implements `ParameterModule`; a parameter of one of the ten declared names that the application registers before `Boot` is refused naming the key that feeds it, and one a parameter hook registers is the duplicate of the aggregated boot report.
 - **Breaking** — `validation.go`: the deprecated aliases `ForbiddenChar`, `CrontabForbiddenChars` and `ValidateNoForbiddenChars` are removed; `ForbiddenCharacter`, `CrontabForbiddenCharacters` and `ValidateNoForbiddenCharacters` remain.
+- **Breaking** — `errors.go`: `ErrSharedRunnerCommandFlags`, deprecated and answered by nothing since the runner accepts a command answering the same flag instances.
 
 ### Fixed
 

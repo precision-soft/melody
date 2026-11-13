@@ -456,7 +456,7 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
     sort.Strings(sortedKeys)
 
     commandKeys := make([]string, 0, len(items))
-    cmds := make(rueidis.Commands, 0, len(items))
+    commands := make(rueidis.Commands, 0, len(items))
     for _, key := range sortedKeys {
         payload := items[key]
 
@@ -473,12 +473,12 @@ func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]
         }
 
         commandKeys = append(commandKeys, key)
-        cmds = append(cmds, command)
+        commands = append(commands, command)
     }
 
     /* every failing response is collected before one is reported, as the delete sibling does, so the report is deterministic and shows how much of the batch failed */
     setErrors := make(map[string]error, len(commandKeys))
-    for index, response := range instance.client.DoMulti(ctx, cmds...) {
+    for index, response := range instance.client.DoMulti(ctx, commands...) {
         if err := response.Error(); nil != err {
             setErrors[commandKeys[index]] = err
         }

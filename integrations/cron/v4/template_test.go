@@ -32,11 +32,11 @@ func TestBuiltinTemplatesReturnsCrontabVariantsAndK8s(t *testing.T) {
 func TestRender_RendersThroughTheCrontabTemplate(t *testing.T) {
     entries := []Entry{
         {
-            Name:     "backup:run",
-            User:     "apache",
-            Binary:   "/usr/local/bin/fakeapp",
-            Args:     []string{"backup:run"},
-            Schedule: &Schedule{Minute: "0", Hour: "2"},
+            Name:      "backup:run",
+            User:      "apache",
+            Binary:    "/usr/local/bin/fakeapp",
+            Arguments: []string{"backup:run"},
+            Schedule:  &Schedule{Minute: "0", Hour: "2"},
         },
     }
 

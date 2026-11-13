@@ -212,6 +212,7 @@ could not answer, at either door or through a sign-in door's `Handler` or token 
 - http: **Breaking**: `cors.NewService` refuses a credentialed service, without an `AllowOriginFunc`, holding an allowed origin without a scheme, naming `Config.AllowOrigins` and the entry, where it read the entry as admitting its host under any scheme, `http://` included; `RestrictiveService` refuses it too.
 - http: **Breaking**: `SetSessionCookiePolicy`, through `NewKernel` and a module alike, refuses a policy of `SameSite=None` with `SessionCookieSecureNever`, naming `SessionCookiePolicy.Secure`, where the kernel wrote a cookie every current browser drops, so no session stuck.
 - mailer: **Breaking**: `NewSmtpTransport` refuses an empty `SmtpConfig.Address`, a padded one, one without a host or a port and one whose port the dial cannot read, naming the field, before it judges the timeouts, where it built the transport and failed at the first send's dial.
+- application: **Breaking**: a module whose `Name()` begins or ends with whitespace is refused where it is registered, naming the module's type and the name, and two names differing only by case are one identity: the second is recorded in the aggregated boot report naming both spellings, and neither it nor the modules it provides boots, where `twin` and `Twin` booted as two modules.
 
 ### Removed
 
@@ -248,6 +249,7 @@ could not answer, at either door or through a sign-in door's `Handler` or token 
 - security: **Breaking**: the boot warnings `security.firewallAccessControlEmpty`, `security.firewallPrefixUnreachable`, `security.jwtSecretShort` and `security.hmacSecretShort` are removed; their configurations are refused.
 - http: **Breaking**: the boot warnings `cors.credentialedOriginWithoutScheme` and `http.sessionCookie.sameSiteNoneNeverSecure` are removed; their configurations are refused.
 - security: **Breaking**: the boot warnings `security.firewallShadowed`, `security.pathPercentEncoded` and `http.static.excludedPathPercentEncoded` are removed; their configurations are refused.
+- http: **Breaking**: `ErrorUnsupportedContentType` and `ErrorJsonBodyHasExtraData`, which no door of the framework answered; an application that built them writes `exception.NewError("unsupported content type", nil, nil)`.
 
 ### Fixed
 

@@ -1,8 +1,12 @@
 package application
 
 import (
+    "fmt"
+    "strings"
+
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     securityconfig "github.com/precision-soft/melody/v4/security/config"
 )
@@ -40,18 +44,29 @@ func (instance *Application) registerModuleAtDepth(moduleInstance applicationcon
         )
     }
 
-    /* a module's identity is its name: a second registration under a name already registered, the same instance reached again included, is a duplicate recorded for the aggregated boot report, and neither it nor the modules it provides boots */
-    if nil == instance.registeredModuleNames {
-        instance.registeredModuleNames = make(map[string]struct{})
+    if strings.TrimSpace(moduleName) != moduleName {
+        exception.Panic(
+            exception.NewError(
+                fmt.Sprintf("module name may not begin or end with whitespace; %T answers %q", moduleInstance, moduleName),
+                exceptioncontract.Context{"moduleType": fmt.Sprintf("%T", moduleInstance), "moduleName": moduleName},
+                nil,
+            ),
+        )
     }
 
-    if _, exists := instance.registeredModuleNames[moduleName]; true == exists {
-        instance.recordBootCollision(bootCollisionKindModule, moduleName)
+    /* a module's identity is its name folded to lower case: a second registration under a name already registered in any case, the same instance reached again included, is a duplicate recorded for the aggregated boot report naming both spellings, and neither it nor the modules it provides boots */
+    if nil == instance.registeredModuleNames {
+        instance.registeredModuleNames = make(map[string]string)
+    }
+
+    moduleIdentity := strings.ToLower(moduleName)
+    if registeredName, exists := instance.registeredModuleNames[moduleIdentity]; true == exists {
+        instance.recordModuleCollision(moduleName, registeredName)
 
         return
     }
 
-    instance.registeredModuleNames[moduleName] = struct{}{}
+    instance.registeredModuleNames[moduleIdentity] = moduleName
 
     instance.appendModule(moduleInstance, depth)
 }

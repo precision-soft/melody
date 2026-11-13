@@ -515,7 +515,7 @@ func TestMigrateCommand_TheRunnersOwnProgressStaysOutOfTheMachineDocument(t *tes
                 database,
                 "up",
                 "20240101000000",
-                []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{},
+                []Query{{Name: "create-users", Sql: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{},
             )
         },
     })
@@ -553,7 +553,7 @@ func TestMigrateCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testi
         Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
             _, carriedByTheContext = runnerOptionFromContext(ctx)
 
-            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{})
+            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", Sql: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{})
         },
     })
 
@@ -596,7 +596,7 @@ func TestMigrateCommand_AReportCutShortIsRefusedInsteadOfExitingZero(t *testing.
         Name:    "20240101000000",
         Comment: "create_users",
         Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
-            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", SQL: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{})
+            return RunQueries(ctx, database, "up", "20240101000000", []Query{{Name: "create-users", Sql: "CREATE TABLE users (id BIGINT)"}}, RunnerOption{})
         },
     })
 

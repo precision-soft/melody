@@ -276,7 +276,7 @@ func buildCrontabLine(entry Entry, includeUserColumn bool) (string, error) {
             )
         }
 
-        tokens := append([]string{entry.Binary}, entry.Args...)
+        tokens := append([]string{entry.Binary}, entry.Arguments...)
         if validationErr := ValidateNoForbiddenCharacters(tokens, CrontabForbiddenCharacters, fmt.Sprintf("entry %q", entry.Name)); nil != validationErr {
             return "", validationErr
         }

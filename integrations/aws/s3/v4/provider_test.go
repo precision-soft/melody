@@ -175,6 +175,10 @@ func TestConfig_RedactsCredentialsOnEveryFmtVerb(t *testing.T) {
         }
     }
 
+    if rendered := fmt.Sprintf("%v", config); false == strings.HasPrefix(rendered, "aws.s3.Config{") {
+        t.Fatalf("expected the rendering to carry the module's name, got %s", rendered)
+    }
+
     pointerRendered := fmt.Sprintf("%v", &config)
     if true == strings.Contains(pointerRendered, "wJalrXUtn-the-secret") {
         t.Fatalf("a *Config leaked the secret key: %s", pointerRendered)

@@ -46,12 +46,12 @@ type Provider struct {
     tlsConfig     *tls.Config
 }
 
-func (instance *Provider) Open(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.OpenContext(context.Background(), params, logger)
+func (instance *Provider) Open(parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.OpenContext(context.Background(), parameters, logger)
 }
 
 /* OpenContext opens under the caller's context: an already-cancelled context is refused before the attempt, the retry sleeps watch it beside the clock, and the configuration hook and the boot ping derive their budgets from it; pgdialect makes no server round trip at construction, so the first packet is the boot ping's dial. A nil context reads as context.Background(). A nil logger reads as the emergency logger for the open's own records, since the terminal branches mark the returned error as logged; the diagnostics routing takes the logger as handed, so a nil, like an already-cancelled context, routes nothing and leaves bun's channel where the last routing put it. */
-func (instance *Provider) OpenContext(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *Provider) OpenContext(ctx context.Context, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     if nil == ctx {
         ctx = context.Background()
     }
@@ -65,17 +65,17 @@ func (instance *Provider) OpenContext(ctx context.Context, params bunorm.Connect
         logger = logging.EmergencyLogger()
     }
 
-    return instance.openWithRetry(ctx, params, logger)
+    return instance.openWithRetry(ctx, parameters, logger)
 }
 
 /* OpenForMigration opens the same database with the driver deadlines lifted: ReadTimeout and WriteTimeout are per-operation socket deadlines baked into the connector, sized for request traffic, and a DDL statement that legitimately runs past them — an ALTER TABLE adding constraints on a large table, a long CREATE INDEX — is cut mid-statement with an i/o timeout. The connect timeout stays armed (a down database must still fail fast), the pool is kept to the two connections a sequential migration run needs, and no connection is recycled mid-run — a lifetime rotation under a running statement is the same cut by another name. */
-func (instance *Provider) OpenForMigration(params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.OpenForMigrationContext(context.Background(), params, logger)
+func (instance *Provider) OpenForMigration(parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.OpenForMigrationContext(context.Background(), parameters, logger)
 }
 
 /* OpenForMigrationContext is OpenForMigration under the caller's context, the way OpenContext is Open under it: the registry hands the context it was constructed with, so an already-cancelled migration is refused before the attempt and a cancellation arriving mid-attempt is honoured at the next cancellable step instead of sleeping out the retry budget. A nil context reads as context.Background(), which is exactly OpenForMigration. */
-func (instance *Provider) OpenForMigrationContext(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
-    return instance.migrationProvider().OpenContext(ctx, params, logger)
+func (instance *Provider) OpenForMigrationContext(ctx context.Context, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    return instance.migrationProvider().OpenContext(ctx, parameters, logger)
 }
 
 /* migrationProvider derives the provider OpenForMigration dials with: the same hook, retry policy and transport settings, over the migration pool and the lifted deadlines. */
@@ -87,14 +87,14 @@ func (instance *Provider) migrationProvider() *Provider {
     return &derived
 }
 
-func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *Provider) openWithRetry(ctx context.Context, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     attempt := 0
     maxAttempts := instance.retry.maxAttempts
 
     for {
         attempt = attempt + 1
 
-        database, openErr := instance.open(ctx, params, logger)
+        database, openErr := instance.open(ctx, parameters, logger)
         if nil == openErr {
             if 1 < attempt {
                 logger.Info(
@@ -195,7 +195,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, params bunorm.Conne
     }
 }
 
-func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+func (instance *Provider) open(ctx context.Context, parameters bunorm.ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
     /* an already-cancelled context is refused before the attempt, so a shutdown-cancelled lazy open surfaces as the cancellation rather than as a failed connection naming the database */
     if ctxErr := ctx.Err(); nil != ctxErr {
         return nil, exception.NewError(
@@ -206,26 +206,26 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     }
 
     /* an empty database or user is refused by name before the driver sees it, since pgdriver.WithDatabase and pgdriver.WithUser panic on an empty string. An empty host is refused too: the address ":port" is the local system to a dialer, so an unset host would connect to whatever listens there with the configured credentials. An empty password is legitimate. */
-    if "" == params.Database {
-        return nil, exception.NewError("pgsql database open refused: the database name is empty", params.SafeContext(), nil)
+    if "" == parameters.Database {
+        return nil, exception.NewError("pgsql database open refused: the database name is empty", parameters.SafeContext(), nil)
     }
 
-    if "" == params.User {
-        return nil, exception.NewError("pgsql database open refused: the user is empty", params.SafeContext(), nil)
+    if "" == parameters.User {
+        return nil, exception.NewError("pgsql database open refused: the user is empty", parameters.SafeContext(), nil)
     }
 
-    if "" == params.Host {
-        return nil, exception.NewError("pgsql database open refused: the host is empty", params.SafeContext(), nil)
+    if "" == parameters.Host {
+        return nil, exception.NewError("pgsql database open refused: the host is empty", parameters.SafeContext(), nil)
     }
 
-    address := dialAddressOf(params.Host, portOrDefault(params.Port))
+    address := dialAddressOf(parameters.Host, portOrDefault(parameters.Port))
 
     /* every deadline the driver applies is named here, since pgdriver's own defaults would otherwise cap the connect timeout and cut long queries; an unlimited read or write deadline reaches pgdriver as the zero it reads as none */
     connectorOptions := []pgdriver.Option{
         pgdriver.WithAddr(address),
-        pgdriver.WithDatabase(params.Database),
-        pgdriver.WithUser(params.User),
-        pgdriver.WithPassword(params.Password),
+        pgdriver.WithDatabase(parameters.Database),
+        pgdriver.WithUser(parameters.User),
+        pgdriver.WithPassword(parameters.Password),
         pgdriver.WithDialTimeout(instance.timeout.connectTimeout),
         pgdriver.WithReadTimeout(driverDuration(instance.timeout.readTimeout)),
         pgdriver.WithWriteTimeout(driverDuration(instance.timeout.writeTimeout)),
@@ -239,7 +239,7 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
     } else {
         /* do NOT hand this case to pgdriver.WithInsecure(false): despite the name, pgdriver implements it as tls.Config{InsecureSkipVerify: true} — TLS is negotiated but the server certificate is never checked, so the default connection is trivially machine-in-the-middled. Build a verifying config instead: the system roots, and the configured host as the name to verify against. Callers that genuinely want an unverified session set TlsConfig or Insecure explicitly. */
         connectorOptions = append(connectorOptions, pgdriver.WithTLSConfig(&tls.Config{
-            ServerName: tlsServerNameOf(params.Host),
+            ServerName: tlsServerNameOf(parameters.Host),
             MinVersion: tls.VersionTLS12,
         }))
     }
@@ -254,7 +254,7 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
         if nil != hookErr {
             return nil, exception.NewError(
                 "pgsql database connector configuration failed",
-                params.SafeContext(),
+                parameters.SafeContext(),
                 hookErr,
             )
         }
@@ -283,7 +283,7 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
 
         return nil, exception.NewError(
             "database connection failed",
-            instance.toConnectionContext(params, connector.Config().Addr),
+            instance.toConnectionContext(parameters, connector.Config().Addr),
             pingErr,
         )
     }
@@ -292,11 +292,11 @@ func (instance *Provider) open(ctx context.Context, params bunorm.ConnectionPara
 }
 
 func (instance *Provider) toConnectionContext(
-    params bunorm.ConnectionParameters,
+    parameters bunorm.ConnectionParameters,
     dialedAddress string,
 ) exceptioncontract.Context {
     return map[string]any{
-        "connection":    params.SafeContext(),
+        "connection":    parameters.SafeContext(),
         "poolConfig":    instance.pool.context(),
         "timeoutConfig": instance.timeout.context(),
         /* the endpoint the dial actually reached, which is not always the configured one: the connection config is built from the parameters BEFORE the post-build hook runs, and the hook may rewrite the address — it is handed the very field the hook tests read. Named separately rather than folded into the connection, so a record where the two differ says so. */

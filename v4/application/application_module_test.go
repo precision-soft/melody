@@ -287,6 +287,63 @@ func TestRegisterModule_RefusesAnEmptyName(t *testing.T) {
     }, "module name may not be empty")
 }
 
+/* a padded name would be a second identity for the same module in every place that prints or keys on it, so it is refused where it is registered, like the empty one */
+func TestRegisterModule_RefusesANamePaddedWithWhitespace(t *testing.T) {
+    for _, paddedName := range []string{" twin", "twin ", "twin\t", "   "} {
+        testhelper.AssertPanicsWithError(t, func() {
+            (&Application{}).RegisterModule(fakeModule{name: paddedName})
+        }, "module name may not begin or end with whitespace")
+
+        testhelper.AssertPanicsWithError(t, func() {
+            (&Application{}).RegisterModuleProvider(bareModuleProvider{children: []applicationcontract.Module{fakeModule{name: paddedName}}})
+        }, "module name may not begin or end with whitespace")
+    }
+}
+
+/* two names differing only by case are one identity: the second is a collision naming both spellings, runs no hook and expands no child, and the first keeps its own spelling */
+func TestRegisterModule_TwoNamesDifferingOnlyByCaseAreOneCollisionNamingBoth(t *testing.T) {
+    instance := newCollisionTestApplication(t)
+
+    first := &hookRecordingModule{fakeModule: fakeModule{name: "twin"}}
+    second := &hookRecordingModule{fakeModule: fakeModule{name: "Twin"}}
+
+    instance.RegisterModule(first)
+    instance.RegisterModule(second)
+    instance.RegisterModule(fakeModuleProvider{
+        fakeModule: fakeModule{name: "TWIN"},
+        children:   []applicationcontract.Module{fakeModule{name: "child-a"}},
+    })
+
+    assertModuleNames(t, instance.modules, []string{"twin"})
+
+    if 2 != len(instance.bootCollisions) {
+        t.Fatalf("expected 2 recorded collisions, got %+v", instance.bootCollisions)
+    }
+
+    for index, expectedSpelling := range []string{"Twin", "TWIN"} {
+        collision := instance.bootCollisions[index]
+        if bootCollisionKindModule != collision.kind || expectedSpelling != collision.name || "twin" != collision.registeredAs {
+            t.Fatalf("expected collision %d to be module %q registered as \"twin\", got %+v", index, expectedSpelling, collision)
+        }
+
+        description := collision.describe()
+        if false == strings.Contains(description, `"`+expectedSpelling+`"`) || false == strings.Contains(description, `already registered as "twin"`) {
+            t.Fatalf("expected the report line to name both spellings, got %q", description)
+        }
+    }
+
+    instance.bootModulesPreConfigurationResolve()
+    instance.bootModulesPostConfigurationResolve()
+
+    if false == first.servicesRegistered {
+        t.Fatalf("expected the first registration to boot")
+    }
+
+    if true == second.configurationsRegistered || true == second.parametersRegistered || true == second.servicesRegistered {
+        t.Fatalf("expected the case-different duplicate to run no hook")
+    }
+}
+
 /* both module doors close for the boot window: the phase loops iterate a snapshot of the module list, so a module registered from inside a boot hook would boot by whatever fraction of the lifecycle had not run yet and report success */
 func TestModuleDoors_RefuseRegistrationDuringTheBootWindow(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
@@ -695,6 +752,38 @@ func TestRefuseDuplicateModules_RaisesTheReportNamingTheModuleAndItsCaller(t *te
     collisions, _ := exception.LogContext(report, exception.LogContextConfig{})["collisions"].([]string)
     if 1 != len(collisions) || false == strings.HasPrefix(collisions[0], `module "twin" registered at `) || false == strings.Contains(collisions[0], "application_module_test.go") {
         t.Fatalf("expected one module line naming the caller, got %v", collisions)
+    }
+
+    if true == strings.Contains(collisions[0], "already registered as") {
+        t.Fatalf("expected a duplicate of one spelling to name it once, got %v", collisions)
+    }
+}
+
+/* the raised report, not only the recorded collision, names both spellings of a case-different duplicate */
+func TestRefuseDuplicateModules_RaisesTheReportNamingBothSpellings(t *testing.T) {
+    instance := newCollisionTestApplication(t)
+
+    instance.RegisterModule(fakeModule{name: "twin"})
+    instance.RegisterModule(fakeModule{name: "Twin"})
+
+    recovered := func() (recovered any) {
+        defer func() {
+            recovered = recover()
+        }()
+
+        instance.refuseDuplicateModules()
+
+        return nil
+    }()
+
+    report, isError := recovered.(error)
+    if false == isError {
+        t.Fatalf("expected the report to panic with an error, got %v", recovered)
+    }
+
+    collisions, _ := exception.LogContext(report, exception.LogContextConfig{})["collisions"].([]string)
+    if 1 != len(collisions) || false == strings.HasPrefix(collisions[0], `module "Twin" registered at `) || false == strings.HasSuffix(collisions[0], `, already registered as "twin"`) {
+        t.Fatalf("expected one module line naming both spellings, got %v", collisions)
     }
 }
 

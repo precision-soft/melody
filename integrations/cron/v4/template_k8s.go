@@ -258,7 +258,7 @@ func k8sInvocation(entry Entry) (string, []string, error) {
         return "command", entry.Command, nil
     }
 
-    if 0 == len(entry.Args) {
+    if 0 == len(entry.Arguments) {
         return "", nil, exception.NewError(
             fmt.Sprintf("cron: entry %q has no command override and no arguments; nothing to schedule", entry.Name),
             exceptioncontract.Context{"entry": entry.Name},
@@ -266,11 +266,11 @@ func k8sInvocation(entry Entry) (string, []string, error) {
         )
     }
 
-    if tokenErr := refuseEmptyTokens(entry.Name, "Args", entry.Args); nil != tokenErr {
+    if tokenErr := refuseEmptyTokens(entry.Name, "Arguments", entry.Arguments); nil != tokenErr {
         return "", nil, tokenErr
     }
 
-    return "args", entry.Args, nil
+    return "args", entry.Arguments, nil
 }
 
 func refuseEmptyTokens(entryName string, field string, tokens []string) error {

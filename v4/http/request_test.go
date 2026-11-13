@@ -544,29 +544,6 @@ func TestRequest_LocaleAndRoutePatternComeFromTheRouteAttributes(t *testing.T) {
     }
 }
 
-/* the two error constructors are public sentinels an application compares against; each has to carry its own message, because two errors sharing one would make a content-type refusal indistinguishable from a trailing-data refusal in every log that renders them. */
-
-func TestRequestErrors_CarryDistinctMessages(t *testing.T) {
-    unsupportedContentType := ErrorUnsupportedContentType()
-    extraData := ErrorJsonBodyHasExtraData()
-
-    if nil == unsupportedContentType || nil == extraData {
-        t.Fatalf("expected both error constructors to produce an error")
-    }
-
-    if "unsupported content type" != unsupportedContentType.Error() {
-        t.Fatalf("unexpected message: %q", unsupportedContentType.Error())
-    }
-
-    if "json body has extra data" != extraData.Error() {
-        t.Fatalf("unexpected message: %q", extraData.Error())
-    }
-
-    if unsupportedContentType.Error() == extraData.Error() {
-        t.Fatalf("the two refusals must not share a message")
-    }
-}
-
 /* the precedence Input documents was implemented but pinned nowhere: every existing case populates a single source, so none of them would notice the order changing. */
 func TestRequest_Input_PrefersThePostBodyOverTheQuery(t *testing.T) {
     httpRequest := httptest.NewRequest("POST", "/submit?field=fromQuery", strings.NewReader("field=fromBody"))

@@ -8,10 +8,10 @@ import (
 
 func k8sSampleEntry(name string) Entry {
     return Entry{
-        Name: name,
-        User: "www-data",
-        Args: []string{name},
-        Schedule: &Schedule{
+        Name:      name,
+        User:      "www-data",
+        Arguments: []string{name},
+        Schedule:  &Schedule{
             Minute: "0",
             Hour:   "*/6",
         },
@@ -203,8 +203,8 @@ func TestK8sRenderRejectsCollidingResourceNames(t *testing.T) {
 func TestK8sRenderSuffixesNamesForMultiInstanceCommand(t *testing.T) {
     /* a command with Instances > 1 expands into several entries sharing one Name; each must become a distinct CronJob rather than colliding on metadata.name */
     entries := []Entry{
-        {Name: "outbox:dispatch", User: "www-data", Args: []string{"outbox:dispatch", "--instance-index=1"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 1, InstanceCount: 2},
-        {Name: "outbox:dispatch", User: "www-data", Args: []string{"outbox:dispatch", "--instance-index=2"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 2, InstanceCount: 2},
+        {Name: "outbox:dispatch", User: "www-data", Arguments: []string{"outbox:dispatch", "--instance-index=1"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 1, InstanceCount: 2},
+        {Name: "outbox:dispatch", User: "www-data", Arguments: []string{"outbox:dispatch", "--instance-index=2"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 2, InstanceCount: 2},
     }
 
     content, err := defaultK8sTemplate.Render(entries, RenderOptions{Image: "img"})
@@ -226,7 +226,7 @@ func TestK8sRenderSuffixesNamesForMultiInstanceCommand(t *testing.T) {
 func TestK8sRenderDoesNotSuffixSingleInstanceName(t *testing.T) {
     /* InstanceCount 0 (literal entries) and 1 are both single-instance and must not carry a -<index> suffix */
     for _, instanceCount := range []int{0, 1} {
-        entry := Entry{Name: "app:info", User: "www-data", Args: []string{"app:info"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 1, InstanceCount: instanceCount}
+        entry := Entry{Name: "app:info", User: "www-data", Arguments: []string{"app:info"}, Schedule: &Schedule{Minute: "0"}, InstanceIndex: 1, InstanceCount: instanceCount}
 
         content, err := defaultK8sTemplate.Render([]Entry{entry}, RenderOptions{Image: "img"})
         if nil != err {
@@ -253,10 +253,10 @@ func TestK8sRenderRejectsNewlineInImage(t *testing.T) {
 func TestK8sRenderRejectsWhitespaceInScheduleField(t *testing.T) {
     entries := []Entry{
         {
-            Name:     "app:info",
-            User:     "www-data",
-            Args:     []string{"app:info"},
-            Schedule: &Schedule{Minute: "0 30", Hour: "*"},
+            Name:      "app:info",
+            User:      "www-data",
+            Arguments: []string{"app:info"},
+            Schedule:  &Schedule{Minute: "0 30", Hour: "*"},
         },
     }
 
@@ -274,10 +274,10 @@ func TestK8sRenderRejectsPercentInScheduleField(t *testing.T) {
     /* % is invalid in a cron schedule field; the k8s template must reject it with a k8s-appropriate reason, not the crontab line-continuation wording */
     entries := []Entry{
         {
-            Name:     "app:info",
-            User:     "www-data",
-            Args:     []string{"app:info"},
-            Schedule: &Schedule{Minute: "0%5", Hour: "*"},
+            Name:      "app:info",
+            User:      "www-data",
+            Arguments: []string{"app:info"},
+            Schedule:  &Schedule{Minute: "0%5", Hour: "*"},
         },
     }
 
@@ -298,10 +298,10 @@ func TestK8sRenderRejectsPercentInScheduleField(t *testing.T) {
 func TestK8sRenderQuotesScheduleAndPreservesExpression(t *testing.T) {
     entries := []Entry{
         {
-            Name:     "app:info",
-            User:     "www-data",
-            Args:     []string{"app:info"},
-            Schedule: &Schedule{Minute: "*/15", Hour: "9-17", DayOfWeek: "mon-fri"},
+            Name:      "app:info",
+            User:      "www-data",
+            Arguments: []string{"app:info"},
+            Schedule:  &Schedule{Minute: "*/15", Hour: "9-17", DayOfWeek: "mon-fri"},
         },
     }
 
@@ -403,11 +403,16 @@ func TestK8sRenderRefusesEmptyInvocationTokens(t *testing.T) {
         t.Fatalf("expected the empty Command token to be refused")
     }
 
-    withEmptyArgToken := k8sSampleEntry("product:list")
-    withEmptyArgToken.Args = []string{"product:list", ""}
+    withEmptyArgumentToken := k8sSampleEntry("product:list")
+    withEmptyArgumentToken.Arguments = []string{"product:list", ""}
 
-    if _, renderErr := defaultK8sTemplate.Render([]Entry{withEmptyArgToken}, RenderOptions{Image: "img"}); nil == renderErr {
-        t.Fatalf("expected the empty Args token to be refused")
+    _, argumentsErr := defaultK8sTemplate.Render([]Entry{withEmptyArgumentToken}, RenderOptions{Image: "img"})
+    if nil == argumentsErr {
+        t.Fatalf("expected the empty Arguments token to be refused")
+    }
+
+    if false == strings.Contains(argumentsErr.Error(), "an empty Arguments token at position 1") {
+        t.Fatalf("expected the refusal to name the Arguments field and the position, got %q", argumentsErr.Error())
     }
 }
 
@@ -421,7 +426,7 @@ func TestK8sRenderRefusesInvalidUtf8(t *testing.T) {
 
     /* the invalid token stands alone so it is the ONLY candidate: beside a valid sibling, an inverted guard refuses the sibling and answers the same observable error, and the mutant survives over a live guard */
     withInvalidToken := k8sSampleEntry("product:list")
-    withInvalidToken.Args = []string{"--flag=\xff"}
+    withInvalidToken.Arguments = []string{"--flag=\xff"}
 
     if _, renderErr := defaultK8sTemplate.Render([]Entry{withInvalidToken}, RenderOptions{Image: "img"}); nil == renderErr {
         t.Fatalf("expected the invalid UTF-8 token to be refused")
@@ -431,7 +436,7 @@ func TestK8sRenderRefusesInvalidUtf8(t *testing.T) {
 /* the refusal of an invalid UTF-8 token names the class it belongs to — a character the manifest cannot carry — and not the empty-command class, which a caller that sorts refusals by sentinel would read it as */
 func TestK8sRenderFilesAnInvalidUtf8TokenUnderTheForbiddenCharacterClass(t *testing.T) {
     withInvalidToken := k8sSampleEntry("product:list")
-    withInvalidToken.Args = []string{"--flag=\xff"}
+    withInvalidToken.Arguments = []string{"--flag=\xff"}
 
     _, renderErr := defaultK8sTemplate.Render([]Entry{withInvalidToken}, RenderOptions{Image: "img"})
     if false == errors.Is(renderErr, ErrForbiddenCharacter) || true == errors.Is(renderErr, ErrEntryEmptyCommand) {

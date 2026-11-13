@@ -146,8 +146,8 @@ func (instance *GenerateCommand) Run(
 }
 
 func (instance *GenerateCommand) resolveTemplate(name string) (Template, error) {
-    template, ok := instance.templates[name]
-    if false == ok {
+    template, exists := instance.templates[name]
+    if false == exists {
         registered := make([]string, 0, len(instance.templates))
         for templateName := range instance.templates {
             registered = append(registered, templateName)
@@ -786,7 +786,7 @@ func printPrunedDestinations(commandContext *clicontract.CommandContext, pruned 
 /* atomicWriteFile writes the content to a temporary file beside the destination and renames it into place, removing the temporary file on every failure it sees. The mode applies to a new destination; an existing one keeps its permission bits, without setuid, setgid and sticky, so a crontab narrowed to 0600 is not widened. A process killed before the rename leaves the temporary file carrying the ownership marker, which a later --prune empties and reports. */
 func atomicWriteFile(destination string, content []byte, mode os.FileMode) error {
     /* the temp name does not carry the destination's basename, which may fill the 255 bytes of a path component on its own */
-    tmpFile, createErr := os.CreateTemp(filepath.Dir(destination), ".melody-cron-*.tmp")
+    temporaryFile, createErr := os.CreateTemp(filepath.Dir(destination), ".melody-cron-*.tmp")
     if nil != createErr {
         return exception.NewError(
             "cron: could not create temporary file next to destination",
@@ -795,47 +795,47 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
         )
     }
 
-    tmpPath := tmpFile.Name()
+    temporaryPath := temporaryFile.Name()
     renamed := false
     defer func() {
         if false == renamed {
-            _ = os.Remove(tmpPath)
+            _ = os.Remove(temporaryPath)
         }
     }()
 
-    if _, writeErr := tmpFile.Write(content); nil != writeErr {
-        _ = tmpFile.Close()
+    if _, writeErr := temporaryFile.Write(content); nil != writeErr {
+        _ = temporaryFile.Close()
         return exception.NewError(
             "cron: could not write temporary file",
-            exceptioncontract.Context{"path": tmpPath},
+            exceptioncontract.Context{"path": temporaryPath},
             writeErr,
         )
     }
 
-    if syncErr := tmpFile.Sync(); nil != syncErr {
-        _ = tmpFile.Close()
+    if syncErr := temporaryFile.Sync(); nil != syncErr {
+        _ = temporaryFile.Close()
         return exception.NewError(
             "cron: could not fsync temporary file",
-            exceptioncontract.Context{"path": tmpPath},
+            exceptioncontract.Context{"path": temporaryPath},
             syncErr,
         )
     }
 
-    if closeErr := tmpFile.Close(); nil != closeErr {
+    if closeErr := temporaryFile.Close(); nil != closeErr {
         return exception.NewError(
             "cron: could not close temporary file",
-            exceptioncontract.Context{"path": tmpPath},
+            exceptioncontract.Context{"path": temporaryPath},
             closeErr,
         )
     }
 
     /* the mode applied is the existing destination's own bits where it exists, the new-file mode otherwise; the refusal carries the one that was applied */
     appliedMode := destinationFileMode(destination, mode)
-    if chmodErr := os.Chmod(tmpPath, appliedMode); nil != chmodErr {
+    if chmodErr := os.Chmod(temporaryPath, appliedMode); nil != chmodErr {
         return exception.NewError(
             "cron: could not chmod temporary file",
             exceptioncontract.Context{
-                "path":        tmpPath,
+                "path":        temporaryPath,
                 "mode":        fmt.Sprintf("%#o", appliedMode),
                 "newFileMode": fmt.Sprintf("%#o", mode),
             },
@@ -843,11 +843,11 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
         )
     }
 
-    if renameErr := os.Rename(tmpPath, destination); nil != renameErr {
+    if renameErr := os.Rename(temporaryPath, destination); nil != renameErr {
         return exception.NewError(
             "cron: could not rename temporary file over destination",
             exceptioncontract.Context{
-                "source":      tmpPath,
+                "source":      temporaryPath,
                 "destination": destination,
             },
             renameErr,
@@ -856,8 +856,8 @@ func atomicWriteFile(destination string, content []byte, mode os.FileMode) error
 
     renamed = true
 
-    if dirSyncErr := syncDir(filepath.Dir(destination)); nil != dirSyncErr {
-        return dirSyncErr
+    if directorySyncErr := syncDirectory(filepath.Dir(destination)); nil != directorySyncErr {
+        return directorySyncErr
     }
 
     return nil
@@ -873,8 +873,8 @@ func destinationFileMode(destination string, newFileMode os.FileMode) os.FileMod
     return info.Mode().Perm()
 }
 
-func syncDir(path string) error {
-    dir, openErr := os.Open(path)
+func syncDirectory(path string) error {
+    directory, openErr := os.Open(path)
     if nil != openErr {
         return exception.NewError(
             "cron: could not open destination directory for fsync",
@@ -883,8 +883,8 @@ func syncDir(path string) error {
         )
     }
 
-    syncErr := dir.Sync()
-    closeErr := dir.Close()
+    syncErr := directory.Sync()
+    closeErr := directory.Close()
 
     if nil != syncErr && nil != closeErr {
         return exception.NewError(
@@ -927,12 +927,12 @@ func resolveBinaryPath(explicit string) (string, error) {
         explicit = resolved
     }
 
-    absolute, absErr := filepath.Abs(explicit)
-    if nil != absErr {
+    absolute, absoluteErr := filepath.Abs(explicit)
+    if nil != absoluteErr {
         return "", exception.NewError(
             "cron: could not resolve absolute path for binary",
             exceptioncontract.Context{"path": explicit},
-            absErr,
+            absoluteErr,
         )
     }
 
@@ -967,7 +967,7 @@ func resolveEntryDestination(entryDestination string, defaultDestination string,
     joined := filepath.Join(defaultDir, entryDestination)
     cleanedDir := filepath.Clean(defaultDir)
 
-    if false == isWithinDir(joined, cleanedDir) {
+    if false == isWithinDirectory(joined, cleanedDir) {
         return "", exception.NewError(
             "cron: EntryConfig.DestinationFile escapes the default destination directory; use an absolute path if the destination must live elsewhere",
             exceptioncontract.Context{
@@ -982,8 +982,8 @@ func resolveEntryDestination(entryDestination string, defaultDestination string,
     return joined, nil
 }
 
-/* isWithinDir answers on the cleaned names deliberately: it refuses a DestinationFile that walks out of dir(--out) with "..", while a symbolic link inside the directory is the operator's layout and is allowed, as an absolute path is. */
-func isWithinDir(candidate string, parent string) bool {
+/* isWithinDirectory answers on the cleaned names deliberately: it refuses a DestinationFile that walks out of dir(--out) with "..", while a symbolic link inside the directory is the operator's layout and is allowed, as an absolute path is. */
+func isWithinDirectory(candidate string, parent string) bool {
     if candidate == parent {
         return true
     }
@@ -1106,19 +1106,19 @@ func expandEntriesForCommand(
         }
 
         if 0 == len(config.Command) {
-            args := []string{commandName}
+            arguments := []string{commandName}
             if 1 < instances {
-                args = append(args,
+                arguments = append(arguments,
                     fmt.Sprintf("--max-instances=%d", instances),
                     fmt.Sprintf("--instance-index=%d", index),
                 )
             }
 
             /* the entry's own arguments come after the instance flags, so the manifest line runs the command line the in-process runner hands the child */
-            args = append(args, config.Arguments...)
+            arguments = append(arguments, config.Arguments...)
 
             entry.Binary = binary
-            entry.Args = args
+            entry.Arguments = arguments
         }
 
         entries = append(entries, entry)
@@ -1175,7 +1175,7 @@ func resolveEntryLogPath(
     joined := filepath.Join(logsDir, logFileName)
     cleanedLogsDir := filepath.Clean(logsDir)
 
-    if false == isWithinDir(joined, cleanedLogsDir) {
+    if false == isWithinDirectory(joined, cleanedLogsDir) {
         return "", "", exception.NewError(
             "cron: EntryConfig.LogFileName resolves to a path that escapes the logs directory; use a file name that stays within the logs dir",
             exceptioncontract.Context{
@@ -1231,7 +1231,7 @@ func (instance unownedLogDirectory) warningMessage() string {
 func missingDirectoriesBelow(directory string, root string) []string {
     missing := make([]string, 0)
 
-    for current := filepath.Clean(directory); current != root && true == isWithinDir(current, root); current = filepath.Dir(current) {
+    for current := filepath.Clean(directory); current != root && true == isWithinDirectory(current, root); current = filepath.Dir(current) {
         if _, statErr := os.Stat(current); nil == statErr {
             break
         }

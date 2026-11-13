@@ -17,7 +17,7 @@ import (
 )
 
 /* PlaintextEndpointBootWarningName is the code of the warning a storage over a plaintext endpoint off this machine writes, the code a cli process lists in MELODY_CLI_BOOT_WARNINGS_IGNORED to leave it out */
-const PlaintextEndpointBootWarningName = "awss3.plaintextEndpoint"
+const PlaintextEndpointBootWarningName = "aws.s3.plaintextEndpoint"
 
 const bootWarningContextKey = "bootWarning"
 

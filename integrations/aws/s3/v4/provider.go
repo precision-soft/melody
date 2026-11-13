@@ -55,7 +55,7 @@ type Config struct {
     Endpoint  string
     AccessKey string
     SecretKey string
-    /* Insecure selects plaintext http; the zero value is https, so a configuration that names nothing crosses the network encrypted. Over plaintext, credentials and objects cross the network in clear and every presigned url is http: set it only for localhost or a loopback address, since a plaintext endpoint off this machine is named once per process, at WARNING, as the boot warning awss3.plaintextEndpoint. */
+    /* Insecure selects plaintext http; the zero value is https, so a configuration that names nothing crosses the network encrypted. Over plaintext, credentials and objects cross the network in clear and every presigned url is http: set it only for localhost or a loopback address, since a plaintext endpoint off this machine is named once per process, at WARNING, as the boot warning aws.s3.plaintextEndpoint. */
     Insecure bool
     Region   string
 }
@@ -63,7 +63,7 @@ type Config struct {
 /* String and Format keep AccessKey and SecretKey out of every rendering fmt routes through this value's methods, each secret reduced to whether it was set; Format answers %#v and the numeric verbs too, and value receivers make a Config and a pointer to it redact alike. %p and %w never reach Format, and a Config held in an unexported field of another struct is walked by reflection with no method called. */
 func (instance Config) String() string {
     return fmt.Sprintf(
-        "awss3.Config{Endpoint:%q, Region:%q, Insecure:%v, AccessKey:[redacted set=%v], SecretKey:[redacted set=%v]}",
+        "aws.s3.Config{Endpoint:%q, Region:%q, Insecure:%v, AccessKey:[redacted set=%v], SecretKey:[redacted set=%v]}",
         instance.Endpoint,
         instance.Region,
         instance.Insecure,

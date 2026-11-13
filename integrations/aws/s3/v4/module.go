@@ -25,7 +25,7 @@ type Module struct {
 }
 
 func (instance *Module) Name() string {
-    return "awss3"
+    return "aws.s3"
 }
 
 func (instance *Module) Description() string {
@@ -36,7 +36,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
     if nil == instance.config.Client {
         if "" != instance.config.Bucket {
             exception.Panic(exception.NewError(
-                "the awss3 module is handed a bucket and has no client",
+                "the aws.s3 module is handed a bucket and has no client",
                 map[string]any{"field": "ModuleConfig.Bucket", "requires": "ModuleConfig.Client"},
                 nil,
             ))
@@ -44,7 +44,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 
         if false == reflect.ValueOf(instance.config.Storage).IsZero() {
             exception.Panic(exception.NewError(
-                "the awss3 module is handed a storage configuration and has no client",
+                "the aws.s3 module is handed a storage configuration and has no client",
                 map[string]any{"field": "ModuleConfig.Storage", "requires": "ModuleConfig.Client"},
                 nil,
             ))

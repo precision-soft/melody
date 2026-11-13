@@ -221,7 +221,7 @@ func ansibleCronJobTokens(entry melodycron.Entry) ([]string, error) {
         )
     }
 
-    return append([]string{entry.Binary}, entry.Args...), nil
+    return append([]string{entry.Binary}, entry.Arguments...), nil
 }
 
 /* refuseInvalidUtf8 refuses a value yamlScalar would rewrite: an invalid byte is escaped as \xNN and decoded by a YAML reader as U+00NN, so the user or the job the module writes would differ from the one configured, in silence. */

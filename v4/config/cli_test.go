@@ -96,7 +96,7 @@ func TestConfigurationCliBootWarningKeysRefuseWhatSilencesNothing(t *testing.T) 
     }
 
     /* whether a code names a warning a cli process writes is judged at boot, once the modules declared theirs */
-    for _, code := range []string{"awss3.plaintextEndpoint", internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage} {
+    for _, code := range []string{"aws.s3.plaintextEndpoint", internal.BootWarningNameSessionUnboundedTtlOnBoundedDefaultStorage} {
         if _, err := newConfigurationFromValues(map[string]string{CliBootWarningsIgnoredKey: code}); nil != err {
             t.Fatalf("expected %q admitted when the configuration is built, got %v", code, err)
         }

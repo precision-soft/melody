@@ -128,6 +128,46 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Why.** A module is a piece of the application's wiring: a second registration either collided on every service, parameter and command it registers, scattered across the report under names that hid the cause, or, for a module whose hooks register nothing by name, ran them again silently: middlewares installed twice, a process-wide table half overwritten.
 
+### Application: a module name carries no padding, and two names differing only by case are one module
+
+**What changed.** [`RegisterModule`](../application/application_module.go) and `RegisterModuleProvider` refuse, with a panic where it is registered, a module whose `Name()` begins or ends with whitespace, naming the module's type and the quoted name. The identity of a module is its name folded to lower case: a module named `Twin` after one named `twin` is a duplicate, recorded in the aggregated boot report as `module "Twin" registered at <line>, already registered as "twin"`, and neither it nor the modules it provides boots. The first module keeps its own spelling everywhere else.
+
+**Symptom.** A boot that registers a module answering `"cache "` fails with `module name may not begin or end with whitespace`; two modules whose names differ only by case fail the boot with `duplicate registrations detected at boot`, where both booted.
+
+**Remedy.** Answer the name without padding, and give two modules two names that differ by more than case. Every module the framework ships names itself in lower case and is unaffected.
+
+### Http: `ErrorUnsupportedContentType` and `ErrorJsonBodyHasExtraData` are removed
+
+**What changed.** The two error constructors of the [`http`](../http/request.go) package are removed. No door of the framework answered either.
+
+**Symptom.** Code that calls them no longer compiles.
+
+**Remedy.** Build the error where it is answered: `exception.NewError("unsupported content type", nil, nil)` and `exception.NewError("json body has extra data", nil, nil)`.
+
+### Cron: `Entry.Args` is renamed `Entry.Arguments`, and `ErrSharedRunnerCommandFlags` is removed
+
+**What changed.** The field of [`cron.Entry`](../../integrations/cron/v4/entry.go) that holds a command's arguments is `Arguments`; the k8s template's refusal of an empty token names the field `Arguments`. `ErrSharedRunnerCommandFlags`, deprecated and answered by nothing, is removed. Nothing else changes.
+
+**Symptom.** A custom template reading `entry.Args`, or code matching `ErrSharedRunnerCommandFlags`, no longer compiles.
+
+**Remedy.** Read `entry.Arguments`; drop the match on `ErrSharedRunnerCommandFlags`, or match `ErrNilRunnerCommandFlag` if the check meant a flag the runner refuses.
+
+### Migrate: `Query.SQL` is renamed `Query.Sql`
+
+**What changed.** The statement field of [`migrate.Query`](../../integrations/bunorm/migrate/v4/migrate.go) is `Sql`. Nothing else changes.
+
+**Symptom.** A migration that builds `migrate.Query{Name: ..., SQL: ...}` no longer compiles.
+
+**Remedy.** Write `Sql:`.
+
+### Object storage: the aws/s3 module is named `aws.s3`
+
+**What changed.** The [aws/s3 module](../../integrations/aws/s3/v4/README.md) answers `aws.s3` from `Name()`, declares its boot warning as `aws.s3.plaintextEndpoint`, exported as `PlaintextEndpointBootWarningName`, and a `Config` prints as `aws.s3.Config{…}`, after the module's path `integrations/aws/s3/v4`, where all three said `awss3`. The Go package is still `awss3`.
+
+**Symptom.** A journal filter on `bootWarning=awss3.plaintextEndpoint`, the code the third major wrote, matches nothing. A `MELODY_CLI_BOOT_WARNINGS_IGNORED` that names the old code fails the boot with `cli boot warning code names no boot warning the framework or a module writes`.
+
+**Remedy.** Write `aws.s3.plaintextEndpoint` in `MELODY_CLI_BOOT_WARNINGS_IGNORED` and in any journal filter.
+
 ### Application: a module declares the `.env` keys it owns
 
 **What changed.** A module can declare its keys through [`EnvironmentKeyModule`](../application/contract/environment_key_module.go): `RegisterEnvironmentKeys(registrar)` runs first in `Boot`, before any parameter hook, and hands one [`EnvironmentKey`](../config/contract/environment_key.go) per key — the `MELODY_<MODULE>_<NAME>` key, the parameter its code reads, the field a refusal names, the default, the secret mark and a rule built with `LimitKeyRule`, `SwitchKeyRule` or `ChoiceKeyRule`. The key and the parameter become one parameter, which takes the default when no `.env` file sets the key; after the resolve each declared key is judged on its resolved value in every mode, as the framework's keys are. A module's key had no default, no rule, no secret mark and no refusal naming it: the application mapped it by hand onto the module's parameter, and a value the module could not use was found at its first read.
@@ -466,7 +506,7 @@ The same holds for a value a module was handed and would drop, refused at the ho
 
 ### Application, config: a command writes the boot warnings, two cli keys filter them, and the fallback session storage takes a configured count
 
-**What changed.** A command writes the boot warnings the boot collected once, before it runs, into its configured journal, stderr when `MELODY_LOG_PATH` is empty, where only an http process wrote them; today `security.firewallDoorReachUnknown`, `application.environment.processVariableIgnored` and `application.secretMark.unmatched` are the framework's codes a command can write, the last two uncoded lines the third major wrote during `Boot`, now written with the others when the http server or the command starts, or before the exit record of a process that dies first, and a module declares codes of its own through `applicationcontract.BootWarningModule`, the aws/s3 module `awss3.plaintextEndpoint`. `MELODY_CLI_BOOT_WARNINGS_IGNORED` lists codes a command leaves out, and `MELODY_CLI_BOOT_WARNINGS_DISABLED=true` writes none. Both are read by a command only. `MELODY_HTTP_SESSION_MAX_SESSIONS`, 100,000 when left out, unlimited admitted, is the count of the framework's fallback in-memory session storage. On that storage, an unlimited `MELODY_HTTP_SESSION_TTL` beside an unlimited count is refused at the http boot. Beside a bounded count it is the boot warning `http.session.unboundedTtlOnBoundedDefaultStorage`, where the third major wrote an uncoded line saying the storage grew without end. `configcontract.HttpConfiguration` declares `SessionMaxSessions()`, and `configcontract.CliConfiguration` declares `BootWarningsIgnored()` and `BootWarningsDisabled()`.
+**What changed.** A command writes the boot warnings the boot collected once, before it runs, into its configured journal, stderr when `MELODY_LOG_PATH` is empty, where only an http process wrote them; today `security.firewallDoorReachUnknown`, `application.environment.processVariableIgnored` and `application.secretMark.unmatched` are the framework's codes a command can write, the last two uncoded lines the third major wrote during `Boot`, now written with the others when the http server or the command starts, or before the exit record of a process that dies first, and a module declares codes of its own through `applicationcontract.BootWarningModule`, the aws/s3 module `aws.s3.plaintextEndpoint`. `MELODY_CLI_BOOT_WARNINGS_IGNORED` lists codes a command leaves out, and `MELODY_CLI_BOOT_WARNINGS_DISABLED=true` writes none. Both are read by a command only. `MELODY_HTTP_SESSION_MAX_SESSIONS`, 100,000 when left out, unlimited admitted, is the count of the framework's fallback in-memory session storage. On that storage, an unlimited `MELODY_HTTP_SESSION_TTL` beside an unlimited count is refused at the http boot. Beside a bounded count it is the boot warning `http.session.unboundedTtlOnBoundedDefaultStorage`, where the third major wrote an uncoded line saying the storage grew without end. `configcontract.HttpConfiguration` declares `SessionMaxSessions()`, and `configcontract.CliConfiguration` declares `BootWarningsIgnored()` and `BootWarningsDisabled()`.
 
 **Symptom.** A command's journal, its stderr when `MELODY_LOG_PATH` is empty, carries the warning lines before its output. The configuration fails on "cli boot warning code may not be empty", "is listed twice" (`MELODY_CLI_BOOT_WARNINGS_IGNORED`, `index`, `code`), or on a list beside `DISABLED=true`; the boot panics on "names no boot warning the framework or a module writes" and "names a boot warning only an http process writes", with the same context and `cliCodes`. An http process panics with "a cli boot warning key is set in an http process" (`environmentKey`), or on the unlimited session pair. A configuration of the application's own implementing either contract no longer compiles.
 
@@ -2247,9 +2287,9 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 ### Cron: the runner accepts a command answering the same flag instances, and refuses a nil flag at construction
 
-**What changed.** `NewRunnerCommand` no longer refuses a command whose `Flags()` answers the same instances on every call: the cli dispatch hands the engine fresh instances of a command's flags, so such a command reads fresh parse state on every tick. `ErrSharedRunnerCommandFlags` is deprecated and answered by nothing. A command answering a nil flag, typed or untyped, is refused at construction with `ErrNilRunnerCommandFlag`, where the typed nil was reported as shared flags and the untyped one was refused at the first tick.
+**What changed.** `NewRunnerCommand` no longer refuses a command whose `Flags()` answers the same instances on every call: the cli dispatch hands the engine fresh instances of a command's flags, so such a command reads fresh parse state on every tick. `ErrSharedRunnerCommandFlags` is removed. A command answering a nil flag, typed or untyped, is refused at construction with `ErrNilRunnerCommandFlag`, where the typed nil was reported as shared flags and the untyped one was refused at the first tick.
 
-**Symptom.** A memoizing command that refused the boot now runs; a command answering a nil flag refuses the boot instead of failing its first tick. A check on `ErrSharedRunnerCommandFlags` no longer matches anything.
+**Symptom.** A memoizing command that refused the boot now runs; a command answering a nil flag refuses the boot instead of failing its first tick. A check on `ErrSharedRunnerCommandFlags` no longer compiles.
 
 **Remedy.** Drop any workaround that rebuilt the flags on every `Flags()` call, if you added one only for the runner; match `ErrNilRunnerCommandFlag` where you matched `ErrSharedRunnerCommandFlags`, and drop the nil entry from what `Flags()` answers.
 

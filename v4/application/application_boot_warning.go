@@ -49,7 +49,7 @@ func (instance *moduleBootWarningRegistrar) DeclareBootWarning(name string, writ
 
     owner, declaredByModule := instance.application.bootWarningOwners[name]
 
-    /* a module registered twice, one instance per configuration, declares its code twice */
+    /* a module declaring one of its codes twice */
     if true == declaredByModule && owner == instance.moduleName && writtenInCli == instance.registry.WrittenInCli(name) {
         return
     }

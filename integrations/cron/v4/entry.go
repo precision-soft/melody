@@ -4,7 +4,7 @@ type Entry struct {
     Name            string
     User            string
     Binary          string
-    Args            []string
+    Arguments       []string
     Schedule        *Schedule
     Command         []string
     LogPath         string

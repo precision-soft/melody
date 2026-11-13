@@ -94,8 +94,13 @@ func TestModule_RegisterBootWarningsDeclaresTheCodeAndAddsTheWarningForAPlaintex
 func TestModule_NameAndDescription(t *testing.T) {
     module := NewModule(ModuleConfig{})
 
-    if "awss3" != module.Name() {
-        t.Fatalf("Name() = %q, want %q", module.Name(), "awss3")
+    if "aws.s3" != module.Name() {
+        t.Fatalf("Name() = %q, want %q", module.Name(), "aws.s3")
+    }
+
+    /* the code is named after the module, so an operator's ignore list and journal filter read one name */
+    if "aws.s3.plaintextEndpoint" != PlaintextEndpointBootWarningName {
+        t.Fatalf("PlaintextEndpointBootWarningName = %q, want %q", PlaintextEndpointBootWarningName, "aws.s3.plaintextEndpoint")
     }
 
     if "" == module.Description() {

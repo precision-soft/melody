@@ -9,11 +9,11 @@ import (
 func TestRenderProducesHeaderAndEntries(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "first",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"first"},
-            Schedule: &Schedule{
+            Name:      "first",
+            User:      "www-data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"first"},
+            Schedule:  &Schedule{
                 Minute: "0",
                 Hour:   "*",
             },
@@ -43,11 +43,11 @@ func TestRenderProducesHeaderAndEntries(t *testing.T) {
 func TestRenderFillsScheduleWildcardsForEmptyFields(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "everything-wildcards",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"everything-wildcards"},
-            Schedule: &Schedule{
+            Name:      "everything-wildcards",
+            User:      "www-data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"everything-wildcards"},
+            Schedule:  &Schedule{
                 Minute: "*/5",
             },
             LogPath: "/var/log/app.log",
@@ -68,11 +68,11 @@ func TestRenderFillsScheduleWildcardsForEmptyFields(t *testing.T) {
 func TestRenderOmitsLogRedirectionWhenLogPathEmpty(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "no-log",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"no-log"},
-            Schedule: &Schedule{
+            Name:      "no-log",
+            User:      "www-data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"no-log"},
+            Schedule:  &Schedule{
                 Minute: "*",
             },
         },
@@ -95,10 +95,10 @@ func TestRenderOmitsLogRedirectionWhenLogPathEmpty(t *testing.T) {
 func TestRenderReturnsErrorWhenEntryUserEmpty(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "missing-user",
-            Binary: "/bin/foo",
-            Args:   []string{"missing-user"},
-            Schedule: &Schedule{
+            Name:      "missing-user",
+            Binary:    "/bin/foo",
+            Arguments: []string{"missing-user"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
             LogPath: "/tmp/x.log",
@@ -118,10 +118,10 @@ func TestRenderReturnsErrorWhenEntryUserEmpty(t *testing.T) {
 func TestRenderReturnsErrorWhenEntryBinaryEmpty(t *testing.T) {
     entries := []Entry{
         {
-            Name: "missing-binary",
-            User: "www-data",
-            Args: []string{"missing-binary"},
-            Schedule: &Schedule{
+            Name:      "missing-binary",
+            User:      "www-data",
+            Arguments: []string{"missing-binary"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
         },
@@ -140,11 +140,11 @@ func TestRenderReturnsErrorWhenEntryBinaryEmpty(t *testing.T) {
 func TestRenderUsesCustomUserWhenProvided(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "custom",
-            User:   "ec2-user",
-            Binary: "/bin/foo",
-            Args:   []string{"custom"},
-            Schedule: &Schedule{
+            Name:      "custom",
+            User:      "ec2-user",
+            Binary:    "/bin/foo",
+            Arguments: []string{"custom"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
             LogPath: "/tmp/x.log",
@@ -192,11 +192,11 @@ func TestRenderReturnsErrorWhenHeartbeatUserEmpty(t *testing.T) {
 func TestRenderOmitsHeartbeatWhenPathEmpty(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "any",
-            User:   "www-data",
-            Binary: "/bin/foo",
-            Args:   []string{"any"},
-            Schedule: &Schedule{
+            Name:      "any",
+            User:      "www-data",
+            Binary:    "/bin/foo",
+            Arguments: []string{"any"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
             LogPath: "/tmp/x.log",
@@ -216,11 +216,11 @@ func TestRenderOmitsHeartbeatWhenPathEmpty(t *testing.T) {
 func TestRenderHandlesMultipleArgsCorrectly(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "multi-arg",
-            User:   "www-data",
-            Binary: "/bin/echo",
-            Args:   []string{"foo", "bar", "baz"},
-            Schedule: &Schedule{
+            Name:      "multi-arg",
+            User:      "www-data",
+            Binary:    "/bin/echo",
+            Arguments: []string{"foo", "bar", "baz"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
             LogPath: "/tmp/x.log",
@@ -348,11 +348,11 @@ func TestRenderReturnsErrorWhenHeartbeatCommandHasNoUser(t *testing.T) {
 func TestRenderShellQuotesArgsContainingSpaces(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "with-space-arg",
-            User:   "www-data",
-            Binary: "/usr/bin/echo",
-            Args:   []string{"hello world", "next"},
-            Schedule: &Schedule{
+            Name:      "with-space-arg",
+            User:      "www-data",
+            Binary:    "/usr/bin/echo",
+            Arguments: []string{"hello world", "next"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
             LogPath: "/var/log/x.log",
@@ -397,11 +397,11 @@ func TestRenderShellQuotesScheduleCommandTokens(t *testing.T) {
 func TestRenderEscapesEmbeddedSingleQuoteInLogPath(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "with-quote",
-            User:   "www-data",
-            Binary: "/bin/echo",
-            Args:   []string{"hello"},
-            Schedule: &Schedule{
+            Name:      "with-quote",
+            User:      "www-data",
+            Binary:    "/bin/echo",
+            Arguments: []string{"hello"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
             LogPath: "/var/log/o'reilly.log",
@@ -452,11 +452,11 @@ func TestRenderShellQuotesHeartbeatCommandTokens(t *testing.T) {
 func TestRenderQuotesEmptyStringToken(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "empty-arg",
-            User:   "www-data",
-            Binary: "/bin/echo",
-            Args:   []string{"", "after"},
-            Schedule: &Schedule{
+            Name:      "empty-arg",
+            User:      "www-data",
+            Binary:    "/bin/echo",
+            Arguments: []string{"", "after"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
             LogPath: "/tmp/x.log",
@@ -477,11 +477,11 @@ func TestRenderQuotesEmptyStringToken(t *testing.T) {
 func TestRenderRejectsEntryArgContainingPercent(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "stamper",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"--time=%H"},
-            Schedule: &Schedule{
+            Name:      "stamper",
+            User:      "www-data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"--time=%H"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
         },
@@ -518,11 +518,11 @@ func TestRenderRejectsCustomCommandContainingPercent(t *testing.T) {
 func TestRenderRejectsLogPathContainingPercent(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "rotated",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"rotated"},
-            Schedule: &Schedule{
+            Name:      "rotated",
+            User:      "www-data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"rotated"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
             LogPath: "/var/log/app/%Y.log",
@@ -574,11 +574,11 @@ func TestRenderRejectsHeartbeatPathContainingPercent(t *testing.T) {
 func TestRenderRejectsEntryArgContainingNewline(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "stamper",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"line1\nline2"},
-            Schedule: &Schedule{
+            Name:      "stamper",
+            User:      "www-data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"line1\nline2"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
         },
@@ -597,11 +597,11 @@ func TestRenderRejectsEntryArgContainingNewline(t *testing.T) {
 func TestRenderRejectsLogPathContainingNewline(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "rotated",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"rotated"},
-            Schedule: &Schedule{
+            Name:      "rotated",
+            User:      "www-data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"rotated"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
             LogPath: "/var/log/app\nrotated.log",
@@ -693,11 +693,11 @@ func TestRenderRejectsScheduleCommandContainingCarriageReturn(t *testing.T) {
 func TestRenderRejectsWhitespaceInScheduleField(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "broken",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"broken"},
-            Schedule: &Schedule{
+            Name:      "broken",
+            User:      "www-data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"broken"},
+            Schedule:  &Schedule{
                 Minute: "0 30",
                 Hour:   "*",
             },
@@ -718,11 +718,11 @@ func TestRenderRejectsWhitespaceInScheduleField(t *testing.T) {
 func TestRenderRejectsForbiddenCharacterInScheduleField(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "broken",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"broken"},
-            Schedule: &Schedule{
+            Name:      "broken",
+            User:      "www-data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"broken"},
+            Schedule:  &Schedule{
                 Minute: "*/5%id",
                 Hour:   "*",
             },
@@ -743,11 +743,11 @@ func TestRenderRejectsForbiddenCharacterInScheduleField(t *testing.T) {
 func TestRenderAcceptsRangeAndStepNotation(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "valid",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"valid"},
-            Schedule: &Schedule{
+            Name:      "valid",
+            User:      "www-data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"valid"},
+            Schedule:  &Schedule{
                 Minute:     "*/15",
                 Hour:       "9-17",
                 DayOfMonth: "1,15",
@@ -771,11 +771,11 @@ func TestRenderAcceptsRangeAndStepNotation(t *testing.T) {
 func TestRenderRejectsEntryUserContainingWhitespace(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "bad-user",
-            User:   "www data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"bad-user"},
-            Schedule: &Schedule{
+            Name:      "bad-user",
+            User:      "www data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"bad-user"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
         },
@@ -798,11 +798,11 @@ func TestRenderRejectsEntryUserContainingWhitespace(t *testing.T) {
 func TestRenderRejectsEntryUserContainingNewline(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "bad-user",
-            User:   "www\ndata",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"bad-user"},
-            Schedule: &Schedule{
+            Name:      "bad-user",
+            User:      "www\ndata",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"bad-user"},
+            Schedule:  &Schedule{
                 Minute: "0",
             },
         },
@@ -847,11 +847,11 @@ func TestRenderRejectsHeartbeatUserContainingNewlineForCommand(t *testing.T) {
 func TestRenderRejectsCarriageReturnInScheduleField(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "stamper",
-            User:   "www-data",
-            Binary: "/usr/bin/app",
-            Args:   []string{"stamper"},
-            Schedule: &Schedule{
+            Name:      "stamper",
+            User:      "www-data",
+            Binary:    "/usr/bin/app",
+            Arguments: []string{"stamper"},
+            Schedule:  &Schedule{
                 Minute: "0\r",
                 Hour:   "3",
             },
@@ -871,11 +871,11 @@ func TestRenderRejectsCarriageReturnInScheduleField(t *testing.T) {
 func TestCrontabNoUserTemplateOmitsTheUserColumn(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "busybox-job",
-            User:   "www-data",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"tick"},
-            Schedule: &Schedule{
+            Name:      "busybox-job",
+            User:      "www-data",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"tick"},
+            Schedule:  &Schedule{
                 Minute: "0",
                 Hour:   "*",
             },
@@ -905,10 +905,10 @@ func TestCrontabNoUserTemplateOmitsTheUserColumn(t *testing.T) {
 func TestCrontabNoUserTemplateAcceptsEntriesWithoutUser(t *testing.T) {
     entries := []Entry{
         {
-            Name:   "no-user-job",
-            Binary: "/usr/local/bin/app",
-            Args:   []string{"tick"},
-            Schedule: &Schedule{
+            Name:      "no-user-job",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"tick"},
+            Schedule:  &Schedule{
                 Minute: "*/5",
             },
         },
@@ -961,10 +961,10 @@ func TestCrontabNoUserTemplateRefusesBusyboxDivergentDayFields(t *testing.T) {
     for name, schedule := range schedules {
         entries := []Entry{
             {
-                Name:     "busybox-divergent",
-                Binary:   "/usr/local/bin/app",
-                Args:     []string{"tick"},
-                Schedule: schedule,
+                Name:      "busybox-divergent",
+                Binary:    "/usr/local/bin/app",
+                Arguments: []string{"tick"},
+                Schedule:  schedule,
             },
         }
 
@@ -986,11 +986,11 @@ func TestCrontabNoUserTemplateRefusesBusyboxDivergentDayFields(t *testing.T) {
 func TestCrontabTemplateKeepsTheDivergentPairForTheUserColumnDialect(t *testing.T) {
     entries := []Entry{
         {
-            Name:     "vixie-job",
-            User:     "deploy",
-            Binary:   "/usr/local/bin/app",
-            Args:     []string{"tick"},
-            Schedule: &Schedule{Minute: "0", Hour: "0", DayOfMonth: "16", DayOfWeek: "0-6"},
+            Name:      "vixie-job",
+            User:      "deploy",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"tick"},
+            Schedule:  &Schedule{Minute: "0", Hour: "0", DayOfMonth: "16", DayOfWeek: "0-6"},
         },
     }
 
@@ -1022,7 +1022,7 @@ func TestCrontabTemplatesRenderTheirOwnershipMarker(t *testing.T) {
             options.Image = "registry.example/app:1"
         }
 
-        for _, entries := range [][]Entry{nil, {{Name: "job:one", User: "deploy", Schedule: &Schedule{Minute: "*"}, Binary: "/bin/app", Args: []string{"job:one"}}}} {
+        for _, entries := range [][]Entry{nil, {{Name: "job:one", User: "deploy", Schedule: &Schedule{Minute: "*"}, Binary: "/bin/app", Arguments: []string{"job:one"}}}} {
             rendered, renderErr := template.Render(entries, options)
             if nil != renderErr {
                 t.Fatalf("unexpected render error for %q: %v", template.Name(), renderErr)
@@ -1058,7 +1058,7 @@ func TestBuiltinTemplatesOwnedByAnApplicationRenderAndAnswerItsLine(t *testing.T
             options.Image = "registry.example/app:1"
         }
 
-        for _, entries := range [][]Entry{nil, {{Name: "job:one", User: "deploy", Schedule: &Schedule{Minute: "*"}, Binary: "/bin/app", Args: []string{"job:one"}}}} {
+        for _, entries := range [][]Entry{nil, {{Name: "job:one", User: "deploy", Schedule: &Schedule{Minute: "*"}, Binary: "/bin/app", Arguments: []string{"job:one"}}}} {
             rendered, renderErr := owned.(Template).Render(entries, options)
             if nil != renderErr {
                 t.Fatalf("unexpected render error for the owned %q: %v", template.Name(), renderErr)

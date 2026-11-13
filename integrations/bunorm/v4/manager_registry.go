@@ -560,25 +560,25 @@ func (instance *ManagerRegistry) SetLogger(logger loggingcontract.Logger) error 
 }
 
 /* openProviderDatabase runs one provider open, under the registry's context when the provider can honour one. */
-func (instance *ManagerRegistry) openProviderDatabase(provider Provider, params ConnectionParameters) (*bun.DB, error) {
+func (instance *ManagerRegistry) openProviderDatabase(provider Provider, parameters ConnectionParameters) (*bun.DB, error) {
     logger := instance.currentLogger()
 
     if contextOpener, isContextOpener := provider.(ContextOpener); true == isContextOpener {
-        return contextOpener.OpenContext(instance.openContext, params, logger)
+        return contextOpener.OpenContext(instance.openContext, parameters, logger)
     }
 
-    return provider.Open(params, logger)
+    return provider.Open(parameters, logger)
 }
 
 /* openProviderMigrationDatabase runs one migration open, under the registry's context when the provider can honour one. */
-func (instance *ManagerRegistry) openProviderMigrationDatabase(provider MigrationProvider, params ConnectionParameters) (*bun.DB, error) {
+func (instance *ManagerRegistry) openProviderMigrationDatabase(provider MigrationProvider, parameters ConnectionParameters) (*bun.DB, error) {
     logger := instance.currentLogger()
 
     if contextOpener, isContextOpener := provider.(MigrationContextOpener); true == isContextOpener {
-        return contextOpener.OpenForMigrationContext(instance.openContext, params, logger)
+        return contextOpener.OpenForMigrationContext(instance.openContext, parameters, logger)
     }
 
-    return provider.OpenForMigration(params, logger)
+    return provider.OpenForMigration(parameters, logger)
 }
 
 func (instance *ManagerRegistry) MustManager(name string) *Manager {

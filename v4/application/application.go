@@ -39,8 +39,8 @@ type Application struct {
     kernel              kernelcontract.Kernel
     embeddedPublicFiles fs.FS
     modules             []applicationcontract.Module
-    /* the names registered so far, a module's name being its identity. Populated lazily, since tests assemble a bare Application without the constructor. */
-    registeredModuleNames map[string]struct{}
+    /* each registered module's identity, its name folded to lower case, to the spelling registered first. Populated lazily, since tests assemble a bare Application without the constructor. */
+    registeredModuleNames     map[string]string
     cliCommands               []clicontract.Command
     httpRouteRegistrars       []RouteRegistrar
     httpMiddlewares           *HttpMiddleware

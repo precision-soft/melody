@@ -45,7 +45,7 @@ func (instance *Provider) resolvedLogger() loggingcontract.Logger {
     return instance.logger
 }
 
-func (instance *Provider) Open(params ConnectionParameters) (rueidis.Client, error) {
+func (instance *Provider) Open(parameters ConnectionParameters) (rueidis.Client, error) {
     logger := instance.resolvedLogger()
 
     attempt := 0
@@ -54,7 +54,7 @@ func (instance *Provider) Open(params ConnectionParameters) (rueidis.Client, err
     for {
         attempt = attempt + 1
 
-        client, openErr := instance.open(params)
+        client, openErr := instance.open(parameters)
         if nil == openErr {
             if 1 < attempt {
                 logger.Info(
@@ -163,7 +163,7 @@ func (instance *Provider) computeBackoffDelay(attempt int) time.Duration {
     maxDelayFloat := float64(maxDelay)
     delay := float64(initialDelay)
 
-    for i := 1; i < attempt; i = i + 1 {
+    for step := 1; step < attempt; step = step + 1 {
         delay = delay * backoffMultiplier
         if delay >= maxDelayFloat {
             return maxDelay
@@ -177,21 +177,21 @@ func (instance *Provider) computeBackoffDelay(attempt int) time.Duration {
     return time.Duration(delay)
 }
 
-func (instance *Provider) open(params ConnectionParameters) (rueidis.Client, error) {
-    addresses := parseAddressList(params.Address)
+func (instance *Provider) open(parameters ConnectionParameters) (rueidis.Client, error) {
+    addresses := parseAddressList(parameters.Address)
     if 0 == len(addresses) {
         return nil, exception.NewError(
             "redis address is empty",
-            instance.connectionContext(params),
+            instance.connectionContext(parameters),
             nil,
         )
     }
 
-    client, createErr := rueidis.NewClient(instance.clientOption(addresses, params))
+    client, createErr := rueidis.NewClient(instance.clientOption(addresses, parameters))
     if nil != createErr {
         return nil, exception.NewError(
             "redis client creation failed",
-            instance.connectionContext(params),
+            instance.connectionContext(parameters),
             createErr,
         )
     }
@@ -212,17 +212,17 @@ func (instance *Provider) open(params ConnectionParameters) (rueidis.Client, err
 
     return nil, exception.NewError(
         "redis connection failed",
-        instance.connectionContext(params),
+        instance.connectionContext(parameters),
         pingErr,
     )
 }
 
 /* clientOption is the one translation of the resolved configuration to the library: the dialer and the write deadline are always installed, so the library's own defaults never govern them. */
-func (instance *Provider) clientOption(addresses []string, params ConnectionParameters) rueidis.ClientOption {
+func (instance *Provider) clientOption(addresses []string, parameters ConnectionParameters) rueidis.ClientOption {
     option := rueidis.ClientOption{
         InitAddress:      addresses,
-        Username:         params.User,
-        Password:         params.Password,
+        Username:         parameters.User,
+        Password:         parameters.Password,
         ClientName:       instance.client.clientName,
         SelectDB:         instance.client.selectDb,
         DisableCache:     false == instance.client.clientSideCacheEnabled,
@@ -239,8 +239,8 @@ func (instance *Provider) clientOption(addresses []string, params ConnectionPara
 }
 
 /* connectionContext is the diagnostic shape of every refusal this provider writes, assembled here because only the provider knows the deadlines that governed the attempt; it is the shape the bunorm siblings' toConnectionContext writes. The password is never part of it, and it names no configuration parameter, since this provider is handed values, not keys. */
-func (instance *Provider) connectionContext(params ConnectionParameters) exceptioncontract.Context {
-    connectionContext := params.SafeContext()
+func (instance *Provider) connectionContext(parameters ConnectionParameters) exceptioncontract.Context {
+    connectionContext := parameters.SafeContext()
 
     connectionContext["connectTimeout"] = instance.timeout.connectTimeout.String()
     connectionContext["dialTimeout"] = instance.client.dialTimeout.String()

@@ -13,7 +13,7 @@ func ansibleSampleEntry(mutate func(entry *melodycron.Entry)) melodycron.Entry {
         Name:          "billing:cleanup",
         User:          "www-data",
         Binary:        "/srv/app/bin/app",
-        Args:          []string{"billing:cleanup"},
+        Arguments:     []string{"billing:cleanup"},
         Schedule:      &melodycron.Schedule{Minute: "*/15"},
         InstanceIndex: 1,
         InstanceCount: 1,
@@ -105,7 +105,7 @@ func TestAnsibleCronRenderDefaultsANilScheduleToEveryValue(t *testing.T) {
 }
 
 func TestAnsibleCronRenderShellQuotesAnArgumentCarryingASpace(t *testing.T) {
-    content := renderAnsibleEntry(t, func(entry *melodycron.Entry) { entry.Args = []string{"billing:cleanup", "a b"} })
+    content := renderAnsibleEntry(t, func(entry *melodycron.Entry) { entry.Arguments = []string{"billing:cleanup", "a b"} })
 
     if false == strings.Contains(content, "    job: !unsafe \"/srv/app/bin/app billing:cleanup 'a b'\"\n") {
         t.Fatalf("expected the argument to be quoted as one word, got:\n%s", content)
@@ -125,7 +125,7 @@ func TestAnsibleCronRenderShellQuotesCommandOverrideTokens(t *testing.T) {
 }
 
 func TestAnsibleCronRenderRejectsPercentInAnArgument(t *testing.T) {
-    err := renderAnsibleEntryError(t, func(entry *melodycron.Entry) { entry.Args = []string{"billing:cleanup", "--format=%Y-%m-%d"} })
+    err := renderAnsibleEntryError(t, func(entry *melodycron.Entry) { entry.Arguments = []string{"billing:cleanup", "--format=%Y-%m-%d"} })
 
     assertRefusal(t, err, melodycron.ErrForbiddenCharacter, "--format=%Y-%m-%d")
 }
@@ -163,7 +163,7 @@ func TestAnsibleCronRenderRejectsAnEmptyUser(t *testing.T) {
 func TestAnsibleCronRenderRejectsAnEntryWithNeitherBinaryNorCommand(t *testing.T) {
     err := renderAnsibleEntryError(t, func(entry *melodycron.Entry) {
         entry.Binary = ""
-        entry.Args = nil
+        entry.Arguments = nil
     })
 
     assertRefusal(t, err, melodycron.ErrEntryEmptyCommand, "empty binary")
@@ -182,7 +182,7 @@ func TestAnsibleCronRenderRejectsALineTerminatorInTheCronName(t *testing.T) {
 }
 
 func TestAnsibleCronRenderRejectsAValueThatIsNotValidUtf8(t *testing.T) {
-    err := renderAnsibleEntryError(t, func(entry *melodycron.Entry) { entry.Args = []string{"billing:cleanup", "a\x85b"} })
+    err := renderAnsibleEntryError(t, func(entry *melodycron.Entry) { entry.Arguments = []string{"billing:cleanup", "a\x85b"} })
 
     assertRefusal(t, err, ErrAnsibleCronInvalidUtf8, "not valid UTF-8")
 }
@@ -190,12 +190,12 @@ func TestAnsibleCronRenderRejectsAValueThatIsNotValidUtf8(t *testing.T) {
 func TestAnsibleCronRenderSuffixesTheCronNameWithTheInstance(t *testing.T) {
     entries := []melodycron.Entry{
         ansibleSampleEntry(func(entry *melodycron.Entry) {
-            entry.Args = []string{"billing:cleanup", "--max-instances=2", "--instance-index=1"}
+            entry.Arguments = []string{"billing:cleanup", "--max-instances=2", "--instance-index=1"}
             entry.InstanceIndex = 1
             entry.InstanceCount = 2
         }),
         ansibleSampleEntry(func(entry *melodycron.Entry) {
-            entry.Args = []string{"billing:cleanup", "--max-instances=2", "--instance-index=2"}
+            entry.Arguments = []string{"billing:cleanup", "--max-instances=2", "--instance-index=2"}
             entry.InstanceIndex = 2
             entry.InstanceCount = 2
         }),
@@ -323,7 +323,7 @@ func TestAnsibleCronRenderRejectsPercentInTheHeartbeatCommand(t *testing.T) {
 }
 
 func TestAnsibleCronRenderWritesEveryTaskValueAsAnUnsafeScalar(t *testing.T) {
-    content := renderAnsibleEntry(t, func(entry *melodycron.Entry) { entry.Args = []string{"billing:cleanup", "{{ lookup('pipe','id') }}"} })
+    content := renderAnsibleEntry(t, func(entry *melodycron.Entry) { entry.Arguments = []string{"billing:cleanup", "{{ lookup('pipe','id') }}"} })
 
     if false == strings.Contains(content, "{{ lookup(") {
         t.Fatalf("expected the templating text written as it is, got:\n%s", content)

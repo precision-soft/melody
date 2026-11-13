@@ -17,8 +17,8 @@ func TestUp_ExecutesAllQueriesInOrder(t *testing.T) {
     buffer := &bytes.Buffer{}
 
     queries := []Query{
-        {Name: "create table", SQL: "CREATE TABLE users (id INTEGER)"},
-        {Name: "create index", SQL: "CREATE INDEX users_id ON users (id)"},
+        {Name: "create table", Sql: "CREATE TABLE users (id INTEGER)"},
+        {Name: "create index", Sql: "CREATE INDEX users_id ON users (id)"},
     }
 
     runErr := Up(context.Background(), database, "add_users", queries, RunnerOption{Writer: buffer, NoColor: true})
@@ -58,7 +58,7 @@ func TestDown_UsesDownDirection(t *testing.T) {
     database, _ := newFakeBunDatabase()
     buffer := &bytes.Buffer{}
 
-    queries := []Query{{Name: "drop table", SQL: "DROP TABLE users"}}
+    queries := []Query{{Name: "drop table", Sql: "DROP TABLE users"}}
 
     runErr := Down(context.Background(), database, "add_users", queries, RunnerOption{Writer: buffer, NoColor: true})
     if nil != runErr {
@@ -82,9 +82,9 @@ func TestRunQueries_StopsOnFailureAndReportsQuery(t *testing.T) {
 
     buffer := &bytes.Buffer{}
     queries := []Query{
-        {Name: "create table", SQL: "CREATE TABLE users (id INTEGER)"},
-        {Name: "create index", SQL: "CREATE INDEX users_id\n    ON users (id)"},
-        {Name: "seed data", SQL: "INSERT INTO users VALUES (1)"},
+        {Name: "create table", Sql: "CREATE TABLE users (id INTEGER)"},
+        {Name: "create index", Sql: "CREATE INDEX users_id\n    ON users (id)"},
+        {Name: "seed data", Sql: "INSERT INTO users VALUES (1)"},
     }
 
     runErr := RunQueries(context.Background(), database, "up", "add_users", queries, RunnerOption{Writer: buffer, NoColor: true})
@@ -135,7 +135,7 @@ func TestRunQueries_NilWriterFallsBackToStdout(t *testing.T) {
         database,
         "up",
         "add_users",
-        []Query{{Name: "create table", SQL: "CREATE TABLE users (id INTEGER)"}},
+        []Query{{Name: "create table", Sql: "CREATE TABLE users (id INTEGER)"}},
         RunnerOption{Writer: nil, NoColor: true},
     )
 
@@ -310,8 +310,8 @@ func TestRunQueries_EscapesTheMigrationNameInsideThePrefixOfEveryPerQueryLine(t 
 
         buffer := &bytes.Buffer{}
         queries := []Query{
-            {Name: "create table", SQL: "CREATE TABLE users (id INTEGER)"},
-            {Name: "create index", SQL: "CREATE INDEX users_id ON users (id)"},
+            {Name: "create table", Sql: "CREATE TABLE users (id INTEGER)"},
+            {Name: "create index", Sql: "CREATE INDEX users_id ON users (id)"},
         }
 
         runErr := RunQueries(context.Background(), database, "up", "m\x1b[31mred", queries, RunnerOption{Writer: buffer, NoColor: noColor})
@@ -340,7 +340,7 @@ func TestRunQueries_EscapesTheMigrationNameInsideThePrefixOfEveryPerQueryLine(t 
 func TestRunQueries_EscapesTheDirectionOnEveryLine(t *testing.T) {
     database, _ := newFakeBunDatabase()
     buffer := &bytes.Buffer{}
-    queries := []Query{{Name: "create table", SQL: "CREATE TABLE users (id INTEGER)"}}
+    queries := []Query{{Name: "create table", Sql: "CREATE TABLE users (id INTEGER)"}}
 
     runErr := RunQueries(context.Background(), database, "up\rinjected", "add_users", queries, RunnerOption{Writer: buffer, NoColor: true})
     if nil != runErr {

@@ -84,11 +84,11 @@ func TestErrorsIsErrHeartbeatUserMissingFromRender(t *testing.T) {
 func TestErrorsIsErrForbiddenCharacterInEntryUser(t *testing.T) {
     entries := []Entry{
         {
-            Name:     "percent-user",
-            User:     "svc%role",
-            Binary:   "/usr/local/bin/app",
-            Args:     []string{"run"},
-            Schedule: &Schedule{Minute: "0"},
+            Name:      "percent-user",
+            User:      "svc%role",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"run"},
+            Schedule:  &Schedule{Minute: "0"},
         },
     }
 
@@ -105,10 +105,10 @@ func TestErrorsIsErrForbiddenCharacterInEntryUser(t *testing.T) {
 func TestErrorsIsErrEntryEmptyUser(t *testing.T) {
     entries := []Entry{
         {
-            Name:     "no-user",
-            Binary:   "/usr/local/bin/app",
-            Args:     []string{"no-user"},
-            Schedule: &Schedule{Minute: "0"},
+            Name:      "no-user",
+            Binary:    "/usr/local/bin/app",
+            Arguments: []string{"no-user"},
+            Schedule:  &Schedule{Minute: "0"},
         },
     }
 

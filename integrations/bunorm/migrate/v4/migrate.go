@@ -13,7 +13,7 @@ import (
 
 type Query struct {
     Name string
-    SQL  string
+    Sql  string
 }
 
 /* RunnerOption shapes the per-query lines a migration prints: Writer, the run's own writer when left out — the posture the migrate command put on the context, else standard output; NoColor, true to print without colour, false to follow the run's posture. The zero value prints as the command prints. */
@@ -89,8 +89,8 @@ func RunQueries(ctx context.Context, db *bun.DB, direction string, migrationName
 
         printer.printExecuting(prefix, query.Name)
 
-        if _, err := db.ExecContext(ctx, query.SQL); nil != err {
-            printer.printFailed(prefix, query.Name, err, query.SQL)
+        if _, err := db.ExecContext(ctx, query.Sql); nil != err {
+            printer.printFailed(prefix, query.Name, err, query.Sql)
 
             return fmt.Errorf("migration %s failed at step %d/%d (%s): %w", migrationName, step, total, query.Name, err)
         }

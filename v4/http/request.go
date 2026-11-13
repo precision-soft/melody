@@ -23,14 +23,6 @@ const RequestAttributeScheme = "_scheme"
 
 const requestAttributeSession = "_session"
 
-func ErrorUnsupportedContentType() error {
-    return exception.NewError("unsupported content type", map[string]any{}, nil)
-}
-
-func ErrorJsonBodyHasExtraData() error {
-    return exception.NewError("json body has extra data", map[string]any{}, nil)
-}
-
 func NewRequest(
     httpRequest *nethttp.Request,
     routeParams map[string]string,
