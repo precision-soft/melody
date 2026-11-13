@@ -3,6 +3,7 @@ package audit
 import (
     "encoding/json"
     "reflect"
+    "strconv"
     "strings"
     "time"
 
@@ -13,7 +14,7 @@ import (
 
 const redactedValue = "<redacted>"
 
-/* the encrypted column types are recognised through the marker interface, since each compartment-bound generic instantiation is a distinct reflect.Type an identity list cannot enumerate */
+/* each compartment-bound generic instantiation is a distinct reflect.Type, so only the marker interface recognises them all */
 var encryptedColumnType = reflect.TypeOf((*encrypt.EncryptedColumn)(nil)).Elem()
 var baseModelType = reflect.TypeOf(bun.BaseModel{})
 
@@ -36,7 +37,7 @@ type changeEnvelope struct {
     New   *any   `json:"new,omitempty"`
 }
 
-/* MarshalJSON emits each side by presence rather than emptiness, so a transition to a zero value renders the zero and is told apart from the one-sided shape of an insert or a delete. A Change built by hand records no presence, and a side is then emitted when it is non-nil. */
+/* MarshalJSON emits each side by presence, so a change to a zero value is told apart from an insert or a delete */
 func (instance Change) MarshalJSON() ([]byte, error) {
     envelope := changeEnvelope{Field: instance.Field}
 
@@ -60,12 +61,12 @@ func ChangeSet(before any, after any) []Change {
 func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Change {
     var changes []Change
 
-    /* the visit record starts with the two root pointers, since Go permits `type Node struct { *Node }` and such an embed can lead back to the model itself */
+    /* the root pointers are seen from the start, since `type Node struct { *Node }` can lead back to the model */
     seen := map[embedVisitKey]struct{}{}
 
-    collectChanges(&changes, structValue(before, seen, false), structValue(after, seen, true), ignore, false, seen)
+    collectChanges(&changes, structValue(before, seen, false), structValue(after, seen, true), ignore, false, seen, nil, nil)
 
-    /* an empty result is returned as an empty slice, never a nil one: a nil slice marshals to the JSON literal null in the changes column, where a consumer reading it as an array errors out and cannot tell it from a genuinely absent change-set. An idempotent update and any non-struct model both land here. */
+    /* never nil: a nil slice marshals to null, which a reader of the changes array cannot tell from an absent change set */
     if 0 == len(changes) {
         return []Change{}
     }
@@ -73,13 +74,13 @@ func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Ch
     return changes
 }
 
-/* the before and after graphs are keyed apart so a pointer the two sides share — the ordinary shape for an embed the statement did not touch — is not mistaken for a cycle and dropped from the change-set */
+/* keyed apart, so a pointer both sides share is not mistaken for a cycle */
 type embedVisitKey struct {
     pointer uintptr
     after   bool
 }
 
-func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}, forceRedact bool, seen map[embedVisitKey]struct{}) {
+func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}, forceRedact bool, seen map[embedVisitKey]struct{}, rowPaths map[string]struct{}, path []int) {
     var structType reflect.Type
     if true == beforeValue.IsValid() {
         structType = beforeValue.Type()
@@ -91,6 +92,10 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
 
     oldUsable := beforeValue.IsValid() && beforeValue.Type() == structType
     newUsable := afterValue.IsValid() && afterValue.Type() == structType
+
+    if nil == rowPaths {
+        rowPaths = embeddedRowFieldPaths(structType)
+    }
 
     for index := 0; index < structType.NumField(); index++ {
         field := structType.Field(index)
@@ -114,19 +119,26 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
                 embeddedAfter, afterCycle = structValueOf(afterValue.Field(index), seen, true)
             }
 
-            /* an embed leading back to a struct the walk is already inside contributes nothing: the frame that first reached that struct reports its fields, and descending again would repeat them until the stack is gone. Either side closing the loop drops the whole embed, because walking the other side alone would read as fields appearing or vanishing when nothing about them changed. */
+            /* an embed closing a loop on either side adds nothing: the frame that first reached the struct reports its fields */
             if true == beforeCycle || true == afterCycle {
                 continue
             }
 
             embedRedact := forceRedact || "redact" == field.Tag.Get("audit")
-            collectChanges(changes, embeddedBefore, embeddedAfter, ignore, embedRedact, seen)
+            collectChanges(changes, embeddedBefore, embeddedAfter, ignore, embedRedact, seen, rowPaths, appendIndex(path, index))
             continue
         }
 
         name, skip := auditFieldName(field)
         if true == skip {
             continue
+        }
+
+        /* an embed: struct is walked as one value here, while bun spreads it into prefixed columns that are never the row paths */
+        if _, spread := parseBunTagOptions(field)["embed"]; 0 < len(path) && false == spread {
+            if _, inRow := rowPaths[indexPathKey(appendIndex(path, index))]; false == inRow {
+                continue
+            }
         }
 
         if _, ignored := ignore[name]; true == ignored {
@@ -192,7 +204,7 @@ func isAuditableEmbed(field reflect.StructField) bool {
     return baseModelType != embedded && false == isEncryptedColumnType(embedded) && reflect.TypeOf(time.Time{}) != embedded
 }
 
-/* structValueOf resolves a value to the struct behind it, recording every pointer it walks through, and reports whether it met one twice: an embedded pointer can lead back to a struct the walk is inside, and the unbounded recursion would be a fatal stack overflow no recover catches. */
+/* structValueOf reports a pointer met twice, since an embed leading back would overflow the stack past any recover */
 func structValueOf(value reflect.Value, seen map[embedVisitKey]struct{}, after bool) (reflect.Value, bool) {
     for reflect.Pointer == value.Kind() {
         if true == value.IsNil() {
@@ -249,7 +261,7 @@ func structValue(value any, seen map[embedVisitKey]struct{}, after bool) reflect
     return resolved
 }
 
-/* dereferencePointerType follows a pointer type to what it points at, ending at the first type met twice, since `type Pointer *Pointer` is legal Go and would otherwise spin forever. The type it ends on is a pointer, which every caller reads as neither an encrypted string type nor a struct. */
+/* dereferencePointerType stops at the first type met twice, since `type Pointer *Pointer` is legal Go */
 func dereferencePointerType(pointerType reflect.Type) reflect.Type {
     visited := map[reflect.Type]struct{}{}
 
@@ -287,7 +299,7 @@ func valueContainsRedactTag(value any) bool {
     return valueContainsRedactTagReflect(reflect.ValueOf(value), map[redactVisitKey]struct{}{})
 }
 
-/* the visit key pairs the pointer with the slice length plus one, so two re-slices sharing a backing-array start are both walked and a redact-tagged element past the shorter one is not skipped, while a self-referential slice is still a cycle; a pointer or a map keeps length 0 */
+/* the slice length is part of the key, so two re-slices of one backing array are both walked */
 type redactVisitKey struct {
     pointer uintptr
     length  uintptr
@@ -319,7 +331,7 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]
 
     switch value.Kind() {
     case reflect.Slice:
-        /* guard self-referential slices reached through an interface element (slice -> any -> same slice), which carry no pointer node for the deref loop to catch and would otherwise recurse until the stack overflows. */
+        /* a slice reached through an interface element carries no pointer for the dereference loop to catch */
         pointer := value.Pointer()
         if 0 != pointer {
             key := redactVisitKey{pointer: pointer, length: uintptr(value.Len()) + 1}
@@ -385,7 +397,7 @@ func valueContainsRedactTagReflect(value reflect.Value, seen map[redactVisitKey]
     }
 }
 
-/* typeContainsRedactTag answers whether a redact tag is reachable from fieldType over a type graph that may be cyclic, recording each type before taking it apart. A type met a second time answers false, which is exact: the frame still exploring it reports any tag it finds, and answering true would redact every self-referential shape. */
+/* typeContainsRedactTag answers false for a type met twice: the frame still exploring it reports any tag it finds */
 func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{}) bool {
     for reflect.Pointer == fieldType.Kind() || reflect.Slice == fieldType.Kind() || reflect.Array == fieldType.Kind() {
         if _, visited := seen[fieldType]; true == visited {
@@ -422,7 +434,7 @@ func typeContainsRedactTag(fieldType reflect.Type, seen map[reflect.Type]struct{
             return true
         }
 
-        /* an encrypted column type is redactable here as on the value walk, so a struct whose only sensitive member is an EncryptedString field is not read as tag-free */
+        /* an encrypted column type is redactable on the type walk as on the value walk */
         if true == isEncryptedColumnType(dereferencePointerType(subField.Type)) {
             return true
         }
@@ -449,13 +461,17 @@ func auditFieldName(field reflect.StructField) (string, bool) {
         return field.Name, false
     }
 
+    /* a scan-only field is never written by an update and a relation is not a column, so neither is part of the row's change set */
+    _, options := parseBunTag(tag)
+    for _, option := range []string{"scanonly", "rel", "m2m"} {
+        if _, has := options[option]; true == has {
+            return "", true
+        }
+    }
+
     first := tag
     if comma := strings.IndexByte(tag, ','); -1 != comma {
         first = tag[:comma]
-    }
-
-    if true == strings.HasPrefix(first, "rel:") || true == strings.HasPrefix(first, "m2m:") {
-        return "", true
     }
 
     if "" == first {
@@ -463,4 +479,178 @@ func auditFieldName(field reflect.StructField) (string, bool) {
     }
 
     return first, false
+}
+
+/* the leading token is the column unless it carries a value, and every later token is an option, as bun's tag parser reads them */
+func parseBunTag(tag string) (string, map[string]string) {
+    name := ""
+    options := map[string]string{}
+
+    for position, token := range strings.Split(tag, ",") {
+        key, value, hasValue := strings.Cut(token, ":")
+        if 0 == position && false == hasValue {
+            name = token
+
+            continue
+        }
+
+        options[key] = value
+    }
+
+    return name, options
+}
+
+func parseBunTagOptions(field reflect.StructField) map[string]string {
+    _, options := parseBunTag(field.Tag.Get("bun"))
+
+    return options
+}
+
+type bunRowField struct {
+    index  []int
+    column string
+    tagged bool
+}
+
+/* bun keeps an embedded field only when no other field of the level carries its column, or when it is the one tagged field that does */
+func embeddedRowFieldPaths(structType reflect.Type) map[string]struct{} {
+    paths := map[string]struct{}{}
+
+    for _, field := range bunRowFields(structType, map[reflect.Type]struct{}{}) {
+        if 1 < len(field.index) {
+            paths[indexPathKey(field.index)] = struct{}{}
+        }
+    }
+
+    return paths
+}
+
+func bunRowFields(structType reflect.Type, visiting map[reflect.Type]struct{}) []bunRowField {
+    if _, inside := visiting[structType]; true == inside {
+        return nil
+    }
+    visiting[structType] = struct{}{}
+    defer delete(visiting, structType)
+
+    levelColumns := map[string]struct{}{}
+    var own []bunRowField
+    var embedded []bunRowField
+
+    for index := 0; index < structType.NumField(); index++ {
+        field := structType.Field(index)
+        tag := field.Tag.Get("bun")
+
+        if "-" == tag {
+            levelColumns[field.Name] = struct{}{}
+
+            continue
+        }
+
+        if false == field.IsExported() && false == field.Anonymous {
+            continue
+        }
+
+        name, options := parseBunTag(tag)
+
+        prefix, hasPrefix := options["embed"]
+        if true == field.Anonymous {
+            prefix = ""
+        }
+
+        if true == field.Anonymous || true == hasPrefix {
+            embeddedType := dereferencePointerType(field.Type)
+            if reflect.Struct != embeddedType.Kind() {
+                continue
+            }
+
+            for _, subfield := range bunRowFields(embeddedType, visiting) {
+                embedded = append(embedded, bunRowField{
+                    index:  append([]int{index}, subfield.index...),
+                    column: prefix + subfield.column,
+                    tagged: subfield.tagged,
+                })
+            }
+
+            continue
+        }
+
+        column := bunColumnName(field.Name)
+        if "" != name {
+            column = name
+        }
+        if explicit, has := options["column"]; true == has {
+            column = explicit
+        }
+
+        levelColumns[column] = struct{}{}
+        own = append(own, bunRowField{index: []int{index}, column: column, tagged: "" != name || 0 < len(options)})
+    }
+
+    holders := map[string]int{}
+    taggedHolders := map[string]int{}
+    for column := range levelColumns {
+        holders[column]++
+        taggedHolders[column]++
+    }
+    for _, field := range embedded {
+        holders[field.column]++
+        if true == field.tagged {
+            taggedHolders[field.column]++
+        }
+    }
+
+    for _, field := range embedded {
+        if 1 < holders[field.column] && false == (true == field.tagged && 1 == taggedHolders[field.column]) {
+            continue
+        }
+
+        own = append(own, field)
+    }
+
+    return own
+}
+
+/* bun's own name for an untagged column: an upper-case letter next to a lower-case one starts a new word */
+func bunColumnName(goName string) string {
+    column := make([]byte, 0, len(goName)+5)
+
+    for position := 0; position < len(goName); position++ {
+        character := goName[position]
+        if 'A' > character || 'Z' < character {
+            column = append(column, character)
+
+            continue
+        }
+
+        lower := character + 32
+        if 0 < position && position+1 < len(goName) && (isLowerAscii(goName[position-1]) || isLowerAscii(goName[position+1])) {
+            column = append(column, '_', lower)
+
+            continue
+        }
+
+        column = append(column, lower)
+    }
+
+    return string(column)
+}
+
+func isLowerAscii(character byte) bool {
+    return 'a' <= character && 'z' >= character
+}
+
+func appendIndex(path []int, index int) []int {
+    extended := make([]int, len(path), len(path)+1)
+    copy(extended, path)
+
+    return append(extended, index)
+}
+
+func indexPathKey(index []int) string {
+    parts := make([]string, len(index))
+    for position, value := range index {
+        parts[position] = strconv.Itoa(value)
+    }
+
+    return strings.Join(parts, ".")
 }
