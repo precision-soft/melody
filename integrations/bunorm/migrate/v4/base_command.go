@@ -25,16 +25,16 @@ type migrationUnlocker interface {
 }
 
 /* unlockMigrations reports a failed release both printed and returned, since a surviving lock row refuses every later migration and a command exiting 0 over it misleads the deploy script. The wrap names that the lock row stays held, its table and the unlock command that clears it; the bun error stays the cause, so errors.Is still reaches it. */
-func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput, unlockCommand string, unlockTimeout time.Duration) error {
+func unlockMigrations(ctx context.Context, unlocker migrationUnlocker, outputInstance *commandOutput, locksTable string, unlockCommand string, unlockTimeout time.Duration) error {
     /* the unlock must not ride the command context: an interrupted migration cancels it, the delete never reaches the database and the lock row survives, refusing every later migration until someone runs the unlock command */
     unlockContext, cancelUnlock := context.WithTimeout(context.WithoutCancel(ctx), unlockTimeout)
     defer cancelUnlock()
 
     if unlockErr := unlocker.Unlock(unlockContext); nil != unlockErr {
         heldLock := exception.NewError(
-            "migrate: the migration lock could not be released and stays held in "+migrationLocksTable+", refusing every later migration on every replica until "+unlockCommand+" clears it: "+unlockErr.Error(),
+            "migrate: the migration lock could not be released and stays held in "+locksTable+", refusing every later migration on every replica until "+unlockCommand+" clears it: "+unlockErr.Error(),
             exceptioncontract.Context{
-                "locksTable":    migrationLocksTable,
+                "locksTable":    locksTable,
                 "unlockCommand": unlockCommand,
             },
             unlockErr,
@@ -103,25 +103,30 @@ func (instance *baseCommand) run(
     return body(runtimeInstance, commandContext, outputInstance)
 }
 
-/* resolveMigrator answers the database this command acts on, the manager it belongs to, the migrator over it, and the release the caller must defer; a migrator that cannot be built still releases the database. */
+/* resolveMigrator answers the database this command acts on, the manager it belongs to, the migrator over it, the two tables it reads, and the release the caller must defer; the tables are read before the database is opened, and a migrator that cannot be built still releases the database. */
 func (instance *baseCommand) resolveMigrator(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
-) (*bun.DB, string, *migrate.Migrator, func(), error) {
-    db, managerName, releaseDatabase, dbErr := instance.resolveDatabase(runtimeInstance, commandContext, outputInstance)
-    if nil != dbErr {
-        return nil, "", nil, nil, dbErr
+) (*bun.DB, string, *migrate.Migrator, migrationTables, func(), error) {
+    tables, tablesErr := resolveTables(runtimeInstance)
+    if nil != tablesErr {
+        return nil, "", nil, migrationTables{}, nil, tablesErr
     }
 
-    migrator, migratorErr := instance.newMigrator(db)
+    db, managerName, releaseDatabase, dbErr := instance.resolveDatabase(runtimeInstance, commandContext, outputInstance)
+    if nil != dbErr {
+        return nil, "", nil, migrationTables{}, nil, dbErr
+    }
+
+    migrator, migratorErr := instance.newMigrator(db, tables)
     if nil != migratorErr {
         releaseDatabase()
 
-        return nil, "", nil, nil, migratorErr
+        return nil, "", nil, migrationTables{}, nil, migratorErr
     }
 
-    return db, managerName, migrator, releaseDatabase, nil
+    return db, managerName, migrator, tables, releaseDatabase, nil
 }
 
 /* printDatabaseIdentity prints the database block the detailed postures carry, under the context the caller hands. */
@@ -223,7 +228,7 @@ func (instance *baseCommand) resolveDatabase(
     return database, label, release, nil
 }
 
-func (instance *baseCommand) newMigrator(db *bun.DB) (*migrate.Migrator, error) {
+func (instance *baseCommand) newMigrator(db *bun.DB, tables migrationTables) (*migrate.Migrator, error) {
     if nil == db {
         return nil, errors.New("bun database is nil")
     }
@@ -236,6 +241,8 @@ func (instance *baseCommand) newMigrator(db *bun.DB) (*migrate.Migrator, error) 
         db,
         instance.migrations,
         migrate.WithMarkAppliedOnSuccess(true),
+        migrate.WithTableName(tables.migrations),
+        migrate.WithLocksTableName(tables.locks),
     ), nil
 }
 

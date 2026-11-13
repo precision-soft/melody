@@ -43,7 +43,7 @@ func (instance *InitCommand) runInit(
     commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) (runErr error) {
-    db, managerName, migrator, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
+    db, managerName, migrator, _, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
     if nil != resolveErr {
         return resolveErr
     }

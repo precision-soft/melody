@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - This major includes every change of the third major up to v3.2.0; that history is in the third major's changelog.
 - `option.go`: `Options.UnlockTimeout`, the budget of the migration lock's release after a run, 5s when left out as the constant was, at least 1ms, unlimited refused, a value outside the rule panicking at registration naming the field; a migration context inherits the base options' value unless its own options set one.
 - `option.go`: `DefaultManagerRegistryServiceId`, `DefaultManagerFlagName` and `DefaultCommandPrefix`, the defaults an `Options` field takes when left out.
+- `parameter.go`, `module.go`: the keys `MELODY_BUNORM_MIGRATE_MIGRATIONS_TABLE` and `MELODY_BUNORM_MIGRATE_LOCKS_TABLE` name the two tables bun keeps, `bun_migrations` and `bun_migration_locks` when unset, one pair for every command of the process; the module declares them, `ModuleConfig.KeyDefaults` their defaults, `EnvironmentKeys(defaults)` for a host that builds the commands without it; a value that is not a plain identifier of at most 64 bytes fails the boot, the error's context naming the key, two keys naming one table are refused at the run before the database is opened, and every message that names a table names the configured one.
 
 ### Changed
 

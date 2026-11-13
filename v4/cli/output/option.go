@@ -20,6 +20,8 @@ type Option struct {
     Offset bound.Count
     /* TableMaxWidth caps a table's width in characters: absent is 120, a value is at least 1, unlimited lets the table be as wide as its content. */
     TableMaxWidth bound.Count
+    /* ApplicationVersion is the version the application declared, read from the root of the command tree; "" when undeclared. */
+    ApplicationVersion string
 }
 
 var (

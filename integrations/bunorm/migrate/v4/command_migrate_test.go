@@ -116,7 +116,7 @@ func TestMigrateCommand_LockFailureAbortsWithoutMigratingOrUnlocking(t *testing.
     lockContext := contextual.Context()
     for key, expected := range map[string]string{
         "manager":       "<default>",
-        "locksTable":    migrationLocksTable,
+        "locksTable":    DefaultLocksTable,
         "unlockCommand": DefaultCommandPrefix + ":unlock",
     } {
         actual, present := lockContext[key]
@@ -672,7 +672,7 @@ func TestMigrationCommands_APanicKeepsPrecedenceOverAFailedUnlock(t *testing.T) 
             func() {
                 defer func() { recovered = recover() }()
 
-                if dispatchErr := melodycli.DispatchCommand(context.Background(), command, runtimeInstance, []string{command.Name(), "--format=json"}, buffer); nil != dispatchErr {
+                if dispatchErr := melodycli.DispatchCommand(context.Background(), command, runtimeInstance, []string{command.Name(), "--format=json"}, buffer, melodycli.DispatchConfig{}); nil != dispatchErr {
                     t.Errorf("expected the command to panic before it returned, got %v", dispatchErr)
                 }
             }()
@@ -761,7 +761,7 @@ func TestLockRefusal_ACancelledContextSaysCancelled(t *testing.T) {
     cancelled, cancel := context.WithCancel(context.Background())
     cancel()
 
-    refusal := lockRefusal(cancelled, database, context.Canceled, "primary", "db:unlock")
+    refusal := lockRefusal(cancelled, database, context.Canceled, "primary", DefaultLocksTable, "db:unlock")
     if false == strings.Contains(refusal.Error(), "cancelled") || false == errors.Is(refusal, context.Canceled) {
         t.Fatalf("expected the cancelled refusal, got %v", refusal)
     }

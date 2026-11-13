@@ -208,7 +208,7 @@ func TestUnlockMigrations_RunsOnACancelledCommandContext(t *testing.T) {
     unlocker := &recordingMigrationUnlocker{}
     outputInstance, _ := newBufferedOutput(true)
 
-    if unlockErr := unlockMigrations(cancelledContext, unlocker, outputInstance, "db:unlock", optionsUnlockTimeoutRule.Default); nil != unlockErr {
+    if unlockErr := unlockMigrations(cancelledContext, unlocker, outputInstance, DefaultLocksTable, "db:unlock", optionsUnlockTimeoutRule.Default); nil != unlockErr {
         t.Fatalf("expected no error from a successful unlock, got %v", unlockErr)
     }
 
@@ -234,7 +234,7 @@ func TestUnlockMigrations_EndsAtTheUnlockTimeoutItIsHanded(t *testing.T) {
     outputInstance, _ := newBufferedOutput(true)
     calledAt := time.Now()
 
-    if unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "db:unlock", 2*time.Second); nil != unlockErr {
+    if unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, DefaultLocksTable, "db:unlock", 2*time.Second); nil != unlockErr {
         t.Fatalf("expected no error from a successful unlock, got %v", unlockErr)
     }
 
@@ -248,7 +248,7 @@ func TestUnlockMigrations_ReportsAFailedUnlock(t *testing.T) {
     unlocker := &recordingMigrationUnlocker{unlockError: deleteRefused}
     outputInstance, buffer := newBufferedOutput(true)
 
-    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "db:unlock", optionsUnlockTimeoutRule.Default)
+    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, DefaultLocksTable, "db:unlock", optionsUnlockTimeoutRule.Default)
 
     if false == strings.Contains(buffer.String(), "delete refused") {
         t.Fatalf("expected the unlock failure to be reported, got %q", buffer.String())
@@ -375,7 +375,7 @@ func TestNewMigrator_SqlMigrationExecFailureReachesTheCaller(t *testing.T) {
 
     base := &baseCommand{migrations: migrations, options: resolvedDefaultOptions}
 
-    migrator, migratorErr := base.newMigrator(database)
+    migrator, migratorErr := base.newMigrator(database, migrationTables{migrations: DefaultMigrationsTable, locks: DefaultLocksTable})
     if nil != migratorErr {
         t.Fatalf("failed to build the migrator: %s", migratorErr.Error())
     }
@@ -708,7 +708,7 @@ func TestUnlockMigrations_NamesTheSurvivingLockInTheJsonDocument(t *testing.T) {
     buffer := &bytes.Buffer{}
     outputInstance := newCommandOutput(buffer, nil, output.Option{Format: output.FormatJson})
 
-    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, "db:unlock", optionsUnlockTimeoutRule.Default)
+    unlockErr := unlockMigrations(context.Background(), unlocker, outputInstance, DefaultLocksTable, "db:unlock", optionsUnlockTimeoutRule.Default)
     if nil == unlockErr {
         t.Fatal("expected the failed release to be returned")
     }

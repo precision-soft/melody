@@ -138,6 +138,7 @@ func runGenerateCommand(
         runtimeInstance,
         append([]string{command.Name()}, arguments...),
         output,
+        melodycli.DispatchConfig{},
     )
 
     written := output.String()
@@ -658,6 +659,7 @@ func TestGenerateCommand_TheStdoutModeJournalsTheReportAndPrintsTheSourceAlone(t
         runtimeInstance,
         []string{command.Name(), "--report-excluded"},
         output,
+        melodycli.DispatchConfig{},
     )
     if nil != runErr {
         t.Fatalf("expected the generation to succeed, got %v", runErr)
@@ -702,6 +704,7 @@ func TestGenerateCommand_TheStdoutModeJournalsTheCoverageLossesAboveAWarningThre
         runtimeInstance,
         []string{command.Name(), "--report-excluded"},
         &bytes.Buffer{},
+        melodycli.DispatchConfig{},
     )
     if nil != runErr {
         t.Fatalf("expected the generation to succeed, got %v", runErr)

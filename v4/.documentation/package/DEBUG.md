@@ -111,6 +111,7 @@ func main() {
         "example",
         "example application",
     )
+    rootCli.SetVersion("v1.0.0")
 
     /* Register returns nothing: it fails fast through exception.Panic on a nil argument, an empty name or a duplicate name */
     rootCli.Register(&debug.ContainerCommand{}, runtimeInstance)
@@ -132,7 +133,7 @@ func main() {
     )
 
     rootCli.Register(
-        &debug.VersionCommand{ApplicationVersion: "v1.0.0"},
+        &debug.VersionCommand{},
         runtimeInstance,
     )
 

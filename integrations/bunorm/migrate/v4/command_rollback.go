@@ -47,7 +47,7 @@ func (instance *RollbackCommand) runRollback(
         ctx = withEmptyMigrationWarner(ctx, outputInstance.printWarning)
     }
 
-    db, managerName, migrator, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
+    db, managerName, migrator, tables, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
     if nil != resolveErr {
         return resolveErr
     }
@@ -55,11 +55,11 @@ func (instance *RollbackCommand) runRollback(
 
     /* take the bun migration lock so two replicas rolling back concurrently cannot both act on the same applied group. */
     if lockErr := migrator.Lock(ctx); nil != lockErr {
-        return lockRefusal(ctx, db, lockErr, managerName, instance.base.options.CommandPrefix+":unlock")
+        return lockRefusal(ctx, db, lockErr, managerName, tables.locks, instance.base.options.CommandPrefix+":unlock")
     }
     /* the unlock failure becomes the command's verdict only when the rollback itself succeeded: a failed rollback keeps its own error, with the unlock failure printed beside it */
     defer func() {
-        unlockErr := unlockMigrations(ctx, migrator, outputInstance, instance.base.options.CommandPrefix+":unlock", instance.base.unlockTimeout)
+        unlockErr := unlockMigrations(ctx, migrator, outputInstance, tables.locks, instance.base.options.CommandPrefix+":unlock", instance.base.unlockTimeout)
         if nil == runErr && nil != unlockErr {
             runErr = unlockErr
         }

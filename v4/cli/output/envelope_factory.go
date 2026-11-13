@@ -21,11 +21,10 @@ func NewMeta(
         version.Melody = melodyversion.BuildVersion()
     }
 
-    if "" == version.Application {
-        version.Application = getApplicationVersion()
-    }
+    /* the option is the one source of the application's version; a caller's Application is not read */
+    version.Application = option.ApplicationVersion
 
-    /* as for the two fields above: the caller's value wins when present, the running binary's otherwise */
+    /* as for melody's: the caller's value wins when present, the running binary's otherwise */
     if "" == version.Go {
         version.Go = runtime.Version()
     }

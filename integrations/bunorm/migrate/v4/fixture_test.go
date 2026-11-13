@@ -97,6 +97,7 @@ func runMigrationCommandTo(
         runtimeInstance,
         append([]string{command.Name()}, arguments...),
         writer,
+        melodycli.DispatchConfig{},
     ); nil != parseErr {
         t.Fatalf("failed to parse command arguments: %s", parseErr.Error())
     }
@@ -423,7 +424,7 @@ func dispatchProbeCommand(
     runtimeInstance runtimecontract.Runtime,
     arguments []string,
 ) error {
-    return melodycli.DispatchCommand(context.Background(), command, runtimeInstance, arguments, io.Discard)
+    return melodycli.DispatchCommand(context.Background(), command, runtimeInstance, arguments, io.Discard, melodycli.DispatchConfig{})
 }
 
 /* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */

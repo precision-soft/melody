@@ -5,10 +5,12 @@ import (
     "context"
     "errors"
     "io"
+    "strings"
     "testing"
     "time"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -270,5 +272,85 @@ func TestRoot_RunEndsAtTheScopeTeardownTimeoutWithTheScopeFailure(t *testing.T) 
         }
     case <-time.After(container.DefaultScopeTeardownTimeout / 2):
         t.Fatalf("expected the run to end at the configured scope teardown timeout")
+    }
+}
+
+func TestRoot_VersionFlagPrintsTheDeclaredVersion(t *testing.T) {
+    for _, testCase := range []struct {
+        declared string
+        printed  string
+    }{
+        {"1.2.3", "app version 1.2.3\n"},
+        {"", "app version <unknown>\n"},
+    } {
+        buffer := &bytes.Buffer{}
+
+        root := NewRoot("app", "")
+        root.SetVersion(testCase.declared)
+        root.SetWriter(buffer)
+
+        if runErr := root.Run(context.Background(), []string{"app", "--version"}); nil != runErr {
+            t.Fatalf("expected no error, got %v", runErr)
+        }
+
+        if testCase.printed != buffer.String() {
+            t.Fatalf("expected %q, got %q", testCase.printed, buffer.String())
+        }
+    }
+}
+
+func TestRoot_ARegisteredCommandReadsTheVersionOffTheRoot(t *testing.T) {
+    for _, declared := range []string{"5.6.7", ""} {
+        observed := "unset"
+
+        root := NewRoot("app", "")
+        root.SetVersion(declared)
+        root.SetWriter(io.Discard)
+        root.Register(
+            &testCommand{
+                nameValue:        "probe",
+                descriptionValue: "probe",
+                runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                    observed = output.ApplicationVersionOf(commandContext)
+
+                    return nil
+                },
+            },
+            newTestRuntime(t),
+        )
+
+        if runErr := root.Run(context.Background(), []string{"app", "probe"}); nil != runErr {
+            t.Fatalf("expected no error, got %v", runErr)
+        }
+
+        if declared != observed {
+            t.Fatalf("expected the registered command to read %q, got %q", declared, observed)
+        }
+    }
+}
+
+func TestRoot_VersionFlagHasNoShortAliasAndTheHelpNamesTheVersion(t *testing.T) {
+    buffer := &bytes.Buffer{}
+
+    root := NewRoot("app", "")
+    root.SetVersion("")
+    root.SetWriter(buffer)
+    root.SetErrorWriter(buffer)
+
+    if runErr := root.Run(context.Background(), []string{"app", "-v"}); nil == runErr {
+        t.Fatalf("expected -v refused on the root, got the output %q", buffer.String())
+    }
+
+    buffer.Reset()
+    if runErr := root.Run(context.Background(), []string{"app", "--help"}); nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if false == strings.Contains(buffer.String(), "--version") || true == strings.Contains(buffer.String(), "--version, -v") {
+        t.Fatalf("expected --version listed without an alias, got %q", buffer.String())
+    }
+
+    if false == strings.Contains(buffer.String(), "VERSION:\n   <unknown>") {
+        t.Fatalf("expected the help to name the undeclared version, got %q", buffer.String())
     }
 }

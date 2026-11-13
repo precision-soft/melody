@@ -59,7 +59,7 @@ func (instance *MigrateCommand) runMigrate(
         ctx = withEmptyMigrationWarner(ctx, outputInstance.printWarning)
     }
 
-    db, managerName, migrator, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
+    db, managerName, migrator, tables, releaseDatabase, resolveErr := instance.base.resolveMigrator(runtimeInstance, commandContext, outputInstance)
     if nil != resolveErr {
         return resolveErr
     }
@@ -67,11 +67,11 @@ func (instance *MigrateCommand) runMigrate(
 
     /* take the bun migration lock so two replicas running the migrate command during a rolling deploy cannot both compute the same pending set and double-apply a migration. */
     if lockErr := migrator.Lock(ctx); nil != lockErr {
-        return lockRefusal(ctx, db, lockErr, managerName, instance.base.options.CommandPrefix+":unlock")
+        return lockRefusal(ctx, db, lockErr, managerName, tables.locks, instance.base.options.CommandPrefix+":unlock")
     }
     /* the unlock failure becomes the command's verdict only when the migration itself succeeded: a failed migration keeps its own error, with the unlock failure printed beside it */
     defer func() {
-        unlockErr := unlockMigrations(ctx, migrator, outputInstance, instance.base.options.CommandPrefix+":unlock", instance.base.unlockTimeout)
+        unlockErr := unlockMigrations(ctx, migrator, outputInstance, tables.locks, instance.base.options.CommandPrefix+":unlock", instance.base.unlockTimeout)
         if nil == runErr && nil != unlockErr {
             runErr = unlockErr
         }
@@ -84,7 +84,7 @@ func (instance *MigrateCommand) runMigrate(
     group, migrateErr := migrator.Migrate(ctx)
     if nil != migrateErr {
         /* a group that fails part way has already applied everything before the migration that broke, and those are reported beside the failure, so the operator can choose between re-running and rolling back */
-        printAppliedGroup(outputInstance, managerName, group, migrateErr)
+        printAppliedGroup(outputInstance, managerName, tables.migrations, group, migrateErr)
 
         return migrateErr
     }
@@ -129,9 +129,6 @@ func (instance *MigrateCommand) runMigrate(
     return nil
 }
 
-/* migrationLocksTable mirrors bun's default: newMigrator builds the migrator without WithLocksTableName, so this is the table an operator goes and looks at. */
-const migrationLocksTable = "bun_migration_locks"
-
 func migrationNamesOf(group *migrate.MigrationGroup) []string {
     if nil == group {
         return []string{}
@@ -145,8 +142,8 @@ func migrationNamesOf(group *migrate.MigrationGroup) []string {
     return names
 }
 
-/* printAppliedGroup reports what a failed run had already applied, on both renderings: the text block an operator reads and the data of the machine document, which finish assembles from these same calls and hands over beside the error. It is silent for a run that landed nothing, so a failure on the first migration does not print an empty block claiming a partial state. A migration whose Up ran but whose mark failed is named apart, under "ranNotRecorded", with a warning not to run it again: its change is in the schema, and bun_migrations does not say so. */
-func printAppliedGroup(outputInstance *commandOutput, managerName string, group *migrate.MigrationGroup, migrateErr error) {
+/* printAppliedGroup reports what a failed run had already applied, on both renderings: the text block an operator reads and the data of the machine document, which finish assembles from these same calls and hands over beside the error. It is silent for a run that landed nothing, so a failure on the first migration does not print an empty block claiming a partial state. A migration whose Up ran but whose mark failed is named apart, under "ranNotRecorded", with a warning not to run it again: its change is in the schema, and the migrations table does not say so. */
+func printAppliedGroup(outputInstance *commandOutput, managerName string, migrationsTable string, group *migrate.MigrationGroup, migrateErr error) {
     names, ranNotRecorded := appliedNamesOnFailure(group, migrateErr)
     if 0 == len(names) && "" == ranNotRecorded {
         return
@@ -164,7 +161,7 @@ func printAppliedGroup(outputInstance *commandOutput, managerName string, group 
 
     if "" != ranNotRecorded {
         outputInstance.printMigrationsBlock("ranNotRecorded", "RAN BUT NOT RECORDED", []string{ranNotRecorded})
-        outputInstance.printWarning(ranNotRecorded + " ran but was not recorded in bun_migrations: do not run it again; insert its row in bun_migrations, or roll its change back by hand")
+        outputInstance.printWarning(ranNotRecorded + " ran but was not recorded in "+migrationsTable+": do not run it again; insert its row in "+migrationsTable+", or roll its change back by hand")
     }
 }
 
@@ -188,7 +185,7 @@ func appliedNamesOnFailure(group *migrate.MigrationGroup, migrateErr error) ([]s
 var _ clicontract.Command = (*MigrateCommand)(nil)
 
 /* lockRefusal answers a migration lock bun could not take. bun files every failure of its lock insert under one "already locked" text, a held lock, a missing locks table, a refused connection and a cancelled context alike, so the refusal asks which it was: a cancelled context first, then the locks table itself. Only a lock row present is answered as held, with the unlock command named, since that remedy is wrong for every other cause. bun's error stays the cause on every branch, so errors.Is still reaches it. */
-func lockRefusal(ctx context.Context, database bun.IDB, lockErr error, managerName string, unlockCommand string) error {
+func lockRefusal(ctx context.Context, database bun.IDB, lockErr error, managerName string, locksTable string, unlockCommand string) error {
     if ctxErr := ctx.Err(); nil != ctxErr {
         return exception.NewError(
             "migrate: taking the migration lock was cancelled",
@@ -197,13 +194,13 @@ func lockRefusal(ctx context.Context, database bun.IDB, lockErr error, managerNa
         )
     }
 
-    heldLocks, probeErr := database.NewSelect().TableExpr(migrationLocksTable).Count(ctx)
+    heldLocks, probeErr := database.NewSelect().TableExpr(locksTable).Count(ctx)
     if nil != probeErr {
         return exception.NewError(
             "migrate: the migration lock could not be taken; the locks table is missing or unreachable",
             exceptioncontract.Context{
                 "manager":    managerName,
-                "locksTable": migrationLocksTable,
+                "locksTable": locksTable,
                 "probeError": probeErr.Error(),
             },
             lockErr,
@@ -215,7 +212,7 @@ func lockRefusal(ctx context.Context, database bun.IDB, lockErr error, managerNa
             "migrate: the migration lock is held; another migration is running, or a crashed one left it behind",
             exceptioncontract.Context{
                 "manager":       managerName,
-                "locksTable":    migrationLocksTable,
+                "locksTable":    locksTable,
                 "unlockCommand": unlockCommand,
             },
             lockErr,
@@ -226,7 +223,7 @@ func lockRefusal(ctx context.Context, database bun.IDB, lockErr error, managerNa
         "migrate: the migration lock could not be taken",
         exceptioncontract.Context{
             "manager":    managerName,
-            "locksTable": migrationLocksTable,
+            "locksTable": locksTable,
         },
         lockErr,
     )

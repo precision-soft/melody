@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `runner_command.go`: a scheduled command's document carries the application's version: the runner reads it off the tree it was started under and hands it to each dispatch, which runs on the process's context under no tree of its own and read it empty.
 - `module.go`, `parameter.go`: **Behavioural change**: the module's defaults are no longer opt-in: with no `--out` the generator writes `%kernel.project_dir%/generated_conf/cron/crontab` and with no `--logs-dir` it redirects every entry under `%kernel.logs_dir%/cron`, creating that directory on every run, the k8s template's included, where a module registered without `WithDefaultParameters` refused both runs naming the flag; an empty `.env` line for `MELODY_CRON_DESTINATION_FILE` or `MELODY_CRON_LOGS_DIR` restores the refusal.
 - `generate_command.go`: **Behavioural change**: the heartbeat opt-in reads an empty value as unset, the declared key's default, where an empty parameter was refused as not holding a boolean.
 - `runner_command.go`: **Behavioural change**: the child scope of a run closes under the container's `ScopeTeardownTimeout`, 3s when left out, where a scoped service waiting on its context held the runner without limit; a service that did not finish is reported as the run's close failure.

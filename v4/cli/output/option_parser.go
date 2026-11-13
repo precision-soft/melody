@@ -39,6 +39,7 @@ func ParseOptionFromCommand(commandContext *clicontract.CommandContext) Option {
     option.Limit = countFlag(commandContext, FlagNameLimit)
     option.Offset = countFlag(commandContext, FlagNameOffset)
     option.TableMaxWidth = countFlag(commandContext, FlagNameTableMaxWidth)
+    option.ApplicationVersion = ApplicationVersionOf(commandContext)
 
     return option
 }

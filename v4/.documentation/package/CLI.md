@@ -39,11 +39,15 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 - [`cli.Root`](../../cli/root.go)
 - [`cli.NewRoot(applicationName string, applicationDescription string) *cli.Root`](../../cli/root.go)
 - [`cli.Root.Register(command clicontract.Command, runtimeInstance runtimecontract.Runtime)`](../../cli/root.go)
+- [`cli.Root.SetVersion(version string)`](../../cli/root.go)
 - [`cli.Root.SetWriter(writer io.Writer)`](../../cli/root.go)
 - [`cli.Root.SetErrorWriter(writer io.Writer)`](../../cli/root.go)
 - [`cli.Root.Run(ctx context.Context, arguments []string) error`](../../cli/root.go)
 - [`cli.Root.CommandNames() []string`](../../cli/root.go)
-- [`cli.DispatchCommand(ctx context.Context, command clicontract.Command, runtimeInstance runtimecontract.Runtime, arguments []string, writer io.Writer) error`](../../cli/dispatch.go)
+- [`cli.DispatchCommand(ctx context.Context, command clicontract.Command, runtimeInstance runtimecontract.Runtime, arguments []string, writer io.Writer, config cli.DispatchConfig) error`](../../cli/dispatch.go)
+- [`cli.DispatchConfig{ApplicationVersion}`](../../cli/dispatch.go)
+
+The application's version has one source, `ApplicationConfig.Version`, which the application hands to `Root.SetVersion` on the tree it dispatches from. The root then shows `--version`, without the engine's `-v` alias, which melody keeps for the verbosity, printing `<name> version <version>`, `<unknown>` when no version is declared, the root's help naming it in a `VERSION:` block, and every command registered on the tree reads the version off the root through `output.ApplicationVersionOf`, which `output.ParseOptionFromCommand` copies into `Option.ApplicationVersion` and `output.NewMeta` writes into the meta of every document, `""` when undeclared. A command run through `DispatchCommand` is the root of its own tree, so the version it reads is `DispatchConfig.ApplicationVersion`: a caller dispatching inside an application's command, as the cron runner does, hands on its own `output.ApplicationVersionOf(commandContext)`.
 
 ### The flag and context layer
 
@@ -110,7 +114,8 @@ This subpackage provides shared helpers that commands can use for consistent out
     - [`output.Envelope`](../../cli/output/envelope.go)
 
 - Application version:
-    - [`output.SetApplicationVersion(versionString string)`](../../cli/output/application_version.go)
+    - [`output.ApplicationVersionOf(commandContext *clicontract.CommandContext) string`](../../cli/output/application_version.go)
+    - [`output.MetadataApplicationVersion`, `output.UnknownApplicationVersion`](../../cli/output/application_version.go)
 
 ### Standard output flags
 

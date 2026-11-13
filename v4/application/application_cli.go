@@ -101,7 +101,6 @@ func (instance *Application) bootCli() {
                     return instance.httpMiddlewares.buildForInspection(instance.kernel)
                 },
             ),
-            /* the application slot stays empty: the application's own version arrives through output.SetApplicationVersion, and one never declared reads <unknown> */
             &debug.VersionCommand{},
         )
     }
@@ -210,6 +209,7 @@ func (instance *Application) runCli() error {
     loggerWithProcess.Info("starting cli application", nil)
 
     rootCli := cli.NewRoot(configuration.Cli().Name(), configuration.Cli().Description())
+    rootCli.SetVersion(instance.applicationConfig.Version)
     rootCli.SetWriter(os.Stdout)
     rootCli.SetErrorWriter(os.Stderr)
 

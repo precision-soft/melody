@@ -5,10 +5,16 @@ import (
     "io"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
+
+/* DispatchConfig.ApplicationVersion is what the dispatched command reads as the application's version, "" undeclared. */
+type DispatchConfig struct {
+    ApplicationVersion string
+}
 
 /* DispatchCommand parses one command line against a command's own flags and runs it, with no banner, no scope close and no exit handling, for a caller that dispatches inside a process it keeps owning, as the cron runner does. arguments[0] is the name the command was invoked under, as for Root.Run; writer receives the command's output and the parser's refusals, and nil discards. The command's error is answered as it is, read through the interface. A ctx that descends from another command's action inherits that command's flag set; dispatch from the process's own context. The command's flags are refused when one is nil, repeats a spelling, carries an empty alias or, under ValidateDefaults, declares a default its own validator refuses, and the engine parses into fresh instances of them, so a command answering the same instances on every Flags() call is dispatched as any other, twice at once included; a Destination the flags declare is the one pointer every dispatch writes the parsed value into, so two dispatches in flight share it. */
 func DispatchCommand(
@@ -17,6 +23,7 @@ func DispatchCommand(
     runtimeInstance runtimecontract.Runtime,
     arguments []string,
     writer io.Writer,
+    config DispatchConfig,
 ) error {
     if true == internal.IsNilInterface(command) {
         exception.Panic(
@@ -61,6 +68,8 @@ func DispatchCommand(
         HideHelpCommand: true,
         /* as in NewCommandContext: the engine's default would end the process on any error the command returns */
         ExitErrHandler: inertExitHandler,
+        /* the dispatched command is the root of its own tree */
+        Metadata: map[string]any{output.MetadataApplicationVersion: config.ApplicationVersion},
     }
 
     return engineCommand.Run(ctx, NormalizeVerbosityArguments(arguments))

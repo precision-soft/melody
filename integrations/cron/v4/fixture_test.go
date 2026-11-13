@@ -361,6 +361,7 @@ func dispatchGenerateCommand(
         runtimeInstance,
         append([]string{generateCommand.Name()}, extraArgs...),
         &stdout,
+        melodycli.DispatchConfig{},
     )
 
     return stdout.String(), runErr
@@ -391,7 +392,7 @@ func (instance *runnerDispatch) Run(ctx context.Context, arguments []string) err
         runtimeInstance = newRunnerTestRuntime(ctx)
     }
 
-    return melodycli.DispatchCommand(ctx, instance.runner, runtimeInstance, arguments, instance.writer)
+    return melodycli.DispatchCommand(ctx, instance.runner, runtimeInstance, arguments, instance.writer, melodycli.DispatchConfig{})
 }
 
 /* parsedContextValues are the values a command line would carry, parsed by the engine into the command context a command's Run receives: every flag named here is declared and given, every other name reads as the zero value, and the arguments follow the flags as positionals. A nil writer discards. */

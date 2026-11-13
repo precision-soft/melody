@@ -1,21 +1,35 @@
 package debug
 
 import (
+    "bytes"
+    "context"
     "encoding/json"
     "strings"
     "testing"
 
-    "github.com/precision-soft/melody/v4/cli/output"
+    melodycli "github.com/precision-soft/melody/v4/cli"
     "github.com/precision-soft/melody/v4/container"
     melodyversion "github.com/precision-soft/melody/v4/version"
 )
 
+func runVersionUnderRoot(t *testing.T, version string, arguments []string) (string, error) {
+    t.Helper()
+
+    buffer := &bytes.Buffer{}
+
+    root := melodycli.NewRoot("app", "")
+    root.SetVersion(version)
+    root.SetWriter(buffer)
+    root.SetErrorWriter(buffer)
+    root.Register(&VersionCommand{}, newTestRuntime(container.NewContainer(container.ContainerConfig{})))
+
+    runErr := root.Run(context.Background(), append([]string{"app", "debug:version"}, arguments...))
+
+    return buffer.String(), runErr
+}
+
 func TestVersionCommand_TableFormat_PrintsTheThreeVersions(t *testing.T) {
-    rendered, runErr := runDebugCommand(
-        &VersionCommand{ApplicationVersion: "1.2.3"},
-        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
-        []string{},
-    )
+    rendered, runErr := runVersionUnderRoot(t, "1.2.3", []string{})
     if nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
@@ -56,44 +70,34 @@ func TestVersionCommand_TableFormat_NamesAnUnknownApplicationVersion(t *testing.
     }
 }
 
-/* the application row reads the process-wide declaration the composition root makes through output.SetApplicationVersion; an explicit value on the command still wins over it */
-func TestVersionCommand_ReadsTheProcessWideApplicationVersion(t *testing.T) {
-    output.SetApplicationVersion("7.7.7-declared")
-    defer output.SetApplicationVersion("")
+func TestVersionCommand_JsonFormat_EachTreeNamesItsOwnVersion(t *testing.T) {
+    for _, version := range []string{"1.0.0-first", "2.0.0-second", ""} {
+        rendered, runErr := runVersionUnderRoot(t, version, []string{"--format=json"})
+        if nil != runErr {
+            t.Fatalf("expected no error, got %v", runErr)
+        }
 
-    rendered, runErr := runDebugCommand(
-        &VersionCommand{},
-        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
-        []string{},
-    )
-    if nil != runErr {
-        t.Fatalf("expected no error, got %v", runErr)
-    }
+        envelope := struct {
+            Meta struct {
+                Version struct {
+                    Application string `json:"application"`
+                } `json:"version"`
+            } `json:"meta"`
+            Data map[string]string `json:"data"`
+        }{}
 
-    if false == strings.Contains(rendered, "7.7.7-declared") {
-        t.Fatalf("expected the declared application version, got %q", rendered)
-    }
+        if decodeErr := json.Unmarshal([]byte(rendered), &envelope); nil != decodeErr {
+            t.Fatalf("failed to decode the envelope: %v, rendered %q", decodeErr, rendered)
+        }
 
-    explicitRendered, explicitErr := runDebugCommand(
-        &VersionCommand{ApplicationVersion: "8.8.8-explicit"},
-        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
-        []string{},
-    )
-    if nil != explicitErr {
-        t.Fatalf("expected no error, got %v", explicitErr)
-    }
-
-    if false == strings.Contains(explicitRendered, "8.8.8-explicit") {
-        t.Fatalf("expected the explicit value to win over the declaration, got %q", explicitRendered)
+        if version != envelope.Data["application"] || version != envelope.Meta.Version.Application {
+            t.Fatalf("expected %q in the data and the meta, got %q and %q", version, envelope.Data["application"], envelope.Meta.Version.Application)
+        }
     }
 }
 
 func TestVersionCommand_JsonFormat_CarriesTheThreeVersionsAsData(t *testing.T) {
-    rendered, runErr := runDebugCommand(
-        &VersionCommand{ApplicationVersion: "1.2.3"},
-        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
-        []string{"--format=json"},
-    )
+    rendered, runErr := runVersionUnderRoot(t, "1.2.3", []string{"--format=json"})
     if nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
@@ -135,16 +139,9 @@ func TestVersionCommand_NameAndDescriptionAndFlags(t *testing.T) {
     }
 }
 
-/* the siblings above read the whole rendering, which the META header shadows: the header prints the application version off the same meta, so a details row reading the command's own field instead of the resolved chain still leaves the declared value in the output and every Contains assertion passes. This one reads the ROW, which is the only place the two answers differ. The frozen majors assert on the rendering alone, so the row is unpinned there too. */
-func TestVersionCommand_TheDetailsRowCarriesTheResolvedApplicationVersion(t *testing.T) {
-    output.SetApplicationVersion("9.9.9-process-wide")
-    defer output.SetApplicationVersion("")
-
-    rendered, runErr := runDebugCommand(
-        &VersionCommand{},
-        newTestRuntime(container.NewContainer(container.ContainerConfig{})),
-        []string{"--format=table", "--table-width=400"},
-    )
+/* the META header prints the version too, so the row itself is read */
+func TestVersionCommand_TheDetailsRowCarriesTheDeclaredApplicationVersion(t *testing.T) {
+    rendered, runErr := runVersionUnderRoot(t, "9.9.9-declared", []string{"--format=table", "--table-width=400"})
     if nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
@@ -158,7 +155,7 @@ func TestVersionCommand_TheDetailsRowCarriesTheResolvedApplicationVersion(t *tes
         }
     }
 
-    if "9.9.9-process-wide" != applicationValue {
-        t.Fatalf("expected the details row to carry the process-wide declaration, got %q in %q", applicationValue, rendered)
+    if "9.9.9-declared" != applicationValue {
+        t.Fatalf("expected the details row to carry the declared version, got %q in %q", applicationValue, rendered)
     }
 }

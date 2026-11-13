@@ -13,10 +13,10 @@ import (
     urfavecli "github.com/urfave/cli/v3"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    "github.com/precision-soft/melody/v4/debug"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
@@ -423,24 +423,70 @@ func TestRunCli_TheRunLoggerPreservesACallerProcessIdUnderProvided(t *testing.T)
     }
 }
 
-func TestBootCli_LeavesTheDebugVersionApplicationSlotEmpty(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+type versionProbeCliCommand struct {
+    optionVersion string
+    metaVersion   string
+}
+
+func (instance *versionProbeCliCommand) Name() string {
+    return "probe:version"
+}
+
+func (instance *versionProbeCliCommand) Description() string {
+    return "records the application version its output reads"
+}
+
+func (instance *versionProbeCliCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *versionProbeCliCommand) Run(
+    runtimeInstance runtimecontract.Runtime,
+    commandContext *clicontract.CommandContext,
+) error {
+    option := output.ParseOptionFromCommand(commandContext)
+    instance.optionVersion = option.ApplicationVersion
+    instance.metaVersion = output.NewMeta(instance.Name(), nil, option, time.Now(), 0, output.Version{}).Version.Application
+
+    return nil
+}
+
+func runVersionProbe(t *testing.T, version string) *versionProbeCliCommand {
+    t.Helper()
+
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{Version: version, EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    probeCommand := &versionProbeCliCommand{}
+    applicationInstance.RegisterCliCommand(probeCommand)
 
     applicationInstance.Boot()
 
-    versionCommand := (*debug.VersionCommand)(nil)
-    for _, command := range applicationInstance.cliCommands {
-        if candidate, isVersion := command.(*debug.VersionCommand); true == isVersion {
-            versionCommand = candidate
-        }
+    originalArguments := os.Args
+    os.Args = []string{"probe", "probe:version"}
+    defer func() { os.Args = originalArguments }()
+
+    if runErr := applicationInstance.runCli(); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
     }
 
-    if nil == versionCommand {
-        t.Fatal("expected bootCli to register debug:version in the dev environment")
+    return probeCommand
+}
+
+func TestRunCli_EachApplicationCarriesItsOwnVersion(t *testing.T) {
+    first := runVersionProbe(t, "1.0.0-first")
+    second := runVersionProbe(t, "2.0.0-second")
+    undeclared := runVersionProbe(t, "")
+
+    if "1.0.0-first" != first.optionVersion || "1.0.0-first" != first.metaVersion {
+        t.Fatalf("expected the first application's version, got option %q meta %q", first.optionVersion, first.metaVersion)
     }
 
-    if "" != versionCommand.ApplicationVersion {
-        t.Fatalf("expected the wiring to leave the application slot empty, got %q", versionCommand.ApplicationVersion)
+    if "2.0.0-second" != second.optionVersion || "2.0.0-second" != second.metaVersion {
+        t.Fatalf("expected the second application's version, got option %q meta %q", second.optionVersion, second.metaVersion)
+    }
+
+    if "" != undeclared.optionVersion || "" != undeclared.metaVersion {
+        t.Fatalf("expected an undeclared version to read empty, got option %q meta %q", undeclared.optionVersion, undeclared.metaVersion)
     }
 }
 

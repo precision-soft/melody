@@ -160,6 +160,42 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Write `Sql:`.
 
+### Cli: the application's version is `ApplicationConfig.Version`, and the root shows `--version`
+
+**What changed.** The application's version has one source, [`ApplicationConfig.Version`](../application/application_new.go). The application declares it on the root of its command tree: the root shows `--version`, printing `<name> version <version>`, `<unknown>` when none is declared, and every command document's meta carries it, `""` when undeclared. `output.SetApplicationVersion`, a process-wide value the last application to call it won, and `debug.VersionCommand.ApplicationVersion` are removed. [`cli.DispatchCommand`](../cli/dispatch.go) takes a `DispatchConfig` last, whose `ApplicationVersion` the dispatched command reads.
+
+**Symptom.** A call to `output.SetApplicationVersion`, a `VersionCommand{ApplicationVersion: …}` literal and a `DispatchCommand` call with five arguments no longer compile. An `output.Version{Application: …}` handed to `output.NewMeta` still compiles and is no longer read: the meta carries `Option.ApplicationVersion`. A root command of the application answers `--version` where it refused the flag; `-v` stays the verbosity, never an alias of `--version`, and the root's help prints a `VERSION:` block, `<unknown>` when none is declared.
+
+**Remedy.** Write the version in the configuration, `application.NewApplication(ctx, application.ApplicationConfig{Version: version, …})`, and drop the call and the field. Pass `cli.DispatchConfig{}` to `DispatchCommand`, or `cli.DispatchConfig{ApplicationVersion: output.ApplicationVersionOf(commandContext)}` when dispatching from inside a command, so the dispatched command's documents carry the version.
+
+### Migrate: the two migration tables are named by `.env` keys
+
+**What changed.** The [migrate module](../../integrations/bunorm/migrate/v4/README.md) declares `MELODY_BUNORM_MIGRATE_MIGRATIONS_TABLE` and `MELODY_BUNORM_MIGRATE_LOCKS_TABLE`, the tables bun keeps, `bun_migrations` and `bun_migration_locks` when unset; `ModuleConfig.KeyDefaults` sets only their defaults. A value that is not a plain identifier of at most 64 bytes fails the boot with `a module's environment key is refused`, the error's context naming the key; two keys naming one table fail the command with `migrate: the migrations table and the locks table are one table`.
+
+**Symptom.** None for an application that sets neither key: the commands act on the tables they acted on. An application whose own `.env` already defines a variable of either name has it read as the table name.
+
+**Remedy.** Nothing to do to keep bun's tables. To name them, set the keys in the `.env` files, or `KeyDefaults` for the application's own default.
+
+### Audit: a `FileStorage` line names its keys in camelCase, and `changes` is an array
+
+**What changed.** A line [`audit.FileStorage`](../../integrations/bunorm/v4/audit/storage.go) appends names every key in camelCase and embeds the entry's changes as the json array they are:
+
+```json
+{"table":"melody_audit","entry":{"id":1,"transactionId":7,"entity":"product","entityId":"42","operation":"UPDATE","changes":[{"field":"name","old":"a","new":"b"}],"actor":"ana","createdAt":"2026-11-13T09:00:00Z"}}
+```
+
+where the third major wrote the entry's Go field names and the changes as an escaped string:
+
+```json
+{"table":"melody_audit","entry":{"Id":1,"TransactionId":7,"Entity":"product","EntityId":"42","Operation":"UPDATE","Changes":"[{\"field\":\"name\",\"old\":\"a\",\"new\":\"b\"}]","Actor":"ana","CreatedAt":"2026-11-13T09:00:00Z"}}
+```
+
+A `Changes` that is not a json array, an `Entry` built by hand, is written as a json string. `audit.Entry` itself carries no json tags, so an application marshalling it in its own documents is unaffected.
+
+**Symptom.** A reader of the audit file that looks up `entry.Changes`, or decodes `changes` as a string, finds nothing or fails. A file the third major wrote keeps its lines, so a reader of a file that spans the upgrade meets both forms.
+
+**Remedy.** Read the camelCase keys, and `changes` as an array; tell a hand-built value by its token being a string. No converter ships: a reader that must read old files tries both forms.
+
 ### Object storage: the aws/s3 module is named `aws.s3`
 
 **What changed.** The [aws/s3 module](../../integrations/aws/s3/v4/README.md) answers `aws.s3` from `Name()`, declares its boot warning as `aws.s3.plaintextEndpoint`, exported as `PlaintextEndpointBootWarningName`, and a `Config` prints as `aws.s3.Config{…}`, after the module's path `integrations/aws/s3/v4`, where all three said `awss3`. The Go package is still `awss3`.
@@ -1725,11 +1761,11 @@ debug.NewMiddlewareCommand(
 
 ### Debug: `debug:version` reads the version rows off the envelope meta
 
-**What changed.** The application row reads `envelope.Meta.Version.Application`, where `NewMeta` has already applied the fallback chain — the command's explicit `ApplicationVersion`, then the process-wide declaration made through `output.SetApplicationVersion`, then nothing.
+**What changed.** The application row reads `envelope.Meta.Version.Application`, the version the application declares in `ApplicationConfig.Version`.
 
-**Symptom.** An application that declared its version through `output.SetApplicationVersion` — which is where a composition root's `main` declares it — now sees that version in the `application` row and in the json document, where it used to see an empty value.
+**Symptom.** The `application` row and the json document carry the declared version, where they used to carry an empty value.
 
-**Remedy.** None; the row now reports what the process declared. An application that sets `ApplicationVersion` on the command itself is unaffected: the explicit value still wins.
+**Remedy.** None; the row reports what the application declared.
 
 ### Container: a scoped registration under the protected `service.` prefix is refused at boot
 

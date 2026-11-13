@@ -6,6 +6,7 @@ import (
     "strings"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/cli/output"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
@@ -19,6 +20,20 @@ func NewRoot(applicationName string, applicationDescription string) *Root {
     return &Root{
         command: NewCommandContext(applicationName, applicationDescription),
     }
+}
+
+/* SetVersion declares the application's version: --version prints it, <unknown> when empty, and the tree's commands read it through output.ApplicationVersionOf. */
+func (instance *Root) SetVersion(version string) {
+    instance.command.Version = version
+    if "" == version {
+        instance.command.Version = output.UnknownApplicationVersion
+    }
+
+    if nil == instance.command.Metadata {
+        instance.command.Metadata = make(map[string]any)
+    }
+
+    instance.command.Metadata[output.MetadataApplicationVersion] = version
 }
 
 /* SetWriter points the tree's output at a stream: the help and usage the tree writes, and the output of every command registered on it, whenever registered. Left unset, or set to a typed nil, the stream is the process's standard output. */

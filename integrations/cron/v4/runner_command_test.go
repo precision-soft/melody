@@ -18,6 +18,7 @@ import (
     "github.com/precision-soft/melody/v4/application"
     "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    melodycli "github.com/precision-soft/melody/v4/cli"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -319,6 +320,56 @@ func TestRunnerCommand_OnceFlagRunsDueCommandsAndExits(t *testing.T) {
 
     if 1 != job.runCount {
         t.Fatalf("expected --once to run the due command exactly once, ran %d", job.runCount)
+    }
+}
+
+type versionRecordingCommand struct {
+    observed string
+}
+
+func (instance *versionRecordingCommand) Name() string {
+    return "job:version"
+}
+
+func (instance *versionRecordingCommand) Description() string {
+    return "records the application version"
+}
+
+func (instance *versionRecordingCommand) Flags() []clicontract.Flag {
+    return nil
+}
+
+func (instance *versionRecordingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    instance.observed = output.ParseOptionFromCommand(commandContext).ApplicationVersion
+
+    return nil
+}
+
+func TestRunnerCommand_AScheduledJobReadsTheApplicationVersionTheRunnerRunsUnder(t *testing.T) {
+    job := &versionRecordingCommand{observed: "unset"}
+
+    configuration := NewConfiguration().
+        Schedule("job:version", EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
+    runner.now = func() time.Time {
+        return time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
+    }
+
+    runErr := melodycli.DispatchCommand(
+        context.Background(),
+        runner,
+        newRunnerTestRuntime(context.Background()),
+        []string{runner.Name(), "--once"},
+        io.Discard,
+        melodycli.DispatchConfig{ApplicationVersion: "4.0.0-runner"},
+    )
+    if nil != runErr {
+        t.Fatalf("unexpected error running --once: %v", runErr)
+    }
+
+    if "4.0.0-runner" != job.observed {
+        t.Fatalf("expected the scheduled job to read the runner's application version, got %q", job.observed)
     }
 }
 

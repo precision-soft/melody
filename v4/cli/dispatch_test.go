@@ -37,6 +37,7 @@ func TestDispatchCommand_ParsesTheArgumentsAgainstTheCommandsOwnFlags(t *testing
         newTestRuntime(t),
         []string{"probe", "--format=json", "alpha"},
         nil,
+        DispatchConfig{},
     )
     if nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
@@ -62,7 +63,7 @@ func TestDispatchCommand_AnswersTheCommandsOwnError(t *testing.T) {
         },
     }
 
-    runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil)
+    runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil, DispatchConfig{})
 
     if false == errors.Is(runErr, expectedErr) {
         t.Fatalf("expected the command's own error, got %v", runErr)
@@ -90,7 +91,7 @@ func TestDispatchCommand_ReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
         },
     }
 
-    runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil)
+    runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil, DispatchConfig{})
 
     if nil != runErr {
         t.Fatalf("expected a typed nil to read as success, got %v", runErr)
@@ -111,7 +112,7 @@ func TestDispatchCommand_WritesTheCommandsOutputToTheGivenWriter(t *testing.T) {
         },
     }
 
-    if runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, buffer); nil != runErr {
+    if runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, buffer, DispatchConfig{}); nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
 
@@ -144,7 +145,7 @@ func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
         },
     }
 
-    if runErr := DispatchCommand(context.Background(), command, runtimeInstance, []string{"probe"}, buffer); nil != runErr {
+    if runErr := DispatchCommand(context.Background(), command, runtimeInstance, []string{"probe"}, buffer, DispatchConfig{}); nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
 
@@ -170,7 +171,7 @@ func TestDispatchCommand_AddsNoBannerAndClosesNoScope(t *testing.T) {
 
 func TestDispatchCommand_PanicsOnANilCommand(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = DispatchCommand(context.Background(), nil, newTestRuntime(t), []string{"probe"}, nil)
+        _ = DispatchCommand(context.Background(), nil, newTestRuntime(t), []string{"probe"}, nil, DispatchConfig{})
     }, "cli command may not be nil")
 }
 
@@ -179,7 +180,7 @@ func TestDispatchCommand_PanicsOnATypedNilCommand(t *testing.T) {
     var typedNilCommand *testCommand
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = DispatchCommand(context.Background(), typedNilCommand, newTestRuntime(t), []string{"probe"}, nil)
+        _ = DispatchCommand(context.Background(), typedNilCommand, newTestRuntime(t), []string{"probe"}, nil, DispatchConfig{})
     }, "cli command may not be nil")
 }
 
@@ -194,7 +195,7 @@ func TestDispatchCommand_PanicsOnANilRuntime(t *testing.T) {
     }
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = DispatchCommand(context.Background(), command, nil, []string{"probe"}, nil)
+        _ = DispatchCommand(context.Background(), command, nil, []string{"probe"}, nil, DispatchConfig{})
     }, "runtime instance may not be nil in cli dispatch")
 }
 
@@ -210,7 +211,7 @@ func TestDispatchCommand_PanicsOnEmptyArguments(t *testing.T) {
     }
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = DispatchCommand(context.Background(), command, newTestRuntime(t), nil, nil)
+        _ = DispatchCommand(context.Background(), command, newTestRuntime(t), nil, nil, DispatchConfig{})
     }, "cli dispatch arguments may not be empty")
 }
 
@@ -234,6 +235,7 @@ func TestDispatchCommand_ATypedNilWriterDiscardsRatherThanPanicking(t *testing.T
         newTestRuntime(t),
         []string{"probe", "--no-such-flag"},
         absentBuffer,
+        DispatchConfig{},
     )
 
     if nil == runErr {
@@ -255,7 +257,7 @@ func TestDispatchCommand_RewritesTheRepeatedVerbosityFlag(t *testing.T) {
         },
     }
 
-    runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", "-vv"}, nil)
+    runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", "-vv"}, nil, DispatchConfig{})
     if nil != runErr {
         t.Fatalf("expected -vv accepted, got %v", runErr)
     }
@@ -279,7 +281,7 @@ func TestDispatchCommand_APositionalHelpReachesTheCommandAndTheHelpFlagPrintsThe
             },
         }
 
-        runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", positional}, nil)
+        runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", positional}, nil, DispatchConfig{})
         if nil != runErr {
             t.Fatalf("expected %q dispatched, got %v", positional, runErr)
         }
@@ -301,7 +303,7 @@ func TestDispatchCommand_APositionalHelpReachesTheCommandAndTheHelpFlagPrintsThe
     }
 
     buffer := &bytes.Buffer{}
-    _ = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", "--help"}, buffer)
+    _ = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe", "--help"}, buffer, DispatchConfig{})
 
     if true == ran || false == strings.Contains(buffer.String(), "probe description") {
         t.Fatalf("expected --help to print the usage without running, ran=%v output=%q", ran, buffer.String())
@@ -320,6 +322,30 @@ func TestDispatchCommand_RefusesARepeatedFlagSpelling(t *testing.T) {
     }
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil)
+        _ = DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil, DispatchConfig{})
     }, "cli flag spelling declared twice")
+}
+
+func TestDispatchCommand_CarriesTheApplicationVersion(t *testing.T) {
+    for _, version := range []string{"3.1.4", ""} {
+        observed := "unset"
+
+        command := &testCommand{
+            nameValue:        "probe",
+            descriptionValue: "probe",
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                observed = output.ParseOptionFromCommand(commandContext).ApplicationVersion
+
+                return nil
+            },
+        }
+
+        if runErr := DispatchCommand(context.Background(), command, newTestRuntime(t), []string{"probe"}, nil, DispatchConfig{ApplicationVersion: version}); nil != runErr {
+            t.Fatalf("expected no error, got %v", runErr)
+        }
+
+        if version != observed {
+            t.Fatalf("expected the dispatched command to read %q, got %q", version, observed)
+        }
+    }
 }

@@ -5,7 +5,6 @@ package main
 import (
     "github.com/precision-soft/melody/v4/.example/config"
     "github.com/precision-soft/melody/v4/application"
-    melodyclioutput "github.com/precision-soft/melody/v4/cli/output"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodylogging "github.com/precision-soft/melody/v4/logging"
 )
@@ -23,12 +22,10 @@ func main() {
         melodylogging.LogOnRecoverAndExit(melodylogging.EmergencyLogger(), recover(), 1, melodylogging.ExitConfig{})
     }()
 
-    /* every command document names this version in its meta, and debug:version prints it beside melody's */
-    melodyclioutput.SetApplicationVersion(applicationVersion)
-
     app := application.NewApplication(
         ctx,
         application.ApplicationConfig{
+            Version:     applicationVersion,
             EnvFiles:    embeddedEnvFiles,
             PublicFiles: embeddedPublicFiles,
         },

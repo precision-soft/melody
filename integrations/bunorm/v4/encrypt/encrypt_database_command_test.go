@@ -88,6 +88,7 @@ func runEncryptDatabaseCommand(t *testing.T, command *EncryptDatabaseCommand, ex
         fakeRuntime{},
         append([]string{command.Name()}, extraArgs...),
         io.Discard,
+        melodycli.DispatchConfig{},
     )
 }
 

@@ -432,6 +432,7 @@ func runEncryptCommand(t *testing.T, command clicontract.Command, arguments []st
         runtimeInstance,
         arguments,
         io.Discard,
+        melodycli.DispatchConfig{},
     ); nil != executeErr {
         t.Fatalf("cli command execution failed: %v", executeErr)
     }

@@ -8,10 +8,8 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* VersionCommand answers three rows: the application's version, melody's and the Go runtime's. The application row reads the declaration made through output.SetApplicationVersion, and an explicit ApplicationVersion on the command wins over it. */
-type VersionCommand struct {
-    ApplicationVersion string
-}
+/* VersionCommand answers three rows: the application's version, melody's and the Go runtime's. The application row reads ApplicationConfig.Version, declared on the root of the command tree. */
+type VersionCommand struct{}
 
 func (instance *VersionCommand) Name() string {
     return "debug:version"
@@ -42,9 +40,7 @@ func (instance *VersionCommand) Run(
         option,
         startedAt,
         time.Duration(0),
-        output.Version{
-            Application: instance.ApplicationVersion,
-        },
+        output.Version{},
     )
 
     envelope := output.NewEnvelope(meta)
@@ -59,11 +55,10 @@ func (instance *VersionCommand) Run(
             []string{"component", "version"},
         )
 
-        /* NewMeta already applied the fallback: the command's value, then the process-wide declaration */
         if "" != envelope.Meta.Version.Application {
             block.AddRow("application", envelope.Meta.Version.Application)
         } else {
-            block.AddRow("application", "<unknown>")
+            block.AddRow("application", output.UnknownApplicationVersion)
         }
 
         block.AddRow("melody", envelope.Meta.Version.Melody)

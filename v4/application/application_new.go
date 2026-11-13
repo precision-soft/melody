@@ -24,6 +24,8 @@ import (
 
 /* ApplicationConfig is what an application is built from. A field left out takes its default: no embedded env files, no embedded public files, and the framework defaults of the limits, a 15s read timeout, a 5s read header timeout, a 30s write timeout, a 60s idle timeout, a 1 MiB header cap, a 10s teardown budget, 1,024 container creation waiters and a 5s unavailable retry after. Each limit is the application's own default for the configuration key of the same name, MELODY_HTTP_READ_TIMEOUT, MELODY_HTTP_READ_HEADER_TIMEOUT, MELODY_HTTP_WRITE_TIMEOUT, MELODY_HTTP_IDLE_TIMEOUT, MELODY_HTTP_MAX_HEADER_BYTES, MELODY_TEARDOWN_TIMEOUT, MELODY_CONTAINER_CREATION_WAITERS and MELODY_HTTP_UNAVAILABLE_RETRY_AFTER: a key the deployment sets wins over the field. */
 type ApplicationConfig struct {
+    /* Version is the application's own version; empty is undeclared, <unknown> in a table and --version, "" in json. */
+    Version string
     /* EnvFiles is the embedded filesystem the .env artifacts are read from under melody_env_embedded. */
     EnvFiles fs.FS
     /* PublicFiles is the embedded filesystem the file server serves under melody_static_embedded. */

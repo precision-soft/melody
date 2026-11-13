@@ -48,7 +48,7 @@ func runRelayCommandWith(t *testing.T, runtimeInstance runtimecontract.Runtime, 
 
     capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
-    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, append([]string{relayCommand.Name()}, arguments...), io.Discard); nil != commandErr {
+    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, append([]string{relayCommand.Name()}, arguments...), io.Discard, melodycli.DispatchConfig{}); nil != commandErr {
         t.Fatalf("unexpected command run error: %v", commandErr)
     }
 
@@ -190,7 +190,7 @@ func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
 
     capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
 
-    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, []string{relayCommand.Name(), "--limit", "3", "--interval", "1ms"}, io.Discard); nil != commandErr {
+    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, []string{relayCommand.Name(), "--limit", "3", "--interval", "1ms"}, io.Discard, melodycli.DispatchConfig{}); nil != commandErr {
         t.Fatalf("unexpected command run error: %v", commandErr)
     }
 

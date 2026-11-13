@@ -99,6 +99,17 @@ If you deliberately keep separate registries per context, set each context's `Ma
 - `ManagerName` (default empty) pins the manager used when the `--manager` flag is absent; empty falls back to the registry default.
 - `UnlockTimeout` (a `bound.Duration`, 5s when left out, at least 1ms, unlimited refused) bounds the release of the migration lock after `db:migrate` and `db:rollback`. The release runs detached from the command's context, so an interrupted run still frees the lock row, and the exit waits on it, which is why it cannot be unlimited. A value outside the rule panics at registration naming `Options.UnlockTimeout`; a migration context inherits the base options' value unless its own options set one.
 
+## Table names
+
+The two tables bun keeps, the applied migrations and the migration lock, are named by two `.env` keys the module declares, one pair for every command of the process, every migration context included:
+
+| key | parameter | default |
+|---|---|---|
+| `MELODY_BUNORM_MIGRATE_MIGRATIONS_TABLE` | `melody.bunorm.migrate.migrations_table` | `bun_migrations` |
+| `MELODY_BUNORM_MIGRATE_LOCKS_TABLE` | `melody.bunorm.migrate.locks_table` | `bun_migration_locks` |
+
+The keys are the one source of the names: `ModuleConfig.KeyDefaults{MigrationsTable, LocksTable}` sets only what a key reads when no `.env` file sets it, an empty field taking bun's name. A value that is not a plain identifier, `[A-Za-z_][A-Za-z0-9_]*` of at most 64 bytes, fails the boot with `a module's environment key is refused`, the error's context naming the key; `NewModule` refuses such a default, and two defaults naming one table, naming the field. Two keys naming one table, letter case aside, are refused at the command's run, before the database is opened. A host that builds the commands without the module declares the keys through `EnvironmentKeys(defaults)` from its own module; commands driven outside an application, with no configuration service, act on bun's names. Every message that names a table, the held lock, the failed release and a migration that ran but was not recorded, names the configured one.
+
 `RegisterCommands` refuses a `nil` migration set rather than answering with no commands: the silence left a
 caller believing it had registered the family and finding out at invocation time, as "unknown command".
 `NewModule` gates its own optional set before calling, so a binary that registers only `Contexts` never

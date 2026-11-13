@@ -152,7 +152,7 @@ Cron defaults (user, logs directory, destination file, template, heartbeat, the 
 
 It only:
 
-- declares the application's version to every command document (`SetApplicationVersion`)
+- declares the application's version to every command document and to `--version` (`ApplicationConfig.Version`)
 - constructs the Melody application using:
     - `embeddedEnvFiles` (from `embedded_env_*`)
     - `embeddedPublicFiles` (from `embedded_static_*`)
@@ -268,7 +268,7 @@ go run . --role worker app:info                        # the runtime process rol
 
 `auth:token` mints the HS256 token the `/secure` api reads, signed with `APP_JWT_SECRET`: `--role` writes the roles claim (`ROLE_USER` when neither flag is given), and `--scope-role` writes the grant into the `scope` claim the way an OAuth-style issuer carries it, read by the firewall's scope enricher; a token minted with `--scope-role` alone carries an empty roles claim, so the role it holds on the route is the scope's.
 
-The application declares its own version to every command document and to `debug:version` through `output.SetApplicationVersion`, from `main.applicationVersion`, which a build sets with `go build -ldflags "-X main.applicationVersion=<version>"`; a build that sets nothing reports `dev`.
+The application declares its own version to every command document, to `debug:version` and to the root's `--version` through `ApplicationConfig.Version`, from `main.applicationVersion`, which a build sets with `go build -ldflags "-X main.applicationVersion=<version>"`; a build that sets nothing reports `dev`.
 
 A console run has no signed-in user, so the audit trail and the catalogue journal name the run itself as the actor of the grant, `process:<id>`, the process id every journal record of that run carries; a signed-in request names its user, and an unauthenticated one the system.
 

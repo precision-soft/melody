@@ -1,20 +1,25 @@
 package output
 
 import (
-    "sync/atomic"
+    clicontract "github.com/precision-soft/melody/v4/cli/contract"
 )
 
-var applicationVersion atomic.Value
+/* MetadataApplicationVersion keys the declared version in the root command's metadata. */
+const MetadataApplicationVersion = "melody.applicationVersion"
 
-/* SetApplicationVersion declares the running application's own version to every command envelope, read by the meta of each document and by debug:version. Call it once from the composition root before Run. Undeclared, it renders empty in the meta and in the json formats of debug:version, and <unknown> in its table. */
-func SetApplicationVersion(versionString string) {
-    applicationVersion.Store(versionString)
-}
+/* UnknownApplicationVersion is how a table and --version spell a version the application never declared. */
+const UnknownApplicationVersion = "<unknown>"
 
-func getApplicationVersion() string {
-    if storedValue, ok := applicationVersion.Load().(string); true == ok {
-        return storedValue
+/* ApplicationVersionOf answers the version declared on the root of the command's tree, "" when none. */
+func ApplicationVersionOf(commandContext *clicontract.CommandContext) string {
+    if nil == commandContext {
+        return ""
     }
 
-    return ""
+    declared, isText := commandContext.Root().Metadata[MetadataApplicationVersion].(string)
+    if false == isText {
+        return ""
+    }
+
+    return declared
 }

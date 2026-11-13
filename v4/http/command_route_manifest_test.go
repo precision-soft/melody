@@ -88,6 +88,7 @@ func runRouteManifestCommand(
         runtimeInstance,
         append([]string{command.Name()}, arguments...),
         output,
+        melodycli.DispatchConfig{},
     )
 
     return output.String(), runErr

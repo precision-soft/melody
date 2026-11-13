@@ -236,7 +236,7 @@ func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
 
     lockContext := contextual.Context()
     for key, expected := range map[string]string{
-        "locksTable":    migrationLocksTable,
+        "locksTable":    DefaultLocksTable,
         "unlockCommand": DefaultCommandPrefix + ":unlock",
     } {
         actual, present := lockContext[key]

@@ -11,6 +11,7 @@ import (
     "sort"
     "strings"
     "sync"
+    "sync/atomic"
     "time"
     "unicode/utf8"
 
@@ -61,6 +62,8 @@ type RunnerCommand struct {
     /* the scheduler loop hands each minute's wait to a goroutine of its own, so two minutes' documents can complete in any order: the writer is guarded to keep one document one line */
     writeMutex          sync.Mutex
     userIgnoredCommands []string
+    /* a scheduled dispatch runs on the process's context, under no tree, so Run hands its own tree's version on */
+    applicationVersion atomic.Pointer[string]
 }
 
 type runReporting struct {
@@ -320,6 +323,9 @@ func (instance *RunnerCommand) Run(
     }
 
     instance.declareSchedule(runtimeInstance)
+
+    applicationVersion := output.ApplicationVersionOf(commandContext)
+    instance.applicationVersion.Store(&applicationVersion)
 
     option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
     if nil != normalizeOptionErr {
@@ -878,7 +884,7 @@ func (instance *RunnerCommand) invokeRun(runtimeInstance runtimecontract.Runtime
 
     completed := make(chan error, 1)
     go func() {
-        completed <- runScheduledCommand(childContext, entry, childRuntime, capturedOutput)
+        completed <- runScheduledCommand(childContext, entry, childRuntime, capturedOutput, instance.declaredApplicationVersion())
     }()
 
     /* the abandon signal sits one unwind grace past whichever cancellation reaches the command, so a command that honours its cancelled context always reports its own outcome. The deadline arms it at the start of the run and the shutdown arms it on arrival; an entry that opted out of the deadline is never abandoned while the runner is live, a nil channel blocking forever, and is abandoned at shutdown like every other. */
@@ -1181,6 +1187,7 @@ func runScheduledCommand(
     entry *scheduledRunEntry,
     childRuntime runtimecontract.Runtime,
     capturedOutput io.Writer,
+    applicationVersion string,
 ) (runErr error) {
     defer func() {
         if recovered := recover(); nil != recovered {
@@ -1223,7 +1230,16 @@ func runScheduledCommand(
         childRuntime,
         append([]string{entry.commandName}, entry.arguments...),
         capturedOutput,
+        melodycli.DispatchConfig{ApplicationVersion: applicationVersion},
     )
+}
+
+func (instance *RunnerCommand) declaredApplicationVersion() string {
+    if declared := instance.applicationVersion.Load(); nil != declared {
+        return *declared
+    }
+
+    return ""
 }
 
 /* isNilInterface duplicates the framework's internal helper, which an integration module may not import. */

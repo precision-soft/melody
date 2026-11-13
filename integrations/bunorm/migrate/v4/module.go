@@ -14,9 +14,15 @@ type ModuleConfig struct {
 
     /* Contexts declares additional per-database command families (db:<name>:migrate, ...) for multi-context binaries; it composes with the single-set form above, which keeps its unprefixed commands. */
     Contexts []ContextConfig
+
+    /* KeyDefaults are the values the module's MELODY_BUNORM_MIGRATE_* keys take when no .env file sets them. */
+    KeyDefaults KeyDefaults
 }
 
+/* NewModule refuses a KeyDefaults pair that is not two different plain identifiers, naming the field. */
 func NewModule(config ModuleConfig) *Module {
+    mustCheckKeyDefaults(config.KeyDefaults)
+
     return &Module{config: config}
 }
 
@@ -30,6 +36,12 @@ func (instance *Module) Name() string {
 
 func (instance *Module) Description() string {
     return "registers the database migration commands"
+}
+
+func (instance *Module) RegisterEnvironmentKeys(registrar applicationcontract.EnvironmentKeyRegistrar) {
+    for _, key := range EnvironmentKeys(instance.config.KeyDefaults) {
+        registrar.DeclareEnvironmentKey(key)
+    }
 }
 
 func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
@@ -56,4 +68,6 @@ func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel
 var (
     _ applicationcontract.Module    = (*Module)(nil)
     _ applicationcontract.CliModule = (*Module)(nil)
+
+    _ applicationcontract.EnvironmentKeyModule = (*Module)(nil)
 )

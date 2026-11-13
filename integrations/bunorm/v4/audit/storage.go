@@ -1,10 +1,12 @@
 package audit
 
 import (
+    "bytes"
     "context"
     "encoding/json"
     "os"
     "sync"
+    "time"
 
     "github.com/precision-soft/melody/v4/exception"
     "github.com/uptrace/bun"
@@ -114,8 +116,44 @@ type FileStorage struct {
 }
 
 type fileRecord struct {
-    Table string `json:"table"`
-    Entry Entry  `json:"entry"`
+    Table string    `json:"table"`
+    Entry fileEntry `json:"entry"`
+}
+
+/* fileEntry is the line's own shape, so the json keys stay camelCase without tagging Entry, which an application may already marshal in its own documents. */
+type fileEntry struct {
+    Id            int64           `json:"id"`
+    TransactionId int64           `json:"transactionId"`
+    Entity        string          `json:"entity"`
+    EntityId      string          `json:"entityId"`
+    Operation     string          `json:"operation"`
+    Changes       json.RawMessage `json:"changes"`
+    Actor         string          `json:"actor"`
+    CreatedAt     time.Time       `json:"createdAt"`
+}
+
+/* a Changes that is not a json array, an Entry built by hand, is written as a json string rather than refused */
+func newFileEntry(entry Entry) (fileEntry, error) {
+    changes := json.RawMessage(entry.Changes)
+    if false == isJsonArray(changes) {
+        quoted, quoteErr := json.Marshal(entry.Changes)
+        if nil != quoteErr {
+            return fileEntry{}, quoteErr
+        }
+
+        changes = quoted
+    }
+
+    return fileEntry{
+        Id:            entry.Id,
+        TransactionId: entry.TransactionId,
+        Entity:        entry.Entity,
+        EntityId:      entry.EntityId,
+        Operation:     entry.Operation,
+        Changes:       changes,
+        Actor:         entry.Actor,
+        CreatedAt:     entry.CreatedAt,
+    }, nil
 }
 
 /* Save appends the entries as json lines and syncs the file once per batch. A context already cancelled is refused before the file is opened, so an AsyncStorage that cancels its worker gets the remaining entries back as dead-letters; an open or write already parked in the kernel is not interrupted. A failure after the first entry leaves the entries before it appended, so a failed batch is not retried whole. */
@@ -138,7 +176,12 @@ func (instance *FileStorage) Save(ctx context.Context, table string, entries []E
     defer file.Close()
 
     for _, entry := range entries {
-        line, marshalErr := json.Marshal(fileRecord{Table: table, Entry: entry})
+        lineEntry, lineEntryErr := newFileEntry(entry)
+        if nil != lineEntryErr {
+            return exception.NewError("could not encode the audit entry", nil, lineEntryErr)
+        }
+
+        line, marshalErr := json.Marshal(fileRecord{Table: table, Entry: lineEntry})
         if nil != marshalErr {
             return exception.NewError("could not encode the audit entry", nil, marshalErr)
         }
@@ -153,6 +196,12 @@ func (instance *FileStorage) Save(ctx context.Context, table string, entries []E
     }
 
     return nil
+}
+
+func isJsonArray(text json.RawMessage) bool {
+    trimmed := bytes.TrimSpace(text)
+
+    return 0 < len(trimmed) && '[' == trimmed[0] && true == json.Valid(trimmed)
 }
 
 var _ Storage = (*BunStorage)(nil)
