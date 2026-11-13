@@ -1,0 +1,303 @@
+//go:build !melody_static_embedded
+
+package application
+
+import (
+    "context"
+    "io"
+    nethttp "net/http"
+    "net/http/httptest"
+    "os"
+    "path/filepath"
+    "testing"
+
+    applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/exception"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal/testhelper"
+    "github.com/precision-soft/melody/v4/logging"
+    "github.com/precision-soft/melody/v4/runtime"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+)
+
+func newStaticExclusionTestConfiguration(t *testing.T, values map[string]string) configcontract.Configuration {
+    t.Helper()
+
+    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    return configuration
+}
+
+func newStaticExclusionTestRuntime() runtimecontract.Runtime {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
+
+    return runtime.New(context.Background(), scope, serviceContainer)
+}
+
+/* the pipeline hands back the middlewares outermost first, which is the order the http kernel wraps them in */
+func composeStaticExclusionTestChain(chain httpMiddlewareChain, handler httpcontract.Handler) httpcontract.Handler {
+    for index := len(chain) - 1; 0 <= index; index-- {
+        handler = chain[index](handler)
+    }
+
+    return handler
+}
+
+func newStaticExclusionTestPublicDirectory(t *testing.T) string {
+    t.Helper()
+
+    publicDirectory := t.TempDir()
+
+    writeErr := os.WriteFile(filepath.Join(publicDirectory, "index.html"), []byte("served from disk"), 0o640)
+    if nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    makeErr := os.MkdirAll(filepath.Join(publicDirectory, "private"), 0o750)
+    if nil != makeErr {
+        t.Fatalf("unexpected make directory error: %v", makeErr)
+    }
+
+    writeErr = os.WriteFile(filepath.Join(publicDirectory, "private", "report.json"), []byte(`{"secret":true}`), 0o640)
+    if nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    return publicDirectory
+}
+
+func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredWithUse(t *testing.T) {
+    /* the built-in file server is the outermost middleware, so a path it answers is a path the application's own chain never sees. The exclusion is the only channel this instance has, because it is built inside the application rather than registered by it. */
+    publicDirectory := newStaticExclusionTestPublicDirectory(t)
+
+    configuration := newStaticExclusionTestConfiguration(t, map[string]string{
+        config.PublicDirectoryKey:     publicDirectory,
+        config.StaticExcludedPathsKey: "/private",
+        config.StaticEnableCacheKey:   "false",
+    })
+
+    httpMiddleware := NewHttpMiddleware(
+        newStaticFileServerConfig(nil, configuration),
+        configuration,
+    )
+
+    reached := false
+
+    httpMiddleware.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler {
+        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            reached = true
+
+            return next(runtimeInstance, writer, request)
+        }
+    }}})
+
+    answeredByTheApplication := false
+
+    handler := composeStaticExclusionTestChain(
+        httpMiddleware.all(newTestKernel()),
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            answeredByTheApplication = true
+
+            return nil, nil
+        },
+    )
+
+    response, err := handler(
+        newStaticExclusionTestRuntime(),
+        httptest.NewRecorder(),
+        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/private/report.json"),
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if false == reached {
+        t.Fatalf("expected the excluded prefix to reach the middleware registered with Use")
+    }
+
+    if false == answeredByTheApplication {
+        t.Fatalf("expected the excluded prefix to reach the application handler")
+    }
+
+    if nil != response {
+        t.Fatalf("expected no response from the file server for an excluded prefix")
+    }
+}
+
+func TestNewStaticFileServerConfig_PathOutsideTheExclusionIsStillServedFromDisk(t *testing.T) {
+    publicDirectory := newStaticExclusionTestPublicDirectory(t)
+
+    configuration := newStaticExclusionTestConfiguration(t, map[string]string{
+        config.PublicDirectoryKey:     publicDirectory,
+        config.StaticExcludedPathsKey: "/private",
+        config.StaticEnableCacheKey:   "false",
+    })
+
+    httpMiddleware := NewHttpMiddleware(
+        newStaticFileServerConfig(nil, configuration),
+        configuration,
+    )
+
+    reached := false
+
+    httpMiddleware.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler {
+        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            reached = true
+
+            return next(runtimeInstance, writer, request)
+        }
+    }}})
+
+    handler := composeStaticExclusionTestChain(
+        httpMiddleware.all(newTestKernel()),
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            t.Fatalf("expected the file server to answer a path outside the exclusion")
+
+            return nil, nil
+        },
+    )
+
+    response, err := handler(
+        newStaticExclusionTestRuntime(),
+        httptest.NewRecorder(),
+        testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/index.html"),
+    )
+    if nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if true == reached {
+        t.Fatalf("expected the file server to answer before the middleware registered with Use")
+    }
+
+    if nil == response {
+        t.Fatalf("expected the file server to answer with a response")
+    }
+
+    if nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected status 200, got %d", response.StatusCode())
+    }
+
+    body, readErr := io.ReadAll(response.BodyReader())
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    if "served from disk" != string(body) {
+        t.Fatalf("expected the file body, got %q", string(body))
+    }
+}
+
+func TestNewStaticFileServerConfig_CarriesTheCacheKeys(t *testing.T) {
+    cachingConfiguration := newStaticExclusionTestConfiguration(t, map[string]string{
+        config.StaticCacheMaxAgeKey: "120",
+    })
+
+    cachingConfig := newStaticFileServerConfig(nil, cachingConfiguration)
+
+    if true == cachingConfig.CacheDisabled || bound.Of(120) != cachingConfig.CacheMaxAge {
+        t.Fatalf("expected the cache on with a max age of 120, got disabled %v and %v", cachingConfig.CacheDisabled, cachingConfig.CacheMaxAge)
+    }
+
+    disabledConfiguration := newStaticExclusionTestConfiguration(t, map[string]string{
+        config.StaticEnableCacheKey: "false",
+    })
+
+    disabledConfig := newStaticFileServerConfig(nil, disabledConfiguration)
+
+    if false == disabledConfig.CacheDisabled || false == disabledConfig.CacheMaxAge.IsAbsent() {
+        t.Fatalf("expected the cache off with no max age, got disabled %v and %v", disabledConfig.CacheDisabled, disabledConfig.CacheMaxAge)
+    }
+}
+
+func TestNewStaticFileServerConfig_RefusesAnExplicitPublicDirectoryThatIsNotADirectory(t *testing.T) {
+    projectDirectory := t.TempDir()
+    filePath := filepath.Join(projectDirectory, "assets.txt")
+    if writeErr := os.WriteFile(filePath, []byte("not a directory"), 0o640); nil != writeErr {
+        t.Fatalf("unexpected write error: %v", writeErr)
+    }
+
+    cases := map[string]struct {
+        publicDirectory string
+        message         string
+        resolved        string
+    }{
+        "relative and missing":  {"missing-assets", "the public directory does not exist", filepath.Join(projectDirectory, "missing-assets")},
+        "absolute and missing":  {filepath.Join(projectDirectory, "absent"), "the public directory does not exist", filepath.Join(projectDirectory, "absent")},
+        "a file":                {"assets.txt", "the public directory is a file", filePath},
+        "the default name set":  {"public", "the public directory does not exist", filepath.Join(projectDirectory, "public")},
+        "blank, read as public": {"  ", "the public directory does not exist", filepath.Join(projectDirectory, "public")},
+        "under a file":          {"assets.txt/inner", "the public directory cannot be read", filepath.Join(projectDirectory, "assets.txt", "inner")},
+    }
+
+    for name, testCase := range cases {
+        t.Run(name, func(t *testing.T) {
+            configuration := newStaticPublicDirectoryTestConfiguration(t, projectDirectory, map[string]string{config.PublicDirectoryKey: testCase.publicDirectory})
+
+            defer func() {
+                refusal, isRefusal := recover().(*exception.Error)
+                if false == isRefusal {
+                    t.Fatalf("expected the refusal %q", testCase.message)
+                }
+
+                if testCase.message != refusal.Message() {
+                    t.Fatalf("expected the message %q, got %q", testCase.message, refusal.Message())
+                }
+
+                if config.PublicDirectoryKey != refusal.Context()["environmentKey"] || testCase.resolved != refusal.Context()["publicDirectory"] {
+                    t.Fatalf("expected the refusal to name %s and %s, got %v", config.PublicDirectoryKey, testCase.resolved, refusal.Context())
+                }
+            }()
+
+            newStaticFileServerConfig(nil, configuration)
+        })
+    }
+}
+
+func TestNewStaticFileServerConfig_AdmitsTheDefaultPublicDirectoryAbsentAndAnExistingOne(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    defaulted := newStaticFileServerConfig(nil, newStaticPublicDirectoryTestConfiguration(t, projectDirectory, map[string]string{}))
+    if "public" != defaulted.PublicDirectory {
+        t.Fatalf("expected the default public directory admitted while absent, got %q", defaulted.PublicDirectory)
+    }
+
+    if mkdirErr := os.Mkdir(filepath.Join(projectDirectory, "assets"), 0o750); nil != mkdirErr {
+        t.Fatalf("unexpected make directory error: %v", mkdirErr)
+    }
+
+    explicit := newStaticFileServerConfig(nil, newStaticPublicDirectoryTestConfiguration(t, projectDirectory, map[string]string{config.PublicDirectoryKey: "assets"}))
+    if "assets" != explicit.PublicDirectory {
+        t.Fatalf("expected the existing explicit directory admitted, got %q", explicit.PublicDirectory)
+    }
+}
+
+func newStaticPublicDirectoryTestConfiguration(t *testing.T, projectDirectory string, values map[string]string) configcontract.Configuration {
+    t.Helper()
+
+    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    return configuration
+}

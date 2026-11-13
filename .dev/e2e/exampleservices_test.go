@@ -113,3 +113,24 @@ func TestExampleProcessServiceProblems_AScopedServiceNeedsNoRow(t *testing.T) {
         t.Fatalf("expected the scoped service to be counted and left alone, got %v %d %d", problems, processServices, scopedServices)
     }
 }
+
+func TestExampleProcessServiceInventoryOf_NamesTheModulePathOfTheMajorAndTheFourthMajorsCipher(t *testing.T) {
+    third := exampleProcessServiceInventoryOf(exampleMajor{number: 3, label: "v3"})
+    fourth := exampleProcessServiceInventoryOf(exampleMajor{number: 4, label: "v4"})
+
+    if len(exampleProcessServiceInventory) != len(third) {
+        t.Fatalf("the third major is held to %d rows, wanted the %d written", len(third), len(exampleProcessServiceInventory))
+    }
+
+    if _, found := third["service.encrypt.cipher"]; true == found {
+        t.Fatal("the third major registers no cipher service, so the row would be a dead one")
+    }
+
+    if _, found := fourth["*github.com/precision-soft/melody/v4/.example/reporting.ReportFormatter"]; false == found {
+        t.Fatal("the fourth major's rows must name its own module path")
+    }
+
+    if classification := fourth["service.encrypt.cipher"]; processServiceStore != classification.category {
+        t.Fatalf("the cipher memoizes key material under a lock, classified %q", classification.category)
+    }
+}

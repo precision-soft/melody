@@ -1,0 +1,32 @@
+# Changelog
+
+All notable changes to `precision-soft/melody/integrations/aws/s3/v4` will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- This major includes every change of the third major, `integrations/awss3/v3`, up to v3.1.0; that history is in the third major's changelog.
+- `storage.go`, `provider.go`, `module.go`: `StorageConfig` of `PutSpoolLimit`, what a `Put` may hold in memory, 16 MiB when left out as the constant was, at least 1, unlimited refused, and `MultipartAbortTimeout`, the bound of the detached abort, 10s when left out as the constant was, at least 1ms, unlimited refused; `EnsureBucketConfig` of `Region`; `ModuleConfig.Storage`.
+- `module.go`, `plaintext_endpoint.go`: the module is a `BootWarningModule`: it declares `aws.s3.plaintextEndpoint`, exported as `PlaintextEndpointBootWarningName`, as a boot warning a command writes, and over a plaintext client off this machine adds the warning at boot, so `MELODY_CLI_BOOT_WARNINGS_IGNORED` accepts the code and both cli keys silence it; a storage built with `NewStorage` honours the two keys at its first use.
+
+### Changed
+
+- `module.go`: **Behavioural change**: `RegisterServices` refuses a `Bucket` or a `Storage` with no client, naming the field, where it registered nothing.
+- **Breaking** — `service_resolver.go`: `ServiceRegistrar.RegisterService` takes the framework's `RegisterOptions` struct last, the fourth major's registration form, where it took variadic `RegisterOption` functions; the application satisfies it as before.
+- **Breaking** — `provider.go`: `Config.Secure` is replaced by `Config.Insecure`, so a configuration that names neither dials https where it dialed plaintext http; the refusals of an empty endpoint or credential name the field.
+- **Breaking** — `provider.go`, `storage.go`, `service_resolver.go`: `EnsureBucket` takes an `EnsureBucketConfig` after the bucket where it took the region, `NewStorage` a `StorageConfig` after the bucket, refused naming the field, and `RegisterStorageService` a `StorageConfig` resolved at the call, so a refused value fails the registration.
+- **Breaking** — `module.go`, `plaintext_endpoint.go`, `provider.go`: the module is named `aws.s3`, its boot warning `aws.s3.plaintextEndpoint`, and a `Config` prints as `aws.s3.Config{…}`, after the module's path, where they said `awss3`, so a journal filter on `awss3.plaintextEndpoint` matches nothing and `MELODY_CLI_BOOT_WARNINGS_IGNORED` naming it is refused at boot as an unknown code. The Go package stays `awss3`.
+
+### Fixed
+
+- `storage.go`: `Put` of a body of unknown size, a negative `size`, names a part size of 16 MiB, where the part size was left to the client, which sizes it for the largest object s3 holds and allocated a buffer of about 528 MiB for every such put; an object put this way is bounded at ten thousand parts, 160 GiB.
+- `plaintext_endpoint.go`: the plaintext endpoint warning names `Config.Insecure`, where it told the reader to set `Secure`, a field the fourth major no longer has.
+- `plaintext_endpoint.go`: the plaintext endpoint warning is written once per endpoint host per process, where each storage over the same client wrote its own, so an application registering the module and building a storage of its own over one client wrote it twice.
+- storage: an upload body's read error whose `Unwrap` chain reaches itself no longer holds the goroutine that checks the body's end.
+
+### Security
+
+- `go.mod`: `golang.org/x/crypto` v0.52.0, `golang.org/x/net` v0.55.0 and `github.com/klauspost/compress` v1.18.7, past the versions the advisories name. None of them reached code this module calls.

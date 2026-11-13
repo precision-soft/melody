@@ -1,0 +1,311 @@
+package awss3
+
+import (
+    "context"
+    "encoding/xml"
+    "errors"
+    "fmt"
+    "io"
+    nethttp "net/http"
+    "net/http/httptest"
+    "strings"
+    "sync"
+    "sync/atomic"
+    "testing"
+
+    "github.com/precision-soft/melody/v4/exception"
+)
+
+func TestNewClientRefusesAnEmptyAccessKey(t *testing.T) {
+    _, clientErr := NewClient(Config{Endpoint: "localhost:9000", AccessKey: "", SecretKey: "secret"})
+
+    if nil == clientErr {
+        t.Fatal("expected an empty access key to be refused rather than silently downgrading to anonymous access")
+    }
+
+    if false == strings.Contains(clientErr.Error(), "anonymous") {
+        t.Fatalf("expected the refusal to name the anonymous downgrade, got %v", clientErr)
+    }
+}
+
+func TestNewClientRefusesAnEmptySecretKey(t *testing.T) {
+    _, clientErr := NewClient(Config{Endpoint: "localhost:9000", AccessKey: "access", SecretKey: ""})
+
+    if nil == clientErr {
+        t.Fatal("expected an empty secret key to be refused rather than silently downgrading to anonymous access")
+    }
+}
+
+func TestNewClientAcceptsCompleteCredentials(t *testing.T) {
+    client, clientErr := NewClient(Config{Endpoint: "localhost:9000", AccessKey: "access", SecretKey: "secret"})
+
+    if nil != clientErr {
+        t.Fatalf("expected complete credentials to build a client, got %v", clientErr)
+    }
+
+    if nil == client {
+        t.Fatal("expected a client")
+    }
+}
+
+/* bucketRaceServer plays an s3 endpoint mid bucket-creation race: the existence probe answers absent until the creation was attempted, and the creation itself answers the conflict a losing replica sees. */
+type bucketRaceServer struct {
+    makeAttempted atomic.Bool
+    conflictCode  string
+}
+
+func (instance *bucketRaceServer) ServeHTTP(writer nethttp.ResponseWriter, request *nethttp.Request) {
+    /* minio's BucketExists probes with GET ?location= and reads 200 as "exists" */
+    if nethttp.MethodGet == request.Method || nethttp.MethodHead == request.Method {
+        if true == instance.makeAttempted.Load() {
+            writer.WriteHeader(nethttp.StatusOK)
+            _, _ = writer.Write([]byte(`<LocationConstraint></LocationConstraint>`))
+
+            return
+        }
+
+        writer.WriteHeader(nethttp.StatusNotFound)
+
+        return
+    }
+
+    if nethttp.MethodPut == request.Method {
+        instance.makeAttempted.Store(true)
+
+        writer.WriteHeader(nethttp.StatusConflict)
+
+        type errorResponse struct {
+            XMLName xml.Name `xml:"Error"`
+            Code    string   `xml:"Code"`
+            Message string   `xml:"Message"`
+        }
+
+        _ = xml.NewEncoder(writer).Encode(errorResponse{Code: instance.conflictCode, Message: "conflict"})
+
+        return
+    }
+
+    writer.WriteHeader(nethttp.StatusNotImplemented)
+}
+
+func TestEnsureBucketTreatsALostCreationRaceAsSuccessWhenTheBucketIsUsable(t *testing.T) {
+    handler := &bucketRaceServer{conflictCode: "BucketAlreadyOwnedByYou"}
+    server := httptest.NewServer(handler)
+    defer server.Close()
+
+    client, clientErr := NewClient(Config{
+        Endpoint:  strings.TrimPrefix(server.URL, "http://"),
+        AccessKey: "access",
+        SecretKey: "secret",
+        Insecure:  true,
+    })
+    if nil != clientErr {
+        t.Fatalf("could not build the client: %v", clientErr)
+    }
+
+    if ensureErr := EnsureBucket(context.Background(), client, "raced-bucket", EnsureBucketConfig{}); nil != ensureErr {
+        t.Fatalf("expected the lost creation race to read as success once the bucket is usable, got %v", ensureErr)
+    }
+}
+
+/* aloneConflictServer answers the creation conflict but keeps reporting the bucket absent, the shape of BucketAlreadyExists on a name another account owns: the re-check must NOT excuse that refusal. */
+type aloneConflictServer struct{}
+
+func (instance aloneConflictServer) ServeHTTP(writer nethttp.ResponseWriter, request *nethttp.Request) {
+    if nethttp.MethodGet == request.Method || nethttp.MethodHead == request.Method {
+        writer.WriteHeader(nethttp.StatusNotFound)
+
+        return
+    }
+
+    if nethttp.MethodPut == request.Method {
+        writer.WriteHeader(nethttp.StatusConflict)
+
+        type errorResponse struct {
+            XMLName xml.Name `xml:"Error"`
+            Code    string   `xml:"Code"`
+            Message string   `xml:"Message"`
+        }
+
+        _ = xml.NewEncoder(writer).Encode(errorResponse{Code: "BucketAlreadyExists", Message: "taken"})
+
+        return
+    }
+
+    writer.WriteHeader(nethttp.StatusNotImplemented)
+}
+
+func TestEnsureBucketStillRefusesANameOwnedElsewhere(t *testing.T) {
+    server := httptest.NewServer(aloneConflictServer{})
+    defer server.Close()
+
+    client, clientErr := NewClient(Config{
+        Endpoint:  strings.TrimPrefix(server.URL, "http://"),
+        AccessKey: "access",
+        SecretKey: "secret",
+        Insecure:  true,
+    })
+    if nil != clientErr {
+        t.Fatalf("could not build the client: %v", clientErr)
+    }
+
+    if ensureErr := EnsureBucket(context.Background(), client, "foreign-bucket", EnsureBucketConfig{}); nil == ensureErr {
+        t.Fatal("expected a conflict on a bucket the re-check cannot see to stay an error")
+    }
+}
+
+func TestConfig_RedactsCredentialsOnEveryFmtVerb(t *testing.T) {
+    config := Config{
+        Endpoint:  "s3.example:9000",
+        AccessKey: "AKIA-public-part",
+        SecretKey: "wJalrXUtn-the-secret",
+        Region:    "us-east-1",
+    }
+
+    for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%d"} {
+        rendered := fmt.Sprintf(verb, config)
+        if true == strings.Contains(rendered, "AKIA-public-part") {
+            t.Fatalf("verb %s leaked the access key: %s", verb, rendered)
+        }
+        if true == strings.Contains(rendered, "wJalrXUtn-the-secret") {
+            t.Fatalf("verb %s leaked the secret key: %s", verb, rendered)
+        }
+        if false == strings.Contains(rendered, "s3.example:9000") {
+            t.Fatalf("verb %s dropped the safe Endpoint field: %s", verb, rendered)
+        }
+    }
+
+    if rendered := fmt.Sprintf("%v", config); false == strings.HasPrefix(rendered, "aws.s3.Config{") {
+        t.Fatalf("expected the rendering to carry the module's name, got %s", rendered)
+    }
+
+    pointerRendered := fmt.Sprintf("%v", &config)
+    if true == strings.Contains(pointerRendered, "wJalrXUtn-the-secret") {
+        t.Fatalf("a *Config leaked the secret key: %s", pointerRendered)
+    }
+}
+
+/* recheckFailingConflictServer answers the creation conflict, the bucket absent at the first read of its location — the one the creation makes — and a server error at every read after it: the client's existence check is that read, so the re-check that would settle the conflict cannot answer */
+type recheckFailingConflictServer struct {
+    mutex  sync.Mutex
+    checks int
+}
+
+func (instance *recheckFailingConflictServer) ServeHTTP(writer nethttp.ResponseWriter, request *nethttp.Request) {
+    if nethttp.MethodPut == request.Method {
+        writer.WriteHeader(nethttp.StatusConflict)
+
+        type errorResponse struct {
+            XMLName xml.Name `xml:"Error"`
+            Code    string   `xml:"Code"`
+            Message string   `xml:"Message"`
+        }
+
+        _ = xml.NewEncoder(writer).Encode(errorResponse{Code: "BucketAlreadyExists", Message: "taken"})
+
+        return
+    }
+
+    instance.mutex.Lock()
+    instance.checks++
+    firstCheck := 1 == instance.checks
+    instance.mutex.Unlock()
+
+    if true == firstCheck {
+        writer.WriteHeader(nethttp.StatusNotFound)
+
+        return
+    }
+
+    writer.WriteHeader(nethttp.StatusInternalServerError)
+}
+
+/* a re-check that could not answer leaves the conflict unsettled rather than answered "taken elsewhere": the refusal says the re-check failed, so a network failure reads as one */
+func TestEnsureBucketNamesAReCheckThatCouldNotComplete(t *testing.T) {
+    server := httptest.NewServer(&recheckFailingConflictServer{})
+    defer server.Close()
+
+    client, clientErr := NewClient(Config{
+        Endpoint:  strings.TrimPrefix(server.URL, "http://"),
+        AccessKey: "access",
+        SecretKey: "secret",
+        Insecure:  true,
+    })
+    if nil != clientErr {
+        t.Fatalf("could not build the client: %v", clientErr)
+    }
+
+    ensureErr := EnsureBucket(context.Background(), client, "contested-bucket", EnsureBucketConfig{})
+    if nil == ensureErr || false == strings.Contains(ensureErr.Error(), "the re-check of its existence could not complete") {
+        t.Fatalf("expected the refusal to name the failed re-check, got %v", ensureErr)
+    }
+}
+
+func TestNewClient_ARefusalNamesTheField(t *testing.T) {
+    testCases := []struct {
+        config Config
+        field  string
+    }{
+        {Config{AccessKey: "access", SecretKey: "secret"}, "Config.Endpoint"},
+        {Config{Endpoint: "localhost:9000", SecretKey: "secret"}, "Config.AccessKey"},
+        {Config{Endpoint: "localhost:9000", AccessKey: "access"}, "Config.SecretKey"},
+    }
+
+    for _, testCase := range testCases {
+        _, clientErr := NewClient(testCase.config)
+
+        var refusal *exception.Error
+        if false == errors.As(clientErr, &refusal) || testCase.field != refusal.Context()["field"] {
+            t.Fatalf("expected a refusal naming %s, got %v", testCase.field, clientErr)
+        }
+    }
+}
+
+/* regionRecordingServer answers a bucket that does not exist and records the creation request's body, where the region travels as the location constraint */
+type regionRecordingServer struct {
+    mutex sync.Mutex
+    body  string
+}
+
+func (instance *regionRecordingServer) ServeHTTP(writer nethttp.ResponseWriter, request *nethttp.Request) {
+    if nethttp.MethodPut != request.Method {
+        writer.WriteHeader(nethttp.StatusNotFound)
+
+        return
+    }
+
+    body, _ := io.ReadAll(request.Body)
+
+    instance.mutex.Lock()
+    instance.body = string(body)
+    instance.mutex.Unlock()
+
+    writer.WriteHeader(nethttp.StatusOK)
+}
+
+func TestEnsureBucket_TheConfiguredRegionReachesTheCreation(t *testing.T) {
+    handler := &regionRecordingServer{}
+    server := httptest.NewServer(handler)
+    defer server.Close()
+
+    client, clientErr := NewClient(Config{
+        Endpoint:  strings.TrimPrefix(server.URL, "http://"),
+        AccessKey: "access",
+        SecretKey: "secret",
+        Insecure:  true,
+    })
+    if nil != clientErr {
+        t.Fatalf("could not build the client: %v", clientErr)
+    }
+
+    if ensureErr := EnsureBucket(context.Background(), client, "regional-bucket", EnsureBucketConfig{Region: "eu-west-1"}); nil != ensureErr {
+        t.Fatalf("unexpected error: %v", ensureErr)
+    }
+
+    handler.mutex.Lock()
+    defer handler.mutex.Unlock()
+
+    if false == strings.Contains(handler.body, "eu-west-1") {
+        t.Fatalf("expected the creation to carry the configured region, got %q", handler.body)
+    }
+}

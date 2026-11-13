@@ -15,6 +15,10 @@ The example application inside this major keeps no changelog: it is not a projec
 - `.documentation/package/HTTP.md`: what an error handler installed with `SetErrorHandler` answers and what it takes over from the exception listener.
 - `SECURITY.md`: an application that serves HTTP/2 directly must be built with Go 1.26.9 or newer for four `net/http` advisories, whatever the `go` line of the module says.
 
+### Security
+
+- tooling: the dev toolchain is go1.26.11, the release that fixes [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859) (a `net/http` HTTP/1 server crash through a `MaxBytesReader` header race), which govulncheck reports as reachable from every module built on go1.26.10: `go.work` and the standalone `go.mod` files of the e2e harness and the typecheck module name `toolchain go1.26.11`, so the ci jobs and the dev image move with them.
+
 ## [v1.19.4] - 2026-11-06 - Build Version Matches the Release
 
 ### Fixed

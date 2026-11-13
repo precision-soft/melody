@@ -1,0 +1,121 @@
+package kernel
+
+import (
+    "context"
+
+    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/http"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal"
+    kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+)
+
+func NewKernel(
+    ctx context.Context,
+    applicationConfiguration configcontract.Configuration,
+    serviceContainer containercontract.Container,
+    httpRouter httpcontract.Router,
+    eventDispatcher eventcontract.EventDispatcher,
+    clock clockcontract.Clock,
+) kernelcontract.Kernel {
+    if true == internal.IsNilInterface(ctx) {
+        exception.Panic(
+            exception.NewError("context is required for new kernel", nil, nil),
+        )
+    }
+
+    if true == internal.IsNilInterface(applicationConfiguration) {
+        exception.Panic(
+            exception.NewError("application configuration is required for new kernel", nil, nil),
+        )
+    }
+
+    if true == internal.IsNilInterface(serviceContainer) {
+        exception.Panic(
+            exception.NewError("service container is required for new kernel", nil, nil),
+        )
+    }
+
+    if true == internal.IsNilInterface(httpRouter) {
+        exception.Panic(
+            exception.NewError("http router is required for new kernel", nil, nil),
+        )
+    }
+
+    if true == internal.IsNilInterface(eventDispatcher) {
+        exception.Panic(
+            exception.NewError("event dispatcher is required for new kernel", nil, nil),
+        )
+    }
+
+    if true == internal.IsNilInterface(clock) {
+        exception.Panic(
+            exception.NewError("clock is required for new kernel", nil, nil),
+        )
+    }
+
+    httpKernel := http.NewKernel(httpRouter, http.KernelConfig{})
+
+    return &kernel{
+        ctx:              ctx,
+        config:           applicationConfiguration,
+        serviceContainer: serviceContainer,
+        httpRouter:       httpRouter,
+        httpKernel:       httpKernel,
+        eventDispatcher:  eventDispatcher,
+        clock:            clock,
+    }
+}
+
+type kernel struct {
+    ctx              context.Context
+    config           configcontract.Configuration
+    serviceContainer containercontract.Container
+    httpRouter       httpcontract.Router
+    httpKernel       httpcontract.Kernel
+    eventDispatcher  eventcontract.EventDispatcher
+    clock            clockcontract.Clock
+}
+
+func (instance *kernel) Context() context.Context {
+    return instance.ctx
+}
+
+func (instance *kernel) Environment() string {
+    return instance.config.Kernel().Environment()
+}
+
+func (instance *kernel) DebugMode() bool {
+    return config.EnvironmentDevelopment == instance.config.Kernel().Environment()
+}
+
+func (instance *kernel) ServiceContainer() containercontract.Container {
+    return instance.serviceContainer
+}
+
+func (instance *kernel) EventDispatcher() eventcontract.EventDispatcher {
+    return instance.eventDispatcher
+}
+
+func (instance *kernel) Config() configcontract.Configuration {
+    return instance.config
+}
+
+func (instance *kernel) HttpRouter() httpcontract.Router {
+    return instance.httpRouter
+}
+
+func (instance *kernel) HttpKernel() httpcontract.Kernel {
+    return instance.httpKernel
+}
+
+func (instance *kernel) Clock() clockcontract.Clock {
+    return instance.clock
+}
+
+var _ kernelcontract.Kernel = (*kernel)(nil)

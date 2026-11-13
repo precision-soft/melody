@@ -1,0 +1,102 @@
+package container
+
+import (
+    "reflect"
+
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
+)
+
+func Register[T any](
+    registrar containercontract.Registrar,
+    serviceName string,
+    provider containercontract.Provider[T],
+    options containercontract.RegisterOptions,
+) error {
+    if nil == registrar {
+        return exception.NewError(
+            "registrar is nil",
+            nil,
+            nil,
+        )
+    }
+
+    serviceType := reflect.TypeOf((*T)(nil)).Elem()
+    if false == options.TypeRegistrationDisabled && true == isAnyType(serviceType) {
+        return exception.NewError(
+            "type registration requires a concrete type",
+            map[string]any{
+                "serviceName": serviceName,
+            },
+            nil,
+        )
+    }
+
+    return registrar.Register(
+        serviceName,
+        provider,
+        options,
+    )
+}
+
+func MustRegister[T any](
+    registrar containercontract.Registrar,
+    serviceName string,
+    provider containercontract.Provider[T],
+    options containercontract.RegisterOptions,
+) {
+    registerErr := Register[T](registrar, serviceName, provider, options)
+    if nil != registerErr {
+        exception.Panic(
+            exception.NewError(
+                "failed to register service",
+                map[string]any{
+                    "serviceName": serviceName,
+                    "serviceType": reflect.TypeOf((*T)(nil)).Elem().String(),
+                },
+                registerErr,
+            ),
+        )
+    }
+}
+
+/* RegisterType registers a provider under the name its type derives: a named type is qualified with its import path, so two packages' same-named types get distinct names, while an unnamed composite is named by its spelling, so two packages' same-spelled composites, func(alpha.Bus) and func(beta.Bus), collide as one duplicate name; register such a type under an explicit name. */
+func RegisterType[T any](
+    registrar containercontract.Registrar,
+    provider containercontract.Provider[T],
+    options containercontract.RegisterOptions,
+) error {
+    serviceType := reflect.TypeOf((*T)(nil)).Elem()
+
+    serviceName := defaultServiceNameForType(serviceType)
+    if "" == serviceName {
+        return exception.NewError(
+            "could not determine service name for type",
+            map[string]any{
+                "serviceType": serviceType.String(),
+            },
+            nil,
+        )
+    }
+
+    return Register[T](registrar, serviceName, provider, options)
+}
+
+func MustRegisterType[T any](
+    registrar containercontract.Registrar,
+    provider containercontract.Provider[T],
+    options containercontract.RegisterOptions,
+) {
+    registerTypeErr := RegisterType[T](registrar, provider, options)
+    if nil != registerTypeErr {
+        exception.Panic(
+            exception.NewError(
+                "failed to register service by type",
+                map[string]any{
+                    "serviceType": reflect.TypeOf((*T)(nil)).Elem().String(),
+                },
+                registerTypeErr,
+            ),
+        )
+    }
+}

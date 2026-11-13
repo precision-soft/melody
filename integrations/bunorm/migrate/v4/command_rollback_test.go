@@ -1,0 +1,339 @@
+package migrate
+
+import (
+    "context"
+    "database/sql/driver"
+    "encoding/json"
+    "errors"
+    "github.com/precision-soft/melody/v4/bound"
+    "strings"
+    "testing"
+    "time"
+
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    "github.com/uptrace/bun/migrate"
+)
+
+func TestRollbackCommand_RollsBackLastGroupUnderLock(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    downCalls := 0
+    migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
+
+    command := NewRollbackCommand(migrations, resolvedDefaultOptions)
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
+    if nil != runErr {
+        t.Fatalf("unexpected error: %s", runErr.Error())
+    }
+
+    if 1 != downCalls {
+        t.Fatalf("expected the down migration to run once, ran %d times", downCalls)
+    }
+
+    if false == strings.Contains(rendered, "migrations rolled back successfully") {
+        t.Fatalf("missing success message in %q", rendered)
+    }
+
+    lockIndex := recorder.firstIndexMatching(isLockInsert)
+    markUnappliedIndex := recorder.firstIndexMatching(func(query string) bool {
+        return strings.HasPrefix(query, "DELETE") &&
+            strings.Contains(query, "bun_migrations") &&
+            false == strings.Contains(query, "bun_migration_locks")
+    })
+    unlockIndex := recorder.firstIndexMatching(isUnlockDelete)
+
+    if 0 > lockIndex || 0 > markUnappliedIndex || 0 > unlockIndex {
+        t.Fatalf("missing expected statements: %v", recorder.recordedQueries())
+    }
+
+    if false == (lockIndex < markUnappliedIndex && markUnappliedIndex < unlockIndex) {
+        t.Fatalf("rollback did not run inside the migration lock: %v", recorder.recordedQueries())
+    }
+}
+
+/* bun hands the group back beside the failure, so a rollback that fails part way names the group it walks on the way out: with only the failing migration, which schema changes are already undone could only be reconstructed from the migrations table by hand */
+func TestRollbackCommand_AFailedRollbackNamesTheGroupItWasWalking(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    migrations := migrate.NewMigrations()
+    migrations.Add(migrate.Migration{
+        Name:    "20240101000000",
+        Comment: "create_users",
+        Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            return nil
+        },
+        Down: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            return errors.New("down refused")
+        },
+    })
+
+    command := NewRollbackCommand(migrations, resolvedDefaultOptions)
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
+    if nil == runErr {
+        t.Fatalf("expected the failing down to fail the command")
+    }
+
+    if false == strings.Contains(rendered, "ROLLBACK GROUP MIGRATIONS") {
+        t.Fatalf("expected the report to name the group the failed rollback was walking, got %q", rendered)
+    }
+
+    if false == strings.Contains(rendered, "20240101000000") {
+        t.Fatalf("expected the group's migration named, got %q", rendered)
+    }
+}
+
+/* the count of the group a failed rollback was walking is promised on BOTH renderings, and the text block draws a fixed set of keys: a key of the caller's own naming reaches the machine document and is dropped from the block a person reads, silently and with no fallthrough. */
+func TestRollbackCommand_TheFailedGroupCountRendersOnBothRenderings(t *testing.T) {
+    newFailingRollback := func(t *testing.T) (runtimecontract.Runtime, *migrate.Migrations) {
+        t.Helper()
+
+        database, recorder := newFakeBunDatabase()
+        recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+
+        migrations := migrate.NewMigrations()
+        migrations.Add(migrate.Migration{
+            Name:    "20240101000000",
+            Comment: "create_users",
+            Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+                return nil
+            },
+            Down: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+                return errors.New("down refused")
+            },
+        })
+
+        return newRuntimeWithDatabase(t, database), migrations
+    }
+
+    textRuntime, textMigrations := newFailingRollback(t)
+    rendered, textErr := runMigrationCommand(t, textRuntime, NewRollbackCommand(textMigrations, resolvedDefaultOptions), "--no-color", "--verbose")
+    if nil == textErr {
+        t.Fatal("expected the failing down to fail the command")
+    }
+
+    if false == strings.Contains(rendered, "1 migration in the group") {
+        t.Fatalf("expected the group's count in the text block, got %q", rendered)
+    }
+
+    jsonRuntime, jsonMigrations := newFailingRollback(t)
+    document, jsonErr := runMigrationCommand(t, jsonRuntime, NewRollbackCommand(jsonMigrations, resolvedDefaultOptions), "--format=json")
+    if nil == jsonErr {
+        t.Fatal("expected the failing down to fail the command")
+    }
+
+    decoded := struct {
+        Data struct {
+            Details map[string]string `json:"details"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(document), &decoded); nil != decodeErr {
+        t.Fatalf("failed to decode the document: %v; rendered %q", decodeErr, document)
+    }
+
+    if "1 migration in the group" != decoded.Data.Details["status"] {
+        t.Fatalf("expected the same count in the machine document, got %#v", decoded.Data.Details)
+    }
+}
+
+func TestRollbackCommand_NoMigrationsWarns(t *testing.T) {
+    database, _ := newFakeBunDatabase()
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    downCalls := 0
+    migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
+
+    command := NewRollbackCommand(migrations, resolvedDefaultOptions)
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
+    if nil != runErr {
+        t.Fatalf("unexpected error: %s", runErr.Error())
+    }
+
+    if 0 != downCalls {
+        t.Fatalf("a never-applied migration was rolled back (%d times)", downCalls)
+    }
+
+    if false == strings.Contains(rendered, "WARNING: no migrations to rollback") {
+        t.Fatalf("missing warning in %q", rendered)
+    }
+}
+
+func TestRollbackCommand_FailedUnlockFailsTheCommand(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+    recorder.execHook = func(query string) error {
+        if true == isUnlockDelete(query) {
+            return context.DeadlineExceeded
+        }
+
+        return nil
+    }
+
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    downCalls := 0
+    migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
+
+    command := NewRollbackCommand(migrations, resolvedDefaultOptions)
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
+    if nil == runErr {
+        t.Fatal("expected the failed unlock to fail the command")
+    }
+
+    if 1 != downCalls {
+        t.Fatalf("expected the rollback itself to have run once, ran %d times", downCalls)
+    }
+
+    if false == strings.Contains(rendered, "ERROR:") {
+        t.Fatalf("unlock failure was not printed beside the exit code: %q", rendered)
+    }
+}
+
+/* the same remedy-naming refusal the migrate sibling proves: bun's bare lock error names neither the database nor db:unlock, so rollback wraps it */
+func TestRollbackCommand_LockFailureNamesTheRemedy(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = lockCountHook(1)
+    recorder.execHook = func(query string) error {
+        if true == isLockInsert(query) {
+            return context.DeadlineExceeded
+        }
+
+        return nil
+    }
+
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    downCalls := 0
+    migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
+
+    command := NewRollbackCommand(migrations, resolvedDefaultOptions)
+
+    _, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
+    if nil == runErr {
+        t.Fatal("expected an error when the rollback lock cannot be taken")
+    }
+
+    if false == errors.Is(runErr, context.DeadlineExceeded) {
+        t.Fatalf("the bun lock failure must survive as the cause, got %q", runErr.Error())
+    }
+
+    contextual, isContextual := runErr.(interface {
+        Context() exceptioncontract.Context
+    })
+    if false == isContextual {
+        t.Fatalf("the lock refusal carries no context at all: %q", runErr.Error())
+    }
+
+    lockContext := contextual.Context()
+    for key, expected := range map[string]string{
+        "locksTable":    DefaultLocksTable,
+        "unlockCommand": DefaultCommandPrefix + ":unlock",
+    } {
+        actual, present := lockContext[key]
+        if false == present {
+            t.Fatalf("the lock refusal does not name %s: %v", key, lockContext)
+        }
+
+        if expected != actual {
+            t.Fatalf("%s = %v, want %q", key, actual, expected)
+        }
+    }
+
+    if 0 != downCalls {
+        t.Fatalf("rollback ran despite the lock failure (%d times)", downCalls)
+    }
+}
+
+func TestRollbackCommand_HandsItsPostureToTheMigrationsThroughTheContext(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    carriedByTheContext := false
+    migrations := migrate.NewMigrations()
+    migrations.Add(migrate.Migration{
+        Name:    "20240101000000",
+        Comment: "create_users",
+        Up: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            return nil
+        },
+        Down: func(ctx context.Context, migrator *migrate.Migrator, migration *migrate.Migration) error {
+            _, carriedByTheContext = runnerOptionFromContext(ctx)
+
+            return RunQueries(ctx, database, "down", "20240101000000", []Query{{Name: "drop-users", Sql: "DROP TABLE users"}}, RunnerOption{})
+        },
+    })
+
+    rendered, runErr := runMigrationCommand(t, runtimeInstance, NewRollbackCommand(migrations, resolvedDefaultOptions), "--no-color")
+    if nil != runErr {
+        t.Fatalf("unexpected error: %s", runErr.Error())
+    }
+
+    if false == strings.Contains(rendered, "[migration:down] 20240101000000 [1/1] executing: drop-users") {
+        t.Fatalf("the per-query line did not reach the command's writer through the context: %q", rendered)
+    }
+
+    if false == carriedByTheContext {
+        t.Fatal("the migration was not handed the context carrying the command's posture")
+    }
+}
+
+/* the rollback asks the locks table the same question: a missing table is not answered with the unlock command */
+func TestRollbackCommand_ALockRefusedByAMissingLocksTableDoesNotNameTheUnlockCommand(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    missingTable := errors.New("Error 1146 (42S02): Table 'melody.bun_migration_locks' doesn't exist")
+    recorder.queryHook = func(query string) ([]string, [][]driver.Value, error) {
+        if true == strings.Contains(query, "bun_migration_locks") {
+            return nil, nil, missingTable
+        }
+
+        return []string{}, nil, nil
+    }
+    recorder.execHook = func(query string) error {
+        if true == isLockInsert(query) {
+            return missingTable
+        }
+
+        return nil
+    }
+
+    _, runErr := runMigrationCommand(t, newRuntimeWithDatabase(t, database), NewRollbackCommand(newSingleMigrationSet("20240101000000", "create_users", nil, new(int)), resolvedDefaultOptions), "--no-color")
+    if nil == runErr || false == strings.Contains(runErr.Error(), "missing or unreachable") {
+        t.Fatalf("expected the missing-table refusal, got %v", runErr)
+    }
+
+    if _, namesUnlock := lockRefusalContextOf(t, runErr)["unlockCommand"]; true == namesUnlock {
+        t.Fatal("expected no unlock command named for a missing locks table")
+    }
+}
+
+func TestRollbackCommand_ReleasesTheLockUnderItsUnlockTimeout(t *testing.T) {
+    database, recorder := newFakeBunDatabase()
+    recorder.queryHook = appliedMigrationRowsHook("20240101000000")
+    remaining := unlockDeadlineRecorder(recorder)
+    runtimeInstance := newRuntimeWithDatabase(t, database)
+
+    downCalls := 0
+    migrations := newSingleMigrationSet("20240101000000", "create_users", nil, &downCalls)
+
+    options := resolvedDefaultOptions
+    options.UnlockTimeout = bound.Of(2 * time.Second)
+
+    if _, runErr := runMigrationCommand(t, runtimeInstance, NewRollbackCommand(migrations, options), "--no-color"); nil != runErr {
+        t.Fatalf("unexpected error: %s", runErr.Error())
+    }
+
+    if *remaining <= time.Second || *remaining > 2*time.Second {
+        t.Fatalf("expected the unlock to run under the 2s unlock timeout, got %s left", *remaining)
+    }
+}

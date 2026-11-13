@@ -1,0 +1,247 @@
+package config
+
+import (
+    outboxintegration "github.com/precision-soft/melody/integrations/outbox/v4"
+    melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
+    "github.com/precision-soft/melody/v4/.example/handler"
+    "github.com/precision-soft/melody/v4/.example/handler/accesstoken"
+    handlercategory "github.com/precision-soft/melody/v4/.example/handler/category"
+    handlercurrency "github.com/precision-soft/melody/v4/.example/handler/currency"
+    handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
+    handleri18n "github.com/precision-soft/melody/v4/.example/handler/i18n"
+    handlerinternalauth "github.com/precision-soft/melody/v4/.example/handler/internalauth"
+    handleroutbox "github.com/precision-soft/melody/v4/.example/handler/outbox"
+    handlerproduct "github.com/precision-soft/melody/v4/.example/handler/product"
+    handlerreport "github.com/precision-soft/melody/v4/.example/handler/report"
+    handlersecure "github.com/precision-soft/melody/v4/.example/handler/secure"
+    handlerstorage "github.com/precision-soft/melody/v4/.example/handler/storage"
+    handlertwofactor "github.com/precision-soft/melody/v4/.example/handler/twofactor"
+    handleruser "github.com/precision-soft/melody/v4/.example/handler/user"
+    "github.com/precision-soft/melody/v4/.example/route"
+    "github.com/precision-soft/melody/v4/.example/twofactor"
+    melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    melodybound "github.com/precision-soft/melody/v4/bound"
+    melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
+    melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodyopenapi "github.com/precision-soft/melody/v4/openapi"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    bun "github.com/uptrace/bun"
+)
+
+func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.Kernel) {
+    router := kernelInstance.HttpRouter()
+
+    kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
+    kernelInstance.HttpKernel().SetForwardedHeadersPolicy(exampleForwardedHeadersPolicy())
+    applySessionCookieSecure(kernelInstance.HttpKernel(), instance.environmentValue(environmentKeySessionCookieSecure))
+
+    /* the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
+    router.HandleWithOptions(
+        "/health",
+        handler.HealthHandler(instance.applicationVersion),
+        melodyhttp.RouteOptions{Name: "example.health", Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
+    )
+
+    router.HandleWithOptions(
+        "/openapi.json",
+        melodyopenapi.SpecificationHandler(instance.openApiInfo, instance.openApiRegistry),
+        melodyhttp.RouteOptions{Name: "example.openapi", Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
+    )
+
+    router.HandleWithOptions("/platform/check", handler.PlatformCheckHandler(), melodyhttp.RouteOptions{Name: "example.platform.check", Methods: []string{"GET"}})
+
+    /* the write budget is built before the first door it guards */
+    if nil != instance.redisClient {
+        instance.buildCatalogWriteThrottle()
+    } else {
+        instance.buildInProcessCatalogWriteThrottle(kernelInstance.Clock())
+    }
+
+    router.HandleWithOptions("/messagebus/dispatch", instance.throttledWrite(handler.WelcomeEmailDispatchHandler("" != instance.environmentValue(environmentKeyAmqpDsn))), melodyhttp.RouteOptions{Name: "example.messagebus.dispatch", Methods: []string{"POST"}})
+
+    /* the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
+
+    router.HandleWithOptions("/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher), melodyhttp.RouteOptions{Name: "example.encrypt.roundtrip", Methods: []string{"GET"}})
+
+    router.HandleWithOptions(route.AccessTokenIssuePattern, accesstoken.IssueHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenIssueName, Methods: []string{"POST"}})
+    router.HandleWithOptions(route.AccessTokenRevokeDevicePattern, accesstoken.RevokeDeviceHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeDeviceName, Methods: []string{"POST"}})
+    router.HandleWithOptions(route.AccessTokenRevokeUserPattern, accesstoken.RevokeUserHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeUserName, Methods: []string{"POST"}})
+    router.HandleWithOptions(route.DeviceIdentityPattern, handlersecure.MeHandler(), melodyhttp.RouteOptions{Name: route.DeviceIdentityName, Methods: []string{"GET"}})
+
+    router.HandleWithOptions(route.LoginPagePattern, handler.LoginPageHandler(), melodyhttp.RouteOptions{Name: route.LoginPageName, Methods: []string{"GET"}})
+
+    secondFactorReplayGuard := instance.buildSecondFactorReplayGuard(kernelInstance.Clock())
+
+    /* the logger the second-factor budget records a failure the request does not carry in, a failed release of the budget; a container without one leaves the limiter on the emergency logger */
+    secondFactorBudgetLogger, _ := melodylogging.LoggerFromResolver(kernelInstance.Context(), kernelInstance.ServiceContainer())
+
+    /* the sign-in door is declared in RegisterSecurity, before the kernel-built parts of its chain exist, so they are handed over here */
+    loginAuthentication := instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard, secondFactorBudgetLogger)
+    instance.loginDoorAuthenticator.Bind(loginAuthentication)
+
+    /* handed over as the interface only when there is one, so a sign-in without a budget is no typed nil behind it */
+    var secondFactorBudget handlertwofactor.FactorBudget
+    if budget := loginAuthentication.Budget(); nil != budget {
+        secondFactorBudget = budget
+    }
+
+    router.HandleWithOptions(route.RoutesPattern, handler.RoutesHandler(), frontendRoute(route.RoutesName, "GET"))
+    router.HandleWithOptions(route.CataloguePagePattern, handler.CataloguePageHandler(), frontendRoute(route.CataloguePageName, "GET"))
+
+    router.HandleWithOptions(route.SecureMePattern, handlersecure.MeHandler(), melodyhttp.RouteOptions{Name: route.SecureMeName, Methods: []string{"GET"}})
+
+    router.HandleWithOptions(route.InternalWhoamiPattern, handlerinternalauth.WhoamiHandler(), melodyhttp.RouteOptions{Name: route.InternalWhoamiName, Methods: []string{"POST"}})
+
+    /* the two doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts. The verification door, and the enrollment door when it replaces an enrollment, burn an accepted code in the memory the sign-in reads, so a code is spent once across all three, and count every presented factor against the account's budget the sign-in spends. */
+    if true == instance.catalogueWired {
+        router.HandleWithOptions("/twofactor/enroll", handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), melodyhttp.RouteOptions{Name: "example.twofactor.enroll", Methods: []string{"POST"}})
+        router.HandleWithOptions("/twofactor/verify", handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), melodyhttp.RouteOptions{Name: "example.twofactor.verify", Methods: []string{"POST"}})
+    }
+
+    /* the outbox handlers hold container.Lazy handles built at route-registration time: the store and relay services (provided by the outbox module's factories, see configure.go) are resolved at the first request, so registering the routes never touches the outbox schema or the transport. */
+    if true == instance.catalogueWired {
+        outboxStore := melodycontainer.Lazy[*outboxintegration.Store](kernelInstance.ServiceContainer(), outboxintegration.ServiceStore)
+        outboxRelay := melodycontainer.Lazy[*outboxintegration.Relay](kernelInstance.ServiceContainer(), outboxintegration.ServiceRelay)
+
+        catalogueDatabase := melodycontainer.Lazy[*bun.DB](kernelInstance.ServiceContainer(), serviceDatabase)
+
+        router.HandleWithOptions("/outbox/enqueue", instance.throttledWrite(handleroutbox.EnqueueHandler(catalogueDatabase, outboxStore)), melodyhttp.RouteOptions{Name: "example.outbox.enqueue", Methods: []string{"POST"}})
+        router.HandleWithOptions("/outbox/relay", instance.throttledWrite(handleroutbox.RelayHandler(outboxRelay)), melodyhttp.RouteOptions{Name: "example.outbox.relay", Methods: []string{"POST"}})
+        router.HandleWithOptions("/outbox/status", handleroutbox.StatusHandler(catalogueDatabase, outboxStore), melodyhttp.RouteOptions{Name: "example.outbox.status", Methods: []string{"GET"}})
+    }
+
+    if nil != instance.storage {
+        router.HandleWithOptions("/storage/object", instance.throttledWrite(handlerstorage.PutHandler(instance.storage)), melodyhttp.RouteOptions{Name: "example.storage.put", Methods: []string{"POST"}})
+        router.HandleWithOptions("/storage/object", handlerstorage.GetHandler(instance.storage), melodyhttp.RouteOptions{Name: "example.storage.get", Methods: []string{"GET"}})
+        router.HandleWithOptions("/storage/object/link", handlerstorage.LinkHandler(instance.storage), melodyhttp.RouteOptions{Name: "example.storage.link", Methods: []string{"GET"}})
+    }
+
+    router.HandleWithOptions(
+        route.I18nGreetingPattern,
+        handleri18n.GreetingHandler(),
+        melodyhttp.RouteOptions{Name: route.I18nGreetingName, Methods: []string{"GET"}, Locales: route.I18nGreetingLocaleList()},
+    )
+
+    router.HandleWithOptions(route.EventsStreamPattern, handlerevent.StreamHandler(instance.eventStreamSlots), melodyhttp.RouteOptions{Name: route.EventsStreamName, Methods: []string{"GET"}})
+    router.HandleWithOptions(route.EventsPublishPattern, instance.throttledWrite(handlerevent.PublishHandler(instance.messageBusDispatch)), melodyhttp.RouteOptions{Name: route.EventsPublishName, Methods: []string{"POST"}})
+
+    /* every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make the client throw "unknown route". */
+    router.HandleWithOptions(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))
+    router.HandleWithOptions(route.ReportsApiHistoryPattern, handlerreport.ApiHistoryHandler(), frontendRoute(route.ReportsApiHistoryName, "GET"))
+    router.HandleWithOptions(route.ReportsApiExportPattern, handlerreport.ApiExportHandler(), frontendRoute(route.ReportsApiExportName, "GET"))
+
+    instance.registerCurrencyApiRoutes(router)
+
+    router.HandleWithOptions(route.ProductsListPagePattern, handlerproduct.ListPageHandler(), frontendRoute(route.ProductsListPageName, "GET"))
+    router.HandleWithOptions(route.ProductsCreatePagePattern, handlerproduct.CreatePageHandler(), frontendRoute(route.ProductsCreatePageName, "GET"))
+    router.HandleWithOptions(route.ProductsUpdatePagePattern, handlerproduct.UpdatePageHandler(), frontendRoute(route.ProductsUpdatePageName, "GET"))
+    router.HandleWithOptions(route.ProductsApiCreatePattern, instance.throttledWrite(handlerproduct.ApiCreateHandler()), frontendRoute(route.ProductsApiCreateName, "POST"))
+    router.HandleWithOptions(route.ProductsApiReadAllPattern, handlerproduct.ApiReadAllHandler(), frontendRoute(route.ProductsApiReadAllName, "GET"))
+    router.HandleWithOptions(route.ProductsApiReadPattern, handlerproduct.ApiReadHandler(), frontendRoute(route.ProductsApiReadName, "GET"))
+    router.HandleWithOptions(route.ProductsApiUpdatePattern, instance.throttledWrite(handlerproduct.ApiUpdateHandler()), frontendRoute(route.ProductsApiUpdateName, "PUT"))
+    router.HandleWithOptions(route.ProductsApiDeletePattern, instance.throttledWrite(handlerproduct.ApiDeleteHandler()), frontendRoute(route.ProductsApiDeleteName, "DELETE"))
+
+    router.HandleWithOptions(route.UsersListPagePattern, handleruser.ListPageHandler(), frontendRoute(route.UsersListPageName, "GET"))
+    router.HandleWithOptions(route.UsersCreatePagePattern, handleruser.CreatePageHandler(), frontendRoute(route.UsersCreatePageName, "GET"))
+    router.HandleWithOptions(route.UsersUpdatePagePattern, handleruser.UpdatePageHandler(), frontendRoute(route.UsersUpdatePageName, "GET"))
+    router.HandleWithOptions(route.UsersApiCreatePattern, instance.throttledWrite(handleruser.ApiCreateHandler()), frontendRoute(route.UsersApiCreateName, "POST"))
+    router.HandleWithOptions(route.UsersApiReadAllPattern, handleruser.ApiReadAllHandler(), frontendRoute(route.UsersApiReadAllName, "GET"))
+    router.HandleWithOptions(route.UsersApiReadPattern, handleruser.ApiReadHandler(), frontendRoute(route.UsersApiReadName, "GET"))
+    router.HandleWithOptions(route.UsersApiUpdatePattern, instance.throttledWrite(handleruser.ApiUpdateHandler()), frontendRoute(route.UsersApiUpdateName, "PUT"))
+    router.HandleWithOptions(route.UsersApiDeletePattern, instance.throttledWrite(handleruser.ApiDeleteHandler()), frontendRoute(route.UsersApiDeleteName, "DELETE"))
+}
+
+/* frontendRoute marks a route as exposed in the frontend zone so its URL is generatable by name from the route manifest (window.melodyRoutes) that the admin SPA resolves data-route / route(...) calls against. */
+/* registerCurrencyApiRoutes registers the four currency api doors through one route group, which prefixes their patterns and names; the writes sit behind the catalogue's write budget */
+func (instance *Module) registerCurrencyApiRoutes(router melodyhttpcontract.Router) {
+    currencyApi := router.Group(
+        melodyhttpcontract.GroupConfig{
+            PathPrefix: route.CurrenciesApiGroupPrefix,
+            NamePrefix: route.CurrenciesApiGroupNamePrefix,
+        },
+    )
+    currencyApi.HandleWithOptions(route.CurrenciesApiReadAllRelativePattern, handlercurrency.ApiReadAllHandler(), frontendRoute(route.CurrenciesApiReadAllRelativeName, "GET"))
+    currencyApi.HandleWithOptions(route.CurrenciesApiCreateRelativePattern, instance.throttledWrite(handlercurrency.ApiCreateHandler()), frontendRoute(route.CurrenciesApiCreateRelativeName, "POST"))
+    currencyApi.HandleWithOptions(route.CurrenciesApiUpdateRelativePattern, instance.throttledWrite(handlercurrency.ApiUpdateHandler()), frontendRoute(route.CurrenciesApiUpdateRelativeName, "PUT"))
+    currencyApi.HandleWithOptions(route.CurrenciesApiDeleteRelativePattern, instance.throttledWrite(handlercurrency.ApiDeleteHandler()), frontendRoute(route.CurrenciesApiDeleteRelativeName, "DELETE"))
+}
+
+func frontendRoute(name string, method string) melodyhttpcontract.RouteOptions {
+    return melodyhttp.RouteOptions{Name: name, Methods: []string{method}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)}
+}
+
+var _ melodyapplicationcontract.HttpModule = (*Module)(nil)
+
+/* buildCatalogWriteThrottle prepares the shared budget the nomenclature's write endpoints sit behind.
+
+   The counter lives in redis, so several replicas enforce one limit rather than each allowing its own, and the client key is resolved trusted-proxy-aware: behind the compose load balancer the X-Forwarded-For client is used, a direct hit falls back to the peer address, and a spoofed header from an untrusted peer is ignored. With redis unreachable the limiter fails closed, so a write is refused rather than let through uncounted. */
+func (instance *Module) buildCatalogWriteThrottle() {
+    limiter := melodyrueidis.NewRateLimiter(instance.redisClient, melodyrueidis.RateLimiterConfig{
+        Limit:     catalogWriteAllowance,
+        Window:    catalogWriteWindow,
+        KeyPrefix: redisRateLimitKeyPrefix,
+    })
+
+    instance.loginDoorLimiter.bind(limiter)
+
+    instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(limiter, melodyhttpmiddleware.RateLimitConfig{
+        ClientIpResolver: instance.trustedProxyResolver.Resolve,
+    })
+}
+
+/* buildInProcessCatalogWriteThrottle arms the write budget of a process that runs without redis: a sliding window per client address held in this process, bounded in the addresses it tracks. It limits this process only — behind a balancer every replica would allow a budget of its own, which is why a deployment runs the redis budget — but a single process keeps its writes and its sign-ins throttled rather than unthrottled. Past 10,000 addresses an unseen address takes the slot of the address seen longest ago, which comes back with a full budget: a caller varying its address gains nothing a fresh address does not already give it; the redis budget has no such table. */
+func (instance *Module) buildInProcessCatalogWriteThrottle(clockInstance melodyclockcontract.Clock) {
+    limiter := melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{
+        Limit:   catalogWriteAllowance,
+        Window:  catalogWriteWindow,
+        MaxKeys: melodybound.Of(inProcessWriteThrottleMaxAddresses),
+        Clock:   clockInstance,
+    })
+
+    instance.loginDoorLimiter.bind(limiter)
+
+    instance.catalogWriteThrottle = melodyhttpmiddleware.RateLimitMiddleware(limiter, melodyhttpmiddleware.RateLimitConfig{
+        ClientIpResolver: instance.trustedProxyResolver.Resolve,
+    })
+}
+
+/* throttledWrite puts an endpoint that changes the nomenclature, or spends a backend this process does not own (the message bus, the outbox, the object store, the event hub), behind the per-address budget. The reads are left alone deliberately: a catalogue is meant to be browsed, and it is the writes that a runaway script turns into damage. The budget counts in redis when the example has one and in this process otherwise; a route registered before the budget is built is returned untouched. */
+func (instance *Module) throttledWrite(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
+    if nil == instance.catalogWriteThrottle {
+        return next
+    }
+
+    return instance.catalogWriteThrottle(next)
+}
+
+/* lateBoundRateLimiter is the write budget as the sign-in door holds it: the door is declared before the budget is built, and it charges the same counter as the routes behind throttledWrite. */
+type lateBoundRateLimiter struct {
+    limiter melodyhttpcontract.RateLimiter
+}
+
+func (instance *lateBoundRateLimiter) bind(limiter melodyhttpcontract.RateLimiter) {
+    instance.limiter = limiter
+}
+
+func (instance *lateBoundRateLimiter) Allow(key string) bool {
+    return instance.limiter.Allow(key)
+}
+
+func (instance *lateBoundRateLimiter) Reset(key string) {
+    instance.limiter.Reset(key)
+}
+
+func (instance *lateBoundRateLimiter) AllowWithRuntime(runtimeInstance melodyruntimecontract.Runtime, key string) (bool, error) {
+    if runtimeLimiter, isRuntimeLimiter := instance.limiter.(melodyhttpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
+        return runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
+    }
+
+    return instance.limiter.Allow(key), nil
+}
+
+var _ melodyhttpcontract.RuntimeRateLimiter = (*lateBoundRateLimiter)(nil)

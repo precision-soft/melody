@@ -1,0 +1,312 @@
+package config
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    nethttp "net/http"
+    "net/http/httptest"
+    "strings"
+    "testing"
+    "time"
+
+    melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
+    handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
+    "github.com/precision-soft/melody/v4/.example/message"
+    "github.com/precision-soft/melody/v4/.example/route"
+    melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+)
+
+/* the group prefixes the patterns and the names: the four doors must land on exactly the full spellings the access control and the route manifest read */
+func TestRegisterCurrencyApiRoutes_RegistersTheFullPatternsAndNamesThroughTheGroup(t *testing.T) {
+    router := melodyhttp.NewRouter()
+
+    (&Module{}).registerCurrencyApiRoutes(router)
+
+    expected := map[string]string{
+        route.CurrenciesApiReadAllName: route.CurrenciesApiReadAllPattern,
+        route.CurrenciesApiCreateName:  route.CurrenciesApiCreatePattern,
+        route.CurrenciesApiUpdateName:  route.CurrenciesApiUpdatePattern,
+        route.CurrenciesApiDeleteName:  route.CurrenciesApiDeletePattern,
+    }
+
+    definitions := router.RouteDefinitions()
+    if len(expected) != len(definitions) {
+        t.Fatalf("expected %d currency doors, got %d", len(expected), len(definitions))
+    }
+
+    for _, definition := range definitions {
+        pattern, known := expected[definition.Name()]
+        if false == known {
+            t.Fatalf("expected only the currency doors' names, got %q", definition.Name())
+        }
+
+        if strings.TrimSuffix(pattern, "/") != strings.TrimSuffix(definition.Pattern(), "/") {
+            t.Fatalf("expected %s on %s, got %s", definition.Name(), pattern, definition.Pattern())
+        }
+    }
+}
+
+/* without redis the budget is counted in this process: thirty writes a minute from one address pass, the thirty-first is refused 429, and another address still has its own budget */
+func TestBuildInProcessCatalogWriteThrottle_RefusesTheThirtyFirstWriteOfAnAddressInAMinute(t *testing.T) {
+    moduleInstance := &Module{trustedProxyResolver: newTrustedProxyResolver("", time.Now)}
+    moduleInstance.buildInProcessCatalogWriteThrottle(melodyclock.NewFrozenClock(time.Unix(1700000000, 0)))
+
+    throttled := moduleInstance.throttledWrite(func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        return melodyhttp.EmptyResponse(nethttp.StatusNoContent), nil
+    })
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    statusFrom := func(peer string) int {
+        httpRequest := httptest.NewRequest(nethttp.MethodPost, "/products/api/create/", nil)
+        httpRequest.RemoteAddr = peer + ":41234"
+        request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("budget-test", time.Now()))
+
+        response, handlerErr := throttled(runtimeInstance, httptest.NewRecorder(), request)
+        if nil != handlerErr {
+            /* a refusal is answered as the http exception the kernel renders */
+            var httpException *melodyexception.HttpException
+            if false == errors.As(handlerErr, &httpException) {
+                t.Fatalf("expected a response or an http exception, got %v", handlerErr)
+            }
+
+            return httpException.StatusCode()
+        }
+
+        return response.StatusCode()
+    }
+
+    for write := 1; write <= catalogWriteAllowance; write++ {
+        if status := statusFrom("10.1.1.1"); nethttp.StatusNoContent != status {
+            t.Fatalf("expected write %d of the allowance through, got %d", write, status)
+        }
+    }
+
+    if status := statusFrom("10.1.1.1"); nethttp.StatusTooManyRequests != status {
+        t.Fatalf("expected the write past the allowance refused 429, got %d", status)
+    }
+
+    if status := statusFrom("10.1.1.2"); nethttp.StatusNoContent != status {
+        t.Fatalf("expected another address to keep its own budget, got %d", status)
+    }
+}
+
+func TestBuildInProcessCatalogWriteThrottle_GivesTheSlotOfTheAddressSeenLongestAgoPastItsCeiling(t *testing.T) {
+    moduleInstance := &Module{trustedProxyResolver: newTrustedProxyResolver("", time.Now)}
+    moduleInstance.buildInProcessCatalogWriteThrottle(melodyclock.NewFrozenClock(time.Unix(1700000000, 0)))
+
+    throttled := moduleInstance.throttledWrite(func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        return melodyhttp.EmptyResponse(nethttp.StatusNoContent), nil
+    })
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    writeFrom := func(peer string) error {
+        httpRequest := httptest.NewRequest(nethttp.MethodPost, "/products/api/create/", nil)
+        httpRequest.RemoteAddr = peer + ":41234"
+        request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("ceiling-test", time.Now()))
+
+        _, handlerErr := throttled(runtimeInstance, httptest.NewRecorder(), request)
+
+        return handlerErr
+    }
+
+    for address := 0; address < inProcessWriteThrottleMaxAddresses; address++ {
+        if writeErr := writeFrom(fmt.Sprintf("10.%d.%d.1", address/256, address%256)); nil != writeErr {
+            t.Fatalf("expected address %d admitted below the ceiling, got %v", address, writeErr)
+        }
+    }
+
+    if writeErr := writeFrom("192.0.2.1"); nil != writeErr {
+        t.Fatalf("expected an unseen address admitted once %d addresses are tracked, got %v", inProcessWriteThrottleMaxAddresses, writeErr)
+    }
+
+    for attempt := 1; attempt < catalogWriteAllowance; attempt++ {
+        if writeErr := writeFrom("192.0.2.1"); nil != writeErr {
+            t.Fatalf("expected attempt %d of the admitted address inside its budget, got %v", attempt, writeErr)
+        }
+    }
+
+    var httpException *melodyexception.HttpException
+    if writeErr := writeFrom("192.0.2.1"); false == errors.As(writeErr, &httpException) || nethttp.StatusTooManyRequests != httpException.StatusCode() {
+        t.Fatalf("expected the admitted address refused 429 past its budget, got %v", writeErr)
+    }
+
+    if writeErr := writeFrom("10.0.0.1"); nil != writeErr {
+        t.Fatalf("expected the address seen longest ago evicted and back with a full budget, got %v", writeErr)
+    }
+}
+
+/* routeKernel carries the router and the http kernel RegisterHttpRoutes writes into, and the container and clock it reads */
+type routeKernel struct {
+    melodykernelcontract.Kernel
+    router     *melodyhttp.Router
+    httpKernel melodyhttpcontract.Kernel
+    container  melodycontainercontract.Container
+}
+
+func (instance *routeKernel) Context() context.Context {
+    return context.Background()
+}
+
+func (instance *routeKernel) HttpRouter() melodyhttpcontract.Router {
+    return instance.router
+}
+
+func (instance *routeKernel) HttpKernel() melodyhttpcontract.Kernel {
+    return instance.httpKernel
+}
+
+func (instance *routeKernel) ServiceContainer() melodycontainercontract.Container {
+    return instance.container
+}
+
+func (instance *routeKernel) Clock() melodyclockcontract.Clock {
+    return melodyclock.NewFrozenClock(time.Unix(1700000000, 0))
+}
+
+func TestRegisterHttpRoutes_PutsTheBackendSpendingDoorsBehindTheWriteBudget(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.trustedProxyResolver = newTrustedProxyResolver("", time.Now)
+    moduleInstance.catalogueWired = true
+    moduleInstance.eventStreamSlots = handlerevent.NewStreamSlots(1, 1)
+
+    client, clientErr := melodyawss3.NewClient(melodyawss3.Config{Endpoint: "127.0.0.1:9", AccessKey: "test", SecretKey: "test", Region: "us-east-1", Insecure: true})
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+    moduleInstance.storage = melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{})
+
+    router := melodyhttp.NewRouter()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.Close() })
+    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
+
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    noContent := func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        return melodyhttp.EmptyResponse(nethttp.StatusNoContent), nil
+    }
+
+    requestFrom := func(path string) melodyhttpcontract.Request {
+        httpRequest := httptest.NewRequest(nethttp.MethodPost, path, nil)
+        httpRequest.RemoteAddr = "203.0.113.7:41234"
+
+        return melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("budget-test", time.Now()))
+    }
+
+    /* the address spends its whole budget on a write the module throttles, so every door behind the same budget refuses it next */
+    for attempt := 0; attempt < 30; attempt++ {
+        if _, spendErr := moduleInstance.throttledWrite(noContent)(runtimeInstance, httptest.NewRecorder(), requestFrom("/products/api/create/")); nil != spendErr {
+            t.Fatalf("attempt %d: expected the budget spent without a refusal, got %v", attempt, spendErr)
+        }
+    }
+
+    for _, path := range []string{"/messagebus/dispatch", "/outbox/enqueue", "/outbox/relay", "/storage/object", route.EventsPublishPattern} {
+        matched, found := router.Match(nethttp.MethodPost, path, "", "http")
+        if false == found {
+            t.Fatalf("expected a POST route on %s", path)
+        }
+
+        _, handlerErr := matched.Handler(runtimeInstance, httptest.NewRecorder(), requestFrom(path))
+
+        var httpException *melodyexception.HttpException
+        if false == errors.As(handlerErr, &httpException) || nethttp.StatusTooManyRequests != httpException.StatusCode() {
+            t.Fatalf("%s: expected the spent budget refused 429, got %v", path, handlerErr)
+        }
+    }
+
+    /* an address with its budget whole reaches the dispatch door, which this module, built without AMQP_DSN, answers 503 */
+    matched, _ := router.Match(nethttp.MethodPost, "/messagebus/dispatch", "", "http")
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/messagebus/dispatch", nil)
+    httpRequest.RemoteAddr = "203.0.113.8:41234"
+    response, handlerErr := matched.Handler(runtimeInstance, httptest.NewRecorder(), melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("budget-test", time.Now())))
+    if nil != handlerErr || nethttp.StatusServiceUnavailable != response.StatusCode() {
+        t.Fatalf("expected the dispatch door answered 503 without AMQP_DSN, got %v (%v)", response, handlerErr)
+    }
+}
+
+func TestBuildOutboxTransport_RefusesWithoutAmqpDsnNamingTheKey(t *testing.T) {
+    _, transportErr := moduleWithEnvironment(t, map[string]string{}).buildOutboxTransport()
+    if false == errors.Is(transportErr, message.ErrTransportNotConfigured) {
+        t.Fatalf("expected the transport refused by name without AMQP_DSN, got %v", transportErr)
+    }
+
+    transport, transportErr := moduleWithEnvironment(t, map[string]string{environmentKeyAmqpDsn: "amqp://guest:guest@rabbitmq:5672/"}).buildOutboxTransport()
+    if nil != transportErr || nil == transport {
+        t.Fatalf("expected the amqp transport with a dsn, got %v (%v)", transport, transportErr)
+    }
+    _ = transport.CloseWithContext(t.Context())
+}
+
+/* the doors registered by name and method: each name answers its pattern under its one method, as the access control, the url generator and the frontend manifest read them */
+func TestRegisterHttpRoutes_RegistersEachNamedDoorUnderItsPatternAndMethod(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.trustedProxyResolver = newTrustedProxyResolver("", time.Now)
+    moduleInstance.catalogueWired = true
+    moduleInstance.eventStreamSlots = handlerevent.NewStreamSlots(1, 1)
+
+    client, clientErr := melodyawss3.NewClient(melodyawss3.Config{Endpoint: "127.0.0.1:9", AccessKey: "test", SecretKey: "test", Region: "us-east-1", Insecure: true})
+    if nil != clientErr {
+        t.Fatalf("client: %v", clientErr)
+    }
+    moduleInstance.storage = melodyawss3.NewStorage(client, "melody-test", melodyawss3.StorageConfig{})
+
+    router := melodyhttp.NewRouter()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.Close() })
+    moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
+
+    doors := []struct {
+        name    string
+        method  string
+        pattern string
+    }{
+        {name: "example.platform.check", method: "GET", pattern: "/platform/check"},
+        {name: "example.messagebus.dispatch", method: "POST", pattern: "/messagebus/dispatch"},
+        {name: "example.encrypt.roundtrip", method: "GET", pattern: "/encrypt/roundtrip"},
+        {name: route.AccessTokenIssueName, method: "POST", pattern: route.AccessTokenIssuePattern},
+        {name: route.AccessTokenRevokeDeviceName, method: "POST", pattern: route.AccessTokenRevokeDevicePattern},
+        {name: route.AccessTokenRevokeUserName, method: "POST", pattern: route.AccessTokenRevokeUserPattern},
+        {name: route.DeviceIdentityName, method: "GET", pattern: route.DeviceIdentityPattern},
+        {name: route.LoginPageName, method: "GET", pattern: route.LoginPagePattern},
+        {name: route.SecureMeName, method: "GET", pattern: route.SecureMePattern},
+        {name: route.InternalWhoamiName, method: "POST", pattern: route.InternalWhoamiPattern},
+        {name: "example.twofactor.enroll", method: "POST", pattern: "/twofactor/enroll"},
+        {name: "example.twofactor.verify", method: "POST", pattern: "/twofactor/verify"},
+        {name: "example.outbox.enqueue", method: "POST", pattern: "/outbox/enqueue"},
+        {name: "example.outbox.relay", method: "POST", pattern: "/outbox/relay"},
+        {name: "example.outbox.status", method: "GET", pattern: "/outbox/status"},
+        {name: "example.storage.put", method: "POST", pattern: "/storage/object"},
+        {name: "example.storage.get", method: "GET", pattern: "/storage/object"},
+        {name: "example.storage.link", method: "GET", pattern: "/storage/object/link"},
+        {name: route.EventsStreamName, method: "GET", pattern: route.EventsStreamPattern},
+        {name: route.EventsPublishName, method: "POST", pattern: route.EventsPublishPattern},
+    }
+
+    for _, door := range doors {
+        definition, found := router.RouteDefinition(door.name)
+        if false == found {
+            t.Fatalf("expected a route named %s", door.name)
+        }
+
+        if strings.TrimSuffix(door.pattern, "/") != strings.TrimSuffix(definition.Pattern(), "/") {
+            t.Fatalf("%s: expected the pattern %s, got %s", door.name, door.pattern, definition.Pattern())
+        }
+
+        if 1 != len(definition.Methods()) || door.method != definition.Methods()[0] {
+            t.Fatalf("%s: expected the one method %s, got %v", door.name, door.method, definition.Methods())
+        }
+    }
+}

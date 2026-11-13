@@ -1,0 +1,200 @@
+package rueidis
+
+import (
+    "fmt"
+    "strings"
+    "testing"
+    "time"
+
+    "github.com/redis/rueidis"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodylock "github.com/precision-soft/melody/v4/lock"
+)
+
+type fakeClient struct {
+    rueidis.Client
+}
+
+type spyServiceRegistrar struct {
+    names []string
+}
+
+func (instance *spyServiceRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.names = append(instance.names, serviceName)
+}
+
+func (instance *spyServiceRegistrar) Register(serviceName string, provider any, options containercontract.RegisterOptions) error {
+    instance.RegisterService(serviceName, provider, options)
+
+    return nil
+}
+
+func (instance *spyServiceRegistrar) MustRegister(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.RegisterService(serviceName, provider, options)
+}
+
+func containsName(names []string, want string) bool {
+    for _, name := range names {
+        if want == name {
+            return true
+        }
+    }
+
+    return false
+}
+
+func TestModule_NameAndDescription(t *testing.T) {
+    module := NewModule(ModuleConfig{})
+
+    if "rueidis" != module.Name() {
+        t.Fatalf("Name() = %q, want %q", module.Name(), "rueidis")
+    }
+
+    if "" == module.Description() {
+        t.Fatal("Description() must not be empty")
+    }
+}
+
+func TestModule_AnEmptyConfigRegistersNothing(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+    NewModule(ModuleConfig{}).RegisterServices(registrar)
+    if 0 != len(registrar.names) {
+        t.Fatalf("expected no services from an empty module, got %v", registrar.names)
+    }
+}
+
+func TestModule_ARoleWithNoClientIsRefusedNamingIt(t *testing.T) {
+    expectPanicNamingField(t, "ModuleConfig.AsLocker", func() {
+        NewModule(ModuleConfig{AsLocker: true}).RegisterServices(&spyServiceRegistrar{})
+    })
+
+    expectPanicNamingField(t, "ModuleConfig.AsTokenStore", func() {
+        NewModule(ModuleConfig{AsTokenStore: true}).RegisterServices(&spyServiceRegistrar{})
+    })
+}
+
+type typedNilModuleClient struct {
+    rueidis.Client
+}
+
+func TestModule_ATypedNilClientIsNoClient(t *testing.T) {
+    var client *typedNilModuleClient
+
+    expectPanicNamingField(t, "ModuleConfig.AsLocker", func() {
+        NewModule(ModuleConfig{Client: client, AsLocker: true}).RegisterServices(&spyServiceRegistrar{})
+    })
+}
+
+func TestModule_ARolesConfigurationWithTheRoleOffIsRefusedNamingIt(t *testing.T) {
+    expectPanicNamingField(t, "ModuleConfig.Locker", func() {
+        NewModule(ModuleConfig{Locker: LockerConfig{CallTimeout: bound.Of(time.Second)}}).RegisterServices(&spyServiceRegistrar{})
+    })
+
+    expectPanicNamingField(t, "ModuleConfig.TokenStore", func() {
+        NewModule(ModuleConfig{TokenStore: TokenStoreConfig{Prefix: "app:"}}).RegisterServices(&spyServiceRegistrar{})
+    })
+}
+
+func TestModule_RegisterServicesClientOnly(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+    NewModule(ModuleConfig{Client: fakeClient{}}).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceClient) {
+        t.Fatalf("expected the client service, got %v", registrar.names)
+    }
+    if true == containsName(registrar.names, melodylock.ServiceLocker) || true == containsName(registrar.names, ServiceTokenStore) {
+        t.Fatalf("expected only the client service without the flags, got %v", registrar.names)
+    }
+}
+
+func TestModule_RegisterServicesAllEnabled(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+    NewModule(ModuleConfig{Client: fakeClient{}, AsLocker: true, AsTokenStore: true}).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceClient) {
+        t.Fatalf("expected the client service, got %v", registrar.names)
+    }
+    if false == containsName(registrar.names, melodylock.ServiceLocker) {
+        t.Fatalf("expected the locker service, got %v", registrar.names)
+    }
+    if false == containsName(registrar.names, ServiceTokenStore) {
+        t.Fatalf("expected the token store service, got %v", registrar.names)
+    }
+}
+
+func TestModule_RegisterServicesRegistersTheConnectionOwner(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+    client := fakeClient{}
+
+    NewModule(ModuleConfig{Client: client, Connection: NewConnection(client)}).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceConnection) {
+        t.Fatalf("expected the connection owner service, got %v", registrar.names)
+    }
+
+    if false == containsName(registrar.names, ServiceClient) {
+        t.Fatalf("expected the client service beside the owner, got %v", registrar.names)
+    }
+}
+
+/* handing in only the Connection is enough: the client is read off it, so the composition root does not have to carry both */
+func TestModule_RegisterServicesDerivesTheClientFromTheConnection(t *testing.T) {
+    registrar := &spyServiceRegistrar{}
+
+    NewModule(ModuleConfig{Connection: NewConnection(fakeClient{})}).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceClient) {
+        t.Fatalf("expected the client service derived from the connection, got %v", registrar.names)
+    }
+}
+
+func TestModule_RegisterServicesForwardsTheLockerConfig(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    registrar := &containerRegistrar{target: serviceContainer}
+
+    NewModule(ModuleConfig{
+        Client:   fakeClient{},
+        AsLocker: true,
+        Locker:   LockerConfig{CallTimeout: bound.Of(750 * time.Millisecond)},
+    }).RegisterServices(registrar)
+
+    locker := melodylock.LockerMustFromContainer(t.Context(), serviceContainer).(*Locker)
+    if 750*time.Millisecond != locker.callTimeout {
+        t.Fatalf("expected the module to hand its locker config to the registered locker, got %v", locker.callTimeout)
+    }
+}
+
+func TestModule_ARefusedLockerOrTokenStoreConfigFailsRegistration(t *testing.T) {
+    expectPanicNamingField(t, "LockerConfig.CallTimeout", func() {
+        NewModule(ModuleConfig{Client: fakeClient{}, AsLocker: true, Locker: LockerConfig{CallTimeout: bound.UnlimitedDuration()}}).RegisterServices(&spyServiceRegistrar{})
+    })
+
+    expectPanicNamingField(t, "TokenStoreConfig.ScanCount", func() {
+        NewModule(ModuleConfig{Client: fakeClient{}, AsTokenStore: true, TokenStore: TokenStoreConfig{ScanCount: bound.Of(0)}}).RegisterServices(&spyServiceRegistrar{})
+    })
+}
+
+func TestModule_AClientAndAConnectionOverDifferentClientsAreRefusedAtRegistration(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if nil == recovered || false == strings.Contains(fmt.Sprintf("%v", recovered), "Client and Connection name different clients") {
+            t.Fatalf("expected the mismatched pair refused by name, got %v", recovered)
+        }
+    }()
+
+    NewModule(ModuleConfig{Client: &stubClient{}, Connection: NewConnection(&stubClient{})}).RegisterServices(&spyServiceRegistrar{})
+}
+
+func TestModule_AClientAndTheConnectionThatWrapsItAreAdmitted(t *testing.T) {
+    client := &stubClient{}
+    registrar := &spyServiceRegistrar{}
+
+    NewModule(ModuleConfig{Client: client, Connection: NewConnection(client)}).RegisterServices(registrar)
+
+    if false == containsName(registrar.names, ServiceConnection) || false == containsName(registrar.names, ServiceClient) {
+        t.Fatalf("expected the pair registered, got %v", registrar.names)
+    }
+}
