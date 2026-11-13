@@ -1353,7 +1353,7 @@ func resolveDefault(
     return parameterValue(configuration, parameterName)
 }
 
-/* resolveDefaultPath is resolveDefault for a path: a relative path from a parameter is anchored at the project directory, as melody anchors MELODY_LOG_PATH, kernel.logs_dir and kernel.cache_dir, while one typed as a cli flag stays relative to the working directory the shell resolves it against. */
+/* resolveDefaultPath is resolveDefault for a path: a relative path from a parameter is anchored at the project directory, as melody anchors MELODY_LOG_PATH, kernel.logs_directory and kernel.cache_directory, while one typed as a cli flag stays relative to the working directory the shell resolves it against. */
 func resolveDefaultPath(
     commandContext *clicontract.CommandContext,
     configuration configcontract.Configuration,
@@ -1406,7 +1406,7 @@ func anchorConfiguredPath(value string, configuration configcontract.Configurati
         return value
     }
 
-    projectDirectory := kernelConfiguration.ProjectDir()
+    projectDirectory := kernelConfiguration.ProjectDirectory()
     if "" == projectDirectory {
         return value
     }

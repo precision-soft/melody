@@ -169,7 +169,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
         melodysecurity.NewSegmentPrefixMatcher(route.InternalPrefix),
         melodysecurity.NewHmacTokenSource(melodysecurity.HmacTokenSourceConfig{
             Secrets:         instance.hmacSecrets,
-            Apps:            instance.hmacApps,
+            Applications:    instance.hmacApplications,
             MaxFutureExpiry: bound.Of(internalEnvelopeMaxFutureExpiry),
             NonceGuard:      instance.internalNonceGuard(),
         }),

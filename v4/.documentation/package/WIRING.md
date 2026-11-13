@@ -84,7 +84,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 
 ## Footguns & caveats
 
-- The scan is directory-relative to the **project directory** the running application reports (`kernel.project_dir`), the same directory `--out` writes into; the declared directories are plain paths joined onto it.
+- The scan is directory-relative to the **project directory** the running application reports (`kernel.project_directory`), the same directory `--out` writes into; the declared directories are plain paths joined onto it.
 - The scanned directories must not include the package the generated file is written into, or the generated file would import its own package — the command refuses an `--out` inside a scanned directory for exactly this reason, reading the containment on path components (a directory named `..hidden` inside the scanned one is inside it) and refusing an output path it cannot relate to a scanned directory rather than reading the failed relation as outside.
 - A constructor whose scalar argument narrows the accessor's widest type (a `uint8`, a `byte`) is range-guarded in the generated provider, so an out-of-range parameter is an error naming the parameter rather than a silent wrap.
 - The generated file opens with the `// Code generated ... DO NOT EDIT.` marker Go tooling recognizes; edit the constructors and regenerate, never the generated file. The command replaces only a file opening with that marker (or an absent or empty one) — a mistyped `--out` pointing at a hand-written file is refused — and the write lands through a temp file and a rename, so an interrupted run leaves the previous file intact.

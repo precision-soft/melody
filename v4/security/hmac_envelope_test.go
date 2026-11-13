@@ -13,20 +13,20 @@ func hmacEnvelopeProbeSecrets() *StaticHmacSecretProvider {
     return NewStaticHmacSecretProvider(HmacKeyRing{
         CurrentKeyId: "key-current",
         Keys: map[string]HmacKey{
-            "key-current": {App: "billing", Secret: []byte("current-shared-secret-value-0001")},
+            "key-current": {Application: "billing", Secret: []byte("current-shared-secret-value-0001")},
         },
     })
 }
 
 func hmacEnvelopeProbe() hmacEnvelope {
     return hmacEnvelope{
-        App:       "billing",
-        Method:    "GET",
-        Path:      "/orders",
-        IssuedAt:  1000,
-        ExpiresAt: 1030,
-        Nonce:     "nonce-1",
-        BodyHash:  hashBody(nil),
+        Application: "billing",
+        Method:      "GET",
+        Path:        "/orders",
+        IssuedAt:    1000,
+        ExpiresAt:   1030,
+        Nonce:       "nonce-1",
+        BodyHash:    hashBody(nil),
     }
 }
 
@@ -196,12 +196,39 @@ func TestDecodeHmacHeaderValue_RefusesASignatureOverOtherContent(t *testing.T) {
     otherSecrets := NewStaticHmacSecretProvider(HmacKeyRing{
         CurrentKeyId: "key-current",
         Keys: map[string]HmacKey{
-            "key-current": {App: "billing", Secret: []byte("another-shared-secret-value-002-padded-to-the-hs256-minimum")},
+            "key-current": {Application: "billing", Secret: []byte("another-shared-secret-value-002-padded-to-the-hs256-minimum")},
         },
     })
 
     _, _, otherKeyErr := decodeHmacHeaderValue(valid, otherSecrets, minimumHmacSha256SecretLength)
     if nil == otherKeyErr || false == strings.Contains(otherKeyErr.Error(), "internal-auth signature mismatch") {
         t.Fatalf("expected a signature mismatch under another secret, got %v", otherKeyErr)
+    }
+}
+
+func TestHmacEnvelope_TheWireFieldOfTheApplicationIsApp(t *testing.T) {
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "wms-service", Secrets: hmacTestSecrets()})
+    headerValue, signErr := signer.Sign("GET", "/internal/ping", nil, nil)
+    if nil != signErr {
+        t.Fatalf("expected the envelope to sign, got %v", signErr)
+    }
+
+    parts := strings.Split(headerValue, ".")
+    if 3 != len(parts) {
+        t.Fatalf("expected three parts, got %d", len(parts))
+    }
+
+    payloadBytes, decodeErr := base64.RawURLEncoding.DecodeString(parts[1])
+    if nil != decodeErr {
+        t.Fatalf("expected a base64url payload, got %v", decodeErr)
+    }
+
+    payload := map[string]any{}
+    if unmarshalErr := json.Unmarshal(payloadBytes, &payload); nil != unmarshalErr {
+        t.Fatalf("expected a json payload, got %v", unmarshalErr)
+    }
+
+    if "wms-service" != payload["app"] {
+        t.Fatalf("expected the application on the wire under app, so a third-major peer reads it, got %v", payload)
     }
 }

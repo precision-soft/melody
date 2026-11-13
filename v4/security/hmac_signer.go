@@ -16,8 +16,8 @@ import (
 
 /* HmacEnvelopeSignerConfig configures the client side of the internal-auth scheme, which a calling service uses to sign a request its callee's HmacTokenSource accepts. */
 type HmacEnvelopeSignerConfig struct {
-    /* App is the calling application's own name, recorded in the envelope and matched against the callee's app registry. */
-    App string
+    /* Application is the calling application's own name, recorded in the envelope and matched against the callee's application registry. */
+    Application string
 
     Secrets HmacSecretProvider
 
@@ -51,21 +51,21 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
 
     minimumSecretLength := resolveMinimumSecretLength(config.MinimumSecretLength, "HmacEnvelopeSignerConfig.MinimumSecretLength")
 
-    if "" == config.App {
-        exception.Panic(exception.NewError("hmac signer app is empty", nil, nil))
+    if "" == config.Application {
+        exception.Panic(exception.NewError("hmac signer application is empty", nil, nil))
     }
 
     if true == internal.IsNilInterface(config.Secrets) {
         exception.Panic(exception.NewError("hmac signer secrets provider is nil", nil, nil))
     }
 
-    /* the signer's current key must be issued to the app it signs for, since the verifier refuses any other */
+    /* the signer's current key must be issued to the application it signs for, since the verifier refuses any other */
     currentKeyId := config.Secrets.CurrentKeyId()
-    if boundApp, keyBound := config.Secrets.AppForKeyId(currentKeyId); false == keyBound || boundApp != config.App {
+    if boundApplication, keyBound := config.Secrets.ApplicationForKeyId(currentKeyId); false == keyBound || boundApplication != config.Application {
         exception.Panic(
             exception.NewError(
-                "hmac signer current key id is not bound to the signer app",
-                map[string]any{"keyId": currentKeyId, "signerApp": config.App, "boundApp": boundApp},
+                "hmac signer current key id is not bound to the signer application",
+                map[string]any{"keyId": currentKeyId, "signerApplication": config.Application, "boundApplication": boundApplication},
                 nil,
             ),
         )
@@ -90,7 +90,7 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
     }
 
     return &HmacEnvelopeSigner{
-        app:                 config.App,
+        application:         config.Application,
         secrets:             config.Secrets,
         headerName:          headerName,
         ttl:                 ttl.Value,
@@ -101,7 +101,7 @@ func NewHmacEnvelopeSigner(config HmacEnvelopeSignerConfig) *HmacEnvelopeSigner 
 }
 
 type HmacEnvelopeSigner struct {
-    app                 string
+    application         string
     secrets             HmacSecretProvider
     headerName          string
     ttl                 time.Duration
@@ -148,16 +148,16 @@ func (instance *HmacEnvelopeSigner) Sign(
     signedPath, signedQuery, _ := strings.Cut(path, "?")
 
     envelope := hmacEnvelope{
-        App:       instance.app,
-        Audience:  instance.audience,
-        Method:    method,
-        Path:      signedPath,
-        Query:     signedQuery,
-        IssuedAt:  now.Unix(),
-        ExpiresAt: now.Add(instance.ttl).Unix(),
-        Nonce:     nonce,
-        BodyHash:  hashBody(body),
-        Actor:     ActorToData(actor),
+        Application: instance.application,
+        Audience:    instance.audience,
+        Method:      method,
+        Path:        signedPath,
+        Query:       signedQuery,
+        IssuedAt:    now.Unix(),
+        ExpiresAt:   now.Add(instance.ttl).Unix(),
+        Nonce:       nonce,
+        BodyHash:    hashBody(body),
+        Actor:       ActorToData(actor),
     }
 
     return encodeHmacHeaderValue(keyId, envelope, secret)

@@ -501,14 +501,14 @@ func TestLocalStorage_NegativeSizeMeansUnknownAndSkipsTheLengthCheck(t *testing.
     }
 }
 
-/* the reserved temp name is spelled here from the digest rather than read from the helper, so a change to the namespace fails this file instead of moving with it */
-func reservedTempName(leaf string, randomPart string) string {
+/* the reserved temporary name is spelled here from the digest rather than read from the helper, so a change to the namespace fails this file instead of moving with it */
+func reservedTemporaryName(leaf string, randomPart string) string {
     digest := sha256.Sum256([]byte(leaf))
 
     return ".melody-storage-" + hex.EncodeToString(digest[:]) + "." + randomPart + ".tmp"
 }
 
-func TestLocalStorage_PutSweepsStaleTempObjectsAndKeepsLiveOnes(t *testing.T) {
+func TestLocalStorage_PutSweepsStaleTemporaryObjectsAndKeepsLiveOnes(t *testing.T) {
     baseDirectory := t.TempDir()
     storage := NewLocalStorage(baseDirectory, LocalStorageConfig{})
     runtimeInstance := testRuntime()
@@ -533,23 +533,23 @@ func TestLocalStorage_PutSweepsStaleTempObjectsAndKeepsLiveOnes(t *testing.T) {
     }
 
     /* a crash mid-write leaves this shape behind, which nothing sweeps but a later Put of the same key */
-    staleTemp := plant(reservedTempName("report.txt", "00112233445566aa"), "orphan", true)
-    /* a fresh temp is a concurrent writer still at work */
-    freshTemp := plant(reservedTempName("report.txt", "ffeeddccbbaa9988"), "in flight", false)
-    /* a stale temp of another key is that key's to sweep, and only that key's */
-    otherKeyTemp := plant(reservedTempName("invoice.txt", "00112233445566aa"), "orphan of another key", true)
-    /* an ordinary key that reads like a temp name is an object the application stored */
+    staleTemporary := plant(reservedTemporaryName("report.txt", "00112233445566aa"), "orphan", true)
+    /* a fresh temporary is a concurrent writer still at work */
+    freshTemporary := plant(reservedTemporaryName("report.txt", "ffeeddccbbaa9988"), "in flight", false)
+    /* a stale temporary of another key is that key's to sweep, and only that key's */
+    otherKeyTemporary := plant(reservedTemporaryName("invoice.txt", "00112233445566aa"), "orphan of another key", true)
+    /* an ordinary key that reads like a temporary name is an object the application stored */
     lookalikeKey := plant("report.txt.tmp-00112233445566aa", "application data", true)
-    reservedButNotGenerated := plant(reservedTempName("report.txt", "notahexsuffix!!!"), "operator data", true)
+    reservedButNotGenerated := plant(reservedTemporaryName("report.txt", "notahexsuffix!!!"), "operator data", true)
 
     if putErr := storage.Put(runtimeInstance, "invoice.txt", strings.NewReader("invoice"), -1, storagecontract.PutOptions{}); nil != putErr {
         t.Fatalf("unexpected put error: %v", putErr)
     }
 
-    if _, statErr := os.Stat(otherKeyTemp); false == os.IsNotExist(statErr) {
+    if _, statErr := os.Stat(otherKeyTemporary); false == os.IsNotExist(statErr) {
         t.Fatalf("expected the stale temp of the other key to be swept by its own Put, stat answered %v", statErr)
     }
-    if _, statErr := os.Stat(staleTemp); nil != statErr {
+    if _, statErr := os.Stat(staleTemporary); nil != statErr {
         t.Fatalf("expected the stale temp of report.txt to survive a Put of another key: %v", statErr)
     }
 
@@ -557,11 +557,11 @@ func TestLocalStorage_PutSweepsStaleTempObjectsAndKeepsLiveOnes(t *testing.T) {
         t.Fatalf("unexpected put error: %v", putErr)
     }
 
-    if _, statErr := os.Stat(staleTemp); false == os.IsNotExist(statErr) {
+    if _, statErr := os.Stat(staleTemporary); false == os.IsNotExist(statErr) {
         t.Fatalf("expected the stale temp to be swept, stat answered %v", statErr)
     }
 
-    for _, survivor := range []string{freshTemp, lookalikeKey, reservedButNotGenerated} {
+    for _, survivor := range []string{freshTemporary, lookalikeKey, reservedButNotGenerated} {
         if _, statErr := os.Stat(survivor); nil != statErr {
             t.Fatalf("expected %s to survive the sweep: %v", filepath.Base(survivor), statErr)
         }
@@ -578,7 +578,7 @@ func TestNewLocalStorage_RefusesAFieldOutsideItsRuleByName(t *testing.T) {
         config LocalStorageConfig
         field  string
     }{
-        "stale age below 1s":    {LocalStorageConfig{TempStaleAge: bound.Of(time.Millisecond)}, "LocalStorageConfig.TempStaleAge"},
+        "stale age below 1s":    {LocalStorageConfig{TemporaryStaleAge: bound.Of(time.Millisecond)}, "LocalStorageConfig.TemporaryStaleAge"},
         "sweep batch zero":      {LocalStorageConfig{SweepBatchSize: bound.Of(0)}, "LocalStorageConfig.SweepBatchSize"},
         "sweep batch unlimited": {LocalStorageConfig{SweepBatchSize: bound.UnlimitedCount()}, "LocalStorageConfig.SweepBatchSize"},
     }
@@ -603,8 +603,8 @@ func TestLocalStorage_TheConfiguredStaleAgeDecidesWhatIsSwept(t *testing.T) {
     }{
         "default, two seconds": {LocalStorageConfig{}, 2 * time.Second, false},
         "default, two hours":   {LocalStorageConfig{}, 2 * time.Hour, true},
-        "one second":           {LocalStorageConfig{TempStaleAge: bound.Of(time.Second)}, 2 * time.Second, true},
-        "unlimited, two hours": {LocalStorageConfig{TempStaleAge: bound.UnlimitedDuration()}, 2 * time.Hour, false},
+        "one second":           {LocalStorageConfig{TemporaryStaleAge: bound.Of(time.Second)}, 2 * time.Second, true},
+        "unlimited, two hours": {LocalStorageConfig{TemporaryStaleAge: bound.UnlimitedDuration()}, 2 * time.Hour, false},
     }
 
     for name, testCase := range cases {
@@ -612,7 +612,7 @@ func TestLocalStorage_TheConfiguredStaleAgeDecidesWhatIsSwept(t *testing.T) {
             baseDirectory := t.TempDir()
             storage := NewLocalStorage(baseDirectory, testCase.config)
 
-            planted := filepath.Join(baseDirectory, reservedTempName("report.txt", "00112233445566aa"))
+            planted := filepath.Join(baseDirectory, reservedTemporaryName("report.txt", "00112233445566aa"))
             if writeErr := os.WriteFile(planted, []byte("orphan"), 0o640); nil != writeErr {
                 t.Fatalf("could not plant the temp: %v", writeErr)
             }
@@ -633,13 +633,13 @@ func TestLocalStorage_TheConfiguredStaleAgeDecidesWhatIsSwept(t *testing.T) {
     }
 }
 
-func TestLocalStorage_PutSweepsEveryStaleTempObjectOfADirectoryReadInBatches(t *testing.T) {
+func TestLocalStorage_PutSweepsEveryStaleTemporaryObjectOfADirectoryReadInBatches(t *testing.T) {
     for _, config := range []LocalStorageConfig{{}, {SweepBatchSize: bound.Of(2)}} {
-        assertPutSweepsEveryStaleTempObjectReadInBatches(t, config)
+        assertPutSweepsEveryStaleTemporaryObjectReadInBatches(t, config)
     }
 }
 
-func assertPutSweepsEveryStaleTempObjectReadInBatches(t *testing.T, config LocalStorageConfig) {
+func assertPutSweepsEveryStaleTemporaryObjectReadInBatches(t *testing.T, config LocalStorageConfig) {
     baseDirectory := t.TempDir()
     storage := NewLocalStorage(baseDirectory, config)
     runtimeInstance := testRuntime()
@@ -653,7 +653,7 @@ func assertPutSweepsEveryStaleTempObjectReadInBatches(t *testing.T, config Local
     staleInstant := time.Now().Add(-2 * time.Hour)
     staleTemps := make([]string, 0, 8)
     for index := 0; index < 8; index++ {
-        planted := filepath.Join(baseDirectory, reservedTempName("report.txt", fmt.Sprintf("%016x", index)))
+        planted := filepath.Join(baseDirectory, reservedTemporaryName("report.txt", fmt.Sprintf("%016x", index)))
         if writeErr := os.WriteFile(planted, []byte("orphan"), 0o640); nil != writeErr {
             t.Fatalf("could not plant temp %d: %v", index, writeErr)
         }
@@ -669,9 +669,9 @@ func assertPutSweepsEveryStaleTempObjectReadInBatches(t *testing.T, config Local
     }
     t.Logf("put over %d objects took %v", 5*storageSweepBatchSize+8, time.Since(startedAt))
 
-    for _, staleTemp := range staleTemps {
-        if _, statErr := os.Stat(staleTemp); false == os.IsNotExist(statErr) {
-            t.Fatalf("expected %s swept wherever its batch fell, stat answered %v", filepath.Base(staleTemp), statErr)
+    for _, staleTemporary := range staleTemps {
+        if _, statErr := os.Stat(staleTemporary); false == os.IsNotExist(statErr) {
+            t.Fatalf("expected %s swept wherever its batch fell, stat answered %v", filepath.Base(staleTemporary), statErr)
         }
     }
 
@@ -680,11 +680,11 @@ func assertPutSweepsEveryStaleTempObjectReadInBatches(t *testing.T, config Local
     }
 }
 
-func TestLocalStorage_RefusesAKeySpelledLikeAReservedTempObject(t *testing.T) {
+func TestLocalStorage_RefusesAKeySpelledLikeAReservedTemporaryObject(t *testing.T) {
     storage := NewLocalStorage(t.TempDir(), LocalStorageConfig{})
     runtimeInstance := testRuntime()
 
-    reservedKey := "sub/" + reservedTempName("report.txt", "00112233445566aa")
+    reservedKey := "sub/" + reservedTemporaryName("report.txt", "00112233445566aa")
     if putErr := storage.Put(runtimeInstance, reservedKey, strings.NewReader("user data"), -1, storagecontract.PutOptions{}); nil == putErr || false == strings.Contains(putErr.Error(), "reserved .melody-storage- namespace") {
         t.Fatalf("expected a key spelled like a reserved temp object to be refused, got %v", putErr)
     }
@@ -692,14 +692,14 @@ func TestLocalStorage_RefusesAKeySpelledLikeAReservedTempObject(t *testing.T) {
         t.Fatalf("expected Exists to refuse the reserved spelling too")
     }
 
-    for _, ordinaryKey := range []string{".melody-storage-notes.txt", reservedTempName("report.txt", "notahexsuffix!!!"), "report.txt.tmp-00112233445566aa"} {
+    for _, ordinaryKey := range []string{".melody-storage-notes.txt", reservedTemporaryName("report.txt", "notahexsuffix!!!"), "report.txt.tmp-00112233445566aa"} {
         if putErr := storage.Put(runtimeInstance, ordinaryKey, strings.NewReader("user data"), -1, storagecontract.PutOptions{}); nil != putErr {
             t.Fatalf("expected the ordinary key %q to be stored, got %v", ordinaryKey, putErr)
         }
     }
 }
 
-/* a leaf of 255 bytes is the longest a filesystem component admits; the temp object beside it must fit the same component */
+/* a leaf of 255 bytes is the longest a filesystem component admits; the temporary object beside it must fit the same component */
 func TestLocalStorage_PutStoresAKeyWhoseLeafFillsTheFilesystemComponent(t *testing.T) {
     baseDirectory := t.TempDir()
     storage := NewLocalStorage(baseDirectory, LocalStorageConfig{})
@@ -805,7 +805,7 @@ func TestLocalStorage_PutStopsReadingOneBytePastTheDeclaredSize(t *testing.T) {
     }
 }
 
-/* a nil reader is refused by name before anything is created, so neither a temp object nor a directory is left behind */
+/* a nil reader is refused by name before anything is created, so neither a temporary object nor a directory is left behind */
 func TestLocalStorage_PutRefusesANilReaderBeforeCreatingAnything(t *testing.T) {
     base := filepath.Join(t.TempDir(), "base")
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -905,7 +905,7 @@ func TestLocalStorage_AKeyUnderARegularFileIsAbsent(t *testing.T) {
     }
 }
 
-/* removingDirectoryReader removes a directory once it is read, standing in for a temp object or its directory removed under a short write */
+/* removingDirectoryReader removes a directory once it is read, standing in for a temporary object or its directory removed under a short write */
 type removingDirectoryReader struct {
     directory string
     done      bool
@@ -924,7 +924,7 @@ func (instance *removingDirectoryReader) Read(buffer []byte) (int, error) {
     return 1, nil
 }
 
-/* a temp object lost on a write far shorter than the stale age was not swept: the error says it is gone, and does not claim the sweep */
+/* a temporary object lost on a write far shorter than the stale age was not swept: the error says it is gone, and does not claim the sweep */
 func TestLocalStorage_ATempLostOnAShortWriteIsNotBlamedOnTheSweep(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})

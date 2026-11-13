@@ -134,7 +134,7 @@ cronConfiguration := cron.NewConfiguration().
         User:     productUser,
         Timeout:  5 * time.Minute,
     }).
-    Schedule(cron.CommandName(cli.NewAppInfoCommand), &cron.EntryConfig{
+    Schedule(cron.CommandName(cli.NewApplicationInformationCommand), &cron.EntryConfig{
         Schedule: &cron.Schedule{Minute: "*", Hour: "*"},
     })
 ```
@@ -154,7 +154,7 @@ It only:
 
 - declares the application's version to every command document and to `--version` (`ApplicationConfig.Version`)
 - constructs the Melody application using:
-    - `embeddedEnvFiles` (from `embedded_env_*`)
+    - `embeddedEnvironmentFiles` (from `embedded_env_*`)
     - `embeddedPublicFiles` (from `embedded_static_*`)
 - calls `config.Configure(ctx, app, applicationVersion)`
 - boots the application, resolves the boot services (`config.ResolveBootServices`, a refusal closing the application before the process exits); the boot refuses a declared teardown dependency that names no service, since the teardown closes in waves

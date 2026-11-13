@@ -24,15 +24,15 @@ func newStaticFileServerConfig(
 ) static.Config {
     _ = embeddedPublicFiles
 
-    refuseAnExplicitPublicDirThatIsNotADirectory(configuration)
+    refuseAnExplicitPublicDirectoryThatIsNotADirectory(configuration)
 
     staticConfig := static.Config{
         Mode:             static.ModeFilesystem,
-        PublicDir:        configuration.Http().PublicDir(),
+        PublicDirectory:  configuration.Http().PublicDirectory(),
         IndexFile:        configuration.Http().StaticIndexFile(),
         CacheDisabled:    false == configuration.Http().StaticEnableCache(),
         ExcludedPathList: configuration.Http().StaticExcludedPaths(),
-        Root:             configuration.Kernel().ProjectDir(),
+        Root:             configuration.Kernel().ProjectDirectory(),
     }
 
     /* the file server refuses a max age beside CacheDisabled */
@@ -44,27 +44,27 @@ func newStaticFileServerConfig(
 }
 
 /* the default may be absent, an application with no assets; one the environment names is meant to be served */
-func refuseAnExplicitPublicDirThatIsNotADirectory(configuration configcontract.Configuration) {
+func refuseAnExplicitPublicDirectoryThatIsNotADirectory(configuration configcontract.Configuration) {
     /* a configuration that does not carry the key has no explicit value to refuse */
-    parameter := configuration.Get(config.KernelPublicDir)
+    parameter := configuration.Get(config.KernelPublicDirectory)
     if true == internal.IsNilInterface(parameter) || true == parameter.IsDefault() {
         return
     }
 
     /* resolved as the file server resolves it */
-    publicDir := strings.TrimSpace(configuration.Http().PublicDir())
-    if "" == publicDir {
-        publicDir = "public"
+    publicDirectory := strings.TrimSpace(configuration.Http().PublicDirectory())
+    if "" == publicDirectory {
+        publicDirectory = "public"
     }
 
-    if false == filepath.IsAbs(publicDir) {
-        publicDir = filepath.Join(configuration.Kernel().ProjectDir(), publicDir)
+    if false == filepath.IsAbs(publicDirectory) {
+        publicDirectory = filepath.Join(configuration.Kernel().ProjectDirectory(), publicDirectory)
     }
 
-    publicDirInfo, publicDirErr := os.Stat(publicDir)
-    if nil != publicDirErr {
+    publicDirectoryInfo, publicDirectoryErr := os.Stat(publicDirectory)
+    if nil != publicDirectoryErr {
         message := "the public directory cannot be read"
-        if true == errors.Is(publicDirErr, fs.ErrNotExist) {
+        if true == errors.Is(publicDirectoryErr, fs.ErrNotExist) {
             message = "the public directory does not exist"
         }
 
@@ -72,21 +72,21 @@ func refuseAnExplicitPublicDirThatIsNotADirectory(configuration configcontract.C
             exception.NewError(
                 message,
                 exceptioncontract.Context{
-                    "environmentKey": config.PublicDirKey,
-                    "publicDir":      publicDir,
+                    "environmentKey":  config.PublicDirectoryKey,
+                    "publicDirectory": publicDirectory,
                 },
-                publicDirErr,
+                publicDirectoryErr,
             ),
         )
     }
 
-    if false == publicDirInfo.IsDir() {
+    if false == publicDirectoryInfo.IsDir() {
         exception.Panic(
             exception.NewError(
                 "the public directory is a file",
                 exceptioncontract.Context{
-                    "environmentKey": config.PublicDirKey,
-                    "publicDir":      publicDir,
+                    "environmentKey":  config.PublicDirectoryKey,
+                    "publicDirectory": publicDirectory,
                 },
                 nil,
             ),

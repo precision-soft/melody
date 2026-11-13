@@ -51,7 +51,7 @@ const DefaultHttpShutdownTimeout = 5 * time.Second
 func newHttpConfiguration(
     address string,
     defaultLocale string,
-    publicDir string,
+    publicDirectory string,
     staticIndexFile string,
     maxRequestBodyBytes bound.Resolved[int],
     staticEnableCache bool,
@@ -80,7 +80,7 @@ func newHttpConfiguration(
     httpConfigurationInstance := &httpConfiguration{
         address:                   address,
         defaultLocale:             defaultLocale,
-        publicDir:                 publicDir,
+        publicDirectory:           publicDirectory,
         staticIndexFile:           staticIndexFile,
         maxRequestBodyBytes:       maxRequestBodyBytes,
         staticEnableCache:         staticEnableCache,
@@ -104,7 +104,7 @@ func newHttpConfiguration(
 type httpConfiguration struct {
     address                   string
     defaultLocale             string
-    publicDir                 string
+    publicDirectory           string
     staticIndexFile           string
     maxRequestBodyBytes       bound.Resolved[int]
     staticEnableCache         bool
@@ -136,8 +136,8 @@ func (instance *httpConfiguration) DefaultLocale() string {
     return instance.defaultLocale
 }
 
-func (instance *httpConfiguration) PublicDir() string {
-    return instance.publicDir
+func (instance *httpConfiguration) PublicDirectory() string {
+    return instance.publicDirectory
 }
 
 func (instance *httpConfiguration) StaticIndexFile() string {
@@ -225,9 +225,9 @@ func (instance *httpConfiguration) validate() error {
         return validateDefaultLocaleErr
     }
 
-    validatePublicDirErr := instance.validatePublicDir()
-    if nil != validatePublicDirErr {
-        return validatePublicDirErr
+    validatePublicDirectoryErr := instance.validatePublicDirectory()
+    if nil != validatePublicDirectoryErr {
+        return validatePublicDirectoryErr
     }
 
     validateStaticIndexFileErr := instance.validateStaticIndexFile()
@@ -305,17 +305,17 @@ func (instance *httpConfiguration) validateDefaultLocale() error {
     return nil
 }
 
-func (instance *httpConfiguration) validatePublicDir() error {
-    publicDir := instance.publicDir
-    if "" == publicDir {
+func (instance *httpConfiguration) validatePublicDirectory() error {
+    publicDirectory := instance.publicDirectory
+    if "" == publicDirectory {
         return exception.NewError("public directory may not be empty", nil, nil)
     }
 
-    if true == strings.Contains(publicDir, "..") {
+    if true == strings.Contains(publicDirectory, "..") {
         return exception.NewError(
             "public directory is invalid",
             exceptioncontract.Context{
-                "publicDir": publicDir,
+                "publicDirectory": publicDirectory,
             },
             nil,
         )

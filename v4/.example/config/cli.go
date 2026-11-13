@@ -19,7 +19,7 @@ import (
 /* RegisterCliCommands contributes only the application's own commands; the core melody commands are auto-registered by the framework once their services are configured, and melody:outbox:relay comes from the outbox module. */
 func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.Kernel) []melodyclicontract.Command {
     commands := []melodyclicontract.Command{
-        cli.NewAppInfoCommand(),
+        cli.NewApplicationInformationCommand(),
         cli.NewCatalogReportRefreshCommand(),
         cli.NewCurrencyRefreshRatesCommand(),
         cli.NewProductListCommand(),
@@ -28,7 +28,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
             instance.messageBusConsume,
             instance.messageBusTransport,
         ),
-        cli.NewAuthTokenCommand(instance.jwtSecret),
+        cli.NewAuthenticationTokenCommand(instance.jwtSecret),
         cli.NewInternalSignCommand(instance.internalAuthSigner),
         cli.NewTotpCodeCommand(),
         cli.NewMailSendCommand(instance.mailer),

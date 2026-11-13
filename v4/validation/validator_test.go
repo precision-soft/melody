@@ -271,6 +271,10 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
         if ErrorInvalidRuleSyntax != validationError.Code() {
             t.Fatalf("expected a malformed numeric parameter to fail closed with code %q, got %q", ErrorInvalidRuleSyntax, validationError.Code())
         }
+
+        if nil == validationError.Context()["parameters"] {
+            t.Fatalf("expected the refused rule's parameters under parameters, got %v", validationError.Context())
+        }
     }
 
     /* a fractional bound is refused whole, not truncated: 3.9 read as 3 silently enforced a bound the tag does not declare, and on lessThan a truncated negative bound accepted values the tag as written refuses */
@@ -413,7 +417,7 @@ func TestValidator_Validate_TypedNilPointer_ReturnsEmptyWithoutPanic(t *testing.
     requireNoValidationErrors(t, err)
 }
 
-func TestValidator_RegexConstraint_WithPatternParam(t *testing.T) {
+func TestValidator_RegexConstraint_WithPatternParameter(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
     err := validatorInstance.Validate(payloadWithRegex{Value: "zzz"})
@@ -524,10 +528,10 @@ func (instance *betweenLengthConstraint) Validate(value any, field string) valid
     return nil
 }
 
-func (instance *betweenLengthConstraint) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+func (instance *betweenLengthConstraint) WithParameters(parameters map[string]string) (validationcontract.Constraint, error) {
     configured := &betweenLengthConstraint{min: instance.min, max: instance.max}
 
-    if valueString, exists := params["min"]; true == exists {
+    if valueString, exists := parameters["min"]; true == exists {
         parsed, ok := parseIntStrict(valueString)
         if false == ok {
             return nil, exception.NewError("invalid between min parameter", nil, nil)
@@ -535,7 +539,7 @@ func (instance *betweenLengthConstraint) WithParams(params map[string]string) (v
         configured.min = parsed
     }
 
-    if valueString, exists := params["max"]; true == exists {
+    if valueString, exists := parameters["max"]; true == exists {
         parsed, ok := parseIntStrict(valueString)
         if false == ok {
             return nil, exception.NewError("invalid between max parameter", nil, nil)
@@ -556,11 +560,11 @@ type payloadWithBetween struct {
     Code string `json:"code" validate:"betweenLength(min=2,max=3)"`
 }
 
-type payloadWithRigidParams struct {
+type payloadWithRigidParameters struct {
     Code string `json:"code" validate:"rigid(strictness=high)"`
 }
 
-func TestValidator_CustomParameterizedConstraintConsumesParams(t *testing.T) {
+func TestValidator_CustomParameterizedConstraintConsumesParameters(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
     validatorInstance.RegisterConstraint("betweenLength", &betweenLengthConstraint{min: 0, max: 1000})
 
@@ -577,11 +581,11 @@ func TestValidator_CustomParameterizedConstraintConsumesParams(t *testing.T) {
     requireValidationErrors(t, err)
 }
 
-func TestValidator_ParamsOnNonParameterizableConstraintFailClosed(t *testing.T) {
+func TestValidator_ParametersOnNonParameterizableConstraintFailClosed(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
     validatorInstance.RegisterConstraint("rigid", &rigidConstraint{})
 
-    err := validatorInstance.Validate(payloadWithRigidParams{Code: "anything"})
+    err := validatorInstance.Validate(payloadWithRigidParameters{Code: "anything"})
     validationErrors := requireValidationErrors(t, err)
 
     validationError, ok := validationErrors[0].(*ValidationError)
@@ -594,7 +598,7 @@ func TestValidator_ParamsOnNonParameterizableConstraintFailClosed(t *testing.T) 
     }
 }
 
-func TestValidator_ParamsOnNonParameterizableBuiltInFailClosed(t *testing.T) {
+func TestValidator_ParametersOnNonParameterizableBuiltInFailClosed(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
     type payloadWithParameterizedEmail struct {
@@ -958,15 +962,15 @@ func TestValidateStruct_FailsClosedPastTheNestingDepthLimit(t *testing.T) {
 }
 
 type countingConstraint struct {
-    withParamsCount int
+    withParametersCount int
 }
 
 func (instance *countingConstraint) Validate(value any, field string) validationcontract.ValidationError {
     return nil
 }
 
-func (instance *countingConstraint) WithParams(params map[string]string) (validationcontract.Constraint, error) {
-    instance.withParamsCount++
+func (instance *countingConstraint) WithParameters(parameters map[string]string) (validationcontract.Constraint, error) {
+    instance.withParametersCount++
 
     return &countingConstraint{}, nil
 }
@@ -992,8 +996,8 @@ func TestValidator_ConstructsAParameterizedConstraintOncePerTag(t *testing.T) {
         }),
     )
 
-    if 1 != counting.withParamsCount {
-        t.Fatalf("expected the constraint to be constructed once, got %d constructions", counting.withParamsCount)
+    if 1 != counting.withParametersCount {
+        t.Fatalf("expected the constraint to be constructed once, got %d constructions", counting.withParametersCount)
     }
 }
 
@@ -1029,7 +1033,7 @@ func (instance *concurrentCountingConstraint) Validate(value any, field string) 
     return nil
 }
 
-func (instance *concurrentCountingConstraint) WithParams(params map[string]string) (validationcontract.Constraint, error) {
+func (instance *concurrentCountingConstraint) WithParameters(parameters map[string]string) (validationcontract.Constraint, error) {
     instance.constructionCount.Add(1)
 
     return &concurrentCountingConstraint{}, nil
@@ -1067,7 +1071,7 @@ func TestValidator_ValidatesConcurrentlyWithMemoizedConstraints(t *testing.T) {
                     return
                 }
 
-                constraint, ok, _ := validatorInstance.createConstraintWithParams("concurrentCounting", map[string]string{"mode": "strict"})
+                constraint, ok, _ := validatorInstance.createConstraintWithParameters("concurrentCounting", map[string]string{"mode": "strict"})
                 if false == ok {
                     t.Errorf("expected the parameterized constraint to resolve")
 
@@ -1825,10 +1829,10 @@ func TestValidator_TypedNilConstraintErrorIsSuccess(t *testing.T) {
 }
 
 /* the registry is append-only, so the missing-name read is unreachable through Validate: the guard is latent and this pins it at the only level it is observable. */
-func TestValidator_CreateConstraintWithParamsRefusesUnregisteredName(t *testing.T) {
+func TestValidator_CreateConstraintWithParametersRefusesUnregisteredName(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    constraint, ok, refusalCause := validatorInstance.createConstraintWithParams("neverRegistered", nil)
+    constraint, ok, refusalCause := validatorInstance.createConstraintWithParameters("neverRegistered", nil)
 
     if nil != constraint || true == ok {
         t.Fatalf("expected an unregistered name to fail closed, got constraint=%v ok=%v", constraint, ok)
@@ -1855,7 +1859,7 @@ func TestValidator_ParameterRefusalCauseReachesTheErrorContext(t *testing.T) {
 
     cause, exists := validationError.Context()["cause"].(string)
     if false == exists || false == strings.Contains(cause, "invalid min length parameter") {
-        t.Fatalf("expected the WithParams refusal reason in the error context, got %v", validationError.Context())
+        t.Fatalf("expected the WithParameters refusal reason in the error context, got %v", validationError.Context())
     }
 }
 
@@ -2201,21 +2205,21 @@ func TestValidator_ANonNilPointerEmbedIsWalkedThroughItsValue(t *testing.T) {
     }
 }
 
-type typedNilWithParamsConstraint struct{}
+type typedNilWithParametersConstraint struct{}
 
-func (instance *typedNilWithParamsConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *typedNilWithParametersConstraint) Validate(value any, field string) validationcontract.ValidationError {
     return nil
 }
 
-func (instance *typedNilWithParamsConstraint) WithParams(params map[string]string) (validationcontract.Constraint, error) {
-    return (*typedNilWithParamsConstraint)(nil), nil
+func (instance *typedNilWithParametersConstraint) WithParameters(parameters map[string]string) (validationcontract.Constraint, error) {
+    return (*typedNilWithParametersConstraint)(nil), nil
 }
 
-func TestValidator_BuildConstraintWithParamsRefusesATypedNilConstruction(t *testing.T) {
+func TestValidator_BuildConstraintWithParametersRefusesATypedNilConstruction(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
-    validatorInstance.RegisterConstraint("typedNilFromParams", &typedNilWithParamsConstraint{})
+    validatorInstance.RegisterConstraint("typedNilFromParameters", &typedNilWithParametersConstraint{})
 
-    constraint, ok, refusalCause := validatorInstance.createConstraintWithParams("typedNilFromParams", map[string]string{"value": "x"})
+    constraint, ok, refusalCause := validatorInstance.createConstraintWithParameters("typedNilFromParameters", map[string]string{"value": "x"})
 
     if nil != constraint || true == ok {
         t.Fatalf("expected a typed-nil construction to fail closed, got constraint=%v ok=%v", constraint, ok)

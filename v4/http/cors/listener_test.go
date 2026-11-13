@@ -244,7 +244,7 @@ func newCorsListenerTestContainer() containercontract.Container {
             environment, err := config.NewEnvironment(
                 &corsListenerTestEnvironmentSource{
                     values: map[string]string{
-                        config.EnvKey: config.EnvDevelopment,
+                        config.EnvironmentNameKey: config.EnvironmentDevelopment,
                     },
                 },
             )
@@ -260,7 +260,7 @@ func newCorsListenerTestContainer() containercontract.Container {
     serviceContainer.MustRegister(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-            return session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30*time.Minute)}), nil
+            return session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)}), nil
         },
         container.RegisterOptions{},
     )

@@ -87,8 +87,8 @@ func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *test
         environment   string
         seedsAccounts bool
     }{
-        {melodyconfig.EnvDevelopment, true},
-        {melodyconfig.EnvProduction, false},
+        {melodyconfig.EnvironmentDevelopment, true},
+        {melodyconfig.EnvironmentProduction, false},
     } {
         for _, database := range []*bun.DB{nil, newUndialedDatabase()} {
             containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -98,7 +98,7 @@ func TestRegisterCatalogStorageService_SeedsTheAccountsInDevelopmentOnly(t *test
                 }, melodycontainer.RegisterOptions{Closer: registryOwnedDatabaseCloser})
             }
 
-            moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvKey: environmentCase.environment})
+            moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvironmentNameKey: environmentCase.environment})
             moduleInstance.catalogueWired = nil != database
             moduleInstance.registerCatalogStorageService(containerRegistrar{Container: containerInstance})
 

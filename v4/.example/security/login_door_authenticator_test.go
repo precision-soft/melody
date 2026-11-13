@@ -80,7 +80,7 @@ func loginRuntimeForEnvironmentRecordingFailures(t *testing.T, environmentName s
 
     source := &stubAuthenticationEnvironmentSource{
         values: map[string]string{
-            melodyconfig.EnvKey: environmentName,
+            melodyconfig.EnvironmentNameKey: environmentName,
         },
     }
 
@@ -160,7 +160,7 @@ func loginResponseBody(t *testing.T, runtimeInstance melodyruntimecontract.Runti
 
 /* the login door is unauthenticated, so an authentication failure must answer a public message and nothing else: the errors list is written into the response with no debug gate at all, and the causes this call can really reach — a driver error naming the schema and the host — would be handed to anonymous callers verbatim. ApiErrorWithErr is the door that keeps the cause behind the debug gates instead. */
 func TestLoginHandler_KeepsTheAuthenticationCauseOutOfTheResponseWithoutDebug(t *testing.T) {
-    runtimeInstance := loginRuntimeForEnvironment(t, melodyconfig.EnvProduction)
+    runtimeInstance := loginRuntimeForEnvironment(t, melodyconfig.EnvironmentProduction)
 
     statusCode, body := loginResponseBody(t, runtimeInstance)
 
@@ -197,7 +197,7 @@ func TestLoginHandler_KeepsTheAuthenticationCauseOutOfTheResponseWithoutDebug(t 
 
 /* the cause is not discarded, it is gated: under the development kernel environment the same call carries it in the debug-gated context and trace, which is what makes the public message safe to keep bare */
 func TestLoginHandler_CarriesTheAuthenticationCauseUnderDebug(t *testing.T) {
-    runtimeInstance := loginRuntimeForEnvironment(t, melodyconfig.EnvDevelopment)
+    runtimeInstance := loginRuntimeForEnvironment(t, melodyconfig.EnvironmentDevelopment)
 
     statusCode, body := loginResponseBody(t, runtimeInstance)
 
@@ -235,7 +235,7 @@ func TestLoginHandler_CarriesTheAuthenticationCauseUnderDebug(t *testing.T) {
 /* The logout doors are asked what the STORAGE holds afterwards, not what the session object says: deleting the two identity keys leaves the entry modified, so the response path saves it back under the same id and re-issues the cookie, and only a cleared session routes that path to DeleteSession. The response path is run here exactly as the kernel runs it, through SaveSession. */
 /* the credentials are read from the json body alone: a POST whose query string carries them and whose body names none answers as a request without credentials, where a query read would have authenticated — with the credentials written into every access log in front of the application. The body of the same credentials reaches the authentication, which this fixture's cache refuses, so the arms are told apart by the status; a media type parameter is read past, and any body other than json is refused 415 before the credentials are read, a cross-site form being unable to post json. */
 func TestLoginHandler_ReadsTheJsonCredentialsFromTheBodyAndRefusesAnyOtherBody(t *testing.T) {
-    runtimeInstance, failureList := loginRuntimeForEnvironmentRecordingFailures(t, melodyconfig.EnvProduction)
+    runtimeInstance, failureList := loginRuntimeForEnvironmentRecordingFailures(t, melodyconfig.EnvironmentProduction)
 
     login := func(target string, contentType string, body string) (int, string) {
         httpRequest := httptest.NewRequest(nethttp.MethodPost, target, bytes.NewBufferString(body))

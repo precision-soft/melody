@@ -811,7 +811,7 @@ func (instance *panickingParameterModule) RegisterParameters(registrar applicati
 /* Boot reports a refusal and exits the process, so the boot runs in a child of the test binary; the duplicate is the record it leaves, not the phase that failed after it */
 func TestBoot_RefusesADuplicateModuleBeforeAnyPhaseRuns(t *testing.T) {
     if "1" == os.Getenv(duplicateModuleBootChildVariable) {
-        application := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+        application := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
         application.RegisterModule(fakeModule{name: "twin"})
         application.RegisterModule(fakeModule{name: "twin"})
         application.RegisterModule(&panickingParameterModule{fakeModule: fakeModule{name: "failing"}})

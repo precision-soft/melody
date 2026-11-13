@@ -158,7 +158,7 @@ func TestResolveExecutablePath_RefusalCarriesThePathAsHanded(t *testing.T) {
 type creationWaitersProbe struct{}
 
 func TestNewApplication_TheContainerCreationWaitersFieldReachesTheContainer(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ContainerCreationWaiters: bound.Of(1)})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ContainerCreationWaiters: bound.Of(1)})
     serviceContainer := applicationInstance.kernel.ServiceContainer()
     defer func() {
         _ = serviceContainer.Close()
@@ -209,7 +209,7 @@ func TestNewApplication_TheContainerCreationWaitersFieldReachesTheContainer(t *t
 
 func TestNewApplication_TheContainerTeardownSequentialFieldReachesTheContainer(t *testing.T) {
     for _, sequential := range []bool{false, true} {
-        applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ContainerTeardownSequential: sequential})
+        applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ContainerTeardownSequential: sequential})
         serviceContainer := applicationInstance.kernel.ServiceContainer()
 
         viewed, carriesView := serviceContainer.(interface{ TeardownRunsInWaves() bool })
@@ -236,7 +236,7 @@ func (instance *scopeTeardownTimeoutProbe) CloseWithContext(closeContext context
 }
 
 func TestNewApplication_TheScopeTeardownTimeoutFieldReachesTheContainersScopes(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ScopeTeardownTimeout: bound.UnlimitedDuration()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ScopeTeardownTimeout: bound.UnlimitedDuration()})
     serviceContainer := applicationInstance.kernel.ServiceContainer()
     defer func() {
         _ = serviceContainer.Close()

@@ -198,7 +198,7 @@ func (instance *Module) registerMessageBusServices(registrar melodyapplicationco
 
 /* registerSessionStorage swaps the framework's in-memory default for the file-backed storage when the environment names a file, so a signed-in session survives a restart — the development supervisor restarts the example on every saved change — and the storage drops a session once MELODY_HTTP_SESSION_TTL has passed without a request. An empty value keeps the in-memory default. */
 func (instance *Module) registerSessionStorage(registrar melodyapplicationcontract.ServiceRegistrar) {
-    sessionFilePath := resolvedSessionFilePath(instance.environmentValue(environmentKeySessionFile), instance.configuration.Kernel().ProjectDir())
+    sessionFilePath := resolvedSessionFilePath(instance.environmentValue(environmentKeySessionFile), instance.configuration.Kernel().ProjectDirectory())
     if "" == sessionFilePath {
         return
     }

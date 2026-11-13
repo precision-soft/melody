@@ -88,7 +88,7 @@ func newEnvironmentKeyBootApplication(t *testing.T, values map[string]string) *A
 func newEnvironmentKeyBootApplicationIn(t *testing.T, values map[string]string, projectDirectory string) *Application {
     t.Helper()
 
-    bootValues := map[string]string{config.EnvKey: config.EnvDevelopment}
+    bootValues := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}
     for key, value := range values {
         bootValues[key] = value
     }

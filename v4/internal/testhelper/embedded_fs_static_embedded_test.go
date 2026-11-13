@@ -7,7 +7,7 @@ import (
 )
 
 func TestEmbeddedFilesystems_AnswerWhatThisBuildCarries(t *testing.T) {
-    if nil != NewEmbeddedEnvFs() {
+    if nil != NewEmbeddedEnvironmentFs() {
         t.Fatalf("expected no embedded environment filesystem under this build")
     }
 

@@ -9,9 +9,9 @@ var environmentKeyAliasMap = map[string][]string{
         ProcessRoleKey,
         KernelProcessRole,
     },
-    EnvKey: {
-        EnvKey,
-        KernelEnv,
+    EnvironmentNameKey: {
+        EnvironmentNameKey,
+        KernelEnvironment,
     },
     HttpAddressKey: {
         HttpAddressKey,
@@ -45,9 +45,9 @@ var environmentKeyAliasMap = map[string][]string{
         DefaultLocaleKey,
         KernelDefaultLocale,
     },
-    PublicDirKey: {
-        PublicDirKey,
-        KernelPublicDir,
+    PublicDirectoryKey: {
+        PublicDirectoryKey,
+        KernelPublicDirectory,
     },
     StaticIndexFileKey: {
         StaticIndexFileKey,

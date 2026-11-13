@@ -5,22 +5,22 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* HmacSecretProvider resolves the shared secret for the internal-auth HMAC source. CurrentKeyId names the key a signer uses now, Secret looks up the secret for a presented key id, and AppForKeyId names the one application a key id is issued to. Several resolvable keys allow a rotation without a gap. */
+/* HmacSecretProvider resolves the shared secret for the internal-auth HMAC source. CurrentKeyId names the key a signer uses now, Secret looks up the secret for a presented key id, and ApplicationForKeyId names the one application a key id is issued to. Several resolvable keys allow a rotation without a gap. */
 type HmacSecretProvider interface {
     CurrentKeyId() string
 
     Secret(keyId string) ([]byte, bool)
 
-    AppForKeyId(keyId string) (string, bool)
+    ApplicationForKeyId(keyId string) (string, bool)
 }
 
-/* HmacKey is one entry in a static secret provider: the secret bytes for a key id and the application that key id belongs to. A key id is owned by exactly one app; an app may own several key ids (rotation overlap), all naming the same app. */
+/* HmacKey is one entry in a static secret provider: the secret bytes for a key id and the application that key id belongs to. A key id is owned by exactly one application; an application may own several key ids (rotation overlap), all naming the same application. */
 type HmacKey struct {
-    App    string
-    Secret []byte
+    Application string
+    Secret      []byte
 }
 
-/* HmacKeyRing is the set of keys a static provider resolves: CurrentKeyId names the key a signer uses now, Keys every resolvable key by id, each bound to its app; both are required and judged when the provider is built. */
+/* HmacKeyRing is the set of keys a static provider resolves: CurrentKeyId names the key a signer uses now, Keys every resolvable key by id, each bound to its application; both are required and judged when the provider is built. */
 type HmacKeyRing struct {
     CurrentKeyId string
     Keys         map[string]HmacKey
@@ -44,16 +44,16 @@ func NewStaticHmacSecretProvider(ring HmacKeyRing) *StaticHmacSecretProvider {
     }
 
     secretsByKeyId := make(map[string][]byte, len(keysByKeyId))
-    appsByKeyId := make(map[string]string, len(keysByKeyId))
-    appBySecret := make(map[string]string, len(keysByKeyId))
+    applicationsByKeyId := make(map[string]string, len(keysByKeyId))
+    applicationBySecret := make(map[string]string, len(keysByKeyId))
     for keyId, key := range keysByKeyId {
         if "" == keyId {
             exception.Panic(exception.NewError("hmac key id is empty", map[string]any{"field": "HmacKeyRing.Keys"}, nil))
         }
 
-        if "" == key.App {
+        if "" == key.Application {
             exception.Panic(
-                exception.NewError("hmac key has no app", map[string]any{"field": "HmacKeyRing.Keys", "keyId": keyId}, nil),
+                exception.NewError("hmac key has no application", map[string]any{"field": "HmacKeyRing.Keys", "keyId": keyId}, nil),
             )
         }
 
@@ -72,20 +72,20 @@ func NewStaticHmacSecretProvider(ring HmacKeyRing) *StaticHmacSecretProvider {
             )
         }
 
-        /* cross-app secret reuse is refused: the key id is attacker-visible, so a shared secret would let its holder sign under either app's key id */
-        if owner, reused := appBySecret[string(key.Secret)]; true == reused && owner != key.App {
+        /* cross-app secret reuse is refused: the key id is attacker-visible, so a shared secret would let its holder sign under either application's key id */
+        if owner, reused := applicationBySecret[string(key.Secret)]; true == reused && owner != key.Application {
             exception.Panic(
                 exception.NewError(
-                    "hmac secret is reused across apps",
-                    map[string]any{"field": "HmacKeyRing.Keys", "keyId": keyId, "app": key.App, "otherApp": owner},
+                    "hmac secret is reused across applications",
+                    map[string]any{"field": "HmacKeyRing.Keys", "keyId": keyId, "application": key.Application, "otherApplication": owner},
                     nil,
                 ),
             )
         }
-        appBySecret[string(key.Secret)] = key.App
+        applicationBySecret[string(key.Secret)] = key.Application
 
         secretsByKeyId[keyId] = append([]byte{}, key.Secret...)
-        appsByKeyId[keyId] = key.App
+        applicationsByKeyId[keyId] = key.Application
     }
 
     if _, exists := secretsByKeyId[currentKeyId]; false == exists {
@@ -99,16 +99,16 @@ func NewStaticHmacSecretProvider(ring HmacKeyRing) *StaticHmacSecretProvider {
     }
 
     return &StaticHmacSecretProvider{
-        currentKeyId:   currentKeyId,
-        secretsByKeyId: secretsByKeyId,
-        appsByKeyId:    appsByKeyId,
+        currentKeyId:        currentKeyId,
+        secretsByKeyId:      secretsByKeyId,
+        applicationsByKeyId: applicationsByKeyId,
     }
 }
 
 type StaticHmacSecretProvider struct {
-    currentKeyId   string
-    secretsByKeyId map[string][]byte
-    appsByKeyId    map[string]string
+    currentKeyId        string
+    secretsByKeyId      map[string][]byte
+    applicationsByKeyId map[string]string
 }
 
 func (instance *StaticHmacSecretProvider) CurrentKeyId() string {
@@ -124,13 +124,13 @@ func (instance *StaticHmacSecretProvider) Secret(keyId string) ([]byte, bool) {
     return append([]byte{}, secret...), true
 }
 
-func (instance *StaticHmacSecretProvider) AppForKeyId(keyId string) (string, bool) {
-    app, exists := instance.appsByKeyId[keyId]
+func (instance *StaticHmacSecretProvider) ApplicationForKeyId(keyId string) (string, bool) {
+    application, exists := instance.applicationsByKeyId[keyId]
     if false == exists {
         return "", false
     }
 
-    return app, true
+    return application, true
 }
 
 var _ HmacSecretProvider = (*StaticHmacSecretProvider)(nil)

@@ -226,7 +226,7 @@ func TestNewFileServer_RefusesANegativeCacheMaxAge(t *testing.T) {
 func TestNewFileServer_RefusesAnUnknownMode(t *testing.T) {
     assertRefusedNamingField(
         t,
-        Config{Mode: Mode("embed"), FileSystem: fstest.MapFS{}, PublicDir: "public"},
+        Config{Mode: Mode("embed"), FileSystem: fstest.MapFS{}, PublicDirectory: "public"},
         "the static mode is unknown",
         "Config.Mode",
     )
@@ -3358,6 +3358,15 @@ func TestNewFileServer_RefusesAnEmbeddedPublicDirectoryThatIsAFile(t *testing.T)
         },
         "the public directory is a file in the embedded file system",
     )
+
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || "public" != refusal.Context()["publicDirectory"] {
+            t.Fatalf("expected the refusal to name the directory under publicDirectory, got %v", refusal)
+        }
+    }()
+
+    NewFileServer(newTestSource(newTestConfig(ModeEmbedded, "public", "", "", false, 0, false), "", fileSystem))
 }
 
 /* the empty public directory is the unconfigured value and means the root of the embedded filesystem, so it is not a name to prove */

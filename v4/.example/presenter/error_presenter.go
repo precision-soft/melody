@@ -457,7 +457,7 @@ func debugMode(runtimeInstance melodyruntimecontract.Runtime) bool {
         return false
     }
 
-    return melodyconfig.EnvDevelopment == configuration.Kernel().Env()
+    return melodyconfig.EnvironmentDevelopment == configuration.Kernel().Environment()
 }
 
 func buildErrorContext(

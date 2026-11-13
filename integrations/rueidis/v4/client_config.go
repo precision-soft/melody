@@ -14,7 +14,7 @@ import (
 type ClientConfig struct {
     ClientName string
 
-    SelectDb int
+    SelectDatabase int
 
     TlsConfig *tls.Config
 
@@ -54,7 +54,7 @@ var clientSideCacheBytesRule = bound.Rule[int]{
 
 type resolvedClient struct {
     clientName             string
-    selectDb               int
+    selectDatabase         int
     tlsConfig              *tls.Config
     dialTimeout            time.Duration
     connectionWriteTimeout time.Duration
@@ -92,7 +92,7 @@ func resolveClient(config ClientConfig) (resolvedClient, error) {
 
     return resolvedClient{
         clientName:             config.ClientName,
-        selectDb:               config.SelectDb,
+        selectDatabase:         config.SelectDatabase,
         tlsConfig:              config.TlsConfig,
         dialTimeout:            dialTimeout.Value,
         connectionWriteTimeout: connectionWriteTimeout.Value,

@@ -12,7 +12,7 @@ import (
 /* a server that does not cache takes no max age, as Config refuses one beside CacheDisabled */
 func newTestConfig(
     mode Mode,
-    publicDir string,
+    publicDirectory string,
     indexFile string,
     stripPrefix string,
     enableCache bool,
@@ -20,12 +20,12 @@ func newTestConfig(
     weakEtag bool,
 ) Config {
     config := Config{
-        Mode:          mode,
-        PublicDir:     publicDir,
-        IndexFile:     indexFile,
-        StripPrefix:   stripPrefix,
-        CacheDisabled: false == enableCache,
-        WeakEtag:      weakEtag,
+        Mode:            mode,
+        PublicDirectory: publicDirectory,
+        IndexFile:       indexFile,
+        StripPrefix:     stripPrefix,
+        CacheDisabled:   false == enableCache,
+        WeakEtag:        weakEtag,
     }
 
     if true == enableCache {

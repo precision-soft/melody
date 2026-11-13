@@ -15,10 +15,10 @@ import (
 )
 
 const (
-    fixtureImportPath = "github.com/precision-soft/melody/v4/wiring/internal/fixture/domain"
-    fixtureDirectory  = "wiring/internal/fixture/domain"
-    fixtureGoldenFile = "internal/fixture/wiring/wiring_gen.go"
-    fixtureProjectDir = ".."
+    fixtureImportPath       = "github.com/precision-soft/melody/v4/wiring/internal/fixture/domain"
+    fixtureDirectory        = "wiring/internal/fixture/domain"
+    fixtureGoldenFile       = "internal/fixture/wiring/wiring_gen.go"
+    fixtureProjectDirectory = ".."
 )
 
 func newFixtureBindSet() *BindSet {
@@ -41,7 +41,7 @@ func generateFixture(t *testing.T, bindSet *BindSet) (string, *GenerateReport) {
     t.Helper()
 
     source, report, generateErr := Generate(&GenerateRequest{
-        ProjectDirectory: fixtureProjectDir,
+        ProjectDirectory: fixtureProjectDirectory,
         PackageName:      "wiring",
         FunctionName:     "RegisterFixtureServices",
         BindSet:          bindSet,
@@ -177,7 +177,7 @@ func TestGenerate_FailsWhenAScalarArgumentHasNoBind(t *testing.T) {
     bindSet.Package(fixtureImportPath, fixtureDirectory).Exclude("*Fixture")
 
     _, _, generateErr := Generate(&GenerateRequest{
-        ProjectDirectory: fixtureProjectDir,
+        ProjectDirectory: fixtureProjectDirectory,
         PackageName:      "wiring",
         BindSet:          bindSet,
     })
@@ -193,7 +193,7 @@ func TestGenerate_FailsWhenAScalarArgumentHasNoBind(t *testing.T) {
 /* checking the bind target against the declared parameters turns a typo in a parameter name into a generation failure instead of a panic at boot */
 func TestGenerate_FailsWhenABindTargetsAnUndeclaredParameter(t *testing.T) {
     _, _, generateErr := Generate(&GenerateRequest{
-        ProjectDirectory: fixtureProjectDir,
+        ProjectDirectory: fixtureProjectDirectory,
         PackageName:      "wiring",
         BindSet:          newFixtureBindSet(),
         DeclaredParameters: map[string]bool{
@@ -213,7 +213,7 @@ func TestGenerate_FailsWhenABindTargetsAnUndeclaredParameter(t *testing.T) {
 }
 
 func TestGenerate_RequiresABindSet(t *testing.T) {
-    _, _, generateErr := Generate(&GenerateRequest{ProjectDirectory: fixtureProjectDir})
+    _, _, generateErr := Generate(&GenerateRequest{ProjectDirectory: fixtureProjectDirectory})
     if nil == generateErr {
         t.Fatalf("expected generation to require a bind set")
     }
@@ -277,7 +277,7 @@ func TestGenerate_EmptyScanEmitsACompilableFile(t *testing.T) {
     )
 
     source, report, generateErr := Generate(&GenerateRequest{
-        ProjectDirectory: fixtureProjectDir,
+        ProjectDirectory: fixtureProjectDirectory,
         PackageName:      "wiring",
         FunctionName:     "RegisterNothing",
         BindSet:          bindSet,
@@ -362,7 +362,7 @@ func TestResolveArguments_ReportsADirectiveBindOnAServiceArgument(t *testing.T) 
 func TestGenerate_RejectsAFunctionNameTheGeneratedFileCannotCarry(t *testing.T) {
     for _, functionName := range []string{"melodycontainer", "error", "func", "foo bar", "3services", "a.b", "Register(", "Register//", "_", "init"} {
         _, _, generateErr := Generate(&GenerateRequest{
-            ProjectDirectory: fixtureProjectDir,
+            ProjectDirectory: fixtureProjectDirectory,
             PackageName:      "wiring",
             FunctionName:     functionName,
             BindSet:          newFixtureBindSet(),
@@ -375,7 +375,7 @@ func TestGenerate_RejectsAFunctionNameTheGeneratedFileCannotCarry(t *testing.T) 
 
 func TestGenerate_EmptyFunctionNameFallsBackToTheDefault(t *testing.T) {
     source, _, generateErr := Generate(&GenerateRequest{
-        ProjectDirectory: fixtureProjectDir,
+        ProjectDirectory: fixtureProjectDirectory,
         PackageName:      "wiring",
         FunctionName:     "",
         BindSet:          newFixtureBindSet(),
@@ -392,7 +392,7 @@ func TestGenerate_EmptyFunctionNameFallsBackToTheDefault(t *testing.T) {
 func TestGenerate_RejectsAPackageNameTheGeneratedFileCannotCarry(t *testing.T) {
     for _, packageName := range []string{"foo bar", "3pkg", "a.b", "func", "", "_"} {
         _, _, generateErr := Generate(&GenerateRequest{
-            ProjectDirectory: fixtureProjectDir,
+            ProjectDirectory: fixtureProjectDirectory,
             PackageName:      packageName,
             FunctionName:     "RegisterFixtureServices",
             BindSet:          newFixtureBindSet(),
@@ -416,7 +416,7 @@ func generateScopedFixture(t *testing.T, functionName string, scopedFunctionName
     bindSet.Package(scopedFixtureImportPath, scopedFixtureDirectory)
 
     return Generate(&GenerateRequest{
-        ProjectDirectory:   fixtureProjectDir,
+        ProjectDirectory:   fixtureProjectDirectory,
         PackageName:        "wiringscoped",
         FunctionName:       functionName,
         ScopedFunctionName: scopedFunctionName,
@@ -753,7 +753,7 @@ func TestGenerate_ReportsAnUnusedExcludeWithItsImportPath(t *testing.T) {
     bindSet.Packages()[0].Exclude("*Respository")
 
     _, report, generateErr := Generate(&GenerateRequest{
-        ProjectDirectory: fixtureProjectDir,
+        ProjectDirectory: fixtureProjectDirectory,
         PackageName:      "config",
         BindSet:          bindSet,
     })

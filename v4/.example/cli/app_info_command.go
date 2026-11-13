@@ -12,35 +12,35 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-type AppInfoCommand struct{}
+type ApplicationInformationCommand struct{}
 
-func NewAppInfoCommand() *AppInfoCommand {
-    return &AppInfoCommand{}
+func NewApplicationInformationCommand() *ApplicationInformationCommand {
+    return &ApplicationInformationCommand{}
 }
 
-func (instance *AppInfoCommand) Name() string {
+func (instance *ApplicationInformationCommand) Name() string {
     return "app:info"
 }
 
-func (instance *AppInfoCommand) Description() string {
+func (instance *ApplicationInformationCommand) Description() string {
     return "prints application information"
 }
 
-func (instance *AppInfoCommand) Flags() []melodyclicontract.Flag {
+func (instance *ApplicationInformationCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{}
 }
 
-func (instance *AppInfoCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *ApplicationInformationCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     writer := commandContext.Writer
 
     configuration := melodyconfig.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
-    fmt.Fprintln(writer, "env:", configuration.Kernel().Env())
+    fmt.Fprintln(writer, "env:", configuration.Kernel().Environment())
 
     processRole := melodyapplication.ProcessRoleMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
     fmt.Fprintln(writer, "process_role:", processRole)
     fmt.Fprintln(writer, "background_work:", melodyconfig.RoleAllowsBackgroundWork(processRole))
     fmt.Fprintln(writer, "http_address:", configuration.Http().Address())
-    fmt.Fprintln(writer, "public_dir:", configuration.Http().PublicDir())
+    fmt.Fprintln(writer, "public_directory:", configuration.Http().PublicDirectory())
     fmt.Fprintln(writer, "static_index_file:", configuration.Http().StaticIndexFile())
 
     router := melodyhttp.RouterMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
@@ -57,4 +57,4 @@ func (instance *AppInfoCommand) Run(runtimeInstance melodyruntimecontract.Runtim
     return nil
 }
 
-var _ melodyclicontract.Command = (*AppInfoCommand)(nil)
+var _ melodyclicontract.Command = (*ApplicationInformationCommand)(nil)

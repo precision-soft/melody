@@ -1169,11 +1169,11 @@ func (instance *Validator) validateRule(value any, fieldName string, rule valida
         )
     }
 
-    constraint, paramsOk, refusalCause := instance.createConstraintWithParams(rule.name, rule.params)
-    if false == paramsOk {
+    constraint, parametersOk, refusalCause := instance.createConstraintWithParameters(rule.name, rule.parameters)
+    if false == parametersOk {
         context := map[string]any{
-            "rule":   rule.name,
-            "params": copyValidationRuleParams(rule.params),
+            "rule":       rule.name,
+            "parameters": copyValidationRuleParameters(rule.parameters),
         }
 
         if "" != refusalCause {
@@ -1207,9 +1207,9 @@ func (instance *Validator) validateRule(value any, fieldName string, rule valida
 }
 
 /* constraintCacheKey encodes a rule name and its parameters into one lookup key. Every component is length-prefixed and the parameter keys are sorted, so the encoding is injective: no two distinct (name, parameters) pairs can produce the same key whatever characters the tag spells them with. */
-func constraintCacheKey(name string, params map[string]string) string {
-    keys := make([]string, 0, len(params))
-    for key := range params {
+func constraintCacheKey(name string, parameters map[string]string) string {
+    keys := make([]string, 0, len(parameters))
+    for key := range parameters {
         keys = append(keys, key)
     }
     sort.Strings(keys)
@@ -1220,7 +1220,7 @@ func constraintCacheKey(name string, params map[string]string) string {
     builder.WriteString(name)
 
     for _, key := range keys {
-        value := params[key]
+        value := parameters[key]
 
         builder.WriteString(strconv.Itoa(len(key)))
         builder.WriteString(":")
@@ -1233,7 +1233,7 @@ func constraintCacheKey(name string, params map[string]string) string {
     return builder.String()
 }
 
-func (instance *Validator) createConstraintWithParams(name string, params map[string]string) (validationcontract.Constraint, bool, string) {
+func (instance *Validator) createConstraintWithParameters(name string, parameters map[string]string) (validationcontract.Constraint, bool, string) {
     instance.mutex.RLock()
     constraint := instance.constraints[name]
     instance.mutex.RUnlock()
@@ -1243,8 +1243,8 @@ func (instance *Validator) createConstraintWithParams(name string, params map[st
         return nil, false, "constraint is not registered"
     }
 
-    if 0 == len(params) {
-        /* a parameterized rule named without parameters fails closed: the registered instance is a template for WithParams, not a fallback */
+    if 0 == len(parameters) {
+        /* a parameterized rule named without parameters fails closed: the registered instance is a template for WithParameters, not a fallback */
         if _, parameterized := constraint.(validationcontract.ParameterizedConstraint); true == parameterized {
             return nil, false, "constraint requires parameters"
         }
@@ -1252,7 +1252,7 @@ func (instance *Validator) createConstraintWithParams(name string, params map[st
         return constraint, true, ""
     }
 
-    cacheKey := constraintCacheKey(name, params)
+    cacheKey := constraintCacheKey(name, parameters)
 
     if cached, exists := instance.constructedConstraints.Load(cacheKey); true == exists {
         constructed := cached.(constructedConstraint)
@@ -1260,16 +1260,16 @@ func (instance *Validator) createConstraintWithParams(name string, params map[st
         return constructed.constraint, constructed.ok, constructed.refusalCause
     }
 
-    configured, configuredOk, refusalCause := buildConstraintWithParams(constraint, params)
+    configured, configuredOk, refusalCause := buildConstraintWithParameters(constraint, parameters)
 
-    /* LoadOrStore, so a concurrent first touch settles on one shared constraint; refusals are cached too, WithParams being a pure function of its parameters */
+    /* LoadOrStore, so a concurrent first touch settles on one shared constraint; refusals are cached too, WithParameters being a pure function of its parameters */
     stored, _ := instance.constructedConstraints.LoadOrStore(cacheKey, constructedConstraint{constraint: configured, ok: configuredOk, refusalCause: refusalCause})
     constructed := stored.(constructedConstraint)
 
     return constructed.constraint, constructed.ok, constructed.refusalCause
 }
 
-func buildConstraintWithParams(constraint validationcontract.Constraint, params map[string]string) (validationcontract.Constraint, bool, string) {
+func buildConstraintWithParameters(constraint validationcontract.Constraint, parameters map[string]string) (validationcontract.Constraint, bool, string) {
     parameterized, ok := constraint.(validationcontract.ParameterizedConstraint)
     if false == ok {
         /* parameters the registered constraint cannot consume fail closed */
@@ -1277,10 +1277,10 @@ func buildConstraintWithParams(constraint validationcontract.Constraint, params 
     }
 
     /* the parameter map belongs to the memoized parse, so the constraint is handed a copy */
-    configured, withParamsErr := parameterized.WithParams(copyValidationRuleParams(params))
-    if nil != withParamsErr {
+    configured, withParametersErr := parameterized.WithParameters(copyValidationRuleParameters(parameters))
+    if nil != withParametersErr {
         /* the refusal reason travels with the verdict, so a malformed tag, a rejected parameter value and a constraint that takes no parameters are told apart */
-        return nil, false, withParamsErr.Error()
+        return nil, false, withParametersErr.Error()
     }
 
     if true == internal.IsNilInterface(configured) {

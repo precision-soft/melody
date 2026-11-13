@@ -137,7 +137,7 @@ func (instance *firewallDoorTestModule) RegisterHttpRoutes(kernelInstance kernel
 }
 
 func TestBoot_PublishesADeclaredDoor(t *testing.T) {
-    application := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    application := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
     application.RegisterModule(&firewallDoorTestModule{fakeModule: fakeModule{name: "door"}})
 
     kernelInstance := application.Boot()
@@ -154,7 +154,7 @@ func TestBoot_PublishesADeclaredDoor(t *testing.T) {
 /* Boot reports a refusal and exits the process, so the boot runs in a child of the test binary */
 func TestBoot_RefusesARouteOnADoorsPath(t *testing.T) {
     if "1" == os.Getenv(firewallDoorBootChildVariable) {
-        application := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+        application := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
         application.RegisterModule(&firewallDoorTestModule{fakeModule: fakeModule{name: "door"}, pattern: "/login/:step"})
         application.Boot()
 
@@ -172,7 +172,7 @@ func TestBoot_RefusesARouteOnADoorsPath(t *testing.T) {
 }
 
 func TestInstallHttpMiddlewares_RefusesARouteAFactoryPutOnADoorsPath(t *testing.T) {
-    application := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    application := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
     application.RegisterModule(&firewallDoorTestModule{fakeModule: fakeModule{name: "door"}})
     application.RegisterHttpMiddlewareFactories([]applicationcontract.MiddlewareFactory{
         func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {

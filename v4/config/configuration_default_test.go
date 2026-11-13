@@ -11,10 +11,10 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
     configuration := newResolvedConfiguration(t, map[string]string{}, func(configuration *Configuration) {})
 
     for key, expected := range map[string]any{
-        KernelProjectDir:             "/srv/app",
+        KernelProjectDirectory:       "/srv/app",
         DefaultModeKey:               ModeHttp,
         ProcessRoleKey:               RoleAll,
-        EnvKey:                       EnvDevelopment,
+        EnvironmentNameKey:           EnvironmentDevelopment,
         HttpAddressKey:               ":8080",
         HttpMaxRequestBodyBytesKey:   1048576,
         HttpSessionTtlKey:            DefaultSessionTtl.String(),
@@ -30,7 +30,7 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
         CliDescriptionKey:            "",
         LogLevelKey:                  string(loggingcontract.LevelDebug),
         DefaultLocaleKey:             "en",
-        PublicDirKey:                 "public",
+        PublicDirectoryKey:           "public",
         StaticIndexFileKey:           "index.html",
         StaticEnableCacheKey:         true,
         StaticCacheMaxAgeKey:         3600,
@@ -53,7 +53,7 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
 func TestRegisterDefaultParameters_TheDirectoryDefaultsHangUnderTheProjectDirectory(t *testing.T) {
     configuration := newResolvedConfiguration(t, map[string]string{}, func(configuration *Configuration) {})
 
-    logsDirectory := configuration.Get(KernelLogsDir)
+    logsDirectory := configuration.Get(KernelLogsDirectory)
     if nil == logsDirectory {
         t.Fatalf("expected the logs directory to be declared")
     }
@@ -62,7 +62,7 @@ func TestRegisterDefaultParameters_TheDirectoryDefaultsHangUnderTheProjectDirect
         t.Fatalf("expected the logs directory to hang under the project directory, got %q", logsDirectory.String())
     }
 
-    cacheDirectory := configuration.Get(KernelCacheDir)
+    cacheDirectory := configuration.Get(KernelCacheDirectory)
     if nil == cacheDirectory {
         t.Fatalf("expected the cache directory to be declared")
     }

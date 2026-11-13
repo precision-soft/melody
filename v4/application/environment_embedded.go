@@ -13,12 +13,12 @@ import (
 
 func newEnvironmentSource(
     projectDirectory string,
-    embeddedEnvFiles fs.FS,
+    embeddedEnvironmentFiles fs.FS,
 ) configcontract.EnvironmentSource {
     _ = projectDirectory
 
     /* read through the interface: a typed-nil fs.FS passes the plain comparison and would die later inside fs.Stat instead of in this refusal that names the argument */
-    if true == internal.IsNilInterface(embeddedEnvFiles) {
+    if true == internal.IsNilInterface(embeddedEnvironmentFiles) {
         exception.Panic(
             exception.NewError(
                 "embedded environment files are not provided",
@@ -28,7 +28,7 @@ func newEnvironmentSource(
         )
     }
 
-    return config.NewEnvironmentSource(config.EnvironmentSourceConfig{FileSystem: embeddedEnvFiles, BaseDir: "."})
+    return config.NewEnvironmentSource(config.EnvironmentSourceConfig{FileSystem: embeddedEnvironmentFiles, BaseDirectory: "."})
 }
 
 /* missingEnvironmentFileHint has no on-disk .env to point at in the embedded build: the environment is read from the embedded fs. */

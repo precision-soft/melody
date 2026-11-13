@@ -20,18 +20,18 @@ import (
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-/* LocalStorageConfig configures the sweep of the temp objects a crash mid-write leaves; the zero value is the framework's. */
+/* LocalStorageConfig configures the sweep of the temporary objects a crash mid-write leaves; the zero value is the framework's. */
 type LocalStorageConfig struct {
-    /* TempStaleAge is the age past which a later Put of the same key sweeps a leftover temp object; an in-flight Put refreshes its temp's mtime with every write. 1h when left out, at least 1s, unlimited never sweeps. */
-    TempStaleAge bound.Duration
+    /* TemporaryStaleAge is the age past which a later Put of the same key sweeps a leftover temporary object; an in-flight Put refreshes its temporary's mtime with every write. 1h when left out, at least 1s, unlimited never sweeps. */
+    TemporaryStaleAge bound.Duration
 
     /* SweepBatchSize is how many names of a key's directory the sweep reads at a time; 256 when left out, at least 1, unlimited refused since a batch is held in memory. */
     SweepBatchSize bound.Count
 }
 
-var localStorageTempStaleAgeRule = bound.Rule[time.Duration]{
-    Name:              "LocalStorageConfig.TempStaleAge",
-    Default:           storageTempStaleAge,
+var localStorageTemporaryStaleAgeRule = bound.Rule[time.Duration]{
+    Name:              "LocalStorageConfig.TemporaryStaleAge",
+    Default:           storageTemporaryStaleAge,
     Minimum:           bound.TtlMinimum,
     UnlimitedAdmitted: true,
 }
@@ -48,9 +48,9 @@ func NewLocalStorage(baseDirectory string, config LocalStorageConfig) *LocalStor
         exception.Panic(exception.NewError("local storage base directory is empty", nil, nil))
     }
 
-    tempStaleAge, tempStaleAgeErr := bound.Resolve(config.TempStaleAge, localStorageTempStaleAgeRule)
-    if nil != tempStaleAgeErr {
-        exception.Panic(exception.FromError(tempStaleAgeErr))
+    temporaryStaleAge, temporaryStaleAgeErr := bound.Resolve(config.TemporaryStaleAge, localStorageTemporaryStaleAgeRule)
+    if nil != temporaryStaleAgeErr {
+        exception.Panic(exception.FromError(temporaryStaleAgeErr))
     }
 
     sweepBatchSize, sweepBatchSizeErr := bound.Resolve(config.SweepBatchSize, localStorageSweepBatchSizeRule)
@@ -84,16 +84,16 @@ func NewLocalStorage(baseDirectory string, config LocalStorageConfig) *LocalStor
     _ = root.Close()
 
     return &LocalStorage{
-        baseDirectory:  cleanBaseDirectory,
-        tempStaleAge:   tempStaleAge,
-        sweepBatchSize: sweepBatchSize.Value,
+        baseDirectory:     cleanBaseDirectory,
+        temporaryStaleAge: temporaryStaleAge,
+        sweepBatchSize:    sweepBatchSize.Value,
     }
 }
 
 type LocalStorage struct {
-    baseDirectory  string
-    tempStaleAge   bound.Resolved[time.Duration]
-    sweepBatchSize int
+    baseDirectory     string
+    temporaryStaleAge bound.Resolved[time.Duration]
+    sweepBatchSize    int
 }
 
 func (instance *LocalStorage) Put(
@@ -108,7 +108,7 @@ func (instance *LocalStorage) Put(
         return keyErr
     }
 
-    /* refused before anything is created, so a nil reader leaves neither a temp object nor a directory behind */
+    /* refused before anything is created, so a nil reader leaves neither a temporary object nor a directory behind */
     if nil == reader {
         return exception.NewError("storage payload reader is nil", map[string]any{"key": key}, nil)
     }
@@ -142,7 +142,7 @@ func (instance *LocalStorage) Put(
         return exception.NewError("storage key resolves to a directory", map[string]any{"key": key}, storagecontract.ErrKeyIsDirectory)
     }
 
-    tempKey, file, createErr := createStorageTempFile(root, relativeKey)
+    temporaryKey, file, createErr := createStorageTemporaryFile(root, relativeKey)
     if nil != createErr {
         return exception.NewError("could not create the storage object", map[string]any{"key": key}, createErr)
     }
@@ -156,63 +156,63 @@ func (instance *LocalStorage) Put(
     written, copyErr := io.Copy(file, source)
     if nil != copyErr {
         _ = file.Close()
-        _ = root.Remove(tempKey)
+        _ = root.Remove(temporaryKey)
         /* "copy", not "write": io.Copy answers one error for both sides, and the cause names which */
         return exception.NewError("could not copy the payload into the storage object", map[string]any{"key": key}, copyErr)
     }
 
     if 0 <= size && written != size {
         _ = file.Close()
-        _ = root.Remove(tempKey)
+        _ = root.Remove(temporaryKey)
         return exception.NewError("storage object size does not match the declared size", map[string]any{"key": key, "declared": size, "written": written}, nil)
     }
 
     if syncErr := file.Sync(); nil != syncErr {
         _ = file.Close()
-        _ = root.Remove(tempKey)
+        _ = root.Remove(temporaryKey)
         return exception.NewError("could not flush the storage object", map[string]any{"key": key}, syncErr)
     }
 
     if closeErr := file.Close(); nil != closeErr {
-        _ = root.Remove(tempKey)
+        _ = root.Remove(temporaryKey)
         return exception.NewError("could not close the storage object", map[string]any{"key": key}, closeErr)
     }
 
-    if renameErr := root.Rename(tempKey, relativeKey); nil != renameErr {
-        _ = root.Remove(tempKey)
+    if renameErr := root.Rename(temporaryKey, relativeKey); nil != renameErr {
+        _ = root.Remove(temporaryKey)
 
-        /* a temp object gone before its rename, on a write that lasted longer than the stale age, was swept as stale by a concurrent Put of the same key; a shorter write lost it to something else, the temp or its directory removed under it */
-        if true == os.IsNotExist(renameErr) && false == instance.tempStaleAge.Unlimited && instance.tempStaleAge.Value <= time.Since(writeStartedAt) {
-            return exception.NewError("could not store the storage object: its temp object was swept as stale while this write stalled", map[string]any{"key": key, "staleAge": instance.tempStaleAge.Value.String()}, renameErr)
+        /* a temporary object gone before its rename, on a write that lasted longer than the stale age, was swept as stale by a concurrent Put of the same key; a shorter write lost it to something else, the temporary or its directory removed under it */
+        if true == os.IsNotExist(renameErr) && false == instance.temporaryStaleAge.Unlimited && instance.temporaryStaleAge.Value <= time.Since(writeStartedAt) {
+            return exception.NewError("could not store the storage object: its temp object was swept as stale while this write stalled", map[string]any{"key": key, "staleAge": instance.temporaryStaleAge.Value.String()}, renameErr)
         }
 
         return exception.NewError("could not store the storage object", map[string]any{"key": key}, renameErr)
     }
 
-    if false == instance.tempStaleAge.Unlimited {
-        sweepStaleTempObjects(root, relativeKey, instance.tempStaleAge.Value, instance.sweepBatchSize)
+    if false == instance.temporaryStaleAge.Unlimited {
+        sweepStaleTemporaryObjects(root, relativeKey, instance.temporaryStaleAge.Value, instance.sweepBatchSize)
     }
 
     return nil
 }
 
-/* storageTempStaleAge is the default of LocalStorageConfig.TempStaleAge. */
-const storageTempStaleAge = 1 * time.Hour
+/* storageTemporaryStaleAge is the default of LocalStorageConfig.TemporaryStaleAge. */
+const storageTemporaryStaleAge = 1 * time.Hour
 
-/* storageTempObjectSuffix closes the name of every temp object; the random part sits between the reserved prefix and it. */
-const storageTempObjectSuffix = ".tmp"
+/* storageTemporaryObjectSuffix closes the name of every temporary object; the random part sits between the reserved prefix and it. */
+const storageTemporaryObjectSuffix = ".tmp"
 
-/* storageTempPrefix names the reserved namespace of a key's temp objects: a hidden name carrying the digest of the key's leaf, so no ordinary key shares it by accident, and a leaf of any length leaves room for the random part within one path component. */
-func storageTempPrefix(relativeKey string) string {
+/* storageTemporaryPrefix names the reserved namespace of a key's temporary objects: a hidden name carrying the digest of the key's leaf, so no ordinary key shares it by accident, and a leaf of any length leaves room for the random part within one path component. */
+func storageTemporaryPrefix(relativeKey string) string {
     digest := sha256.Sum256([]byte(filepath.Base(relativeKey)))
 
     return ".melody-storage-" + hex.EncodeToString(digest[:]) + "."
 }
 
-/* sweepStaleTempObjects removes abandoned temp objects for this key after a successful Put, best-effort: a failure is retried by the next Put. It costs one pass over the key's directory per Put, the price of cleaning up after a crash without a journal of the temp objects. */
-func sweepStaleTempObjects(root *os.Root, relativeKey string, staleAge time.Duration, batchSize int) {
+/* sweepStaleTemporaryObjects removes abandoned temporary objects for this key after a successful Put, best-effort: a failure is retried by the next Put. It costs one pass over the key's directory per Put, the price of cleaning up after a crash without a journal of the temporary objects. */
+func sweepStaleTemporaryObjects(root *os.Root, relativeKey string, staleAge time.Duration, batchSize int) {
     directory := filepath.Dir(relativeKey)
-    prefix := storageTempPrefix(relativeKey)
+    prefix := storageTemporaryPrefix(relativeKey)
 
     directoryFile, openErr := root.Open(directory)
     if nil != openErr {
@@ -225,11 +225,11 @@ func sweepStaleTempObjects(root *os.Root, relativeKey string, staleAge time.Dura
         names, readErr := directoryFile.Readdirnames(batchSize)
 
         for _, name := range names {
-            if false == strings.HasPrefix(name, prefix) || false == strings.HasSuffix(name, storageTempObjectSuffix) {
+            if false == strings.HasPrefix(name, prefix) || false == strings.HasSuffix(name, storageTemporaryObjectSuffix) {
                 continue
             }
 
-            if false == isStorageTempRandomPart(strings.TrimSuffix(name[len(prefix):], storageTempObjectSuffix)) {
+            if false == isStorageTemporaryRandomPart(strings.TrimSuffix(name[len(prefix):], storageTemporaryObjectSuffix)) {
                 continue
             }
 
@@ -256,8 +256,8 @@ func sweepStaleTempObjects(root *os.Root, relativeKey string, staleAge time.Dura
 /* storageSweepBatchSize is the default of LocalStorageConfig.SweepBatchSize. */
 const storageSweepBatchSize = 256
 
-/* isStorageTempRandomPart matches exactly the sixteen lowercase hex characters createStorageTempFile generates. */
-func isStorageTempRandomPart(randomPart string) bool {
+/* isStorageTemporaryRandomPart matches exactly the sixteen lowercase hex characters createStorageTemporaryFile generates. */
+func isStorageTemporaryRandomPart(randomPart string) bool {
     if 16 != len(randomPart) {
         return false
     }
@@ -271,10 +271,10 @@ func isStorageTempRandomPart(randomPart string) bool {
     return true
 }
 
-/* createStorageTempFile creates a uniquely named temp object beside the target, so the rename stays within the pinned root; O_EXCL never clobbers another writer's temp or the live key. */
-func createStorageTempFile(root *os.Root, relativeKey string) (string, *os.File, error) {
+/* createStorageTemporaryFile creates a uniquely named temporary object beside the target, so the rename stays within the pinned root; O_EXCL never clobbers another writer's temporary or the live key. */
+func createStorageTemporaryFile(root *os.Root, relativeKey string) (string, *os.File, error) {
     directory := filepath.Dir(relativeKey)
-    prefix := storageTempPrefix(relativeKey)
+    prefix := storageTemporaryPrefix(relativeKey)
 
     for attempt := 0; attempt < 10; attempt++ {
         suffix := make([]byte, 8)
@@ -282,11 +282,11 @@ func createStorageTempFile(root *os.Root, relativeKey string) (string, *os.File,
             return "", nil, randErr
         }
 
-        tempKey := filepath.Join(directory, prefix+hex.EncodeToString(suffix)+storageTempObjectSuffix)
+        temporaryKey := filepath.Join(directory, prefix+hex.EncodeToString(suffix)+storageTemporaryObjectSuffix)
 
-        file, openErr := root.OpenFile(tempKey, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
+        file, openErr := root.OpenFile(temporaryKey, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
         if nil == openErr {
-            return tempKey, file, nil
+            return temporaryKey, file, nil
         }
 
         if false == os.IsExist(openErr) {
@@ -429,8 +429,8 @@ func storageRelativeKey(key string) (string, error) {
         return "", exception.NewError("storage key is empty or invalid", map[string]any{"key": key}, nil)
     }
 
-    /* a key spelled exactly like a temp object would be swept by a later Put of the key whose digest it carries, so the reserved namespace is refused at every door */
-    if true == isStorageTempObjectName(filepath.Base(cleaned)) {
+    /* a key spelled exactly like a temporary object would be swept by a later Put of the key whose digest it carries, so the reserved namespace is refused at every door */
+    if true == isStorageTemporaryObjectName(filepath.Base(cleaned)) {
         return "", exception.NewError("storage key names a temp object of the reserved .melody-storage- namespace", map[string]any{"key": key}, nil)
     }
 
@@ -448,15 +448,15 @@ func storageKeyCarriesParentSegment(normalizedKey string) bool {
     return false
 }
 
-/* isStorageTempObjectName matches exactly the names createStorageTempFile gives: the reserved prefix, a sha256 in lowercase hex, a dot, the random part and the suffix. */
-func isStorageTempObjectName(name string) bool {
+/* isStorageTemporaryObjectName matches exactly the names createStorageTemporaryFile gives: the reserved prefix, a sha256 in lowercase hex, a dot, the random part and the suffix. */
+func isStorageTemporaryObjectName(name string) bool {
     const reservedPrefix = ".melody-storage-"
 
-    if false == strings.HasPrefix(name, reservedPrefix) || false == strings.HasSuffix(name, storageTempObjectSuffix) {
+    if false == strings.HasPrefix(name, reservedPrefix) || false == strings.HasSuffix(name, storageTemporaryObjectSuffix) {
         return false
     }
 
-    body := strings.TrimSuffix(strings.TrimPrefix(name, reservedPrefix), storageTempObjectSuffix)
+    body := strings.TrimSuffix(strings.TrimPrefix(name, reservedPrefix), storageTemporaryObjectSuffix)
     if 64+1+16 != len(body) || '.' != body[64] {
         return false
     }
@@ -467,7 +467,7 @@ func isStorageTempObjectName(name string) bool {
         }
     }
 
-    return isStorageTempRandomPart(body[65:])
+    return isStorageTemporaryRandomPart(body[65:])
 }
 
 var _ storagecontract.Storage = (*LocalStorage)(nil)

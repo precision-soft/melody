@@ -37,22 +37,22 @@ func NewFileServer(config Config) *FileServer {
     fileSystem := config.FileSystem
 
     if ModeFilesystem == mode {
-        publicDir := strings.TrimSpace(config.PublicDir)
-        if "" == publicDir {
-            publicDir = "public"
+        publicDirectory := strings.TrimSpace(config.PublicDirectory)
+        if "" == publicDirectory {
+            publicDirectory = "public"
         }
 
-        if true == filepath.IsAbs(publicDir) {
-            fileSystem = osDirFileSystem(publicDir)
+        if true == filepath.IsAbs(publicDirectory) {
+            fileSystem = osDirFileSystem(publicDirectory)
         } else {
             root := strings.TrimSpace(config.Root)
             if "" == root {
                 root = "."
             }
 
-            absolutePublicDir := filepath.Join(root, publicDir)
+            absolutePublicDirectory := filepath.Join(root, publicDirectory)
 
-            fileSystem = osDirFileSystem(absolutePublicDir)
+            fileSystem = osDirFileSystem(absolutePublicDirectory)
         }
     }
 
@@ -62,28 +62,28 @@ func NewFileServer(config Config) *FileServer {
 
     /* in the embedded mode the public directory must exist inside the embedded filesystem, so a directory the build did not embed is refused at construction rather than answering 404 for every asset */
     if ModeEmbedded == mode {
-        embeddedPublicDir := strings.TrimSpace(config.PublicDir)
-        if "" != embeddedPublicDir {
-            publicDirInfo, publicDirErr := fs.Stat(fileSystem, embeddedPublicDir)
-            if nil != publicDirErr {
+        embeddedPublicDirectory := strings.TrimSpace(config.PublicDirectory)
+        if "" != embeddedPublicDirectory {
+            publicDirectoryInfo, publicDirectoryErr := fs.Stat(fileSystem, embeddedPublicDirectory)
+            if nil != publicDirectoryErr {
                 exception.Panic(
                     exception.NewError(
                         "the public directory is not present in the embedded file system",
                         exceptioncontract.Context{
-                            "publicDir": embeddedPublicDir,
+                            "publicDirectory": embeddedPublicDirectory,
                         },
-                        publicDirErr,
+                        publicDirectoryErr,
                     ),
                 )
             }
 
             /* a name the build embedded as a file is refused apart from one it did not embed: the two are different mistakes in the build */
-            if false == publicDirInfo.IsDir() {
+            if false == publicDirectoryInfo.IsDir() {
                 exception.Panic(
                     exception.NewError(
                         "the public directory is a file in the embedded file system",
                         exceptioncontract.Context{
-                            "publicDir": embeddedPublicDir,
+                            "publicDirectory": embeddedPublicDirectory,
                         },
                         nil,
                     ),
@@ -378,17 +378,17 @@ func (instance *FileServer) resolveAndOpen(
 
     relativePath := strings.TrimPrefix(cleanedPath, "/")
 
-    if ModeEmbedded == instance.config.mode && "" != instance.config.publicDir {
-        relativePath = path.Join(instance.config.publicDir, relativePath)
+    if ModeEmbedded == instance.config.mode && "" != instance.config.publicDirectory {
+        relativePath = path.Join(instance.config.publicDirectory, relativePath)
     }
 
     logger.Debug(
         "static serve path resolved",
         loggingcontract.Context{
-            "mode":         instance.config.mode,
-            "cleanedPath":  cleanedPath,
-            "relativePath": relativePath,
-            "publicDir":    instance.config.publicDir,
+            "mode":            instance.config.mode,
+            "cleanedPath":     cleanedPath,
+            "relativePath":    relativePath,
+            "publicDirectory": instance.config.publicDirectory,
         },
     )
 

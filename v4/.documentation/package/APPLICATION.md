@@ -73,7 +73,7 @@ The order is decided when the pipeline is built, not at registration:
 
 A middleware that answers a request itself, without calling `next`, short-circuits everything ordered inside it — the framework's own static middleware serves a matching file and returns without calling the rest of the chain. It is registered at a priority below the default, which keeps it outermost, so a request for a file that exists is answered before anything registered through the registrar observes it. [`(*HttpMiddleware).LastBuildReport`](../../application/http_middleware.go) reports the chain the serving process actually built, for in-process inspection; `debug:middleware` describes and — under `--build` — builds a report of its own rather than reading that record. See [HTTP](HTTP.md) for the full ordering contract and for what a `before`/`after` edge does to the build when it names a definition that is not there.
 
-In a filesystem build, `New` refuses an explicitly set `MELODY_PUBLIC_DIR` that is not an existing directory, in every process role, resolved against the project directory as the static file server resolves it, a blank value reading as `public`; the default `public` may be absent, for an application that serves no asset. An embedded build is checked by [`static.NewFileServer`](../../http/static/file_server.go) against the embedded filesystem instead.
+In a filesystem build, `New` refuses an explicitly set `MELODY_PUBLIC_DIRECTORY` that is not an existing directory, in every process role, resolved against the project directory as the static file server resolves it, a blank value reading as `public`; the default `public` may be absent, for an application that serves no asset. An embedded build is checked by [`static.NewFileServer`](../../http/static/file_server.go) against the embedded filesystem instead.
 
 The chain is not the outermost thing there is, though: a request that a `kernel.request` listener answers or refuses never reaches it at all; a refusal is rendered through `kernel.exception`. Wrapping *those* too is what [Handler decorators](#handler-decorators) are for.
 
@@ -242,12 +242,12 @@ var _ applicationcontract.ParameterModule = (*demoModule)(nil)
 var _ applicationcontract.ServiceModule = (*demoModule)(nil)
 var _ applicationcontract.HttpModule = (*demoModule)(nil)
 
-func buildApplication(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) *application.Application {
+func buildApplication(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFiles fs.FS) *application.Application {
     app := application.NewApplication(
         ctx,
         application.ApplicationConfig{
-            EnvFiles:    embeddedEnvFiles,
-            PublicFiles: embeddedPublicFiles,
+            EnvironmentFiles: embeddedEnvironmentFiles,
+            PublicFiles:      embeddedPublicFiles,
         },
     )
 
@@ -276,8 +276,8 @@ func buildApplication(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPubli
     return app
 }
 
-func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS) {
-    app := buildApplication(ctx, embeddedEnvFiles, embeddedPublicFiles)
+func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFiles fs.FS) {
+    app := buildApplication(ctx, embeddedEnvironmentFiles, embeddedPublicFiles)
     app.Run()
 }
 ```
@@ -346,7 +346,7 @@ func run(ctx context.Context, embeddedEnvFiles fs.FS, embeddedPublicFiles fs.FS)
 
 ### Constructors
 
-- [`NewApplication(ctx, ApplicationConfig)`](../../application/application_new.go) — [`ApplicationConfig`](../../application/application_new.go) carries `Version`, the application's own version, which the root command's `--version` prints, `<unknown>` when empty, and the meta of every command document carries, `EnvFiles` and `PublicFiles`, the embedded filesystems, and the six limits the application states its own default for; every field left out takes its default, see [Server limits](#server-limits)
+- [`NewApplication(ctx, ApplicationConfig)`](../../application/application_new.go) — [`ApplicationConfig`](../../application/application_new.go) carries `Version`, the application's own version, which the root command's `--version` prints, `<unknown>` when empty, and the meta of every command document carries, `EnvironmentFiles` and `PublicFiles`, the embedded filesystems, and the six limits the application states its own default for; every field left out takes its default, see [Server limits](#server-limits)
 - [`NewRuntimeFlags(RuntimeFlagsConfig)`](../../application/cli.go) — the flags as given, an empty `Role` reading as `all`
 - [`ParseRuntimeFlags(RuntimeFlagsConfig)`](../../application/cli.go) — the mode and the role resolved from `os.Args` against the defaults given. An explicit `--role`/`-role` placed before the command name wins over `Role`; the flag exists because melody reads configuration only from `.env` artifacts and never from the process environment
 - [`NewSignalContext()`](../../application/signal_context.go) — the context to hand `Run`: cancelled by the first `SIGINT` or `SIGTERM`, giving the application its shutdown window, while a second one, arriving more than half a second after the first, prints a line to stderr and forces the conventional `128+signal` exit, so an operator facing a hung shutdown is never reduced to `SIGKILL`. The returned stop function unregisters the notifications and is safe to call more than once and concurrently. Call it whenever the process outlives the application: a watcher left armed makes the next application cycle in the same process run under two watchers, and the older one reads that cycle's first `SIGTERM` as its own escalation — a forced exit 143 where a graceful shutdown was owed

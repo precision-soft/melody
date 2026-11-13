@@ -14,11 +14,11 @@ import (
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
 )
 
-func TestAuthTokenCommandPrintsTheTokenOnTheCommandWriter(t *testing.T) {
+func TestAuthenticationTokenCommandPrintsTheTokenOnTheCommandWriter(t *testing.T) {
     secret := []byte("auth-token-command-test-secret-padded-to-the-hs256-minimum")
     captured := &bytes.Buffer{}
 
-    runErr := NewAuthTokenCommand(secret).Run(nil, newStringFlagContext(map[string]string{"user": "alice"}, captured))
+    runErr := NewAuthenticationTokenCommand(secret).Run(nil, newStringFlagContext(map[string]string{"user": "alice"}, captured))
     if nil != runErr {
         t.Fatalf("expected the token to be minted, got %v", runErr)
     }
@@ -54,10 +54,10 @@ func TestAuthTokenCommandPrintsTheTokenOnTheCommandWriter(t *testing.T) {
     }
 }
 
-func TestAuthTokenCommandAnswersARefusedWrite(t *testing.T) {
+func TestAuthenticationTokenCommandAnswersARefusedWrite(t *testing.T) {
     refusal := errors.New("broken pipe")
 
-    runErr := NewAuthTokenCommand([]byte("secret-padded-to-the-hs256-minimum")).Run(nil, newStringFlagContext(nil, &refusingWriter{refusal: refusal}))
+    runErr := NewAuthenticationTokenCommand([]byte("secret-padded-to-the-hs256-minimum")).Run(nil, newStringFlagContext(nil, &refusingWriter{refusal: refusal}))
     if false == errors.Is(runErr, refusal) {
         t.Fatalf("expected the refused write to fail the command, got %v", runErr)
     }
@@ -68,7 +68,7 @@ func mintedClaims(t *testing.T, contextValues parsedContextValues) map[string]an
 
     captured := &bytes.Buffer{}
     contextValues.WriterValue = captured
-    if runErr := NewAuthTokenCommand([]byte("auth-token-command-test-secret-padded-to-the-hs256-minimum")).Run(nil, contextValues.parse()); nil != runErr {
+    if runErr := NewAuthenticationTokenCommand([]byte("auth-token-command-test-secret-padded-to-the-hs256-minimum")).Run(nil, contextValues.parse()); nil != runErr {
         t.Fatalf("expected the token to be minted, got %v", runErr)
     }
 
@@ -86,7 +86,7 @@ func mintedClaims(t *testing.T, contextValues parsedContextValues) map[string]an
     return claims
 }
 
-func TestAuthTokenCommandCarriesScopeRolesAloneWithAnEmptyRolesClaim(t *testing.T) {
+func TestAuthenticationTokenCommandCarriesScopeRolesAloneWithAnEmptyRolesClaim(t *testing.T) {
     claims := mintedClaims(t, parsedContextValues{
         StringSliceValues: map[string][]string{"scope-role": {"ROLE_EDITOR"}},
     })
@@ -107,7 +107,7 @@ func TestAuthTokenCommandCarriesScopeRolesAloneWithAnEmptyRolesClaim(t *testing.
     }
 }
 
-func TestAuthTokenCommandKeepsTheDefaultRoleAndNoScopeWithoutEitherFlag(t *testing.T) {
+func TestAuthenticationTokenCommandKeepsTheDefaultRoleAndNoScopeWithoutEitherFlag(t *testing.T) {
     claims := mintedClaims(t, parsedContextValues{})
 
     roles, isList := claims["roles"].([]any)
@@ -121,14 +121,14 @@ func TestAuthTokenCommandKeepsTheDefaultRoleAndNoScopeWithoutEitherFlag(t *testi
 }
 
 /* the `--ttl` flag parses in base ten, as the standard integer flags do: with the engine's inferred base --ttl=010 would read as eight and --ttl=08 would be refused */
-func TestAuthTokenCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
+func TestAuthenticationTokenCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
     for _, flagName := range []string{"ttl"} {
         for spelling, expected := range map[string]int{"010": 10, "08": 8} {
             observed := -1
 
             engineCommand := &melodyclicontract.CommandContext{
                 Name:  "probe",
-                Flags: (&AuthTokenCommand{}).Flags(),
+                Flags: (&AuthenticationTokenCommand{}).Flags(),
                 ExitErrHandler: func(context.Context, *melodyclicontract.CommandContext, error) {
                 },
                 Action: func(_ context.Context, actionCommand *melodyclicontract.CommandContext) error {

@@ -43,7 +43,7 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
 
     source := &stubEnvironmentSource{
         values: map[string]string{
-            melodyconfig.EnvKey: environmentName,
+            melodyconfig.EnvironmentNameKey: environmentName,
         },
     }
 
@@ -329,11 +329,11 @@ func TestApiRefusalReadsACollectionHandedDirectly(t *testing.T) {
 }
 
 func TestDebugModeFollowsTheKernelEnvironment(t *testing.T) {
-    if true == debugMode(runtimeForEnvironment(t, melodyconfig.EnvProduction)) {
+    if true == debugMode(runtimeForEnvironment(t, melodyconfig.EnvironmentProduction)) {
         t.Fatalf("expected production to disable debug material")
     }
 
-    if false == debugMode(runtimeForEnvironment(t, melodyconfig.EnvDevelopment)) {
+    if false == debugMode(runtimeForEnvironment(t, melodyconfig.EnvironmentDevelopment)) {
         t.Fatalf("expected development to enable debug material")
     }
 }
@@ -462,7 +462,7 @@ func (instance *recordingLogger) lines() []recordedLine {
 func runtimeWithJournal(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request, *recordingLogger) {
     t.Helper()
 
-    runtimeInstance := runtimeForEnvironment(t, melodyconfig.EnvProduction)
+    runtimeInstance := runtimeForEnvironment(t, melodyconfig.EnvironmentProduction)
     logger := &recordingLogger{Logger: melodylogging.NewNopLogger()}
 
     registrar := runtimeInstance.Container().(melodycontainercontract.Registrar)

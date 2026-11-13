@@ -76,7 +76,7 @@ func TestConfiguration_MapEnvironmentKeyToParameterNames_CollapsesTheBuiltInAlia
         logger:      logging.NewDefaultLogger(logging.DefaultLoggerConfig{}),
     }
 
-    names := configuration.mapEnvironmentKeyToParameterNames(EnvKey)
+    names := configuration.mapEnvironmentKeyToParameterNames(EnvironmentNameKey)
     if 2 != len(names) {
         t.Fatalf("expected the built-in key to answer under both spellings, got %#v", names)
     }
@@ -84,10 +84,10 @@ func TestConfiguration_MapEnvironmentKeyToParameterNames_CollapsesTheBuiltInAlia
     foundShort := false
     foundKernel := false
     for _, name := range names {
-        if EnvKey == name {
+        if EnvironmentNameKey == name {
             foundShort = true
         }
-        if KernelEnv == name {
+        if KernelEnvironment == name {
             foundKernel = true
         }
     }

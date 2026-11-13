@@ -1,14 +1,14 @@
 package openapi
 
 type Document struct {
-    OpenApi      string                `json:"openapi"`
-    Info         Info                  `json:"info"`
-    Servers      []Server              `json:"servers,omitempty"`
-    Paths        map[string]PathItem   `json:"paths"`
-    Components   *Components           `json:"components,omitempty"`
-    Security     []map[string][]string `json:"security,omitempty"`
-    Tags         []Tag                 `json:"tags,omitempty"`
-    ExternalDocs *ExternalDocs         `json:"externalDocs,omitempty"`
+    OpenApi               string                 `json:"openapi"`
+    Info                  Info                   `json:"info"`
+    Servers               []Server               `json:"servers,omitempty"`
+    Paths                 map[string]PathItem    `json:"paths"`
+    Components            *Components            `json:"components,omitempty"`
+    Security              []map[string][]string  `json:"security,omitempty"`
+    Tags                  []Tag                  `json:"tags,omitempty"`
+    ExternalDocumentation *ExternalDocumentation `json:"externalDocs,omitempty"`
 }
 
 type Info struct {
@@ -27,7 +27,7 @@ type Tag struct {
     Description string `json:"description,omitempty"`
 }
 
-type ExternalDocs struct {
+type ExternalDocumentation struct {
     Url         string `json:"url"`
     Description string `json:"description,omitempty"`
 }
@@ -81,7 +81,7 @@ type MediaType struct {
 }
 
 type Schema struct {
-    Ref                  string             `json:"$ref,omitempty"`
+    Reference            string             `json:"$ref,omitempty"`
     AllOf                []*Schema          `json:"allOf,omitempty"`
     Type                 string             `json:"type,omitempty"`
     Format               string             `json:"format,omitempty"`

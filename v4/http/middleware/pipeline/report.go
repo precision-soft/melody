@@ -19,37 +19,37 @@ func (instance *InactiveMiddleware) Reason() string { return instance.reason }
 
 func NewMiddlewareBuildReport(
     requestedGroup string,
-    kernelEnv string,
+    kernelEnvironment string,
     selectedNames []string,
     inactive []*InactiveMiddleware,
     missingReference []string,
     cycleDetected bool,
 ) *MiddlewareBuildReport {
     return &MiddlewareBuildReport{
-        requestedGroup:   requestedGroup,
-        kernelEnv:        kernelEnv,
-        selectedNames:    slices.Clone(selectedNames),
-        inactive:         copyInactiveMiddlewareSlice(inactive),
-        missingReference: slices.Clone(missingReference),
-        cycleDetected:    cycleDetected,
+        requestedGroup:    requestedGroup,
+        kernelEnvironment: kernelEnvironment,
+        selectedNames:     slices.Clone(selectedNames),
+        inactive:          copyInactiveMiddlewareSlice(inactive),
+        missingReference:  slices.Clone(missingReference),
+        cycleDetected:     cycleDetected,
     }
 }
 
 type MiddlewareBuildReport struct {
-    requestedGroup   string
-    kernelEnv        string
-    selectedNames    []string
-    inactive         []*InactiveMiddleware
-    missingReference []string
-    cycleDetected    bool
+    requestedGroup    string
+    kernelEnvironment string
+    selectedNames     []string
+    inactive          []*InactiveMiddleware
+    missingReference  []string
+    cycleDetected     bool
 }
 
 func (instance *MiddlewareBuildReport) RequestedGroup() string {
     return instance.requestedGroup
 }
 
-func (instance *MiddlewareBuildReport) KernelEnv() string {
-    return instance.kernelEnv
+func (instance *MiddlewareBuildReport) KernelEnvironment() string {
+    return instance.kernelEnvironment
 }
 
 func (instance *MiddlewareBuildReport) SelectedNames() []string {

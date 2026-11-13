@@ -1918,8 +1918,8 @@ func TestHttpClient_ARelativeTargetWithoutABaseUrlIsRefusedByName(t *testing.T) 
 func TestNewHttpClient_AnUnlimitedFieldReachesTheTransportInNetHttpTerms(t *testing.T) {
     client := newTestHttpClient(t, HttpClientConfig{
         Transport: TransportConfig{
-            MaxIdleConns:    bound.UnlimitedCount(),
-            IdleConnTimeout: bound.UnlimitedDuration(),
+            MaxIdleConnections:    bound.UnlimitedCount(),
+            IdleConnectionTimeout: bound.UnlimitedDuration(),
         },
     })
 
@@ -1929,11 +1929,11 @@ func TestNewHttpClient_AnUnlimitedFieldReachesTheTransportInNetHttpTerms(t *test
     }
 
     if 0 != transport.MaxIdleConns || 100 != transport.MaxIdleConnsPerHost {
-        t.Fatalf("expected the unlimited MaxIdleConns to reach the total as zero and leave the host at 100, got %d and %d", transport.MaxIdleConns, transport.MaxIdleConnsPerHost)
+        t.Fatalf("expected the unlimited MaxIdleConnections to reach the total as zero and leave the host at 100, got %d and %d", transport.MaxIdleConns, transport.MaxIdleConnsPerHost)
     }
 
     if 0 != transport.IdleConnTimeout {
-        t.Fatalf("expected the unlimited IdleConnTimeout to reach the transport as zero, got %v", transport.IdleConnTimeout)
+        t.Fatalf("expected the unlimited IdleConnectionTimeout to reach the transport as zero, got %v", transport.IdleConnTimeout)
     }
 
     if 10*time.Second != transport.TLSHandshakeTimeout {

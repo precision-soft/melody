@@ -3,6 +3,7 @@ package validation
 import (
     "testing"
 
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
@@ -28,12 +29,12 @@ func TestMaxLength_NonStringIsRejected(t *testing.T) {
 }
 
 /* a length is never negative, so a negative bound is a typo that would reject every value with a message naming an impossible limit */
-func TestMaxLength_WithParamsRefusesNegativeBound(t *testing.T) {
+func TestMaxLength_WithParametersRefusesNegativeBound(t *testing.T) {
     constraint := NewMaxLength(5)
 
-    configured, withParamsErr := constraint.WithParams(map[string]string{"value": "-1"})
+    configured, withParametersErr := constraint.WithParameters(map[string]string{"value": "-1"})
 
-    if nil == withParamsErr || nil != configured {
+    if nil == withParametersErr || nil != configured {
         t.Fatalf("expected a negative max length bound to be refused")
     }
 }
@@ -103,5 +104,14 @@ func TestMaxLength_AnAbsentValueIsOptionalityRatherThanAZeroLengthString(t *test
 
     if validationError := NewMinLength(3).Validate("", "field"); nil == validationError {
         t.Fatalf("expected an empty string to fail the lower bound, which an absent value passes")
+    }
+}
+
+func TestMaxLength_AMissingValueParameterIsNamedUnderParameters(t *testing.T) {
+    _, err := NewMaxLength(1).WithParameters(map[string]string{"other": "2"})
+
+    refusal, isRefusal := err.(*exception.Error)
+    if false == isRefusal || nil == refusal.Context()["parameters"] {
+        t.Fatalf("expected the refusal to name the parameters under parameters, got %v", err)
     }
 }

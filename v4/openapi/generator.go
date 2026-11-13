@@ -300,7 +300,7 @@ func convertPattern(pattern string) (string, []Parameter) {
         }
 
         if "" == name {
-            name = "param" + strconv.Itoa(index)
+            name = "parameter" + strconv.Itoa(index)
         }
 
         segments[index] = "{" + name + "}"

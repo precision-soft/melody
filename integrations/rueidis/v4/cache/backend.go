@@ -20,7 +20,7 @@ const defaultBackendPrefix = "melody:cache:"
 
 /* BackendConfig declares the backend over one key prefix; its zero value is the default backend. */
 type BackendConfig struct {
-    /* Prefix is the whole of the backend's isolation: every key it writes carries it, and Clear deletes everything under it. Empty is melody:cache:, the same string in every melody application, so two applications on one redis with it share a namespace, a foreign json document decoding as a hit and a Clear from either emptying the other; the client's SelectDb defaults to 0, so databases do not separate them either. Give each application and environment sharing a store its own prefix. */
+    /* Prefix is the whole of the backend's isolation: every key it writes carries it, and Clear deletes everything under it. Empty is melody:cache:, the same string in every melody application, so two applications on one redis with it share a namespace, a foreign json document decoding as a hit and a Clear from either emptying the other; the client's SelectDatabase defaults to 0, so databases do not separate them either. Give each application and environment sharing a store its own prefix. */
     Prefix string
 
     /* ScanCount is the COUNT hint of the SCAN walk Clear and ClearByPrefix run: 1000 by default, at least 1, unlimited refused. */

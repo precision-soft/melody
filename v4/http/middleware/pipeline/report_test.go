@@ -22,8 +22,8 @@ func TestNewMiddlewareBuildReport_CarriesEveryFieldItWasGiven(t *testing.T) {
         t.Fatalf("unexpected requested group: %q", report.RequestedGroup())
     }
 
-    if "prod" != report.KernelEnv() {
-        t.Fatalf("unexpected kernel environment: %q", report.KernelEnv())
+    if "prod" != report.KernelEnvironment() {
+        t.Fatalf("unexpected kernel environment: %q", report.KernelEnvironment())
     }
 
     if 2 != len(report.SelectedNames()) || "security" != report.SelectedNames()[0] {

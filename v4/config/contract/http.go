@@ -11,7 +11,7 @@ type HttpConfiguration interface {
 
     DefaultLocale() string
 
-    PublicDir() string
+    PublicDirectory() string
 
     StaticIndexFile() string
 

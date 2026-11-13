@@ -369,7 +369,7 @@ func TestLoad_RefusesAnEnvironmentFileThatRenamesTheEnvironment(t *testing.T) {
             t.Fatalf("%s: expected the rename refused, got %v", file, loadErr)
         }
 
-        if "prod" != refusal.Context()["selectedEnvironment"] || "dev" != refusal.Context()["overwritingEnvironment"] || EnvKey != refusal.Context()["environmentKey"] {
+        if "prod" != refusal.Context()["selectedEnvironment"] || "dev" != refusal.Context()["overwritingEnvironment"] || EnvironmentNameKey != refusal.Context()["environmentKey"] {
             t.Fatalf("%s: expected both names and the key, got %v", file, refusal.Context())
         }
 
@@ -706,8 +706,8 @@ func TestEnvironmentSource_ResolvesReferenceInsideTheEnvironmentName(t *testing.
         t.Fatalf("expected the environment file selected by the resolved name to be loaded, got %q", values["APP_TAG"])
     }
 
-    if "prod" != values[EnvKey] {
-        t.Fatalf("expected the environment key itself to be resolved, got %q", values[EnvKey])
+    if "prod" != values[EnvironmentNameKey] {
+        t.Fatalf("expected the environment key itself to be resolved, got %q", values[EnvironmentNameKey])
     }
 }
 
@@ -811,7 +811,7 @@ func TestMarkSecret_ReachesADotEnvValueAssembledFromTheMarkedKey(t *testing.T) {
     }
 }
 
-func TestNewEnvironmentSource_EmptyBaseDirReadsTheRootAndBaseDirNamesASubdirectory(t *testing.T) {
+func TestNewEnvironmentSource_EmptyBaseDirectoryReadsTheRootAndBaseDirectoryNamesASubdirectory(t *testing.T) {
     directory := t.TempDir()
 
     if writeErr := os.WriteFile(filepath.Join(directory, ".env"), []byte("PLACE=root\n"), 0o600); nil != writeErr {
@@ -826,14 +826,14 @@ func TestNewEnvironmentSource_EmptyBaseDirReadsTheRootAndBaseDirNamesASubdirecto
         t.Fatalf("write nested env file: %s", writeErr.Error())
     }
 
-    for baseDir, expected := range map[string]string{"": "root", ".": "root", "nested": "nested"} {
-        values, loadErr := NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: os.DirFS(directory), BaseDir: baseDir}).Load()
+    for baseDirectory, expected := range map[string]string{"": "root", ".": "root", "nested": "nested"} {
+        values, loadErr := NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: os.DirFS(directory), BaseDirectory: baseDirectory}).Load()
         if nil != loadErr {
-            t.Fatalf("base dir %q: load: %s", baseDir, loadErr.Error())
+            t.Fatalf("base dir %q: load: %s", baseDirectory, loadErr.Error())
         }
 
         if expected != values["PLACE"] {
-            t.Fatalf("base dir %q: expected %q, got %q", baseDir, expected, values["PLACE"])
+            t.Fatalf("base dir %q: expected %q, got %q", baseDirectory, expected, values["PLACE"])
         }
     }
 }
@@ -880,7 +880,7 @@ func (instance *cyclicOpenFileSystem) Open(name string) (fs.File, error) {
 }
 
 func TestLoadOptionalDotEnvFile_ReturnsOnACyclicChainFromTheFileSystem(t *testing.T) {
-    source := NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: &cyclicOpenFileSystem{}, BaseDir: "."})
+    source := NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: &cyclicOpenFileSystem{}, BaseDirectory: "."})
 
     var loadErr error
     assertReturnsOnACyclicChain(t, func() {

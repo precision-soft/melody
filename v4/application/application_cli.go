@@ -87,7 +87,7 @@ func (instance *Application) bootCli() {
         &debug.RouterCommand{},
     }
 
-    if config.EnvDevelopment == instance.configuration.Kernel().Env() {
+    if config.EnvironmentDevelopment == instance.configuration.Kernel().Environment() {
         debugCommands = append(
             debugCommands,
             &debug.ContainerCommand{},

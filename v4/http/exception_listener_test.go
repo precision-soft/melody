@@ -994,7 +994,7 @@ func TestBuiltInExceptionListener_ABareRuntimeRendersTheProductionBody(t *testin
 func TestBuiltInExceptionListener_AProductionConfigurationRendersTheProductionBody(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
-    serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), map[string]string{config.EnvKey: config.EnvProduction})
+    serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), map[string]string{config.EnvironmentNameKey: config.EnvironmentProduction})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)

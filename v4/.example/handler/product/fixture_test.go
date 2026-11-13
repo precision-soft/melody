@@ -67,7 +67,7 @@ func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores)
     t.Helper()
 
     environment, environmentErr := melodyconfig.NewEnvironment(&stubEnvironmentSource{
-        values: map[string]string{melodyconfig.EnvKey: melodyconfig.EnvProduction},
+        values: map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentProduction},
     })
     if nil != environmentErr {
         t.Fatalf("new environment: %v", environmentErr)

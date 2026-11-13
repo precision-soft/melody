@@ -13,12 +13,12 @@ import (
 
 func newInternalSignTestSigner(ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
     return melodysecurity.NewHmacEnvelopeSigner(melodysecurity.HmacEnvelopeSignerConfig{
-        App: "wms-service",
-        Ttl: ttl,
+        Application: "wms-service",
+        Ttl:         ttl,
         Secrets: melodysecurity.NewStaticHmacSecretProvider(melodysecurity.HmacKeyRing{
             CurrentKeyId: "key-current",
             Keys: map[string]melodysecurity.HmacKey{
-                "key-current": {App: "wms-service", Secret: []byte("internal-sign-command-test-secret")},
+                "key-current": {Application: "wms-service", Secret: []byte("internal-sign-command-test-secret")},
             },
         }),
     })

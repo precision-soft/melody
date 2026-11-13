@@ -541,11 +541,11 @@ func (instance *ExampleMiddlewareModule) RegisterHttpMiddlewares(
     httpConfiguration := kernelInstance.Config().Http()
 
     staticConfig := static.Config{
-        PublicDir:            httpConfiguration.PublicDir(),
+        PublicDirectory:      httpConfiguration.PublicDirectory(),
         IndexFile:            httpConfiguration.StaticIndexFile(),
         CacheDisabled:        false == httpConfiguration.StaticEnableCache(),
         AllowedDotPrefixList: []string{static.DefaultAllowedDotPrefix, ".artifacts"},
-        Root:                 kernelInstance.Config().Kernel().ProjectDir(),
+        Root:                 kernelInstance.Config().Kernel().ProjectDirectory(),
     }
 
     /* the max age is refused beside CacheDisabled */
@@ -559,7 +559,7 @@ func (instance *ExampleMiddlewareModule) RegisterHttpMiddlewares(
 }
 ```
 
-Where the list itself comes from is the application's business — a constant as above, an environment variable it reads itself, its own module configuration — because the application owns this construction. The `FileSystem` field is consulted only in `static.ModeEmbedded`; under `static.ModeFilesystem`, the mode a `Config` left without one reads as, the server builds its own from `Root` and `PublicDir`, which is why the sample leaves it out.
+Where the list itself comes from is the application's business — a constant as above, an environment variable it reads itself, its own module configuration — because the application owns this construction. The `FileSystem` field is consulted only in `static.ModeEmbedded`; under `static.ModeFilesystem`, the mode a `Config` left without one reads as, the server builds its own from `Root` and `PublicDirectory`, which is why the sample leaves it out.
 
 `Use` registers at `MiddlewarePriorityDefault` (`0`) when the registration leaves `Priority` out, and the built-in static middleware sits further out, so of the two the registered one is the **inner** (see [Middleware ordering](#middleware-ordering)). Each answers what it resolves and never calls `next`, so a registered file server receives only what the built-in one declines. Widening the list therefore lands as written — a dot-prefixed path the built-in refuses falls through and is answered by the file server that allows it — while narrowing it below the default does not land at all: a `.well-known` file that exists under the served directory is answered by the built-in server first, which is applying the default allowance, and the request never reaches the narrower one. Serving a directory *behind* the application's own middleware is the case this composition does fit: put the file server after an authentication middleware and keep its root out of the built-in server's reach — naming that root in [
 `MELODY_STATIC_EXCLUDED_PATHS`](#excluded-path-prefixes) is how the second half is done, since otherwise the built-in server answers the file first and the middleware guarding it never runs.
@@ -744,7 +744,7 @@ Where the list itself comes from is the application's business — a constant as
     - [`Serve`](../../http/static/file_server.go) — the whole-response form
 
 - [`type Config`](../../http/static/option.go) — the zero value serves `public` under `.` with `index.html`, `Cache-Control` with a 3600s max age and strong entity tags
-    - `Mode`, `PublicDir`, `IndexFile`, `StripPrefix`, `WeakEtag`, `Root` and `FileSystem`, the filesystem consulted only in the embedded mode
+    - `Mode`, `PublicDirectory`, `IndexFile`, `StripPrefix`, `WeakEtag`, `Root` and `FileSystem`, the filesystem consulted only in the embedded mode
     - `CacheDisabled` sends no validator; `CacheMaxAge`, a [`bound.Count`](../../bound/limit.go), is 3600 left out, at least 0, unlimited refused, and refused beside `CacheDisabled`
     - `AllowedDotPrefixList` names the dot-prefixed **first** path elements the server may retrieve; `nil` reads as [`DefaultAllowedDotPrefix`](../../http/static/option.go) (`.well-known`) alone, an empty list refuses every dot-prefixed path
     - `ExcludedPathList` names the path prefixes the server declines without touching the disk, compared against the request path as it arrived; the built-in server is given [`HttpConfiguration.StaticExcludedPaths()`](../../config/contract/http.go)

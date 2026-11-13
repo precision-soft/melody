@@ -43,7 +43,7 @@ import (
 )
 
 func TestApplicationRegisterHttpRoute_AppendsRegistrarBeforeBoot(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterHttpRoute(
         nethttp.MethodGet,
@@ -72,7 +72,7 @@ func TestApplicationRegisterHttpRoute_RefusesDuringTheBootWindow(t *testing.T) {
 }
 
 func TestApplicationRegisterHttpRoute_PanicsAfterBoot(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -88,7 +88,7 @@ func TestApplicationRegisterHttpRoute_PanicsAfterBoot(t *testing.T) {
 }
 
 func TestApplicationRegisterHttpMiddlewares_PanicsAfterBoot(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -100,7 +100,7 @@ func TestApplicationRegisterHttpMiddlewares_PanicsAfterBoot(t *testing.T) {
 }
 
 func TestApplicationRegisterHttpMiddlewareFactories_PanicsAfterBoot(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -116,7 +116,7 @@ func TestApplicationRegisterHttpMiddlewareFactories_PanicsAfterBoot(t *testing.T
 }
 
 func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterHttpRoute(
         nethttp.MethodGet,
@@ -141,7 +141,7 @@ func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {
 }
 
 func TestApplicationRegisterHttpMiddlewares_HandsThemToThePipeline(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     before := len(applicationInstance.httpMiddlewares.definitions)
 
@@ -1351,7 +1351,7 @@ func recordingHttpHandlerDecorator(name string, sequence *[]string) applicationc
 }
 
 func TestApplicationDecorateHttpHandler_TheFirstRegisteredDecoratorIsOutermost(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     sequence := make([]string, 0, 4)
 
@@ -1377,7 +1377,7 @@ func TestApplicationDecorateHttpHandler_TheFirstRegisteredDecoratorIsOutermost(t
 }
 
 func TestApplicationRegisterHttpHandlerDecorator_PanicsOnNil(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     testhelper.AssertPanicsWithError(t, func() {
         applicationInstance.RegisterHttpHandlerDecorator(nil)
@@ -1385,7 +1385,7 @@ func TestApplicationRegisterHttpHandlerDecorator_PanicsOnNil(t *testing.T) {
 }
 
 func TestApplicationRegisterHttpHandlerDecorator_PanicsAfterBoot(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -1861,7 +1861,7 @@ func serveSessionReader(serviceContainer containercontract.Container, httpKernel
 
 func TestApplication_InstallsTheSessionPolicyOnTheHttpKernel(t *testing.T) {
     for field, expected := range map[bool]int{true: nethttp.StatusOK, false: nethttp.StatusServiceUnavailable} {
-        applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), SessionEmptyOnOutage: field})
+        applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), SessionEmptyOnOutage: field})
         serviceContainer := applicationInstance.kernel.ServiceContainer()
 
         applicationInstance.Boot()

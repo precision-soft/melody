@@ -87,11 +87,11 @@ func (instance *kernel) Context() context.Context {
 }
 
 func (instance *kernel) Environment() string {
-    return instance.config.Kernel().Env()
+    return instance.config.Kernel().Environment()
 }
 
 func (instance *kernel) DebugMode() bool {
-    return config.EnvDevelopment == instance.config.Kernel().Env()
+    return config.EnvironmentDevelopment == instance.config.Kernel().Environment()
 }
 
 func (instance *kernel) ServiceContainer() containercontract.Container {

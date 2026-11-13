@@ -23,28 +23,28 @@ func TestKernelGettersMatchParameterValues(t *testing.T) {
         t.Fatalf("new configuration error: %v", err)
     }
 
-    if configuration.Kernel().LogsDir() != configuration.MustGet(KernelLogsDir).String() {
-        t.Fatalf("expected LogsDir getter to match parameter value")
+    if configuration.Kernel().LogsDirectory() != configuration.MustGet(KernelLogsDirectory).String() {
+        t.Fatalf("expected LogsDirectory getter to match parameter value")
     }
 
-    if configuration.Kernel().CacheDir() != configuration.MustGet(KernelCacheDir).String() {
-        t.Fatalf("expected CacheDir getter to match parameter value")
+    if configuration.Kernel().CacheDirectory() != configuration.MustGet(KernelCacheDirectory).String() {
+        t.Fatalf("expected CacheDirectory getter to match parameter value")
     }
 }
 
 /* every kernel value is validated at construction, and each refusal names what it refused: these are the settings a deployment gets wrong in its .env, and the boot is the only place where saying so is still useful. A validator that stopped refusing would let the process start on a value nothing downstream can act on — a mode nothing dispatches, a role no runner matches, an environment that decides debug tooling. */
 func TestNewKernelConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
     cases := []struct {
-        name            string
-        defaultMode     string
-        processRole     string
-        environment     string
-        projectDir      string
-        logsDir         string
-        logPath         string
-        logLevel        string
-        cacheDir        string
-        expectedMessage string
+        name             string
+        defaultMode      string
+        processRole      string
+        environment      string
+        projectDirectory string
+        logsDirectory    string
+        logPath          string
+        logLevel         string
+        cacheDirectory   string
+        expectedMessage  string
     }{
         {
             name:            "an empty mode",
@@ -83,31 +83,31 @@ func TestNewKernelConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
             expectedMessage: "environment is not supported",
         },
         {
-            name:            "an empty project directory",
-            defaultMode:     ModeHttp,
-            processRole:     RoleAll,
-            environment:     EnvDevelopment,
-            projectDir:      "",
-            expectedMessage: "project directory may not be empty",
+            name:             "an empty project directory",
+            defaultMode:      ModeHttp,
+            processRole:      RoleAll,
+            environment:      EnvironmentDevelopment,
+            projectDirectory: "",
+            expectedMessage:  "project directory may not be empty",
         },
         {
-            name:            "an empty logs directory",
-            defaultMode:     ModeHttp,
-            processRole:     RoleAll,
-            environment:     EnvDevelopment,
-            projectDir:      "/srv/app",
-            logsDir:         "",
-            expectedMessage: "logs directory may not be empty",
+            name:             "an empty logs directory",
+            defaultMode:      ModeHttp,
+            processRole:      RoleAll,
+            environment:      EnvironmentDevelopment,
+            projectDirectory: "/srv/app",
+            logsDirectory:    "",
+            expectedMessage:  "logs directory may not be empty",
         },
         {
-            name:            "an empty cache directory",
-            defaultMode:     ModeHttp,
-            processRole:     RoleAll,
-            environment:     EnvDevelopment,
-            projectDir:      "/srv/app",
-            logsDir:         "/srv/app/var/log",
-            cacheDir:        "",
-            expectedMessage: "cache directory may not be empty",
+            name:             "an empty cache directory",
+            defaultMode:      ModeHttp,
+            processRole:      RoleAll,
+            environment:      EnvironmentDevelopment,
+            projectDirectory: "/srv/app",
+            logsDirectory:    "/srv/app/var/log",
+            cacheDirectory:   "",
+            expectedMessage:  "cache directory may not be empty",
         },
     }
 
@@ -118,7 +118,7 @@ func TestNewKernelConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
                 logLevel = string(loggingcontract.LevelInfo)
             }
 
-            kernelConfigurationInstance, kernelErr := newKernelConfiguration(testCase.defaultMode, testCase.processRole, testCase.environment, testCase.projectDir, testCase.logsDir, testCase.logPath, logLevel, testCase.cacheDir, bound.Duration{}, bound.Duration{}, bound.Count{})
+            kernelConfigurationInstance, kernelErr := newKernelConfiguration(testCase.defaultMode, testCase.processRole, testCase.environment, testCase.projectDirectory, testCase.logsDirectory, testCase.logPath, logLevel, testCase.cacheDirectory, bound.Duration{}, bound.Duration{}, bound.Count{})
 
             if nil == kernelErr {
                 t.Fatalf("expected the value to be refused")
@@ -150,12 +150,12 @@ func TestNewKernelConfiguration_TheEmptyEnvironmentRefusalNamesTheKeyAndTheFiles
 
     context := exceptionErr.Context()
 
-    if EnvKey != context["environmentKey"] {
-        t.Fatalf("expected the refusal to name %q, got %#v", EnvKey, context["environmentKey"])
+    if EnvironmentNameKey != context["environmentKey"] {
+        t.Fatalf("expected the refusal to name %q, got %#v", EnvironmentNameKey, context["environmentKey"])
     }
 
-    if KernelEnv != context["parameterName"] {
-        t.Fatalf("expected the refusal to name %q, got %#v", KernelEnv, context["parameterName"])
+    if KernelEnvironment != context["parameterName"] {
+        t.Fatalf("expected the refusal to name %q, got %#v", KernelEnvironment, context["parameterName"])
     }
 
     hint, ok := context["hint"].(string)
@@ -163,14 +163,14 @@ func TestNewKernelConfiguration_TheEmptyEnvironmentRefusalNamesTheKeyAndTheFiles
         t.Fatalf("expected the refusal to carry a hint, got %#v", context["hint"])
     }
 
-    if false == strings.Contains(hint, ".env."+EnvDevelopment) {
+    if false == strings.Contains(hint, ".env."+EnvironmentDevelopment) {
         t.Fatalf("expected the hint to name the files an empty value still selects, got %q", hint)
     }
 }
 
 /* a kernel configuration whose every value is acceptable is built and hands each one back, including the log path, which is allowed to be empty because an empty one means stdout */
 func TestNewKernelConfiguration_AcceptsAValidSetAndKeepsEveryValue(t *testing.T) {
-    kernelConfigurationInstance, kernelErr := newKernelConfiguration(ModeHttp, RoleWorker, EnvProduction, "/srv/app", "/srv/app/var/log", "/srv/app/var/log/app.log", string(loggingcontract.LevelWarning), "/srv/app/var/cache", bound.Duration{}, bound.Duration{}, bound.Count{})
+    kernelConfigurationInstance, kernelErr := newKernelConfiguration(ModeHttp, RoleWorker, EnvironmentProduction, "/srv/app", "/srv/app/var/log", "/srv/app/var/log/app.log", string(loggingcontract.LevelWarning), "/srv/app/var/cache", bound.Duration{}, bound.Duration{}, bound.Count{})
     if nil != kernelErr {
         t.Fatalf("unexpected error: %v", kernelErr)
     }
@@ -181,14 +181,14 @@ func TestNewKernelConfiguration_AcceptsAValidSetAndKeepsEveryValue(t *testing.T)
     if RoleWorker != kernelConfigurationInstance.ProcessRole() {
         t.Fatalf("unexpected process role: %q", kernelConfigurationInstance.ProcessRole())
     }
-    if EnvProduction != kernelConfigurationInstance.Env() {
-        t.Fatalf("unexpected environment: %q", kernelConfigurationInstance.Env())
+    if EnvironmentProduction != kernelConfigurationInstance.Environment() {
+        t.Fatalf("unexpected environment: %q", kernelConfigurationInstance.Environment())
     }
-    if "/srv/app" != kernelConfigurationInstance.ProjectDir() {
-        t.Fatalf("unexpected project directory: %q", kernelConfigurationInstance.ProjectDir())
+    if "/srv/app" != kernelConfigurationInstance.ProjectDirectory() {
+        t.Fatalf("unexpected project directory: %q", kernelConfigurationInstance.ProjectDirectory())
     }
-    if "/srv/app/var/log" != kernelConfigurationInstance.LogsDir() {
-        t.Fatalf("unexpected logs directory: %q", kernelConfigurationInstance.LogsDir())
+    if "/srv/app/var/log" != kernelConfigurationInstance.LogsDirectory() {
+        t.Fatalf("unexpected logs directory: %q", kernelConfigurationInstance.LogsDirectory())
     }
     if "/srv/app/var/log/app.log" != kernelConfigurationInstance.LogPath() {
         t.Fatalf("unexpected log path: %q", kernelConfigurationInstance.LogPath())
@@ -196,8 +196,8 @@ func TestNewKernelConfiguration_AcceptsAValidSetAndKeepsEveryValue(t *testing.T)
     if loggingcontract.LevelWarning != kernelConfigurationInstance.LogLevel() {
         t.Fatalf("unexpected log level: %q", kernelConfigurationInstance.LogLevel())
     }
-    if "/srv/app/var/cache" != kernelConfigurationInstance.CacheDir() {
-        t.Fatalf("unexpected cache directory: %q", kernelConfigurationInstance.CacheDir())
+    if "/srv/app/var/cache" != kernelConfigurationInstance.CacheDirectory() {
+        t.Fatalf("unexpected cache directory: %q", kernelConfigurationInstance.CacheDirectory())
     }
 }
 

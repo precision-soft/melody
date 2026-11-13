@@ -31,7 +31,7 @@ func TestStaticMiddleware_DoesNotDuplicateContentType(t *testing.T) {
         t.Fatalf("write file error: %v", writeErr)
     }
 
-    config := static.Config{PublicDir: directory, CacheDisabled: true}
+    config := static.Config{PublicDirectory: directory, CacheDisabled: true}
 
     handler := StaticMiddleware(config)(
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {

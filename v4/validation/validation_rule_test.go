@@ -57,7 +57,7 @@ func TestParseValidationTag_ShorthandRegexWithGroupParses(t *testing.T) {
     if 1 != len(rules) {
         t.Fatalf("expected a single regex rule, got %d: %#v", len(rules), rules)
     }
-    if "regex" != rules[0].name || "^(a|b)$" != rules[0].params["value"] {
+    if "regex" != rules[0].name || "^(a|b)$" != rules[0].parameters["value"] {
         t.Fatalf("expected regex rule with pattern '^(a|b)$' under value, got %#v", rules[0])
     }
 }
@@ -70,7 +70,7 @@ func TestParseValidationTag_ParenthesizedRegexWithGroupParses(t *testing.T) {
     if 1 != len(rules) {
         t.Fatalf("expected a single regex rule, got %d: %#v", len(rules), rules)
     }
-    if "regex" != rules[0].name || "^(a|b)$" != rules[0].params["pattern"] {
+    if "regex" != rules[0].name || "^(a|b)$" != rules[0].parameters["pattern"] {
         t.Fatalf("expected regex rule with pattern '^(a|b)$' under pattern, got %#v", rules[0])
     }
 }
@@ -110,7 +110,7 @@ func TestParseValidationTag_ShorthandRegexCharClassWithClosingBracketParses(t *t
     if nil != err {
         t.Fatalf("shorthand regex with ')' inside a character class must parse, got: %v", err)
     }
-    if 1 != len(rules) || "regex" != rules[0].name || "^[)]a{2,3}b$" != rules[0].params["value"] {
+    if 1 != len(rules) || "regex" != rules[0].name || "^[)]a{2,3}b$" != rules[0].parameters["value"] {
         t.Fatalf("expected a single regex rule with the pattern intact, got %#v", rules)
     }
 }
@@ -120,7 +120,7 @@ func TestParseValidationTag_ParenthesizedRegexCharClassWithClosingBracketParses(
     if nil != err {
         t.Fatalf("parenthesized regex with ')' inside a character class must parse, got: %v", err)
     }
-    if 1 != len(rules) || "regex" != rules[0].name || "^[)]$" != rules[0].params["value"] {
+    if 1 != len(rules) || "regex" != rules[0].name || "^[)]$" != rules[0].parameters["value"] {
         t.Fatalf("expected a single regex rule with pattern '^[)]$', got %#v", rules)
     }
 }
@@ -130,7 +130,7 @@ func TestParseValidationTag_RegexCharClassOfAllBracketsParses(t *testing.T) {
     if nil != err {
         t.Fatalf("a character class containing every bracket must parse, got: %v", err)
     }
-    if 1 != len(rules) || "^[(){}]+$" != rules[0].params["value"] {
+    if 1 != len(rules) || "^[(){}]+$" != rules[0].parameters["value"] {
         t.Fatalf("expected the bracket character class intact, got %#v", rules)
     }
 }
@@ -174,16 +174,16 @@ func TestParseValidationTag_ParenthesizedRegexWithCommaInsideGroup(t *testing.T)
     if "regex" != parenRules[0].name {
         t.Fatalf("expected rule name regex, got %q", parenRules[0].name)
     }
-    if pattern != parenRules[0].params["value"] {
-        t.Fatalf("expected the comma inside the () group to be preserved as part of the value %q, got %q", pattern, parenRules[0].params["value"])
+    if pattern != parenRules[0].parameters["value"] {
+        t.Fatalf("expected the comma inside the () group to be preserved as part of the value %q, got %q", pattern, parenRules[0].parameters["value"])
     }
 
     shorthandRules, shorthandErr := parseValidationTag(`regex=` + pattern)
     if nil != shorthandErr {
         t.Fatalf("shorthand regex must parse: %v", shorthandErr)
     }
-    if shorthandRules[0].params["value"] != parenRules[0].params["value"] {
-        t.Fatalf("shorthand and parenthesized forms must agree on the value: %q vs %q", shorthandRules[0].params["value"], parenRules[0].params["value"])
+    if shorthandRules[0].parameters["value"] != parenRules[0].parameters["value"] {
+        t.Fatalf("shorthand and parenthesized forms must agree on the value: %q vs %q", shorthandRules[0].parameters["value"], parenRules[0].parameters["value"])
     }
 }
 
@@ -210,7 +210,7 @@ func TestParseValidationTag_PosixNamedClassRegexParses(t *testing.T) {
     if nil != err {
         t.Fatalf("a regex with a POSIX named class must parse, got: %v", err)
     }
-    if 1 != len(rules) || "regex" != rules[0].name || "[[:alpha:],]" != rules[0].params["value"] {
+    if 1 != len(rules) || "regex" != rules[0].name || "[[:alpha:],]" != rules[0].parameters["value"] {
         t.Fatalf("expected a single regex rule with the POSIX pattern intact, got %#v", rules)
     }
 }
@@ -311,8 +311,8 @@ func TestParseValidationTag_ADoubledCommaIsSkippedRatherThanRefused(t *testing.T
         t.Fatalf("expected one rule, got %#v", rules)
     }
 
-    if "1" != rules[0].params["min"] || "9" != rules[0].params["max"] {
-        t.Fatalf("expected both parameters to survive the doubled comma, got %#v", rules[0].params)
+    if "1" != rules[0].parameters["min"] || "9" != rules[0].parameters["max"] {
+        t.Fatalf("expected both parameters to survive the doubled comma, got %#v", rules[0].parameters)
     }
 
     rules, parseErr = parseValidationTagUncached("notBlank,  ,max=5")
@@ -408,7 +408,7 @@ func TestParseValidationTag_KeepsEveryLaterEqualsSignInTheValue(t *testing.T) {
         t.Fatalf("expected the shorthand to parse, got %v", parseErr)
     }
 
-    if 1 != len(rules) || "regex" != rules[0].name || "a=b" != rules[0].params["value"] {
+    if 1 != len(rules) || "regex" != rules[0].name || "a=b" != rules[0].parameters["value"] {
         t.Fatalf("expected one regex rule over the value a=b, got %#v", rules)
     }
 }

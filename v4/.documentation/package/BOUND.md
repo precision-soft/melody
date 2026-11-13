@@ -41,7 +41,7 @@ func newExportClient() (*httpclient.HttpClient, error) {
         httpclient.HttpClientConfig{
             Timeout: bound.Of(5 * time.Second),
             Transport: httpclient.TransportConfig{
-                IdleConnTimeout: bound.UnlimitedDuration(),
+                IdleConnectionTimeout: bound.UnlimitedDuration(),
             },
         },
     )

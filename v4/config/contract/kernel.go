@@ -10,13 +10,13 @@ type KernelConfiguration interface {
 
     ProcessRole() string
 
-    Env() string
+    Environment() string
 
-    ProjectDir() string
+    ProjectDirectory() string
 
-    LogsDir() string
+    LogsDirectory() string
 
-    CacheDir() string
+    CacheDirectory() string
 
     LogPath() string
 

@@ -23,8 +23,8 @@ type Config struct {
     /* Mode is filesystem or embedded; "" reads as filesystem. */
     Mode Mode
 
-    /* PublicDir is the directory served, relative to Root in the filesystem mode and inside FileSystem in the embedded mode; "" reads as "public" in the filesystem mode and as the filesystem's root in the embedded mode. */
-    PublicDir string
+    /* PublicDirectory is the directory served, relative to Root in the filesystem mode and inside FileSystem in the embedded mode; "" reads as "public" in the filesystem mode and as the filesystem's root in the embedded mode. */
+    PublicDirectory string
 
     /* IndexFile answers a directory request; "" reads as "index.html". */
     IndexFile string
@@ -45,7 +45,7 @@ type Config struct {
     /* ExcludedPathList names the path prefixes the file server declines without looking at the disk, handing them down the chain to the application. An entry is a prefix of the request path as security.NewPathPrefixMatcher reads it, before the strip prefix and any fold, so a firewall rule and this list select the same requests; a request for the mount root is compared a second time with the index file the root resolves to, so an entry naming the index file declines "/" too; an empty entry switches the server off; an entry without its leading slash gets one. The default excludes nothing. An entry is written decoded, as the router reads the path, with %2F for a separator inside a segment: a percent escape other than %2F excludes only a path whose name holds the percent sign literally. */
     ExcludedPathList []string
 
-    /* Root is the directory PublicDir is joined to in the filesystem mode; "" reads as ".". */
+    /* Root is the directory PublicDirectory is joined to in the filesystem mode; "" reads as ".". */
     Root string
 
     /* FileSystem is the filesystem served in the embedded mode; nil is refused there and it is ignored in the filesystem mode. The content tag of a file with no modification time, every file of an embedded filesystem, is kept per path and size for the life of the server: the bytes of a filesystem without modification times must not change while it serves, or a same-length change is answered 304 over stale bytes; a mutable filesystem must report modification times. */
@@ -59,13 +59,13 @@ var cacheMaxAgeRule = bound.Rule[int]{
 }
 
 type fileServerConfig struct {
-    mode        Mode
-    publicDir   string
-    indexFile   string
-    stripPrefix string
-    enableCache bool
-    cacheMaxAge int
-    weakEtag    bool
+    mode            Mode
+    publicDirectory string
+    indexFile       string
+    stripPrefix     string
+    enableCache     bool
+    cacheMaxAge     int
+    weakEtag        bool
 
     allowedDotPrefixList []string
     excludedPathList     []string
@@ -137,7 +137,7 @@ func resolveFileServerConfig(config Config) *fileServerConfig {
 
     return &fileServerConfig{
         mode:                 mode,
-        publicDir:            config.PublicDir,
+        publicDirectory:      config.PublicDirectory,
         indexFile:            indexFile,
         stripPrefix:          config.StripPrefix,
         enableCache:          false == config.CacheDisabled,

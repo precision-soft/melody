@@ -19,7 +19,7 @@ func TestMissingEnvironmentFileHint_NamesTheRemedyWhenNoEnvFile(t *testing.T) {
         t.Fatalf("expected an actionable hint when the directory has no .env")
     }
 
-    if false == strings.Contains(hint, "no .env, .env.local or .env."+config.EnvDevelopment+" file was found in "+directory) {
+    if false == strings.Contains(hint, "no .env, .env.local or .env."+config.EnvironmentDevelopment+" file was found in "+directory) {
         t.Fatalf("expected the hint to name the directory itself, got %q", hint)
     }
 
@@ -53,8 +53,8 @@ func TestMissingEnvironmentFileHint_EmptyWhenNoDirectory(t *testing.T) {
 /* a project configured solely through the development-environment file boots and loads it without any .env, so a resolution failure there is a plain unresolved key — a hint claiming the environment files are missing would misattribute it. */
 func TestMissingEnvironmentFileHint_EmptyWhenDevelopmentEnvPresent(t *testing.T) {
     cases := []string{
-        ".env." + config.EnvDevelopment,
-        ".env." + config.EnvDevelopment + ".local",
+        ".env." + config.EnvironmentDevelopment,
+        ".env." + config.EnvironmentDevelopment + ".local",
     }
 
     for _, fileName := range cases {

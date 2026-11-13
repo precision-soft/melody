@@ -24,7 +24,7 @@ func newStaticFileServerConfig(
                 "embedded public files are not provided",
                 exceptioncontract.Context{
                     "buildTag":        "melody_static_embedded",
-                    "publicDirectory": configuration.Http().PublicDir(),
+                    "publicDirectory": configuration.Http().PublicDirectory(),
                 },
                 nil,
             ),
@@ -33,7 +33,7 @@ func newStaticFileServerConfig(
 
     staticConfig := static.Config{
         Mode:             static.ModeEmbedded,
-        PublicDir:        configuration.Http().PublicDir(),
+        PublicDirectory:  configuration.Http().PublicDirectory(),
         IndexFile:        configuration.Http().StaticIndexFile(),
         CacheDisabled:    false == configuration.Http().StaticEnableCache(),
         ExcludedPathList: configuration.Http().StaticExcludedPaths(),

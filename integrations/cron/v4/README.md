@@ -36,18 +36,18 @@ app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
 
 The module declares ten `.env` keys through the framework's [module keys](../../../v4/.documentation/package/CONFIG.md#module-keys): each key and its parameter are one parameter, the `.env` line wins, then the `ModuleConfig.KeyDefaults` field, then the module's default, and a key with a rule is judged at boot in every mode the module is registered in, refused naming the key and the `cron.KeyDefaults.<Field>`. A cli flag still wins over the parameter at generation.
 
-| Key                              | Parameter                        | Module default                                     | Rule                   |
-|----------------------------------|----------------------------------|----------------------------------------------------|------------------------|
-| `MELODY_CRON_USER`               | `melody.cron.user`               | `""`                                               | —                      |
-| `MELODY_CRON_LOGS_DIRECTORY`     | `melody.cron.logs_directory`     | `%kernel.logs_dir%/cron`                           | —                      |
-| `MELODY_CRON_BINARY`             | `melody.cron.binary`             | `""` (the running executable)                      | —                      |
-| `MELODY_CRON_DESTINATION_FILE`   | `melody.cron.destination_file`   | `%kernel.project_dir%/generated_conf/cron/crontab` | —                      |
-| `MELODY_CRON_HEARTBEAT_PATH`     | `melody.cron.heartbeat_path`     | `""`                                               | —                      |
-| `MELODY_CRON_HEARTBEAT_ENABLED`  | `melody.cron.heartbeat.enabled`  | `""` (off)                                         | a boolean              |
-| `MELODY_CRON_TEMPLATE`           | `melody.cron.template`           | `crontab`                                          | —                      |
-| `MELODY_CRON_K8S_IMAGE`          | `melody.cron.k8s.image`          | `""`                                               | —                      |
-| `MELODY_CRON_K8S_NAMESPACE`      | `melody.cron.k8s.namespace`      | `""`                                               | an RFC 1123 label      |
-| `MELODY_CRON_K8S_RESTART_POLICY` | `melody.cron.k8s.restart_policy` | `""` (`OnFailure`)                                 | `OnFailure` or `Never` |
+| Key                              | Parameter                        | Module default                                           | Rule                   |
+|----------------------------------|----------------------------------|----------------------------------------------------------|------------------------|
+| `MELODY_CRON_USER`               | `melody.cron.user`               | `""`                                                     | —                      |
+| `MELODY_CRON_LOGS_DIRECTORY`     | `melody.cron.logs_directory`     | `%kernel.logs_directory%/cron`                           | —                      |
+| `MELODY_CRON_BINARY`             | `melody.cron.binary`             | `""` (the running executable)                            | —                      |
+| `MELODY_CRON_DESTINATION_FILE`   | `melody.cron.destination_file`   | `%kernel.project_directory%/generated_conf/cron/crontab` | —                      |
+| `MELODY_CRON_HEARTBEAT_PATH`     | `melody.cron.heartbeat_path`     | `""`                                                     | —                      |
+| `MELODY_CRON_HEARTBEAT_ENABLED`  | `melody.cron.heartbeat.enabled`  | `""` (off)                                               | a boolean              |
+| `MELODY_CRON_TEMPLATE`           | `melody.cron.template`           | `crontab`                                                | —                      |
+| `MELODY_CRON_K8S_IMAGE`          | `melody.cron.k8s.image`          | `""`                                                     | —                      |
+| `MELODY_CRON_K8S_NAMESPACE`      | `melody.cron.k8s.namespace`      | `""`                                                     | an RFC 1123 label      |
+| `MELODY_CRON_K8S_RESTART_POLICY` | `melody.cron.k8s.restart_policy` | `""` (`OnFailure`)                                       | `OnFailure` or `Never` |
 
 An empty `.env` line takes the default on the three keys with a rule and is the empty value on the seven free-text ones: `MELODY_CRON_DESTINATION_FILE=` and `MELODY_CRON_LOGS_DIRECTORY=` leave the generator with no destination and no logs directory, so a run without `--out` is refused and a run without `--logs-directory` refuses an entry that redirects its output.
 

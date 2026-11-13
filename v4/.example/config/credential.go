@@ -10,15 +10,15 @@ import (
 
 /* the keys of the two signing secrets: the bearer tokens of the token firewall are verified with the first, and the envelopes of the internal firewall with the second, under the key id and the caller application beside it */
 const (
-    environmentKeyJwtSecret          = "APP_JWT_SECRET"
-    environmentKeyInternalAuthKeyId  = "APP_INTERNAL_AUTH_KEY_ID"
-    environmentKeyInternalAuthApp    = "APP_INTERNAL_AUTH_APP"
-    environmentKeyInternalAuthSecret = "APP_INTERNAL_AUTH_SECRET"
+    environmentKeyJwtSecret               = "APP_JWT_SECRET"
+    environmentKeyInternalAuthKeyId       = "APP_INTERNAL_AUTH_KEY_ID"
+    environmentKeyInternalAuthApplication = "APP_INTERNAL_AUTH_APP"
+    environmentKeyInternalAuthSecret      = "APP_INTERNAL_AUTH_SECRET"
 )
 
 /* isDevelopment answers whether the kernel runs in development, the one environment that accepts the credentials this example commits and seeds its accounts */
 func (instance *Module) isDevelopment() bool {
-    return melodyconfig.EnvDevelopment == instance.configuration.Kernel().Env()
+    return melodyconfig.EnvironmentDevelopment == instance.configuration.Kernel().Environment()
 }
 
 /* credential answers the value a credential key holds. In development a blank key takes the value .env commits, so a checkout boots as it is; outside development a blank key or the committed value refuses the boot (see refuseDevelopmentCredential). */

@@ -133,7 +133,7 @@ func collectionSchemaReference(
         components[name] = collectionSchemaBody(targetType, components, names, visited, depth)
     }
 
-    return &Schema{Ref: "#/components/schemas/" + name}
+    return &Schema{Reference: "#/components/schemas/" + name}
 }
 
 func collectionSchemaBody(
@@ -191,7 +191,7 @@ func structSchemaReference(
         components[name] = buildStructSchema(structType, components, names, visited, depth)
     }
 
-    return withNullable(&Schema{Ref: "#/components/schemas/" + name}, nullable)
+    return withNullable(&Schema{Reference: "#/components/schemas/" + name}, nullable)
 }
 
 func schemaComponentName(structType reflect.Type, names map[reflect.Type]string) string {
@@ -282,8 +282,8 @@ func embedTagRejectsAll(field reflect.StructField) bool {
 
     /* a bare parameterized constraint needs no check here: on a struct embed the shape refusals below already catch every one */
     return true == tagHasInvalidSyntax(validateTag) ||
-        true == tagHasUnconsumedParameterizedParams(validateTag) ||
-        true == tagHasParamsOnNonParameterizable(validateTag) ||
+        true == tagHasUnconsumedParameterizedParameters(validateTag) ||
+        true == tagHasParametersOnNonParameterizable(validateTag) ||
         true == tagHasEmptyRegexPattern(validateTag) ||
         true == tagRejectsReferencedValue(validateTag, "") ||
         true == tagRefusesNonStringValue(validateTag) ||
@@ -669,7 +669,7 @@ func zeroValueRejectsAbsentProperty(field reflect.StructField, schema *Schema) b
     isPointer := reflect.Ptr == field.Type.Kind()
 
     for _, rule := range parsedTagRules(field.Tag.Get("validate")) {
-        name, params := rule.name, rule.params
+        name, parameters := rule.name, rule.parameters
 
         switch name {
         case "min":
@@ -677,7 +677,7 @@ func zeroValueRejectsAbsentProperty(field reflect.StructField, schema *Schema) b
             if true == isPointer || "string" != schema.Type || true == isStructuralStringFormat(schema.Format) {
                 continue
             }
-            valueString, exists := params["value"]
+            valueString, exists := parameters["value"]
             if false == exists {
                 continue
             }
@@ -692,7 +692,7 @@ func zeroValueRejectsAbsentProperty(field reflect.StructField, schema *Schema) b
             if true == isPointer || ("integer" != schema.Type && "number" != schema.Type) {
                 continue
             }
-            valueString, exists := params["value"]
+            valueString, exists := parameters["value"]
             if false == exists {
                 continue
             }
@@ -707,7 +707,7 @@ func zeroValueRejectsAbsentProperty(field reflect.StructField, schema *Schema) b
             if true == isPointer || ("integer" != schema.Type && "number" != schema.Type) {
                 continue
             }
-            valueString, exists := params["value"]
+            valueString, exists := parameters["value"]
             if false == exists {
                 continue
             }
@@ -890,9 +890,9 @@ func withNullable(schema *Schema, nullable bool) *Schema {
         return schema
     }
 
-    if "" != schema.Ref {
+    if "" != schema.Reference {
         return &Schema{
-            AllOf:    []*Schema{{Ref: schema.Ref}},
+            AllOf:    []*Schema{{Reference: schema.Reference}},
             Nullable: true,
         }
     }
@@ -1012,7 +1012,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
         return true
     }
 
-    if true == tagHasUnconsumedParameterizedParams(validateTag) {
+    if true == tagHasUnconsumedParameterizedParameters(validateTag) {
         /* a parameterizable constraint given parameters without its recognized key fails closed in the validator, so the field accepts no value */
         markFieldUnsatisfiable(schema)
         return true
@@ -1024,11 +1024,11 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
         return true
     }
 
-    if "" != schema.Ref || nil != schema.AllOf {
+    if "" != schema.Reference || nil != schema.AllOf {
         /* the reference is resolved to the component it names, since notEmpty rejects a struct but measures a named collection's length */
         referencedKind := referencedCollectionKind(schema, components)
 
-        if true == tagRejectsReferencedValue(validateTag, referencedKind) || true == tagHasParamsOnNonParameterizable(validateTag) || true == tagRejectsAllViaNumericBound(validateTag) {
+        if true == tagRejectsReferencedValue(validateTag, referencedKind) || true == tagHasParametersOnNonParameterizable(validateTag) || true == tagRejectsAllViaNumericBound(validateTag) {
             markFieldUnsatisfiable(schema)
 
             return true
@@ -1068,7 +1068,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
     unmodeledRules := []string{}
 
     for _, rule := range parsedTagRules(validateTag) {
-        name, params := rule.name, rule.params
+        name, parameters := rule.name, rule.parameters
 
         switch name {
         default:
@@ -1077,7 +1077,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
                 unmodeledRules = append(unmodeledRules, name)
             }
         case "email":
-            if 0 != len(params) {
+            if 0 != len(parameters) {
                 /* parameters a non-parameterizable constraint cannot consume fail the rule closed in the validator */
                 rejectsAll = true
 
@@ -1096,7 +1096,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
         case "min":
             /* the length constraints refuse every non-string value and pass a nil pointer; a malformed bound and a bare min are decided before the switch */
             if "string" == schema.Type && false == isStructuralStringFormat(schema.Format) {
-                if parsed, parsedOk := parseBoundStrict(params["value"]); true == parsedOk && 0 <= parsed {
+                if parsed, parsedOk := parseBoundStrict(parameters["value"]); true == parsedOk && 0 <= parsed {
                     value := parsed
                     /* raise-only, so min=0 cannot lower an earlier notEmpty or notBlank floor of 1 */
                     if nil == schema.MinLength || value > *schema.MinLength {
@@ -1113,7 +1113,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
         case "max":
             /* max measures a genuine string only, so on any other shape every non-null value is refused */
             if "string" == schema.Type && false == isStructuralStringFormat(schema.Format) {
-                if parsed, parsedOk := parseBoundStrict(params["value"]); true == parsedOk && 0 <= parsed {
+                if parsed, parsedOk := parseBoundStrict(parameters["value"]); true == parsedOk && 0 <= parsed {
                     value := parsed
                     /* tighten-only: a lower ceiling another rule set must not be raised by a looser max */
                     if nil == schema.MaxLength || value < *schema.MaxLength {
@@ -1131,7 +1131,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
         case "regex":
             /* the empty pattern is decided before the switch, so only a non-empty one reaches here */
             if "string" == schema.Type && false == isStructuralStringFormat(schema.Format) {
-                pattern := patternParam(params)
+                pattern := patternParameter(parameters)
                 if _, compileErr := regexp.Compile(pattern); nil != compileErr {
                     /* an uncompilable pattern is not emitted; the validator accepts the empty string and nil before its invalid-pattern branch, so the field is advertised as maxLength 0 */
                     zeroLength := 0
@@ -1150,7 +1150,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
                 }
             }
         case "alpha":
-            if 0 != len(params) {
+            if 0 != len(parameters) {
                 /* parameters a non-parameterizable constraint cannot consume fail the rule closed in the validator */
                 rejectsAll = true
 
@@ -1167,7 +1167,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
                 }
             }
         case "numeric":
-            if 0 != len(params) {
+            if 0 != len(parameters) {
                 rejectsAll = true
 
                 continue
@@ -1182,7 +1182,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
                 }
             }
         case "alphanumeric":
-            if 0 != len(params) {
+            if 0 != len(parameters) {
                 rejectsAll = true
 
                 continue
@@ -1197,7 +1197,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
                 }
             }
         case "notBlank":
-            if 0 != len(params) {
+            if 0 != len(parameters) {
                 rejectsAll = true
 
                 continue
@@ -1213,7 +1213,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
                 rejectsAll = true
             }
         case "notEmpty":
-            if 0 != len(params) {
+            if 0 != len(parameters) {
                 /* parameters a non-parameterizable constraint cannot consume fail the rule closed in the validator */
                 rejectsAll = true
 
@@ -1257,7 +1257,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
                 /* greaterThan rejects a null pointer, so nullable is cleared; only a parseable bound reaches the facet, a negative one being legitimate here */
                 schema.Nullable = false
                 exclusive := true
-                if parsed, parsedOk := parseBoundStrict(params["value"]); true == parsedOk {
+                if parsed, parsedOk := parseBoundStrict(parameters["value"]); true == parsedOk {
                     /* the validator enforces every duplicate rule, so the effective floor is the highest bound: raise-only, mirroring the min/max length branches */
                     value := float64(parsed)
                     if nil == schema.Minimum || value > *schema.Minimum {
@@ -1274,7 +1274,7 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
                 /* lessThan rejects a null pointer, so nullable is cleared; only a parseable bound reaches the facet, a negative one being legitimate here */
                 schema.Nullable = false
                 exclusive := true
-                if parsed, parsedOk := parseBoundStrict(params["value"]); true == parsedOk {
+                if parsed, parsedOk := parseBoundStrict(parameters["value"]); true == parsedOk {
                     /* the validator enforces every duplicate rule, so the effective ceiling is the lowest bound: tighten-only, mirroring the min/max length branches */
                     value := float64(parsed)
                     if nil == schema.Maximum || value < *schema.Maximum {
@@ -1323,12 +1323,12 @@ func applyValidation(schema *Schema, validateTag string, components map[string]*
 
 /* referencedCollectionKind reports "array" for a named slice or array component, "object" for a named map, and "" otherwise, the stricter struct reading. The resolution is bounded three ways (reference-only chains, keys already followed, the generator's nesting bound), so it terminates on any components map. */
 func referencedCollectionKind(schema *Schema, components map[string]*Schema) string {
-    reference := schema.Ref
+    reference := schema.Reference
     if "" == reference {
         /* a nullable field carries its reference as the single member of an allOf wrapper (withNullable), the reference itself having no room for the nullable flag beside it */
         for _, member := range schema.AllOf {
-            if "" != member.Ref {
-                reference = member.Ref
+            if "" != member.Reference {
+                reference = member.Reference
 
                 break
             }
@@ -1352,8 +1352,8 @@ func referencedCollectionKind(schema *Schema, components map[string]*Schema) str
             return ""
         }
 
-        if "" != resolved.Ref {
-            reference = resolved.Ref
+        if "" != resolved.Reference {
+            reference = resolved.Reference
 
             continue
         }
@@ -1377,11 +1377,11 @@ func referencedCollectionKind(schema *Schema, components map[string]*Schema) str
 func referencedComponentRejectsAll(schema *Schema, components map[string]*Schema) bool {
     resolved := schema
 
-    reference := schema.Ref
+    reference := schema.Reference
     if "" == reference {
         for _, member := range schema.AllOf {
-            if "" != member.Ref {
-                reference = member.Ref
+            if "" != member.Reference {
+                reference = member.Reference
 
                 break
             }
@@ -1427,7 +1427,7 @@ func liftValidationFacetsOntoReference(schema *Schema) {
         return
     }
 
-    if "" == schema.Ref && nil == schema.AllOf {
+    if "" == schema.Reference && nil == schema.AllOf {
         return
     }
 
@@ -1435,9 +1435,9 @@ func liftValidationFacetsOntoReference(schema *Schema) {
     schema.MinItems = nil
     schema.MinProperties = nil
 
-    if "" != schema.Ref {
-        schema.AllOf = []*Schema{{Ref: schema.Ref}, facets}
-        schema.Ref = ""
+    if "" != schema.Reference {
+        schema.AllOf = []*Schema{{Reference: schema.Reference}, facets}
+        schema.Reference = ""
 
         return
     }
@@ -1486,9 +1486,9 @@ func applyEmptyValueSpace(schema *Schema) {
     case "":
         /* a $ref may name a collection component, on which draft-04's minProperties and maxProperties bind nothing, so the type-agnostic not: {} is written instead */
         contradiction := &Schema{Not: &Schema{}}
-        if "" != schema.Ref {
-            schema.AllOf = []*Schema{{Ref: schema.Ref}, contradiction}
-            schema.Ref = ""
+        if "" != schema.Reference {
+            schema.AllOf = []*Schema{{Reference: schema.Reference}, contradiction}
+            schema.Reference = ""
         } else if nil != schema.AllOf {
             schema.AllOf = append(schema.AllOf, contradiction)
         } else {
@@ -1525,13 +1525,13 @@ func tagHasInvalidSyntax(validateTag string) bool {
                 return true
             }
 
-            paramsString := strings.TrimSpace(part[openIndex+1 : len(part)-1])
-            if false == hasBalancedRuleBrackets(paramsString) {
+            parametersString := strings.TrimSpace(part[openIndex+1 : len(part)-1])
+            if false == hasBalancedRuleBrackets(parametersString) {
                 return true
             }
 
-            if "" != paramsString {
-                for _, pair := range splitRuleParameters(paramsString) {
+            if "" != parametersString {
+                for _, pair := range splitRuleParameters(parametersString) {
                     pair = strings.TrimSpace(pair)
                     if "" == pair {
                         continue
@@ -1566,11 +1566,11 @@ func tagHasInvalidSyntax(validateTag string) bool {
     return false
 }
 
-/* tagHasParamsOnNonParameterizable reports whether a constraint that takes no parameters carries some, which the validator fails closed; it is read before applyValidation returns early for a $ref or allOf schema. */
-func tagHasParamsOnNonParameterizable(validateTag string) bool {
+/* tagHasParametersOnNonParameterizable reports whether a constraint that takes no parameters carries some, which the validator fails closed; it is read before applyValidation returns early for a $ref or allOf schema. */
+func tagHasParametersOnNonParameterizable(validateTag string) bool {
     for _, rule := range parsedTagRules(validateTag) {
-        name, params := rule.name, rule.params
-        if 0 == len(params) {
+        name, parameters := rule.name, rule.parameters
+        if 0 == len(parameters) {
             continue
         }
 
@@ -1583,22 +1583,22 @@ func tagHasParamsOnNonParameterizable(validateTag string) bool {
     return false
 }
 
-/* tagHasUnconsumedParameterizedParams reports whether a parameterizable constraint carries parameters without its recognized key ("value", or "pattern"/"value" for regex), which the validator fails closed. */
-func tagHasUnconsumedParameterizedParams(validateTag string) bool {
+/* tagHasUnconsumedParameterizedParameters reports whether a parameterizable constraint carries parameters without its recognized key ("value", or "pattern"/"value" for regex), which the validator fails closed. */
+func tagHasUnconsumedParameterizedParameters(validateTag string) bool {
     for _, rule := range parsedTagRules(validateTag) {
-        name, params := rule.name, rule.params
-        if 0 == len(params) {
+        name, parameters := rule.name, rule.parameters
+        if 0 == len(parameters) {
             continue
         }
 
         switch name {
         case "min", "max", "greaterThan", "lessThan":
-            if _, exists := params["value"]; false == exists {
+            if _, exists := parameters["value"]; false == exists {
                 return true
             }
         case "regex":
-            _, hasPattern := params["pattern"]
-            _, hasValue := params["value"]
+            _, hasPattern := parameters["pattern"]
+            _, hasValue := parameters["value"]
             if false == hasPattern && false == hasValue {
                 return true
             }
@@ -1611,8 +1611,8 @@ func tagHasUnconsumedParameterizedParams(validateTag string) bool {
 /* tagHasBareParameterizedConstraint reports whether min, max, greaterThan, lessThan or regex is named with no parameters, which the validator fails closed. */
 func tagHasBareParameterizedConstraint(validateTag string) bool {
     for _, rule := range parsedTagRules(validateTag) {
-        name, params := rule.name, rule.params
-        if 0 != len(params) {
+        name, parameters := rule.name, rule.parameters
+        if 0 != len(parameters) {
             continue
         }
 
@@ -1628,12 +1628,12 @@ func tagHasBareParameterizedConstraint(validateTag string) bool {
 /* tagHasEmptyRegexPattern reports whether a regex rule names an explicitly empty pattern, which the validator refuses at construction; the bare and unconsumed-key cases are answered before it. */
 func tagHasEmptyRegexPattern(validateTag string) bool {
     for _, rule := range parsedTagRules(validateTag) {
-        name, params := rule.name, rule.params
-        if "regex" != name || 0 == len(params) {
+        name, parameters := rule.name, rule.parameters
+        if "regex" != name || 0 == len(parameters) {
             continue
         }
 
-        if "" == patternParam(params) {
+        if "" == patternParameter(parameters) {
             return true
         }
     }
@@ -1671,7 +1671,7 @@ func tagRefusesNonStringValue(validateTag string) bool {
     return false
 }
 
-/* reports whether a validate tag carries a bare notEmpty, the constraint that floors the length of the collection a $ref stands for. A notEmpty carrying parameters never reaches this question: the validator fails such a rule closed and tagHasParamsOnNonParameterizable has already answered for it. */
+/* reports whether a validate tag carries a bare notEmpty, the constraint that floors the length of the collection a $ref stands for. A notEmpty carrying parameters never reaches this question: the validator fails such a rule closed and tagHasParametersOnNonParameterizable has already answered for it. */
 func tagRequiresNonEmptyValue(validateTag string) bool {
     for _, rule := range parsedTagRules(validateTag) {
         name := rule.name
@@ -1686,12 +1686,12 @@ func tagRequiresNonEmptyValue(validateTag string) bool {
 /* tagRejectsAllViaNumericBound reports whether a min, max, greaterThan or lessThan bound is refused at construction, being no integer or a negative min/max, which rejects every value, nil included. A negative greaterThan/lessThan bound is legitimate. */
 func tagRejectsAllViaNumericBound(validateTag string) bool {
     for _, rule := range parsedTagRules(validateTag) {
-        name, params := rule.name, rule.params
+        name, parameters := rule.name, rule.parameters
         if "min" != name && "max" != name && "greaterThan" != name && "lessThan" != name {
             continue
         }
 
-        valueString, exists := params["value"]
+        valueString, exists := parameters["value"]
         if false == exists {
             continue
         }
@@ -1709,18 +1709,18 @@ func tagRejectsAllViaNumericBound(validateTag string) bool {
     return false
 }
 
-func patternParam(params map[string]string) string {
-    if pattern, exists := params["pattern"]; true == exists {
+func patternParameter(parameters map[string]string) string {
+    if pattern, exists := parameters["pattern"]; true == exists {
         return pattern
     }
 
-    return params["value"]
+    return parameters["value"]
 }
 
-/* parsedTagRule is one rule of a validate tag as splitRule reads it; the params map is shared by every reader of the memo and is never written after the parse. */
+/* parsedTagRule is one rule of a validate tag as splitRule reads it; the parameters map is shared by every reader of the memo and is never written after the parse. */
 type parsedTagRule struct {
-    name   string
-    params map[string]string
+    name       string
+    parameters map[string]string
 }
 
 /* parsedTagRulesCache memoizes the parse of a validate tag, which nine predicates read per field on every spec request. Nothing evicts, so a program that builds types with reflect.StructOf per request must not build their validate tags per request. */
@@ -1733,8 +1733,8 @@ func parsedTagRules(validateTag string) []parsedTagRule {
 
     var rules []parsedTagRule
     for _, rule := range splitRules(validateTag) {
-        name, params := splitRule(rule)
-        rules = append(rules, parsedTagRule{name: name, params: params})
+        name, parameters := splitRule(rule)
+        rules = append(rules, parsedTagRule{name: name, parameters: parameters})
     }
 
     /* LoadOrStore rather than Store so a concurrent first touch settles on ONE parse, the rules and their maps being shared by identity */
@@ -2055,7 +2055,7 @@ func hasBalancedRuleBrackets(input string) bool {
 
 func splitRule(rule string) (string, map[string]string) {
     trimmed := strings.TrimSpace(rule)
-    params := make(map[string]string)
+    parameters := make(map[string]string)
 
     openIndex := strings.IndexByte(trimmed, '(')
     equalIndex := strings.IndexByte(trimmed, '=')
@@ -2078,17 +2078,17 @@ func splitRule(rule string) (string, map[string]string) {
                 continue
             }
 
-            params[key] = strings.TrimSpace(pair[separator+1:])
+            parameters[key] = strings.TrimSpace(pair[separator+1:])
         }
 
-        return name, params
+        return name, parameters
     }
 
     if -1 == equalIndex {
-        return trimmed, params
+        return trimmed, parameters
     }
 
-    params["value"] = strings.TrimSpace(trimmed[equalIndex+1:])
+    parameters["value"] = strings.TrimSpace(trimmed[equalIndex+1:])
 
-    return strings.TrimSpace(trimmed[:equalIndex]), params
+    return strings.TrimSpace(trimmed[:equalIndex]), parameters
 }

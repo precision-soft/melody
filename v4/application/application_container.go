@@ -166,7 +166,7 @@ func (instance *Application) bootContainer() {
                 resolvedConfiguration := config.ConfigMustFromResolver(resolutionContext, resolver)
 
                 return newContainerLogger(
-                    resolveRuntimePath(resolvedConfiguration.Kernel().ProjectDir(), resolvedConfiguration.Kernel().LogPath()),
+                    resolveRuntimePath(resolvedConfiguration.Kernel().ProjectDirectory(), resolvedConfiguration.Kernel().LogPath()),
                     resolvedConfiguration.Kernel().LogLevel(),
                     instance.moduleConfigurations,
                     clock.ClockMustFromResolver(resolutionContext, resolver),

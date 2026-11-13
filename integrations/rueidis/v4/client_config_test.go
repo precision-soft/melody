@@ -36,7 +36,7 @@ func TestResolveClient_KeepsTheConfiguredValues(t *testing.T) {
 
     resolved, resolveErr := resolveClient(ClientConfig{
         ClientName:             "melody",
-        SelectDb:               3,
+        SelectDatabase:         3,
         TlsConfig:              tlsConfig,
         DialTimeout:            bound.Of(time.Millisecond),
         ConnectionWriteTimeout: bound.Of(2 * time.Second),
@@ -48,7 +48,7 @@ func TestResolveClient_KeepsTheConfiguredValues(t *testing.T) {
         t.Fatalf("expected the client config to resolve, got %v", resolveErr)
     }
 
-    if "melody" != resolved.clientName || 3 != resolved.selectDb || tlsConfig != resolved.tlsConfig {
+    if "melody" != resolved.clientName || 3 != resolved.selectDatabase || tlsConfig != resolved.tlsConfig {
         t.Fatalf("expected the plain fields kept, got %+v", resolved)
     }
 

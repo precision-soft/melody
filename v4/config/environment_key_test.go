@@ -102,7 +102,7 @@ func TestDeclareEnvironmentKey_APresentKeyWinsOverTheDefault(t *testing.T) {
 
 func TestDeclareEnvironmentKey_ATemplatedDefaultResolvesAtBoot(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{})
-    mustDeclare(t, configuration, "x", textKey("%kernel.logs_dir%/x"))
+    mustDeclare(t, configuration, "x", textKey("%kernel.logs_directory%/x"))
 
     if refusal := refusalOfRead(func() { _ = configuration.Get("melody.x.text").String() }); nil == refusal || false == strings.Contains(refusal.Message(), "deferred to boot") {
         t.Fatalf("expected the read before the boot resolve refused, got %v", refusal)
@@ -110,7 +110,7 @@ func TestDeclareEnvironmentKey_ATemplatedDefaultResolvesAtBoot(t *testing.T) {
 
     mustResolve(t, configuration)
 
-    expected := configuration.Get(KernelLogsDir).String() + "/x"
+    expected := configuration.Get(KernelLogsDirectory).String() + "/x"
     if expected != configuration.Get("melody.x.text").String() {
         t.Fatalf("expected %q, got %q", expected, configuration.Get("melody.x.text").String())
     }
@@ -446,7 +446,7 @@ type configurationReadingRule struct {
 }
 
 func (instance configurationReadingRule) Check(text string, field string) error {
-    _ = instance.configuration.Get(KernelEnv)
+    _ = instance.configuration.Get(KernelEnvironment)
 
     return nil
 }

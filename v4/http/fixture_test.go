@@ -305,7 +305,7 @@ func newHttpTestContainer() containercontract.Container {
 func newHttpTestContainerInEnvironment(environment string) containercontract.Container {
     return newHttpTestContainerWithSessionStorageAndEnvironmentValues(
         session.NewInMemoryStorage(session.InMemoryStorageConfig{}),
-        map[string]string{config.EnvKey: environment},
+        map[string]string{config.EnvironmentNameKey: environment},
     )
 }
 
@@ -324,7 +324,7 @@ func newHttpTestContainerWithSessionStorageAndEnvironmentValues(
     environmentValues map[string]string,
 ) containercontract.Container {
     return newHttpTestContainerWithSessionManagerAndEnvironmentValues(
-        session.NewManager(storage, session.ManagerConfig{Ttl: bound.Of(30*time.Minute)}),
+        session.NewManager(storage, session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)}),
         environmentValues,
     )
 }
@@ -347,7 +347,7 @@ func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
         config.ServiceConfig,
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
             values := map[string]string{
-                config.EnvKey: config.EnvDevelopment,
+                config.EnvironmentNameKey: config.EnvironmentDevelopment,
             }
             for key, value := range environmentValues {
                 values[key] = value

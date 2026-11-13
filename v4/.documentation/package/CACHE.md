@@ -89,7 +89,7 @@ The [Usage](#usage) example below registers `cache.NewInMemoryBackend(cache.InMe
 Two hazards belong to what is stored rather than to how long it lives, and neither has a guard the framework can install for you:
 
 - the default serializer writes a bare json document with no schema discriminant, so a value written by one release decodes cleanly in the next — a field added since simply reads as the zero value, with no decoding error to notice and no version to compare — and with an unlimited ttl nothing ever lapses to heal it. Where the shape of a cached value can change between releases, carry a version inside the value or move the cache key with the shape;
-- a redis backend's isolation is entirely its key prefix, and the shipped default is the same string in every melody application, while the client's `SelectDb` defaults to `0`. Two applications on one store with the defaults share a namespace: a `Get` answers what the other wrote under the same name — decodable, so served as a hit rather than treated as a miss — and a `Clear` from either empties the other's entries. Give each application, and each environment sharing a store, its own prefix.
+- a redis backend's isolation is entirely its key prefix, and the shipped default is the same string in every melody application, while the client's `SelectDatabase` defaults to `0`. Two applications on one store with the defaults share a namespace: a `Get` answers what the other wrote under the same name — decodable, so served as a hit rather than treated as a miss — and a `Clear` from either empties the other's entries. Give each application, and each environment sharing a store, its own prefix.
 
 ## Container integration
 

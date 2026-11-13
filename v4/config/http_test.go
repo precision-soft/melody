@@ -402,7 +402,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
         name                string
         address             string
         defaultLocale       string
-        publicDir           string
+        publicDirectory     string
         staticIndexFile     string
         staticExcludedPaths []string
         expectedMessage     string
@@ -448,21 +448,21 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
             name:            "an empty public directory",
             address:         ":8080",
             defaultLocale:   "en",
-            publicDir:       "",
+            publicDirectory: "",
             expectedMessage: "public directory may not be empty",
         },
         {
             name:            "a public directory that climbs out of the project",
             address:         ":8080",
             defaultLocale:   "en",
-            publicDir:       "public/../..",
+            publicDirectory: "public/../..",
             expectedMessage: "public directory is invalid",
         },
         {
             name:            "an empty index file",
             address:         ":8080",
             defaultLocale:   "en",
-            publicDir:       "public",
+            publicDirectory: "public",
             staticIndexFile: "",
             expectedMessage: "static index file may not be empty",
         },
@@ -470,17 +470,17 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
             name:            "an index file that carries a path",
             address:         ":8080",
             defaultLocale:   "en",
-            publicDir:       "public",
+            publicDirectory: "public",
             staticIndexFile: "html/index.html",
             expectedMessage: "static index file is invalid",
         },
         {
-            name:                "a blank address",
-            address:             "   ",
-            defaultLocale:       "en",
-            publicDir:           "public",
-            staticIndexFile:     "index.html",
-            expectedMessage:     "http address may not be empty",
+            name:            "a blank address",
+            address:         "   ",
+            defaultLocale:   "en",
+            publicDirectory: "public",
+            staticIndexFile: "index.html",
+            expectedMessage: "http address may not be empty",
         },
     }
 
@@ -489,7 +489,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
             httpConfigurationInstance, httpErr := newHttpConfiguration(
                 testCase.address,
                 testCase.defaultLocale,
-                testCase.publicDir,
+                testCase.publicDirectory,
                 testCase.staticIndexFile,
                 bound.Resolved[int]{Value: 1024},
                 false,
@@ -543,8 +543,8 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
     if "en-GB" != httpConfigurationInstance.DefaultLocale() {
         t.Fatalf("unexpected locale: %q", httpConfigurationInstance.DefaultLocale())
     }
-    if "public" != httpConfigurationInstance.PublicDir() {
-        t.Fatalf("unexpected public directory: %q", httpConfigurationInstance.PublicDir())
+    if "public" != httpConfigurationInstance.PublicDirectory() {
+        t.Fatalf("unexpected public directory: %q", httpConfigurationInstance.PublicDirectory())
     }
     if "index.html" != httpConfigurationInstance.StaticIndexFile() {
         t.Fatalf("unexpected index file: %q", httpConfigurationInstance.StaticIndexFile())
@@ -572,5 +572,14 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
     }
     if bound.Of(time.Second) != httpConfigurationInstance.ReadTimeout() {
         t.Fatalf("unexpected read timeout: %v", httpConfigurationInstance.ReadTimeout())
+    }
+}
+
+func TestHttpConfiguration_AnInvalidPublicDirectoryIsNamedUnderPublicDirectory(t *testing.T) {
+    err := (&httpConfiguration{publicDirectory: "public/../.."}).validatePublicDirectory()
+
+    refusal, isRefusal := err.(*exception.Error)
+    if false == isRefusal || "public/../.." != refusal.Context()["publicDirectory"] {
+        t.Fatalf("expected the refusal to name the directory under publicDirectory, got %v", err)
     }
 }

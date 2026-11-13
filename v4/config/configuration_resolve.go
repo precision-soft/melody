@@ -41,7 +41,7 @@ func (instance *Configuration) resolveAll(deferUnresolvedReferences bool) error 
     for _, name := range names {
         parameter := instance.parameters[name]
 
-        if KernelProjectDir == name {
+        if KernelProjectDirectory == name {
             continue
         }
 
@@ -450,7 +450,7 @@ func (instance *Configuration) resolveParameterReference(
     }
 
     /* the project directory is a filesystem path, not a template: a literal percent in it survives a reference */
-    if KernelProjectDir == parameterKey {
+    if KernelProjectDirectory == parameterKey {
         return environmentValueString, nil
     }
 

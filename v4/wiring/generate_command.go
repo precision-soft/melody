@@ -101,7 +101,7 @@ func (instance *GenerateCommand) Run(
 
     applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-    projectDirectory := applicationConfiguration.MustGet(config.KernelProjectDir).MustString()
+    projectDirectory := applicationConfiguration.MustGet(config.KernelProjectDirectory).MustString()
 
     declaredParameters := make(map[string]bool)
     for _, name := range applicationConfiguration.Names() {

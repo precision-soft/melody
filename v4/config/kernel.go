@@ -17,11 +17,11 @@ func newKernelConfiguration(
     defaultMode string,
     processRole string,
     environment string,
-    projectDir string,
-    logsDir string,
+    projectDirectory string,
+    logsDirectory string,
     logPath string,
     logLevel string,
-    cacheDir string,
+    cacheDirectory string,
     teardownTimeout bound.Duration,
     scopeTeardownTimeout bound.Duration,
     containerCreationWaiters bound.Count,
@@ -32,14 +32,14 @@ func newKernelConfiguration(
     }
 
     kernelConfigurationInstance := &kernelConfiguration{
-        defaultMode:     defaultMode,
-        processRole:     processRole,
-        env:             environment,
-        projectDir:      projectDir,
-        logsDir:         logsDir,
-        logPath:         logPath,
-        logLevel:        parsedLogLevel,
-        cacheDir:        cacheDir,
+        defaultMode:              defaultMode,
+        processRole:              processRole,
+        environment:              environment,
+        projectDirectory:         projectDirectory,
+        logsDirectory:            logsDirectory,
+        logPath:                  logPath,
+        logLevel:                 parsedLogLevel,
+        cacheDirectory:           cacheDirectory,
         teardownTimeout:          teardownTimeout,
         scopeTeardownTimeout:     scopeTeardownTimeout,
         containerCreationWaiters: containerCreationWaiters,
@@ -54,17 +54,17 @@ func newKernelConfiguration(
 }
 
 type kernelConfiguration struct {
-    defaultMode     string
-    processRole     string
-    env             string
-    projectDir      string
-    logsDir         string
-    logPath         string
-    logLevel        loggingcontract.Level
-    cacheDir        string
-    teardownTimeout bound.Duration
-    scopeTeardownTimeout bound.Duration
-    containerCreationWaiters bound.Count
+    defaultMode                 string
+    processRole                 string
+    environment                 string
+    projectDirectory            string
+    logsDirectory               string
+    logPath                     string
+    logLevel                    loggingcontract.Level
+    cacheDirectory              string
+    teardownTimeout             bound.Duration
+    scopeTeardownTimeout        bound.Duration
+    containerCreationWaiters    bound.Count
     containerTeardownSequential configcontract.Switch
 }
 
@@ -76,16 +76,16 @@ func (instance *kernelConfiguration) ProcessRole() string {
     return instance.processRole
 }
 
-func (instance *kernelConfiguration) Env() string {
-    return instance.env
+func (instance *kernelConfiguration) Environment() string {
+    return instance.environment
 }
 
-func (instance *kernelConfiguration) ProjectDir() string {
-    return instance.projectDir
+func (instance *kernelConfiguration) ProjectDirectory() string {
+    return instance.projectDirectory
 }
 
-func (instance *kernelConfiguration) LogsDir() string {
-    return instance.logsDir
+func (instance *kernelConfiguration) LogsDirectory() string {
+    return instance.logsDirectory
 }
 
 func (instance *kernelConfiguration) LogPath() string {
@@ -96,8 +96,8 @@ func (instance *kernelConfiguration) LogLevel() loggingcontract.Level {
     return instance.logLevel
 }
 
-func (instance *kernelConfiguration) CacheDir() string {
-    return instance.cacheDir
+func (instance *kernelConfiguration) CacheDirectory() string {
+    return instance.cacheDirectory
 }
 
 func (instance *kernelConfiguration) validate() error {
@@ -116,19 +116,19 @@ func (instance *kernelConfiguration) validate() error {
         return validateEnvironmentErr
     }
 
-    validateProjectDirErr := instance.validateProjectDir()
-    if nil != validateProjectDirErr {
-        return validateProjectDirErr
+    validateProjectDirectoryErr := instance.validateProjectDirectory()
+    if nil != validateProjectDirectoryErr {
+        return validateProjectDirectoryErr
     }
 
-    validateLogsDirErr := instance.validateLogsDir()
-    if nil != validateLogsDirErr {
-        return validateLogsDirErr
+    validateLogsDirectoryErr := instance.validateLogsDirectory()
+    if nil != validateLogsDirectoryErr {
+        return validateLogsDirectoryErr
     }
 
-    validateCacheDirErr := instance.validateCacheDir()
-    if nil != validateCacheDirErr {
-        return validateCacheDirErr
+    validateCacheDirectoryErr := instance.validateCacheDirectory()
+    if nil != validateCacheDirectoryErr {
+        return validateCacheDirectoryErr
     }
 
     return nil
@@ -176,21 +176,21 @@ func (instance *kernelConfiguration) validateProcessRole() error {
 
 /* validateEnvironment names the key and the files a refusal is about: the dotenv source reads a present-but-empty MELODY_ENV as "dev" and loads .env.dev before the boot dies here. */
 func (instance *kernelConfiguration) validateEnvironment() error {
-    environment := instance.Env()
+    environment := instance.Environment()
     if "" == environment {
         return exception.NewError(
             "environment may not be empty",
             exceptioncontract.Context{
-                "environmentKey": EnvKey,
-                "parameterName":  KernelEnv,
-                "hint":           "give " + EnvKey + " a value in .env or .env.local: an empty one still selects the .env." + EnvDevelopment + " files, and a removed one is refused as a defaulted name",
+                "environmentKey": EnvironmentNameKey,
+                "parameterName":  KernelEnvironment,
+                "hint":           "give " + EnvironmentNameKey + " a value in .env or .env.local: an empty one still selects the .env." + EnvironmentDevelopment + " files, and a removed one is refused as a defaulted name",
             },
             nil,
         )
     }
 
     switch environment {
-    case EnvDevelopment, EnvProduction:
+    case EnvironmentDevelopment, EnvironmentProduction:
         return nil
     }
 
@@ -198,31 +198,31 @@ func (instance *kernelConfiguration) validateEnvironment() error {
         "environment is not supported",
         exceptioncontract.Context{
             "environment":    environment,
-            "environmentKey": EnvKey,
-            "parameterName":  KernelEnv,
+            "environmentKey": EnvironmentNameKey,
+            "parameterName":  KernelEnvironment,
         },
         nil,
     )
 }
 
-func (instance *kernelConfiguration) validateProjectDir() error {
-    if "" == instance.projectDir {
+func (instance *kernelConfiguration) validateProjectDirectory() error {
+    if "" == instance.projectDirectory {
         return exception.NewError("project directory may not be empty", nil, nil)
     }
 
     return nil
 }
 
-func (instance *kernelConfiguration) validateLogsDir() error {
-    if "" == instance.logsDir {
+func (instance *kernelConfiguration) validateLogsDirectory() error {
+    if "" == instance.logsDirectory {
         return exception.NewError("logs directory may not be empty", nil, nil)
     }
 
     return nil
 }
 
-func (instance *kernelConfiguration) validateCacheDir() error {
-    if "" == instance.cacheDir {
+func (instance *kernelConfiguration) validateCacheDirectory() error {
+    if "" == instance.cacheDirectory {
         return exception.NewError("cache directory may not be empty", nil, nil)
     }
 

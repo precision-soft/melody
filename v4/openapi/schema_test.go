@@ -439,7 +439,7 @@ func TestBuildSchema_MaxBoundWithNonIntegerValueIsUnsatisfiable(t *testing.T) {
     }
 }
 
-/* a length is never negative, so min/max refuse a negative bound at the tag door (constraint_min_length.go / constraint_max_length.go WithParams) and the rule fails closed before any value is examined, min=-5 and max=-10 alike */
+/* a length is never negative, so min/max refuse a negative bound at the tag door (constraint_min_length.go / constraint_max_length.go WithParameters) and the rule fails closed before any value is examined, min=-5 and max=-10 alike */
 func TestBuildSchema_NegativeBoundsAreUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
@@ -663,7 +663,7 @@ func TestBuildSchema_EscapedCommaInRegexShorthandPreserved(t *testing.T) {
     }
 }
 
-func TestBuildSchema_QuotedCommaInRegexParamPreserved(t *testing.T) {
+func TestBuildSchema_QuotedCommaInRegexParameterPreserved(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
     visited := map[reflect.Type]bool{}
@@ -701,7 +701,7 @@ func TestBuildSchema_RegexShorthandEndingInParenPreserved(t *testing.T) {
         t.Fatalf("expected a schema for kind, got %+v", schema.Properties)
     }
     if "^(foo|bar)" != kind.Pattern {
-        t.Fatalf("expected pattern ^(foo|bar): a shorthand regex value ending in ) must not be mis-parsed as the name(params) form, matching the runtime validator, got %q", kind.Pattern)
+        t.Fatalf("expected pattern ^(foo|bar): a shorthand regex value ending in ) must not be mis-parsed as the name(parameters) form, matching the runtime validator, got %q", kind.Pattern)
     }
 }
 
@@ -810,24 +810,24 @@ func TestBuildSchema_AStackedDiamondKeepsThePopulatedProperty(t *testing.T) {
     }
 }
 
-/* nullable ref validation */
+/* nullable reference validation */
 
-type emailRefTarget struct {
+type emailReferenceTarget struct {
     Value string `json:"value"`
 }
 
-type emailRefParent struct {
-    Child *emailRefTarget `json:"child" validate:"email"`
+type emailReferenceParent struct {
+    Child *emailReferenceTarget `json:"child" validate:"email"`
 }
 
-func TestApplyValidation_EmailFormatNotLeakedOntoNullableRefWrapper(t *testing.T) {
+func TestApplyValidation_EmailFormatNotLeakedOntoNullableReferenceWrapper(t *testing.T) {
     components := map[string]*Schema{}
     names := map[reflect.Type]string{}
     visited := map[reflect.Type]bool{}
 
-    buildSchema(reflect.TypeOf(emailRefParent{}), components, names, visited)
+    buildSchema(reflect.TypeOf(emailReferenceParent{}), components, names, visited)
 
-    parent := components["emailRefParent"]
+    parent := components["emailReferenceParent"]
     if nil == parent {
         t.Fatal("expected the parent struct to be registered in components")
     }
@@ -1033,7 +1033,7 @@ func TestApplyValidation_InvalidTagSyntaxIsUnsatisfiable(t *testing.T) {
     }
 }
 
-/* the empty pattern compiles to an expression matching every string, so the validator's WithParams refuses it at construction and the rule fails closed, and the mirror advertises no pattern that matches everything */
+/* the empty pattern compiles to an expression matching every string, so the validator's WithParameters refuses it at construction and the rule fails closed, and the mirror advertises no pattern that matches everything */
 func TestApplyValidation_EmptyRegexPatternIsUnsatisfiable(t *testing.T) {
     for _, tag := range []string{"regex=", "regex(pattern=)"} {
         schema := &Schema{Type: "string", Nullable: true}
@@ -1240,7 +1240,7 @@ func isEmptySchema(schema *Schema) bool {
         return false
     }
 
-    return "" == schema.Ref && "" == schema.Type && 0 == len(schema.Properties) && 0 == len(schema.AllOf) &&
+    return "" == schema.Reference && "" == schema.Type && 0 == len(schema.Properties) && 0 == len(schema.AllOf) &&
         nil == schema.Items && nil == schema.Not && nil == schema.Enum &&
         nil == schema.MinProperties && nil == schema.MaxProperties &&
         nil == schema.MinItems && nil == schema.MaxItems &&
@@ -1259,10 +1259,10 @@ func TestBuildSchema_NotEmptyOnStructIsUnsatisfiable(t *testing.T) {
 
     /* a named struct field renders as a $ref; notEmpty's validator rejects a struct value outright, so the $ref must be wrapped in a contradictory object constraint under allOf rather than advertised as a satisfiable object */
     named := schema.Properties["named"]
-    if nil == named || "" != named.Ref || 2 != len(named.AllOf) {
+    if nil == named || "" != named.Reference || 2 != len(named.AllOf) {
         t.Fatalf("expected named struct notEmpty to wrap the $ref in a contradictory allOf, got %+v", named)
     }
-    if "#/components/schemas/nestedNamedStruct" != named.AllOf[0].Ref || false == isImpossibleObject(named.AllOf[1]) {
+    if "#/components/schemas/nestedNamedStruct" != named.AllOf[0].Reference || false == isImpossibleObject(named.AllOf[1]) {
         t.Fatalf("expected allOf of [$ref, impossible object], got %+v", named)
     }
     if true == named.Nullable {
@@ -1448,73 +1448,73 @@ func TestBuildSchema_MaxOnNonStringScalar(t *testing.T) {
     }
 }
 
-type paramsOnNonParameterizableRequest struct {
+type parametersOnNonParameterizableRequest struct {
     Email string `json:"email" validate:"email(strict=yes)"`
     Name  string `json:"name" validate:"notBlank(mode=hard)"`
 }
 
 func TestBuildSchema_ParamsOnNonParameterizableConstraintIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
-    buildSchema(reflect.TypeOf(paramsOnNonParameterizableRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+    buildSchema(reflect.TypeOf(parametersOnNonParameterizableRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    schema := components["paramsOnNonParameterizableRequest"]
+    schema := components["parametersOnNonParameterizableRequest"]
     if nil == schema {
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParams rejects the rule), so the spec must advertise the field as unsatisfiable rather than as a satisfiable string a client would trust */
+    /* the validator fails closed when a tag carries parameters a non-parameterizable constraint cannot consume (createConstraintWithParameters rejects the rule), so the spec must advertise the field as unsatisfiable rather than as a satisfiable string a client would trust */
     for _, fieldName := range []string{"email", "name"} {
         property := schema.Properties[fieldName]
         if nil == property || nil == property.MinLength || 1 != *property.MinLength || nil == property.MaxLength || 0 != *property.MaxLength {
-            t.Fatalf("expected params on a non-parameterizable constraint to advertise an unsatisfiable string schema, field %q got: %+v", fieldName, property)
+            t.Fatalf("expected parameters on a non-parameterizable constraint to advertise an unsatisfiable string schema, field %q got: %+v", fieldName, property)
         }
     }
 }
 
-type unconsumedParameterizedParamsRequest struct {
+type unconsumedParameterizedParametersRequest struct {
     Name  string `json:"name" validate:"min(len=8)"`
     Code  string `json:"code" validate:"regex(re=^[0-9]{4}$)"`
     Count int    `json:"count" validate:"greaterThan(min=18)"`
 }
 
-func TestBuildSchema_UnconsumedParameterizedParamsIsUnsatisfiable(t *testing.T) {
+func TestBuildSchema_UnconsumedParameterizedParametersIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
-    buildSchema(reflect.TypeOf(unconsumedParameterizedParamsRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+    buildSchema(reflect.TypeOf(unconsumedParameterizedParametersRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    schema := components["unconsumedParameterizedParamsRequest"]
+    schema := components["unconsumedParameterizedParametersRequest"]
     if nil == schema {
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* a parameterizable constraint that receives parameters without its recognized key fails the rule closed in the validator (WithParams returns an error, createConstraintWithParams rejects the rule) before Constraint.Validate runs, so the spec must advertise the field unsatisfiable rather than as the satisfiable default bound (minLength 1, the match-all `.*` pattern, or > 0) a client would trust */
+    /* a parameterizable constraint that receives parameters without its recognized key fails the rule closed in the validator (WithParameters returns an error, createConstraintWithParameters rejects the rule) before Constraint.Validate runs, so the spec must advertise the field unsatisfiable rather than as the satisfiable default bound (minLength 1, the match-all `.*` pattern, or > 0) a client would trust */
     for _, fieldName := range []string{"name", "code"} {
         property := schema.Properties[fieldName]
         if nil == property || nil == property.MinLength || 1 != *property.MinLength || nil == property.MaxLength || 0 != *property.MaxLength {
-            t.Fatalf("expected unconsumed parameterized params to advertise an unsatisfiable string schema, field %q got: %+v", fieldName, property)
+            t.Fatalf("expected unconsumed parameterized parameters to advertise an unsatisfiable string schema, field %q got: %+v", fieldName, property)
         }
     }
 
     count := schema.Properties["count"]
     if nil == count || true == count.Nullable || nil == count.Minimum || nil == count.Maximum || *count.Minimum != *count.Maximum {
-        t.Fatalf("expected unconsumed parameterized params on a numeric field to advertise an empty exclusive range, got: %+v", count)
+        t.Fatalf("expected unconsumed parameterized parameters on a numeric field to advertise an empty exclusive range, got: %+v", count)
     }
 }
 
-type paramsOnNonParameterizableStructRequest struct {
-    Inline *paramsOnNonParameterizableRequest `json:"inline" validate:"notBlank(mode=hard)"`
-    Plain  paramsOnNonParameterizableRequest  `json:"plain" validate:"email(strict=yes)"`
+type parametersOnNonParameterizableStructRequest struct {
+    Inline *parametersOnNonParameterizableRequest `json:"inline" validate:"notBlank(mode=hard)"`
+    Plain  parametersOnNonParameterizableRequest  `json:"plain" validate:"email(strict=yes)"`
 }
 
 func TestBuildSchema_ParamsOnNonParameterizableConstraintOnStructIsUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
-    buildSchema(reflect.TypeOf(paramsOnNonParameterizableStructRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
+    buildSchema(reflect.TypeOf(parametersOnNonParameterizableStructRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    schema := components["paramsOnNonParameterizableStructRequest"]
+    schema := components["parametersOnNonParameterizableStructRequest"]
     if nil == schema {
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* the validator fails the rule closed before Constraint.Validate runs, so a struct field ($ref or nullable allOf-wrapped $ref) carrying params on a non-parameterizable constraint accepts no value either — the early-return branch of applyValidation must advertise it unsatisfiable (contradictory allOf, mirroring notEmpty-on-struct), not as a satisfiable object */
+    /* the validator fails the rule closed before Constraint.Validate runs, so a struct field ($ref or nullable allOf-wrapped $ref) carrying parameters on a non-parameterizable constraint accepts no value either — the early-return branch of applyValidation must advertise it unsatisfiable (contradictory allOf, mirroring notEmpty-on-struct), not as a satisfiable object */
     for _, fieldName := range []string{"inline", "plain"} {
         property := schema.Properties[fieldName]
         if nil == property {
@@ -1522,7 +1522,7 @@ func TestBuildSchema_ParamsOnNonParameterizableConstraintOnStructIsUnsatisfiable
         }
 
         if true == property.Nullable || 0 == len(property.AllOf) || false == isImpossibleObject(property.AllOf[len(property.AllOf)-1]) {
-            t.Fatalf("expected params on a non-parameterizable constraint over a struct field to advertise an unsatisfiable, non-nullable allOf, field %q got: %+v", fieldName, property)
+            t.Fatalf("expected parameters on a non-parameterizable constraint over a struct field to advertise an unsatisfiable, non-nullable allOf, field %q got: %+v", fieldName, property)
         }
     }
 }
@@ -1543,7 +1543,7 @@ func TestBuildSchema_MalformedMinOnNonStringFieldsIsUnsatisfiable(t *testing.T) 
         t.Fatalf("expected the request schema to be registered in components")
     }
 
-    /* a malformed min value fails the rule closed for a field of ANY kind (createConstraintWithParams rejects it before Validate runs), so integer/number/boolean/array fields must be advertised unsatisfiable, not as satisfiable defaults — mirroring the malformed-max handling */
+    /* a malformed min value fails the rule closed for a field of ANY kind (createConstraintWithParameters rejects it before Validate runs), so integer/number/boolean/array fields must be advertised unsatisfiable, not as satisfiable defaults — mirroring the malformed-max handling */
     for _, fieldName := range []string{"age", "score", "ok", "tags"} {
         property := schema.Properties[fieldName]
         if nil == property {
@@ -2115,7 +2115,7 @@ type interfaceMalformedComparisonRequest struct {
     Valid   any `json:"valid" validate:"greaterThan=5"`
 }
 
-/* GreaterThan/LessThan.WithParams run the same parseIntStrict as min/max, so a malformed bound fails constraint creation and rejects every payload before any value is examined; on an interface field the kind-classified branches are exempt, leaving not as the only truthful advertisement — a VALID bound stays satisfiable, judged on the decoded dynamic value */
+/* GreaterThan/LessThan.WithParameters run the same parseIntStrict as min/max, so a malformed bound fails constraint creation and rejects every payload before any value is examined; on an interface field the kind-classified branches are exempt, leaving not as the only truthful advertisement — a VALID bound stays satisfiable, judged on the decoded dynamic value */
 func TestBuildSchema_MalformedComparisonBoundOnInterfaceFieldAdvertisedUnsatisfiable(t *testing.T) {
     components := map[string]*Schema{}
     buildSchema(reflect.TypeOf(interfaceMalformedComparisonRequest{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
@@ -2493,7 +2493,7 @@ func TestBuildSchema_UserMarshalerEmbedKeepsItsObjectSchema(t *testing.T) {
     components := map[string]*Schema{}
     schema := buildSchema(reflect.TypeOf(marshalerEmbedLine{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    if "#/components/schemas/marshalerEmbedLine" != schema.Ref {
+    if "#/components/schemas/marshalerEmbedLine" != schema.Reference {
         t.Fatalf("expected the enclosing type to keep its own component, got %+v", schema)
     }
 
@@ -2523,7 +2523,7 @@ func TestBuildSchema_PointerReceiverMarshalerEmbedMatchesTheValueWireForm(t *tes
     components := map[string]*Schema{}
     schema := buildSchema(reflect.TypeOf(marshalerEmbedPointerHost{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    if "#/components/schemas/marshalerEmbedPointerHost" != schema.Ref {
+    if "#/components/schemas/marshalerEmbedPointerHost" != schema.Reference {
         t.Fatalf("expected the enclosing type to keep its own component, got %+v", schema)
     }
 
@@ -2571,7 +2571,7 @@ func TestPromotedMarshalerOrigin_APointerEmbedWithAPointerReceiverCodecIsUnresol
     components := map[string]*Schema{}
     schema := buildSchema(hostType, components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    if "#/components/schemas/marshalerEmbedPointerIndirectHost" != schema.Ref {
+    if "#/components/schemas/marshalerEmbedPointerIndirectHost" != schema.Reference {
         t.Fatalf("expected the unresolved promotion to keep the object schema, got %+v", schema)
     }
 
@@ -2626,7 +2626,7 @@ func TestBuildSchema_TimeEmbedBesideAMarshalerKeepsItsObjectSchema(t *testing.T)
     components := map[string]*Schema{}
     schema := buildSchema(reflect.TypeOf(timeEmbedBesideAMarshaler{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    if "#/components/schemas/timeEmbedBesideAMarshaler" != schema.Ref {
+    if "#/components/schemas/timeEmbedBesideAMarshaler" != schema.Reference {
         t.Fatalf("expected the enclosing type to keep its own component, got %+v", schema)
     }
 }
@@ -2636,7 +2636,7 @@ func TestBuildSchema_EmbeddedMarshalerInterfaceKeepsItsObjectSchema(t *testing.T
     components := map[string]*Schema{}
     schema := buildSchema(reflect.TypeOf(marshalerEmbedInterfaceHost{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    if "#/components/schemas/marshalerEmbedInterfaceHost" != schema.Ref {
+    if "#/components/schemas/marshalerEmbedInterfaceHost" != schema.Reference {
         t.Fatalf("expected the enclosing type to keep its own component, got %+v", schema)
     }
 
@@ -2689,7 +2689,7 @@ func TestBuildSchema_ShallowerMarshalerEmbedShadowsADeeperTimeCodec(t *testing.T
     components := map[string]*Schema{}
     schema := buildSchema(reflect.TypeOf(timeEmbedShadowedByAnObjectCodec{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    if "#/components/schemas/timeEmbedShadowedByAnObjectCodec" != schema.Ref {
+    if "#/components/schemas/timeEmbedShadowedByAnObjectCodec" != schema.Reference {
         t.Fatalf("expected the enclosing type to keep its object schema, got %+v", schema)
     }
 
@@ -2716,7 +2716,7 @@ func TestBuildSchema_NonStructMarshalerEmbedShadowsADeeperTimeCodec(t *testing.T
         t.Fatalf("expected no date-time advertisement for a body no time codec writes, got %+v", schema)
     }
 
-    if "#/components/schemas/timeEmbedShadowedByAScalarCodec" != schema.Ref {
+    if "#/components/schemas/timeEmbedShadowedByAScalarCodec" != schema.Reference {
         t.Fatalf("expected the enclosing type to keep its object schema, got %+v", schema)
     }
 }
@@ -2789,7 +2789,7 @@ func TestBuildSchema_TimeCodecBehindAPointerCycleKeepsItsObjectSchema(t *testing
     components := map[string]*Schema{}
     schema := buildSchema(reflect.TypeOf(timeEmbedPointerCycle{}), components, map[reflect.Type]string{}, map[reflect.Type]bool{})
 
-    if "#/components/schemas/timeEmbedPointerCycle" != schema.Ref {
+    if "#/components/schemas/timeEmbedPointerCycle" != schema.Reference {
         t.Fatalf("expected the unresolved promotion to keep the object schema, got %+v", schema)
     }
 }
@@ -2836,9 +2836,9 @@ func componentKeyList(components map[string]*Schema) []string {
 func assertResolvableComponentReference(t *testing.T, schema *Schema, components map[string]*Schema) {
     t.Helper()
 
-    tokens := strings.Split(schema.Ref, "/")
+    tokens := strings.Split(schema.Reference, "/")
     if 4 != len(tokens) || "#" != tokens[0] || "components" != tokens[1] || "schemas" != tokens[2] {
-        t.Fatalf("expected a three-token json pointer into the components, got %q", schema.Ref)
+        t.Fatalf("expected a three-token json pointer into the components, got %q", schema.Reference)
     }
 
     if false == componentKeyGrammar.MatchString(tokens[3]) {
@@ -2877,8 +2877,8 @@ func TestSchemaComponentName_DistinctGenericsThatSanitizeAlikeStayDisambiguated(
     assertResolvableComponentReference(t, first, components)
     assertResolvableComponentReference(t, second, components)
 
-    if first.Ref+"2" != second.Ref {
-        t.Fatalf("expected the colliding instantiation to be disambiguated as %q, got %q", first.Ref+"2", second.Ref)
+    if first.Reference+"2" != second.Reference {
+        t.Fatalf("expected the colliding instantiation to be disambiguated as %q, got %q", first.Reference+"2", second.Reference)
     }
 }
 
@@ -2914,7 +2914,7 @@ type cyclicShapeHost struct {
 
 const cyclicShapeChildMarker = "MELODY_OPENAPI_CYCLIC_SHAPE_CHILD"
 
-/* A type cycle that never passes through a struct meets neither of the guards a struct cycle meets, and the recursion that follows it ends in a Go stack overflow — a fatal error, not a panic: recover cannot reach it and neither can the http recovery middleware, so the process dies. SpecHandler regenerates the document on every request, which makes the spec route a kill switch the first client trips. The reproduction therefore cannot live in this process: the child re-executes this test binary with the marker set, builds every shape and asserts what it got, and the parent asserts the child came back alive. The child carries its own timeout so the pointer-cycle shape, which live-locks rather than crashing, is reported instead of hanging the run. */
+/* A type cycle that never passes through a struct meets neither of the guards a struct cycle meets, and the recursion that follows it ends in a Go stack overflow — a fatal error, not a panic: recover cannot reach it and neither can the http recovery middleware, so the process dies. SpecificationHandler regenerates the document on every request, which makes the spec route a kill switch the first client trips. The reproduction therefore cannot live in this process: the child re-executes this test binary with the marker set, builds every shape and asserts what it got, and the parent asserts the child came back alive. The child carries its own timeout so the pointer-cycle shape, which live-locks rather than crashing, is reported instead of hanging the run. */
 func TestBuildSchema_TypeCyclesTerminateWithoutKillingTheProcess(t *testing.T) {
     if "" != os.Getenv(cyclicShapeChildMarker) {
         assertCyclicShapesAreDescribed(t)
@@ -2957,13 +2957,13 @@ func assertNamedMapCycleIsDescribed(t *testing.T) {
 
     assertResolvableComponentReference(t, schema, components)
 
-    component := components[componentKeyOfReference(schema.Ref)]
+    component := components[componentKeyOfReference(schema.Reference)]
     if "object" != component.Type || nil == component.AdditionalProperties {
         t.Fatalf("expected the named map component to describe an object with additional properties, got %+v", component)
     }
 
-    if schema.Ref != component.AdditionalProperties.Ref {
-        t.Fatalf("expected the map value to point back at %q, got %+v", schema.Ref, component.AdditionalProperties)
+    if schema.Reference != component.AdditionalProperties.Reference {
+        t.Fatalf("expected the map value to point back at %q, got %+v", schema.Reference, component.AdditionalProperties)
     }
 }
 
@@ -2976,13 +2976,13 @@ func assertNamedSliceCycleIsDescribed(t *testing.T) {
 
     assertResolvableComponentReference(t, schema, components)
 
-    component := components[componentKeyOfReference(schema.Ref)]
+    component := components[componentKeyOfReference(schema.Reference)]
     if "array" != component.Type || nil == component.Items {
         t.Fatalf("expected the named slice component to describe an array with items, got %+v", component)
     }
 
-    if schema.Ref != component.Items.Ref {
-        t.Fatalf("expected the slice element to point back at %q, got %+v", schema.Ref, component.Items)
+    if schema.Reference != component.Items.Reference {
+        t.Fatalf("expected the slice element to point back at %q, got %+v", schema.Reference, component.Items)
     }
 }
 
@@ -2997,7 +2997,7 @@ func assertNamedPointerCycleIsDescribed(t *testing.T) {
         t.Fatalf("expected a pointer type that dereferences to itself to be described as bounded, got %+v", schema)
     }
 
-    if "" != schema.Type || "" != schema.Ref {
+    if "" != schema.Type || "" != schema.Reference {
         t.Fatalf("expected the bounded position to carry no type and no reference, got %+v", schema)
     }
 
@@ -3015,16 +3015,16 @@ func assertMutualCollectionCycleIsDescribed(t *testing.T) {
 
     assertResolvableComponentReference(t, schema, components)
 
-    left := components[componentKeyOfReference(schema.Ref)]
-    if "array" != left.Type || nil == left.Items || "" == left.Items.Ref {
+    left := components[componentKeyOfReference(schema.Reference)]
+    if "array" != left.Type || nil == left.Items || "" == left.Items.Reference {
         t.Fatalf("expected the first component to reference the second, got %+v", left)
     }
 
     assertResolvableComponentReference(t, left.Items, components)
 
-    right := components[componentKeyOfReference(left.Items.Ref)]
-    if "array" != right.Type || nil == right.Items || schema.Ref != right.Items.Ref {
-        t.Fatalf("expected the second component to reference %q, got %+v", schema.Ref, right)
+    right := components[componentKeyOfReference(left.Items.Reference)]
+    if "array" != right.Type || nil == right.Items || schema.Reference != right.Items.Reference {
+        t.Fatalf("expected the second component to reference %q, got %+v", schema.Reference, right)
     }
 }
 
@@ -3039,7 +3039,7 @@ func assertInterfaceCycleIsDescribed(t *testing.T) {
         t.Fatalf("expected a list of interfaces to stay an inline array, got %+v", schema)
     }
 
-    if "" != schema.Items.Type || "" != schema.Items.Ref {
+    if "" != schema.Items.Type || "" != schema.Items.Reference {
         t.Fatalf("expected the interface element to stay undescribed, got %+v", schema.Items)
     }
 
@@ -3057,14 +3057,14 @@ func assertStructCycleIsDescribed(t *testing.T) {
 
     assertResolvableComponentReference(t, schema, components)
 
-    component := components[componentKeyOfReference(schema.Ref)]
+    component := components[componentKeyOfReference(schema.Reference)]
     children := component.Properties["children"]
     if nil == children || "array" != children.Type || nil == children.Items {
         t.Fatalf("expected the recursive struct field to stay an inline array, got %+v", children)
     }
 
-    if 1 != len(children.Items.AllOf) || schema.Ref != children.Items.AllOf[0].Ref {
-        t.Fatalf("expected the child element to point back at %q, got %+v", schema.Ref, children.Items)
+    if 1 != len(children.Items.AllOf) || schema.Reference != children.Items.AllOf[0].Reference {
+        t.Fatalf("expected the child element to point back at %q, got %+v", schema.Reference, children.Items)
     }
 }
 
@@ -3270,11 +3270,11 @@ func TestBuildSchema_FieldOfAnUnsatisfiableComponentIsRequired(t *testing.T) {
 /* Resolving a reference is itself a walk over the shape the reference was introduced to survive, so it has to terminate on a components map that points back at itself. Neither a map assembled this way nor a key that names nothing may be followed forever, and neither may answer anything but the stricter struct reading. */
 func TestReferencedCollectionKind_ResolutionTerminatesOnACyclicComponentsMap(t *testing.T) {
     components := map[string]*Schema{
-        "selfPointing":  {Ref: "#/components/schemas/selfPointing"},
-        "leftPointing":  {Ref: "#/components/schemas/rightPointing"},
-        "rightPointing": {Ref: "#/components/schemas/leftPointing"},
-        "missing":       {Ref: "#/components/schemas/absent"},
-        "throughToList": {Ref: "#/components/schemas/list"},
+        "selfPointing":  {Reference: "#/components/schemas/selfPointing"},
+        "leftPointing":  {Reference: "#/components/schemas/rightPointing"},
+        "rightPointing": {Reference: "#/components/schemas/leftPointing"},
+        "missing":       {Reference: "#/components/schemas/absent"},
+        "throughToList": {Reference: "#/components/schemas/list"},
         "list":          {Type: "array", Items: &Schema{Type: "string"}},
         "dictionary":    {Type: "object", AdditionalProperties: &Schema{Type: "string"}},
         "placeholder":   {Type: "object"},
@@ -3297,11 +3297,11 @@ func TestReferencedCollectionKind_ResolutionTerminatesOnACyclicComponentsMap(t *
     }
 
     for _, testCase := range cases {
-        if resolved := referencedCollectionKind(&Schema{Ref: testCase.reference}, components); testCase.expected != resolved {
+        if resolved := referencedCollectionKind(&Schema{Reference: testCase.reference}, components); testCase.expected != resolved {
             t.Fatalf("expected %q to resolve to %q, got %q", testCase.reference, testCase.expected, resolved)
         }
 
-        wrapped := &Schema{AllOf: []*Schema{{Ref: testCase.reference}}, Nullable: true}
+        wrapped := &Schema{AllOf: []*Schema{{Reference: testCase.reference}}, Nullable: true}
         if resolved := referencedCollectionKind(wrapped, components); testCase.expected != resolved {
             t.Fatalf("expected the nullable wrapper of %q to resolve to %q, got %q", testCase.reference, testCase.expected, resolved)
         }
@@ -3334,7 +3334,7 @@ func TestBuildSchema_NotEmptyOnAPromotedFixedArrayKeepsTheFixedLengthReading(t *
     }
 
     ring := schema.Properties["ring"]
-    if nil == ring || "" == ring.Ref || 0 != len(ring.AllOf) || nil != ring.MinItems {
+    if nil == ring || "" == ring.Reference || 0 != len(ring.AllOf) || nil != ring.MinItems {
         t.Fatalf("expected notEmpty on a promoted fixed-length array to advertise no floor, got %+v", ring)
     }
 
@@ -3356,11 +3356,11 @@ func assertReferenceCarriesFloor(t *testing.T, property *Schema, reference strin
     }
 
     /* a facet beside a $ref binds nothing, the reference replacing the object it sits in, so the floor has to travel inside an allOf */
-    if "" != property.Ref {
+    if "" != property.Reference {
         t.Fatalf("expected the reference to move into an allOf so the floor binds with it, got %+v", property)
     }
 
-    if 2 != len(property.AllOf) || reference != property.AllOf[0].Ref {
+    if 2 != len(property.AllOf) || reference != property.AllOf[0].Reference {
         t.Fatalf("expected an allOf of [%s, floor], got %+v", reference, property)
     }
 
@@ -3605,8 +3605,8 @@ func schemaAccepts(schema *Schema, components map[string]*Schema, value reflect.
         return true
     }
 
-    if "" != schema.Ref {
-        key := strings.TrimPrefix(schema.Ref, "#/components/schemas/")
+    if "" != schema.Reference {
+        key := strings.TrimPrefix(schema.Reference, "#/components/schemas/")
         component, exists := components[key]
         if false == exists || nil == component {
             return true
@@ -3934,11 +3934,11 @@ func TestParsedTagRules_AnswersOneParsePerTag(t *testing.T) {
     first := parsedTagRules(tag)
     second := parsedTagRules(tag)
 
-    if 3 != len(first) || "notBlank" != first[0].name || "2" != first[1].params["value"] || "^[a-z]+$" != first[2].params["value"] {
+    if 3 != len(first) || "notBlank" != first[0].name || "2" != first[1].parameters["value"] || "^[a-z]+$" != first[2].parameters["value"] {
         t.Fatalf("expected the three rules as splitRule reads them, got %+v", first)
     }
 
-    if reflect.ValueOf(first[1].params).Pointer() != reflect.ValueOf(second[1].params).Pointer() {
+    if reflect.ValueOf(first[1].parameters).Pointer() != reflect.ValueOf(second[1].parameters).Pointer() {
         t.Fatalf("expected the second reading to answer the memoized parse, got a fresh one")
     }
 

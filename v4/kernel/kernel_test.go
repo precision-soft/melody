@@ -31,7 +31,7 @@ func newTestConfiguration(t *testing.T, environment string) configcontract.Confi
     environmentInstance, err := config.NewEnvironment(
         &testEnvironmentSource{
             values: map[string]string{
-                config.EnvKey: environment,
+                config.EnvironmentNameKey: environment,
             },
         },
     )
@@ -50,7 +50,7 @@ func newTestConfiguration(t *testing.T, environment string) configcontract.Confi
 }
 
 func TestNewKernel_InitialState(t *testing.T) {
-    configuration := newTestConfiguration(t, config.EnvDevelopment)
+    configuration := newTestConfiguration(t, config.EnvironmentDevelopment)
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     clockInstance := clock.NewSystemClock()
     dispatcher := event.NewEventDispatcher(clockInstance)
@@ -67,7 +67,7 @@ func TestNewKernel_InitialState(t *testing.T) {
         clockInstance,
     )
 
-    if config.EnvDevelopment != kernelInstance.Environment() {
+    if config.EnvironmentDevelopment != kernelInstance.Environment() {
         t.Fatalf("unexpected environment")
     }
     if false == kernelInstance.DebugMode() {
@@ -94,7 +94,7 @@ func TestKernel_DebugModeFalseOutsideDevelopment(t *testing.T) {
 
     kernelInstance := NewKernel(
         t.Context(),
-        newTestConfiguration(t, config.EnvProduction),
+        newTestConfiguration(t, config.EnvironmentProduction),
         container.NewContainer(container.ContainerConfig{}),
         httpRouter,
         event.NewEventDispatcher(clockInstance),
@@ -143,7 +143,7 @@ func TestNewKernel_TheKernelAnswersTheContextItWasBuiltWith(t *testing.T) {
 
     kernelInstance := NewKernel(
         applicationContext,
-        newTestConfiguration(t, config.EnvProduction),
+        newTestConfiguration(t, config.EnvironmentProduction),
         container.NewContainer(container.ContainerConfig{}),
         http.NewRouterWithRouteRegistry(http.NewRouteRegistry()),
         event.NewEventDispatcher(clockInstance),
@@ -174,7 +174,7 @@ func TestNewKernel_RefusesANilContext(t *testing.T) {
 
     NewKernel(
         nilContext,
-        newTestConfiguration(t, config.EnvProduction),
+        newTestConfiguration(t, config.EnvironmentProduction),
         container.NewContainer(container.ContainerConfig{}),
         http.NewRouterWithRouteRegistry(http.NewRouteRegistry()),
         event.NewEventDispatcher(clockInstance),

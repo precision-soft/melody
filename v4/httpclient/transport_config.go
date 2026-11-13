@@ -9,7 +9,7 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
-/* TransportConfig overrides the transport melody builds for a client. A field left out takes its default; a value below the field's minimum is refused, naming the field, and so is unlimited on a field that does not admit it. Every timeout but IdleConnTimeout refuses unlimited: the dial, TLS handshake, response header and 100-continue waits each guard against a peer that never answers, and KeepAlive has KeepAliveDisabled. */
+/* TransportConfig overrides the transport melody builds for a client. A field left out takes its default; a value below the field's minimum is refused, naming the field, and so is unlimited on a field that does not admit it. Every timeout but IdleConnectionTimeout refuses unlimited: the dial, TLS handshake, response header and 100-continue waits each guard against a peer that never answers, and KeepAlive has KeepAliveDisabled. */
 type TransportConfig struct {
     /* DialTimeout bounds one dial: 10s by default, at least 1ms. */
     DialTimeout bound.Duration
@@ -18,17 +18,17 @@ type TransportConfig struct {
     KeepAlive         bound.Duration
     KeepAliveDisabled bool
 
-    /* MaxIdleConns bounds the idle pool across hosts: 100 by default, at least 1, unlimited admitted. */
-    MaxIdleConns bound.Count
+    /* MaxIdleConnections bounds the idle pool across hosts: 100 by default, at least 1, unlimited admitted. */
+    MaxIdleConnections bound.Count
 
-    /* MaxIdleConnsPerHost bounds the idle pool of one host: 100 by default, at least 1, unlimited admitted. It is decided on its own, whatever MaxIdleConns holds; net/http applies both, so the smaller one wins. */
-    MaxIdleConnsPerHost bound.Count
+    /* MaxIdleConnectionsPerHost bounds the idle pool of one host: 100 by default, at least 1, unlimited admitted. It is decided on its own, whatever MaxIdleConnections holds; net/http applies both, so the smaller one wins. */
+    MaxIdleConnectionsPerHost bound.Count
 
-    /* IdleConnectionsDisabled keeps no connection idle, so every request dials its own over HTTP/1 and HTTP/2 alike, and refuses MaxIdleConns, MaxIdleConnsPerHost or IdleConnTimeout set beside it. */
+    /* IdleConnectionsDisabled keeps no connection idle, so every request dials its own over HTTP/1 and HTTP/2 alike, and refuses MaxIdleConnections, MaxIdleConnectionsPerHost or IdleConnectionTimeout set beside it. */
     IdleConnectionsDisabled bool
 
-    /* IdleConnTimeout closes a connection idle that long: 90s by default, at least 1s, unlimited admitted. */
-    IdleConnTimeout bound.Duration
+    /* IdleConnectionTimeout closes a connection idle that long: 90s by default, at least 1s, unlimited admitted. */
+    IdleConnectionTimeout bound.Duration
 
     /* TlsHandshakeTimeout bounds the TLS handshake: 10s by default, at least 1ms. */
     TlsHandshakeTimeout bound.Duration
@@ -42,18 +42,18 @@ type TransportConfig struct {
 
 /* resolvedTransportConfig is the transport configuration with every field decided, in net/http's terms. */
 type resolvedTransportConfig struct {
-    DialTimeout           time.Duration
-    KeepAlive             time.Duration
-    MaxIdleConns          int
-    MaxIdleConnsPerHost   int
-    IdleConnTimeout       time.Duration
-    TlsHandshakeTimeout   time.Duration
-    ExpectContinueTimeout time.Duration
-    ResponseHeaderTimeout time.Duration
-    DisableKeepAlives     bool
+    DialTimeout               time.Duration
+    KeepAlive                 time.Duration
+    MaxIdleConnections        int
+    MaxIdleConnectionsPerHost int
+    IdleConnectionTimeout     time.Duration
+    TlsHandshakeTimeout       time.Duration
+    ExpectContinueTimeout     time.Duration
+    ResponseHeaderTimeout     time.Duration
+    DisableKeepAlives         bool
 }
 
-const defaultMaxIdleConns = 100
+const defaultMaxIdleConnections = 100
 
 var (
     dialTimeoutRule = bound.Rule[time.Duration]{
@@ -68,22 +68,22 @@ var (
         Minimum: time.Second,
     }
 
-    maxIdleConnsRule = bound.Rule[int]{
-        Name:              "TransportConfig.MaxIdleConns",
-        Default:           defaultMaxIdleConns,
+    maxIdleConnectionsRule = bound.Rule[int]{
+        Name:              "TransportConfig.MaxIdleConnections",
+        Default:           defaultMaxIdleConnections,
         Minimum:           1,
         UnlimitedAdmitted: true,
     }
 
-    maxIdleConnsPerHostRule = bound.Rule[int]{
-        Name:              "TransportConfig.MaxIdleConnsPerHost",
-        Default:           defaultMaxIdleConns,
+    maxIdleConnectionsPerHostRule = bound.Rule[int]{
+        Name:              "TransportConfig.MaxIdleConnectionsPerHost",
+        Default:           defaultMaxIdleConnections,
         Minimum:           1,
         UnlimitedAdmitted: true,
     }
 
-    idleConnTimeoutRule = bound.Rule[time.Duration]{
-        Name:              "TransportConfig.IdleConnTimeout",
+    idleConnectionTimeoutRule = bound.Rule[time.Duration]{
+        Name:              "TransportConfig.IdleConnectionTimeout",
         Default:           90 * time.Second,
         Minimum:           time.Second,
         UnlimitedAdmitted: true,
@@ -143,8 +143,8 @@ func resolveTransportConfig(config TransportConfig) (resolvedTransportConfig, er
             name  string
             limit bound.Count
         }{
-            {name: "TransportConfig.MaxIdleConns", limit: config.MaxIdleConns},
-            {name: "TransportConfig.MaxIdleConnsPerHost", limit: config.MaxIdleConnsPerHost},
+            {name: "TransportConfig.MaxIdleConnections", limit: config.MaxIdleConnections},
+            {name: "TransportConfig.MaxIdleConnectionsPerHost", limit: config.MaxIdleConnectionsPerHost},
         } {
             if false == beside.limit.IsAbsent() {
                 return resolvedTransportConfig{}, exception.NewError(
@@ -157,46 +157,46 @@ func resolveTransportConfig(config TransportConfig) (resolvedTransportConfig, er
             }
         }
 
-        if false == config.IdleConnTimeout.IsAbsent() {
+        if false == config.IdleConnectionTimeout.IsAbsent() {
             return resolvedTransportConfig{}, exception.NewError(
                 "an idle pool limit is set on a transport that keeps no idle connection",
                 exceptioncontract.Context{
-                    "field": "TransportConfig.IdleConnTimeout",
+                    "field": "TransportConfig.IdleConnectionTimeout",
                 },
                 nil,
             )
         }
     }
 
-    maxIdleConns, err := bound.Resolve(config.MaxIdleConns, maxIdleConnsRule)
+    maxIdleConnections, err := bound.Resolve(config.MaxIdleConnections, maxIdleConnectionsRule)
     if nil != err {
         return resolvedTransportConfig{}, err
     }
-    resolved.MaxIdleConns = maxIdleConns.Value
-    if true == maxIdleConns.Unlimited {
+    resolved.MaxIdleConnections = maxIdleConnections.Value
+    if true == maxIdleConnections.Unlimited {
         /* net/http reads a zero total as no limit */
-        resolved.MaxIdleConns = 0
+        resolved.MaxIdleConnections = 0
     }
 
-    maxIdleConnsPerHost, err := bound.Resolve(config.MaxIdleConnsPerHost, maxIdleConnsPerHostRule)
+    maxIdleConnectionsPerHost, err := bound.Resolve(config.MaxIdleConnectionsPerHost, maxIdleConnectionsPerHostRule)
     if nil != err {
         return resolvedTransportConfig{}, err
     }
-    resolved.MaxIdleConnsPerHost = maxIdleConnsPerHost.Value
-    if true == maxIdleConnsPerHost.Unlimited {
+    resolved.MaxIdleConnectionsPerHost = maxIdleConnectionsPerHost.Value
+    if true == maxIdleConnectionsPerHost.Unlimited {
         /* net/http reads a zero per-host pool as its default of two, so unlimited is the largest int */
-        resolved.MaxIdleConnsPerHost = math.MaxInt
+        resolved.MaxIdleConnectionsPerHost = math.MaxInt
     }
 
     /* the HTTP/2 transport reads DisableKeepAlives alone, never a negative per-host pool */
     resolved.DisableKeepAlives = config.IdleConnectionsDisabled
 
-    idleConnTimeout, err := bound.Resolve(config.IdleConnTimeout, idleConnTimeoutRule)
+    idleConnectionTimeout, err := bound.Resolve(config.IdleConnectionTimeout, idleConnectionTimeoutRule)
     if nil != err {
         return resolvedTransportConfig{}, err
     }
     /* net/http reads a zero idle timeout as no limit, which is what unlimited resolves to */
-    resolved.IdleConnTimeout = idleConnTimeout.Value
+    resolved.IdleConnectionTimeout = idleConnectionTimeout.Value
 
     tlsHandshakeTimeout, err := bound.Resolve(config.TlsHandshakeTimeout, tlsHandshakeTimeoutRule)
     if nil != err {

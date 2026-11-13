@@ -14,17 +14,17 @@ func TestRegex_PointerToStringMismatchIsRejected(t *testing.T) {
     }
 }
 
-func TestRegex_WithParamsRefusesEmptyPattern(t *testing.T) {
+func TestRegex_WithParametersRefusesEmptyPattern(t *testing.T) {
     constraint := NewRegex(`^[0-9]$`)
 
-    for _, params := range []map[string]string{
+    for _, parameters := range []map[string]string{
         {"pattern": ""},
         {"value": ""},
     } {
-        configured, withParamsErr := constraint.WithParams(params)
+        configured, withParametersErr := constraint.WithParameters(parameters)
 
-        if nil == withParamsErr || nil != configured {
-            t.Fatalf("fail-open: an empty pattern was accepted for %v", params)
+        if nil == withParametersErr || nil != configured {
+            t.Fatalf("fail-open: an empty pattern was accepted for %v", parameters)
         }
     }
 }

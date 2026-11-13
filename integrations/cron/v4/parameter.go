@@ -34,8 +34,8 @@ const (
 )
 
 const (
-    defaultDestinationFile = "%kernel.project_dir%/generated_conf/cron/crontab"
-    defaultLogsDirectory   = "%kernel.logs_dir%/cron"
+    defaultDestinationFile = "%kernel.project_directory%/generated_conf/cron/crontab"
+    defaultLogsDirectory   = "%kernel.logs_directory%/cron"
 )
 
 /* KeyDefaults are the values the ten keys take when no .env file sets them; a zero field takes the module's own default. */

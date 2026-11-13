@@ -422,7 +422,7 @@ func newTestCompiledFirewallWithRoleHierarchy(name string, roleHierarchy *RoleHi
 type servedSecurityEnvironmentSource struct{}
 
 func (instance *servedSecurityEnvironmentSource) Load() (map[string]string, error) {
-    return map[string]string{config.EnvKey: config.EnvProduction}, nil
+    return map[string]string{config.EnvironmentNameKey: config.EnvironmentProduction}, nil
 }
 
 func servedSecurityContainer(t *testing.T, kernelInstance *testKernel, logger loggingcontract.Logger) containercontract.Container {

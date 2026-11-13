@@ -16,25 +16,25 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-func NewAuthTokenCommand(secret []byte) *AuthTokenCommand {
-    return &AuthTokenCommand{
+func NewAuthenticationTokenCommand(secret []byte) *AuthenticationTokenCommand {
+    return &AuthenticationTokenCommand{
         secret: secret,
     }
 }
 
-type AuthTokenCommand struct {
+type AuthenticationTokenCommand struct {
     secret []byte
 }
 
-func (instance *AuthTokenCommand) Name() string {
+func (instance *AuthenticationTokenCommand) Name() string {
     return "auth:token"
 }
 
-func (instance *AuthTokenCommand) Description() string {
+func (instance *AuthenticationTokenCommand) Description() string {
     return "mints an HS256 JWT for the token-protected secure api"
 }
 
-func (instance *AuthTokenCommand) Flags() []melodyclicontract.Flag {
+func (instance *AuthenticationTokenCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{
         &melodyclicontract.StringFlag{
             Name:  "user",
@@ -60,7 +60,7 @@ func (instance *AuthTokenCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *AuthTokenCommand) Run(
+func (instance *AuthenticationTokenCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
     commandContext *melodyclicontract.CommandContext,
 ) error {
@@ -124,4 +124,4 @@ func signHs256(secret []byte, claims map[string]any) string {
     return signingInput + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-var _ melodyclicontract.Command = (*AuthTokenCommand)(nil)
+var _ melodyclicontract.Command = (*AuthenticationTokenCommand)(nil)

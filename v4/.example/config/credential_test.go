@@ -37,7 +37,7 @@ func TestCredential_OutsideDevelopmentRefusesABlankOrCommittedValueNamingOnlyThe
         {environmentKeyInternalAuthSecret, internalCallerSecret, func(moduleInstance *Module) { moduleInstance.buildInternalAuth() }},
     } {
         for _, value := range []string{"", "  ", credentialCase.developmentValue} {
-            moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvKey: melodyconfig.EnvProduction, credentialCase.environmentKey: value})
+            moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentProduction, credentialCase.environmentKey: value})
 
             refusal := recoveredRefusal(t, func() { credentialCase.build(moduleInstance) })
             if nil == refusal || false == strings.HasPrefix(refusal.Error(), credentialCase.environmentKey+" ") {
@@ -50,7 +50,7 @@ func TestCredential_OutsideDevelopmentRefusesABlankOrCommittedValueNamingOnlyThe
             }
         }
 
-        moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvKey: melodyconfig.EnvProduction, credentialCase.environmentKey: "a-value-of-its-own-for-" + credentialCase.environmentKey})
+        moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentProduction, credentialCase.environmentKey: "a-value-of-its-own-for-" + credentialCase.environmentKey})
         if refusal := recoveredRefusal(t, func() { credentialCase.build(moduleInstance) }); nil != refusal {
             t.Fatalf("%s: expected a value of its own to boot outside development, got %v", credentialCase.environmentKey, refusal)
         }
@@ -59,7 +59,7 @@ func TestCredential_OutsideDevelopmentRefusesABlankOrCommittedValueNamingOnlyThe
 
 /* the token firewall outside development verifies with the configured secret: a token signed with the committed constant, carrying the roles a scope grants, is refused, and one signed with the configured secret is accepted */
 func TestBuildTokenAuth_OutsideDevelopmentRefusesATokenSignedWithTheCommittedSecret(t *testing.T) {
-    moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvKey: melodyconfig.EnvProduction, environmentKeyJwtSecret: ownJwtSecret})
+    moduleInstance := moduleWithEnvironment(t, map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentProduction, environmentKeyJwtSecret: ownJwtSecret})
     moduleInstance.buildTokenAuth()
 
     issuedAt := time.Unix(1700000000, 0).UTC()
@@ -89,15 +89,15 @@ func TestBuildTokenAuth_OutsideDevelopmentRefusesATokenSignedWithTheCommittedSec
 /* the internal firewall verifies under the configured key id, application and secret; blank names take the example's own */
 func TestBuildInternalAuth_ReadsTheKeyIdApplicationAndSecretFromConfiguration(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
-        melodyconfig.EnvKey:              melodyconfig.EnvProduction,
-        environmentKeyInternalAuthKeyId:  "erp-key-7",
-        environmentKeyInternalAuthApp:    "erp-service",
-        environmentKeyInternalAuthSecret: "an-operator-chosen-shared-secret",
+        melodyconfig.EnvironmentNameKey:       melodyconfig.EnvironmentProduction,
+        environmentKeyInternalAuthKeyId:       "erp-key-7",
+        environmentKeyInternalAuthApplication: "erp-service",
+        environmentKeyInternalAuthSecret:      "an-operator-chosen-shared-secret",
     })
     moduleInstance.buildInternalAuth()
 
     secret, found := moduleInstance.hmacSecrets.Secret("erp-key-7")
-    application, _ := moduleInstance.hmacSecrets.AppForKeyId("erp-key-7")
+    application, _ := moduleInstance.hmacSecrets.ApplicationForKeyId("erp-key-7")
     if false == found || "an-operator-chosen-shared-secret" != string(secret) || "erp-service" != application || "erp-key-7" != moduleInstance.hmacSecrets.CurrentKeyId() {
         t.Fatalf("expected the configured key, got %q %v %q", secret, found, application)
     }
@@ -108,7 +108,7 @@ func TestBuildInternalAuth_ReadsTheKeyIdApplicationAndSecretFromConfiguration(t 
 
     developmentInstance := moduleWithEnvironment(t, map[string]string{})
     developmentInstance.buildInternalAuth()
-    if developmentInstance.hmacSecrets.CurrentKeyId() != internalCallerKeyId || internalCallerApp != developmentInstance.internalAuthApp {
-        t.Fatalf("expected blank names to take the example's own, got %q %q", developmentInstance.hmacSecrets.CurrentKeyId(), developmentInstance.internalAuthApp)
+    if developmentInstance.hmacSecrets.CurrentKeyId() != internalCallerKeyId || internalCallerApplication != developmentInstance.internalAuthApplication {
+        t.Fatalf("expected blank names to take the example's own, got %q %q", developmentInstance.hmacSecrets.CurrentKeyId(), developmentInstance.internalAuthApplication)
     }
 }

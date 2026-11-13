@@ -9,8 +9,8 @@ import (
 )
 
 const (
-    EnvDevelopment = "dev"
-    EnvProduction  = "prod"
+    EnvironmentDevelopment = "dev"
+    EnvironmentProduction  = "prod"
 
     ModeHttp = "http"
     ModeCli  = "cli"
@@ -21,7 +21,7 @@ const (
 
     DefaultModeKey                   = "MELODY_DEFAULT_MODE"
     ProcessRoleKey                   = "MELODY_PROCESS_ROLE"
-    EnvKey                           = "MELODY_ENV"
+    EnvironmentNameKey               = "MELODY_ENV"
     HttpAddressKey                   = "MELODY_HTTP_ADDRESS"
     HttpMaxRequestBodyBytesKey       = "MELODY_HTTP_MAX_REQUEST_BODY_BYTES"
     HttpSessionTtlKey                = "MELODY_HTTP_SESSION_TTL"
@@ -46,7 +46,7 @@ const (
     LogPathKey                       = "MELODY_LOG_PATH"
     LogLevelKey                      = "MELODY_LOG_LEVEL"
     DefaultLocaleKey                 = "MELODY_DEFAULT_LOCALE"
-    PublicDirKey                     = "MELODY_PUBLIC_DIR"
+    PublicDirectoryKey               = "MELODY_PUBLIC_DIRECTORY"
     StaticIndexFileKey               = "MELODY_STATIC_INDEX_FILE"
     StaticEnableCacheKey             = "MELODY_STATIC_ENABLE_CACHE"
     StaticCacheMaxAgeKey             = "MELODY_STATIC_CACHE_MAX_AGE"
@@ -54,7 +54,7 @@ const (
 
     KernelDefaultMode                   = "kernel.default_mode"
     KernelProcessRole                   = "kernel.process_role"
-    KernelEnv                           = "kernel.environment"
+    KernelEnvironment                   = "kernel.environment"
     KernelHttpAddress                   = "kernel.http_address"
     KernelHttpMaxRequestBodyBytes       = "kernel.http.max_request_body_bytes"
     KernelHttpSessionTtl                = "kernel.http.session_ttl"
@@ -79,15 +79,15 @@ const (
     KernelLogPath                       = "kernel.log_path"
     KernelLogLevel                      = "kernel.log_level"
     KernelDefaultLocale                 = "kernel.default_locale"
-    KernelPublicDir                     = "kernel.public_dir"
+    KernelPublicDirectory               = "kernel.public_directory"
     KernelStaticIndexFile               = "kernel.static.index_file"
     KernelStaticEnableCache             = "kernel.static.enable_cache"
     KernelStaticCacheMaxAge             = "kernel.static.cache_max_age"
     KernelStaticExcludedPaths           = "kernel.static.excluded_paths"
 
-    KernelProjectDir = "kernel.project_dir"
-    KernelLogsDir    = "kernel.logs_dir"
-    KernelCacheDir   = "kernel.cache_dir"
+    KernelProjectDirectory = "kernel.project_directory"
+    KernelLogsDirectory    = "kernel.logs_directory"
+    KernelCacheDirectory   = "kernel.cache_directory"
 )
 
 type Environment struct {

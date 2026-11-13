@@ -160,7 +160,7 @@ func TestLessThan_RefusesAParameterThatIsNotAnIntegerInItsEntirety(t *testing.T)
     constraint := NewLessThan(0)
 
     for _, refusedValue := range []string{"10a", "1e3", "-0.5", "", " ", "0x10", "1 2"} {
-        built, buildErr := constraint.WithParams(map[string]string{"value": refusedValue})
+        built, buildErr := constraint.WithParameters(map[string]string{"value": refusedValue})
         if nil == buildErr {
             t.Fatalf("expected %q to be refused as a bound, got %#v", refusedValue, built)
         }
@@ -174,7 +174,7 @@ func TestLessThan_RefusesAParameterThatIsNotAnIntegerInItsEntirety(t *testing.T)
         }
     }
 
-    built, buildErr := constraint.WithParams(map[string]string{"value": "-5"})
+    built, buildErr := constraint.WithParameters(map[string]string{"value": "-5"})
     if nil != buildErr {
         t.Fatalf("expected a negative integer bound to be accepted, got %v", buildErr)
     }

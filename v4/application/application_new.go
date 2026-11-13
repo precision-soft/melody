@@ -26,8 +26,8 @@ import (
 type ApplicationConfig struct {
     /* Version is the application's own version; empty is undeclared, <unknown> in a table and --version, "" in json. */
     Version string
-    /* EnvFiles is the embedded filesystem the .env artifacts are read from under melody_env_embedded. */
-    EnvFiles fs.FS
+    /* EnvironmentFiles is the embedded filesystem the .env artifacts are read from under melody_env_embedded. */
+    EnvironmentFiles fs.FS
     /* PublicFiles is the embedded filesystem the file server serves under melody_static_embedded. */
     PublicFiles fs.FS
     /* ReadTimeout bounds reading one whole request, headers and body: at least 1ms, unlimited refused. */
@@ -70,7 +70,7 @@ func NewApplication(
         ctx = context.Background()
     }
 
-    embeddedEnvFiles := applicationConfig.EnvFiles
+    embeddedEnvironmentFiles := applicationConfig.EnvironmentFiles
     embeddedPublicFiles := applicationConfig.PublicFiles
 
     projectDirectory, projectDirectoryErr := computeProjectDirectory()
@@ -80,7 +80,7 @@ func NewApplication(
 
     environmentSource := newEnvironmentSource(
         projectDirectory,
-        embeddedEnvFiles,
+        embeddedEnvironmentFiles,
     )
 
     environment, newEnvironmentErr := config.NewEnvironment(environmentSource)
@@ -275,8 +275,8 @@ func workingDirectoryHasEnvironmentFile(directoryPath string) bool {
     candidates := []string{
         ".env",
         ".env.local",
-        ".env." + config.EnvDevelopment,
-        ".env." + config.EnvDevelopment + ".local",
+        ".env." + config.EnvironmentDevelopment,
+        ".env." + config.EnvironmentDevelopment + ".local",
     }
 
     for _, candidate := range candidates {

@@ -327,7 +327,7 @@ func TestBuild_StillRefusesAReferenceTheUnionDoesNotCover(t *testing.T) {
 
 /* supportedEnvironments is a copy of what config.validateEnvironment admits, and the union of same-named definitions is only universal because of it: a name registered for every supported environment is registered everywhere. If config ever admits a third environment and this list does not learn about it, the union silently stops covering an always-on referrer and a configuration that boots everywhere starts being refused. The comment above the copy promises this guard; here it is. */
 func TestSupportedEnvironments_MatchesTheConfigurationPackage(t *testing.T) {
-    fromConfiguration := []string{config.EnvDevelopment, config.EnvProduction}
+    fromConfiguration := []string{config.EnvironmentDevelopment, config.EnvironmentProduction}
 
     if len(fromConfiguration) != len(supportedEnvironments) {
         t.Fatalf("the pipeline knows %d environments and config admits %d: %v vs %v", len(supportedEnvironments), len(fromConfiguration), supportedEnvironments, fromConfiguration)

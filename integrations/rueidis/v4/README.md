@@ -68,7 +68,7 @@ Every attempt is reported in the journal `ProviderConfig.Logger` names: a warnin
 | `TimeoutConfig` | `ConnectTimeout`         | `3s`      | at least `1ms`, unlimited refused                |
 | `TimeoutConfig` | `CommandTimeout`         | `3s`      | at least `1ms`, unlimited refused                |
 | `ClientConfig`  | `ClientName`             | empty     |                                                  |
-| `ClientConfig`  | `SelectDb`               | `0`       |                                                  |
+| `ClientConfig`  | `SelectDatabase`         | `0`       |                                                  |
 | `ClientConfig`  | `TlsConfig`              | `nil`     |                                                  |
 | `ClientConfig`  | `DialTimeout`            | `5s`      | at least `1ms`, unlimited refused                |
 | `ClientConfig`  | `ConnectionWriteTimeout` | `5s`      | at least `1ms`, unlimited refused                |
@@ -121,9 +121,9 @@ The instants on both sides of that comparison come from application clocks. `Tok
 nonceGuard := rueidis.NewNonceGuard(client, rueidis.NonceGuardConfig{})
 
 tokenSource := security.NewHmacTokenSource(security.HmacTokenSourceConfig{
-    Secrets:    secrets,
-    Apps:       apps,
-    NonceGuard: nonceGuard,
+    Secrets:      secrets,
+    Applications: applications,
+    NonceGuard:   nonceGuard,
 })
 ```
 

@@ -230,6 +230,11 @@ func TestProvider_TheConnectionContextCarriesTheGoverningDeadlines(t *testing.T)
     if "2s" != configured["dialTimeout"] || "7s" != configured["connectTimeout"] {
         t.Fatalf("expected 2s / 7s, got %v", configured)
     }
+
+    selected := NewProvider(ProviderConfig{Client: ClientConfig{SelectDatabase: 2}}).connectionContext(ConnectionParameters{Address: "127.0.0.1:6379"})
+    if 2 != selected["selectDatabase"] {
+        t.Fatalf("expected the database named under selectDatabase, got %v", selected)
+    }
 }
 
 func TestProvider_OpenWithRetry_ReportsEachRetryAndTheExhaustionOnTheLoggerItIsHanded(t *testing.T) {

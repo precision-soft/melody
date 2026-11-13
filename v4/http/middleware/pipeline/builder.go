@@ -150,10 +150,10 @@ func (instance *Builder) selectAndOrder(
     group string,
 ) ([]*HttpMiddlewareDefinition, *MiddlewareBuildReport, error) {
     report := &MiddlewareBuildReport{
-        requestedGroup: group,
-        kernelEnv:      environment,
-        selectedNames:  make([]string, 0),
-        inactive:       make([]*InactiveMiddleware, 0),
+        requestedGroup:    group,
+        kernelEnvironment: environment,
+        selectedNames:     make([]string, 0),
+        inactive:          make([]*InactiveMiddleware, 0),
     }
 
     selected, selectionErr := instance.selectDefinitions(environment, group, report)

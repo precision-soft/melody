@@ -153,7 +153,7 @@ func exceptionListenerDebugMode(runtimeInstance runtimecontract.Runtime) bool {
         return false
     }
 
-    return config.EnvDevelopment == configuration.Kernel().Env()
+    return config.EnvironmentDevelopment == configuration.Kernel().Environment()
 }
 
 type ExceptionRenderConfig struct {

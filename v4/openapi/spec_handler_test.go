@@ -16,7 +16,7 @@ import (
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-func TestSpecHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
+func TestSpecificationHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
     router := melodyhttp.NewRouter()
     router.HandleWithOptions(
         "/products/api/create/",
@@ -46,7 +46,7 @@ func TestSpecHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
 
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
-    handler := SpecHandler(Info{Title: "Example", Version: "1.0.0"}, registry)
+    handler := SpecificationHandler(Info{Title: "Example", Version: "1.0.0"}, registry)
 
     response, handlerErr := handler(runtimeInstance, nil, nil)
     if nil != handlerErr {

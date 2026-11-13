@@ -100,7 +100,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     if nil != resolveErr {
         /* the project directory is named in the failure: melody derives it from the executable location, the working directory under go run, so a binary run from elsewhere fails here with an otherwise unsuggestive "undefined environment key" */
         projectDirectory := ""
-        if projectDirectoryParameter := configuration.Get(config.KernelProjectDir); nil != projectDirectoryParameter {
+        if projectDirectoryParameter := configuration.Get(config.KernelProjectDirectory); nil != projectDirectoryParameter {
             projectDirectory = projectDirectoryParameter.String()
         }
 
@@ -371,9 +371,9 @@ func (instance *Application) RegisterConfiguration(name string, configuration an
 func (instance *Application) ensureRuntimeDirectories() {
     configuration := instance.configuration
 
-    projectDirectory := configuration.Kernel().ProjectDir()
-    logsDirectory := configuration.Kernel().LogsDir()
-    cacheDirectory := configuration.Kernel().CacheDir()
+    projectDirectory := configuration.Kernel().ProjectDirectory()
+    logsDirectory := configuration.Kernel().LogsDirectory()
+    cacheDirectory := configuration.Kernel().CacheDirectory()
 
     ensureRuntimeDirectoriesErr := ensureRuntimeDirectories(
         projectDirectory,
@@ -463,7 +463,7 @@ func (instance *Application) exitFileLogger(emergencyLogger loggingcontract.Logg
     }
 
     return newContainerLogger(
-        resolveRuntimePath(kernelView.ProjectDir(), kernelView.LogPath()),
+        resolveRuntimePath(kernelView.ProjectDirectory(), kernelView.LogPath()),
         kernelView.LogLevel(),
         instance.moduleConfigurations,
         clock.NewSystemClock(),
@@ -606,7 +606,7 @@ func (instance *Application) refuseHttpBootWithoutEnvironment() {
         return
     }
 
-    projectDirectory := instance.configuration.Kernel().ProjectDir()
+    projectDirectory := instance.configuration.Kernel().ProjectDirectory()
 
     exception.Panic(
         exception.NewError(
@@ -621,18 +621,18 @@ func (instance *Application) refuseHttpBootWithoutEnvironment() {
 
 /* refuseBootWithDefaultedEnvironment fails the boot, in every mode, of a process whose MELODY_ENV no .env artifact set: the name defaults to dev, which selects the .env.dev files and turns the debug tooling on, so a production process would run on the development files without a word. A process environment variable does not set it, since melody reads configuration only from the .env artifacts. */
 func (instance *Application) refuseBootWithDefaultedEnvironment() {
-    environmentParameter := instance.configuration.Get(config.EnvKey)
+    environmentParameter := instance.configuration.Get(config.EnvironmentNameKey)
     if nil != environmentParameter && false == environmentParameter.IsDefault() {
         return
     }
 
-    projectDirectory := instance.configuration.Kernel().ProjectDir()
+    projectDirectory := instance.configuration.Kernel().ProjectDirectory()
 
     exception.Panic(
         exception.NewError(
             "MELODY_ENV is not set in the .env artifacts; refusing to boot as dev on a defaulted environment name, which selected the .env.dev files; set it in .env, since a process environment variable is not read"+missingEnvironmentFileHint(projectDirectory),
             exceptioncontract.Context{
-                "environmentKey":   config.EnvKey,
+                "environmentKey":   config.EnvironmentNameKey,
                 "projectDirectory": projectDirectory,
             },
             nil,

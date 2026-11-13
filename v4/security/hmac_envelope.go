@@ -24,16 +24,16 @@ const (
 
 /* hmacEnvelope is the signed payload of the internal-auth header, one signature covering every field: Method, Path and Query bind it to one endpoint, Audience optionally to one callee, IssuedAt, ExpiresAt and Nonce bound its lifetime and single use, BodyHash covers the body, and Actor carries the originating actor. */
 type hmacEnvelope struct {
-    App       string                      `json:"app"`
-    Audience  string                      `json:"audience,omitempty"`
-    Method    string                      `json:"method"`
-    Path      string                      `json:"path"`
-    Query     string                      `json:"query,omitempty"`
-    IssuedAt  int64                       `json:"iat"`
-    ExpiresAt int64                       `json:"exp"`
-    Nonce     string                      `json:"nonce"`
-    BodyHash  string                      `json:"bodyHash"`
-    Actor     *securitycontract.ActorData `json:"actor,omitempty"`
+    Application string                      `json:"app"`
+    Audience    string                      `json:"audience,omitempty"`
+    Method      string                      `json:"method"`
+    Path        string                      `json:"path"`
+    Query       string                      `json:"query,omitempty"`
+    IssuedAt    int64                       `json:"iat"`
+    ExpiresAt   int64                       `json:"exp"`
+    Nonce       string                      `json:"nonce"`
+    BodyHash    string                      `json:"bodyHash"`
+    Actor       *securitycontract.ActorData `json:"actor,omitempty"`
 }
 
 type hmacEnvelopeHeader struct {
@@ -68,7 +68,7 @@ func encodeHmacHeaderValue(keyId string, envelope hmacEnvelope, secret []byte) (
     return part0 + "." + part1 + "." + part2, nil
 }
 
-/* decodeHmacHeaderValue verifies the signature against the secret resolved for the envelope's key id and returns the decoded envelope together with the verified key id, so the caller can check the key id is authorized for the envelope's claimed app. It fails closed on any structural, key-lookup or signature problem, and it requires the envelope's own typ. A resolved secret shorter than minimumSecretLength verifies nothing and is answered as an infrastructure failure: the provider, not the caller, is misconfigured. */
+/* decodeHmacHeaderValue verifies the signature against the secret resolved for the envelope's key id and returns the decoded envelope together with the verified key id, so the caller can check the key id is authorized for the envelope's claimed application. It fails closed on any structural, key-lookup or signature problem, and it requires the envelope's own typ. A resolved secret shorter than minimumSecretLength verifies nothing and is answered as an infrastructure failure: the provider, not the caller, is misconfigured. */
 func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider, minimumSecretLength int) (hmacEnvelope, string, error) {
     parts := strings.Split(headerValue, ".")
     if 3 != len(parts) {

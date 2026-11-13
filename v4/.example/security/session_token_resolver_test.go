@@ -411,7 +411,7 @@ func TestSessionTokenResolver_AFailedLookupIsUnavailableAndKeepsTheSession(t *te
 type outageEnvironmentSource struct{}
 
 func (instance *outageEnvironmentSource) Load() (map[string]string, error) {
-    return map[string]string{melodyconfig.EnvKey: melodyconfig.EnvDevelopment}, nil
+    return map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentDevelopment}, nil
 }
 
 type outageSessionStorage struct {

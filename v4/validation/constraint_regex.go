@@ -18,7 +18,7 @@ const (
 /* the empty pattern would match every string, so it is refused rather than armed */
 var errEmptyRegexPattern = errors.New("the empty pattern matches every string; a pattern meant to match everything says so explicitly")
 
-/* NewRegex keeps a pattern that does not compile, the empty one included, as the constraint's error instead of panicking: Validate refuses every non-empty string with invalidPattern, a non-string being refused first as a regexMismatch, and Error answers why, so a rule declared wrong fails closed where it is used. The tag door (WithParams) refuses the empty pattern before it reaches here. */
+/* NewRegex keeps a pattern that does not compile, the empty one included, as the constraint's error instead of panicking: Validate refuses every non-empty string with invalidPattern, a non-string being refused first as a regexMismatch, and Error answers why, so a rule declared wrong fails closed where it is used. The tag door (WithParameters) refuses the empty pattern before it reaches here. */
 func NewRegex(pattern string) *Regex {
     if "" == pattern {
         return &Regex{
@@ -84,17 +84,17 @@ func (instance *Regex) Error() error {
     return instance.err
 }
 
-func (instance *Regex) WithParams(params map[string]string) (validationcontract.Constraint, error) {
-    patternString, exists := params["pattern"]
+func (instance *Regex) WithParameters(parameters map[string]string) (validationcontract.Constraint, error) {
+    patternString, exists := parameters["pattern"]
     if false == exists {
-        patternString, exists = params["value"]
+        patternString, exists = parameters["value"]
     }
 
     if false == exists {
         return nil, exception.NewError(
             "regex constraint requires a pattern or value parameter",
             exceptioncontract.Context{
-                "params": params,
+                "parameters": parameters,
             },
             nil,
         )
@@ -105,7 +105,7 @@ func (instance *Regex) WithParams(params map[string]string) (validationcontract.
         return nil, exception.NewError(
             "regex constraint requires a non-empty pattern",
             exceptioncontract.Context{
-                "params": params,
+                "parameters": parameters,
             },
             nil,
         )

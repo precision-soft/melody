@@ -40,10 +40,10 @@ type Module struct {
     opaqueTokenStore     *melodysecurity.InMemoryTokenStore
     opaqueTokenValidator melodysecuritycontract.TokenValidator
 
-    hmacSecrets melodysecurity.HmacSecretProvider
-    hmacApps    melodysecurity.HmacAppRegistry
+    hmacSecrets      melodysecurity.HmacSecretProvider
+    hmacApplications melodysecurity.HmacApplicationRegistry
     /* the caller application the internal envelopes are signed for, as APP_INTERNAL_AUTH_APP names it; the signer of internal:sign reads it beside the secret provider */
-    internalAuthApp string
+    internalAuthApplication string
 
     impersonatedUsers melodysecuritycontract.ImpersonatedUserResolver
 

@@ -3586,7 +3586,7 @@ func newGenerateTestConfiguration(t *testing.T) configcontract.Configuration {
     environment, environmentErr := melodyconfig.NewEnvironment(
         &generateTestEnvironmentSource{
             values: map[string]string{
-                melodyconfig.EnvKey: melodyconfig.EnvDevelopment,
+                melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentDevelopment,
             },
         },
     )

@@ -366,7 +366,7 @@ func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryA
         Matcher: internalFirewall.Matcher(),
         TokenSource: melodysecurity.NewHmacTokenSource(melodysecurity.HmacTokenSourceConfig{
             Secrets:         moduleInstance.hmacSecrets,
-            Apps:            moduleInstance.hmacApps,
+            Applications:    moduleInstance.hmacApplications,
             MaxFutureExpiry: bound.Of(internalEnvelopeMaxFutureExpiry),
             NonceGuard:      &failingInternalNonceGuard{},
         }),

@@ -131,7 +131,7 @@ func (instance *Configuration) Parameters() ParameterMap {
 
 /* projectDirectoryParameterValue reads the project-directory default for diagnostics without requiring a resolved configuration. */
 func (instance *Configuration) projectDirectoryParameterValue() string {
-    parameter := instance.Get(KernelProjectDir)
+    parameter := instance.Get(KernelProjectDirectory)
     if true == internal.IsNilInterface(parameter) {
         return ""
     }
@@ -521,12 +521,12 @@ func (instance *Configuration) buildKernelConfiguration() error {
     kernelConfigurationInstance, newKernelConfigurationErr := newKernelConfiguration(
         instance.MustGet(KernelDefaultMode).MustString(),
         instance.MustGet(KernelProcessRole).MustString(),
-        instance.MustGet(KernelEnv).MustString(),
-        instance.MustGet(KernelProjectDir).MustString(),
-        instance.MustGet(KernelLogsDir).MustString(),
+        instance.MustGet(KernelEnvironment).MustString(),
+        instance.MustGet(KernelProjectDirectory).MustString(),
+        instance.MustGet(KernelLogsDirectory).MustString(),
         instance.MustGet(KernelLogPath).MustString(),
         instance.MustGet(KernelLogLevel).MustString(),
-        instance.MustGet(KernelCacheDir).MustString(),
+        instance.MustGet(KernelCacheDirectory).MustString(),
         teardownTimeout,
         scopeTeardownTimeout,
         containerCreationWaiters,
@@ -619,7 +619,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
     httpConfigurationInstance, newHttpConfigurationErr := newHttpConfiguration(
         instance.MustGet(KernelHttpAddress).MustString(),
         instance.MustGet(KernelDefaultLocale).MustString(),
-        instance.MustGet(KernelPublicDir).MustString(),
+        instance.MustGet(KernelPublicDirectory).MustString(),
         instance.MustGet(KernelStaticIndexFile).MustString(),
         httpMaxRequestBodyBytes,
         staticEnableCache,

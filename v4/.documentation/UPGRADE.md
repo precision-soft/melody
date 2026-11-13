@@ -238,7 +238,7 @@ A `Changes` that is not a json array, an `Entry` built by hand, is written as a 
 
 ### Cron: the logs directory is spelled out, flag and parameter, and `ForbiddenCharacter.Char` is `Character`
 
-**What changed.** The [cron](../../integrations/cron/v4/README.md) generator reads the directory its entries redirect into from the flag `--logs-directory` and the parameter `melody.cron.logs_directory`, exported as `ParameterLogsDirectory`; the refusal of a missing one is `ErrNoLogsDirectory`, its message saying "no logs directory is configured", and a log file name escaping the directory is reported under the context key `logsDirectory`. `ForbiddenCharacter.Char` is `ForbiddenCharacter.Character`. The default, `%kernel.logs_dir%/cron`, is unchanged.
+**What changed.** The [cron](../../integrations/cron/v4/README.md) generator reads the directory its entries redirect into from the flag `--logs-directory` and the parameter `melody.cron.logs_directory`, exported as `ParameterLogsDirectory`; the refusal of a missing one is `ErrNoLogsDirectory`, its message saying "no logs directory is configured", and a log file name escaping the directory is reported under the context key `logsDirectory`. `ForbiddenCharacter.Char` is `ForbiddenCharacter.Character`. The default is `%kernel.logs_directory%/cron`, the kernel parameter spelled out in its own section below.
 
 **Symptom.** `melody:cron:generate --logs-dir …` is refused by the command line with `flag provided but not defined: -logs-dir`. A parameter the application still sets as `melody.cron.logs_dir` is read by nothing and refused by nothing: the generator redirects under the default directory. Code naming `ParameterLogsDir`, `ErrNoLogsDir` or `ForbiddenCharacter{Char: …}` no longer compiles.
 
@@ -251,6 +251,70 @@ A `Changes` that is not a json array, an `Entry` built by hand, is written as a 
 **Symptom.** `backend.GetCtx undefined` and the same for its siblings; a `ClientConfig{ConnWriteTimeout: …}` literal no longer compiles.
 
 **Remedy.** Replace the `Ctx` suffix with `Context`, and write `ConnectionWriteTimeout:`.
+
+### Config: the kernel's directories are spelled out, Go names, parameters and the public directory key
+
+**What changed.** The [kernel configuration](../config/contract/kernel.go) answers `ProjectDirectory()`, `LogsDirectory()` and `CacheDirectory()`, and the [http configuration](../config/contract/http.go) `PublicDirectory()`. The parameters are `kernel.project_directory`, `kernel.logs_directory`, `kernel.cache_directory` and `kernel.public_directory`, exported as `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory` and `KernelPublicDirectory`, and the public directory's key is `MELODY_PUBLIC_DIRECTORY`, exported as `PublicDirectoryKey`. The resolved directories are unchanged, and so are the cron module's defaults, which now name the new parameters. A refusal or a journal line naming the public directory carries it under `publicDirectory`.
+
+**Symptom.** A value naming `%kernel.logs_dir%` (or any of the three others) refuses the boot, its cause chain ending in `undefined parameter key in template`: a framework key, `MELODY_LOG_PATH` measured, with `could not initialize the configuration`, a parameter of the application's own or a `melody.cron.*` value at `Boot` with `could not resolve the config parameters on boot`. A `.env` still setting `MELODY_PUBLIC_DIR` boots with the default `public` directory, the key reported by the `application.environment.undeclaredKey` boot warning and read by nothing. Code calling `ProjectDir()`, `LogsDir()`, `CacheDir()` or `PublicDir()`, or naming `KernelProjectDir`, `KernelPublicDir` or `PublicDirKey`, no longer compiles.
+
+**Remedy.** Write `%kernel.project_directory%`, `%kernel.logs_directory%`, `%kernel.cache_directory%` and `%kernel.public_directory%`, rename the key to `MELODY_PUBLIC_DIRECTORY`, and rename the Go names; a journal query on `publicDir` reads `publicDirectory`.
+
+### Config: the environment's Go names are spelled out; `MELODY_ENV` is unchanged
+
+**What changed.** `config.EnvKey`, `KernelEnv`, `EnvDevelopment` and `EnvProduction` are `EnvironmentNameKey`, `KernelEnvironment`, `EnvironmentDevelopment` and `EnvironmentProduction`; the [kernel configuration](../config/contract/kernel.go)'s `Env()` is `Environment()`, and [`MiddlewareBuildReport`](../http/middleware/pipeline/report.go)'s `KernelEnv()` is `KernelEnvironment()`. The key `MELODY_ENV`, its values `dev` and `prod` and the parameter `kernel.environment` are unchanged.
+
+**Symptom.** `undefined: config.EnvDevelopment` and the same for its siblings; `Kernel().Env undefined`.
+
+**Remedy.** Rename the Go names; nothing changes in `.env`.
+
+### Httpclient: the idle pool's fields are spelled out
+
+**What changed.** [`TransportConfig`](../httpclient/transport_config.go)'s `MaxIdleConns`, `MaxIdleConnsPerHost` and `IdleConnTimeout` are `MaxIdleConnections`, `MaxIdleConnectionsPerHost` and `IdleConnectionTimeout`, beside `IdleConnectionsDisabled`, and a refusal names the new field. The values still reach net/http's own fields.
+
+**Symptom.** A `TransportConfig{MaxIdleConns: …}` literal no longer compiles.
+
+**Remedy.** Write `MaxIdleConnections:`, `MaxIdleConnectionsPerHost:` and `IdleConnectionTimeout:`.
+
+### Openapi: `SpecHandler` is `SpecificationHandler`, `ExternalDocs` and `Ref` are spelled out
+
+**What changed.** The handler serving the document is [`SpecificationHandler`](../openapi/spec_handler.go); the [document](../openapi/document.go)'s `ExternalDocs` type and field are `ExternalDocumentation`, and its `Schema.Ref` is `Schema.Reference`. The generated document is byte-identical: its keys stay `externalDocs` and `$ref`.
+
+**Symptom.** `undefined: openapi.SpecHandler`; a `Schema{Ref: …}` or `Document{ExternalDocs: …}` literal no longer compiles.
+
+**Remedy.** Rename the Go names.
+
+### Validation: `WithParams` is `WithParameters`
+
+**What changed.** [`ParameterizedConstraint`](../validation/contract/constraint.go) declares `WithParameters(parameters map[string]string)`, and the framework's constraints implement it under that name. A refusal of a rule's parameters names them under the context key `parameters`, where it said `params`.
+
+**Symptom.** A constraint of the application's own that still implements `WithParams` compiles and is no longer a parameterized constraint: a rule naming it with parameters fails closed, `constraint does not accept parameters`, and a rule naming it without parameters is no longer refused with `constraint requires parameters` but validates with the registered instance, silently. A call to `WithParams` no longer compiles.
+
+**Remedy.** Rename the method to `WithParameters`; a journal query on `params` reads `parameters`.
+
+### Security: the internal-auth names are spelled out; the envelope is unchanged
+
+**What changed.** The internal-auth HMAC names say `Application` where they said `App`: [`HmacKey.Application`](../security/hmac_secret_provider.go), [`HmacEnvelopeSignerConfig.Application`](../security/hmac_signer.go), [`HmacTokenSourceConfig.Applications`](../security/hmac_token_source.go), [`HmacApplicationRegistry`](../security/hmac_application_registry.go) with `RolesForApplication`, `StaticHmacApplicationRegistry` and `NewStaticHmacApplicationRegistry`, and `HmacSecretProvider.ApplicationForKeyId`. The refusals say "application" and name it under `application`, `claimedApplication`, `boundApplication`, `signerApplication` and `otherApplication`. The signed envelope keeps its json field `app`, so a fourth-major service and a third-major one verify each other.
+
+**Symptom.** `undefined: security.NewStaticHmacAppRegistry`; an `HmacKey{App: …}` or `HmacTokenSourceConfig{Apps: …}` literal no longer compiles; a secret provider of the application's own that implements `AppForKeyId` no longer satisfies `HmacSecretProvider`. A journal query on `claimedApp` matches nothing.
+
+**Remedy.** Rename the Go names and the method of a provider of your own; read the context keys under their new names.
+
+### Mailer: `SmtpConfig.RequireAuth` is `RequireAuthentication`
+
+**What changed.** [`SmtpConfig`](../mailer/smtp_transport.go)'s `RequireAuth` is `RequireAuthentication`; its meaning is unchanged.
+
+**Symptom.** An `SmtpConfig{RequireAuth: true}` literal no longer compiles.
+
+**Remedy.** Write `RequireAuthentication: true`.
+
+### Rueidis: `ClientConfig.SelectDb` is `SelectDatabase`
+
+**What changed.** [`ClientConfig`](../../integrations/rueidis/v4/client_config.go)'s `SelectDb` is `SelectDatabase`, and the connection's journal context names it `selectDatabase`. The value still reaches the library's `SelectDB`.
+
+**Symptom.** A `ClientConfig{SelectDb: 2}` literal no longer compiles.
+
+**Remedy.** Write `SelectDatabase: 2`.
 
 ### Application: a module declares the `.env` keys it owns
 
@@ -405,11 +469,11 @@ when it is cancelled, the body read included, and a nil context is refused by na
 
 ### Application: an application is built from one configuration struct, and the server limits are configured
 
-**What changed.** [`NewApplication`](../application/application_new.go) takes the context and an [`ApplicationConfig`](../application/application_new.go) struct, `EnvFiles`, `PublicFiles`, `ReadTimeout`, `ReadHeaderTimeout`, `WriteTimeout`, `IdleTimeout`, `MaxHeaderBytes` and `TeardownTimeout`, in place of the two embedded filesystems positionally. The five server limits the third major fixed at 15s, 5s, 30s, 60s and 1 MiB are now configured, by the field and by the new keys `MELODY_HTTP_READ_TIMEOUT`, `MELODY_HTTP_READ_HEADER_TIMEOUT`, `MELODY_HTTP_WRITE_TIMEOUT`, `MELODY_HTTP_IDLE_TIMEOUT` and `MELODY_HTTP_MAX_HEADER_BYTES`, and the teardown budget by the field and `MELODY_TEARDOWN_TIMEOUT`. A key the deployment sets wins over the field, the field over the framework default. A field left out takes the third major's value. A value below 1ms, 4 KiB on the header cap, is refused naming the field, and unlimited is refused on the five server limits and admitted on the teardown budget.
+**What changed.** [`NewApplication`](../application/application_new.go) takes the context and an [`ApplicationConfig`](../application/application_new.go) struct, `EnvironmentFiles`, `PublicFiles`, `ReadTimeout`, `ReadHeaderTimeout`, `WriteTimeout`, `IdleTimeout`, `MaxHeaderBytes` and `TeardownTimeout`, in place of the two embedded filesystems positionally. The five server limits the third major fixed at 15s, 5s, 30s, 60s and 1 MiB are now configured, by the field and by the new keys `MELODY_HTTP_READ_TIMEOUT`, `MELODY_HTTP_READ_HEADER_TIMEOUT`, `MELODY_HTTP_WRITE_TIMEOUT`, `MELODY_HTTP_IDLE_TIMEOUT` and `MELODY_HTTP_MAX_HEADER_BYTES`, and the teardown budget by the field and `MELODY_TEARDOWN_TIMEOUT`. A key the deployment sets wins over the field, the field over the framework default. A field left out takes the third major's value. A value below 1ms, 4 KiB on the header cap, is refused naming the field, and unlimited is refused on the five server limits and admitted on the teardown budget.
 
-**Symptom.** `application.NewApplication(ctx, envFiles, publicFiles)` no longer compiles. A field or a key below its minimum fails the boot, naming the field.
+**Symptom.** `application.NewApplication(ctx, environmentFiles, publicFiles)` no longer compiles. A field or a key below its minimum fails the boot, naming the field.
 
-**Remedy.** `application.NewApplication(ctx, application.ApplicationConfig{EnvFiles: envFiles, PublicFiles: publicFiles})`; a deployment that wants other limits sets the keys, an application that wants other defaults for its deployments sets the fields.
+**Remedy.** `application.NewApplication(ctx, application.ApplicationConfig{EnvironmentFiles: environmentFiles, PublicFiles: publicFiles})`; a deployment that wants other limits sets the keys, an application that wants other defaults for its deployments sets the fields.
 
 ### Application: the runtime flags are built and parsed from one struct
 
@@ -421,7 +485,7 @@ when it is cancelled, the body read included, and a nil context is refused by na
 
 ### Config: the limit keys are bound limits, the session ttl defaults to 24h, and unlimited is spelled
 
-**What changed.** `MELODY_HTTP_MAX_REQUEST_BODY_BYTES`, `MELODY_STATIC_CACHE_MAX_AGE`, `MELODY_HTTP_SESSION_TTL`, `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION`, `MELODY_HTTP_SHUTDOWN_TIMEOUT` and `MELODY_TEARDOWN_TIMEOUT` are read as [`bound`](../bound/limit.go) limits: the empty value takes the default, `unlimited` lifts the bound where the field admits it, and a value below the field's minimum is refused naming the key and the field. The minimums are one byte, 0, 1s, 1s, 1ms and 1ms, and only the session ttl and the teardown budget admit `unlimited`. [`HttpConfiguration`](../config/contract/http.go) answers the five http limits as a `bound.Resolved`, and declares `ReadTimeout`, `ReadHeaderTimeout`, `WriteTimeout`, `IdleTimeout` and `MaxHeaderBytes`, the server keys as the deployment set them; [`KernelConfiguration`](../config/contract/kernel.go) declares `TeardownTimeout`, the teardown key as the deployment set it. The session ttl defaults to 24h, where the third major defaulted to no expiry, and no expiry is written `unlimited`: a `0` is refused, as it is on the teardown budget, where the third major read it as no deadline. `config.MinimumSessionTtl` is removed, the minimum is the rule's. [`NewEnvironmentSource`](../config/environment_source.go) takes an `EnvironmentSourceConfig`, `FileSystem` and `BaseDir`, the empty base directory reading as the filesystem's root.
+**What changed.** `MELODY_HTTP_MAX_REQUEST_BODY_BYTES`, `MELODY_STATIC_CACHE_MAX_AGE`, `MELODY_HTTP_SESSION_TTL`, `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION`, `MELODY_HTTP_SHUTDOWN_TIMEOUT` and `MELODY_TEARDOWN_TIMEOUT` are read as [`bound`](../bound/limit.go) limits: the empty value takes the default, `unlimited` lifts the bound where the field admits it, and a value below the field's minimum is refused naming the key and the field. The minimums are one byte, 0, 1s, 1s, 1ms and 1ms, and only the session ttl and the teardown budget admit `unlimited`. [`HttpConfiguration`](../config/contract/http.go) answers the five http limits as a `bound.Resolved`, and declares `ReadTimeout`, `ReadHeaderTimeout`, `WriteTimeout`, `IdleTimeout` and `MaxHeaderBytes`, the server keys as the deployment set them; [`KernelConfiguration`](../config/contract/kernel.go) declares `TeardownTimeout`, the teardown key as the deployment set it. The session ttl defaults to 24h, where the third major defaulted to no expiry, and no expiry is written `unlimited`: a `0` is refused, as it is on the teardown budget, where the third major read it as no deadline. `config.MinimumSessionTtl` is removed, the minimum is the rule's. [`NewEnvironmentSource`](../config/environment_source.go) takes an `EnvironmentSourceConfig`, `FileSystem` and `BaseDirectory`, the empty base directory reading as the filesystem's root.
 
 **Symptom.** A deployment that wrote `MELODY_HTTP_SESSION_TTL=0` or `MELODY_TEARDOWN_TIMEOUT=0` fails the boot. A deployment that left the session ttl out now ends a session 24 hours after its last write, where it kept it forever. `configuration.Http().SessionTtl()` and the other four http limits are a `bound.Resolved`, so a comparison against a duration or an int no longer compiles, and a type of your own implementing either contract no longer compiles until it declares the new methods.
 
@@ -461,12 +525,12 @@ when it is cancelled, the body read included, and a nil context is refused by na
 
 ### Http: the static file server is built from one `Config` struct, and a negative max age is refused
 
-**What changed.** [`static.NewFileServer`](../http/static/file_server.go) and [`middleware.StaticMiddleware`](../http/middleware/static.go) take one [`static.Config`](../http/static/option.go) struct, `Mode`, `PublicDir`, `IndexFile`, `StripPrefix`, `CacheDisabled`, `CacheMaxAge`, `WeakEtag`, `AllowedDotPrefixList`, `ExcludedPathList`, `Root` and `FileSystem`, whose zero value serves `public` under `.` with `index.html`, an hour's max age and `.well-known` the one dot-prefixed element retrieved. The third major built a `FileServerConfig` of seven positional parameters, set its two lists after through `SetAllowedDotPrefixList` and `SetExcludedPathList`, and wrapped it in `Options` with the root and the filesystem; all of them are removed. `CacheMaxAge` is a [`bound.Count`](../bound/limit.go): left out it is 3600, a value is at least 0, which is always revalidate, and unlimited is refused, as is a max age beside `CacheDisabled`, each naming `Config.CacheMaxAge`; a negative value read as the
+**What changed.** [`static.NewFileServer`](../http/static/file_server.go) and [`middleware.StaticMiddleware`](../http/middleware/static.go) take one [`static.Config`](../http/static/option.go) struct, `Mode`, `PublicDirectory`, `IndexFile`, `StripPrefix`, `CacheDisabled`, `CacheMaxAge`, `WeakEtag`, `AllowedDotPrefixList`, `ExcludedPathList`, `Root` and `FileSystem`, whose zero value serves `public` under `.` with `index.html`, an hour's max age and `.well-known` the one dot-prefixed element retrieved. The third major built a `FileServerConfig` of seven positional parameters, set its two lists after through `SetAllowedDotPrefixList` and `SetExcludedPathList`, and wrapped it in `Options` with the root and the filesystem; all of them are removed. `CacheMaxAge` is a [`bound.Count`](../bound/limit.go): left out it is 3600, a value is at least 0, which is always revalidate, and unlimited is refused, as is a max age beside `CacheDisabled`, each naming `Config.CacheMaxAge`; a negative value read as the
 default. `AllowedDotPrefixList` left nil is `[".well-known"]` and an empty list refuses every dot-prefixed path. The built-in server reads `MELODY_STATIC_ENABLE_CACHE` and `MELODY_STATIC_CACHE_MAX_AGE` as before.
 
 **Symptom.** `static.NewFileServerConfig`, `static.NewOptions` and the two setters no longer compile, and `StaticMiddleware` takes a `static.Config`. A negative `CacheMaxAge` panics at construction where it served an hour.
 
-**Remedy.** The struct literal, `static.Config{PublicDir: "public", AllowedDotPrefixList: []string{".well-known", ".assets"}}`; `CacheDisabled: true` for the third major's `enableCache` false; leave `CacheMaxAge` out for the default.
+**Remedy.** The struct literal, `static.Config{PublicDirectory: "public", AllowedDotPrefixList: []string{".well-known", ".assets"}}`; `CacheDisabled: true` for the third major's `enableCache` false; leave `CacheMaxAge` out for the default.
 
 ### Cron: the module reads `MELODY_CRON_*`
 
@@ -574,11 +638,11 @@ The same holds for a value a module was handed and would drop, refused at the ho
 
 ### Storage, translation, cors, static: four constructors refuse what they admitted
 
-**What changed.** Four constructors refuse at construction a value the third major admitted and then dropped or failed on later. `storage.NewLocalStorage` creates and opens its base directory, refusing one it cannot create or open, where the first `Put` failed; each operation still reopens the directory. `translation.NewManager`, handed at least one catalog, refuses an empty default locale and a default or fallback locale no catalog carries, since the lookup asks them by that exact name; `NewManager(nil, …)` keeps answering raw ids. `cors.NewService` refuses a blank `AllowOrigins` entry, an `AllowOrigins` list beside `AllowOriginFunc`, and `"*"` beside other entries. In a filesystem build, the application refuses at `New`, in every process role, an explicitly set `MELODY_PUBLIC_DIR` that is not an existing directory, resolved against the project directory as the file server resolves it, a blank value reading as `public`; the default `public` may be absent.
+**What changed.** Four constructors refuse at construction a value the third major admitted and then dropped or failed on later. `storage.NewLocalStorage` creates and opens its base directory, refusing one it cannot create or open, where the first `Put` failed; each operation still reopens the directory. `translation.NewManager`, handed at least one catalog, refuses an empty default locale and a default or fallback locale no catalog carries, since the lookup asks them by that exact name; `NewManager(nil, …)` keeps answering raw ids. `cors.NewService` refuses a blank `AllowOrigins` entry, an `AllowOrigins` list beside `AllowOriginFunc`, and `"*"` beside other entries. In a filesystem build, the application refuses at `New`, in every process role, an explicitly set `MELODY_PUBLIC_DIRECTORY` that is not an existing directory, resolved against the project directory as the file server resolves it, a blank value reading as `public`; the default `public` may be absent.
 
-**Symptom.** A construction that passed now panics: "could not create the storage base directory" or "could not open the storage base directory" (`baseDirectory`); "translation default locale is empty", "translation default locale is carried by no catalog" (`defaultLocale`), "translation fallback locale is empty" or "translation fallback locale is carried by no catalog" (`fallbackLocale`, `index`); a cors misconfiguration naming `Config.AllowOrigins` and the `index`, or both fields; "the public directory does not exist", "the public directory cannot be read" or "the public directory is a file" (`MELODY_PUBLIC_DIR`), in every process role, the cli role included.
+**Symptom.** A construction that passed now panics: "could not create the storage base directory" or "could not open the storage base directory" (`baseDirectory`); "translation default locale is empty", "translation default locale is carried by no catalog" (`defaultLocale`), "translation fallback locale is empty" or "translation fallback locale is carried by no catalog" (`fallbackLocale`, `index`); a cors misconfiguration naming `Config.AllowOrigins` and the `index`, or both fields; "the public directory does not exist", "the public directory cannot be read" or "the public directory is a file" (`MELODY_PUBLIC_DIRECTORY`), in every process role, the cli role included.
 
-**Remedy.** Point the storage at a directory the process can create and open; hand a catalog for every default and fallback locale, or drop the locale; drop the blank entry, keep `AllowOriginFunc` or the list, and spell "allow everything" as `[]string{"*"}` alone; create the public directory, or unset `MELODY_PUBLIC_DIR` when the application serves no assets.
+**Remedy.** Point the storage at a directory the process can create and open; hand a catalog for every default and fallback locale, or drop the locale; drop the blank entry, keep `AllowOriginFunc` or the list, and spell "allow everything" as `[]string{"*"}` alone; create the public directory, or unset `MELODY_PUBLIC_DIRECTORY` when the application serves no assets.
 
 ### Security, static: three boot warnings become refusals, and a protected rule needs a decision manager
 
@@ -1082,7 +1146,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Storage: the local storage declares its temp sweep in one struct
 
-**What changed.** [`NewLocalStorage`](../storage/local.go) takes the base directory and a `LocalStorageConfig{TempStaleAge, SweepBatchSize}`: the age past which a later `Put` sweeps a leftover temp object, 1h when left out, at least 1s, unlimited never sweeping, and the names the sweep reads at a time, 256 when left out, at least 1, unlimited refused; a field outside its rule panics naming it. Both were constants.
+**What changed.** [`NewLocalStorage`](../storage/local.go) takes the base directory and a `LocalStorageConfig{TemporaryStaleAge, SweepBatchSize}`: the age past which a later `Put` sweeps a leftover temp object, 1h when left out, at least 1s, unlimited never sweeping, and the names the sweep reads at a time, 256 when left out, at least 1, unlimited refused; a field outside its rule panics naming it. Both were constants.
 
 **Symptom.** `NewLocalStorage(baseDirectory)` no longer compiles.
 
@@ -1435,11 +1499,11 @@ The internal-auth binding goes one step further and refuses a request whose path
 
 ### Validation: a parameterized rule needs its parameters, whole and non-negative
 
-**What changed.** Three related refusals in how rule parameters are read. A parameterized rule named without parameters (`regex`, `regex()`, `max()`, `lessThan`) fails closed instead of validating with the registered singleton — the bare `regex` validated with the match-everything `.*` default, the bare `lessThan` meant "less than 0", the bare `max` meant the constructor's 100. A numeric bound must be an integer in its entirety: the parse previously accepted a valid leading integer and dropped the rest, so `lessThan=-0.5` became a bound of 0 and accepted `-0.2`, which the tag as written refuses. And [`Regex.WithParams`](../validation/constraint_regex.go) refuses an empty pattern, while [`MinLength`](../validation/constraint_min_length.go) and [`MaxLength`](../validation/constraint_max_length.go) refuse a negative bound.
+**What changed.** Three related refusals in how rule parameters are read. A parameterized rule named without parameters (`regex`, `regex()`, `max()`, `lessThan`) fails closed instead of validating with the registered singleton — the bare `regex` validated with the match-everything `.*` default, the bare `lessThan` meant "less than 0", the bare `max` meant the constructor's 100. A numeric bound must be an integer in its entirety: the parse previously accepted a valid leading integer and dropped the rest, so `lessThan=-0.5` became a bound of 0 and accepted `-0.2`, which the tag as written refuses. And [`Regex.WithParameters`](../validation/constraint_regex.go) refuses an empty pattern, while [`MinLength`](../validation/constraint_min_length.go) and [`MaxLength`](../validation/constraint_max_length.go) refuse a negative bound.
 
 **Symptom.** A tag of any of these shapes now reports `invalidRuleSyntax` on every value it reaches, where it previously enforced a configuration nobody wrote — or nothing at all. The refusal reason travels in the error context under `cause`, and because `invalidRuleSyntax` is one of the rule-wiring codes the kernel already classifies, the 400 is recorded at error level and that context stays out of the response body.
 
-**Remedy.** Write the parameter the rule needs: `regex(pattern=^[a-z]+$)`, `max=100`, `lessThan=0`. A pattern genuinely meant to match everything says so explicitly. The contract on [`ParameterizedConstraint`](../validation/contract/constraint.go) now states that the registered instance is a template for `WithParams` and never a fallback configuration.
+**Remedy.** Write the parameter the rule needs: `regex(pattern=^[a-z]+$)`, `max=100`, `lessThan=0`. A pattern genuinely meant to match everything says so explicitly. The contract on [`ParameterizedConstraint`](../validation/contract/constraint.go) now states that the registered instance is a template for `WithParameters` and never a fallback configuration.
 
 ### Validation: an answer holds at most 1,000 errors, and a truncated list or map is reported once
 
@@ -1477,7 +1541,7 @@ Two spellings inside an entry are bounded too. A map key past 128 bytes is spell
 
 ### OpenAPI: the generated document follows the repaired validator, in the restrictive direction
 
-**What changed.** The schema mirror in [`openapi/schema.go`](../openapi/schema.go) advertises what the repaired validator actually enforces, so the document generated by `melody:openapi:generate` and served by `SpecHandler` changes for every tag class the validation sections above describe. A bare parameterized constraint, an empty `regex` pattern, a malformed or negative `min`/`max` bound and a tag that parses to no rule are advertised as unsatisfiable fields — an impossible facet window, or `not: {}` beside a `$ref` — and such a field is now also listed `required`, because the validator rejects the absent zero value through the same refused rule. The string constraints on a non-string shape are advertised as the refusal they now are: a nullable field accepts exactly `null`, a non-nullable one nothing, and `notBlank` makes any non-string field unconditionally unsatisfiable. The stringified-length reading of `max` on numeric and boolean fields, the `[]byte`/`time.Time` exemptions and
+**What changed.** The schema mirror in [`openapi/schema.go`](../openapi/schema.go) advertises what the repaired validator actually enforces, so the document generated by `melody:openapi:generate` and served by `SpecificationHandler` changes for every tag class the validation sections above describe. A bare parameterized constraint, an empty `regex` pattern, a malformed or negative `min`/`max` bound and a tag that parses to no rule are advertised as unsatisfiable fields — an impossible facet window, or `not: {}` beside a `$ref` — and such a field is now also listed `required`, because the validator rejects the absent zero value through the same refused rule. The string constraints on a non-string shape are advertised as the refusal they now are: a nullable field accepts exactly `null`, a non-nullable one nothing, and `notBlank` makes any non-string field unconditionally unsatisfiable. The stringified-length reading of `max` on numeric and boolean fields, the `[]byte`/`time.Time` exemptions and
 the value-embed brace floor are gone with the behaviour they mirrored. The lockstep is held by an executable proof, [`openapi/schema_test.go`](../openapi/schema_test.go) — the only place `openapi` imports `validation`, test-only — documented in [`OPENAPI.md`](package/OPENAPI.md).
 
 **Symptom.** A published spec regenerated under this release shrinks or contradicts fields whose tags the validator refuses — and a spec-driven client, a contract test or a generated SDK starts failing on those fields at generation or validation time, where the previous document advertised satisfiable bounds the server never honoured and the failures arrived as production 400s instead.
@@ -2125,7 +2189,7 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 **What changed.** The file server refuses the spellings `path.Clean` folds into the mount root — `/..`, `/.`, `//`, `/open/..` — the same refusal every other path already earned, because the matchers in front of the application compare the raw path and those spellings reach the index page from behind whatever rule the other prefix carries. The exclusion list is also consulted against the index file the root resolves to, so excluding `/index.html` excludes it for `/` too. On an embedded filesystem — where files carry no modification time — `Last-Modified` is no longer emitted as the year-one instant and `If-Modified-Since` is not consulted, the entity tag carries the build version instead of the zero timestamp, and the tag reads the modification time at nanosecond resolution. `NewFileServer` copies its configuration, proves an embedded public directory at construction, and honours a `CacheMaxAge` of zero as always-revalidate instead of coercing it to an hour.
 
-**Symptom.** Requests for the folded spellings fall through to the application (usually a 404) instead of answering the index page; clients that conditionally revalidated embedded assets stop being answered 304 forever; a deployment that set `MELODY_STATIC_CACHE_MAX_AGE=0` with cache enabled starts serving `max-age=0`; a boot with `MELODY_PUBLIC_DIR` naming a directory the build did not embed panics instead of serving 404s.
+**Symptom.** Requests for the folded spellings fall through to the application (usually a 404) instead of answering the index page; clients that conditionally revalidated embedded assets stop being answered 304 forever; a deployment that set `MELODY_STATIC_CACHE_MAX_AGE=0` with cache enabled starts serving `max-age=0`; a boot with `MELODY_PUBLIC_DIRECTORY` naming a directory the build did not embed panics instead of serving 404s.
 
 **Remedy.** None for the refusals. A deployment that relied on the hour of freshness sets `MELODY_STATIC_CACHE_MAX_AGE=3600` explicitly; the server keeps its own copy of the `static.Config`, lists included, so a list changed after `NewFileServer` configures only the next server.
 
@@ -2444,11 +2508,11 @@ still empty each other's destinations, so applications sharing a directory run u
 
 ### Cron: a relative parameter path anchors at the project directory
 
-**What changed.** A relative path read from a parameter — `melody.cron.destination_file`, `melody.cron.logs_directory`, `melody.cron.heartbeat_path`, `melody.cron.binary` — is anchored at the project directory, the way melody resolves `kernel.logs_dir` and its siblings. A relative path typed as a cli flag stays relative to the working directory, as a shell path should.
+**What changed.** A relative path read from a parameter — `melody.cron.destination_file`, `melody.cron.logs_directory`, `melody.cron.heartbeat_path`, `melody.cron.binary` — is anchored at the project directory, the way melody resolves `kernel.logs_directory` and its siblings. A relative path typed as a cli flag stays relative to the working directory, as a shell path should.
 
-**Symptom.** `melody.cron.logs_directory = var/log/cron` used to mean a different directory depending on where the binary was invoked from — under a supervisor starting from `/`, the generated crontab baked `/var/log/cron` into itself. The shipped defaults carry `%kernel.project_dir%` and never moved.
+**Symptom.** `melody.cron.logs_directory = var/log/cron` used to mean a different directory depending on where the binary was invoked from — under a supervisor starting from `/`, the generated crontab baked `/var/log/cron` into itself. The shipped defaults carry `%kernel.project_directory%` and never moved.
 
-**Remedy.** None for parameters using the shipped `%kernel.project_dir%`-anchored defaults or absolute paths. A deployment that relied on a relative parameter path following the working directory should either make the path absolute or pass it as the command's flag, which stays relative to the working directory; running the generator from another directory no longer changes where a parameter path points.
+**Remedy.** None for parameters using the shipped `%kernel.project_directory%`-anchored defaults or absolute paths. A deployment that relied on a relative parameter path following the working directory should either make the path absolute or pass it as the command's flag, which stays relative to the working directory; running the generator from another directory no longer changes where a parameter path points.
 
 ### Cron: the generator writes the machine document and names what a failed run left on disk
 
@@ -2617,7 +2681,7 @@ node than the same amount. Both default to zero, which leaves the behaviour of t
 
 ### Mailer: configured smtp credentials fail closed when the server does not advertise AUTH
 
-**What changed.** With a username configured, a server whose EHLO response does not advertise `AUTH` is refused — whatever `RequireAuth` says. `RequireAuth` keeps its other half: it still refuses the configuration in which authentication is required but no username is set.
+**What changed.** With a username configured, a server whose EHLO response does not advertise `AUTH` is refused — whatever `RequireAuthentication` says. `RequireAuthentication` keeps its other half: it still refuses the configuration in which authentication is required but no username is set.
 
 **Symptom.** The old default skipped the whole auth branch and delivered the message as anonymous submission while reporting success, so the configured identity went quietly unused — most commonly against a relay that only advertises `AUTH` after `STARTTLS`, on a session where tls was not negotiated. Deployments in that shape now get an error naming the unapplied credentials instead of silent unauthenticated delivery.
 
@@ -2853,9 +2917,9 @@ A correct size, a zero declared size, and a body **shorter** than its declared s
 
 **What changed.** The parsed `validate` tag and the constraint a parameterized rule resolves to are memoized instead of being rebuilt for every value the validator reaches — a `regex` tag recompiled its pattern once per element. The parse cache is keyed on the tag string, the constraint cache on the rule name and its parameters, and the constraint cache is per-validator, so custom constraints registered under the same name in different validators stay separate.
 
-**Symptom.** A custom [`contract.ParameterizedConstraint`](../validation/contract/constraint.go) whose `WithParams` result carried per-value state, or was not safe for concurrent use, now leaks that state between unrelated values and unrelated requests.
+**Symptom.** A custom [`contract.ParameterizedConstraint`](../validation/contract/constraint.go) whose `WithParameters` result carried per-value state, or was not safe for concurrent use, now leaks that state between unrelated values and unrelated requests.
 
-**Remedy.** Make the constraint `WithParams` returns immutable and safe for concurrent use; do not retain the params map it was handed, and do not accumulate state in `Validate`. One instance is shared for the process lifetime across every request and goroutine that reaches the rule.
+**Remedy.** Make the constraint `WithParameters` returns immutable and safe for concurrent use; do not retain the params map it was handed, and do not accumulate state in `Validate`. One instance is shared for the process lifetime across every request and goroutine that reaches the rule.
 
 ### HTTP kernel: `SetSessionCookiePolicy` keeps the `SameSite=Lax` default
 
@@ -2885,12 +2949,12 @@ A policy that asks for `SameSite=None` gets a `Secure` session cookie under `Ses
 
 ### HTTP client: `TransportConfig` fields are `bound` limits, and the two idle pools are decided each on its own
 
-**What changed.** Every [`TransportConfig`](../httpclient/transport_config.go) field is a [`bound.Duration`](../bound/limit.go) or a [`bound.Count`](../bound/limit.go): a field left out takes its default, `bound.Of` sets a value, and a value below the field's minimum is refused by `NewHttpClient`, naming the field. The third major kept value fields and read a non-positive value as not set. `IdleConnTimeout`, `MaxIdleConns` and `MaxIdleConnsPerHost` admit `bound.UnlimitedDuration()` / `bound.UnlimitedCount()`; every timeout but `IdleConnTimeout` refuses it, the dial, TLS handshake, response header and 100-continue waits since each guards against a peer that never answers; `ExpectContinueTimeout` admits `bound.Of(time.Duration(0))`, which sends the body at once; `KeepAliveDisabled` turns the keep-alive probes off. `MaxIdleConns` and `MaxIdleConnsPerHost` both default to 100, as in the third major, but each is now decided on its own: the third major copied a `MaxIdleConns` set to a
-positive value into the per-host pool unless that was set too, and the fourth leaves the per-host pool at its default; net/http applies both pools and the smaller one wins. `IdleConnectionsDisabled` is new: it keeps no connection idle over HTTP/1 and HTTP/2 alike, every HTTP/1 request carrying `Connection: close`, and refuses `MaxIdleConns`, `MaxIdleConnsPerHost` or `IdleConnTimeout` set beside it; the third major had no way to turn pooling off.
+**What changed.** Every [`TransportConfig`](../httpclient/transport_config.go) field is a [`bound.Duration`](../bound/limit.go) or a [`bound.Count`](../bound/limit.go): a field left out takes its default, `bound.Of` sets a value, and a value below the field's minimum is refused by `NewHttpClient`, naming the field. The third major kept value fields and read a non-positive value as not set. `IdleConnectionTimeout`, `MaxIdleConnections` and `MaxIdleConnectionsPerHost` admit `bound.UnlimitedDuration()` / `bound.UnlimitedCount()`; every timeout but `IdleConnectionTimeout` refuses it, the dial, TLS handshake, response header and 100-continue waits since each guards against a peer that never answers; `ExpectContinueTimeout` admits `bound.Of(time.Duration(0))`, which sends the body at once; `KeepAliveDisabled` turns the keep-alive probes off. `MaxIdleConnections` and `MaxIdleConnectionsPerHost` both default to 100, as in the third major, but each is now decided on its own: the third major copied a `MaxIdleConnections` set to a
+positive value into the per-host pool unless that was set too, and the fourth leaves the per-host pool at its default; net/http applies both pools and the smaller one wins. `IdleConnectionsDisabled` is new: it keeps no connection idle over HTTP/1 and HTTP/2 alike, every HTTP/1 request carrying `Connection: close`, and refuses `MaxIdleConnections`, `MaxIdleConnectionsPerHost` or `IdleConnectionTimeout` set beside it; the third major had no way to turn pooling off.
 
 **Symptom.** A `TransportConfig` literal with value fields, `TransportConfig{DialTimeout: 5 * time.Second}`, no longer compiles. A field set to zero or below is refused naming the field, where it read as the default, `ExpectContinueTimeout` excepted, whose zero is a value. A client that raised `MaxIdleConns` alone, to 500 say, keeps at most 100 idle connections per host where the third major kept 500, so a single busy upstream sees more connections opened and closed.
 
-**Remedy.** Wrap each set field: `TransportConfig{DialTimeout: bound.Of(5 * time.Second), MaxIdleConns: bound.Of(50)}`, and leave out a field that was set to zero to take the default. A caller who raised `MaxIdleConns` for one busy host sets `MaxIdleConnsPerHost` to the same value to keep the third major's pool; a caller who wants no connection reuse sets `IdleConnectionsDisabled: true`.
+**Remedy.** Wrap each set field: `TransportConfig{DialTimeout: bound.Of(5 * time.Second), MaxIdleConnections: bound.Of(50)}`, and leave out a field that was set to zero to take the default. A caller who raised `MaxIdleConns` for one busy host sets `MaxIdleConnectionsPerHost` to the same value to keep the third major's pool; a caller who wants no connection reuse sets `IdleConnectionsDisabled: true`.
 
 ### CLI: json mode writes the document and nothing else
 

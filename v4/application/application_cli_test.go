@@ -52,7 +52,7 @@ func TestRunCli_InstallsTheExitErrHandlerOnTheRootCommand(t *testing.T) {
     urfavecli.OsExiter = func(code int) { exitedWith = code }
     defer func() { urfavecli.OsExiter = originalExiter }()
 
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterCliCommand(&exitCodedProbeApplicationCommand{})
 
@@ -106,7 +106,7 @@ func TestRegisterCliCommand_JudgesTheNameTrimmed(t *testing.T) {
 
 /* the whole path: a command whose Name carries padding must still be reachable from argv — the suggestion gate compares the trimmed input against the trimmed name and the cli library dispatches the trimmed registration. */
 func TestRunCli_DispatchesACommandWhoseNameCarriesPadding(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     probe := &servingProbeApplicationCommand{}
     paddedProbe := &paddedNameProbeCommand{inner: probe}
@@ -281,7 +281,7 @@ func (instance *processContextProbeCliCommand) Run(runtimeInstance runtimecontra
 
 /* the console counterpart of the request context the http kernel installs: the run's identity is resolvable from the run scope, instead of being computed for the logger and thrown away */
 func TestRunCli_InstallsTheProcessContextIntoTheRunScope(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     probeCommand := &processContextProbeCliCommand{}
     applicationInstance.RegisterCliCommand(probeCommand)
@@ -382,7 +382,7 @@ func (instance *providedKeyProbeCliCommand) Run(runtimeInstance runtimecontract.
 func TestRunCli_TheRunLoggerPreservesACallerProcessIdUnderProvided(t *testing.T) {
     baseLogger := &contextCapturingCliLogger{}
 
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterService(
         logging.ServiceLogger,
@@ -454,7 +454,7 @@ func (instance *versionProbeCliCommand) Run(
 func runVersionProbe(t *testing.T, version string) *versionProbeCliCommand {
     t.Helper()
 
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{Version: version, EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{Version: version, EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     probeCommand := &versionProbeCliCommand{}
     applicationInstance.RegisterCliCommand(probeCommand)
@@ -493,7 +493,7 @@ func TestRunCli_EachApplicationCarriesItsOwnVersion(t *testing.T) {
 func bootCliCommandNames(t *testing.T, environmentName string) map[string]bool {
     t.Helper()
 
-    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: environmentName})
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: environmentName})
 
     applicationInstance.bootCli()
 
@@ -507,8 +507,8 @@ func bootCliCommandNames(t *testing.T, environmentName string) map[string]bool {
 
 /* the debug family reads the container's services and the resolved parameters, secrets among them, so outside development only debug:router is registered: a production binary answers every other debug command as not found */
 func TestBootCli_RegistersTheDebugFamilyOnlyInDevelopment(t *testing.T) {
-    developmentNames := bootCliCommandNames(t, config.EnvDevelopment)
-    productionNames := bootCliCommandNames(t, config.EnvProduction)
+    developmentNames := bootCliCommandNames(t, config.EnvironmentDevelopment)
+    productionNames := bootCliCommandNames(t, config.EnvironmentProduction)
 
     for _, name := range []string{"debug:container", "debug:parameters", "debug:events", "debug:middleware", "debug:version"} {
         if false == developmentNames[name] {

@@ -7,7 +7,7 @@ import (
     "testing/fstest"
 )
 
-func NewEmbeddedEnvFs() fs.FS {
+func NewEmbeddedEnvironmentFs() fs.FS {
     return nil
 }
 

@@ -11,13 +11,13 @@ import (
 func (instance *Configuration) registerDefaultParameters(
     projectDirectory string,
 ) {
-    instance.setDefaultParameter(KernelProjectDir, projectDirectory)
-    instance.setDefaultParameter(KernelLogsDir, filepath.Join("%"+KernelProjectDir+"%", "var", "log"))
-    instance.setDefaultParameter(KernelCacheDir, filepath.Join("%"+KernelProjectDir+"%", "var", "cache"))
+    instance.setDefaultParameter(KernelProjectDirectory, projectDirectory)
+    instance.setDefaultParameter(KernelLogsDirectory, filepath.Join("%"+KernelProjectDirectory+"%", "var", "log"))
+    instance.setDefaultParameter(KernelCacheDirectory, filepath.Join("%"+KernelProjectDirectory+"%", "var", "cache"))
 
     instance.setDefaultParameter(DefaultModeKey, ModeHttp)
     instance.setDefaultParameter(ProcessRoleKey, RoleAll)
-    instance.setDefaultParameter(EnvKey, EnvDevelopment)
+    instance.setDefaultParameter(EnvironmentNameKey, EnvironmentDevelopment)
 
     instance.setDefaultParameter(HttpAddressKey, ":8080")
     instance.setDefaultParameter(HttpMaxRequestBodyBytesKey, DefaultHttpMaxRequestBodyBytes)
@@ -50,12 +50,12 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(CliBootWarningsIgnoredKey, "")
     instance.setDefaultParameter(CliBootWarningsDisabledKey, "")
 
-    instance.setDefaultParameter(LogPathKey, filepath.Join("%"+KernelLogsDir+"%", "%"+KernelEnv+"%.log"))
+    instance.setDefaultParameter(LogPathKey, filepath.Join("%"+KernelLogsDirectory+"%", "%"+KernelEnvironment+"%.log"))
     instance.setDefaultParameter(LogLevelKey, string(loggingcontract.LevelDebug))
 
     instance.setDefaultParameter(DefaultLocaleKey, "en")
 
-    instance.setDefaultParameter(PublicDirKey, "public")
+    instance.setDefaultParameter(PublicDirectoryKey, "public")
 
     instance.setDefaultParameter(StaticIndexFileKey, "index.html")
     instance.setDefaultParameter(StaticEnableCacheKey, true)

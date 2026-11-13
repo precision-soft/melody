@@ -19,7 +19,7 @@ func scanFixture(t *testing.T) *ScanResult {
 
     packageBinding := bindSet.Package(fixtureImportPath, fixtureDirectory)
 
-    scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDir, PackageBinding: packageBinding})
+    scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDirectory, PackageBinding: packageBinding})
     if nil != scanErr {
         t.Fatalf("expected the fixture to scan, got %v", scanErr)
     }
@@ -202,7 +202,7 @@ func TestIsExcluded_MatchesTheReturnedTypeName(t *testing.T) {
 func TestScan_ReportsAMissingDirectory(t *testing.T) {
     bindSet := NewBindSet()
 
-    _, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDir, PackageBinding: bindSet.Package("github.com/acme/missing", "wiring/internal/fixture/missing")})
+    _, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDirectory, PackageBinding: bindSet.Package("github.com/acme/missing", "wiring/internal/fixture/missing")})
     if nil == scanErr {
         t.Fatalf("expected a missing directory to be reported")
     }
@@ -429,7 +429,7 @@ const scopedScanFixtureDirectory = "wiring/internal/fixture/scoped"
 func scanScopedFixture(t *testing.T) *ScanResult {
     t.Helper()
 
-    scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDir, PackageBinding: NewBindSet().Package(scopedFixtureImportPath, scopedScanFixtureDirectory)})
+    scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDirectory, PackageBinding: NewBindSet().Package(scopedFixtureImportPath, scopedScanFixtureDirectory)})
     if nil != scanErr {
         t.Fatalf("expected the scoped fixture to scan, got %v", scanErr)
     }
@@ -496,7 +496,7 @@ func TestScan_RefusesAMalformedExcludePattern(t *testing.T) {
     bindSet := NewBindSet()
     binding := bindSet.Package(fixtureImportPath, "wiring/internal/fixture/domain").Exclude("[Fixture")
 
-    _, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDir, PackageBinding: binding})
+    _, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDirectory, PackageBinding: binding})
     if nil == scanErr {
         t.Fatalf("expected the malformed pattern to be refused")
     }
@@ -513,7 +513,7 @@ func TestScan_ReportsAnExcludeThatMatchedNothing(t *testing.T) {
         Exclude("*Fixture").
         Exclude("*Respository")
 
-    scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDir, PackageBinding: binding})
+    scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDirectory, PackageBinding: binding})
     if nil != scanErr {
         t.Fatalf("scan: %v", scanErr)
     }
@@ -670,7 +670,7 @@ func TestScan_RefusesADirectiveWrittenWithABlankAfterTheSlashes(t *testing.T) {
 }
 
 func TestScan_RefusesANilPackageBinding(t *testing.T) {
-    scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDir})
+    scanResult, scanErr := Scan(ScanRequest{ProjectDirectory: fixtureProjectDirectory})
     if nil == scanErr || nil != scanResult {
         t.Fatalf("expected a nil package binding refused, got %v (%v)", scanResult, scanErr)
     }
@@ -682,9 +682,9 @@ func TestScan_RefusesANilPackageBinding(t *testing.T) {
 
 func TestScan_RefusesADirectiveDetachedFromItsConstructor(t *testing.T) {
     for name, source := range map[string]string{
-        "a blank line under the directive": "package domain\n\n//melody:scoped\n\nfunc NewDetached() *Detached {\n    return &Detached{}\n}\n\ntype Detached struct {\n}\n",
+        "a blank line under the directive":  "package domain\n\n//melody:scoped\n\nfunc NewDetached() *Detached {\n    return &Detached{}\n}\n\ntype Detached struct {\n}\n",
         "a directive above the doc comment": "package domain\n\n//melody:ignore\n\n/* NewDetached builds one. */\nfunc NewDetached() *Detached {\n    return &Detached{}\n}\n\ntype Detached struct {\n}\n",
-        "a directive inside the body":      "package domain\n\nfunc NewDetached() *Detached {\n    //melody:service ServiceDetached\n    return &Detached{}\n}\n\ntype Detached struct {\n}\n",
+        "a directive inside the body":       "package domain\n\nfunc NewDetached() *Detached {\n    //melody:service ServiceDetached\n    return &Detached{}\n}\n\ntype Detached struct {\n}\n",
     } {
         projectDirectory := t.TempDir()
 

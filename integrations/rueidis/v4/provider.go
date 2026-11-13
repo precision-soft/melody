@@ -224,7 +224,7 @@ func (instance *Provider) clientOption(addresses []string, parameters Connection
         Username:         parameters.User,
         Password:         parameters.Password,
         ClientName:       instance.client.clientName,
-        SelectDB:         instance.client.selectDb,
+        SelectDB:         instance.client.selectDatabase,
         DisableCache:     false == instance.client.clientSideCacheEnabled,
         TLSConfig:        instance.client.tlsConfig,
         Dialer:           net.Dialer{Timeout: instance.client.dialTimeout},
@@ -244,7 +244,7 @@ func (instance *Provider) connectionContext(parameters ConnectionParameters) exc
 
     connectionContext["connectTimeout"] = instance.timeout.connectTimeout.String()
     connectionContext["dialTimeout"] = instance.client.dialTimeout.String()
-    connectionContext["selectDb"] = instance.client.selectDb
+    connectionContext["selectDatabase"] = instance.client.selectDatabase
 
     return connectionContext
 }

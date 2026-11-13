@@ -5205,7 +5205,7 @@ func TestKernel_ARendererBrokenByItsSerializerStillAnswersThroughTheResponsePath
 }
 
 func TestKernel_ACyclicChainFromAHandlerIsAnsweredWithAFiveHundred(t *testing.T) {
-    for _, environment := range []string{config.EnvProduction, config.EnvDevelopment} {
+    for _, environment := range []string{config.EnvironmentProduction, config.EnvironmentDevelopment} {
         router := NewRouter()
         router.Handle(
             nethttp.MethodGet,
@@ -5229,7 +5229,7 @@ func TestKernel_ACyclicChainFromAHandlerIsAnsweredWithAFiveHundred(t *testing.T)
 }
 
 func TestKernel_ACyclicChainFromAStreamedHandlerAfterItsHeaderIsAnswered(t *testing.T) {
-    for _, environment := range []string{config.EnvProduction, config.EnvDevelopment} {
+    for _, environment := range []string{config.EnvironmentProduction, config.EnvironmentDevelopment} {
         router := NewRouter()
         router.Handle(
             nethttp.MethodGet,
@@ -5255,7 +5255,7 @@ func TestKernel_ACyclicChainFromAStreamedHandlerAfterItsHeaderIsAnswered(t *test
 }
 
 func TestKernel_ACyclicChainFromTheRequestBodyIsAnsweredWithABadRequest(t *testing.T) {
-    for _, environment := range []string{config.EnvProduction, config.EnvDevelopment} {
+    for _, environment := range []string{config.EnvironmentProduction, config.EnvironmentDevelopment} {
         router := NewRouter()
         router.Handle(
             nethttp.MethodPost,

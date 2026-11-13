@@ -327,7 +327,7 @@ func TestResolveUnavailableRetryAfter_TheKeyWinsOverTheFieldOverTheDefault(t *te
 }
 
 func TestNewApplication_TheUnavailableRetryAfterFieldReachesTheHttpKernel(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), UnavailableRetryAfter: bound.Of(13 * time.Second)})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), UnavailableRetryAfter: bound.Of(13 * time.Second)})
     serviceContainer := applicationInstance.kernel.ServiceContainer()
     defer func() {
         _ = serviceContainer.Close()

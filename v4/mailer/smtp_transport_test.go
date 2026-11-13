@@ -25,7 +25,7 @@ import (
     mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
 )
 
-func TestSmtpTransport_RequireAuthFailsWhenServerHasNoAuthExtension(t *testing.T) {
+func TestSmtpTransport_RequireAuthenticationFailsWhenServerHasNoAuthExtension(t *testing.T) {
     listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
     if nil != listenErr {
         t.Fatalf("listen: %v", listenErr)
@@ -35,10 +35,10 @@ func TestSmtpTransport_RequireAuthFailsWhenServerHasNoAuthExtension(t *testing.T
     go serveAuthlessSmtp(listener)
 
     transport := NewSmtpTransport(SmtpConfig{
-        Address:     listener.Addr().String(),
-        Username:    "user",
-        Password:    "pass",
-        RequireAuth: true,
+        Address:               listener.Addr().String(),
+        Username:              "user",
+        Password:              "pass",
+        RequireAuthentication: true,
     })
 
     sendErr := transport.Send(testRuntime(), mailercontract.Message{
@@ -48,7 +48,7 @@ func TestSmtpTransport_RequireAuthFailsWhenServerHasNoAuthExtension(t *testing.T
         Text:    "body",
     })
     if nil == sendErr {
-        t.Fatalf("expected RequireAuth to fail when the server does not advertise AUTH")
+        t.Fatalf("expected RequireAuthentication to fail when the server does not advertise AUTH")
     }
 
     if false == strings.Contains(sendErr.Error(), "AUTH") {
@@ -56,7 +56,7 @@ func TestSmtpTransport_RequireAuthFailsWhenServerHasNoAuthExtension(t *testing.T
     }
 }
 
-func TestSmtpTransport_RequireAuthFailsWhenNoUsernameConfigured(t *testing.T) {
+func TestSmtpTransport_RequireAuthenticationFailsWhenNoUsernameConfigured(t *testing.T) {
     listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
     if nil != listenErr {
         t.Fatalf("listen: %v", listenErr)
@@ -66,8 +66,8 @@ func TestSmtpTransport_RequireAuthFailsWhenNoUsernameConfigured(t *testing.T) {
     go serveAuthlessSmtp(listener)
 
     transport := NewSmtpTransport(SmtpConfig{
-        Address:     listener.Addr().String(),
-        RequireAuth: true,
+        Address:               listener.Addr().String(),
+        RequireAuthentication: true,
     })
 
     sendErr := transport.Send(testRuntime(), mailercontract.Message{
@@ -77,7 +77,7 @@ func TestSmtpTransport_RequireAuthFailsWhenNoUsernameConfigured(t *testing.T) {
         Text:    "body",
     })
     if nil == sendErr {
-        t.Fatalf("expected RequireAuth to fail closed when no username is configured")
+        t.Fatalf("expected RequireAuthentication to fail closed when no username is configured")
     }
 
     if false == strings.Contains(sendErr.Error(), "username") {
@@ -133,13 +133,13 @@ func TestSmtpTransport_AuthSucceedsWhenHostDiffersFromAddress(t *testing.T) {
 
     /* Address is an IP:port while Host is a different name (the TLS SNI / auth identity used when dialing by IP, through a tunnel, or a CNAME). smtp.PlainAuth rejects a mismatch between the client's server name and its host with "wrong host name", so the plain/STARTTLS dial path must build the client with instance.host — not derive the server name from the address, as smtp.Dial does. */
     transport := NewSmtpTransport(SmtpConfig{
-        Address:     listener.Addr().String(),
-        Host:        "smtp.internal.example",
-        Username:    "user",
-        Password:    "pass",
-        RequireAuth: true,
-        RequireTls:  true,
-        TlsConfig:   &tls.Config{InsecureSkipVerify: true},
+        Address:               listener.Addr().String(),
+        Host:                  "smtp.internal.example",
+        Username:              "user",
+        Password:              "pass",
+        RequireAuthentication: true,
+        RequireTls:            true,
+        TlsConfig:             &tls.Config{InsecureSkipVerify: true},
     })
 
     sendErr := transport.Send(testRuntime(), mailercontract.Message{
@@ -1128,7 +1128,7 @@ func TestSmtpTransport_ConfiguredCredentialsFailClosedWhenAuthIsNotAdvertised(t 
 
     go serveAuthlessSmtp(listener)
 
-    /* RequireAuth deliberately left false — the zero-value default: before the guard, this exact configuration skipped the whole auth branch and delivered the message as anonymous submission while reporting success, the operator's configured identity quietly unused; configured credentials that cannot be applied must refuse, not degrade */
+    /* RequireAuthentication deliberately left false — the zero-value default: before the guard, this exact configuration skipped the whole auth branch and delivered the message as anonymous submission while reporting success, the operator's configured identity quietly unused; configured credentials that cannot be applied must refuse, not degrade */
     transport := NewSmtpTransport(SmtpConfig{
         Address:  listener.Addr().String(),
         Username: "user",

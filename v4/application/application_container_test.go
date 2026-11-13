@@ -70,7 +70,7 @@ func newTestKernel() *testKernel {
 }
 
 func (instance *testKernel) Environment() string {
-    return config.EnvDevelopment
+    return config.EnvironmentDevelopment
 }
 
 func (instance *testKernel) DebugMode() bool {
@@ -142,7 +142,7 @@ func TestApplicationRegisterService_RegistersInContainerBeforeBoot(t *testing.T)
 }
 
 func TestApplicationRegisterService_PanicsAfterBoot(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -584,7 +584,7 @@ func TestNewContainerLogger_OpensTheLogFileWhenEverythingItNeedsIsSound(t *testi
 }
 
 func TestBootContainer_TheApplicationsOwnLoggerIsSubstitutedNotCollided(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     ownLogger := logging.NewNopLogger()
 
@@ -609,7 +609,7 @@ func TestBootContainer_TheApplicationsOwnLoggerIsSubstitutedNotCollided(t *testi
 }
 
 func TestBootContainer_AFailingLoggerProviderFailsTheBoot(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterService(
         logging.ServiceLogger,
@@ -643,7 +643,7 @@ func TestNewContainerLogger_CreatesTheLogDirectory(t *testing.T) {
 
 /* the configured window must travel from the environment key through the configuration into the manager: only a lapsed 300ms window explains a deleted session accepting a write-back 400ms later, where the five-minute default would still refuse it. */
 func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     ownManager, managerErr := serializer.NewSerializerManager(
         map[string]serializercontract.Serializer{
@@ -680,7 +680,7 @@ func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T
 }
 
 func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     ownValidator := validation.NewValidator(validation.ValidatorConfig{})
     ownUrlGenerator := http.NewUrlGenerator(http.NewRouteRegistry())
@@ -732,7 +732,7 @@ func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *t
 
 /* TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers pins the id the two published resolvers read. SerializerMustFromRuntime and SerializerFromRuntime were documented with the id nothing registered, so the Must door panicked for every caller and the soft one answered nil — by construction, on every boot the framework has ever performed. */
 func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     kernelInstance := applicationInstance.Boot()
 
@@ -756,7 +756,7 @@ func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *test
 
 /* TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided pins the gate over the same id, so registering a default serializer is a substitution rather than the boot collision every ungated framework id answered with. */
 func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     ownSerializer := serializer.NewPlainTextSerializer(serializer.PlainTextSerializerConfig{})
 
@@ -802,7 +802,7 @@ func newScopedServiceApplication(kernelInstance *testKernel) *Application {
     }
 }
 func TestApplication_RegisterScopedAfterBootPanics(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -880,7 +880,7 @@ func (instance *recordingCloseTransport) CloseWithContext(closeContext context.C
 
 /* the http process publishes through a routing that holds the transport value directly, so it never resolves the transports map; the container still closes the registered transports, or the broker connection lives exactly as long as the process. */
 func TestBoot_TheRegisteredTransportsAreClosedByAProcessThatNeverResolvesTheMap(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     transport := &recordingCloseTransport{}
 
@@ -902,7 +902,7 @@ func TestBoot_TheRegisteredTransportsAreClosedByAProcessThatNeverResolvesTheMap(
 
 /* the consume process still gets its ordered teardown: the edge is recorded on the RESOLUTION, so a closer already built at boot is no less a dependency of the map than one the map's own provider built. */
 func TestBoot_ResolvingTheTransportsMapStillOrdersTheTeardownAfterTheBootBuild(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     transport := &recordingCloseTransport{}
 
@@ -930,7 +930,7 @@ func TestBoot_ResolvingTheTransportsMapStillOrdersTheTeardownAfterTheBootBuild(t
 
 /* an application that registered nothing must not gain a service it never asked for, and the boot must not fail looking for one. */
 func TestBoot_NoTransportsRegisteredBuildsNoCloser(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     kernelInstance := applicationInstance.Boot()
 
@@ -944,7 +944,7 @@ func TestBootContainer_TheJournalOfAConsoleProcessReopensOnSighup(t *testing.T) 
     logPath := filepath.Join(directory, "application.log")
     rotatedPath := filepath.Join(directory, "application.log.1")
 
-    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: "dev", config.LogPathKey: logPath})
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: "dev", config.LogPathKey: logPath})
     applicationInstance.bootContainer()
 
     logger, resolveErr := logging.LoggerFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
@@ -986,7 +986,7 @@ func TestBootContainer_TheJournalOfAConsoleProcessReopensOnSighup(t *testing.T) 
 func TestBootContainer_ARelativeLogPathIsAnchoredToTheProjectDirectoryUnderACreatedParent(t *testing.T) {
     relativePath := filepath.Join("var", "log", "nested", "application.log")
 
-    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: "dev", config.LogPathKey: relativePath})
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: "dev", config.LogPathKey: relativePath})
     applicationInstance.bootContainer()
 
     logger, resolveErr := logging.LoggerFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
@@ -997,7 +997,7 @@ func TestBootContainer_ARelativeLogPathIsAnchoredToTheProjectDirectoryUnderACrea
 
     logger.Emergency("anchored", nil)
 
-    anchoredPath := filepath.Join(applicationInstance.Configuration().Kernel().ProjectDir(), relativePath)
+    anchoredPath := filepath.Join(applicationInstance.Configuration().Kernel().ProjectDirectory(), relativePath)
 
     content, readErr := os.ReadFile(anchoredPath)
     if nil != readErr {
@@ -1016,7 +1016,7 @@ func (instance *teardownOrderProbeBus) Dispatch(runtimeInstance runtimecontract.
 }
 
 func TestBoot_TheRegisteredBusesCloseBeforeTheTransportsTheyRouteTo(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     messagebus.RegisterTransports(
         applicationInstance,
@@ -1061,7 +1061,7 @@ func TestBoot_TheRegisteredBusesCloseBeforeTheTransportsTheyRouteTo(t *testing.T
 func TestBuildMessageBusTransportsCloser_FailsWhenTheBusCannotBeOrderedBeforeItsTransports(t *testing.T) {
     for _, busName := range []string{messagebus.ServiceBus, messagebus.ServiceConsumeBus} {
         t.Run(busName, func(t *testing.T) {
-            applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: "dev"})
+            applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: "dev"})
 
             applicationInstance.RegisterService(
                 busName,
@@ -1101,7 +1101,7 @@ func TestBuildMessageBusTransportsCloser_FailsWhenTheBusCannotBeOrderedBeforeIts
 }
 
 func TestBuildMessageBusTransportsCloser_FailsWhenTheTransportsCloserCannotBeBuilt(t *testing.T) {
-    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvKey: "dev"})
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: "dev"})
 
     providerErr := errors.New("transports closer provider failed")
 
@@ -1133,7 +1133,7 @@ func TestBuildMessageBusTransportsCloser_FailsWhenTheTransportsCloserCannotBeBui
 
 /* the after-boot refusals of RegisterService and RegisterScopedService name the service that was registered too late, as the parameter and configuration siblings name theirs. */
 func TestApplicationRegisterService_AfterBootRefusalNamesTheService(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -1203,7 +1203,7 @@ func TestBootContainer_TheConsoleJournalOfACommandIsStandardError(t *testing.T) 
         originalStdout, originalStderr := os.Stdout, os.Stderr
         os.Stdout, os.Stderr = stdoutWrite, stderrWrite
 
-        applicationInstance := newEnvironmentRefusalApplication(t, testCase.mode, map[string]string{config.EnvKey: "dev", config.LogPathKey: ""})
+        applicationInstance := newEnvironmentRefusalApplication(t, testCase.mode, map[string]string{config.EnvironmentNameKey: "dev", config.LogPathKey: ""})
         applicationInstance.bootContainer()
 
         logger, resolveErr := logging.LoggerFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
@@ -1230,7 +1230,7 @@ func TestBootContainer_TheConsoleJournalOfACommandIsStandardError(t *testing.T) 
 }
 
 func TestBootContainer_TheFrameworkProvidersResolveTheirKernelValues(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
     serviceContainer := applicationInstance.Boot().ServiceContainer()
     defer func() { _ = serviceContainer.Close() }()
 

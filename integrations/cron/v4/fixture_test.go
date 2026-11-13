@@ -269,19 +269,19 @@ func (instance *stubKernelConfiguration) ProcessRole() string {
     return ""
 }
 
-func (instance *stubKernelConfiguration) Env() string {
+func (instance *stubKernelConfiguration) Environment() string {
     return "dev"
 }
 
-func (instance *stubKernelConfiguration) ProjectDir() string {
+func (instance *stubKernelConfiguration) ProjectDirectory() string {
     return instance.projectDirectory
 }
 
-func (instance *stubKernelConfiguration) LogsDir() string {
+func (instance *stubKernelConfiguration) LogsDirectory() string {
     return ""
 }
 
-func (instance *stubKernelConfiguration) CacheDir() string {
+func (instance *stubKernelConfiguration) CacheDirectory() string {
     return ""
 }
 

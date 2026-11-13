@@ -78,7 +78,7 @@ func (instance *RouteManifestCommand) Run(
 
     if false == filepath.IsAbs(out) {
         applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
-        out = filepath.Join(applicationConfiguration.MustGet(config.KernelProjectDir).MustString(), out)
+        out = filepath.Join(applicationConfiguration.MustGet(config.KernelProjectDirectory).MustString(), out)
     }
 
     if refusalErr := internal.RefuseNonJsonOutputTarget(out, "route manifest"); nil != refusalErr {

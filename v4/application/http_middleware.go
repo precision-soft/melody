@@ -44,12 +44,12 @@ func NewHttpMiddleware(
     configuration configcontract.Configuration,
 ) *HttpMiddleware {
     return &HttpMiddleware{
-        definitions:   make([]middlewarepipeline.HttpMiddlewareDefinition, 0),
-        staticConfig:  staticConfig,
-        customIndex:   0,
+        definitions:  make([]middlewarepipeline.HttpMiddlewareDefinition, 0),
+        staticConfig: staticConfig,
+        customIndex:  0,
         lastBuildReport: middlewarepipeline.NewMiddlewareBuildReport(
             "",
-            configuration.Kernel().Env(),
+            configuration.Kernel().Environment(),
             make([]string, 0),
             make([]*middlewarepipeline.InactiveMiddleware, 0),
             nil,

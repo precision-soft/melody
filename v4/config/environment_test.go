@@ -38,3 +38,17 @@ func TestEmptyStringIsPresentValue(t *testing.T) {
         t.Fatalf("expected empty string to be present value")
     }
 }
+
+func TestEnvironment_TheDirectoryNamesAreSpelledOut(t *testing.T) {
+    for constant, expected := range map[string]string{
+        PublicDirectoryKey:     "MELODY_PUBLIC_DIRECTORY",
+        KernelPublicDirectory:  "kernel.public_directory",
+        KernelProjectDirectory: "kernel.project_directory",
+        KernelLogsDirectory:    "kernel.logs_directory",
+        KernelCacheDirectory:   "kernel.cache_directory",
+    } {
+        if expected != constant {
+            t.Fatalf("expected %q, got %q", expected, constant)
+        }
+    }
+}

@@ -688,8 +688,8 @@ func TestResolveTemplate_ProjectDirectoryReferenceIsData(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
         parameters: ParameterMap{
-            KernelProjectDir:  projectDirectoryParameter,
-            "kernel.logs_dir": NewParameter("", "%kernel.project_dir%/var/log", "", true),
+            KernelProjectDirectory:  projectDirectoryParameter,
+            "kernel.logs_directory": NewParameter("", "%kernel.project_directory%/var/log", "", true),
         },
     }
 
@@ -698,8 +698,8 @@ func TestResolveTemplate_ProjectDirectoryReferenceIsData(t *testing.T) {
         t.Fatalf("expected the reference to resolve, got %v", resolveErr)
     }
 
-    if "/srv/app%1/var/log" != configuration.getInternalParameter("kernel.logs_dir").String() {
-        t.Fatalf("unexpected logs dir %q", configuration.getInternalParameter("kernel.logs_dir").String())
+    if "/srv/app%1/var/log" != configuration.getInternalParameter("kernel.logs_directory").String() {
+        t.Fatalf("unexpected logs dir %q", configuration.getInternalParameter("kernel.logs_directory").String())
     }
 
     if "/srv/app%1" != projectDirectoryParameter.String() {

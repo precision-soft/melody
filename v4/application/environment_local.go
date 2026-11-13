@@ -12,13 +12,13 @@ import (
 
 func newEnvironmentSource(
     projectDirectory string,
-    embeddedEnvFiles fs.FS,
+    embeddedEnvironmentFiles fs.FS,
 ) configcontract.EnvironmentSource {
-    _ = embeddedEnvFiles
+    _ = embeddedEnvironmentFiles
 
     fileSystem := os.DirFS(projectDirectory)
 
-    return config.NewEnvironmentSource(config.EnvironmentSourceConfig{FileSystem: fileSystem, BaseDir: "."})
+    return config.NewEnvironmentSource(config.EnvironmentSourceConfig{FileSystem: fileSystem, BaseDirectory: "."})
 }
 
 /* missingEnvironmentFileHint returns a remedy when the project directory holds no environment file the source would load, and the empty string otherwise. Boot appends it to a configuration-resolution failure, so "undefined environment key" names the real cause; a missing file is never a failure in itself. */
@@ -27,5 +27,5 @@ func missingEnvironmentFileHint(projectDirectory string) string {
         return ""
     }
 
-    return "; no .env, .env.local or .env." + config.EnvDevelopment + " file was found in " + projectDirectory + " — create one there, or build with -tags melody_env_embedded to embed it"
+    return "; no .env, .env.local or .env." + config.EnvironmentDevelopment + " file was found in " + projectDirectory + " — create one there, or build with -tags melody_env_embedded to embed it"
 }

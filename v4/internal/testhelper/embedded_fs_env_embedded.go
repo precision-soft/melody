@@ -7,7 +7,7 @@ import (
     "testing/fstest"
 )
 
-func NewEmbeddedEnvFs() fs.FS {
+func NewEmbeddedEnvironmentFs() fs.FS {
     return fstest.MapFS{
         ".env": &fstest.MapFile{Data: []byte("MELODY_ENV=dev\n")},
     }

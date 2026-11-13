@@ -89,7 +89,7 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
         username:               config.Username,
         password:               config.Password,
         requireTls:             config.RequireTls,
-        requireAuth:            config.RequireAuth,
+        requireAuthentication:  config.RequireAuthentication,
         implicitTls:            config.ImplicitTls,
         tlsConfig:              config.TlsConfig,
         dialTimeout:            dialTimeout.Value,
@@ -100,14 +100,14 @@ func NewSmtpTransport(config SmtpConfig) *SmtpTransport {
 }
 
 type SmtpConfig struct {
-    Address     string
-    Host        string
-    Username    string
-    Password    string
-    RequireTls  bool
-    RequireAuth bool
-    ImplicitTls bool
-    TlsConfig   *tls.Config
+    Address               string
+    Host                  string
+    Username              string
+    Password              string
+    RequireTls            bool
+    RequireAuthentication bool
+    ImplicitTls           bool
+    TlsConfig             *tls.Config
 
     /* LocalName is the client name sent in the hello; "localhost" when left out, the default net/smtp uses, and a name holding whitespace or a control character is refused. A relay that judges the hello wants the host's own name. */
     LocalName string
@@ -183,7 +183,7 @@ type SmtpTransport struct {
     username               string
     password               string
     requireTls             bool
-    requireAuth            bool
+    requireAuthentication  bool
     implicitTls            bool
     tlsConfig              *tls.Config
     dialTimeout            time.Duration
@@ -252,7 +252,7 @@ func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, 
         }
     }
 
-    if true == instance.requireAuth && "" == instance.username {
+    if true == instance.requireAuthentication && "" == instance.username {
         return exception.NewError(
             "smtp authentication is required but no username is configured",
             map[string]any{"address": instance.address},

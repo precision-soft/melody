@@ -154,7 +154,7 @@ func TestGenerate_BuildsPathsParametersAndSchemas(t *testing.T) {
     }
 
     bodySchema := createPath.Post.RequestBody.Content["application/json"].Schema
-    if nil == bodySchema || "#/components/schemas/createProductRequest" != bodySchema.Ref {
+    if nil == bodySchema || "#/components/schemas/createProductRequest" != bodySchema.Reference {
         t.Fatalf("expected the request body to reference the component schema, got: %+v", bodySchema)
     }
 
@@ -336,14 +336,14 @@ func TestGenerate_DiamondEmbeddedFieldDroppedAsAmbiguous(t *testing.T) {
     }
 }
 
-type nullableRefRequest struct {
+type nullableReferenceRequest struct {
     Audit *embeddedAudit `json:"audit,omitempty"`
 }
 
 func TestGenerate_NullablePointerToStructUsesAllOf(t *testing.T) {
     registry := NewRegistry()
     registry.Describe("nullable.create", Descriptor{
-        RequestType: TypeOf[nullableRefRequest](),
+        RequestType: TypeOf[nullableReferenceRequest](),
     })
 
     routes := []httpcontract.RouteDefinition{
@@ -352,20 +352,20 @@ func TestGenerate_NullablePointerToStructUsesAllOf(t *testing.T) {
 
     document := Generate(Info{Title: "Example", Version: "1.0.0"}, routes, registry)
 
-    auditField := document.Components.Schemas["nullableRefRequest"].Properties["audit"]
+    auditField := document.Components.Schemas["nullableReferenceRequest"].Properties["audit"]
     if nil == auditField {
         t.Fatalf("expected the audit property")
     }
 
-    if "" != auditField.Ref {
-        t.Fatalf("a nullable $ref must not set Ref directly (OAS 3.0 ignores $ref siblings): %+v", auditField)
+    if "" != auditField.Reference {
+        t.Fatalf("a nullable $ref must not set Reference directly (OAS 3.0 ignores $ref siblings): %+v", auditField)
     }
 
     if false == auditField.Nullable {
         t.Fatalf("expected the audit property to be nullable: %+v", auditField)
     }
 
-    if 1 != len(auditField.AllOf) || "#/components/schemas/embeddedAudit" != auditField.AllOf[0].Ref {
+    if 1 != len(auditField.AllOf) || "#/components/schemas/embeddedAudit" != auditField.AllOf[0].Reference {
         t.Fatalf("expected allOf wrapping the $ref, got: %+v", auditField)
     }
 }
@@ -833,11 +833,11 @@ func TestGenerate_ResponsesAreVisitedInStatusOrder(t *testing.T) {
             t.Fatalf("expected the GET operation")
         }
 
-        okRef := operation.Responses["200"].Content["application/json"].Schema.Ref
-        conflictRef := operation.Responses["409"].Content["application/json"].Schema.Ref
+        okReference := operation.Responses["200"].Content["application/json"].Schema.Reference
+        conflictReference := operation.Responses["409"].Content["application/json"].Schema.Reference
 
-        if okRef+"2" != conflictRef {
-            t.Fatalf("iteration %d: expected status 200 to name the component first, got %q and %q", iteration, okRef, conflictRef)
+        if okReference+"2" != conflictReference {
+            t.Fatalf("iteration %d: expected status 200 to name the component first, got %q and %q", iteration, okReference, conflictReference)
         }
     }
 }

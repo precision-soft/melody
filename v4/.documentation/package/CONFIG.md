@@ -41,7 +41,7 @@ A `#` opens a comment when it is preceded by a space byte or by nothing: a whole
 
 A quoted value is kept byte for byte, whatever its encoding: the file is read as bytes and never decoded, so a password saved as Latin-1 between quotes reaches its parameter with exactly the bytes the file holds. An unquoted value that is not valid UTF-8 is refused at boot, naming the key and the file and never the value: quote it. The value is judged as godotenv reads it: a comment after it is not judged, and a second statement on its line is judged as its own value.
 
-The environment name is resolved from `MELODY_ENV` inside the loaded `.env` values (the `.env.<name>` files it selects default to `dev` when it is missing or empty). See [`EnvKey`](../../config/environment.go) and [`EnvironmentSource`](../../config/environment_source.go). A process whose `MELODY_ENV` no artifact sets fails the boot, in every mode, naming the key: the default selects the `.env.dev` files and turns the debug tooling on, so a production process would run on the development files without a word. A process environment variable does not set it; a command run before any `.env` exists, in a build stage for instance, writes one first (`printf 'MELODY_ENV=prod\n' > .env`). An http process whose `.env` artifacts contributed no key at all is refused for that first.
+The environment name is resolved from `MELODY_ENV` inside the loaded `.env` values (the `.env.<name>` files it selects default to `dev` when it is missing or empty). See [`EnvironmentNameKey`](../../config/environment.go) and [`EnvironmentSource`](../../config/environment_source.go). A process whose `MELODY_ENV` no artifact sets fails the boot, in every mode, naming the key: the default selects the `.env.dev` files and turns the debug tooling on, so a production process would run on the development files without a word. A process environment variable does not set it; a command run before any `.env` exists, in a build stage for instance, writes one first (`printf 'MELODY_ENV=prod\n' > .env`). An http process whose `.env` artifacts contributed no key at all is refused for that first.
 
 **A present-but-empty `MELODY_ENV` selects the `.env.dev` files and then fails the boot.** The default above applies to the *file selection* — an empty value picks `dev` and `.env.dev` / `.env.dev.local` are loaded — but the parameter itself keeps the empty value it was given, and the kernel configuration refuses it: `environment may not be empty`, naming `MELODY_ENV`, `kernel.environment`, and the files the emptiness already selected. The two readers deliberately disagree, because an empty value is an accident of a rendered deployment template rather than a request to run in development, and the alternative — booting on the development files because a variable came out blank — is the failure mode worth refusing. Give it a value: a removed key is refused too, as a defaulted name, unless `.env.dev` sets it.
 
@@ -55,47 +55,47 @@ A present key with an empty string value is considered **present** (it is a vali
 
 All recognised `.env` keys and their defaults live in [`config/environment.go`](../../config/environment.go) and [`config/configuration_default.go`](../../config/configuration_default.go). The table holds the framework's keys; a module declares its own (see [Module keys](#module-keys)) and its README lists them:
 
-| Env key                                   | Parameter name                            | Default                                      |
-|-------------------------------------------|-------------------------------------------|----------------------------------------------|
-| `MELODY_ENV`                              | `kernel.environment`                      | none: a boot without it is refused           |
-| `MELODY_DEFAULT_MODE`                     | `kernel.default_mode`                     | `"http"`                                     |
-| `MELODY_PROCESS_ROLE`                     | `kernel.process_role`                     | `"all"`                                      |
-| `MELODY_HTTP_ADDRESS`                     | `kernel.http_address`                     | `":8080"`                                    |
-| `MELODY_HTTP_MAX_REQUEST_BODY_BYTES`      | `kernel.http.max_request_body_bytes`      | `1048576`                                    |
-| `MELODY_HTTP_SESSION_TTL`                 | `kernel.http.session_ttl`                 | `24h`                                        |
-| `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`                                         |
-| `MELODY_HTTP_SESSION_MAX_SESSIONS`        | `kernel.http.session_max_sessions`        | `100000`                                     |
-| `MELODY_HTTP_SHUTDOWN_TIMEOUT`            | `kernel.http.shutdown_timeout`            | `5s`                                         |
-| `MELODY_TEARDOWN_TIMEOUT`                 | `kernel.teardown_timeout`                 | `""` (the application's, then `10s`)         |
-| `MELODY_CONTAINER_CREATION_WAITERS`       | `kernel.container_creation_waiters`       | `""` (the application's, then `1024`)        |
-| `MELODY_CONTAINER_TEARDOWN_SEQUENTIAL`    | `kernel.container_teardown_sequential`    | `""` (the application's, then `false`)       |
-| `MELODY_HTTP_READ_TIMEOUT`                | `kernel.http.read_timeout`                | `""` (the application's, then `15s`)         |
-| `MELODY_HTTP_READ_HEADER_TIMEOUT`         | `kernel.http.read_header_timeout`         | `""` (the application's, then `5s`)          |
-| `MELODY_HTTP_WRITE_TIMEOUT`               | `kernel.http.write_timeout`               | `""` (the application's, then `30s`)         |
-| `MELODY_HTTP_IDLE_TIMEOUT`                | `kernel.http.idle_timeout`                | `""` (the application's, then `60s`)         |
-| `MELODY_HTTP_MAX_HEADER_BYTES`            | `kernel.http.max_header_bytes`            | `""` (the application's, then `1048576`)     |
-| `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER`     | `kernel.http.unavailable_retry_after`     | `""` (the application's, then `5s`)          |
-| `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE`     | `kernel.http.session_empty_on_outage`     | `""` (the application's, then `false`)       |
-| `MELODY_CLI_NAME`                         | `kernel.cli_name`                         | `"melody"`                                   |
-| `MELODY_CLI_DESCRIPTION`                  | `kernel.cli_description`                  | `""`                                         |
-| `MELODY_CLI_BOOT_WARNINGS_IGNORED`        | `kernel.cli_boot_warnings_ignored`        | `""`                                         |
-| `MELODY_CLI_BOOT_WARNINGS_DISABLED`       | `kernel.cli_boot_warnings_disabled`       | `""` (`false`)                               |
-| `MELODY_LOG_PATH`                         | `kernel.log_path`                         | `%kernel.logs_dir%/%kernel.environment%.log` |
-| `MELODY_LOG_LEVEL`                        | `kernel.log_level`                        | `"debug"`                                    |
-| `MELODY_DEFAULT_LOCALE`                   | `kernel.default_locale`                   | `"en"`                                       |
-| `MELODY_PUBLIC_DIR`                       | `kernel.public_dir`                       | `"public"` (set explicitly, it must exist)   |
-| `MELODY_STATIC_INDEX_FILE`                | `kernel.static.index_file`                | `"index.html"`                               |
-| `MELODY_STATIC_ENABLE_CACHE`              | `kernel.static.enable_cache`              | `true`                                       |
-| `MELODY_STATIC_CACHE_MAX_AGE`             | `kernel.static.cache_max_age`             | `3600`                                       |
-| `MELODY_STATIC_EXCLUDED_PATHS`            | `kernel.static.excluded_paths`            | `""`                                         |
+| Env key                                   | Parameter name                            | Default                                            |
+|-------------------------------------------|-------------------------------------------|----------------------------------------------------|
+| `MELODY_ENV`                              | `kernel.environment`                      | none: a boot without it is refused                 |
+| `MELODY_DEFAULT_MODE`                     | `kernel.default_mode`                     | `"http"`                                           |
+| `MELODY_PROCESS_ROLE`                     | `kernel.process_role`                     | `"all"`                                            |
+| `MELODY_HTTP_ADDRESS`                     | `kernel.http_address`                     | `":8080"`                                          |
+| `MELODY_HTTP_MAX_REQUEST_BODY_BYTES`      | `kernel.http.max_request_body_bytes`      | `1048576`                                          |
+| `MELODY_HTTP_SESSION_TTL`                 | `kernel.http.session_ttl`                 | `24h`                                              |
+| `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`                                               |
+| `MELODY_HTTP_SESSION_MAX_SESSIONS`        | `kernel.http.session_max_sessions`        | `100000`                                           |
+| `MELODY_HTTP_SHUTDOWN_TIMEOUT`            | `kernel.http.shutdown_timeout`            | `5s`                                               |
+| `MELODY_TEARDOWN_TIMEOUT`                 | `kernel.teardown_timeout`                 | `""` (the application's, then `10s`)               |
+| `MELODY_CONTAINER_CREATION_WAITERS`       | `kernel.container_creation_waiters`       | `""` (the application's, then `1024`)              |
+| `MELODY_CONTAINER_TEARDOWN_SEQUENTIAL`    | `kernel.container_teardown_sequential`    | `""` (the application's, then `false`)             |
+| `MELODY_HTTP_READ_TIMEOUT`                | `kernel.http.read_timeout`                | `""` (the application's, then `15s`)               |
+| `MELODY_HTTP_READ_HEADER_TIMEOUT`         | `kernel.http.read_header_timeout`         | `""` (the application's, then `5s`)                |
+| `MELODY_HTTP_WRITE_TIMEOUT`               | `kernel.http.write_timeout`               | `""` (the application's, then `30s`)               |
+| `MELODY_HTTP_IDLE_TIMEOUT`                | `kernel.http.idle_timeout`                | `""` (the application's, then `60s`)               |
+| `MELODY_HTTP_MAX_HEADER_BYTES`            | `kernel.http.max_header_bytes`            | `""` (the application's, then `1048576`)           |
+| `MELODY_HTTP_UNAVAILABLE_RETRY_AFTER`     | `kernel.http.unavailable_retry_after`     | `""` (the application's, then `5s`)                |
+| `MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE`     | `kernel.http.session_empty_on_outage`     | `""` (the application's, then `false`)             |
+| `MELODY_CLI_NAME`                         | `kernel.cli_name`                         | `"melody"`                                         |
+| `MELODY_CLI_DESCRIPTION`                  | `kernel.cli_description`                  | `""`                                               |
+| `MELODY_CLI_BOOT_WARNINGS_IGNORED`        | `kernel.cli_boot_warnings_ignored`        | `""`                                               |
+| `MELODY_CLI_BOOT_WARNINGS_DISABLED`       | `kernel.cli_boot_warnings_disabled`       | `""` (`false`)                                     |
+| `MELODY_LOG_PATH`                         | `kernel.log_path`                         | `%kernel.logs_directory%/%kernel.environment%.log` |
+| `MELODY_LOG_LEVEL`                        | `kernel.log_level`                        | `"debug"`                                          |
+| `MELODY_DEFAULT_LOCALE`                   | `kernel.default_locale`                   | `"en"`                                             |
+| `MELODY_PUBLIC_DIRECTORY`                 | `kernel.public_directory`                 | `"public"` (set explicitly, it must exist)         |
+| `MELODY_STATIC_INDEX_FILE`                | `kernel.static.index_file`                | `"index.html"`                                     |
+| `MELODY_STATIC_ENABLE_CACHE`              | `kernel.static.enable_cache`              | `true`                                             |
+| `MELODY_STATIC_CACHE_MAX_AGE`             | `kernel.static.cache_max_age`             | `3600`                                             |
+| `MELODY_STATIC_EXCLUDED_PATHS`            | `kernel.static.excluded_paths`            | `""`                                               |
 
 Project layout defaults that are not env-overridable:
 
-| Parameter name       | Default                            |
-|----------------------|------------------------------------|
-| `kernel.project_dir` | set from the application bootstrap |
-| `kernel.logs_dir`    | `%kernel.project_dir%/var/log`     |
-| `kernel.cache_dir`   | `%kernel.project_dir%/var/cache`   |
+| Parameter name             | Default                                |
+|----------------------------|----------------------------------------|
+| `kernel.project_directory` | set from the application bootstrap     |
+| `kernel.logs_directory`    | `%kernel.project_directory%/var/log`   |
+| `kernel.cache_directory`   | `%kernel.project_directory%/var/cache` |
 
 ### Limit keys
 
@@ -117,7 +117,7 @@ The `MELODY_` namespace belongs to the framework and the modules. Every loaded `
 
 ### Environment / mode / role constants
 
-- [`EnvDevelopment` (`"dev"`) / `EnvProduction` (`"prod"`)](../../config/environment.go)
+- [`EnvironmentDevelopment` (`"dev"`) / `EnvironmentProduction` (`"prod"`)](../../config/environment.go)
 - [`ModeHttp` (`"http"`) / `ModeCli` (`"cli"`)](../../config/environment.go)
 - [`RoleWeb` (`"web"`) / `RoleWorker` (`"worker"`) / `RoleAll` (`"all"`)](../../config/environment.go)
 
@@ -393,7 +393,7 @@ func example() configcontract.Configuration {
 - `ConfigMustFromContainer` is a fail-fast helper and will panic if `ServiceConfig` is missing or has an invalid type.
 - `Application.Boot()` calls `Resolve()` after all runtime parameters are registered via `Application.RegisterParameter`.
 - The boot `Resolve()` passes through any parameter whose value is not a string — which is what a runtime parameter registered with a native value is; a runtime parameter registered with a string template is resolved like any other, eagerly at registration once the boot resolution has run.
-- A template reference (e.g., `%kernel.project_dir%`, `%env(MELODY_ENV)%`) resolves only against a parameter whose value is a string; a parameter registered after construction is deferred by the constructor's tolerant pass and settled by the boot `Resolve()`, so the composition root may reference what it registers before boot. The deferral is **not** transparent while it lasts: between construction and boot every value accessor on a deferred parameter panics naming it, because the alternative is handing out the raw `%app.user%` template as though it were the value; `EnvironmentValue` alone answers the raw template, as it does for every parameter. Read such a parameter after `Resolve()` has run. A runtime registration made before boot is deferred only when its value carries a template construct — a doubled percent, an `%env(...)%`, a `%name%` reference or a name-shaped run a percent opened; a literal such as `Coverage 95%` is its own resolved value and reads at once.
+- A template reference (e.g., `%kernel.project_directory%`, `%env(MELODY_ENV)%`) resolves only against a parameter whose value is a string; a parameter registered after construction is deferred by the constructor's tolerant pass and settled by the boot `Resolve()`, so the composition root may reference what it registers before boot. The deferral is **not** transparent while it lasts: between construction and boot every value accessor on a deferred parameter panics naming it, because the alternative is handing out the raw `%app.user%` template as though it were the value; `EnvironmentValue` alone answers the raw template, as it does for every parameter. Read such a parameter after `Resolve()` has run. A runtime registration made before boot is deferred only when its value carries a template construct — a doubled percent, an `%env(...)%`, a `%name%` reference or a name-shaped run a percent opened; a literal such as `Coverage 95%` is its own resolved value and reads at once.
 
 ## Userland API
 
@@ -419,7 +419,7 @@ func example() configcontract.Configuration {
     - [`NewEnvironment(configcontract.EnvironmentSource) (*Environment, error)`](../../config/environment.go)
     - [`All() map[string]string` / `Get(key string) (string, bool)`](../../config/environment.go) — the loaded `.env` keys, and one of them with the presence flag that tells an empty value apart from an absent one
 - [`type EnvironmentSource`](../../config/environment_source.go)
-    - [`NewEnvironmentSource(EnvironmentSourceConfig) *EnvironmentSource`](../../config/environment_source.go) — `FileSystem` and `BaseDir`, the directory inside it, an empty one reading as its root
+    - [`NewEnvironmentSource(EnvironmentSourceConfig) *EnvironmentSource`](../../config/environment_source.go) — `FileSystem` and `BaseDirectory`, the directory inside it, an empty one reading as its root
 - [`type Parameter`](../../config/parameter.go), [`type ParameterMap`](../../config/parameter.go)
     - [`NewParameter(environmentKey string, environmentValue any, value any, isDefault bool) *Parameter`](../../config/parameter.go)
 - [`IntWithDefault(configParameter configcontract.Parameter, defaultValue int) int`](../../config/utility.go) — answers the default only for a parameter that is **absent**: one that exists and does not parse panics, because a mistyped value that quietly becomes a number nobody wrote is a misconfiguration running in disguise
@@ -432,15 +432,15 @@ func example() configcontract.Configuration {
 
 ### Environment variable keys (`config`)
 
-- [`EnvKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
+- [`EnvironmentNameKey`, `DefaultModeKey`, `ProcessRoleKey`, `HttpAddressKey`, `HttpMaxRequestBodyBytesKey`, `HttpSessionTtlKey`, `HttpSessionTombstoneRetentionKey`, `HttpSessionMaxSessionsKey`, `HttpShutdownTimeoutKey`, `HttpUnavailableRetryAfterKey`, `HttpSessionEmptyOnOutageKey`, `TeardownTimeoutKey`, `ScopeTeardownTimeoutKey`, `ContainerCreationWaitersKey`, `ContainerTeardownSequentialKey`, `CliNameKey`, `CliDescriptionKey`, `CliBootWarningsIgnoredKey`, `CliBootWarningsDisabledKey`, `LogPathKey`, `LogLevelKey`, `DefaultLocaleKey`, `PublicDirectoryKey`, `StaticIndexFileKey`, `StaticEnableCacheKey`, `StaticCacheMaxAgeKey`, `StaticExcludedPathsKey`](../../config/environment.go)
 
 ### Kernel parameter names (`config`)
 
-- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnv`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDir`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDir`, `KernelLogsDir`, `KernelCacheDir`](../../config/environment.go)
+- [`KernelDefaultMode`, `KernelProcessRole`, `KernelEnvironment`, `KernelHttpAddress`, `KernelHttpMaxRequestBodyBytes`, `KernelHttpSessionTtl`, `KernelHttpSessionTombstoneRetention`, `KernelHttpSessionMaxSessions`, `KernelHttpShutdownTimeout`, `KernelHttpUnavailableRetryAfter`, `KernelHttpSessionEmptyOnOutage`, `KernelTeardownTimeout`, `KernelScopeTeardownTimeout`, `KernelContainerCreationWaiters`, `KernelContainerTeardownSequential`, `KernelCliName`, `KernelCliDescription`, `KernelCliBootWarningsIgnored`, `KernelCliBootWarningsDisabled`, `KernelLogPath`, `KernelLogLevel`, `KernelDefaultLocale`, `KernelPublicDirectory`, `KernelStaticIndexFile`, `KernelStaticEnableCache`, `KernelStaticCacheMaxAge`, `KernelStaticExcludedPaths`, `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory`](../../config/environment.go)
 
 ### Environment / mode / role constants (`config`)
 
-- [`EnvDevelopment`, `EnvProduction`](../../config/environment.go)
+- [`EnvironmentDevelopment`, `EnvironmentProduction`](../../config/environment.go)
 - [`ModeHttp`, `ModeCli`](../../config/environment.go)
 - [`RoleWeb`, `RoleWorker`, `RoleAll`](../../config/environment.go)
 - [`RoleAllowsBackgroundWork(role string) bool`](../../config/process_role.go) — whether a process with this role should start outbox relays and message consumers. Melody itself gates nothing on the role: it is declared intent for application wiring to query

@@ -38,12 +38,12 @@ func TestMinLength_NonStringIsRejected(t *testing.T) {
 }
 
 /* a length is never negative, so a negative bound is a typo that would make the rule a silent no-op */
-func TestMinLength_WithParamsRefusesNegativeBound(t *testing.T) {
+func TestMinLength_WithParametersRefusesNegativeBound(t *testing.T) {
     constraint := NewMinLength(1)
 
-    configured, withParamsErr := constraint.WithParams(map[string]string{"value": "-1"})
+    configured, withParametersErr := constraint.WithParameters(map[string]string{"value": "-1"})
 
-    if nil == withParamsErr || nil != configured {
+    if nil == withParametersErr || nil != configured {
         t.Fatalf("expected a negative min length bound to be refused")
     }
 }

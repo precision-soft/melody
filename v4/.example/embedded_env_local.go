@@ -4,4 +4,4 @@ package main
 
 import "io/fs"
 
-var embeddedEnvFiles fs.FS = nil
+var embeddedEnvironmentFiles fs.FS = nil

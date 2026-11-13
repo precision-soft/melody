@@ -26,22 +26,22 @@ func TestConfigurationDefaultsAndTemplateResolution(t *testing.T) {
         t.Fatalf("new environment error: %v", err)
     }
 
-    projectDir := filepath.Join("/tmp", "melody")
-    configuration, err := NewConfiguration(environment, projectDir)
+    projectDirectory := filepath.Join("/tmp", "melody")
+    configuration, err := NewConfiguration(environment, projectDirectory)
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
 
-    if projectDir != configuration.Kernel().ProjectDir() {
+    if projectDirectory != configuration.Kernel().ProjectDirectory() {
         t.Fatalf("expected project dir to be resolved")
     }
 
-    expectedLogsDir := filepath.Join(projectDir, "var", "log")
-    if expectedLogsDir != configuration.MustGet(KernelLogsDir).String() {
+    expectedLogsDirectory := filepath.Join(projectDirectory, "var", "log")
+    if expectedLogsDirectory != configuration.MustGet(KernelLogsDirectory).String() {
         t.Fatalf("expected logs dir template to be resolved")
     }
 
-    expectedLogPath := filepath.Join(expectedLogsDir, EnvDevelopment+".log")
+    expectedLogPath := filepath.Join(expectedLogsDirectory, EnvironmentDevelopment+".log")
     if expectedLogPath != configuration.MustGet(KernelLogPath).String() {
         t.Fatalf("expected log path template to be resolved")
     }
@@ -54,8 +54,8 @@ func TestConfigurationDefaultsAndTemplateResolution(t *testing.T) {
 func TestConfigurationEnvironmentOverridesDefaultsWhenNonEmpty(t *testing.T) {
     source := &testEnvironmentSource{
         values: map[string]string{
-            EnvKey:         EnvProduction,
-            HttpAddressKey: ":9090",
+            EnvironmentNameKey: EnvironmentProduction,
+            HttpAddressKey:     ":9090",
         },
     }
 
@@ -69,7 +69,7 @@ func TestConfigurationEnvironmentOverridesDefaultsWhenNonEmpty(t *testing.T) {
         t.Fatalf("new configuration error: %v", err)
     }
 
-    if EnvProduction != configuration.Kernel().Env() {
+    if EnvironmentProduction != configuration.Kernel().Environment() {
         t.Fatalf("expected environment to be overridden")
     }
 
@@ -425,7 +425,7 @@ func TestTemplateReferencedNames_RejectsIdentifiersStartingWithDigit(t *testing.
 }
 
 func TestTemplateReferencedNames_AcceptsDottedAndSingleCharacterIdentifiers(t *testing.T) {
-    if false == slices.Equal([]string{"kernel.project_dir", "a"}, templateReferencedNames("%kernel.project_dir%%a%")) {
+    if false == slices.Equal([]string{"kernel.project_directory", "a"}, templateReferencedNames("%kernel.project_directory%%a%")) {
         t.Fatalf("expected pattern to accept dotted identifier")
     }
 }

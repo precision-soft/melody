@@ -20,7 +20,7 @@ import (
 func textNegotiatingRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
-    runtimeInstance := runtimeForEnvironment(t, melodyconfig.EnvProduction)
+    runtimeInstance := runtimeForEnvironment(t, melodyconfig.EnvironmentProduction)
 
     melodycontainer.MustRegister(
         runtimeInstance.Container().(melodycontainercontract.Registrar),

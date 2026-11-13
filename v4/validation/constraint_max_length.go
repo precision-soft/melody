@@ -67,13 +67,13 @@ func (instance *MaxLength) Max() int {
     return instance.max
 }
 
-func (instance *MaxLength) WithParams(params map[string]string) (validationcontract.Constraint, error) {
-    valueString, exists := params["value"]
+func (instance *MaxLength) WithParameters(parameters map[string]string) (validationcontract.Constraint, error) {
+    valueString, exists := parameters["value"]
     if false == exists {
         return nil, exception.NewError(
             "max length constraint requires a value parameter",
             exceptioncontract.Context{
-                "params": params,
+                "parameters": parameters,
             },
             nil,
         )

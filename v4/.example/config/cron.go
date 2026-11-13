@@ -42,7 +42,7 @@ func cronConfiguration(productUser string) *melodycron.Configuration {
             Timeout:  bound.Of(cronRatesRefreshTimeout),
         }).
         /* the worker's heartbeat: the process information every minute, so every evaluated minute dispatches at least one run and a worker that stopped dispatching is seen within the minute. It is the in-process runner's heartbeat. The generated crontab carries it too, appending some 0.86 MB a day to a log nothing rotates, and the manifest has its own touch heartbeat, so a deployment of the manifest drops this line or rotates its log. LogDisabled would only move the output into cron's mail, since the manifest sets no MAILTO. */
-        Schedule(melodycron.CommandName(cli.NewAppInfoCommand), melodycron.EntryConfig{
+        Schedule(melodycron.CommandName(cli.NewApplicationInformationCommand), melodycron.EntryConfig{
             Schedule: &melodycron.Schedule{Minute: "*", Hour: "*"},
         })
 }
@@ -53,6 +53,6 @@ func cronRunnerCommands() []clicontract.Command {
         cli.NewCatalogReportRefreshCommand(),
         cli.NewCurrencyRefreshRatesCommand(),
         cli.NewProductListCommand(),
-        cli.NewAppInfoCommand(),
+        cli.NewApplicationInformationCommand(),
     }
 }

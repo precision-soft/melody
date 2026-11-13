@@ -56,9 +56,9 @@ func TestEnvironmentKeys_DeclaresTheTenKeysAndTheirParameters(t *testing.T) {
         ruled     bool
     }{
         {KeyUser, ParameterUser, "cron.KeyDefaults.User", "", false},
-        {KeyLogsDirectory, ParameterLogsDirectory, "cron.KeyDefaults.LogsDirectory", "%kernel.logs_dir%/cron", false},
+        {KeyLogsDirectory, ParameterLogsDirectory, "cron.KeyDefaults.LogsDirectory", "%kernel.logs_directory%/cron", false},
         {KeyBinary, ParameterBinary, "cron.KeyDefaults.Binary", "", false},
-        {KeyDestinationFile, ParameterDestinationFile, "cron.KeyDefaults.DestinationFile", "%kernel.project_dir%/generated_conf/cron/crontab", false},
+        {KeyDestinationFile, ParameterDestinationFile, "cron.KeyDefaults.DestinationFile", "%kernel.project_directory%/generated_conf/cron/crontab", false},
         {KeyHeartbeatPath, ParameterHeartbeatPath, "cron.KeyDefaults.HeartbeatPath", "", false},
         {KeyHeartbeatEnabled, ParameterHeartbeatAutoEnabled, "cron.KeyDefaults.HeartbeatEnabled", "", true},
         {KeyTemplate, ParameterTemplate, "cron.KeyDefaults.Template", TemplateNameCrontab, false},
@@ -190,7 +190,7 @@ func TestEnvironmentKeys_TheGeneratorReadsTheDeclaredDefaults(t *testing.T) {
 func TestEnvironmentKeys_TheGeneratorRunsOverTheDeclaredKeys(t *testing.T) {
     configuration := newDeclaringConfiguration(t, map[string]string{KeyUser: "apache", KeyHeartbeatEnabled: "true"}, KeyDefaults{})
 
-    projectDirectory := configuration.Kernel().ProjectDir()
+    projectDirectory := configuration.Kernel().ProjectDirectory()
     commands := []clicontract.Command{newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"})}
 
     if _, runErr := runGenerateCommandWithConfiguration(t, commands, []string{"--binary", "/usr/local/bin/fakeapp"}, configuration); nil != runErr {
@@ -202,7 +202,7 @@ func TestEnvironmentKeys_TheGeneratorRunsOverTheDeclaredKeys(t *testing.T) {
         t.Fatalf("expected the crontab at the declared destination: %v", readErr)
     }
 
-    logsDirectory := filepath.Join(configuration.Kernel().LogsDir(), "cron")
+    logsDirectory := filepath.Join(configuration.Kernel().LogsDirectory(), "cron")
     for _, expected := range []string{"0 2 * * * apache /usr/local/bin/fakeapp backup:run", filepath.Join(logsDirectory, "backup-run.log"), "apache /bin/touch " + filepath.Join(logsDirectory, "heartbeat.crontab")} {
         if false == strings.Contains(string(content), expected) {
             t.Fatalf("expected %q in the crontab, got:\n%s", expected, content)

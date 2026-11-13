@@ -10,8 +10,8 @@ import (
 )
 
 type validationRule struct {
-    name   string
-    params map[string]string
+    name       string
+    parameters map[string]string
 }
 
 func splitByTopLevelComma(valueString string) []string {
@@ -343,9 +343,9 @@ func parseValidationTag(tag string) ([]validationRule, error) {
     return parsed.rules, parsed.err
 }
 
-func copyValidationRuleParams(params map[string]string) map[string]string {
-    copied := make(map[string]string, len(params))
-    for key, value := range params {
+func copyValidationRuleParameters(parameters map[string]string) map[string]string {
+    copied := make(map[string]string, len(parameters))
+    for key, value := range parameters {
         copied[key] = value
     }
 
@@ -363,7 +363,7 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
         }
 
         rule := validationRule{
-            params: make(map[string]string),
+            parameters: make(map[string]string),
         }
 
         openIndex := strings.Index(part, "(")
@@ -398,9 +398,9 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
                 )
             }
 
-            paramsString := strings.TrimSpace(part[openIndex+1 : lastIndex])
+            parametersString := strings.TrimSpace(part[openIndex+1 : lastIndex])
 
-            if false == hasBalancedBrackets(paramsString) {
+            if false == hasBalancedBrackets(parametersString) {
                 return nil, exception.NewError(
                     "invalid validation tag syntax",
                     exceptioncontract.Context{
@@ -414,9 +414,9 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
 
             rule.name = name
 
-            if "" != paramsString {
-                paramPairs := splitByCommaOutsideRegexMeta(paramsString)
-                for _, pair := range paramPairs {
+            if "" != parametersString {
+                parameterPairs := splitByCommaOutsideRegexMeta(parametersString)
+                for _, pair := range parameterPairs {
                     pair = strings.TrimSpace(pair)
                     if "" == pair {
                         continue
@@ -450,7 +450,7 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
                         )
                     }
 
-                    rule.params[key] = value
+                    rule.parameters[key] = value
                 }
             }
 
@@ -475,7 +475,7 @@ func parseValidationTagUncached(tag string) ([]validationRule, error) {
                 )
             }
 
-            rule.params["value"] = strings.TrimSpace(keyValue[1])
+            rule.parameters["value"] = strings.TrimSpace(keyValue[1])
 
             rules = append(rules, rule)
             continue

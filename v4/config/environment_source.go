@@ -24,20 +24,20 @@ const (
 
 /* EnvironmentSourceConfig names where the .env artifacts are read from: the filesystem, and the directory inside it, "" reading as its root. */
 type EnvironmentSourceConfig struct {
-    FileSystem fs.FS
-    BaseDir    string
+    FileSystem    fs.FS
+    BaseDirectory string
 }
 
 func NewEnvironmentSource(environmentSourceConfig EnvironmentSourceConfig) *EnvironmentSource {
     return &EnvironmentSource{
-        fileSystem: environmentSourceConfig.FileSystem,
-        baseDir:    environmentSourceConfig.BaseDir,
+        fileSystem:    environmentSourceConfig.FileSystem,
+        baseDirectory: environmentSourceConfig.BaseDirectory,
     }
 }
 
 type EnvironmentSource struct {
-    fileSystem fs.FS
-    baseDir    string
+    fileSystem    fs.FS
+    baseDirectory string
     /* the keys each .env value was assembled from through ${KEY}, filled by Load, so a secret marking reaches a value no template names; held behind a pointer so the source stays comparable */
     provenance *dotEnvProvenance
 }
@@ -64,7 +64,7 @@ func (instance *EnvironmentSource) Load() (map[string]string, error) {
         return nil, expandDotEnvReferencesErr
     }
 
-    refuseEnvironmentRenameErr := refuseEnvironmentRename(values, environmentName, assembledFrom[EnvKey])
+    refuseEnvironmentRenameErr := refuseEnvironmentRename(values, environmentName, assembledFrom[EnvironmentNameKey])
     if nil != refuseEnvironmentRenameErr {
         return nil, refuseEnvironmentRenameErr
     }
@@ -76,11 +76,11 @@ func (instance *EnvironmentSource) Load() (map[string]string, error) {
 
 /* refuseEnvironmentRename fails the load when .env.<name> or .env.<name>.local leaves MELODY_ENV naming another environment than the one that selected them: the process would run the selected files under another name, the production files as dev with the debug tooling on. The name is compared once the references are expanded, and an absent or empty value reads as dev, as it does when the files are selected. A name assembled from other keys is reported by those keys, never by the value they gave it. */
 func refuseEnvironmentRename(values map[string]string, environmentName string, assembledFrom []string) error {
-    overwritingName := strings.TrimSpace(values[EnvKey])
+    overwritingName := strings.TrimSpace(values[EnvironmentNameKey])
 
     finalName := overwritingName
     if "" == finalName {
-        finalName = EnvDevelopment
+        finalName = EnvironmentDevelopment
     }
 
     if environmentName == finalName {
@@ -88,7 +88,7 @@ func refuseEnvironmentRename(values map[string]string, environmentName string, a
     }
 
     context := exceptioncontract.Context{
-        "environmentKey":      EnvKey,
+        "environmentKey":      EnvironmentNameKey,
         "selectedEnvironment": environmentName,
         "environmentFiles":    []string{".env." + environmentName, ".env." + environmentName + ".local"},
     }
@@ -107,26 +107,26 @@ func refuseEnvironmentRename(values map[string]string, environmentName string, a
 }
 
 func (instance *EnvironmentSource) loadDotEnvFiles(values map[string]string) (string, error) {
-    dotEnvPath := path.Join(instance.baseDir, ".env")
+    dotEnvPath := path.Join(instance.baseDirectory, ".env")
     loadOptionalDotEnvFileErr := instance.loadOptionalDotEnvFile(values, dotEnvPath)
     if nil != loadOptionalDotEnvFileErr {
         return "", loadOptionalDotEnvFileErr
     }
 
-    dotEnvLocalPath := path.Join(instance.baseDir, ".env.local")
+    dotEnvLocalPath := path.Join(instance.baseDirectory, ".env.local")
     loadOptionalDotEnvFileErr = instance.loadOptionalDotEnvFile(values, dotEnvLocalPath)
     if nil != loadOptionalDotEnvFileErr {
         return "", loadOptionalDotEnvFileErr
     }
 
-    _, exists := values[EnvKey]
+    _, exists := values[EnvironmentNameKey]
     if false == exists {
-        return EnvDevelopment, nil
+        return EnvironmentDevelopment, nil
     }
 
     /* the environment name picks the next two files to load, so a reference inside it is resolved now, against the two files already read; the whole set is resolved again once every file is merged */
     environmentValue, expandErr := expandDotEnvValue(
-        EnvKey,
+        EnvironmentNameKey,
         values,
         make(map[string]string, 1),
         make(map[string]bool, 1),
@@ -143,7 +143,7 @@ func (instance *EnvironmentSource) loadDotEnvFiles(values map[string]string) (st
 
     environmentName := strings.TrimSpace(environmentValue)
     if "" == environmentName {
-        return EnvDevelopment, nil
+        return EnvironmentDevelopment, nil
     }
 
     return environmentName, nil
@@ -155,13 +155,13 @@ func (instance *EnvironmentSource) loadDotEnvEnvironmentFiles(
 ) error {
     baseName := ".env." + environmentName
 
-    environmentPath := path.Join(instance.baseDir, baseName)
+    environmentPath := path.Join(instance.baseDirectory, baseName)
     loadOptionalDotEnvFileErr := instance.loadOptionalDotEnvFile(values, environmentPath)
     if nil != loadOptionalDotEnvFileErr {
         return loadOptionalDotEnvFileErr
     }
 
-    environmentLocalPath := path.Join(instance.baseDir, baseName+".local")
+    environmentLocalPath := path.Join(instance.baseDirectory, baseName+".local")
     loadOptionalDotEnvFileErr = instance.loadOptionalDotEnvFile(values, environmentLocalPath)
     if nil != loadOptionalDotEnvFileErr {
         return loadOptionalDotEnvFileErr

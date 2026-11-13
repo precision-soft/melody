@@ -40,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Breaking** — `cache/backend.go`: `BackendConfig.CommandTimeout` bounds every operation dispatched without a caller context, each round trip of a `Clear` on its own, 1s when left out, at least 1ms, unlimited refused, where a backend built without `WithCommandTimeout` ran those operations unbounded.
 - **Breaking** — `cache/backend.go`: the eleven context-first methods of `Backend` end in `Context`, `GetContext`, `SetContext`, `DeleteContext`, `HasContext`, `ClearContext`, `ClearByPrefixContext`, `ManyContext`, `SetMultipleContext`, `DeleteMultipleContext`, `IncrementContext` and `DecrementContext`, where they ended in `Ctx`; nothing else changes.
 - **Breaking** — `client_config.go`: `ClientConfig.ConnWriteTimeout` is renamed `ClientConfig.ConnectionWriteTimeout`; the value still reaches the library's `ConnWriteTimeout`.
+- **Breaking** — `client_config.go`: `ClientConfig.SelectDb` is renamed `ClientConfig.SelectDatabase`, and the connection's journal context names it `selectDatabase`; the value still reaches the library's `SelectDB`.
 
 ### Removed
 

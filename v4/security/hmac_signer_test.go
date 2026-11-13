@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
@@ -14,41 +15,50 @@ func hmacSignerProbeSecrets() *StaticHmacSecretProvider {
     return NewStaticHmacSecretProvider(HmacKeyRing{
         CurrentKeyId: "key-current",
         Keys: map[string]HmacKey{
-            "key-current": {App: "billing", Secret: []byte("current-shared-secret-value-0001")},
+            "key-current": {Application: "billing", Secret: []byte("current-shared-secret-value-0001")},
         },
     })
 }
 
 func TestNewHmacEnvelopeSigner_RefusesASignerThatCanNotIdentifyItself(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "", Secrets: hmacSignerProbeSecrets()})
-    }, "hmac signer app is empty")
+        _ = NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "", Secrets: hmacSignerProbeSecrets()})
+    }, "hmac signer application is empty")
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "billing", Secrets: nil})
+        _ = NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "billing", Secrets: nil})
     }, "hmac signer secrets provider is nil")
 
     var typedNilSecrets HmacSecretProvider = (*StaticHmacSecretProvider)(nil)
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "billing", Secrets: typedNilSecrets})
+        _ = NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "billing", Secrets: typedNilSecrets})
     }, "hmac signer secrets provider is nil")
 }
 
-/* the verifier refuses an envelope whose key id is not bound to its claimed app, so a signer whose current key belongs to someone else would emit envelopes that are silently rejected on the other side, one request at a time, with nothing on this end to say why */
-func TestNewHmacEnvelopeSigner_RefusesACurrentKeyIssuedToAnotherApp(t *testing.T) {
+/* the verifier refuses an envelope whose key id is not bound to its claimed application, so a signer whose current key belongs to someone else would emit envelopes that are silently rejected on the other side, one request at a time, with nothing on this end to say why */
+func TestNewHmacEnvelopeSigner_RefusesACurrentKeyIssuedToAnotherApplication(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "crm", Secrets: hmacSignerProbeSecrets()})
-    }, "hmac signer current key id is not bound to the signer app")
+        _ = NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "crm", Secrets: hmacSignerProbeSecrets()})
+    }, "hmac signer current key id is not bound to the signer application")
+
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || "crm" != refusal.Context()["signerApplication"] || "billing" != refusal.Context()["boundApplication"] {
+            t.Fatalf("expected the refusal to name both applications, got %v", refusal)
+        }
+    }()
+
+    _ = NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "crm", Secrets: hmacSignerProbeSecrets()})
 }
 
 func TestNewHmacEnvelopeSigner_FallsBackToTheDefaultHeaderName(t *testing.T) {
-    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "billing", Secrets: hmacSignerProbeSecrets()})
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "billing", Secrets: hmacSignerProbeSecrets()})
 
     if DefaultHmacHeaderName != signer.HeaderName() {
         t.Fatalf("expected the default header name, got %q", signer.HeaderName())
     }
 
-    named := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "billing", Secrets: hmacSignerProbeSecrets(), HeaderName: "X-Own-Auth"})
+    named := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "billing", Secrets: hmacSignerProbeSecrets(), HeaderName: "X-Own-Auth"})
     if "X-Own-Auth" != named.HeaderName() {
         t.Fatalf("expected the configured header name, got %q", named.HeaderName())
     }
@@ -56,9 +66,9 @@ func TestNewHmacEnvelopeSigner_FallsBackToTheDefaultHeaderName(t *testing.T) {
 
 func TestHmacEnvelopeSigner_AnAbsentTtlSignsForThirtySeconds(t *testing.T) {
     signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{
-        App:     "billing",
-        Secrets: hmacSignerProbeSecrets(),
-        Clock:   clock.NewFrozenClock(time.Unix(1000, 0)),
+        Application: "billing",
+        Secrets:     hmacSignerProbeSecrets(),
+        Clock:       clock.NewFrozenClock(time.Unix(1000, 0)),
     })
 
     headerValue, signErr := signer.Sign("GET", "/orders", nil, nil)
@@ -79,7 +89,7 @@ func TestHmacEnvelopeSigner_AnAbsentTtlSignsForThirtySeconds(t *testing.T) {
 func TestHmacEnvelopeSigner_RefusesATtlUnderASecondAndUnlimited(t *testing.T) {
     for _, ttl := range []bound.Duration{bound.Of(500 * time.Millisecond), bound.Of(-time.Minute), bound.UnlimitedDuration()} {
         expectPanicNamingField(t, "HmacEnvelopeSignerConfig.Ttl", func() {
-            NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "billing", Secrets: hmacSignerProbeSecrets(), Ttl: ttl})
+            NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "billing", Secrets: hmacSignerProbeSecrets(), Ttl: ttl})
         })
     }
 }
@@ -87,10 +97,10 @@ func TestHmacEnvelopeSigner_RefusesATtlUnderASecondAndUnlimited(t *testing.T) {
 /* the path argument may arrive with a query string attached; the envelope signs the two separately because the callee matches them against the request's path and its raw query, which are separate there too */
 func TestHmacEnvelopeSigner_SignSplitsTheQueryOffThePath(t *testing.T) {
     signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{
-        App:      "billing",
-        Secrets:  hmacSignerProbeSecrets(),
-        Audience: "warehouse",
-        Clock:    clock.NewFrozenClock(time.Unix(1000, 0)),
+        Application: "billing",
+        Secrets:     hmacSignerProbeSecrets(),
+        Audience:    "warehouse",
+        Clock:       clock.NewFrozenClock(time.Unix(1000, 0)),
     })
 
     headerValue, signErr := signer.Sign("POST", "/orders?page=2&size=10", []byte("payload"), nil)
@@ -127,9 +137,9 @@ func TestHmacEnvelopeSigner_SignSplitsTheQueryOffThePath(t *testing.T) {
 /* the nonce is what makes an envelope single-use, so two envelopes signed by the same signer at the same frozen instant must still differ */
 func TestHmacEnvelopeSigner_SignMintsAFreshNonceEachTime(t *testing.T) {
     signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{
-        App:     "billing",
-        Secrets: hmacSignerProbeSecrets(),
-        Clock:   clock.NewFrozenClock(time.Unix(1000, 0)),
+        Application: "billing",
+        Secrets:     hmacSignerProbeSecrets(),
+        Clock:       clock.NewFrozenClock(time.Unix(1000, 0)),
     })
 
     firstValue, _ := signer.Sign("GET", "/orders", nil, nil)

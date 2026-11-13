@@ -6,11 +6,11 @@ import (
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
-/* the key-id↔app binding is only sound when each app's secret material is distinct, so the provider refuses the same secret bytes under key ids belonging to different apps — otherwise a holder could sign under a sibling app's key id and defeat the binding. */
-func TestStaticHmacSecretProvider_RejectsSecretReusedAcrossApps(t *testing.T) {
+/* the key-id↔application binding is only sound when each application's secret material is distinct, so the provider refuses the same secret bytes under key ids belonging to different applications — otherwise a holder could sign under a sibling application's key id and defeat the binding. */
+func TestStaticHmacSecretProvider_RejectsSecretReusedAcrossApplications(t *testing.T) {
     defer func() {
         if recovered := recover(); nil == recovered {
-            t.Fatal("expected a panic when the same secret is registered for two different apps")
+            t.Fatal("expected a panic when the same secret is registered for two different applications")
         }
     }()
 
@@ -18,29 +18,29 @@ func TestStaticHmacSecretProvider_RejectsSecretReusedAcrossApps(t *testing.T) {
     NewStaticHmacSecretProvider(HmacKeyRing{
         CurrentKeyId: "key-a",
         Keys: map[string]HmacKey{
-            "key-a": {App: "app-a", Secret: shared},
-            "key-b": {App: "app-b", Secret: shared},
+            "key-a": {Application: "app-a", Secret: shared},
+            "key-b": {Application: "app-b", Secret: shared},
         },
     })
 }
 
-/* positive control: the same app may legitimately own several key ids (rotation overlap), even reusing material is fine within one app — only cross-app reuse is rejected. */
-func TestStaticHmacSecretProvider_AllowsMultipleKeysForOneApp(t *testing.T) {
+/* positive control: the same application may legitimately own several key ids (rotation overlap), even reusing material is fine within one application — only cross-app reuse is rejected. */
+func TestStaticHmacSecretProvider_AllowsMultipleKeysForOneApplication(t *testing.T) {
     provider := NewStaticHmacSecretProvider(HmacKeyRing{
         CurrentKeyId: "key-current",
         Keys: map[string]HmacKey{
-            "key-current":  {App: "wms-service", Secret: []byte("current-shared-secret-value-0001")},
-            "key-previous": {App: "wms-service", Secret: []byte("previous-shared-secret-value-002")},
+            "key-current":  {Application: "wms-service", Secret: []byte("current-shared-secret-value-0001")},
+            "key-previous": {Application: "wms-service", Secret: []byte("previous-shared-secret-value-002")},
         },
     })
 
-    if app, bound := provider.AppForKeyId("key-previous"); false == bound || "wms-service" != app {
-        t.Fatalf("expected key-previous bound to wms-service, got %q bound=%v", app, bound)
+    if application, bound := provider.ApplicationForKeyId("key-previous"); false == bound || "wms-service" != application {
+        t.Fatalf("expected key-previous bound to wms-service, got %q bound=%v", application, bound)
     }
 }
 
 func TestNewStaticHmacSecretProvider_RefusesAConfigurationThatCanNotSign(t *testing.T) {
-    validKeys := map[string]HmacKey{"key-a": {App: "app-a", Secret: []byte("secret-value-of-thirty-two-bytes")}}
+    validKeys := map[string]HmacKey{"key-a": {Application: "app-a", Secret: []byte("secret-value-of-thirty-two-bytes")}}
 
     testhelper.AssertPanicsWithError(t, func() {
         _ = NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "", Keys: validKeys})
@@ -58,20 +58,20 @@ func TestNewStaticHmacSecretProvider_RefusesAConfigurationThatCanNotSign(t *test
 
 func TestNewStaticHmacSecretProvider_RefusesAKeyThatCanNotIdentifyItsOwner(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"": {App: "app-a", Secret: []byte("secret-value-of-thirty-two-bytes")}}})
+        _ = NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"": {Application: "app-a", Secret: []byte("secret-value-of-thirty-two-bytes")}}})
     }, "hmac key id is empty")
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"key-a": {App: "", Secret: []byte("secret-value-of-thirty-two-bytes")}}})
-    }, "hmac key has no app")
+        _ = NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"key-a": {Application: "", Secret: []byte("secret-value-of-thirty-two-bytes")}}})
+    }, "hmac key has no application")
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"key-a": {App: "app-a", Secret: nil}}})
+        _ = NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"key-a": {Application: "app-a", Secret: nil}}})
     }, "hmac secret is empty")
 }
 
 func TestStaticHmacSecretProvider_AnswersFalseForAnUnknownKeyId(t *testing.T) {
-    provider := NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"key-a": {App: "app-a", Secret: []byte("secret-value-of-thirty-two-bytes")}}})
+    provider := NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"key-a": {Application: "app-a", Secret: []byte("secret-value-of-thirty-two-bytes")}}})
 
     if "key-a" != provider.CurrentKeyId() {
         t.Fatalf("expected the current key id to be reported, got %q", provider.CurrentKeyId())
@@ -81,15 +81,15 @@ func TestStaticHmacSecretProvider_AnswersFalseForAnUnknownKeyId(t *testing.T) {
         t.Fatalf("expected an unknown key id to resolve to no secret, got %v", secret)
     }
 
-    if app, exists := provider.AppForKeyId("key-absent"); true == exists || "" != app {
-        t.Fatalf("expected an unknown key id to be bound to no app, got %q", app)
+    if application, exists := provider.ApplicationForKeyId("key-absent"); true == exists || "" != application {
+        t.Fatalf("expected an unknown key id to be bound to no application, got %q", application)
     }
 }
 
-/* the secret is the whole credential: a caller that kept the slice it handed in, or that mutates the slice handed back, rewrites what every envelope of that app verifies against */
+/* the secret is the whole credential: a caller that kept the slice it handed in, or that mutates the slice handed back, rewrites what every envelope of that application verifies against */
 func TestStaticHmacSecretProvider_OwnsItsSecretBytes(t *testing.T) {
     callerSecret := []byte("secret-value-of-thirty-two-bytes")
-    provider := NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"key-a": {App: "app-a", Secret: callerSecret}}})
+    provider := NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"key-a": {Application: "app-a", Secret: callerSecret}}})
 
     callerSecret[0] = 'X'
 
@@ -108,7 +108,7 @@ func TestStaticHmacSecretProvider_OwnsItsSecretBytes(t *testing.T) {
 
 func TestNewStaticHmacSecretProvider_NamesTheKeyRingFieldItRefuses(t *testing.T) {
     expectPanicNamingField(t, "HmacKeyRing.CurrentKeyId", func() {
-        NewStaticHmacSecretProvider(HmacKeyRing{Keys: map[string]HmacKey{"k": {App: "billing", Secret: []byte("secret-padded-to-the-hs256-minimum")}}})
+        NewStaticHmacSecretProvider(HmacKeyRing{Keys: map[string]HmacKey{"k": {Application: "billing", Secret: []byte("secret-padded-to-the-hs256-minimum")}}})
     })
 
     expectPanicNamingField(t, "HmacKeyRing.Keys", func() {
@@ -116,6 +116,6 @@ func TestNewStaticHmacSecretProvider_NamesTheKeyRingFieldItRefuses(t *testing.T)
     })
 
     expectPanicNamingField(t, "HmacKeyRing.CurrentKeyId", func() {
-        NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "missing", Keys: map[string]HmacKey{"k": {App: "billing", Secret: []byte("secret-padded-to-the-hs256-minimum")}}})
+        NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "missing", Keys: map[string]HmacKey{"k": {Application: "billing", Secret: []byte("secret-padded-to-the-hs256-minimum")}}})
     })
 }

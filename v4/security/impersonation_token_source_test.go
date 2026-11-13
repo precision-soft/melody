@@ -192,7 +192,7 @@ func TestImpersonation_PropagatesImpersonatorBetweenServicesOverHmac(t *testing.
         t.Fatal("expected the impersonation token to carry an originating actor")
     }
 
-    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{App: "wms-service", Secrets: hmacTestSecrets()})
+    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "wms-service", Secrets: hmacTestSecrets()})
     headerValue, signErr := signer.Sign("POST", "/internal/orders", nil, actor)
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)

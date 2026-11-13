@@ -4,7 +4,7 @@ package testhelper
 
 import "io/fs"
 
-func NewEmbeddedEnvFs() fs.FS {
+func NewEmbeddedEnvironmentFs() fs.FS {
     return nil
 }
 

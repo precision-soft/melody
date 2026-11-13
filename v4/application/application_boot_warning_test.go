@@ -290,7 +290,7 @@ const bootCliCodeProbeMarker = "MELODY_TEST_BOOT_CLI_CODE_PROBE"
 func TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs(t *testing.T) {
     if probe := os.Getenv(bootCliCodeProbeMarker); "" != probe {
         values := map[string]string{
-            config.EnvKey:                    config.EnvDevelopment,
+            config.EnvironmentNameKey:        config.EnvironmentDevelopment,
             config.HttpAddressKey:            "127.0.0.1:34524",
             config.CliBootWarningsIgnoredKey: map[string]string{"moduleCode": "test.module.hazard", "unknownCode": "test.nobody.writes"}[probe],
         }
@@ -391,7 +391,7 @@ func TestRunCli_WritesTheIgnoredProcessVariableAndTheUnmatchedSecretMarkUnderThe
 func TestBoot_CollectsTheIgnoredProcessVariableAndTheUnmatchedSecretMark(t *testing.T) {
     t.Setenv(config.HttpAddressKey, "127.0.0.1:1")
 
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
     applicationInstance.MarkParameterSecret("app.misspelled")
 
     applicationInstance.Boot()
@@ -416,7 +416,7 @@ const bootWarningsBeforeExitProbeMarker = "MELODY_TEST_BOOT_WARNINGS_BEFORE_EXIT
 func TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord(t *testing.T) {
     if probe := os.Getenv(bootWarningsBeforeExitProbeMarker); "" != probe {
         projectDirectory, disabled, _ := strings.Cut(probe, "|")
-        values := map[string]string{config.EnvKey: config.EnvDevelopment, config.HttpAddressKey: "127.0.0.1:34525"}
+        values := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment, config.HttpAddressKey: "127.0.0.1:34525"}
         if "disabled" == disabled {
             values[config.CliBootWarningsDisabledKey] = "true"
         }
@@ -511,7 +511,7 @@ const runRefusalBootWarningsProbeMarker = "MELODY_TEST_RUN_REFUSAL_BOOT_WARNINGS
 func TestRun_AnHttpRunRefusedBeforeItsWriterWritesTheBootWarningsBeforeItsExitRecord(t *testing.T) {
     if projectDirectory := os.Getenv(runRefusalBootWarningsProbeMarker); "" != projectDirectory {
         environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{
-            config.EnvKey:                  config.EnvDevelopment,
+            config.EnvironmentNameKey:      config.EnvironmentDevelopment,
             config.HttpAddressKey:          "127.0.0.1:34526",
             config.ScopeTeardownTimeoutKey: "1h",
         }})

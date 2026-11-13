@@ -54,7 +54,7 @@ func (instance dynamicRouteModule) RegisterHttpRoutes(kernelInstance kernelcontr
 
 /* the root's /users/me must not be dispatched as the module's /users/:id with id="me": the router breaks a priority tie on registration order */
 func TestBoot_TheRootsRoutesRegisterBeforeAnyModules(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterHttpRoute(nethttp.MethodGet, "/users/me", applicationBootRouteHandler())
     applicationInstance.RegisterModule(dynamicRouteModule{fakeModule{name: "dynamic-route"}})
@@ -107,7 +107,7 @@ func TestRun_MarksTheConfigurationServingBeforeItDispatches(t *testing.T) {
     os.Args = []string{"probe", "probe:serving"}
     defer func() { os.Args = originalArguments }()
 
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     probe := &servingProbeApplicationCommand{}
     applicationInstance.RegisterCliCommand(probe)
@@ -176,7 +176,7 @@ func TestRun_MarksTheOpenApiRegistryServingBeforeItDispatches(t *testing.T) {
     os.Args = []string{"probe", "probe:openapi-serving"}
     defer func() { os.Args = originalArguments }()
 
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     registryProbe := &openApiRegistryServingProbe{}
     applicationInstance.RegisterService(
@@ -210,7 +210,7 @@ func TestRun_LeavesARegistryWithoutTheMarkerAloneAndDispatches(t *testing.T) {
     os.Args = []string{"probe", "probe:serving"}
     defer func() { os.Args = originalArguments }()
 
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterService(
         openapi.ServiceOpenApiRegistry,
@@ -235,7 +235,7 @@ func TestRun_LeavesARegistryWhoseProviderFailsAloneAndDispatches(t *testing.T) {
     os.Args = []string{"probe", "probe:serving"}
     defer func() { os.Args = originalArguments }()
 
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.RegisterService(
         openapi.ServiceOpenApiRegistry,
@@ -566,7 +566,7 @@ func TestRefuseHttpBootWithoutEnvironment_RefusesAnHttpBootOnZeroKeys(t *testing
 }
 
 func TestRefuseHttpBootWithoutEnvironment_AcceptsAnHttpBootWithAnyKey(t *testing.T) {
-    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{config.EnvKey: "dev"})
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeHttp, map[string]string{config.EnvironmentNameKey: "dev"})
 
     applicationInstance.refuseHttpBootWithoutEnvironment()
 }
@@ -595,15 +595,15 @@ func TestRefuseBootWithDefaultedEnvironment_RefusesEveryModeNamingTheKey(t *test
             t.Fatalf("expected the %s boot refused on the defaulted name, got %v", mode, refusal)
         }
 
-        if config.EnvKey != refusal.Context()["environmentKey"] {
-            t.Fatalf("expected the %s refusal to name %s, got %v", mode, config.EnvKey, refusal.Context())
+        if config.EnvironmentNameKey != refusal.Context()["environmentKey"] {
+            t.Fatalf("expected the %s refusal to name %s, got %v", mode, config.EnvironmentNameKey, refusal.Context())
         }
     }
 }
 
 func TestRefuseBootWithDefaultedEnvironment_AdmitsAnExplicitDevInEveryMode(t *testing.T) {
     for _, mode := range []string{config.ModeHttp, config.ModeCli} {
-        applicationInstance := newEnvironmentRefusalApplication(t, mode, map[string]string{config.EnvKey: config.EnvDevelopment})
+        applicationInstance := newEnvironmentRefusalApplication(t, mode, map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment})
 
         applicationInstance.refuseBootWithDefaultedEnvironment()
     }
@@ -733,7 +733,7 @@ func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *
     projectDirectory := os.Getenv(runPanicPathProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvKey: config.EnvDevelopment}})
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -777,7 +777,7 @@ func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *
         t.Fatalf("expected exit code 1, got %d with output: %s", exitError.ExitCode(), string(output))
     }
 
-    logPath := filepath.Join(childProjectDirectory, "var", "log", config.EnvDevelopment+".log")
+    logPath := filepath.Join(childProjectDirectory, "var", "log", config.EnvironmentDevelopment+".log")
 
     logContent, readErr := os.ReadFile(logPath)
     if nil != readErr {
@@ -854,7 +854,7 @@ func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
     projectDirectory := os.Getenv(bootPanicTeardownProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvKey: config.EnvDevelopment}})
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -923,7 +923,7 @@ func TestBoot_RefusesADeclaredTeardownDependencyNamingNoService(t *testing.T) {
     projectDirectory := os.Getenv(bootDanglingDeclarationProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvKey: config.EnvDevelopment}})
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -976,7 +976,7 @@ func TestBoot_RefusesALazyLockerOverAContainerWithNoLocker(t *testing.T) {
     projectDirectory := os.Getenv(bootDanglingLazyHandleProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvKey: config.EnvDevelopment}})
+        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -1040,7 +1040,7 @@ func bootHttpRefusalChildValues() map[string]map[string]string {
 
 func TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrACliBootWarningKey(t *testing.T) {
     if probe := os.Getenv(bootHttpRefusalProbeMarker); "" != probe {
-        values := map[string]string{config.EnvKey: config.EnvDevelopment, config.HttpAddressKey: "127.0.0.1:34523"}
+        values := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment, config.HttpAddressKey: "127.0.0.1:34523"}
         for key, value := range bootHttpRefusalChildValues()[probe] {
             values[key] = value
         }
@@ -1145,7 +1145,7 @@ func TestResolveExitLogger_AnswersTheEmergencyLoggerForATypedNilKernel(t *testin
 }
 
 func TestResolveExitLogger_FallsBackToTheConfiguredDestinationWhenTheContainerCannotAnswer(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     /* deliberately unbooted: the logger service does not exist yet, which is the window every boot failure dies in */
     logger := applicationInstance.resolveExitLogger()
@@ -1158,7 +1158,7 @@ func TestResolveExitLogger_FallsBackToTheConfiguredDestinationWhenTheContainerCa
     logger.Emergency(marker, nil)
 
     logPath := resolveRuntimePath(
-        applicationInstance.configuration.Kernel().ProjectDir(),
+        applicationInstance.configuration.Kernel().ProjectDirectory(),
         applicationInstance.configuration.Kernel().LogPath(),
     )
 
@@ -1183,7 +1183,7 @@ func TestResolveExitLogger_AnswersTheEmergencyLoggerWhenNothingIsConfigured(t *t
 }
 
 func TestBoot_RegistersTheKernelListenersInEveryProcessShape(t *testing.T) {
-    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvFiles: testhelper.NewEmbeddedEnvFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     applicationInstance.Boot()
 
@@ -1468,7 +1468,7 @@ func TestRun_ClosesIndependentDependentsTogetherUnderTheConfiguredBudget(t *test
     }
     t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
 
-    app := NewApplication(context.Background(), ApplicationConfig{EnvFiles: fstest.MapFS{".env": &fstest.MapFile{Data: environment}}, PublicFiles: testhelper.NewEmbeddedStaticFs()})
+    app := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: fstest.MapFS{".env": &fstest.MapFile{Data: environment}}, PublicFiles: testhelper.NewEmbeddedStaticFs()})
     command := &servingProbeApplicationCommand{}
     app.RegisterCliCommand(command)
 

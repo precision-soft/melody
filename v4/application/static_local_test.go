@@ -85,7 +85,7 @@ func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredW
     publicDirectory := newStaticExclusionTestPublicDirectory(t)
 
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{
-        config.PublicDirKey:           publicDirectory,
+        config.PublicDirectoryKey:     publicDirectory,
         config.StaticExcludedPathsKey: "/private",
         config.StaticEnableCacheKey:   "false",
     })
@@ -142,7 +142,7 @@ func TestNewStaticFileServerConfig_PathOutsideTheExclusionIsStillServedFromDisk(
     publicDirectory := newStaticExclusionTestPublicDirectory(t)
 
     configuration := newStaticExclusionTestConfiguration(t, map[string]string{
-        config.PublicDirKey:           publicDirectory,
+        config.PublicDirectoryKey:     publicDirectory,
         config.StaticExcludedPathsKey: "/private",
         config.StaticEnableCacheKey:   "false",
     })
@@ -224,7 +224,7 @@ func TestNewStaticFileServerConfig_CarriesTheCacheKeys(t *testing.T) {
     }
 }
 
-func TestNewStaticFileServerConfig_RefusesAnExplicitPublicDirThatIsNotADirectory(t *testing.T) {
+func TestNewStaticFileServerConfig_RefusesAnExplicitPublicDirectoryThatIsNotADirectory(t *testing.T) {
     projectDirectory := t.TempDir()
     filePath := filepath.Join(projectDirectory, "assets.txt")
     if writeErr := os.WriteFile(filePath, []byte("not a directory"), 0o640); nil != writeErr {
@@ -232,21 +232,21 @@ func TestNewStaticFileServerConfig_RefusesAnExplicitPublicDirThatIsNotADirectory
     }
 
     cases := map[string]struct {
-        publicDir string
-        message   string
-        resolved  string
+        publicDirectory string
+        message         string
+        resolved        string
     }{
-        "relative and missing": {"missing-assets", "the public directory does not exist", filepath.Join(projectDirectory, "missing-assets")},
-        "absolute and missing": {filepath.Join(projectDirectory, "absent"), "the public directory does not exist", filepath.Join(projectDirectory, "absent")},
-        "a file":               {"assets.txt", "the public directory is a file", filePath},
-        "the default name set": {"public", "the public directory does not exist", filepath.Join(projectDirectory, "public")},
+        "relative and missing":  {"missing-assets", "the public directory does not exist", filepath.Join(projectDirectory, "missing-assets")},
+        "absolute and missing":  {filepath.Join(projectDirectory, "absent"), "the public directory does not exist", filepath.Join(projectDirectory, "absent")},
+        "a file":                {"assets.txt", "the public directory is a file", filePath},
+        "the default name set":  {"public", "the public directory does not exist", filepath.Join(projectDirectory, "public")},
         "blank, read as public": {"  ", "the public directory does not exist", filepath.Join(projectDirectory, "public")},
-        "under a file":         {"assets.txt/inner", "the public directory cannot be read", filepath.Join(projectDirectory, "assets.txt", "inner")},
+        "under a file":          {"assets.txt/inner", "the public directory cannot be read", filepath.Join(projectDirectory, "assets.txt", "inner")},
     }
 
     for name, testCase := range cases {
         t.Run(name, func(t *testing.T) {
-            configuration := newStaticPublicDirTestConfiguration(t, projectDirectory, map[string]string{config.PublicDirKey: testCase.publicDir})
+            configuration := newStaticPublicDirectoryTestConfiguration(t, projectDirectory, map[string]string{config.PublicDirectoryKey: testCase.publicDirectory})
 
             defer func() {
                 refusal, isRefusal := recover().(*exception.Error)
@@ -258,8 +258,8 @@ func TestNewStaticFileServerConfig_RefusesAnExplicitPublicDirThatIsNotADirectory
                     t.Fatalf("expected the message %q, got %q", testCase.message, refusal.Message())
                 }
 
-                if config.PublicDirKey != refusal.Context()["environmentKey"] || testCase.resolved != refusal.Context()["publicDir"] {
-                    t.Fatalf("expected the refusal to name %s and %s, got %v", config.PublicDirKey, testCase.resolved, refusal.Context())
+                if config.PublicDirectoryKey != refusal.Context()["environmentKey"] || testCase.resolved != refusal.Context()["publicDirectory"] {
+                    t.Fatalf("expected the refusal to name %s and %s, got %v", config.PublicDirectoryKey, testCase.resolved, refusal.Context())
                 }
             }()
 
@@ -268,25 +268,25 @@ func TestNewStaticFileServerConfig_RefusesAnExplicitPublicDirThatIsNotADirectory
     }
 }
 
-func TestNewStaticFileServerConfig_AdmitsTheDefaultPublicDirAbsentAndAnExistingOne(t *testing.T) {
+func TestNewStaticFileServerConfig_AdmitsTheDefaultPublicDirectoryAbsentAndAnExistingOne(t *testing.T) {
     projectDirectory := t.TempDir()
 
-    defaulted := newStaticFileServerConfig(nil, newStaticPublicDirTestConfiguration(t, projectDirectory, map[string]string{}))
-    if "public" != defaulted.PublicDir {
-        t.Fatalf("expected the default public directory admitted while absent, got %q", defaulted.PublicDir)
+    defaulted := newStaticFileServerConfig(nil, newStaticPublicDirectoryTestConfiguration(t, projectDirectory, map[string]string{}))
+    if "public" != defaulted.PublicDirectory {
+        t.Fatalf("expected the default public directory admitted while absent, got %q", defaulted.PublicDirectory)
     }
 
     if mkdirErr := os.Mkdir(filepath.Join(projectDirectory, "assets"), 0o750); nil != mkdirErr {
         t.Fatalf("unexpected make directory error: %v", mkdirErr)
     }
 
-    explicit := newStaticFileServerConfig(nil, newStaticPublicDirTestConfiguration(t, projectDirectory, map[string]string{config.PublicDirKey: "assets"}))
-    if "assets" != explicit.PublicDir {
-        t.Fatalf("expected the existing explicit directory admitted, got %q", explicit.PublicDir)
+    explicit := newStaticFileServerConfig(nil, newStaticPublicDirectoryTestConfiguration(t, projectDirectory, map[string]string{config.PublicDirectoryKey: "assets"}))
+    if "assets" != explicit.PublicDirectory {
+        t.Fatalf("expected the existing explicit directory admitted, got %q", explicit.PublicDirectory)
     }
 }
 
-func newStaticPublicDirTestConfiguration(t *testing.T, projectDirectory string, values map[string]string) configcontract.Configuration {
+func newStaticPublicDirectoryTestConfiguration(t *testing.T, projectDirectory string, values map[string]string) configcontract.Configuration {
     t.Helper()
 
     environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})

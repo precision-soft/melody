@@ -307,7 +307,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         configuration := config.ConfigMustFromContainer(request.Context(), serviceContainer)
         defaultLocale := configuration.Http().DefaultLocale()
-        debugMode := config.EnvDevelopment == configuration.Kernel().Env()
+        debugMode := config.EnvironmentDevelopment == configuration.Kernel().Environment()
 
         /* the cap is at least one byte and never unlimited, so every body is bounded */
         if nil != request.Body {

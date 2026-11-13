@@ -24,12 +24,12 @@ const hmacTokenSourceName = "hmacInternal"
 /* HmacVerifyBodyBeforeNonceAttribute is the request attribute (settable per route or, on demand, through SetHmacVerifyBodyBeforeNonce) that overrides the source's VerifyBodyBeforeNonce default for a single request. Its value must be a bool; a value of any other type is ignored and the source's default applies. */
 const HmacVerifyBodyBeforeNonceAttribute = "security.hmac.verifyBodyBeforeNonce"
 
-/* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme. Secrets resolves the shared key (supporting rotation through multiple resolvable key ids); Apps maps a verified caller to the roles its service principal receives; NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); MaxFutureExpiry bounds how far ahead an envelope's expiry may sit. */
+/* HmacTokenSourceConfig configures the verifying side of the internal-auth scheme. Secrets resolves the shared key (supporting rotation through multiple resolvable key ids); Applications maps a verified caller to the roles its service principal receives; NonceGuard rejects replayed envelopes (defaults to an in-process guard — supply a shared one for multi-instance deployments); MaxFutureExpiry bounds how far ahead an envelope's expiry may sit. */
 type HmacTokenSourceConfig struct {
-    Secrets    HmacSecretProvider
-    Apps       HmacAppRegistry
-    NonceGuard securitycontract.NonceGuard
-    HeaderName string
+    Secrets      HmacSecretProvider
+    Applications HmacApplicationRegistry
+    NonceGuard   securitycontract.NonceGuard
+    HeaderName   string
 
     /* Leeway tolerates clock skew on the issued and expiry checks, and the issued check one second more, the resolution of the IssuedAt claim: 5s when left out, bound.Of(time.Duration(0)) for strict, at most 5m, unlimited refused. The nonce guard remembers a nonce for the leeway too, since an envelope past its expiry by less than the leeway is still honoured and must still be refused as a replay. */
     Leeway bound.Duration
@@ -67,8 +67,8 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
         exception.Panic(exception.NewError("hmac token source secrets provider is nil", nil, nil))
     }
 
-    if true == internal.IsNilInterface(config.Apps) {
-        exception.Panic(exception.NewError("hmac token source app registry is nil", nil, nil))
+    if true == internal.IsNilInterface(config.Applications) {
+        exception.Panic(exception.NewError("hmac token source application registry is nil", nil, nil))
     }
 
     headerName := config.HeaderName
@@ -100,7 +100,7 @@ func NewHmacTokenSource(config HmacTokenSourceConfig) *HmacTokenSource {
 
     return &HmacTokenSource{
         secrets:               config.Secrets,
-        apps:                  config.Apps,
+        applications:          config.Applications,
         nonceGuard:            nonceGuard,
         headerName:            headerName,
         leeway:                leeway.Value,
@@ -119,7 +119,7 @@ func SetHmacVerifyBodyBeforeNonce(request httpcontract.Request, value bool) {
 
 type HmacTokenSource struct {
     secrets               HmacSecretProvider
-    apps                  HmacAppRegistry
+    applications          HmacApplicationRegistry
     nonceGuard            securitycontract.NonceGuard
     headerName            string
     leeway                time.Duration
@@ -148,24 +148,24 @@ func (instance *HmacTokenSource) Resolve(
         return instance.reject(runtimeInstance, decodeErr)
     }
 
-    /* the key id must be issued to the app the envelope claims, or any holder of a valid secret could impersonate another app */
-    boundApp, keyBound := instance.secrets.AppForKeyId(keyId)
-    if false == keyBound || boundApp != envelope.App {
+    /* the key id must be issued to the application the envelope claims, or any holder of a valid secret could impersonate another application */
+    boundApplication, keyBound := instance.secrets.ApplicationForKeyId(keyId)
+    if false == keyBound || boundApplication != envelope.Application {
         return instance.reject(
             runtimeInstance,
             exception.NewError(
-                "internal-auth key id is not authorized for the claimed app",
-                map[string]any{"keyId": internal.BoundDiagnosticText(keyId), "claimedApp": internal.BoundDiagnosticText(envelope.App), "boundApp": boundApp},
+                "internal-auth key id is not authorized for the claimed application",
+                map[string]any{"keyId": internal.BoundDiagnosticText(keyId), "claimedApplication": internal.BoundDiagnosticText(envelope.Application), "boundApplication": boundApplication},
                 nil,
             ),
         )
     }
 
-    roles, appKnown := instance.apps.RolesForApp(envelope.App)
-    if false == appKnown {
+    roles, applicationKnown := instance.applications.RolesForApplication(envelope.Application)
+    if false == applicationKnown {
         return instance.reject(
             runtimeInstance,
-            exception.NewError("internal-auth app is not known", map[string]any{"app": internal.BoundDiagnosticText(envelope.App)}, nil),
+            exception.NewError("internal-auth application is not known", map[string]any{"application": internal.BoundDiagnosticText(envelope.Application)}, nil),
         )
     }
 
@@ -190,7 +190,7 @@ func (instance *HmacTokenSource) Resolve(
         actor = rebuilt
     }
 
-    return NewAuthenticatedToken(envelope.App, roles, actor), nil
+    return NewAuthenticatedToken(envelope.Application, roles, actor), nil
 }
 
 func (instance *HmacTokenSource) verifyAudience(envelope hmacEnvelope) error {

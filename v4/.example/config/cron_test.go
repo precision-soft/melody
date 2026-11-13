@@ -18,10 +18,10 @@ import (
    moved on. */
 func TestCronConfiguration_SchedulesEachCommandAtItsOwnCadenceUnderTheCatalogueAccount(t *testing.T) {
     expected := map[string]string{
-        melodycron.CommandName(cli.NewCatalogReportRefreshCommand): "0 * user=catalogue args=",
-        melodycron.CommandName(cli.NewProductListCommand):          "0 */6 user=catalogue args=--limit=2",
-        melodycron.CommandName(cli.NewCurrencyRefreshRatesCommand): "*/30 * user=catalogue args=",
-        melodycron.CommandName(cli.NewAppInfoCommand):              "* * user= args=",
+        melodycron.CommandName(cli.NewCatalogReportRefreshCommand):   "0 * user=catalogue args=",
+        melodycron.CommandName(cli.NewProductListCommand):            "0 */6 user=catalogue args=--limit=2",
+        melodycron.CommandName(cli.NewCurrencyRefreshRatesCommand):   "*/30 * user=catalogue args=",
+        melodycron.CommandName(cli.NewApplicationInformationCommand): "* * user= args=",
     }
 
     entryList := cronConfiguration("catalogue").Entries()

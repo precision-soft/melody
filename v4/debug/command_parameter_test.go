@@ -63,7 +63,7 @@ type parameterCommandTestEnvelope struct {
             Name     string `json:"name"`
             IsSecret bool   `json:"isSecret"`
         } `json:"items"`
-        Total  int `json:"total"`
+        Total  int         `json:"total"`
         Limit  bound.Count `json:"limit"`
         Offset bound.Count `json:"offset"`
     } `json:"data"`
@@ -85,7 +85,7 @@ func newParameterTestRuntime(t *testing.T) *testRuntime {
     environment, environmentErr := config.NewEnvironment(
         &parameterTestEnvironmentSource{
             value: map[string]string{
-                config.EnvKey: config.EnvDevelopment,
+                config.EnvironmentNameKey: config.EnvironmentDevelopment,
             },
         },
     )
