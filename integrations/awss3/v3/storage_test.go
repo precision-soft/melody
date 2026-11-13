@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     "io"
+    "math"
     "net/http"
     "net/http/httptest"
     "os"
@@ -165,9 +166,12 @@ func TestBoundedPutReader_StripsReaderAtAndCapsWhatMinioCanStore(t *testing.T) {
         t.Fatalf("expected the bounded reader to cap minio's read at the declared %d bytes, got %d", declared, overConsumed)
     }
 
-    streamed := strings.NewReader("whole")
-    if streamed != boundedPutReader(streamed, -1) {
-        t.Fatalf("expected a negative size to stream the original reader unwrapped")
+    streamed, isUnknownSizeReader := boundedPutReader(strings.NewReader("whole"), -1).(*unknownSizePutReader)
+    if false == isUnknownSizeReader || unknownSizePutLimit != streamed.remaining {
+        t.Fatalf("expected a negative size bounded at %d, got %+v", int64(unknownSizePutLimit), streamed)
+    }
+    if 10000*putSpoolLimit != unknownSizePutLimit {
+        t.Fatalf("expected the limit at ten thousand parts of the part size, got %d", int64(unknownSizePutLimit))
     }
 }
 
@@ -1118,4 +1122,208 @@ func TestSizeCheckedReader_ReturnsOnACyclicChainFromTheBody(t *testing.T) {
             t.Error("expected the body's failure")
         }
     })
+}
+
+func TestPutObjectOptions_NamesThePartSizeOfABodyOfUnknownSize(t *testing.T) {
+    for _, size := range []int64{-1, -2, math.MinInt64} {
+        if unknown := putObjectOptions(size, "text/plain"); putSpoolLimit != unknown.PartSize || "text/plain" != unknown.ContentType {
+            t.Fatalf("expected a body of size %d put in parts of %d, got %d (%q)", size, putSpoolLimit, unknown.PartSize, unknown.ContentType)
+        }
+    }
+
+    for _, size := range []int64{0, 1, putSpoolLimit, 10 * putSpoolLimit} {
+        if known := putObjectOptions(size, "application/pdf"); 0 != known.PartSize || "application/pdf" != known.ContentType {
+            t.Fatalf("expected the part size of a body of %d bytes left to minio, got %d (%q)", size, known.PartSize, known.ContentType)
+        }
+    }
+}
+
+type multipartPutServer struct {
+    server       *httptest.Server
+    mutex        sync.Mutex
+    partSizeList []int
+    singlePuts   int
+    completed    int
+    aborted      int
+}
+
+func newMultipartPutServer(t *testing.T) *multipartPutServer {
+    recorder := &multipartPutServer{}
+
+    recorder.server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+        body, _ := io.ReadAll(request.Body)
+        if true == strings.HasPrefix(request.Header.Get("X-Amz-Content-Sha256"), "STREAMING-") {
+            body = []byte(decodeChunkedPutBody(string(body)))
+        }
+
+        query := request.URL.Query()
+        _, initiates := query["uploads"]
+
+        switch {
+        case http.MethodPost == request.Method && true == initiates:
+            writer.Header().Set("Content-Type", "application/xml")
+            _, _ = io.WriteString(writer, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"+
+                "<InitiateMultipartUploadResult><Bucket>melody-test</Bucket><Key>uploads/unknown.bin</Key>"+
+                "<UploadId>upload-id-7</UploadId></InitiateMultipartUploadResult>")
+
+        case http.MethodPut == request.Method && "" != query.Get("partNumber"):
+            recorder.mutex.Lock()
+            recorder.partSizeList = append(recorder.partSizeList, len(body))
+            recorder.mutex.Unlock()
+
+            writer.Header().Set("ETag", "\"9a0364b9e99bb480dd25e1f0284c8555\"")
+            writer.WriteHeader(http.StatusOK)
+
+        case http.MethodDelete == request.Method && "" != query.Get("uploadId"):
+            recorder.mutex.Lock()
+            recorder.aborted++
+            recorder.mutex.Unlock()
+
+            writer.WriteHeader(http.StatusNoContent)
+
+        case http.MethodPost == request.Method && "" != query.Get("uploadId"):
+            recorder.mutex.Lock()
+            recorder.completed++
+            recorder.mutex.Unlock()
+
+            writer.Header().Set("Content-Type", "application/xml")
+            _, _ = io.WriteString(writer, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"+
+                "<CompleteMultipartUploadResult><Bucket>melody-test</Bucket><Key>uploads/unknown.bin</Key>"+
+                "<ETag>\"9a0364b9e99bb480dd25e1f0284c8555-2\"</ETag></CompleteMultipartUploadResult>")
+
+        case http.MethodPut == request.Method:
+            recorder.mutex.Lock()
+            recorder.singlePuts++
+            recorder.mutex.Unlock()
+
+            writer.Header().Set("ETag", "\"9a0364b9e99bb480dd25e1f0284c8555\"")
+            writer.WriteHeader(http.StatusOK)
+
+        default:
+            writer.WriteHeader(http.StatusOK)
+        }
+    }))
+
+    t.Cleanup(recorder.server.Close)
+
+    return recorder
+}
+
+func (instance *multipartPutServer) newClient(t *testing.T) *minio.Client {
+    client, clientErr := NewClient(Config{
+        Endpoint:  strings.TrimPrefix(instance.server.URL, "http://"),
+        AccessKey: "test",
+        SecretKey: "test",
+        Secure:    false,
+        Region:    "us-east-1",
+    })
+    if nil != clientErr {
+        t.Fatalf("client: %s", clientErr.Error())
+    }
+
+    return client
+}
+
+func TestPut_UploadsABodyOfUnknownSizeInPartsOfTheNamedSize(t *testing.T) {
+    server := newMultipartPutServer(t)
+    store := NewStorage(server.newClient(t), "melody-test")
+    body := &sequentialReader{reader: strings.NewReader(strings.Repeat("x", putSpoolLimit+1))}
+
+    if putErr := store.Put(newRuntime(), "uploads/unknown.bin", body, -1, storagecontract.PutOptions{}); nil != putErr {
+        t.Fatalf("put: %s", putErr.Error())
+    }
+
+    server.mutex.Lock()
+    defer server.mutex.Unlock()
+
+    if 0 != server.singlePuts || 2 != len(server.partSizeList) || putSpoolLimit != server.partSizeList[0] || 1 != server.partSizeList[1] {
+        t.Fatalf("expected two parts of %d and 1 bytes, got single puts %d, parts %v", putSpoolLimit, server.singlePuts, server.partSizeList)
+    }
+}
+
+func TestUnknownSizePutReader_YieldsABodyUpToTheLimitAndRefusesALongerOneBeforeItsLastByte(t *testing.T) {
+    for _, row := range []struct {
+        label  string
+        reader io.Reader
+        whole  string
+    }{
+        {label: "shorter than the limit", reader: strings.NewReader("abc"), whole: "abc"},
+        {label: "exactly the limit", reader: strings.NewReader("abcdefgh"), whole: "abcdefgh"},
+        {label: "exactly the limit with zero length reads", reader: &stutteringReader{remaining: "abcdefgh"}, whole: "abcdefgh"},
+    } {
+        read, readErr := io.ReadAll(newUnknownSizePutReader(row.reader, 8))
+        if nil != readErr || row.whole != string(read) {
+            t.Fatalf("%s: expected %q whole, got %q (%v)", row.label, row.whole, read, readErr)
+        }
+    }
+
+    for _, row := range []struct {
+        label  string
+        reader io.Reader
+    }{
+        {label: "one byte longer", reader: strings.NewReader("abcdefghi")},
+        {label: "one byte longer with zero length reads", reader: &stutteringReader{remaining: "abcdefghi"}},
+    } {
+        longer := newUnknownSizePutReader(row.reader, 8)
+        buffer := make([]byte, 8)
+
+        filled := 0
+        var readErr error
+        for 8 > filled && nil == readErr {
+            var read int
+            read, readErr = longer.Read(buffer[filled:])
+            filled += read
+        }
+
+        if false == exception.ChainIs(readErr, errUnknownSizePutTooLong) || 8 == filled {
+            t.Fatalf("%s: expected the refusal before the buffer filled, got %d bytes and %v", row.label, filled, readErr)
+        }
+
+        if _, againErr := longer.Read(buffer); false == exception.ChainIs(againErr, errUnknownSizePutTooLong) {
+            t.Fatalf("%s: expected the refusal to stay, got %v", row.label, againErr)
+        }
+    }
+}
+
+func TestUnknownSizePutReader_ALongerBodyFailsTheMultipartUploadInsteadOfCompletingItCut(t *testing.T) {
+    server := newMultipartPutServer(t)
+    client := server.newClient(t)
+
+    body := newUnknownSizePutReader(&sequentialReader{reader: strings.NewReader(strings.Repeat("x", 2*putSpoolLimit+1))}, 2*putSpoolLimit)
+
+    _, putErr := client.PutObject(context.Background(), "melody-test", "uploads/unknown.bin", body, -1, putObjectOptions(-1, ""))
+    if false == exception.ChainIs(putErr, errUnknownSizePutTooLong) {
+        t.Fatalf("expected the put refused past the limit, got %v", putErr)
+    }
+
+    server.mutex.Lock()
+    defer server.mutex.Unlock()
+
+    if 0 != server.completed || 1 != server.aborted {
+        t.Fatalf("expected the upload aborted and never completed, got %d completed and %d aborted", server.completed, server.aborted)
+    }
+}
+
+func TestPutFailedError_NamesTheRefusalOfABodyOfUnknownSizeLongerThanTheLimit(t *testing.T) {
+    server := newMultipartPutServer(t)
+    client := server.newClient(t)
+
+    body := newUnknownSizePutReader(&sequentialReader{reader: strings.NewReader(strings.Repeat("x", 2*putSpoolLimit+1))}, 2*putSpoolLimit)
+
+    _, putErr := client.PutObject(context.Background(), "melody-test", "uploads/unknown.bin", body, -1, putObjectOptions(-1, ""))
+
+    var refused *exception.Error
+    if false == errors.As(putFailedError("uploads/unknown.bin", "melody-test", putErr), &refused) {
+        t.Fatalf("expected an exception error, got %v", putErr)
+    }
+
+    if "object storage put of unknown size is longer than the limit" != refused.Message() || "uploads/unknown.bin" != refused.Context()["key"] || "melody-test" != refused.Context()["bucket"] || int64(unknownSizePutLimit) != refused.Context()["limit"] {
+        t.Fatalf("expected the refusal named with its key, bucket and limit, got %q %v", refused.Message(), refused.Context())
+    }
+
+    other := errors.New("connection reset")
+    var failed *exception.Error
+    if false == errors.As(putFailedError("uploads/unknown.bin", "melody-test", other), &failed) || "object storage put failed" != failed.Message() || false == errors.Is(failed, other) {
+        t.Fatalf("expected any other failure wrapped as a failed put, got %v", failed)
+    }
 }

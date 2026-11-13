@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.7] - 2026-11-13 - Audit Before Image Holds the Primary Key
+
+### Fixed
+
+- `audit/track.go`: `Tracker.Update`, and `Tracker.Delete` under `CaptureDeleteBeforeImage`, read the stored row into a model holding the primary key alone, where a json map column kept the passed model's keys and an update that only added a key was recorded with an empty change set.
+- **Behavioural change**: `audit` — `ChangeSet` leaves out a `scanonly` field, a relation whatever the position of its `rel` or `m2m` option, and an embedded field bun leaves out of the row; the `Tracker`'s before image holds the primary key alone, so a select or scan hook of the model reads only the key there. See `UPGRADE.md`.
+
 ## [v3.6.6] - 2026-11-12 - Unknown Seal Format Refused
 
 ### Security
@@ -252,7 +259,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.6...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.7...HEAD
+
+[v3.6.7]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.6...integrations/bunorm/v3.6.7
 
 [v3.6.6]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.5...integrations/bunorm/v3.6.6
 

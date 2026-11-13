@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.1.3] - 2026-11-13 - Bounded Put of Unknown Size
+
+### Fixed
+
+- **Behavioural change**: `storage.go` — `Put` of unknown size, a negative `size`, goes up in parts of 16 MiB, where the client allocated about 528 MiB for each such put, and is bounded at ten thousand parts, 156.25 GiB: a longer body fails with `object storage put of unknown size is longer than the limit` and leaves no upload behind, where the client took up to 5 TiB. See `UPGRADE.md`.
+
 ## [v3.1.2] - 2026-11-07 - Dependency Advisories
 
 ### Security
@@ -71,7 +77,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `storage.go` — object keys are now normalized the same way the core `LocalStorage` backend normalizes them (backslash to forward slash, clean `.`/`..` segments, strip the leading slash) before every `Put`/`Get`/`Delete`/`Exists`/`PresignedUrl` call. Keys were passed to S3 verbatim while `LocalStorage` cleaned them, so the same key string addressed different objects depending on the backend, and `PresignedUrl("a/../f.txt")` signed a path the browser collapses before sending (yielding `SignatureDoesNotMatch`). An empty or `.`/`..`-only key is now rejected, matching the `LocalStorage` contract.
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.2...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.3...HEAD
+
+[v3.1.3]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.2...integrations/awss3/v3.1.3
 
 [v3.1.2]: https://github.com/precision-soft/melody/compare/integrations/awss3/v3.1.1...integrations/awss3/v3.1.2
 

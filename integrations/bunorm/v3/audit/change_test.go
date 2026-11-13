@@ -7,6 +7,7 @@ import (
     "os"
     "os/exec"
     "reflect"
+    "strconv"
     "strings"
     "testing"
     "time"
@@ -66,7 +67,299 @@ func TestChangeSet_UpdateCapturesOnlyChangedFields(t *testing.T) {
     }
 }
 
-/* an empty change-set must always serialise as [], never as the JSON literal null: the delete path already writes [] for the same "nothing recorded" meaning, and a consumer running jsonb_array_length(changes) over the trail errors or reads 1 on null, which is also indistinguishable from a genuinely absent change-set. */
+func TestChangeSet_LeavesAScanOnlyFieldOut(t *testing.T) {
+    type bareOption struct {
+        Id    int64  `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64  `bun:",scanonly"`
+    }
+
+    type namedOption struct {
+        Id    int64  `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64  `bun:"total,scanonly"`
+    }
+
+    type optionAfterAnother struct {
+        Id    int64  `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64  `bun:"total,nullzero,scanonly"`
+    }
+
+    type optionBeforeAnother struct {
+        Id    int64  `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64  `bun:"total,scanonly,nullzero"`
+    }
+
+    for _, row := range []struct {
+        label  string
+        before any
+        after  any
+    }{
+        {label: "bare option", before: bareOption{Id: 1, Name: "old"}, after: bareOption{Id: 1, Name: "new", Total: 7}},
+        {label: "option after a column name", before: namedOption{Id: 1, Name: "old"}, after: namedOption{Id: 1, Name: "new", Total: 7}},
+        {label: "option after another option", before: optionAfterAnother{Id: 1, Name: "old"}, after: optionAfterAnother{Id: 1, Name: "new", Total: 7}},
+        {label: "option before another option", before: optionBeforeAnother{Id: 1, Name: "old"}, after: optionBeforeAnother{Id: 1, Name: "new", Total: 7}},
+    } {
+        changes := ChangeSet(row.before, row.after)
+
+        if _, found := findChange(changes, "Total"); true == found {
+            t.Fatalf("%s: expected the scan-only field left out, got %+v", row.label, changes)
+        }
+
+        if _, found := findChange(changes, "total"); true == found {
+            t.Fatalf("%s: expected the scan-only field left out, got %+v", row.label, changes)
+        }
+
+        if _, found := findChange(changes, "name"); false == found {
+            t.Fatalf("%s: expected the column change kept, got %+v", row.label, changes)
+        }
+    }
+}
+
+type shadowedAuditFields struct {
+    Name string `bun:"name"`
+    Note string `bun:"note"`
+}
+
+type shadowingRow struct {
+    bun.BaseModel `bun:"table:shadowing_rows"`
+    shadowedAuditFields
+    Id   int64  `bun:"id,pk"`
+    Name string `bun:"name"`
+}
+
+type deeplyShadowedAuditFields struct {
+    shadowedAuditFields
+}
+
+type deeplyShadowingRow struct {
+    bun.BaseModel `bun:"table:deeply_shadowing_rows"`
+    deeplyShadowedAuditFields
+    Id   int64  `bun:"id,pk"`
+    Name string `bun:"name"`
+}
+
+func TestChangeSet_LeavesOutAnEmbeddedFieldAColumnNearerTheRootShadows(t *testing.T) {
+    for _, row := range []struct {
+        label  string
+        before any
+        after  any
+    }{
+        {
+            label:  "one level down",
+            before: shadowingRow{Id: 1, Name: "top"},
+            after:  shadowingRow{Id: 1, Name: "top", shadowedAuditFields: shadowedAuditFields{Name: "inner", Note: "kept"}},
+        },
+        {
+            label:  "two levels down",
+            before: deeplyShadowingRow{Id: 1, Name: "top"},
+            after:  deeplyShadowingRow{Id: 1, Name: "top", deeplyShadowedAuditFields: deeplyShadowedAuditFields{shadowedAuditFields{Name: "inner", Note: "kept"}}},
+        },
+    } {
+        changes := ChangeSet(row.before, row.after)
+
+        if _, found := findChange(changes, "name"); true == found {
+            t.Fatalf("%s: expected the shadowed embedded field left out, got %+v", row.label, changes)
+        }
+
+        if noteChange, found := findChange(changes, "note"); false == found || "kept" != noteChange.New {
+            t.Fatalf("%s: expected the embedded field no column shadows kept, got %+v", row.label, changes)
+        }
+    }
+
+    topChanges := ChangeSet(shadowingRow{Id: 1, Name: "old"}, shadowingRow{Id: 1, Name: "new"})
+    if topChange, found := findChange(topChanges, "name"); false == found || "new" != topChange.New {
+        t.Fatalf("expected the shadowing column itself recorded, got %+v", topChanges)
+    }
+}
+
+type optionFirstMeta struct {
+    Meta map[string]any `bun:"type:jsonb"`
+}
+
+type optionFirstRow struct {
+    bun.BaseModel `bun:"table:option_first_rows"`
+    optionFirstMeta
+    Id   int64          `bun:"id,pk"`
+    Data map[string]any `bun:"type:jsonb"`
+}
+
+type taggedEmail struct {
+    Mail        string `bun:"email"`
+    UpdatedBy   string `bun:"updated_by"`
+    PhoneNumber string
+}
+
+type untaggedEmailRow struct {
+    bun.BaseModel `bun:"table:untagged_email_rows"`
+    taggedEmail
+    Id        int64 `bun:"id,pk"`
+    Email     string
+    UpdatedBy string
+    Phone     string `bun:",column:phone_number"`
+}
+
+type untaggedNote struct {
+    Note string
+}
+
+type otherUntaggedNote struct {
+    Note string
+}
+
+type taggedNote struct {
+    Note string `bun:"note"`
+}
+
+type siblingUntaggedRow struct {
+    bun.BaseModel `bun:"table:sibling_untagged_rows"`
+    untaggedNote
+    otherUntaggedNote
+    Id int64 `bun:"id,pk"`
+}
+
+type siblingTaggedRow struct {
+    bun.BaseModel `bun:"table:sibling_tagged_rows"`
+    untaggedNote
+    *taggedNote
+    Id int64 `bun:"id,pk"`
+}
+
+type scanOnlyTotal struct {
+    Total  int    `bun:"total"`
+    Hidden string `bun:"Hidden"`
+}
+
+type scanOnlyRootRow struct {
+    bun.BaseModel `bun:"table:scan_only_root_rows"`
+    scanOnlyTotal
+    Id     int64  `bun:"id,pk"`
+    Total  int    `bun:"total,scanonly"`
+    Hidden string `bun:"-"`
+}
+
+type prefixedAddress struct {
+    City string `bun:"city"`
+}
+
+type prefixedCity struct {
+    AddressCity string `bun:"address_city"`
+}
+
+type prefixedRow struct {
+    bun.BaseModel `bun:"table:prefixed_rows"`
+    prefixedCity
+    Id      int64           `bun:"id,pk"`
+    Address prefixedAddress `bun:"embed:address_"`
+}
+
+type nestedPrefixedAddress struct {
+    Address prefixedAddress `bun:"embed:address_"`
+}
+
+type nestedPrefixedRow struct {
+    bun.BaseModel `bun:"table:nested_prefixed_rows"`
+    nestedPrefixedAddress
+    Id int64 `bun:"id,pk"`
+}
+
+type anonymousPrefixedRow struct {
+    bun.BaseModel   `bun:"table:anonymous_prefixed_rows"`
+    prefixedAddress `bun:"embed:address_"`
+    Id              int64  `bun:"id,pk"`
+    City            string `bun:"city"`
+}
+
+func TestEmbeddedRowFieldPaths_KeepTheEmbeddedFieldsBunKeeps(t *testing.T) {
+    database := newTestDatabase()
+
+    for _, model := range []any{
+        optionFirstRow{},
+        untaggedEmailRow{},
+        siblingUntaggedRow{},
+        siblingTaggedRow{},
+        scanOnlyRootRow{},
+        prefixedRow{},
+        anonymousPrefixedRow{},
+        shadowingRow{},
+        deeplyShadowingRow{},
+    } {
+        modelType := reflect.TypeOf(model)
+
+        expected := map[string]struct{}{}
+        for _, field := range database.Table(modelType).FieldMap {
+            if 1 < len(field.Index) && true == modelType.Field(field.Index[0]).Anonymous {
+                expected[indexPathKey(field.Index)] = struct{}{}
+            }
+        }
+
+        actual := map[string]struct{}{}
+        for path := range embeddedRowFieldPaths(modelType) {
+            first, _, _ := strings.Cut(path, ".")
+            index, _ := strconv.Atoi(first)
+            if true == modelType.Field(index).Anonymous {
+                actual[path] = struct{}{}
+            }
+        }
+
+        if false == reflect.DeepEqual(expected, actual) {
+            t.Fatalf("%s: expected the embedded fields bun keeps %v, got %v", modelType.Name(), expected, actual)
+        }
+    }
+}
+
+func TestChangeSet_RecordsAnEmbeddedFieldBunKeepsAndLeavesOutOneItDrops(t *testing.T) {
+    optionFirstChanges := ChangeSet(
+        optionFirstRow{Id: 1, Data: map[string]any{"a": 1}},
+        optionFirstRow{Id: 1, Data: map[string]any{"a": 1}, optionFirstMeta: optionFirstMeta{Meta: map[string]any{"b": 2}}},
+    )
+    if 1 != len(optionFirstChanges) {
+        t.Fatalf("expected the embedded column bun writes under its own name recorded, got %+v", optionFirstChanges)
+    }
+
+    emailChanges := ChangeSet(untaggedEmailRow{Id: 1}, untaggedEmailRow{Id: 1, taggedEmail: taggedEmail{Mail: "inner@example.com", PhoneNumber: "0700"}})
+    if 0 != len(emailChanges) {
+        t.Fatalf("expected the embedded field an untagged root column shadows left out, got %+v", emailChanges)
+    }
+
+    siblingChanges := ChangeSet(
+        siblingTaggedRow{Id: 1, taggedNote: &taggedNote{}},
+        siblingTaggedRow{Id: 1, untaggedNote: untaggedNote{Note: "untagged"}, taggedNote: &taggedNote{Note: "tagged"}},
+    )
+    if 1 != len(siblingChanges) || "tagged" != siblingChanges[0].New {
+        t.Fatalf("expected only the tagged sibling recorded, got %+v", siblingChanges)
+    }
+}
+
+func TestChangeSet_RecordsAnEmbedPrefixedStructInsideAnAnonymousEmbed(t *testing.T) {
+    changes := ChangeSet(
+        nestedPrefixedRow{Id: 1, nestedPrefixedAddress: nestedPrefixedAddress{Address: prefixedAddress{City: "old"}}},
+        nestedPrefixedRow{Id: 1, nestedPrefixedAddress: nestedPrefixedAddress{Address: prefixedAddress{City: "new"}}},
+    )
+
+    if _, found := findChange(changes, "embed:address_"); false == found {
+        t.Fatalf("expected the prefixed struct inside an anonymous embed recorded, got %+v", changes)
+    }
+}
+
+func TestAuditFieldName_SkipsARelationWhoseOptionFollowsTheName(t *testing.T) {
+    for _, tag := range []reflect.StructTag{
+        `bun:"author,rel:belongs-to,join:author_id=id"`,
+        `bun:"items,m2m:order_to_items,join:Order=Item"`,
+        `bun:"rel:has-one,join:id=owner_id"`,
+    } {
+        if _, skip := auditFieldName(reflect.StructField{Name: "Author", Type: reflect.TypeOf(struct{}{}), Tag: tag}); false == skip {
+            t.Fatalf("expected %s skipped as a relation", tag)
+        }
+    }
+
+    if name, skip := auditFieldName(reflect.StructField{Name: "Meta", Type: reflect.TypeOf(""), Tag: `bun:"type:jsonb"`}); true == skip || "type:jsonb" != name {
+        t.Fatalf("expected an option-first column kept under its existing name, got %q %v", name, skip)
+    }
+}
+
 func TestChangeSet_EmptyResultAlwaysSerialisesAsAnEmptyArray(t *testing.T) {
     identical := product{Id: 1, Name: "same", Price: 10}
 
@@ -582,7 +875,7 @@ func TestValueContainsRedactTag_SharedBackingArraySliceNotFalseDeduped(t *testin
         Full []any
     }
 
-    /* Head and Full share one backing array; Head[:1] is benign and is walked first, recording the backing-array pointer. Full carries the redact-tagged secretHolder at index 1, past Head's length. A pointer-only visit key would dedup Full against Head and skip the secret (leaking it); the pointer+length key must let Full be traversed so the redact tag is detected. */
+    /* Full shares Head's backing array and holds the redacted element past Head's length */
     backing := []any{"benign", secretHolder{Secret: "leak-me"}}
     value := carrier{Head: backing[:1], Full: backing}
 
@@ -591,7 +884,7 @@ func TestValueContainsRedactTag_SharedBackingArraySliceNotFalseDeduped(t *testin
     }
 }
 
-/* the reproductions below cannot run inside the test binary: a stack overflow is a runtime fatal error that no recover contains, and a spinning element chase never returns at all, so either one takes the whole binary down with it. TestMain therefore doubles as a probe entry point — when the environment variable names a probe the process runs that reproduction and exits instead of running the suite — and each test re-executes this binary, bounds it with a deadline and asserts on the child's exit status. */
+/* the probes run in a child process, since a stack overflow or a spinning chase takes the whole binary down */
 const changeProbeEnvironmentVariable = "MELODY_AUDIT_CHANGE_PROBE"
 
 func TestMain(mainInstance *testing.M) {
@@ -605,7 +898,6 @@ func TestMain(mainInstance *testing.M) {
     os.Exit(mainInstance.Run())
 }
 
-/* type cyclicAttributes is the map shape the type walk cannot answer by descending: its element is itself */
 type cyclicAttributes map[string]cyclicAttributes
 
 type cyclicMapModel struct {
@@ -613,7 +905,6 @@ type cyclicMapModel struct {
     Attributes cyclicAttributes `bun:"attributes"`
 }
 
-/* type cyclicSlice is the slice shape whose element chase never reaches a non-slice */
 type cyclicSlice []cyclicSlice
 
 type cyclicSliceModel struct {
@@ -621,7 +912,6 @@ type cyclicSliceModel struct {
     Data cyclicSlice `bun:"data"`
 }
 
-/* type cyclicPointer is the pointer shape whose element chase never reaches a non-pointer */
 type cyclicPointer *cyclicPointer
 
 type cyclicPointerModel struct {
@@ -638,7 +928,6 @@ type cyclicPointerNestedModel struct {
     Carrier cyclicPointerCarrier `bun:"carrier"`
 }
 
-/* CyclicEmbeddedNode is the embed Go permits only through a pointer, and the pointer may close a loop with no nil to end it */
 type CyclicEmbeddedNode struct {
     *CyclicEmbeddedNode
     Name string `bun:"name"`
@@ -717,58 +1006,59 @@ func assertChangeProbeExitsCleanly(t *testing.T, probeName string, budget time.D
     t.Fatalf("could not run the %s probe: %v; output: %s", probeName, runErr, combinedOutput)
 }
 
-/* a field whose map type contains itself must not send the redact-tag type walk into unbounded recursion; the walk runs for every non-anonymous field of every audited insert, update and delete, and a stack overflow there is a fatal error that takes the process down with no recover and no rollback */
 func TestIsRedactedField_SelfReferentialMapTypeTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "cyclicMapType", 30*time.Second)
 }
 
-/* `type Node []Node` is legal Go and its element chase never reaches a non-slice, so the chase spins at full processor instead of overflowing: the process never dies, it just stops serving */
 func TestIsRedactedField_SelfReferentialSliceTypeTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "cyclicSliceType", 30*time.Second)
 }
 
-/* `type Pointer *Pointer` is legal Go and spins the same chase, both where the field type is dereferenced for the encrypted string check and inside the redact-tag type walk */
 func TestIsRedactedField_SelfReferentialPointerTypeTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "cyclicPointerType", 30*time.Second)
 }
 
-/* the same pointer shape reached as a nested struct field, where the value walk dereferences sub-field types of its own */
 func TestValueContainsRedactTag_SelfReferentialPointerSubFieldTypeTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "cyclicPointerNestedType", 30*time.Second)
 }
 
-/* Go rejects `type Node struct { Node }` but permits `type Node struct { *Node }`, so an embed can point back at the struct the walk is already inside; the embed recursion has no nil to stop on and overflows the stack, which a deferred recover around ChangeSet does not catch */
 func TestChangeSet_SelfEmbeddedPointerCycleTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "cyclicEmbeddedPointer", 30*time.Second)
 }
 
-/* the same loop closed over two nodes rather than one */
 func TestChangeSet_MutuallyEmbeddedPointerCycleTerminates(t *testing.T) {
     assertChangeProbeExitsCleanly(t, "mutuallyCyclicEmbeddedPointer", 30*time.Second)
 }
 
-/* the cycle guard must not swallow a finite embed chain: three distinct nodes are three distinct pointers, and every field they carry still belongs in the change-set */
-func TestChangeSet_FiniteEmbeddedPointerChainIsStillWalked(t *testing.T) {
-    before := &CyclicEmbeddedNode{Name: "root"}
-    before.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "middle"}
-    before.CyclicEmbeddedNode.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "leaf-before"}
+type finiteChainLeaf struct {
+    Leaf string `bun:"leaf"`
+}
 
-    after := &CyclicEmbeddedNode{Name: "root"}
-    after.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "middle"}
-    after.CyclicEmbeddedNode.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "leaf-after"}
+type finiteChainMiddle struct {
+    *finiteChainLeaf
+    Middle string `bun:"middle"`
+}
+
+type finiteChainRoot struct {
+    *finiteChainMiddle
+    Name string `bun:"name"`
+}
+
+func TestChangeSet_FiniteEmbeddedPointerChainIsStillWalked(t *testing.T) {
+    before := &finiteChainRoot{Name: "root", finiteChainMiddle: &finiteChainMiddle{Middle: "middle", finiteChainLeaf: &finiteChainLeaf{Leaf: "leaf-before"}}}
+    after := &finiteChainRoot{Name: "root", finiteChainMiddle: &finiteChainMiddle{Middle: "middle", finiteChainLeaf: &finiteChainLeaf{Leaf: "leaf-after"}}}
 
     changes := ChangeSet(before, after)
 
-    nameChange, found := findChange(changes, "name")
+    leafChange, found := findChange(changes, "leaf")
     if false == found {
         t.Fatalf("expected the deepest embed of a finite chain to still be diffed, got %+v", changes)
     }
-    if "leaf-before" != nameChange.Old || "leaf-after" != nameChange.New {
-        t.Fatalf("expected the change from the third node of the chain, got %+v", nameChange)
+    if "leaf-before" != leafChange.Old || "leaf-after" != leafChange.New {
+        t.Fatalf("expected the change from the third node of the chain, got %+v", leafChange)
     }
 }
 
-/* the redact-tag type walk must keep answering true for a self-referential type that does carry a tag somewhere; guarding the cycle may not turn into refusing to look */
 func TestIsRedactedField_CyclicTypeStillReportsAReachableRedactTag(t *testing.T) {
     type taggedNode struct {
         Secret   string `audit:"redact"`
@@ -795,7 +1085,6 @@ func (instance changeTestCompartmentRef) CipherName() string {
     return "change-test-compartment"
 }
 
-/* the compartment-bound generic forms instantiate a distinct reflect.Type per marker, so an identity list could never enumerate them: an Iban typed EncryptedStringFor[ref] must reach the change-set redacted */
 func TestChangeSet_RedactsTheCompartmentBoundEncryptedTypes(t *testing.T) {
     type compartmentAccount struct {
         Id            int64                                                             `bun:"id,pk"`
@@ -818,7 +1107,6 @@ func TestChangeSet_RedactsTheCompartmentBoundEncryptedTypes(t *testing.T) {
     }
 }
 
-/* a struct field whose TYPE holds an encrypted column one level down must read as redacted on the type walk as on the value walk */
 func TestChangeSet_RedactsAStructWhoseTypeNestsAnEncryptedColumn(t *testing.T) {
     type paymentDetails struct {
         Iban encrypt.EncryptedString
@@ -842,7 +1130,6 @@ func TestChangeSet_RedactsAStructWhoseTypeNestsAnEncryptedColumn(t *testing.T) {
     }
 }
 
-/* under plain omitempty the transition active true→false marshalled byte-identical to a delete's before-image; the present zero must render */
 func TestChange_MarshalsAPresentZeroValue(t *testing.T) {
     type flagRow struct {
         Id     int64 `bun:"id,pk"`
@@ -875,7 +1162,7 @@ func TestChange_MarshalsAPresentZeroValue(t *testing.T) {
         t.Fatalf("expected the delete's before-image to keep its old side, got %s", deletePayload)
     }
 
-    /* the boxed false above is non-nil either way, so it cannot separate presence from the plain nil check; the value that can is a PRESENT nil — an any-typed field emptied to nil must render "new":null, where absence would erase the transition */
+    /* a present nil, not a boxed false, is what separates presence from the nil check */
     type attributeRow struct {
         Id    int64 `bun:"id,pk"`
         Extra any   `bun:"extra"`
@@ -893,7 +1180,6 @@ func TestChange_MarshalsAPresentZeroValue(t *testing.T) {
     }
 }
 
-/* the one shape where the TYPE walk answers alone: an empty slice against a nil slice records a change whose values hold no element for the value walk to inspect, so only the field type can say the element carries an encrypted column, and the empty containers must be redacted like every populated shape */
 func TestChangeSet_RedactsAnEmptyContainerOfAnEncryptedCarryingType(t *testing.T) {
     type paymentDetails struct {
         Iban encrypt.EncryptedString

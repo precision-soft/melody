@@ -83,7 +83,7 @@ func (instance *Storage) Put(
         normalizedKey,
         boundedPutReader(body, size),
         size,
-        minio.PutObjectOptions{ContentType: options.ContentType},
+        putObjectOptions(size, options.ContentType),
     )
     if nil != putErr {
         instance.abortOrphanedMultipartUpload(runtimeInstance.Context(), normalizedKey, size)
@@ -92,7 +92,7 @@ func (instance *Storage) Put(
             return declaredSizeMismatchError(key, size)
         }
 
-        return exception.NewError("object storage put failed", map[string]any{"key": key, "bucket": instance.bucket}, putErr)
+        return putFailedError(key, instance.bucket, putErr)
     }
 
     return nil
@@ -116,8 +116,18 @@ func (instance *Storage) abortOrphanedMultipartUpload(ctx context.Context, norma
     _ = instance.client.RemoveIncompleteUpload(abortContext, instance.bucket, normalizedKey)
 }
 
-/* putSpoolLimit is minio's default part size: a body at or below it goes up as one request, a larger one streams multipart */
+/* putSpoolLimit is minio's default part size, and the one named for a body of unknown size */
 const putSpoolLimit = 16 * 1024 * 1024
+
+/* left to minio, a body of unknown size is sized for 5 TiB: one buffer of about 528 MiB a put */
+func putObjectOptions(size int64, contentType string) minio.PutObjectOptions {
+    options := minio.PutObjectOptions{ContentType: contentType}
+    if 0 > size {
+        options.PartSize = putSpoolLimit
+    }
+
+    return options
+}
 
 func validatedPutBody(ctx context.Context, key string, reader io.Reader, size int64) (io.Reader, *sizeCheckedReader, error) {
     if 0 > size {
@@ -291,6 +301,18 @@ func seekableRemainingLength(seeker io.Seeker) (int64, bool, error) {
     return end - current, true, nil
 }
 
+func putFailedError(key string, bucket string, putErr error) error {
+    if true == exception.ChainIs(putErr, errUnknownSizePutTooLong) {
+        return exception.NewError(
+            "object storage put of unknown size is longer than the limit",
+            map[string]any{"key": key, "bucket": bucket, "limit": int64(unknownSizePutLimit)},
+            nil,
+        )
+    }
+
+    return exception.NewError("object storage put failed", map[string]any{"key": key, "bucket": bucket}, putErr)
+}
+
 func declaredSizeMismatchError(key string, size int64) error {
     return exception.NewError(
         "storage object size does not match the declared size",
@@ -305,7 +327,80 @@ func boundedPutReader(reader io.Reader, size int64) io.Reader {
         return io.LimitReader(reader, size)
     }
 
-    return reader
+    return newUnknownSizePutReader(reader, unknownSizePutLimit)
+}
+
+/* minio completes a body of unknown size after its ten thousandth part and drops the rest */
+const unknownSizePutLimit = putSpoolLimit * 10000
+
+var errUnknownSizePutTooLong = exception.NewError(
+    "object storage put of unknown size is longer than the limit",
+    map[string]any{"limit": int64(unknownSizePutLimit)},
+    nil,
+)
+
+type unknownSizePutReader struct {
+    reader    io.Reader
+    remaining int64
+    drained   bool
+    exceeded  bool
+}
+
+func newUnknownSizePutReader(reader io.Reader, limit int64) *unknownSizePutReader {
+    return &unknownSizePutReader{reader: reader, remaining: limit}
+}
+
+func (instance *unknownSizePutReader) Read(buffer []byte) (int, error) {
+    if true == instance.exceeded {
+        return 0, errUnknownSizePutTooLong
+    }
+
+    if true == instance.drained {
+        return 0, io.EOF
+    }
+
+    if int64(len(buffer)) > instance.remaining {
+        buffer = buffer[:instance.remaining]
+    }
+
+    read, readErr := instance.reader.Read(buffer)
+    instance.remaining -= int64(read)
+    if 0 < instance.remaining || nil != readErr {
+        return read, readErr
+    }
+
+    /* the refusal must come before the last byte: minio drops a read error once its part buffer is full */
+    longer, probeErr := instance.probe()
+    if true == longer {
+        instance.exceeded = true
+
+        return 0, errUnknownSizePutTooLong
+    }
+
+    if nil != probeErr && io.EOF != probeErr {
+        return 0, probeErr
+    }
+
+    instance.drained = true
+
+    return read, nil
+}
+
+func (instance *unknownSizePutReader) probe() (bool, error) {
+    var single [1]byte
+
+    for attempt := 0; attempt < 100; attempt++ {
+        read, readErr := instance.reader.Read(single[:])
+        if 0 < read {
+            return true, nil
+        }
+
+        if nil != readErr {
+            return false, readErr
+        }
+    }
+
+    return false, io.ErrNoProgress
 }
 
 func (instance *Storage) Get(
