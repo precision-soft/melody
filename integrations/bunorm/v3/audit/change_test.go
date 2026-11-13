@@ -69,27 +69,27 @@ func TestChangeSet_UpdateCapturesOnlyChangedFields(t *testing.T) {
 
 func TestChangeSet_LeavesAScanOnlyFieldOut(t *testing.T) {
     type bareOption struct {
-        Id    int64 `bun:"id,pk"`
+        Id    int64  `bun:"id,pk"`
         Name  string `bun:"name"`
-        Total int64 `bun:",scanonly"`
+        Total int64  `bun:",scanonly"`
     }
 
     type namedOption struct {
-        Id    int64 `bun:"id,pk"`
+        Id    int64  `bun:"id,pk"`
         Name  string `bun:"name"`
-        Total int64 `bun:"total,scanonly"`
+        Total int64  `bun:"total,scanonly"`
     }
 
     type optionAfterAnother struct {
-        Id    int64 `bun:"id,pk"`
+        Id    int64  `bun:"id,pk"`
         Name  string `bun:"name"`
-        Total int64 `bun:"total,nullzero,scanonly"`
+        Total int64  `bun:"total,nullzero,scanonly"`
     }
 
     type optionBeforeAnother struct {
-        Id    int64 `bun:"id,pk"`
+        Id    int64  `bun:"id,pk"`
         Name  string `bun:"name"`
-        Total int64 `bun:"total,scanonly,nullzero"`
+        Total int64  `bun:"total,scanonly,nullzero"`
     }
 
     for _, row := range []struct {
@@ -235,7 +235,7 @@ type scanOnlyTotal struct {
 type scanOnlyRootRow struct {
     bun.BaseModel `bun:"table:scan_only_root_rows"`
     scanOnlyTotal
-    Id    int64 `bun:"id,pk"`
+    Id     int64  `bun:"id,pk"`
     Total  int    `bun:"total,scanonly"`
     Hidden string `bun:"-"`
 }
@@ -266,10 +266,10 @@ type nestedPrefixedRow struct {
 }
 
 type anonymousPrefixedRow struct {
-    bun.BaseModel `bun:"table:anonymous_prefixed_rows"`
+    bun.BaseModel   `bun:"table:anonymous_prefixed_rows"`
     prefixedAddress `bun:"embed:address_"`
-    Id   int64  `bun:"id,pk"`
-    City string `bun:"city"`
+    Id              int64  `bun:"id,pk"`
+    City            string `bun:"city"`
 }
 
 func TestEmbeddedRowFieldPaths_KeepTheEmbeddedFieldsBunKeeps(t *testing.T) {
