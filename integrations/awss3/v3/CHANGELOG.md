@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **Behavioural change**: `storage.go` — `Put` of a body of unknown size, a negative `size`, names a part size of 16 MiB, where the part size was left to the client, which sizes it for the largest object s3 holds and allocated a buffer of about 528 MiB for every such put; an object put this way is bounded at ten thousand parts, 156.25 GiB, where the client admitted 5 TiB, and a longer body fails the put, `object storage put of unknown size is longer than the limit`, and leaves no upload behind, where the client completed the upload at its last part and stored the object cut.
+
 ## [v3.1.2] - 2026-11-07 - Dependency Advisories
 
 ### Security

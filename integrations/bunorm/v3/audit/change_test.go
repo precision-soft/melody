@@ -66,6 +66,114 @@ func TestChangeSet_UpdateCapturesOnlyChangedFields(t *testing.T) {
     }
 }
 
+func TestChangeSet_LeavesAScanOnlyFieldOut(t *testing.T) {
+    type bareOption struct {
+        Id    int64 `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64 `bun:",scanonly"`
+    }
+
+    type namedOption struct {
+        Id    int64 `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64 `bun:"total,scanonly"`
+    }
+
+    type optionAfterAnother struct {
+        Id    int64 `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64 `bun:"total,nullzero,scanonly"`
+    }
+
+    type optionBeforeAnother struct {
+        Id    int64 `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64 `bun:"total,scanonly,nullzero"`
+    }
+
+    for _, row := range []struct {
+        label  string
+        before any
+        after  any
+    }{
+        {label: "bare option", before: bareOption{Id: 1, Name: "old"}, after: bareOption{Id: 1, Name: "new", Total: 7}},
+        {label: "option after a column name", before: namedOption{Id: 1, Name: "old"}, after: namedOption{Id: 1, Name: "new", Total: 7}},
+        {label: "option after another option", before: optionAfterAnother{Id: 1, Name: "old"}, after: optionAfterAnother{Id: 1, Name: "new", Total: 7}},
+        {label: "option before another option", before: optionBeforeAnother{Id: 1, Name: "old"}, after: optionBeforeAnother{Id: 1, Name: "new", Total: 7}},
+    } {
+        changes := ChangeSet(row.before, row.after)
+
+        if _, found := findChange(changes, "Total"); true == found {
+            t.Fatalf("%s: expected the scan-only field left out, got %+v", row.label, changes)
+        }
+
+        if _, found := findChange(changes, "total"); true == found {
+            t.Fatalf("%s: expected the scan-only field left out, got %+v", row.label, changes)
+        }
+
+        if _, found := findChange(changes, "name"); false == found {
+            t.Fatalf("%s: expected the column change kept, got %+v", row.label, changes)
+        }
+    }
+}
+
+type shadowedAuditFields struct {
+    Name string `bun:"name"`
+    Note string `bun:"note"`
+}
+
+type shadowingRow struct {
+    bun.BaseModel `bun:"table:shadowing_rows"`
+    shadowedAuditFields
+    Id   int64  `bun:"id,pk"`
+    Name string `bun:"name"`
+}
+
+type deeplyShadowedAuditFields struct {
+    shadowedAuditFields
+}
+
+type deeplyShadowingRow struct {
+    bun.BaseModel `bun:"table:deeply_shadowing_rows"`
+    deeplyShadowedAuditFields
+    Id   int64  `bun:"id,pk"`
+    Name string `bun:"name"`
+}
+
+func TestChangeSet_LeavesOutAnEmbeddedFieldAColumnNearerTheRootShadows(t *testing.T) {
+    for _, row := range []struct {
+        label  string
+        before any
+        after  any
+    }{
+        {
+            label:  "one level down",
+            before: shadowingRow{Id: 1, Name: "top"},
+            after:  shadowingRow{Id: 1, Name: "top", shadowedAuditFields: shadowedAuditFields{Name: "inner", Note: "kept"}},
+        },
+        {
+            label:  "two levels down",
+            before: deeplyShadowingRow{Id: 1, Name: "top"},
+            after:  deeplyShadowingRow{Id: 1, Name: "top", deeplyShadowedAuditFields: deeplyShadowedAuditFields{shadowedAuditFields{Name: "inner", Note: "kept"}}},
+        },
+    } {
+        changes := ChangeSet(row.before, row.after)
+
+        if _, found := findChange(changes, "name"); true == found {
+            t.Fatalf("%s: expected the shadowed embedded field left out, got %+v", row.label, changes)
+        }
+
+        if noteChange, found := findChange(changes, "note"); false == found || "kept" != noteChange.New {
+            t.Fatalf("%s: expected the embedded field no column shadows kept, got %+v", row.label, changes)
+        }
+    }
+
+    topChanges := ChangeSet(shadowingRow{Id: 1, Name: "old"}, shadowingRow{Id: 1, Name: "new"})
+    if topChange, found := findChange(topChanges, "name"); false == found || "new" != topChange.New {
+        t.Fatalf("expected the shadowing column itself recorded, got %+v", topChanges)
+    }
+}
+
 /* an empty change-set must always serialise as [], never as the JSON literal null: the delete path already writes [] for the same "nothing recorded" meaning, and a consumer running jsonb_array_length(changes) over the trail errors or reads 1 on null, which is also indistinguishable from a genuinely absent change-set. */
 func TestChangeSet_EmptyResultAlwaysSerialisesAsAnEmptyArray(t *testing.T) {
     identical := product{Id: 1, Name: "same", Price: 10}
@@ -748,23 +856,32 @@ func TestChangeSet_MutuallyEmbeddedPointerCycleTerminates(t *testing.T) {
 }
 
 /* the cycle guard must not swallow a finite embed chain: three distinct nodes are three distinct pointers, and every field they carry still belongs in the change-set */
-func TestChangeSet_FiniteEmbeddedPointerChainIsStillWalked(t *testing.T) {
-    before := &CyclicEmbeddedNode{Name: "root"}
-    before.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "middle"}
-    before.CyclicEmbeddedNode.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "leaf-before"}
+type finiteChainLeaf struct {
+    Leaf string `bun:"leaf"`
+}
 
-    after := &CyclicEmbeddedNode{Name: "root"}
-    after.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "middle"}
-    after.CyclicEmbeddedNode.CyclicEmbeddedNode = &CyclicEmbeddedNode{Name: "leaf-after"}
+type finiteChainMiddle struct {
+    *finiteChainLeaf
+    Middle string `bun:"middle"`
+}
+
+type finiteChainRoot struct {
+    *finiteChainMiddle
+    Name string `bun:"name"`
+}
+
+func TestChangeSet_FiniteEmbeddedPointerChainIsStillWalked(t *testing.T) {
+    before := &finiteChainRoot{Name: "root", finiteChainMiddle: &finiteChainMiddle{Middle: "middle", finiteChainLeaf: &finiteChainLeaf{Leaf: "leaf-before"}}}
+    after := &finiteChainRoot{Name: "root", finiteChainMiddle: &finiteChainMiddle{Middle: "middle", finiteChainLeaf: &finiteChainLeaf{Leaf: "leaf-after"}}}
 
     changes := ChangeSet(before, after)
 
-    nameChange, found := findChange(changes, "name")
+    leafChange, found := findChange(changes, "leaf")
     if false == found {
         t.Fatalf("expected the deepest embed of a finite chain to still be diffed, got %+v", changes)
     }
-    if "leaf-before" != nameChange.Old || "leaf-after" != nameChange.New {
-        t.Fatalf("expected the change from the third node of the chain, got %+v", nameChange)
+    if "leaf-before" != leafChange.Old || "leaf-after" != leafChange.New {
+        t.Fatalf("expected the change from the third node of the chain, got %+v", leafChange)
     }
 }
 

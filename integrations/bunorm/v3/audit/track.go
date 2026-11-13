@@ -69,9 +69,9 @@ func (instance *Tracker) runInTx(ctx context.Context, entity string, operation s
 
 func (instance *Tracker) Update(ctx context.Context, entity string, entityId string, model any) error {
     return instance.runInTx(ctx, entity, OperationUpdate, func(ctx context.Context, tx bun.Tx) error {
-        before, cloneErr := cloneModel(model)
-        if nil != cloneErr {
-            return cloneErr
+        before, imageErr := beforeImageModel(instance.database, model)
+        if nil != imageErr {
+            return imageErr
         }
 
         if selectErr := tx.NewSelect().Model(before).WherePK().For("UPDATE").Scan(ctx); nil != selectErr {
@@ -92,9 +92,9 @@ func (instance *Tracker) Delete(ctx context.Context, entity string, entityId str
         var before any
 
         if true == instance.recorder.registry.capturesDeleteBeforeImageFor(entity) {
-            captured, cloneErr := cloneModel(model)
-            if nil != cloneErr {
-                return cloneErr
+            captured, imageErr := beforeImageModel(instance.database, model)
+            if nil != imageErr {
+                return imageErr
             }
 
             if selectErr := tx.NewSelect().Model(captured).WherePK().For("UPDATE").Scan(ctx); nil != selectErr {
@@ -179,57 +179,30 @@ func escapeEntityIdPart(part string) string {
     return strings.ReplaceAll(part, ":", `\:`)
 }
 
-func cloneModel(model any) (any, error) {
+/* the primary key alone: a field copied from the new model survives the read where the column decodes into it, a json map keeping the new keys */
+func beforeImageModel(database *bun.DB, model any) (any, error) {
     value := reflect.ValueOf(model)
     if reflect.Pointer != value.Kind() || true == value.IsNil() || reflect.Struct != value.Elem().Kind() {
         return nil, exception.NewError("audited model must be a non-nil pointer to a struct", nil, nil)
     }
 
     source := value.Elem()
-    clone := reflect.New(source.Type())
-    target := clone.Elem()
-    target.Set(source)
+    image := reflect.New(source.Type())
 
-    for index := 0; index < source.NumField(); index++ {
-        if false == target.Field(index).CanSet() {
+    for _, primaryKeyField := range database.Table(source.Type()).PKs {
+        sourceValue := primaryKeyField.Value(source)
+
+        /* the read scans through a pointer key, so a shared pointee would rewrite the caller's key */
+        if reflect.Pointer == sourceValue.Kind() && false == sourceValue.IsNil() {
+            copied := reflect.New(sourceValue.Elem().Type())
+            copied.Elem().Set(sourceValue.Elem())
+            primaryKeyField.Value(image.Elem()).Set(copied)
+
             continue
         }
 
-        decoupleClonedField(target.Field(index), source.Field(index))
+        primaryKeyField.Value(image.Elem()).Set(sourceValue)
     }
 
-    return clone.Interface(), nil
-}
-
-func decoupleClonedField(target reflect.Value, source reflect.Value) {
-    switch source.Kind() {
-    case reflect.Pointer:
-        if true == source.IsNil() {
-            return
-        }
-
-        copied := reflect.New(source.Elem().Type())
-        copied.Elem().Set(source.Elem())
-        target.Set(copied)
-
-    case reflect.Slice:
-        if true == source.IsNil() {
-            return
-        }
-
-        copied := reflect.MakeSlice(source.Type(), source.Len(), source.Len())
-        reflect.Copy(copied, source)
-        target.Set(copied)
-
-    case reflect.Map:
-        if true == source.IsNil() {
-            return
-        }
-
-        copied := reflect.MakeMap(source.Type())
-        for _, key := range source.MapKeys() {
-            copied.SetMapIndex(key, source.MapIndex(key))
-        }
-        target.Set(copied)
-    }
+    return image.Interface(), nil
 }

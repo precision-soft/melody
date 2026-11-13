@@ -34,38 +34,63 @@ func newTestDatabase() *bun.DB {
     return bun.NewDB(sql.OpenDB(fakeConnector{}), mysqldialect.New())
 }
 
-func TestCloneModel_DecouplesPointerSliceAndMapFields(t *testing.T) {
+func TestBeforeImageModel_HoldsThePrimaryKeyAndNothingElseOfTheModel(t *testing.T) {
     type entity struct {
-        Name   *string
-        Tags   []string
-        Labels map[string]string
+        bun.BaseModel `bun:"table:before_image_entity"`
+
+        Id     int64             `bun:"id,pk"`
+        Tenant string            `bun:"tenant,pk"`
+        Name   *string           `bun:"name"`
+        Tags   []string          `bun:"tags"`
+        Labels map[string]string `bun:"labels"`
     }
 
-    name := "before"
-    model := &entity{
-        Name:   &name,
-        Tags:   []string{"x"},
-        Labels: map[string]string{"k": "before"},
+    name := "new"
+    model := &entity{Id: 7, Tenant: "acme", Name: &name, Tags: []string{"x"}, Labels: map[string]string{"k": "new"}}
+
+    image, imageErr := beforeImageModel(newTestDatabase(), model)
+    if nil != imageErr {
+        t.Fatalf("before image: %v", imageErr)
     }
 
-    cloned, cloneErr := cloneModel(model)
-    if nil != cloneErr {
-        t.Fatalf("clone: %v", cloneErr)
+    typedImage := image.(*entity)
+    if 7 != typedImage.Id || "acme" != typedImage.Tenant {
+        t.Fatalf("expected the primary key carried over, got %d %q", typedImage.Id, typedImage.Tenant)
     }
 
-    typedClone := cloned.(*entity)
-    *typedClone.Name = "after"
-    typedClone.Tags[0] = "y"
-    typedClone.Labels["k"] = "after"
+    if nil != typedImage.Name || nil != typedImage.Tags || nil != typedImage.Labels {
+        t.Fatalf("expected nothing else of the model carried over, got %+v", typedImage)
+    }
 
-    if "before" != *model.Name {
-        t.Fatalf("clone aliased the original pointer field; bun would scan the old row in-place over the live model, got %q", *model.Name)
+    type pointerKeyEntity struct {
+        bun.BaseModel `bun:"table:before_image_pointer_key"`
+
+        Id   *string `bun:"id,pk"`
+        Name string  `bun:"name"`
     }
-    if "x" != model.Tags[0] {
-        t.Fatalf("clone aliased the original slice field, got %q", model.Tags[0])
+
+    key := "ABC"
+    pointerModel := &pointerKeyEntity{Id: &key, Name: "new"}
+
+    pointerImage, pointerImageErr := beforeImageModel(newTestDatabase(), pointerModel)
+    if nil != pointerImageErr {
+        t.Fatalf("before image of a pointer key: %v", pointerImageErr)
     }
-    if "before" != model.Labels["k"] {
-        t.Fatalf("clone aliased the original map field, got %q", model.Labels["k"])
+
+    typedPointerImage := pointerImage.(*pointerKeyEntity)
+    if nil == typedPointerImage.Id || "ABC" != *typedPointerImage.Id || "" != typedPointerImage.Name {
+        t.Fatalf("expected the pointer key alone carried over, got %+v", typedPointerImage)
+    }
+
+    *typedPointerImage.Id = "abc"
+    if "ABC" != *pointerModel.Id {
+        t.Fatalf("expected a read into the image to leave the caller's key alone, got %q", *pointerModel.Id)
+    }
+
+    for _, refused := range []any{nil, entity{}, (*entity)(nil), new(int)} {
+        if _, refusedErr := beforeImageModel(newTestDatabase(), refused); nil == refusedErr {
+            t.Fatalf("expected %T refused as no pointer to a struct", refused)
+        }
     }
 }
 
@@ -136,6 +161,8 @@ var auditedAccountColumnList = []string{"id", "name", "email", "balance"}
 
 type scriptedDatabase struct {
     row        *auditedAccount
+    rowColumns []string
+    rowValues  []driver.Value
     statements []string
     commitErr  error
 }
@@ -185,6 +212,10 @@ func (instance *scriptedConnection) QueryContext(_ context.Context, query string
 
     instance.database.statements = append(instance.database.statements, query)
 
+    if nil != instance.database.rowColumns {
+        return &scriptedRows{columns: instance.database.rowColumns, values: [][]driver.Value{instance.database.rowValues}}, nil
+    }
+
     if nil == instance.database.row {
         return &scriptedRows{columns: auditedAccountColumnList}, nil
     }
@@ -202,7 +233,7 @@ func (instance *scriptedConnection) ExecContext(_ context.Context, query string,
 
     if true == strings.HasPrefix(strings.ToUpper(strings.TrimSpace(query)), "DELETE") {
         affected := int64(0)
-        if nil != instance.database.row {
+        if nil != instance.database.row || nil != instance.database.rowColumns {
             affected = 1
         }
 
@@ -542,5 +573,57 @@ func TestTracker_AStorageErrorOnACyclicChainIsReported(t *testing.T) {
         }
     case <-time.After(5 * time.Second):
         t.Fatal("expected the insert to return on an error chain that reaches itself")
+    }
+}
+
+type auditedLabelled struct {
+    bun.BaseModel `bun:"table:audited_labelled"`
+
+    Id     int64             `bun:"id,pk"`
+    Labels map[string]string `bun:"labels"`
+}
+
+func TestTracker_UpdateReadsTheBeforeImageIntoAModelHoldingNothingOfTheNewOne(t *testing.T) {
+    scripted := &scriptedDatabase{rowColumns: []string{"id", "labels"}, rowValues: []driver.Value{int64(42), []byte(`{"tier":"gold"}`)}}
+    database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
+    storage := &fakeStorage{}
+    tracker := NewTracker(database, NewRecorderWithStorage(storage, NewRegistry("melody_audit")))
+
+    model := &auditedLabelled{Id: 42, Labels: map[string]string{"tier": "gold", "region": "eu"}}
+
+    if updateErr := tracker.Update(context.Background(), "labelled", "", model); nil != updateErr {
+        t.Fatalf("update: %v", updateErr)
+    }
+
+    if 1 != len(storage.saves) {
+        t.Fatalf("expected one audit entry, got %d", len(storage.saves))
+    }
+
+    changes := storage.saves[0].entries[0].Changes
+    if false == strings.Contains(changes, "region") || true == strings.Contains(changes, `"old":{"region"`) || false == strings.Contains(changes, `"old":{"tier":"gold"}`) {
+        t.Fatalf("expected the added key recorded against the stored map alone, got %s", changes)
+    }
+}
+
+func TestTracker_DeleteReadsTheBeforeImageIntoAModelHoldingNothingOfThePassedOne(t *testing.T) {
+    scripted := &scriptedDatabase{rowColumns: []string{"id", "labels"}, rowValues: []driver.Value{int64(42), []byte(`{"tier":"gold"}`)}}
+    database := bun.NewDB(sql.OpenDB(&scriptedConnector{database: scripted}), mysqldialect.New())
+    storage := &fakeStorage{}
+    registry := NewRegistry("melody_audit").Register("labelled", EntityOptions{CaptureDeleteBeforeImage: true})
+    tracker := NewTracker(database, NewRecorderWithStorage(storage, registry))
+
+    model := &auditedLabelled{Id: 42, Labels: map[string]string{"tier": "gold", "region": "eu"}}
+
+    if deleteErr := tracker.Delete(context.Background(), "labelled", "", model); nil != deleteErr {
+        t.Fatalf("delete: %v", deleteErr)
+    }
+
+    if 1 != len(storage.saves) {
+        t.Fatalf("expected one audit entry, got %d", len(storage.saves))
+    }
+
+    changes := storage.saves[0].entries[0].Changes
+    if false == strings.Contains(changes, `"old":{"tier":"gold"}`) || true == strings.Contains(changes, "region") {
+        t.Fatalf("expected the stored map alone in the deleted row's image, got %s", changes)
     }
 }

@@ -3676,6 +3676,15 @@ func (instance *cyclicOpenFileSystem) Open(name string) (fs.File, error) {
     return nil, newCyclicChainError()
 }
 
+type cyclicPathErrorFileSystem struct{}
+
+func (instance *cyclicPathErrorFileSystem) Open(name string) (fs.File, error) {
+    pathErr := &fs.PathError{Op: "open", Path: name}
+    pathErr.Err = &cyclicChainError{next: pathErr}
+
+    return nil, pathErr
+}
+
 func TestFileServer_ReturnsOnACyclicChainFromTheFileSystem(t *testing.T) {
     server := NewFileServer(
         NewOptions(
@@ -3684,11 +3693,23 @@ func TestFileServer_ReturnsOnACyclicChainFromTheFileSystem(t *testing.T) {
             &cyclicOpenFileSystem{},
         ),
     )
+    pathErrorServer := NewFileServer(
+        NewOptions(
+            NewFileServerConfig(ModeEmbedded, "", "index.html", "", false, 0, false),
+            "",
+            &cyclicPathErrorFileSystem{},
+        ),
+    )
 
     assertReturnsOnACyclicChain(t, func() {
         logOpenFailure(logging.NewNopLogger(), "a.txt", newCyclicChainError())
 
         server.Serve(
+            testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
+            logging.NewNopLogger(),
+        )
+
+        pathErrorServer.Serve(
             testhelper.NewHttpTestRequest(http.MethodGet, "http://example.com/a.txt"),
             logging.NewNopLogger(),
         )

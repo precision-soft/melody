@@ -1,8 +1,10 @@
 package http
 
 import (
+    "fmt"
     "io"
     nethttp "net/http"
+    "reflect"
     "strconv"
     "strings"
     "sync"
@@ -18,7 +20,7 @@ type ServerSentEvent struct {
     Retry int
 }
 
-/* NewServerSentEventWriter refuses a committed response or an unflushable connection; it must not outlive the handler */
+/* NewServerSentEventWriter refuses before the commit, since after it nothing can be answered; it must not outlive the handler */
 func NewServerSentEventWriter(writer nethttp.ResponseWriter) (*ServerSentEventWriter, error) {
     if nil == writer {
         return nil, exception.NewError("response writer may not be nil", nil, nil)
@@ -30,7 +32,11 @@ func NewServerSentEventWriter(writer nethttp.ResponseWriter) (*ServerSentEventWr
         }
     }
 
-    flusher, isFlusher := streamingFlusherOf(writer)
+    flusher, isFlusher, chainErr := streamingFlusherOf(writer)
+    if nil != chainErr {
+        return nil, chainErr
+    }
+
     if false == isFlusher {
         return nil, exception.NewError("response writer does not support streaming", nil, nil)
     }
@@ -50,11 +56,34 @@ func NewServerSentEventWriter(writer nethttp.ResponseWriter) (*ServerSentEventWr
     }, nil
 }
 
-/* streamingFlusherOf finds the flusher reaching the connection: the kernel's recording writer may flush nothing */
-func streamingFlusherOf(writer nethttp.ResponseWriter) (nethttp.Flusher, bool) {
-    current := writer
+const responseWriterChainLimit = 65536
 
-    for {
+/* the kernel's recording writer may flush nothing; the ring is refused here since http.ResponseController walks the chain unbounded */
+func streamingFlusherOf(writer nethttp.ResponseWriter) (nethttp.Flusher, bool, error) {
+    current := writer
+    seen := map[nethttp.ResponseWriter]struct{}{}
+
+    for link := 0; ; link++ {
+        if responseWriterChainLimit <= link {
+            return nil, false, exception.NewError(
+                "response writer chain is longer than the limit",
+                map[string]any{"writerType": fmt.Sprintf("%T", writer), "limit": responseWriterChainLimit},
+                nil,
+            )
+        }
+
+        if reflect.Pointer == reflect.ValueOf(current).Kind() {
+            if _, isSeen := seen[current]; true == isSeen {
+                return nil, false, exception.NewError(
+                    "response writer chain reaches itself",
+                    map[string]any{"writerType": fmt.Sprintf("%T", writer), "repeatedType": fmt.Sprintf("%T", current)},
+                    nil,
+                )
+            }
+
+            seen[current] = struct{}{}
+        }
+
         unwrapper, isUnwrapper := current.(interface{ Unwrap() nethttp.ResponseWriter })
         if false == isUnwrapper {
             break
@@ -69,16 +98,16 @@ func streamingFlusherOf(writer nethttp.ResponseWriter) (nethttp.Flusher, bool) {
     }
 
     if _, isFlusher := current.(nethttp.Flusher); false == isFlusher {
-        return nil, false
+        return nil, false, nil
     }
 
     /* the flush goes through the outermost writer, so every wrapper records the commit */
     flusher, isFlusher := writer.(nethttp.Flusher)
     if false == isFlusher {
-        return nil, false
+        return nil, false, nil
     }
 
-    return flusher, true
+    return flusher, true, nil
 }
 
 type ServerSentEventWriter struct {

@@ -63,7 +63,7 @@ func changeSetWithIgnore(before any, after any, ignore map[string]struct{}) []Ch
     /* the visit record starts with the two root pointers, since Go permits `type Node struct { *Node }` and such an embed can lead back to the model itself */
     seen := map[embedVisitKey]struct{}{}
 
-    collectChanges(&changes, structValue(before, seen, false), structValue(after, seen, true), ignore, false, seen)
+    collectChanges(&changes, structValue(before, seen, false), structValue(after, seen, true), ignore, false, seen, nil)
 
     /* an empty result is returned as an empty slice, never a nil one: a nil slice marshals to the JSON literal null in the changes column, where a consumer reading it as an array errors out and cannot tell it from a genuinely absent change-set. An idempotent update and any non-struct model both land here. */
     if 0 == len(changes) {
@@ -79,7 +79,7 @@ type embedVisitKey struct {
     after   bool
 }
 
-func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}, forceRedact bool, seen map[embedVisitKey]struct{}) {
+func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue reflect.Value, ignore map[string]struct{}, forceRedact bool, seen map[embedVisitKey]struct{}, takenAbove map[string]struct{}) {
     var structType reflect.Type
     if true == beforeValue.IsValid() {
         structType = beforeValue.Type()
@@ -91,6 +91,23 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
 
     oldUsable := beforeValue.IsValid() && beforeValue.Type() == structType
     newUsable := afterValue.IsValid() && afterValue.Type() == structType
+
+    /* bun never lets an embedded field override a column a level nearer the root holds, so such a field is not part of the row */
+    taken := make(map[string]struct{}, len(takenAbove)+structType.NumField())
+    for name := range takenAbove {
+        taken[name] = struct{}{}
+    }
+
+    for index := 0; index < structType.NumField(); index++ {
+        field := structType.Field(index)
+        if false == field.IsExported() || true == field.Anonymous {
+            continue
+        }
+
+        if name, skip := auditFieldName(field); false == skip {
+            taken[name] = struct{}{}
+        }
+    }
 
     for index := 0; index < structType.NumField(); index++ {
         field := structType.Field(index)
@@ -120,12 +137,16 @@ func collectChanges(changes *[]Change, beforeValue reflect.Value, afterValue ref
             }
 
             embedRedact := forceRedact || "redact" == field.Tag.Get("audit")
-            collectChanges(changes, embeddedBefore, embeddedAfter, ignore, embedRedact, seen)
+            collectChanges(changes, embeddedBefore, embeddedAfter, ignore, embedRedact, seen, taken)
             continue
         }
 
         name, skip := auditFieldName(field)
         if true == skip {
+            continue
+        }
+
+        if _, shadowed := takenAbove[name]; true == shadowed {
             continue
         }
 
@@ -452,6 +473,13 @@ func auditFieldName(field reflect.StructField) (string, bool) {
     first := tag
     if comma := strings.IndexByte(tag, ','); -1 != comma {
         first = tag[:comma]
+
+        /* a scan-only field is never written by an update, so it is not part of the row's change set */
+        for _, option := range strings.Split(tag[comma+1:], ",") {
+            if "scanonly" == option {
+                return "", true
+            }
+        }
     }
 
     if true == strings.HasPrefix(first, "rel:") || true == strings.HasPrefix(first, "m2m:") {

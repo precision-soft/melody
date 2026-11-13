@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- `audit/track.go`: `Tracker.Update`, and `Tracker.Delete` under `CaptureDeleteBeforeImage`, read the stored row into a model holding the primary key alone, where they read it into a copy of the passed model and a column that decodes into what is already there, a json map, kept the passed model's keys: an update that only added a key was recorded with an empty change set.
+- **Behavioural change**: `audit/change.go` — a field whose `bun` tag carries the `scanonly` option, and a field of an embedded struct whose column a field nearer the root already holds, are left out of every change set. Neither is a column the update writes, and with the before image read into a model holding the primary key alone each would have been recorded as changed on every update; a direct `ChangeSet(before, after)` caller comparing two loaded models no longer gets an entry for them.
+
 ## [v3.6.6] - 2026-11-12 - Unknown Seal Format Refused
 
 ### Security

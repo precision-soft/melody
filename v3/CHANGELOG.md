@@ -13,6 +13,10 @@ The example application inside this major keeps no changelog: it is not a projec
 - `.documentation/package/HTTP.md`: what an error handler installed with `SetErrorHandler` replaces and what stays with the kernel.
 - `SECURITY.md`: an application that serves HTTP/2 directly must be built with Go 1.26.9 or newer for four `net/http` advisories, whatever the `go` line of the module says.
 
+### Fixed
+
+- `http/server_sent_event.go`: `NewServerSentEventWriter` refuses a writer chain whose `Unwrap` reaches itself, `response writer chain reaches itself`, or runs past 65,536 links, `response writer chain is longer than the limit`, before it commits a header, where the walk had no bound and a ring held the handler forever.
+
 ## [v3.14.4] - 2026-11-06 - Build Version Matches the Release
 
 ### Fixed
