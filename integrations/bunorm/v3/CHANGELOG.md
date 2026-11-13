@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.7] - 2026-11-13 - Audit Before Image Holds the Primary Key
+
 ### Fixed
 
 - `audit/track.go`: `Tracker.Update`, and `Tracker.Delete` under `CaptureDeleteBeforeImage`, read the stored row into a model holding the primary key alone, where they read it into a copy of the passed model and a column that decodes into what is already there, a json map, kept the passed model's keys: an update that only added a key was recorded with an empty change set.
@@ -257,7 +259,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.6...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.7...HEAD
+
+[v3.6.7]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.6...integrations/bunorm/v3.6.7
 
 [v3.6.6]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.5...integrations/bunorm/v3.6.6
 

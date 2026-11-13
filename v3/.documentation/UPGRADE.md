@@ -1032,6 +1032,22 @@ package, a column's `Value` and the `Migrator`'s re-seal refuse a value of the f
 
 **Remedy.** Read and migrate such a column with the build that wrote it, or restore the damaged rows; the rows are those whose bytes begin with `<ENC>\0` and not with `<ENC>\0gcm1\0`. A value that begins with `<ENC>` without the NUL glue, as bun's formatter leaves one inlined as a `string`, is still plaintext.
 
+### Bunorm audit: a change set leaves out scan-only fields and a shadowed embedded field
+
+**What changed.** [`ChangeSet`](../../integrations/bunorm/v3/audit/change.go) leaves out a field whose `bun` tag carries the `scanonly` option, and a field of an embedded struct whose column a field nearer the root already holds, as bun leaves both out of the row it writes. The [`Tracker`](../../integrations/bunorm/v3/audit/track.go) reads the before image of an update, and of a delete under `CaptureDeleteBeforeImage`, into a model holding the primary key alone, where it read it into a copy of the passed model. Shipped in `integrations/bunorm/v3` `v3.6.7`.
+
+**Symptom.** A direct `ChangeSet(before, after)` caller comparing two loaded models gets no entry for such a field where it got one when the field differed. On the `Tracker` path, an update that only added a key to a json map column is recorded with that key, where it was recorded with an empty change set.
+
+**Remedy.** None needed: neither field is a column of the row. Read a scan-only value from the query that selects it, not from the audit trail.
+
+### Object storage: `awss3` `Put` of unknown size goes up in parts of 16 MiB and is refused past ten thousand of them
+
+**What changed.** [`Storage.Put`](../../integrations/awss3/v3/storage.go) with a negative `size` names a part size of 16 MiB, where the client sized the part for a 5 TiB object and allocated about 528 MiB for every such put. Ten thousand parts of 16 MiB bound the object at 156.25 GiB, and a longer body fails the put. Shipped in `integrations/awss3/v3` `v3.1.3`.
+
+**Symptom.** A put of unknown size longer than 156.25 GiB fails with `object storage put of unknown size is longer than the limit`, and the multipart upload is aborted, where it went up whole to 5 TiB.
+
+**Remedy.** Pass the body's size when it is known: a put of known size is bounded by s3 alone.
+
 ### Bunorm migrate: the held-lock refusal names the resource and the remedy
 
 **What changed.** `<prefix>:migrate` and `<prefix>:rollback` wrap bun's lock error in a melody error naming the manager label and, but on a cancelled context, the lock table — and, when the lock is held by another run, the `<prefix>:unlock` command —, with bun's error kept as the cause; the wrap is one of four, for a cancelled context, a locks table missing or unreachable, a held lock and a lock that could not be taken. It previously travelled as bun's own error, carrying no melody context at all.
