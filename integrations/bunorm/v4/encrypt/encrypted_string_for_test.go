@@ -10,15 +10,15 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
-type crmCipherRef struct{}
+type crmCipherReference struct{}
 
-func (instance crmCipherRef) CipherName() string {
+func (instance crmCipherReference) CipherName() string {
     return "test:crm"
 }
 
-type billingCipherRef struct{}
+type billingCipherReference struct{}
 
-func (instance billingCipherRef) CipherName() string {
+func (instance billingCipherReference) CipherName() string {
     return "test:billing"
 }
 
@@ -35,7 +35,7 @@ func useCompartmentCiphers(t *testing.T) {
 func TestEncryptedStringFor_RoundTripPerCompartment(t *testing.T) {
     useCompartmentCiphers(t)
 
-    original := EncryptedStringFor[crmCipherRef]("customer iban")
+    original := EncryptedStringFor[crmCipherReference]("customer iban")
 
     stored, valueErr := original.Value()
     if nil != valueErr {
@@ -47,7 +47,7 @@ func TestEncryptedStringFor_RoundTripPerCompartment(t *testing.T) {
         t.Fatalf("expected encrypted stored value, got %v", stored)
     }
 
-    var loaded EncryptedStringFor[crmCipherRef]
+    var loaded EncryptedStringFor[crmCipherReference]
     if scanErr := loaded.Scan(storedBytes); nil != scanErr {
         t.Fatalf("scan: %v", scanErr)
     }
@@ -60,7 +60,7 @@ func TestEncryptedStringFor_RoundTripPerCompartment(t *testing.T) {
 func TestEncryptedStringFor_CompartmentsAreIsolated(t *testing.T) {
     useCompartmentCiphers(t)
 
-    crmValue := EncryptedStringFor[crmCipherRef]("customer iban")
+    crmValue := EncryptedStringFor[crmCipherReference]("customer iban")
 
     stored, valueErr := crmValue.Value()
     if nil != valueErr {
@@ -68,14 +68,14 @@ func TestEncryptedStringFor_CompartmentsAreIsolated(t *testing.T) {
     }
 
     /* the billing compartment must not be able to decrypt a crm ciphertext */
-    var leaked EncryptedStringFor[billingCipherRef]
+    var leaked EncryptedStringFor[billingCipherReference]
     if scanErr := leaked.Scan(stored.([]byte)); nil == scanErr {
         t.Fatalf("expected the billing compartment to reject a crm ciphertext")
     }
 }
 
 func TestEncryptedStringFor_UnconfiguredCompartmentErrors(t *testing.T) {
-    value := EncryptedStringFor[crmCipherRef]("data")
+    value := EncryptedStringFor[crmCipherReference]("data")
 
     if _, valueErr := value.Value(); nil == valueErr {
         t.Fatalf("expected an error without the named cipher installed")
@@ -85,7 +85,7 @@ func TestEncryptedStringFor_UnconfiguredCompartmentErrors(t *testing.T) {
 func TestEncryptedStringFor_DoesNotUseTheDefaultCipher(t *testing.T) {
     installCipher(t, defaultCipherName, NewFakeCipher())
 
-    value := EncryptedStringFor[crmCipherRef]("data")
+    value := EncryptedStringFor[crmCipherReference]("data")
 
     if _, valueErr := value.Value(); nil == valueErr {
         t.Fatalf("expected the named binding to ignore the default cipher")
@@ -93,7 +93,7 @@ func TestEncryptedStringFor_DoesNotUseTheDefaultCipher(t *testing.T) {
 }
 
 func TestEncryptedStringFor_RedactsEverywhere(t *testing.T) {
-    value := EncryptedStringFor[crmCipherRef]("secret")
+    value := EncryptedStringFor[crmCipherReference]("secret")
 
     if redactedPlaceholder != value.String() {
         t.Fatalf("expected String to redact, got %q", value.String())
@@ -116,7 +116,7 @@ func TestEncryptedStringFor_RedactsEverywhere(t *testing.T) {
 func TestEncryptedStringFor_ScanNullResetsTheValue(t *testing.T) {
     useCompartmentCiphers(t)
 
-    loaded := EncryptedStringFor[crmCipherRef]("stale")
+    loaded := EncryptedStringFor[crmCipherReference]("stale")
     if scanErr := loaded.Scan(nil); nil != scanErr {
         t.Fatalf("scan nil: %v", scanErr)
     }
@@ -132,7 +132,7 @@ func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testi
     provider := NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v1", Keys: map[string][]byte{"crm-v1": oldKey}})
     installCipher(t, "test:crm", NewCipher(provider))
 
-    original := EncryptedStringFor[crmCipherRef]("long lived row")
+    original := EncryptedStringFor[crmCipherReference]("long lived row")
 
     stored, valueErr := original.Value()
     if nil != valueErr {
@@ -149,7 +149,7 @@ func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testi
     })
     storeCipher("test:crm", NewCipher(rotatedProvider))
 
-    var loaded EncryptedStringFor[crmCipherRef]
+    var loaded EncryptedStringFor[crmCipherReference]
     if scanErr := loaded.Scan(stored.([]byte)); nil != scanErr {
         t.Fatalf("scan after rotation: %v", scanErr)
     }
@@ -159,10 +159,9 @@ func TestEncryptedStringFor_RotationInsideTheCompartmentKeepsDecrypting(t *testi
     }
 }
 
-/* emptyNameCipherRef is the misuse the compartment marker must refuse: an empty name is the default cipher's reserved registry entry, not a compartment. */
-type emptyNameCipherRef struct{}
+type emptyNameCipherReference struct{}
 
-func (instance emptyNameCipherRef) CipherName() string {
+func (instance emptyNameCipherReference) CipherName() string {
     return ""
 }
 
@@ -170,13 +169,13 @@ func (instance emptyNameCipherRef) CipherName() string {
 func TestEncryptedStringFor_EmptyCipherNameIsRejected(t *testing.T) {
     installCipher(t, defaultCipherName, NewFakeCipher())
 
-    column := EncryptedStringFor[emptyNameCipherRef]("secret")
+    column := EncryptedStringFor[emptyNameCipherReference]("secret")
 
     if _, valueErr := column.Value(); nil == valueErr {
         t.Fatal("expected an empty cipher name to be rejected rather than resolve the default cipher")
     }
 
-    var scanned EncryptedStringFor[emptyNameCipherRef]
+    var scanned EncryptedStringFor[emptyNameCipherReference]
     if scanErr := scanned.Scan("anything"); nil == scanErr {
         t.Fatal("expected Scan with an empty cipher name to be rejected")
     }
@@ -188,8 +187,8 @@ func TestEncryptedTypes_RedactUnderTheGoStringVerb(t *testing.T) {
     renderings := []string{
         fmt.Sprintf("%#v", EncryptedString(plaintext)),
         fmt.Sprintf("%#v", EncryptedDeterministicString(plaintext)),
-        fmt.Sprintf("%#v", EncryptedStringFor[emptyNameCipherRef](plaintext)),
-        fmt.Sprintf("%#v", EncryptedDeterministicStringFor[emptyNameCipherRef](plaintext)),
+        fmt.Sprintf("%#v", EncryptedStringFor[emptyNameCipherReference](plaintext)),
+        fmt.Sprintf("%#v", EncryptedDeterministicStringFor[emptyNameCipherReference](plaintext)),
     }
 
     for _, rendering := range renderings {
@@ -219,16 +218,15 @@ func TestEncryptedStringFor_RefusesAPointerFormMarker(t *testing.T) {
     }
 }
 
-/* the compartment-bound column carries the EncryptedColumn marker its non-generic sibling carries, which is what the auto-redaction type walk recognises it by. The assertion lives here rather than beside the type because instantiating a generic column needs a CipherRef marker, and the package deliberately ships none — a marker is the integrator's, minted per compartment. */
-var _ EncryptedColumn = EncryptedStringFor[crmCipherRef]("")
+var _ EncryptedColumn = EncryptedStringFor[crmCipherReference]("")
 
 func TestEncryptedStringFor_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testing.T) {
-    payload, marshalErr := json.Marshal(EncryptedStringFor[crmCipherRef]("super-secret"))
+    payload, marshalErr := json.Marshal(EncryptedStringFor[crmCipherReference]("super-secret"))
     if nil != marshalErr {
         t.Fatalf("marshal: %v", marshalErr)
     }
 
-    decoded := EncryptedStringFor[crmCipherRef]("untouched")
+    decoded := EncryptedStringFor[crmCipherReference]("untouched")
     unmarshalErr := json.Unmarshal(payload, &decoded)
     if nil == unmarshalErr {
         t.Fatalf("expected the redacted document to be refused, got %q", string(decoded))
@@ -244,7 +242,7 @@ func TestEncryptedStringFor_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testi
 }
 
 func TestEncryptedStringFor_UnmarshalJSONDecodesAPlaintextString(t *testing.T) {
-    var decoded EncryptedStringFor[crmCipherRef]
+    var decoded EncryptedStringFor[crmCipherReference]
     if unmarshalErr := json.Unmarshal([]byte(`"hello"`), &decoded); nil != unmarshalErr {
         t.Fatalf("unmarshal: %v", unmarshalErr)
     }
@@ -255,12 +253,12 @@ func TestEncryptedStringFor_UnmarshalJSONDecodesAPlaintextString(t *testing.T) {
 }
 
 /* the generic instantiation cannot be asserted in the source file, because the package ships no marker of its own on purpose: the marker is the integrator's, one per compartment */
-var _ json.Unmarshaler = (*EncryptedStringFor[crmCipherRef])(nil)
+var _ json.Unmarshaler = (*EncryptedStringFor[crmCipherReference])(nil)
 
 func TestEncryptedStringFor_FormatRedactsNumericVerbs(t *testing.T) {
     secret := "top-secret-plaintext"
     for _, verb := range []string{"%d", "%o", "%b", "%c", "%U"} {
-        rendered := fmt.Sprintf(verb, EncryptedStringFor[crmCipherRef](secret))
+        rendered := fmt.Sprintf(verb, EncryptedStringFor[crmCipherReference](secret))
         if true == strings.Contains(rendered, secret) {
             t.Fatalf("verb %s leaked the plaintext through the badverb form: %s", verb, rendered)
         }
@@ -274,7 +272,7 @@ func TestEncryptedStringFor_FormatRedactsNumericVerbs(t *testing.T) {
 func TestEncryptedStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
     useCompartmentCiphers(t)
 
-    crmCipher, _, cipherErr := refColumn[crmCipherRef]()
+    crmCipher, _, cipherErr := referenceColumn[crmCipherReference]()
     if nil != cipherErr {
         t.Fatalf("cipher: %v", cipherErr)
     }
@@ -284,7 +282,7 @@ func TestEncryptedStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *te
         t.Fatalf("seal: %v", sealErr)
     }
 
-    stored, valueErr := EncryptedStringFor[crmCipherRef](otherRowsSeal).Value()
+    stored, valueErr := EncryptedStringFor[crmCipherReference](otherRowsSeal).Value()
     if nil != valueErr {
         t.Fatalf("value: %v", valueErr)
     }
@@ -293,7 +291,7 @@ func TestEncryptedStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *te
         t.Fatalf("expected the seal to be sealed as data, it was stored verbatim")
     }
 
-    var loaded EncryptedStringFor[crmCipherRef]
+    var loaded EncryptedStringFor[crmCipherReference]
     if scanErr := loaded.Scan(stored); nil != scanErr {
         t.Fatalf("scan: %v", scanErr)
     }
@@ -303,7 +301,6 @@ func TestEncryptedStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *te
     }
 }
 
-/* an interface marker, CipherRef itself, has no zero value to call CipherName on; both doors answer an error instead of panicking inside database/sql */
 func TestEncryptedStringFor_AnInterfaceMarkerIsRefusedWithoutAPanic(t *testing.T) {
     defer func() {
         if recovered := recover(); nil != recovered {
@@ -311,27 +308,27 @@ func TestEncryptedStringFor_AnInterfaceMarkerIsRefusedWithoutAPanic(t *testing.T
         }
     }()
 
-    if _, valueErr := EncryptedStringFor[CipherRef]("plaintext").Value(); nil == valueErr || false == strings.Contains(valueErr.Error(), "pointer or interface type") {
+    if _, valueErr := EncryptedStringFor[CipherReference]("plaintext").Value(); nil == valueErr || false == strings.Contains(valueErr.Error(), "pointer or interface type") {
         t.Fatalf("expected the interface marker refused at Value, got: %v", valueErr)
     }
 
-    var loaded EncryptedStringFor[CipherRef]
+    var loaded EncryptedStringFor[CipherReference]
     if scanErr := loaded.Scan(markerPrefix + "v1:c2VhbGVk"); nil == scanErr {
         t.Fatal("expected the interface marker refused at Scan")
     }
 }
 
 /* the refusal of a marker that is a pointer or an interface names the marker's TYPE: %T of a nil interface spelled "<nil>", which named nothing. */
-func TestRefCipher_RefusalNamesThePointerAndTheInterfaceMarker(t *testing.T) {
-    _, _, interfaceErr := refColumn[CipherRef]()
+func TestReferenceCipher_RefusalNamesThePointerAndTheInterfaceMarker(t *testing.T) {
+    _, _, interfaceErr := referenceColumn[CipherReference]()
     interfaceRefusal, isInterfaceRefusal := interfaceErr.(*exception.Error)
-    if false == isInterfaceRefusal || "encrypt.CipherRef" != interfaceRefusal.Context()["cipherRef"] {
+    if false == isInterfaceRefusal || "encrypt.CipherReference" != interfaceRefusal.Context()["cipherReference"] {
         t.Fatalf("expected the interface marker named, got %v", interfaceErr)
     }
 
-    _, _, pointerErr := refColumn[*crmCipherRef]()
+    _, _, pointerErr := referenceColumn[*crmCipherReference]()
     pointerRefusal, isPointerRefusal := pointerErr.(*exception.Error)
-    if false == isPointerRefusal || "*encrypt.crmCipherRef" != pointerRefusal.Context()["cipherRef"] {
+    if false == isPointerRefusal || "*encrypt.crmCipherReference" != pointerRefusal.Context()["cipherReference"] {
         t.Fatalf("expected the pointer marker named, got %v", pointerErr)
     }
 }
@@ -369,7 +366,7 @@ func TestEncryptedStringFor_ValueSealsUnderTheBindingOfItsMarker(t *testing.T) {
 func TestEncryptedStringFor_AMarkerWithoutABindingStillSealsGcm1(t *testing.T) {
     newCrmCipher(t)
 
-    stored, valueErr := EncryptedStringFor[crmCipherRef]("RO49AAAA1B31007593840000").Value()
+    stored, valueErr := EncryptedStringFor[crmCipherReference]("RO49AAAA1B31007593840000").Value()
     if nil != valueErr || false == strings.HasPrefix(string(stored.([]byte)), "<ENC>\x00gcm1\x00") {
         t.Fatalf("expected a gcm1 seal, got %q (%v)", stored, valueErr)
     }
@@ -394,7 +391,7 @@ func TestBoundColumn_AdmitsAnUnboundSealAndPlaintextByDefault(t *testing.T) {
 func TestBoundColumn_RefusingUnboundRefusesAGcm1Seal(t *testing.T) {
     provider := &countingKeyProvider{KeyProvider: NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v2", Keys: map[string][]byte{"crm-v2": newKey(12)}})}
     cipherInstance := NewCipher(provider)
-    installCipher(t, crmCipherRef{}.CipherName(), cipherInstance)
+    installCipher(t, crmCipherReference{}.CipherName(), cipherInstance)
     installSealBinding(t, crmIbanBinding{}, true)
 
     unbound, _ := cipherInstance.Encrypt("RO49AAAA1B31007593840000")
@@ -446,8 +443,7 @@ func (instance *pointerReceiverBinding) SealBinding() string {
     return "customer.pointer_receiver"
 }
 
-/* a marker whose SealBinding is on the pointer receiver would leave its value type unbound, so its column refuses instead of writing gcm1; DefaultCipherRef embedded by pointer is refused as an error, never a nil dereference */
-func TestRefColumn_RefusesAMarkerThatCannotCarryItsBinding(t *testing.T) {
+func TestReferenceColumn_RefusesAMarkerThatCannotCarryItsBinding(t *testing.T) {
     newCrmCipher(t)
     installCipher(t, defaultCipherName, NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}})))
 
@@ -456,7 +452,7 @@ func TestRefColumn_RefusesAMarkerThatCannotCarryItsBinding(t *testing.T) {
     }
 
     if stored, valueErr := EncryptedStringFor[pointerDefaultBinding]("value").Value(); nil == valueErr || false == strings.Contains(valueErr.Error(), "by pointer") {
-        t.Fatalf("expected DefaultCipherRef by pointer refused, stored %q (%v)", stored, valueErr)
+        t.Fatalf("expected DefaultCipherReference by pointer refused, stored %q (%v)", stored, valueErr)
     }
 }
 
@@ -516,7 +512,7 @@ func TestEncryptedStringFor_AnUndeclaredBindingIsRefused(t *testing.T) {
         }
 
         context := exception.FromError(refusal).Context()
-        if "ModuleConfig.SealBindings" != context["field"] || false == strings.Contains(fmt.Sprint(context["cipherRef"]), "undeclaredBinding") {
+        if "ModuleConfig.SealBindings" != context["field"] || false == strings.Contains(fmt.Sprint(context["cipherReference"]), "undeclaredBinding") {
             t.Fatalf("expected the refusal to name the marker and the field, got %v", context)
         }
     }
@@ -524,7 +520,7 @@ func TestEncryptedStringFor_AnUndeclaredBindingIsRefused(t *testing.T) {
 
 /* a wrapped cipher installed behind the declaration's back is refused by the bound column, which never seals unbound in its place */
 func TestBoundColumn_AWrappedCipherIsRefused(t *testing.T) {
-    installCipher(t, crmCipherRef{}.CipherName(), wrappedCipher{Cipher: NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v2", Keys: map[string][]byte{"crm-v2": newKey(12)}}))})
+    installCipher(t, crmCipherReference{}.CipherName(), wrappedCipher{Cipher: NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v2", Keys: map[string][]byte{"crm-v2": newKey(12)}}))})
     installSealBinding(t, crmIbanBinding{}, false)
 
     if stored, valueErr := EncryptedStringFor[crmIbanBinding]("value").Value(); nil == valueErr || false == strings.Contains(valueErr.Error(), "needs the package cipher") {
@@ -537,8 +533,7 @@ func TestBoundColumn_AWrappedCipherIsRefused(t *testing.T) {
     }
 }
 
-/* DefaultCipherRef selects the default cipher for a bound marker; a marker naming the empty compartment without it is still refused */
-func TestDefaultCipherRef_SelectsTheDefaultCipher(t *testing.T) {
+func TestDefaultCipherReference_SelectsTheDefaultCipher(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
     installCipher(t, defaultCipherName, cipherInstance)
     installSealBinding(t, defaultSecretBinding{}, true)
@@ -548,8 +543,8 @@ func TestDefaultCipherRef_SelectsTheDefaultCipher(t *testing.T) {
         t.Fatalf("expected a gcm2 seal under the default cipher, got %q (%v)", stored, valueErr)
     }
 
-    if _, _, resolveErr := refColumn[emptyNameRef](); nil == resolveErr || false == strings.Contains(resolveErr.Error(), "name is empty") {
-        t.Fatalf("expected the empty name refused without DefaultCipherRef, got %v", resolveErr)
+    if _, _, resolveErr := referenceColumn[emptyNameRef](); nil == resolveErr || false == strings.Contains(resolveErr.Error(), "name is empty") {
+        t.Fatalf("expected the empty name refused without DefaultCipherReference, got %v", resolveErr)
     }
 }
 

@@ -205,7 +205,7 @@ func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) runtimecontr
         context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
-            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -347,7 +347,7 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
         context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
-            bunorm.ProviderDefinition{Name: "primary", Provider: &refusingCountingProvider{}, Params: testConnectionParameters, IsDefault: true},
+            bunorm.ProviderDefinition{Name: "primary", Provider: &refusingCountingProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {

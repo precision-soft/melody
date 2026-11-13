@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `output.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
 - **Breaking** — `migrate.go`: `Query.SQL` is renamed `Query.Sql`; nothing else changes.
+- **Breaking** — `command_init.go`: `InitCommand` and `NewInitCommand` are renamed `InitializeCommand` and `NewInitializeCommand`; the command keeps its name.
 
 ### Fixed
 

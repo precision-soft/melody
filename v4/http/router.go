@@ -118,18 +118,18 @@ func (instance *Router) RoutesClaimingPath(path string) []httpcontract.RouteDefi
 
         routeValue := routes[index]
 
-        params, matched := matchPath(routeValue, pathParts)
+        parameters, matched := matchPath(routeValue, pathParts)
         if false == matched {
             continue
         }
 
         for key, defaultValue := range routeValue.defaults {
-            if _, exists := params[key]; false == exists {
-                params[key] = defaultValue
+            if _, exists := parameters[key]; false == exists {
+                parameters[key] = defaultValue
             }
         }
 
-        if false == matchesLocale(routeValue.locales, params) {
+        if false == matchesLocale(routeValue.locales, parameters) {
             continue
         }
 
@@ -659,19 +659,19 @@ func (instance *Router) match(method string, path string, host string, scheme st
             continue
         }
 
-        params, matched := matchPath(routeDefinition, pathParts)
+        parameters, matched := matchPath(routeDefinition, pathParts)
         if false == matched {
             continue
         }
 
         /* the defaults are merged before the locale gate reads them, since a default is how a route supplies a locale its url does not carry; the kernel reads the same merged map */
         for key, defaultValue := range routeDefinition.defaults {
-            if _, exists := params[key]; false == exists {
-                params[key] = defaultValue
+            if _, exists := parameters[key]; false == exists {
+                parameters[key] = defaultValue
             }
         }
 
-        if false == matchesLocale(routeDefinition.locales, params) {
+        if false == matchesLocale(routeDefinition.locales, parameters) {
             continue
         }
 
@@ -692,7 +692,7 @@ func (instance *Router) match(method string, path string, host string, scheme st
             routeDefinition.priority > bestPriority ||
             (routeDefinition.priority == bestPriority && (0 > bestIndex || index < bestIndex)) {
             bestHandler = routeDefinition.handler
-            bestParams = params
+            bestParams = parameters
             bestAttributes = routeDefinition.attributes
             bestPriority = routeDefinition.priority
             bestIndex = index

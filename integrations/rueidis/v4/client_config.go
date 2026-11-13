@@ -21,8 +21,8 @@ type ClientConfig struct {
     /* DialTimeout bounds the dial of every connection: 5s by default, at least 1ms, unlimited refused, so the library's own dial default never governs a dial. */
     DialTimeout bound.Duration
 
-    /* ConnWriteTimeout is the per-connection write deadline and the cadence of the library's background pings: 5s by default, at least 1ms, unlimited refused, since the library has no unbounded form. */
-    ConnWriteTimeout bound.Duration
+    /* ConnectionWriteTimeout is the per-connection write deadline and the cadence of the library's background pings: 5s by default, at least 1ms, unlimited refused, since the library has no unbounded form. */
+    ConnectionWriteTimeout bound.Duration
 
     /* BootPingDisabled skips the ping that verifies the store answers before Open returns; a dead address still refuses at client creation. */
     BootPingDisabled bool
@@ -40,8 +40,8 @@ var clientDialTimeoutRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
-var clientConnWriteTimeoutRule = bound.Rule[time.Duration]{
-    Name:    "ClientConfig.ConnWriteTimeout",
+var clientConnectionWriteTimeoutRule = bound.Rule[time.Duration]{
+    Name:    "ClientConfig.ConnectionWriteTimeout",
     Default: 5 * time.Second,
     Minimum: bound.TimeoutMinimum,
 }
@@ -57,7 +57,7 @@ type resolvedClient struct {
     selectDb               int
     tlsConfig              *tls.Config
     dialTimeout            time.Duration
-    connWriteTimeout       time.Duration
+    connectionWriteTimeout time.Duration
     bootPingDisabled       bool
     clientSideCacheEnabled bool
     clientSideCacheBytes   int
@@ -69,9 +69,9 @@ func resolveClient(config ClientConfig) (resolvedClient, error) {
         return resolvedClient{}, dialTimeoutErr
     }
 
-    connWriteTimeout, connWriteTimeoutErr := bound.Resolve(config.ConnWriteTimeout, clientConnWriteTimeoutRule)
-    if nil != connWriteTimeoutErr {
-        return resolvedClient{}, connWriteTimeoutErr
+    connectionWriteTimeout, connectionWriteTimeoutErr := bound.Resolve(config.ConnectionWriteTimeout, clientConnectionWriteTimeoutRule)
+    if nil != connectionWriteTimeoutErr {
+        return resolvedClient{}, connectionWriteTimeoutErr
     }
 
     if false == config.ClientSideCacheEnabled && false == config.ClientSideCacheBytes.IsAbsent() {
@@ -95,7 +95,7 @@ func resolveClient(config ClientConfig) (resolvedClient, error) {
         selectDb:               config.SelectDb,
         tlsConfig:              config.TlsConfig,
         dialTimeout:            dialTimeout.Value,
-        connWriteTimeout:       connWriteTimeout.Value,
+        connectionWriteTimeout: connectionWriteTimeout.Value,
         bootPingDisabled:       config.BootPingDisabled,
         clientSideCacheEnabled: config.ClientSideCacheEnabled,
         clientSideCacheBytes:   clientSideCacheBytes.Value,

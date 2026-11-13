@@ -7,7 +7,7 @@ import (
     "log/slog"
 )
 
-/* EncryptedDeterministicString is EncryptedString with the nonce derived from the plaintext, so equal plaintext seals to equal ciphertext and the column answers an equality lookup through Cipher.CiphertextCandidates. The nonce is keyed by the key and the plaintext alone, so equal values are correlatable across every unbound deterministic column and table sealed under the same key; the readme's "Searchable (deterministic) encryption" section says what that rules the type out for. A bound column is an EncryptedDeterministicStringFor over a SealBindingRef; this type reads a bound seal as ErrSealBound. */
+/* EncryptedDeterministicString is EncryptedString with the nonce derived from the plaintext, so equal plaintext seals to equal ciphertext and the column answers an equality lookup through Cipher.CiphertextCandidates. The nonce is keyed by the key and the plaintext alone, so equal values are correlatable across every unbound deterministic column and table sealed under the same key; the readme's "Searchable (deterministic) encryption" section says what that rules the type out for. A bound column is an EncryptedDeterministicStringFor over a SealBindingReference; this type reads a bound seal as ErrSealBound. */
 type EncryptedDeterministicString string
 
 func (instance EncryptedDeterministicString) encryptedColumn() {}

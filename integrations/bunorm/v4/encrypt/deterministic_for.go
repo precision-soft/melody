@@ -7,8 +7,8 @@ import (
     "log/slog"
 )
 
-/* EncryptedDeterministicStringFor is EncryptedDeterministicString bound to the named cipher the CipherRef marker R selects; see EncryptedStringFor for the compartment semantics and EncryptedDeterministicString for what the plaintext-derived nonce reveals. */
-type EncryptedDeterministicStringFor[R CipherRef] string
+/* EncryptedDeterministicStringFor is EncryptedDeterministicString bound to the named cipher the CipherReference marker R selects; see EncryptedStringFor for the compartment semantics and EncryptedDeterministicString for what the plaintext-derived nonce reveals. */
+type EncryptedDeterministicStringFor[R CipherReference] string
 
 func (instance EncryptedDeterministicStringFor[R]) encryptedColumn() {}
 
@@ -35,7 +35,7 @@ func (instance *EncryptedDeterministicStringFor[R]) UnmarshalJSON(data []byte) e
 }
 
 func (instance EncryptedDeterministicStringFor[R]) Value() (driver.Value, error) {
-    return sealRefColumnValue[R](string(instance), true)
+    return sealReferenceColumnValue[R](string(instance), true)
 }
 
 func (instance *EncryptedDeterministicStringFor[R]) Scan(source any) error {
@@ -49,7 +49,7 @@ func (instance *EncryptedDeterministicStringFor[R]) Scan(source any) error {
         return nil
     }
 
-    plaintext, plaintextErr := openRefColumnValue[R](raw)
+    plaintext, plaintextErr := openReferenceColumnValue[R](raw)
     if nil != plaintextErr {
         return plaintextErr
     }

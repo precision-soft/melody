@@ -1016,18 +1016,18 @@ func TestEncryptedDeterministicString_ASealWrittenAsDataThroughAWrappedCipherIsR
 /* a column bound to a named compartment over a wrapped cipher refuses it the same way */
 func TestEncryptedStringFor_ASealWrittenAsDataThroughAWrappedNamedCipherIsRefused(t *testing.T) {
     packageCipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v1", Keys: map[string][]byte{"crm-v1": newKey(11)}}))
-    installCipher(t, crmCipherRef{}.CipherName(), wrappedCipher{Cipher: packageCipher})
+    installCipher(t, crmCipherReference{}.CipherName(), wrappedCipher{Cipher: packageCipher})
 
     otherRowsSeal, sealErr := packageCipher.Encrypt("another customer's iban")
     if nil != sealErr {
         t.Fatalf("seal: %v", sealErr)
     }
 
-    if stored, valueErr := EncryptedStringFor[crmCipherRef](otherRowsSeal).Value(); nil == valueErr {
+    if stored, valueErr := EncryptedStringFor[crmCipherReference](otherRowsSeal).Value(); nil == valueErr {
         t.Fatalf("expected the marker-shaped value refused through a wrapped named cipher, stored %q", stored)
     }
 
-    if stored, valueErr := EncryptedDeterministicStringFor[crmCipherRef](otherRowsSeal).Value(); nil == valueErr {
+    if stored, valueErr := EncryptedDeterministicStringFor[crmCipherReference](otherRowsSeal).Value(); nil == valueErr {
         t.Fatalf("expected the marker-shaped value refused through a wrapped named cipher, stored %q", stored)
     }
 }

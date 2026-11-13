@@ -67,26 +67,26 @@ func normalizeCronNameTokens(value string, nameValues map[string]int) string {
 }
 
 type ForbiddenCharacter struct {
-    Char   rune
-    Reason string
+    Character rune
+    Reason    string
 }
 
 var CrontabForbiddenCharacters = []ForbiddenCharacter{
-    {Char: '%', Reason: "reserved by crontab as a line-continuation character (translated to a newline before the shell sees it); remove it at the source"},
-    {Char: '\n', Reason: "terminates the crontab line; a literal newline inside a token splits one entry into multiple invalid lines"},
-    {Char: '\r', Reason: "terminates the crontab line on many cron daemons; remove it before passing the token to the generator"},
+    {Character: '%', Reason: "reserved by crontab as a line-continuation character (translated to a newline before the shell sees it); remove it at the source"},
+    {Character: '\n', Reason: "terminates the crontab line; a literal newline inside a token splits one entry into multiple invalid lines"},
+    {Character: '\r', Reason: "terminates the crontab line on many cron daemons; remove it before passing the token to the generator"},
 }
 
 func ValidateNoForbiddenCharacters(tokens []string, forbidden []ForbiddenCharacter, context string) error {
     for _, token := range tokens {
         for _, character := range forbidden {
-            if true == strings.ContainsRune(token, character.Char) {
+            if true == strings.ContainsRune(token, character.Character) {
                 return exception.NewError(
-                    fmt.Sprintf("cron: token %q in %s contains forbidden character %q: %s", token, context, character.Char, character.Reason),
+                    fmt.Sprintf("cron: token %q in %s contains forbidden character %q: %s", token, context, character.Character, character.Reason),
                     exceptioncontract.Context{
                         "token":     token,
                         "context":   context,
-                        "character": string(character.Char),
+                        "character": string(character.Character),
                         "reason":    character.Reason,
                     },
                     ErrForbiddenCharacter,

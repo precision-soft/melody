@@ -16,7 +16,7 @@ import (
 
 const defaultMigrateBatchSize = 500
 
-type TableSpec struct {
+type TableSpecification struct {
     Table      string
     PrimaryKey string
     Columns    []string
@@ -36,14 +36,14 @@ type ColumnSealBinding struct {
     RefuseUnbound bool
 }
 
-var tableSpecBatchSizeRule = bound.Rule[int]{
-    Name:    "TableSpec.BatchSize",
+var tableSpecificationBatchSizeRule = bound.Rule[int]{
+    Name:    "TableSpecification.BatchSize",
     Default: defaultMigrateBatchSize,
     Minimum: 1,
 }
 
-func resolveBatchSize(spec TableSpec) (int, error) {
-    resolved, resolveErr := bound.Resolve(spec.BatchSize, tableSpecBatchSizeRule)
+func resolveBatchSize(specification TableSpecification) (int, error) {
+    resolved, resolveErr := bound.Resolve(specification.BatchSize, tableSpecificationBatchSizeRule)
     if nil != resolveErr {
         return 0, resolveErr
     }
@@ -51,31 +51,31 @@ func resolveBatchSize(spec TableSpec) (int, error) {
     return resolved.Value, nil
 }
 
-/* resolveSpecBindings reads TableSpec.SealBindings into the bindings the run's transforms take, refusing a spec it cannot bind before any query is sent */
-func (instance *Migrator) resolveSpecBindings(spec TableSpec) (map[string]sealBinding, error) {
-    if 0 == len(spec.SealBindings) {
+/* resolveSpecificationBindings reads TableSpecification.SealBindings into the bindings the run's transforms take, refusing a specification it cannot bind before any query is sent */
+func (instance *Migrator) resolveSpecificationBindings(specification TableSpecification) (map[string]sealBinding, error) {
+    if 0 == len(specification.SealBindings) {
         return nil, nil
     }
 
-    listed := make(map[string]bool, len(spec.Columns))
-    for _, column := range spec.Columns {
+    listed := make(map[string]bool, len(specification.Columns))
+    for _, column := range specification.Columns {
         listed[column] = true
     }
 
     if _, carriesBinding := instance.cipher.(bindingSealer); false == carriesBinding {
         return nil, exception.NewError(
             "migrate seal binding needs the package cipher; a cipher implemented outside the package, a wrapper included, cannot bind a seal",
-            map[string]any{"field": "TableSpec.SealBindings", "table": spec.Table},
+            map[string]any{"field": "TableSpecification.SealBindings", "table": specification.Table},
             nil,
         )
     }
 
-    bindings := make(map[string]sealBinding, len(spec.SealBindings))
-    for column, columnBinding := range spec.SealBindings {
+    bindings := make(map[string]sealBinding, len(specification.SealBindings))
+    for column, columnBinding := range specification.SealBindings {
         if false == listed[column] {
             return nil, exception.NewError(
-                "migrate seal binding names a column the spec does not list",
-                map[string]any{"field": "TableSpec.SealBindings", "table": spec.Table, "column": column},
+                "migrate seal binding names a column the specification does not list",
+                map[string]any{"field": "TableSpecification.SealBindings", "table": specification.Table, "column": column},
                 nil,
             )
         }
@@ -83,7 +83,7 @@ func (instance *Migrator) resolveSpecBindings(spec TableSpec) (map[string]sealBi
         if false == sealBindingLabelPattern.MatchString(columnBinding.Label) {
             return nil, exception.NewError(
                 "migrate seal binding label must match "+sealBindingLabelPattern.String(),
-                map[string]any{"field": "TableSpec.SealBindings", "table": spec.Table, "column": column, "sealBinding": columnBinding.Label},
+                map[string]any{"field": "TableSpecification.SealBindings", "table": specification.Table, "column": column, "sealBinding": columnBinding.Label},
                 nil,
             )
         }
@@ -119,75 +119,75 @@ func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
     return &Migrator{db: db, cipher: cipher}
 }
 
-/* MigrateEncrypt runs EnsureColumnCapacity before the first write, so a programmatic caller gets the width check the command runs. Over a column TableSpec.SealBindings binds, a value without the marker is sealed under the binding and a seal without one is re-sealed under it, its key and mode kept, so the run brings the column to the form its bound type writes. */
-func (instance *Migrator) MigrateEncrypt(ctx context.Context, spec TableSpec) (int, error) {
-    stats, runErr := instance.migrateEncrypt(ctx, spec)
+/* MigrateEncrypt runs EnsureColumnCapacity before the first write, so a programmatic caller gets the width check the command runs. Over a column TableSpecification.SealBindings binds, a value without the marker is sealed under the binding and a seal without one is re-sealed under it, its key and mode kept, so the run brings the column to the form its bound type writes. */
+func (instance *Migrator) MigrateEncrypt(ctx context.Context, specification TableSpecification) (int, error) {
+    stats, runErr := instance.migrateEncrypt(ctx, specification)
 
     return stats.rows, runErr
 }
 
-func (instance *Migrator) migrateEncrypt(ctx context.Context, spec TableSpec) (migrateStats, error) {
-    batchSize, batchSizeErr := resolveBatchSize(spec)
+func (instance *Migrator) migrateEncrypt(ctx context.Context, specification TableSpecification) (migrateStats, error) {
+    batchSize, batchSizeErr := resolveBatchSize(specification)
     if nil != batchSizeErr {
         return migrateStats{}, batchSizeErr
     }
 
-    bindings, bindingsErr := instance.resolveSpecBindings(spec)
+    bindings, bindingsErr := instance.resolveSpecificationBindings(specification)
     if nil != bindingsErr {
         return migrateStats{}, bindingsErr
     }
 
     /* the width check's queries are the run's first, so a cancellation landing on one is named an interruption, as one landing inside the run */
-    if capacityErr := instance.ensureColumnCapacity(ctx, spec, ""); nil != capacityErr {
-        return migrateStats{}, instance.classifyRunError(spec, 0, "", capacityErr)
+    if capacityErr := instance.ensureColumnCapacity(ctx, specification, ""); nil != capacityErr {
+        return migrateStats{}, instance.classifyRunError(specification, 0, "", capacityErr)
     }
 
-    return instance.run(ctx, spec, batchSize, columnTransform(bindings, instance.encryptTransform(spec), instance.encryptBoundTransform(spec)))
+    return instance.run(ctx, specification, batchSize, columnTransform(bindings, instance.encryptTransform(specification), instance.encryptBoundTransform(specification)))
 }
 
 /* MigrateReencrypt runs its own EnsureColumnCapacityForReencrypt first, for the reason on MigrateEncrypt. Over a bound column every value it writes is sealed under the binding, and a stored seal is already the target only when it is bound and under the target key. */
-func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (int, error) {
-    stats, runErr := instance.migrateReencrypt(ctx, spec, targetKeyId)
+func (instance *Migrator) MigrateReencrypt(ctx context.Context, specification TableSpecification, targetKeyId string) (int, error) {
+    stats, runErr := instance.migrateReencrypt(ctx, specification, targetKeyId)
 
     return stats.rows, runErr
 }
 
-func (instance *Migrator) migrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (migrateStats, error) {
-    batchSize, batchSizeErr := resolveBatchSize(spec)
+func (instance *Migrator) migrateReencrypt(ctx context.Context, specification TableSpecification, targetKeyId string) (migrateStats, error) {
+    batchSize, batchSizeErr := resolveBatchSize(specification)
     if nil != batchSizeErr {
         return migrateStats{}, batchSizeErr
     }
 
     if "" == targetKeyId {
-        return migrateStats{}, exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": spec.Table}, nil)
+        return migrateStats{}, exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": specification.Table}, nil)
     }
 
-    bindings, bindingsErr := instance.resolveSpecBindings(spec)
+    bindings, bindingsErr := instance.resolveSpecificationBindings(specification)
     if nil != bindingsErr {
         return migrateStats{}, bindingsErr
     }
 
-    if capacityErr := instance.ensureColumnCapacity(ctx, spec, targetKeyId); nil != capacityErr {
-        return migrateStats{}, instance.classifyRunError(spec, 0, "", capacityErr)
+    if capacityErr := instance.ensureColumnCapacity(ctx, specification, targetKeyId); nil != capacityErr {
+        return migrateStats{}, instance.classifyRunError(specification, 0, "", capacityErr)
     }
 
-    return instance.run(ctx, spec, batchSize, columnTransform(bindings, instance.reencryptTransform(spec, targetKeyId), instance.reencryptBoundTransform(spec, targetKeyId)))
+    return instance.run(ctx, specification, batchSize, columnTransform(bindings, instance.reencryptTransform(specification, targetKeyId), instance.reencryptBoundTransform(specification, targetKeyId)))
 }
 
 /* MigrateDecrypt stops the run on a row whose stored value is of a seal format this build does not read, whatever the cipher's Decrypt answers for it, and on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. A bound column is opened under its binding. */
-func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
-    stats, runErr := instance.migrateDecrypt(ctx, spec)
+func (instance *Migrator) MigrateDecrypt(ctx context.Context, specification TableSpecification) (int, error) {
+    stats, runErr := instance.migrateDecrypt(ctx, specification)
 
     return stats.rows, runErr
 }
 
-func (instance *Migrator) migrateDecrypt(ctx context.Context, spec TableSpec) (migrateStats, error) {
-    batchSize, batchSizeErr := resolveBatchSize(spec)
+func (instance *Migrator) migrateDecrypt(ctx context.Context, specification TableSpecification) (migrateStats, error) {
+    batchSize, batchSizeErr := resolveBatchSize(specification)
     if nil != batchSizeErr {
         return migrateStats{}, batchSizeErr
     }
 
-    bindings, bindingsErr := instance.resolveSpecBindings(spec)
+    bindings, bindingsErr := instance.resolveSpecificationBindings(specification)
     if nil != bindingsErr {
         return migrateStats{}, bindingsErr
     }
@@ -197,13 +197,13 @@ func (instance *Migrator) migrateDecrypt(ctx context.Context, spec TableSpec) (m
         if true == binding.refuseUnbound {
             return migrateStats{}, exception.NewError(
                 "migrate decrypt cannot write bare values into a column that refuses unbound values; deploy the binding without RefuseUnbound first",
-                map[string]any{"field": "TableSpec.SealBindings", "table": spec.Table, "column": column, "sealBinding": binding.label},
+                map[string]any{"field": "TableSpecification.SealBindings", "table": specification.Table, "column": column, "sealBinding": binding.label},
                 nil,
             )
         }
     }
 
-    return instance.run(ctx, spec, batchSize, columnTransform(bindings, instance.decryptTransform(), instance.decryptBoundTransform()))
+    return instance.run(ctx, specification, batchSize, columnTransform(bindings, instance.decryptTransform(), instance.decryptBoundTransform()))
 }
 
 func (instance *Migrator) decryptTransform() func(string) (string, error) {
@@ -225,14 +225,14 @@ func (instance *Migrator) decryptTransform() func(string) (string, error) {
     }
 }
 
-/* errUnboundRunOverABoundSeal says what to do when a run over a column its spec leaves unbound meets a bound seal: the key is there and the row is intact, the column is to be bound */
+/* errUnboundRunOverABoundSeal says what to do when a run over a column its specification leaves unbound meets a bound seal: the key is there and the row is intact, the column is to be bound */
 func errUnboundRunOverABoundSeal(cause error) error {
     if false == exception.ChainIs(cause, ErrSealBound) {
         return cause
     }
 
     return exception.NewError(
-        "migrate found a seal bound to a column in a column the run leaves unbound; bind the column through TableSpec.SealBindings, or --seal-binding on the command",
+        "migrate found a seal bound to a column in a column the run leaves unbound; bind the column through TableSpecification.SealBindings, or --seal-binding on the command",
         nil,
         cause,
     )
@@ -246,7 +246,7 @@ func errDecryptedValueIsASeal() error {
     )
 }
 
-/* columnTransform hands each column's value to the transform of its kind: the unbound one for a column the spec leaves out of SealBindings, the bound one under the column's binding otherwise */
+/* columnTransform hands each column's value to the transform of its kind: the unbound one for a column the specification leaves out of SealBindings, the bound one under the column's binding otherwise */
 func columnTransform(
     bindings map[string]sealBinding,
     unbound func(string) (string, error),
@@ -283,7 +283,7 @@ func (instance *Migrator) openBoundStored(binding sealBinding, value string) (op
 }
 
 /* encryptBoundTransform brings a bound column to the form its type writes: a value without the marker sealed under the binding and the current key, a seal without a binding re-sealed under it with the key it carries and its mode kept, a bound seal left as it is; Deterministic converts a random seal, as on an unbound column. The value opened is sealed as data, so a seal stored as data stays data. */
-func (instance *Migrator) encryptBoundTransform(spec TableSpec) func(sealBinding, string) (string, error) {
+func (instance *Migrator) encryptBoundTransform(specification TableSpecification) func(sealBinding, string) (string, error) {
     return func(binding sealBinding, value string) (string, error) {
         opened, openErr := instance.openBoundStored(binding, value)
         if nil != openErr {
@@ -294,21 +294,21 @@ func (instance *Migrator) encryptBoundTransform(spec TableSpec) func(sealBinding
 
         switch opened.format {
         case formatGcmV1:
-            return sealer.sealBoundValueWithKeyId(opened.plaintext, opened.keyId, binding, true == opened.deterministic || true == spec.Deterministic)
+            return sealer.sealBoundValueWithKeyId(opened.plaintext, opened.keyId, binding, true == opened.deterministic || true == specification.Deterministic)
         case formatGcmV2:
-            if false == spec.Deterministic || true == opened.deterministic {
+            if false == specification.Deterministic || true == opened.deterministic {
                 return value, nil
             }
 
             return sealer.sealBoundValueWithKeyId(opened.plaintext, opened.keyId, binding, true)
         }
 
-        return sealer.sealBoundValue(opened.plaintext, binding, spec.Deterministic)
+        return sealer.sealBoundValue(opened.plaintext, binding, specification.Deterministic)
     }
 }
 
 /* reencryptBoundTransform is reencryptTransform over a bound column: every value it writes is sealed under the binding and the target key, and a stored seal is already the target only when it is bound and under that key, so a seal without a binding under the target key is re-sealed with its mode kept, never taken for the same-key conversion to random */
-func (instance *Migrator) reencryptBoundTransform(spec TableSpec, targetKeyId string) func(sealBinding, string) (string, error) {
+func (instance *Migrator) reencryptBoundTransform(specification TableSpecification, targetKeyId string) func(sealBinding, string) (string, error) {
     return func(binding sealBinding, value string) (string, error) {
         opened, openErr := instance.openBoundStored(binding, value)
         if nil != openErr {
@@ -317,7 +317,7 @@ func (instance *Migrator) reencryptBoundTransform(spec TableSpec, targetKeyId st
 
         sealer := instance.cipher.(bindingSealer)
 
-        if true == spec.Deterministic {
+        if true == specification.Deterministic {
             return sealer.sealBoundValueWithKeyId(opened.plaintext, targetKeyId, binding, true)
         }
 
@@ -358,7 +358,7 @@ func errSealStoredAsDataThroughForeignCipher(keyId string) error {
 }
 
 /* encryptTransform reads stored values, so it takes the cipher's strict read side: a marker whose body does not decrypt is damage or a retired key, and the run stops on it, naming the row, instead of sealing over the only copy. A value that decrypts is already sealed: the random mode hands it back unchanged and the deterministic mode keeps a deterministic seal and re-seals a random one's decrypted value as data under its own key, so mode=encrypt is never a key rotation and never unwraps a seal stored as data. */
-func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string, error) {
+func (instance *Migrator) encryptTransform(specification TableSpecification) func(string) (string, error) {
     sealer, isSealer := instance.cipher.(valueSealer)
 
     return func(value string) (string, error) {
@@ -368,7 +368,7 @@ func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string,
         }
 
         if false == markerShaped {
-            if false == spec.Deterministic {
+            if false == specification.Deterministic {
                 return instance.cipher.Encrypt(value)
             }
 
@@ -388,7 +388,7 @@ func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string,
             )
         }
 
-        if false == spec.Deterministic {
+        if false == specification.Deterministic {
             return value, nil
         }
 
@@ -409,8 +409,8 @@ func (instance *Migrator) encryptTransform(spec TableSpec) func(string) (string,
     }
 }
 
-/* reencryptTransform decides on the STORED value alone and seals the value it decrypted as data under the target key, so a seal an application stored as data is rotated as data and never turned back into a bare seal. On a key change the stored seal's mode is kept, deterministic or random; spec.Deterministic converts to deterministic, and a run onto the key a seal already carries without the flag converts it to random, the two explicit conversions. */
-func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string) func(string) (string, error) {
+/* reencryptTransform decides on the STORED value alone and seals the value it decrypted as data under the target key, so a seal an application stored as data is rotated as data and never turned back into a bare seal. On a key change the stored seal's mode is kept, deterministic or random; specification.Deterministic converts to deterministic, and a run onto the key a seal already carries without the flag converts it to random, the two explicit conversions. */
+func (instance *Migrator) reencryptTransform(specification TableSpecification, targetKeyId string) func(string) (string, error) {
     sealer, isSealer := instance.cipher.(valueSealer)
 
     return func(value string) (string, error) {
@@ -427,7 +427,7 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
         }
 
         if true == isSealer {
-            if true == spec.Deterministic {
+            if true == specification.Deterministic {
                 return sealer.sealValueWithKeyId(plaintext, targetKeyId, true)
             }
 
@@ -448,7 +448,7 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
             return "", errSealStoredAsDataThroughForeignCipher(currentKeyId)
         }
 
-        if true == spec.Deterministic {
+        if true == specification.Deterministic {
             return instance.cipher.EncryptDeterministicWithKeyId(plaintext, targetKeyId)
         }
 
@@ -482,32 +482,32 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
 }
 
 /* EnsureColumnCapacity refuses a migration whose ciphertext could not fit back into the column it is read from. Under a non-strict sql_mode an overflowing UPDATE succeeds with a truncated ciphertext that never authenticates again, so the requirement is set before the first row by sealing a probe as long as the longest value not yet sealed, with the cipher the run uses. It cannot bound a longer value written concurrently, and a key rotation is covered by EnsureColumnCapacityForReencrypt. */
-func (instance *Migrator) EnsureColumnCapacity(ctx context.Context, spec TableSpec) error {
-    return instance.ensureColumnCapacity(ctx, spec, "")
+func (instance *Migrator) EnsureColumnCapacity(ctx context.Context, specification TableSpecification) error {
+    return instance.ensureColumnCapacity(ctx, specification, "")
 }
 
 /* EnsureColumnCapacityForReencrypt is EnsureColumnCapacity for a key rotation, which rewrites values already sealed: re-sealing under another key id changes each stored length by the difference between the two ids. The widest result comes from one aggregate over the column, and the plaintext still in it is sized under the target key id. */
-func (instance *Migrator) EnsureColumnCapacityForReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) error {
+func (instance *Migrator) EnsureColumnCapacityForReencrypt(ctx context.Context, specification TableSpecification, targetKeyId string) error {
     if "" == targetKeyId {
-        return exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": spec.Table}, nil)
+        return exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": specification.Table}, nil)
     }
 
-    return instance.ensureColumnCapacity(ctx, spec, targetKeyId)
+    return instance.ensureColumnCapacity(ctx, specification, targetKeyId)
 }
 
 /* ensureColumnCapacity is both checks: an empty targetKeyId means the run only seals what is not sealed yet, and a non-empty one means it also rewrites what is. */
-func (instance *Migrator) ensureColumnCapacity(ctx context.Context, spec TableSpec, targetKeyId string) error {
-    if "" == spec.Table || 0 == len(spec.Columns) {
-        return exception.NewError("migrate spec needs a table and at least one column", nil, nil)
+func (instance *Migrator) ensureColumnCapacity(ctx context.Context, specification TableSpecification, targetKeyId string) error {
+    if "" == specification.Table || 0 == len(specification.Columns) {
+        return exception.NewError("migrate specification needs a table and at least one column", nil, nil)
     }
 
-    charsetByColumn, charsetErr := instance.columnCharsets(ctx, spec.Table)
+    charsetByColumn, charsetErr := instance.columnCharsets(ctx, specification.Table)
     if nil != charsetErr {
         return charsetErr
     }
 
-    for _, column := range spec.Columns {
-        longest, hasUnsealed, longestErr := instance.longestUnsealedLength(ctx, spec.Table, column, charsetByColumn[column])
+    for _, column := range specification.Columns {
+        longest, hasUnsealed, longestErr := instance.longestUnsealedLength(ctx, specification.Table, column, charsetByColumn[column])
         if nil != longestErr {
             return longestErr
         }
@@ -524,7 +524,7 @@ func (instance *Migrator) ensureColumnCapacity(ctx context.Context, spec TableSp
         }
 
         if "" != targetKeyId {
-            withoutKeyId, hasSealed, withoutKeyIdErr := instance.longestSealedLengthWithoutKeyId(ctx, spec.Table, column, charsetByColumn[column])
+            withoutKeyId, hasSealed, withoutKeyIdErr := instance.longestSealedLengthWithoutKeyId(ctx, specification.Table, column, charsetByColumn[column])
             if nil != withoutKeyIdErr {
                 return withoutKeyIdErr
             }
@@ -538,14 +538,14 @@ func (instance *Migrator) ensureColumnCapacity(ctx context.Context, spec TableSp
             continue
         }
 
-        width, widthErr := instance.columnWidth(ctx, spec.Table, column)
+        width, widthErr := instance.columnWidth(ctx, specification.Table, column)
         if nil != widthErr {
             return widthErr
         }
 
         if width < required {
             diagnostic := map[string]any{
-                "table":         spec.Table,
+                "table":         specification.Table,
                 "column":        column,
                 "width":         width,
                 "requiredWidth": required,
@@ -719,34 +719,34 @@ type migrateStats struct {
     sealedFromPlaintext int
 }
 
-func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int, transform func(string, string) (string, error)) (migrateStats, error) {
-    if "" == spec.Table || "" == spec.PrimaryKey || 0 == len(spec.Columns) {
-        return migrateStats{}, exception.NewError("migrate spec needs a table, primary key and at least one column", nil, nil)
+func (instance *Migrator) run(ctx context.Context, specification TableSpecification, batchSize int, transform func(string, string) (string, error)) (migrateStats, error) {
+    if "" == specification.Table || "" == specification.PrimaryKey || 0 == len(specification.Columns) {
+        return migrateStats{}, exception.NewError("migrate specification needs a table, primary key and at least one column", nil, nil)
     }
 
-    selectColumns := append([]string{spec.PrimaryKey}, spec.Columns...)
+    selectColumns := append([]string{specification.PrimaryKey}, specification.Columns...)
     selectClause := strings.Join(quoteIdentifiers(selectColumns), ", ")
     firstSelectSql := fmt.Sprintf(
         "SELECT %s FROM %s ORDER BY %s ASC LIMIT ?",
         selectClause,
-        quoteIdentifier(spec.Table),
-        quoteIdentifier(spec.PrimaryKey),
+        quoteIdentifier(specification.Table),
+        quoteIdentifier(specification.PrimaryKey),
     )
     nextSelectSql := fmt.Sprintf(
         "SELECT %s FROM %s WHERE %s > ? ORDER BY %s ASC LIMIT ?",
         selectClause,
-        quoteIdentifier(spec.Table),
-        quoteIdentifier(spec.PrimaryKey),
-        quoteIdentifier(spec.PrimaryKey),
+        quoteIdentifier(specification.Table),
+        quoteIdentifier(specification.PrimaryKey),
+        quoteIdentifier(specification.PrimaryKey),
     )
 
-    charsetByColumn, charsetErr := instance.columnCharsets(ctx, spec.Table)
+    charsetByColumn, charsetErr := instance.columnCharsets(ctx, specification.Table)
     if nil != charsetErr {
-        return migrateStats{}, instance.classifyRunError(spec, 0, "", charsetErr)
+        return migrateStats{}, instance.classifyRunError(specification, 0, "", charsetErr)
     }
 
-    guardByColumn := make([]string, 0, len(spec.Columns))
-    for _, column := range spec.Columns {
+    guardByColumn := make([]string, 0, len(specification.Columns))
+    for _, column := range specification.Columns {
         guardByColumn = append(guardByColumn, binaryComparison(column, charsetByColumn[column])+" = ?")
     }
 
@@ -767,14 +767,14 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int
             rows, queryErr = instance.db.DB.QueryContext(ctx, nextSelectSql, cursor, batchSize)
         }
         if nil != queryErr {
-            return stats, instance.classifyRunError(spec, stats.rows, "migrate select failed", queryErr)
+            return stats, instance.classifyRunError(specification, stats.rows, "migrate select failed", queryErr)
         }
 
-        batch, scanErr := scanMigrateRows(rows, len(spec.Columns))
+        batch, scanErr := scanMigrateRows(rows, len(specification.Columns))
         rows.Close()
         if nil != scanErr {
             /* a cancellation landing during a page's iteration surfaces through Rows.Err; it is named as an interruption like one landing on the select or the update */
-            return stats, instance.classifyRunError(spec, stats.rows, "", scanErr)
+            return stats, instance.classifyRunError(specification, stats.rows, "", scanErr)
         }
 
         if 0 == len(batch) {
@@ -785,9 +785,9 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int
             cursor = row.primaryKeyArgument
             hasCursor = true
 
-            applied, changes, updateErr := instance.applyRow(ctx, spec, guardByColumn, row, transform)
+            applied, changes, updateErr := instance.applyRow(ctx, specification, guardByColumn, row, transform)
             if nil != updateErr {
-                return stats, instance.classifyRunError(spec, stats.rows, "", updateErr)
+                return stats, instance.classifyRunError(specification, stats.rows, "", updateErr)
             }
 
             if false == applied {
@@ -814,7 +814,7 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int
         return stats, exception.NewError(
             "migrate left rows untouched because they changed under the run; re-run to pick them up",
             map[string]any{
-                "table":             spec.Table,
+                "table":             specification.Table,
                 "skippedCount":      skippedCount,
                 "skippedPrimaryKey": skippedSample,
             },
@@ -826,11 +826,11 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, batchSize int
 }
 
 /* classifyRunError separates a run the operator stopped from one that broke: both are errors, but an interruption names itself and carries how far the run got. An empty message hands a pre-wrapped error through unchanged. */
-func (instance *Migrator) classifyRunError(spec TableSpec, processed int, message string, cause error) error {
+func (instance *Migrator) classifyRunError(specification TableSpecification, processed int, message string, cause error) error {
     if true == exception.ChainIs(cause, context.Canceled) || true == exception.ChainIs(cause, context.DeadlineExceeded) {
         return exception.NewError(
             "migrate was interrupted by the caller's context; the run is incomplete and a re-run picks up the remaining rows",
-            map[string]any{"table": spec.Table, "processed": processed},
+            map[string]any{"table": specification.Table, "processed": processed},
             cause,
         )
     }
@@ -839,18 +839,18 @@ func (instance *Migrator) classifyRunError(spec TableSpec, processed int, messag
         return cause
     }
 
-    return exception.NewError(message, map[string]any{"table": spec.Table}, cause)
+    return exception.NewError(message, map[string]any{"table": specification.Table}, cause)
 }
 
 /* applyRow answers, beside whether the row was written, what its update changed: a seal without a binding written bound, a value without the marker written sealed */
-func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByColumn []string, row migrateRow, transform func(string, string) (string, error)) (bool, migrateStats, error) {
-    assignments := make([]string, 0, len(spec.Columns))
-    setArguments := make([]any, 0, len(spec.Columns))
-    valuePredicates := make([]string, 0, len(spec.Columns))
-    valueArguments := make([]any, 0, len(spec.Columns))
+func (instance *Migrator) applyRow(ctx context.Context, specification TableSpecification, guardByColumn []string, row migrateRow, transform func(string, string) (string, error)) (bool, migrateStats, error) {
+    assignments := make([]string, 0, len(specification.Columns))
+    setArguments := make([]any, 0, len(specification.Columns))
+    valuePredicates := make([]string, 0, len(specification.Columns))
+    valueArguments := make([]any, 0, len(specification.Columns))
     changes := migrateStats{}
 
-    for index, column := range spec.Columns {
+    for index, column := range specification.Columns {
         value := row.values[index]
         if false == value.Valid {
             continue
@@ -858,7 +858,7 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByC
 
         transformed, transformErr := transform(column, value.String)
         if nil != transformErr {
-            return false, migrateStats{}, exception.NewError("migrate transform failed", map[string]any{"table": spec.Table, "column": column, "id": row.primaryKey}, transformErr)
+            return false, migrateStats{}, exception.NewError("migrate transform failed", map[string]any{"table": specification.Table, "column": column, "id": row.primaryKey}, transformErr)
         }
 
         if transformed == value.String {
@@ -888,21 +888,21 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByC
     arguments = append(arguments, valueArguments...)
 
     /* guard each assignment on the value read for this row so a concurrent application write between the select and this update is not silently reverted; a row that changed under us matches zero rows and is re-encrypted on the next run. The comparison is byte-exact, which is what makes the guard hold at all — see binaryComparison. */
-    whereClause := quoteIdentifier(spec.PrimaryKey) + " = ?"
+    whereClause := quoteIdentifier(specification.PrimaryKey) + " = ?"
     for _, predicate := range valuePredicates {
         whereClause += " AND " + predicate
     }
 
     updateSql := fmt.Sprintf(
         "UPDATE %s SET %s WHERE %s",
-        quoteIdentifier(spec.Table),
+        quoteIdentifier(specification.Table),
         strings.Join(assignments, ", "),
         whereClause,
     )
 
     result, execErr := instance.db.DB.ExecContext(ctx, updateSql, arguments...)
     if nil != execErr {
-        return false, migrateStats{}, exception.NewError("migrate update failed", map[string]any{"table": spec.Table, "id": row.primaryKey}, execErr)
+        return false, migrateStats{}, exception.NewError("migrate update failed", map[string]any{"table": specification.Table, "id": row.primaryKey}, execErr)
     }
 
     /* a driver that cannot report the affected count is treated as having applied the update: reporting a false skip would fail a run that in fact completed */

@@ -124,8 +124,8 @@ func TestNewManagerRegistry_ErrorsWhenMultipleDefaults(t *testing.T) {
         context.Background(),
         logger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "a", Provider: providerA, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "b", Provider: providerB, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "a", Provider: providerA, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "b", Provider: providerB, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil == registryErr {
@@ -147,8 +147,8 @@ func TestNewManagerRegistry_DefaultIsFirstWhenNoneIsDefault(t *testing.T) {
         context.Background(),
         logger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "a", Provider: providerA, Params: testConnectionParameters, IsDefault: false},
-            ProviderDefinition{Name: "b", Provider: providerB, Params: testConnectionParameters, IsDefault: false},
+            ProviderDefinition{Name: "a", Provider: providerA, Parameters: testConnectionParameters, IsDefault: false},
+            ProviderDefinition{Name: "b", Provider: providerB, Parameters: testConnectionParameters, IsDefault: false},
         },
     )
     if nil != registryErr {
@@ -175,8 +175,8 @@ func TestManagerRegistry_CachesManagersOneToOne(t *testing.T) {
         context.Background(),
         logger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "a", Provider: providerA, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "b", Provider: providerB, Params: testConnectionParameters, IsDefault: false},
+            ProviderDefinition{Name: "a", Provider: providerA, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "b", Provider: providerB, Parameters: testConnectionParameters, IsDefault: false},
         },
     )
     if nil != registryErr {
@@ -224,8 +224,8 @@ func TestManagerRegistry_OpenOfOneManagerDoesNotBlockCacheHitsForAnother(t *test
         context.Background(),
         logger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "fast", Provider: fastProvider, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "slow", Provider: slowProvider, Params: testConnectionParameters, IsDefault: false},
+            ProviderDefinition{Name: "fast", Provider: fastProvider, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "slow", Provider: slowProvider, Parameters: testConnectionParameters, IsDefault: false},
         },
     )
     if nil != registryErr {
@@ -275,7 +275,7 @@ func TestManagerRegistry_PanicDuringOpenReleasesCoalescedWaiters(t *testing.T) {
         context.Background(),
         logger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -370,7 +370,7 @@ func TestManagerRegistry_AnInFlightOpenIsRegisteredBeforeTheDial(t *testing.T) {
         context.Background(),
         logger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -411,7 +411,7 @@ func TestManagerRegistry_ACallerFindingAnInFlightOpenWaitsInsteadOfDialing(t *te
         context.Background(),
         logger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -585,7 +585,7 @@ func TestManagerRegistry_CloseDuringInFlightOpenClosesDatabaseAndRefuses(t *test
         context.Background(),
         logger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -721,7 +721,7 @@ func TestManagerRegistry_MigrationDatabasePrefersTheContextOpenerWithTheConstruc
         ctx,
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -768,7 +768,7 @@ func TestManagerRegistry_MigrationDatabaseFallsBackToTheContextLessCapability(t 
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -802,7 +802,7 @@ func TestManagerRegistry_MigrationDatabasePrefersTheCapability(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -837,7 +837,7 @@ func TestManagerRegistry_MigrationDatabaseFallsBackWithoutTheCapability(t *testi
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -873,7 +873,7 @@ func TestManagerRegistry_CloseClosesTheMigrationDatabase(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -906,7 +906,7 @@ func TestNewManagerRegistry_ErrorsWhenLoggerIsTypedNil(t *testing.T) {
         context.Background(),
         typedNilLogger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
 
@@ -922,7 +922,7 @@ func TestNewManagerRegistry_ErrorsWhenProviderIsTypedNil(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: typedNilProvider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: typedNilProvider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
 
@@ -948,7 +948,7 @@ func TestManagerRegistry_RefusesProviderReturningNeitherDatabaseNorError(t *test
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -991,7 +991,7 @@ func TestManagerRegistry_ClosesTheDatabaseAProviderReturnsBesideAnError(t *testi
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &databaseBesideErrorProvider{database: database, openErr: providerErr}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &databaseBesideErrorProvider{database: database, openErr: providerErr}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1049,8 +1049,8 @@ func TestManagerRegistry_CloseNamesEveryDatabaseThatFailedToClose(t *testing.T) 
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "alpha", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(alphaErr)}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "beta", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(betaErr)}, Params: testConnectionParameters},
+            ProviderDefinition{Name: "alpha", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(alphaErr)}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "beta", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(betaErr)}, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -1092,7 +1092,7 @@ func TestManagerRegistry_CloseKeepsALoneCloseFailureUntouched(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "alpha", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(alphaErr)}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "alpha", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(alphaErr)}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1144,7 +1144,7 @@ func TestManagerRegistry_MigrationDatabaseRefusesProviderReturningNeitherDatabas
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1169,7 +1169,7 @@ func TestManagerRegistry_MigrationDatabaseClosesTheDatabaseReturnedBesideAnError
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: database, migrationErr: providerErr}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: database, migrationErr: providerErr}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1204,7 +1204,7 @@ func TestManagerRegistry_CloseDuringInFlightMigrationOpenClosesDatabaseAndRefuse
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1283,7 +1283,7 @@ func TestManagerRegistry_MigrationDatabaseRefusesAnUnknownName(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1311,7 +1311,7 @@ func TestManagerRegistry_MigrationDatabaseFallbackPropagatesTheOpenFailure(t *te
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &erroringProvider{openErr: openRefused}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &erroringProvider{openErr: openRefused}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1332,7 +1332,7 @@ func TestManagerRegistry_RefusesACachedManagerAfterClose(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1364,7 +1364,7 @@ func TestManagerRegistry_RefusesAnUnopenedNameAfterCloseWithoutDialing(t *testin
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1409,7 +1409,7 @@ func TestManagerRegistry_PrefersTheContextOpenerWithTheConstructionContext(t *te
         ctx,
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "a", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "a", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1437,7 +1437,7 @@ func TestNewManagerRegistry_ANilContextBindsABackgroundContextForContextOpeners(
         nil,
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "a", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "a", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1467,8 +1467,8 @@ func TestManagerRegistry_CloseCarriesTheSortedFirstFailureAsCause(t *testing.T) 
             context.Background(),
             &fakeLogger{},
             []ProviderDefinition{
-                ProviderDefinition{Name: "zebra", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(zebraErr)}, Params: testConnectionParameters, IsDefault: true},
-                ProviderDefinition{Name: "alpha", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(alphaErr)}, Params: testConnectionParameters},
+                ProviderDefinition{Name: "zebra", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(zebraErr)}, Parameters: testConnectionParameters, IsDefault: true},
+                ProviderDefinition{Name: "alpha", Provider: &pinnedDatabaseProvider{database: newFailClosingDatabase(alphaErr)}, Parameters: testConnectionParameters},
             },
         )
         if nil != registryErr {
@@ -1536,7 +1536,7 @@ func TestManagerRegistry_APanickingOpenHandsItsCauseAndItsStackToTheWaiter(t *te
         context.Background(),
         logger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1640,7 +1640,7 @@ func TestManagerRegistry_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) 
         context.Background(),
         logger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1726,8 +1726,8 @@ func TestManagerRegistry_AnUnknownDefinitionNamesTheRequestedAndTheRegistered(t 
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "analytics", Provider: &fakeProvider{}, Params: testConnectionParameters},
+            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "analytics", Provider: &fakeProvider{}, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -1769,7 +1769,7 @@ func TestManagerRegistry_AnUnknownMigrationDefinitionNamesTheRequestedAndTheRegi
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1842,7 +1842,7 @@ func TestManagerRegistry_CloseRefusesAnotherCallerWhileAPoolIsStillTearingDown(t
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fixedDatabaseProvider{database: database}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &fixedDatabaseProvider{database: database}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -1901,8 +1901,8 @@ func TestNewManagerRegistry_AConstructionRefusalNamesTheDefinitionItIsAbout(t *t
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "", Provider: &fakeProvider{}, Params: testConnectionParameters},
+            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "", Provider: &fakeProvider{}, Parameters: testConnectionParameters},
         },
     )
     assertConstructionRefusalNames(t, missingNameErr, ErrProviderDefinitionNameIsRequired, 1, "")
@@ -1911,8 +1911,8 @@ func TestNewManagerRegistry_AConstructionRefusalNamesTheDefinitionItIsAbout(t *t
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "analytics", Provider: nil, Params: testConnectionParameters},
+            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "analytics", Provider: nil, Parameters: testConnectionParameters},
         },
     )
     assertConstructionRefusalNames(t, missingProviderErr, ErrProviderIsRequired, 1, "analytics")
@@ -1921,8 +1921,8 @@ func TestNewManagerRegistry_AConstructionRefusalNamesTheDefinitionItIsAbout(t *t
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Params: testConnectionParameters},
+            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters},
         },
     )
     assertConstructionRefusalNames(t, duplicateErr, ErrProviderDefinitionNameMustBeUnique, 1, "reports")
@@ -1934,15 +1934,15 @@ func TestNewManagerRegistry_RefusesAnEmptyHostOrDatabaseNamingTheFieldAndTheDefi
         sentinel error
         field    string
     }{
-        {params: ConnectionParameters{Database: "melody"}, sentinel: ErrConnectionHostIsRequired, field: "ProviderDefinition.Params.Host"},
-        {params: ConnectionParameters{Host: "127.0.0.1"}, sentinel: ErrConnectionDatabaseIsRequired, field: "ProviderDefinition.Params.Database"},
+        {params: ConnectionParameters{Database: "melody"}, sentinel: ErrConnectionHostIsRequired, field: "ProviderDefinition.Parameters.Host"},
+        {params: ConnectionParameters{Host: "127.0.0.1"}, sentinel: ErrConnectionDatabaseIsRequired, field: "ProviderDefinition.Parameters.Database"},
     } {
         _, refusalErr := NewManagerRegistry(
             context.Background(),
             &fakeLogger{},
             []ProviderDefinition{
-                ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-                ProviderDefinition{Name: "analytics", Provider: &fakeProvider{}, Params: testCase.params},
+                ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+                ProviderDefinition{Name: "analytics", Provider: &fakeProvider{}, Parameters: testCase.params},
             },
         )
         assertConstructionRefusalNames(t, refusalErr, testCase.sentinel, 1, "analytics")
@@ -2002,7 +2002,7 @@ func TestManagerRegistry_AProviderThatExitsItsGoroutineIsNotReportedAsAPanic(t *
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2103,7 +2103,7 @@ func TestManagerRegistry_APanicInThePublishIsNotBlamedOnTheProvider(t *testing.T
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2177,7 +2177,7 @@ func TestManagerRegistry_CloseWaitsForAnInFlightOpen(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2251,7 +2251,7 @@ func TestManagerRegistry_CloseWaitsForAnInFlightMigrationOpen(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2316,10 +2316,10 @@ func TestManagerRegistry_CloseMigrationDatabaseEndsThePoolAndForgetsIt(t *testin
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{
-                Name:      "main",
-                Provider:  &configurableMigrationProvider{migrationDatabase: migrationDatabase},
-                Params:    testConnectionParameters,
-                IsDefault: true,
+                Name:       "main",
+                Provider:   &configurableMigrationProvider{migrationDatabase: migrationDatabase},
+                Parameters: testConnectionParameters,
+                IsDefault:  true,
             },
         },
     )
@@ -2359,10 +2359,10 @@ func TestManagerRegistry_CloseMigrationDatabaseReadsAnEmptyNameAsTheDefault(t *t
         &fakeLogger{},
         []ProviderDefinition{
             ProviderDefinition{
-                Name:      "main",
-                Provider:  &configurableMigrationProvider{migrationDatabase: migrationDatabase},
-                Params:    testConnectionParameters,
-                IsDefault: true,
+                Name:       "main",
+                Provider:   &configurableMigrationProvider{migrationDatabase: migrationDatabase},
+                Parameters: testConnectionParameters,
+                IsDefault:  true,
             },
         },
     )
@@ -2391,7 +2391,7 @@ func TestManagerRegistry_CloseMigrationDatabaseIsSilentForANameThatHasNone(t *te
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2413,7 +2413,7 @@ func TestManagerRegistry_CloseMigrationDatabaseRefusesAClosedRegistry(t *testing
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2466,8 +2466,8 @@ func TestManagerRegistry_SetLoggerReachesTheNextOpen(t *testing.T) {
         context.Background(),
         wiringLogger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "first", Provider: provider, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "second", Provider: provider, Params: testConnectionParameters},
+            ProviderDefinition{Name: "first", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "second", Provider: provider, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -2512,7 +2512,7 @@ func TestManagerRegistry_SetLoggerTakesBunsDiagnosticChannelWithIt(t *testing.T)
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2539,7 +2539,7 @@ func TestManagerRegistry_CloseHandsBackTheDestinationItRoutedForALoggerWithoutId
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2596,7 +2596,7 @@ func TestManagerRegistry_SetLoggerOnAClosedRegistryIsRefusedAndLeavesBunsChannel
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2630,7 +2630,7 @@ func TestManagerRegistry_SetLoggerRefusesTheAbsentLogger(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2665,7 +2665,7 @@ func TestManagerRegistry_CloseHandsBunsDiagnosticChannelBack(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2694,12 +2694,12 @@ func TestManagerRegistry_CloseLeavesAnotherRegistrysDiagnosticChannelAlone(t *te
     secondLogger := &capturingDiagnosticLogger{}
     t.Cleanup(ResetDiagnostics)
 
-    first, firstErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true}})
+    first, firstErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != firstErr {
         t.Fatalf("registry error: %v", firstErr)
     }
 
-    second, secondErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true}})
+    second, secondErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != secondErr {
         t.Fatalf("registry error: %v", secondErr)
     }
@@ -2734,7 +2734,7 @@ func TestManagerRegistry_CloseWithContext_StopsWaitingForOpensStillInFlight(t *t
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2778,7 +2778,7 @@ func TestManagerRegistry_CloseWithContext_AnOpenThatEndedIsNotCountedAbandonedUn
             context.Background(),
             &fakeLogger{},
             []ProviderDefinition{
-                ProviderDefinition{Name: "x", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+                ProviderDefinition{Name: "x", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
             },
         )
         if nil != registryErr {
@@ -2830,7 +2830,7 @@ func TestManagerRegistry_CloseEndsAnOpenStillInFlightInsteadOfAbandoningIt(t *te
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2904,7 +2904,7 @@ func TestManagerRegistry_AnOpenRefusedOnTheProvidersOwnGroundsAfterTheCloseKeeps
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2952,7 +2952,7 @@ func TestManagerRegistry_HasProviderDefinitionAnswersWithoutOpening(t *testing.T
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "primary", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -2995,7 +2995,7 @@ func TestManagerRegistry_DelayedProviderCannotRouteAfterClose(t *testing.T) {
     provider := &delayedDiagnosticProvider{entered: make(chan struct{}), resume: make(chan struct{})}
     logger := &capturingDiagnosticLogger{}
 
-    registry, registryErr := NewManagerRegistry(context.Background(), logger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: provider, Params: testConnectionParameters}})
+    registry, registryErr := NewManagerRegistry(context.Background(), logger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters}})
     if nil != registryErr {
         t.Fatalf("registry error: %v", registryErr)
     }
@@ -3035,7 +3035,7 @@ func TestManagerRegistry_DelayedProviderCannotRouteAfterSetLogger(t *testing.T) 
     provider := &delayedDiagnosticProvider{entered: make(chan struct{}), resume: make(chan struct{})}
     wiringLogger := &capturingDiagnosticLogger{}
 
-    registry, registryErr := NewManagerRegistry(context.Background(), wiringLogger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: provider, Params: testConnectionParameters}})
+    registry, registryErr := NewManagerRegistry(context.Background(), wiringLogger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters}})
     if nil != registryErr {
         t.Fatalf("registry error: %v", registryErr)
     }
@@ -3067,7 +3067,7 @@ func TestManagerRegistry_DelayedProviderCannotRouteAfterSetLogger(t *testing.T) 
 func TestManagerRegistry_CloseHandsBackTheChannelItsProviderRoutedForAValueLogger(t *testing.T) {
     for name, build := range map[string]func(t *testing.T, logger loggingcontract.Logger) *ManagerRegistry{
         "constructor": func(t *testing.T, logger loggingcontract.Logger) *ManagerRegistry {
-            registry, registryErr := NewManagerRegistry(context.Background(), logger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Params: testConnectionParameters, IsDefault: true}})
+            registry, registryErr := NewManagerRegistry(context.Background(), logger, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
             if nil != registryErr {
                 t.Fatalf("registry error: %v", registryErr)
             }
@@ -3075,7 +3075,7 @@ func TestManagerRegistry_CloseHandsBackTheChannelItsProviderRoutedForAValueLogge
             return registry
         },
         "SetLogger": func(t *testing.T, logger loggingcontract.Logger) *ManagerRegistry {
-            registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Params: testConnectionParameters, IsDefault: true}})
+            registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
             if nil != registryErr {
                 t.Fatalf("registry error: %v", registryErr)
             }
@@ -3115,12 +3115,12 @@ func TestManagerRegistry_CloseHandsBackTheChannelItsProviderRoutedForAValueLogge
 func TestManagerRegistry_CloseLeavesTheChannelAnotherRegistryOfAnEqualValueLoggerRouted(t *testing.T) {
     t.Cleanup(ResetDiagnostics)
 
-    first, firstErr := NewManagerRegistry(context.Background(), sliceCarryingLogger{records: make([]string, 0)}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Params: testConnectionParameters, IsDefault: true}})
+    first, firstErr := NewManagerRegistry(context.Background(), sliceCarryingLogger{records: make([]string, 0)}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != firstErr {
         t.Fatalf("registry error: %v", firstErr)
     }
 
-    second, secondErr := NewManagerRegistry(context.Background(), sliceCarryingLogger{records: make([]string, 0)}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Params: testConnectionParameters, IsDefault: true}})
+    second, secondErr := NewManagerRegistry(context.Background(), sliceCarryingLogger{records: make([]string, 0)}, []ProviderDefinition{ProviderDefinition{Name: "main", Provider: &routingProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != secondErr {
         t.Fatalf("registry error: %v", secondErr)
     }
@@ -3151,8 +3151,8 @@ func TestManagerRegistry_AnUnknownNameIsRefusedWithTheSortedListAndACutName(t *t
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "analytics", Provider: &fakeProvider{}, Params: testConnectionParameters},
+            ProviderDefinition{Name: "reports", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "analytics", Provider: &fakeProvider{}, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -3219,7 +3219,7 @@ func TestManagerRegistry_ARefusalOverAJournaledOpenFailureStaysMarkedLogged(t *t
             provider, entered = watching, watching.entered
         }
 
-        registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true}})
+        registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true}})
         if nil != registryErr {
             t.Fatalf("unexpected error: %v", registryErr)
         }
@@ -3259,7 +3259,7 @@ func TestManagerRegistry_CloseMigrationDatabaseClosesOnlyWhenTheLastHolderReleas
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: migrationDatabase}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: migrationDatabase}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -3304,7 +3304,7 @@ func TestManagerRegistry_AMigrationDatabaseCloseOutlivingTheDeadlineAnswersTheDe
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: database}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: database}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -3348,7 +3348,7 @@ func TestManagerRegistry_AnOpenRefusedOnACyclicChainAfterTheCloseAnswersItsWaite
     registry, registryErr := NewManagerRegistry(
         context.Background(),
         &fakeLogger{},
-        []ProviderDefinition{{Name: "x", Provider: provider, Params: testConnectionParameters, IsDefault: true}},
+        []ProviderDefinition{{Name: "x", Provider: provider, Parameters: testConnectionParameters, IsDefault: true}},
     )
     if nil != registryErr {
         t.Fatalf("unexpected error: %v", registryErr)

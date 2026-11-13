@@ -8,10 +8,10 @@ import (
 )
 
 func (instance *Router) Match(method string, path string, host string, scheme string) (*httpcontract.MatchResult, bool) {
-    handler, params, routeAttributes := instance.match(method, path, host, scheme)
+    handler, parameters, routeAttributes := instance.match(method, path, host, scheme)
 
-    if nil == params {
-        params = map[string]string{}
+    if nil == parameters {
+        parameters = map[string]string{}
     }
     if nil == routeAttributes {
         routeAttributes = map[string]any{}
@@ -28,7 +28,7 @@ func (instance *Router) Match(method string, path string, host string, scheme st
 
     matchResult := &httpcontract.MatchResult{
         Handler:         handler,
-        Params:          params,
+        Parameters:      parameters,
         RouteAttributes: routeAttributes,
     }
 
@@ -59,19 +59,19 @@ func (instance *Router) AllowedMethods(path string, host string, scheme string) 
             continue
         }
 
-        params, matched := matchPath(routeValue, pathSegments)
+        parameters, matched := matchPath(routeValue, pathSegments)
         if false == matched {
             continue
         }
 
         /* the defaults are merged before the locale gate reads them, as Match does */
         for key, defaultValue := range routeValue.defaults {
-            if _, exists := params[key]; false == exists {
-                params[key] = defaultValue
+            if _, exists := parameters[key]; false == exists {
+                parameters[key] = defaultValue
             }
         }
 
-        if false == matchesLocale(routeValue.locales, params) {
+        if false == matchesLocale(routeValue.locales, parameters) {
             continue
         }
 

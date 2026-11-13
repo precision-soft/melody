@@ -25,8 +25,8 @@ var ErrAnsibleCronInvalidUtf8 = errors.New("ansible-cron: value is not valid UTF
 
 /* the cron name becomes the "#Ansible: <name>" comment line above the crontab line, so a line terminator inside it would start a crontab line of the name's own choosing; nothing else is refused, since % is inert in a comment and the name never reaches a shell */
 var ansibleCronNameForbiddenCharacters = []melodycron.ForbiddenCharacter{
-    {Char: '\n', Reason: "a literal newline ends the #Ansible: comment line and starts a crontab line of its own; remove it at the source"},
-    {Char: '\r', Reason: "a carriage return ends the #Ansible: comment line on many cron daemons; remove it at the source"},
+    {Character: '\n', Reason: "a literal newline ends the #Ansible: comment line and starts a crontab line of its own; remove it at the source"},
+    {Character: '\r', Reason: "a carriage return ends the #Ansible: comment line on many cron daemons; remove it at the source"},
 }
 
 /* AnsibleCronTemplate renders every entry as one ansible.builtin.cron task, the five schedule fields mapped one to one onto the module's minute/hour/day/month/weekday arguments. The module writes the crontab line as its arguments joined on a space with no validation and no escaping, so the template holds the schedule fields, the user and the job to the builtin crontab dialect's rules through the binding's validators and shell quoting. TaskNamePrefix reaches only the play's task name and is not validated; ApplicationName completes the ownership line, since a custom dialect is handed no name by the generator. */

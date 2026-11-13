@@ -6,7 +6,7 @@ import (
 
 var (
     ErrNoOutputPath                       = errors.New("cron: no output path configured")
-    ErrNoLogsDir                          = errors.New("cron: no logs directory configured")
+    ErrNoLogsDirectory                    = errors.New("cron: no logs directory configured")
     ErrTemplateNotFound                   = errors.New("cron: template not registered")
     ErrHeartbeatUserMissing               = errors.New("cron: heartbeat is configured but no user is set")
     ErrHeartbeatDestinationUnmatched      = errors.New("cron: heartbeat destination does not match any written destination")

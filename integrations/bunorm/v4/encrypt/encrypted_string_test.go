@@ -143,14 +143,14 @@ func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
 /* every column type reads through Decrypt, so a stored value of an unknown seal format is an error on Scan and the destination keeps what it held */
 func TestEncryptedColumn_ScanRefusesAnUnknownSealFormat(t *testing.T) {
     installCipher(t, defaultCipherName, NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(7)}})))
-    installCipher(t, crmCipherRef{}.CipherName(), NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v1", Keys: map[string][]byte{"crm-v1": newKey(11)}})))
+    installCipher(t, crmCipherReference{}.CipherName(), NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v1", Keys: map[string][]byte{"crm-v1": newKey(11)}})))
 
     stored := []byte("<ENC>\x00gcm9\x00v1:zzz")
 
     encryptedString := EncryptedString("kept")
     deterministicString := EncryptedDeterministicString("kept")
-    encryptedStringFor := EncryptedStringFor[crmCipherRef]("kept")
-    deterministicStringFor := EncryptedDeterministicStringFor[crmCipherRef]("kept")
+    encryptedStringFor := EncryptedStringFor[crmCipherReference]("kept")
+    deterministicStringFor := EncryptedDeterministicStringFor[crmCipherReference]("kept")
 
     for name, column := range map[string]struct {
         scan func(any) error

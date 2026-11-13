@@ -228,7 +228,7 @@ func (instance *Provider) clientOption(addresses []string, parameters Connection
         DisableCache:     false == instance.client.clientSideCacheEnabled,
         TLSConfig:        instance.client.tlsConfig,
         Dialer:           net.Dialer{Timeout: instance.client.dialTimeout},
-        ConnWriteTimeout: instance.client.connWriteTimeout,
+        ConnWriteTimeout: instance.client.connectionWriteTimeout,
     }
 
     if true == instance.client.clientSideCacheEnabled {

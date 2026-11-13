@@ -9,7 +9,7 @@ import (
 
 const (
     ParameterUser                 = "melody.cron.user"
-    ParameterLogsDir              = "melody.cron.logs_dir"
+    ParameterLogsDirectory        = "melody.cron.logs_directory"
     ParameterBinary               = "melody.cron.binary"
     ParameterDestinationFile      = "melody.cron.destination_file"
     ParameterHeartbeatPath        = "melody.cron.heartbeat_path"
@@ -22,7 +22,7 @@ const (
 
 const (
     KeyUser             = "MELODY_CRON_USER"
-    KeyLogsDir          = "MELODY_CRON_LOGS_DIR"
+    KeyLogsDirectory    = "MELODY_CRON_LOGS_DIRECTORY"
     KeyBinary           = "MELODY_CRON_BINARY"
     KeyDestinationFile  = "MELODY_CRON_DESTINATION_FILE"
     KeyHeartbeatPath    = "MELODY_CRON_HEARTBEAT_PATH"
@@ -35,13 +35,13 @@ const (
 
 const (
     defaultDestinationFile = "%kernel.project_dir%/generated_conf/cron/crontab"
-    defaultLogsDir         = "%kernel.logs_dir%/cron"
+    defaultLogsDirectory   = "%kernel.logs_dir%/cron"
 )
 
 /* KeyDefaults are the values the ten keys take when no .env file sets them; a zero field takes the module's own default. */
 type KeyDefaults struct {
     User             string
-    LogsDir          string
+    LogsDirectory    string
     Binary           string
     DestinationFile  string
     HeartbeatPath    string
@@ -64,7 +64,7 @@ func EnvironmentKeys(defaults KeyDefaults) []configcontract.EnvironmentKey {
 
     return []configcontract.EnvironmentKey{
         {Key: KeyUser, Parameter: ParameterUser, Field: "cron.KeyDefaults.User", Default: defaults.User},
-        {Key: KeyLogsDir, Parameter: ParameterLogsDir, Field: "cron.KeyDefaults.LogsDir", Default: textOrDefault(defaults.LogsDir, defaultLogsDir)},
+        {Key: KeyLogsDirectory, Parameter: ParameterLogsDirectory, Field: "cron.KeyDefaults.LogsDirectory", Default: textOrDefault(defaults.LogsDirectory, defaultLogsDirectory)},
         {Key: KeyBinary, Parameter: ParameterBinary, Field: "cron.KeyDefaults.Binary", Default: defaults.Binary},
         {Key: KeyDestinationFile, Parameter: ParameterDestinationFile, Field: "cron.KeyDefaults.DestinationFile", Default: textOrDefault(defaults.DestinationFile, defaultDestinationFile)},
         {Key: KeyHeartbeatPath, Parameter: ParameterHeartbeatPath, Field: "cron.KeyDefaults.HeartbeatPath", Default: defaults.HeartbeatPath},

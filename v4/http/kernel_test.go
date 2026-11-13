@@ -3671,7 +3671,7 @@ func TestKernel_MatchesTheRouteOnThePathAsSpelled(t *testing.T) {
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
-        reached = "one-segment:" + request.Params()["name"]
+        reached = "one-segment:" + request.Parameters()["name"]
 
         return NewResponse(nethttp.StatusOK, []byte("ok")), nil
     })
@@ -3713,7 +3713,7 @@ func TestKernel_RefusesARawPathAFrontHandlerLeftStale(t *testing.T) {
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
-        reached = "one-segment:" + request.Params()["name"]
+        reached = "one-segment:" + request.Parameters()["name"]
 
         return NewResponse(nethttp.StatusOK, []byte("ok")), nil
     })
@@ -3824,10 +3824,10 @@ func TestRouter_EqualPriorityIsWonByTheFirstRegistration(t *testing.T) {
     router.HandleWithOptions("/users/:id", routeRegistryTestHandler(), RouteOptions{Name: "first", Methods: []string{nethttp.MethodGet}})
     router.HandleWithOptions("/users/new", routeRegistryTestHandler(), RouteOptions{Name: "second", Methods: []string{nethttp.MethodGet}})
 
-    _, params, attributes := router.match(nethttp.MethodGet, "/users/new", "", "https")
+    _, parameters, attributes := router.match(nethttp.MethodGet, "/users/new", "", "https")
 
-    if "new" != params["id"] {
-        t.Fatalf("expected the first registration to win the tie, got params %v", params)
+    if "new" != parameters["id"] {
+        t.Fatalf("expected the first registration to win the tie, got parameters %v", parameters)
     }
 
     if "first" != attributes[RouteAttributeName] {

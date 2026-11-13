@@ -58,7 +58,7 @@ func TestApiErrorAnswersATextPlainClientWithReadableLines(t *testing.T) {
         t.Fatalf("expected the status line, the request id and the time first, got %q", body)
     }
 
-    for _, expected := range []string{"method: GET", "path: /missing", "params:"} {
+    for _, expected := range []string{"method: GET", "path: /missing", "parameters:"} {
         found := false
         for _, line := range lines[3:] {
             if expected == line {
@@ -87,7 +87,7 @@ func TestPlainTextRefusalListsNestedEntriesAndTheTrace(t *testing.T) {
                 "time":         "2026-09-29T09:00:00Z",
                 "routePattern": "/twofactor/verify/",
                 "routeName":    "",
-                "params":       map[string]string{"id": "7", "code": "x"},
+                "parameters":   map[string]string{"id": "7", "code": "x"},
             },
             Trace: []map[string]any{
                 {"message": "store refused", "type": "*errors.errorString"},
@@ -100,7 +100,7 @@ func TestPlainTextRefusalListsNestedEntriesAndTheTrace(t *testing.T) {
         "500 could not verify the code; try again",
         "request id: abc",
         "time: 2026-09-29T09:00:00Z",
-        "params:",
+        "parameters:",
         "  code: x",
         "  id: 7",
         "route name:",
@@ -144,9 +144,9 @@ func TestPlainTextRefusal_KeepsOneEntryOnOneLine(t *testing.T) {
         apiResponse{
             Errors: []string{"refused\nrequest id: forged"},
             Context: map[string]any{
-                "requestId": "abc",
-                "params":    map[string]string{"name\nrequest id": "x\nrequest id: forged"},
-                "count":     stringerValue("y\rz"),
+                "requestId":  "abc",
+                "parameters": map[string]string{"name\nrequest id": "x\nrequest id: forged"},
+                "count":      stringerValue("y\rz"),
             },
             Trace: []map[string]any{
                 {"message": "a\nb", "type": "c"},
@@ -159,7 +159,7 @@ func TestPlainTextRefusal_KeepsOneEntryOnOneLine(t *testing.T) {
         `400 refused\nrequest id: forged`,
         "request id: abc",
         `count: y\rz`,
-        "params:",
+        "parameters:",
         `  name\nrequest id: x\nrequest id: forged`,
         "trace:",
         `  - a\nb (c)`,

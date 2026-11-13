@@ -8,51 +8,51 @@ import (
     "github.com/precision-soft/melody/v4/exception"
 )
 
-/* CipherRef binds a column type to a named cipher through the type system: a zero-size marker type implementing CipherName parameterizes EncryptedStringFor and EncryptedDeterministicStringFor, since database/sql gives Value and Scan no context. */
-type CipherRef interface {
+/* CipherReference binds a column type to a named cipher through the type system: a zero-size marker type implementing CipherName parameterizes EncryptedStringFor and EncryptedDeterministicStringFor, since database/sql gives Value and Scan no context. */
+type CipherReference interface {
     CipherName() string
 }
 
-/* SealBindingRef is a CipherRef whose columns are sealed bound to a label, <table>.<column>: the label is authenticated in each seal and taken into the deterministic nonce, so a seal opens through a column of this marker alone and equal values of two bound columns are not equal seals. Every such marker is declared in ModuleConfig.SealBindings; an undeclared one is refused at its column's first Value or Scan. */
-type SealBindingRef interface {
-    CipherRef
+/* SealBindingReference is a CipherReference whose columns are sealed bound to a label, <table>.<column>: the label is authenticated in each seal and taken into the deterministic nonce, so a seal opens through a column of this marker alone and equal values of two bound columns are not equal seals. Every such marker is declared in ModuleConfig.SealBindings; an undeclared one is refused at its column's first Value or Scan. */
+type SealBindingReference interface {
+    CipherReference
 
     SealBinding() string
 }
 
-/* DefaultCipherRef, embedded by value in a marker type, selects the cipher installed as ModuleConfig.Cipher, so a bound column can use the default cipher; any other marker naming the empty compartment is refused. */
-type DefaultCipherRef struct{}
+/* DefaultCipherReference, embedded by value in a marker type, selects the cipher installed as ModuleConfig.Cipher, so a bound column can use the default cipher; any other marker naming the empty compartment is refused. */
+type DefaultCipherReference struct{}
 
-func (instance DefaultCipherRef) CipherName() string {
+func (instance DefaultCipherReference) CipherName() string {
     return defaultCipherName
 }
 
-func (instance DefaultCipherRef) defaultCipherRef() {}
+func (instance DefaultCipherReference) defaultCipherReference() {}
 
-/* defaultCipherSelector is promoted by embedding DefaultCipherRef, and is the one way a marker may name the empty compartment */
+/* defaultCipherSelector is promoted by embedding DefaultCipherReference, and is the one way a marker may name the empty compartment */
 type defaultCipherSelector interface {
-    defaultCipherRef()
+    defaultCipherReference()
 }
 
-var sealBindingRefType = reflect.TypeOf((*SealBindingRef)(nil)).Elem()
+var sealBindingReferenceType = reflect.TypeOf((*SealBindingReference)(nil)).Elem()
 
-var defaultCipherRefPointerType = reflect.TypeOf((*DefaultCipherRef)(nil))
+var defaultCipherReferencePointerType = reflect.TypeOf((*DefaultCipherReference)(nil))
 
-/* markerShapeDefect answers why a marker type cannot carry a binding, empty when it can: a marker holds no state, since the column reads the zero value of its type; a SealBinding on the pointer receiver would leave the value type unbound without a word; and DefaultCipherRef embedded by pointer promotes its methods over a nil pointer */
+/* markerShapeDefect answers why a marker type cannot carry a binding, empty when it can: a marker holds no state, since the column reads the zero value of its type; a SealBinding on the pointer receiver would leave the value type unbound without a word; and DefaultCipherReference embedded by pointer promotes its methods over a nil pointer */
 func markerShapeDefect(marker reflect.Type) string {
-    if _, isBound := reflect.Zero(marker).Interface().(SealBindingRef); false == isBound && true == reflect.PointerTo(marker).Implements(sealBindingRefType) {
+    if _, isBound := reflect.Zero(marker).Interface().(SealBindingReference); false == isBound && true == reflect.PointerTo(marker).Implements(sealBindingReferenceType) {
         return "cipher reference declares SealBinding on its pointer receiver; a marker's methods must have value receivers"
     }
 
     if reflect.Struct == marker.Kind() {
         for index := 0; index < marker.NumField(); index++ {
-            if field := marker.Field(index); true == field.Anonymous && defaultCipherRefPointerType == field.Type {
-                return "cipher reference embeds DefaultCipherRef by pointer; embed it by value"
+            if field := marker.Field(index); true == field.Anonymous && defaultCipherReferencePointerType == field.Type {
+                return "cipher reference embeds DefaultCipherReference by pointer; embed it by value"
             }
         }
     }
 
-    if _, isBound := reflect.Zero(marker).Interface().(SealBindingRef); true == isBound && 0 != marker.Size() {
+    if _, isBound := reflect.Zero(marker).Interface().(SealBindingReference); true == isBound && 0 != marker.Size() {
         return "cipher reference of a seal binding holds fields; a marker must be a zero-size value type, since its column reads the zero value"
     }
 

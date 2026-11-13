@@ -12,8 +12,8 @@ import (
 func TestEncryptedDeterministicStringFor_EqualPlaintextsProduceEqualCiphertexts(t *testing.T) {
     useCompartmentCiphers(t)
 
-    first := EncryptedDeterministicStringFor[crmCipherRef]("lookup value")
-    second := EncryptedDeterministicStringFor[crmCipherRef]("lookup value")
+    first := EncryptedDeterministicStringFor[crmCipherReference]("lookup value")
+    second := EncryptedDeterministicStringFor[crmCipherReference]("lookup value")
 
     firstStored, firstErr := first.Value()
     secondStored, secondErr := second.Value()
@@ -29,14 +29,14 @@ func TestEncryptedDeterministicStringFor_EqualPlaintextsProduceEqualCiphertexts(
 func TestEncryptedDeterministicStringFor_RoundTripAndIsolation(t *testing.T) {
     useCompartmentCiphers(t)
 
-    original := EncryptedDeterministicStringFor[crmCipherRef]("searchable")
+    original := EncryptedDeterministicStringFor[crmCipherReference]("searchable")
 
     stored, valueErr := original.Value()
     if nil != valueErr {
         t.Fatalf("value: %v", valueErr)
     }
 
-    var loaded EncryptedDeterministicStringFor[crmCipherRef]
+    var loaded EncryptedDeterministicStringFor[crmCipherReference]
     if scanErr := loaded.Scan(stored.([]byte)); nil != scanErr {
         t.Fatalf("scan: %v", scanErr)
     }
@@ -45,14 +45,14 @@ func TestEncryptedDeterministicStringFor_RoundTripAndIsolation(t *testing.T) {
         t.Fatalf("expected the round trip to restore the plaintext, got %q", string(loaded))
     }
 
-    var leaked EncryptedDeterministicStringFor[billingCipherRef]
+    var leaked EncryptedDeterministicStringFor[billingCipherReference]
     if scanErr := leaked.Scan(stored.([]byte)); nil == scanErr {
         t.Fatalf("expected the billing compartment to reject a crm ciphertext")
     }
 }
 
 func TestEncryptedDeterministicStringFor_RedactsString(t *testing.T) {
-    value := EncryptedDeterministicStringFor[crmCipherRef]("secret")
+    value := EncryptedDeterministicStringFor[crmCipherReference]("secret")
 
     if redactedPlaceholder != value.String() {
         t.Fatalf("expected String to redact, got %q", value.String())
@@ -60,15 +60,15 @@ func TestEncryptedDeterministicStringFor_RedactsString(t *testing.T) {
 }
 
 /* the searchable compartment-bound column carries the same marker, pinned here for the reason written on its EncryptedStringFor sibling. */
-var _ EncryptedColumn = EncryptedDeterministicStringFor[crmCipherRef]("")
+var _ EncryptedColumn = EncryptedDeterministicStringFor[crmCipherReference]("")
 
 func TestEncryptedDeterministicStringFor_UnmarshalJSONRefusesTheRedactionPlaceholder(t *testing.T) {
-    payload, marshalErr := json.Marshal(EncryptedDeterministicStringFor[crmCipherRef]("lookup value"))
+    payload, marshalErr := json.Marshal(EncryptedDeterministicStringFor[crmCipherReference]("lookup value"))
     if nil != marshalErr {
         t.Fatalf("marshal: %v", marshalErr)
     }
 
-    decoded := EncryptedDeterministicStringFor[crmCipherRef]("untouched")
+    decoded := EncryptedDeterministicStringFor[crmCipherReference]("untouched")
     unmarshalErr := json.Unmarshal(payload, &decoded)
     if nil == unmarshalErr {
         t.Fatalf("expected the redacted document to be refused, got %q", string(decoded))
@@ -84,7 +84,7 @@ func TestEncryptedDeterministicStringFor_UnmarshalJSONRefusesTheRedactionPlaceho
 }
 
 func TestEncryptedDeterministicStringFor_UnmarshalJSONDecodesAPlaintextString(t *testing.T) {
-    var decoded EncryptedDeterministicStringFor[crmCipherRef]
+    var decoded EncryptedDeterministicStringFor[crmCipherReference]
     if unmarshalErr := json.Unmarshal([]byte(`"hello"`), &decoded); nil != unmarshalErr {
         t.Fatalf("unmarshal: %v", unmarshalErr)
     }
@@ -95,12 +95,12 @@ func TestEncryptedDeterministicStringFor_UnmarshalJSONDecodesAPlaintextString(t 
 }
 
 /* the generic instantiation cannot be asserted in the source file — see the sibling assertion on EncryptedStringFor */
-var _ json.Unmarshaler = (*EncryptedDeterministicStringFor[crmCipherRef])(nil)
+var _ json.Unmarshaler = (*EncryptedDeterministicStringFor[crmCipherReference])(nil)
 
 func TestEncryptedDeterministicStringFor_FormatRedactsNumericVerbs(t *testing.T) {
     secret := "top-secret-plaintext"
     for _, verb := range []string{"%d", "%o", "%b", "%c", "%U"} {
-        rendered := fmt.Sprintf(verb, EncryptedDeterministicStringFor[crmCipherRef](secret))
+        rendered := fmt.Sprintf(verb, EncryptedDeterministicStringFor[crmCipherReference](secret))
         if true == strings.Contains(rendered, secret) {
             t.Fatalf("verb %s leaked the plaintext through the badverb form: %s", verb, rendered)
         }
@@ -114,7 +114,7 @@ func TestEncryptedDeterministicStringFor_FormatRedactsNumericVerbs(t *testing.T)
 func TestEncryptedDeterministicStringFor_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
     useCompartmentCiphers(t)
 
-    crmCipher, _, cipherErr := refColumn[crmCipherRef]()
+    crmCipher, _, cipherErr := referenceColumn[crmCipherReference]()
     if nil != cipherErr {
         t.Fatalf("cipher: %v", cipherErr)
     }
@@ -124,7 +124,7 @@ func TestEncryptedDeterministicStringFor_ASealWrittenAsDataIsSealedAndReadBackAs
         t.Fatalf("seal: %v", sealErr)
     }
 
-    stored, valueErr := EncryptedDeterministicStringFor[crmCipherRef](otherRowsSeal).Value()
+    stored, valueErr := EncryptedDeterministicStringFor[crmCipherReference](otherRowsSeal).Value()
     if nil != valueErr {
         t.Fatalf("value: %v", valueErr)
     }
@@ -133,7 +133,7 @@ func TestEncryptedDeterministicStringFor_ASealWrittenAsDataIsSealedAndReadBackAs
         t.Fatalf("expected the seal to be sealed as data, it was stored verbatim")
     }
 
-    var loaded EncryptedDeterministicStringFor[crmCipherRef]
+    var loaded EncryptedDeterministicStringFor[crmCipherReference]
     if scanErr := loaded.Scan(stored); nil != scanErr {
         t.Fatalf("scan: %v", scanErr)
     }
@@ -151,11 +151,11 @@ func TestEncryptedDeterministicStringFor_AnInterfaceMarkerIsRefusedWithoutAPanic
         }
     }()
 
-    if _, valueErr := EncryptedDeterministicStringFor[CipherRef]("plaintext").Value(); nil == valueErr {
+    if _, valueErr := EncryptedDeterministicStringFor[CipherReference]("plaintext").Value(); nil == valueErr {
         t.Fatal("expected the interface marker refused at Value")
     }
 
-    var loaded EncryptedDeterministicStringFor[CipherRef]
+    var loaded EncryptedDeterministicStringFor[CipherReference]
     if scanErr := loaded.Scan(markerPrefix + "v1:c2VhbGVk"); nil == scanErr {
         t.Fatal("expected the interface marker refused at Scan")
     }

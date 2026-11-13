@@ -30,7 +30,7 @@ type EncryptDatabaseCommandConfig struct {
     DatabaseResolver func(ctx context.Context) (*bun.DB, error)
     CommandName      string
 
-    /* SealBindings are the bound columns of the command's compartment, the module handing each command its own: a --column whose <table>.<column> is a declared label runs bound, and --seal-binding column=label binds a column of a table spelled otherwise to a declared label. A nil Ref and a label declared twice are refused at construction, naming the field and the index. */
+    /* SealBindings are the bound columns of the command's compartment, the module handing each command its own: a --column whose <table>.<column> is a declared label runs bound, and --seal-binding column=label binds a column of a table spelled otherwise to a declared label. A nil Reference and a label declared twice are refused at construction, naming the field and the index. */
     SealBindings []SealBindingConfig
 }
 
@@ -52,15 +52,15 @@ func NewEncryptDatabaseCommand(cipher Cipher, config EncryptDatabaseCommandConfi
 
     sealBindingsByLabel := make(map[string]SealBindingConfig, len(config.SealBindings))
     for position, bindingConfig := range config.SealBindings {
-        if true == isNilSealBindingRef(bindingConfig.Ref) {
+        if true == isNilSealBindingReference(bindingConfig.Reference) {
             exception.Panic(exception.NewError(
-                "encrypt database command seal binding has no Ref",
+                "encrypt database command seal binding has no Reference",
                 map[string]any{"field": "EncryptDatabaseCommandConfig.SealBindings", "index": position},
                 nil,
             ))
         }
 
-        label := bindingConfig.Ref.SealBinding()
+        label := bindingConfig.Reference.SealBinding()
         if _, repeated := sealBindingsByLabel[label]; true == repeated {
             exception.Panic(exception.NewError(
                 "encrypt database command seal binding declares a label twice",
@@ -143,7 +143,7 @@ func (instance *EncryptDatabaseCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
-    spec := TableSpec{
+    specification := TableSpecification{
         Table:         commandContext.String("table"),
         PrimaryKey:    commandContext.String("primary-key"),
         Columns:       commandContext.StringSlice("column"),
@@ -152,10 +152,10 @@ func (instance *EncryptDatabaseCommand) Run(
     }
 
     /* the flag is named in the message, since the exit line does not print the cause */
-    if _, batchSizeErr := resolveBatchSize(spec); nil != batchSizeErr {
+    if _, batchSizeErr := resolveBatchSize(specification); nil != batchSizeErr {
         return exception.NewError(
             "--batch must be at least 1; zero selects the default",
-            map[string]any{"batch": commandContext.Int("batch"), "field": "TableSpec.BatchSize"},
+            map[string]any{"batch": commandContext.Int("batch"), "field": "TableSpecification.BatchSize"},
             batchSizeErr,
         )
     }
@@ -169,9 +169,9 @@ func (instance *EncryptDatabaseCommand) Run(
         return migratorErr
     }
 
-    /* the run is refused naming the flags it lacks, before any row is read: the migrator refuses the same spec, but as the cause of the run's failure, which the terminal does not print. The database is resolved first, so a factory failure still surfaces at the first run. A flag present with an empty value is refused as one that is missing */
-    if "" == spec.Table || "" == spec.PrimaryKey || false == everyColumnNamed(spec.Columns) {
-        return exception.NewError("--table, --primary-key and at least one --column are required, none of them empty", map[string]any{"table": spec.Table, "primaryKey": spec.PrimaryKey, "columns": spec.Columns}, nil)
+    /* the run is refused naming the flags it lacks, before any row is read: the migrator refuses the same specification, but as the cause of the run's failure, which the terminal does not print. The database is resolved first, so a factory failure still surfaces at the first run. A flag present with an empty value is refused as one that is missing */
+    if "" == specification.Table || "" == specification.PrimaryKey || false == everyColumnNamed(specification.Columns) {
+        return exception.NewError("--table, --primary-key and at least one --column are required, none of them empty", map[string]any{"table": specification.Table, "primaryKey": specification.PrimaryKey, "columns": specification.Columns}, nil)
     }
 
     if migrateModeReencrypt == mode && "" == targetKey {
@@ -182,16 +182,16 @@ func (instance *EncryptDatabaseCommand) Run(
         return exception.NewError("--target-key is read by mode reencrypt alone", map[string]any{"mode": mode}, nil)
     }
 
-    if migrateModeDecrypt == mode && true == spec.Deterministic {
+    if migrateModeDecrypt == mode && true == specification.Deterministic {
         return exception.NewError("--deterministic is not read by mode decrypt", map[string]any{"mode": mode}, nil)
     }
 
-    sealBindings, sealBindingsErr := instance.resolveSealBindings(spec.Table, spec.Columns, commandContext.StringSlice("seal-binding"))
+    sealBindings, sealBindingsErr := instance.resolveSealBindings(specification.Table, specification.Columns, commandContext.StringSlice("seal-binding"))
     if nil != sealBindingsErr {
         return sealBindingsErr
     }
 
-    spec.SealBindings = sealBindings
+    specification.SealBindings = sealBindings
 
     /* both writing modes size their columns inside the run, since a non-strict sql_mode keeps an overflowing ciphertext that never authenticates; decrypting only shortens a value, so it needs no room */
     var stats migrateStats
@@ -199,11 +199,11 @@ func (instance *EncryptDatabaseCommand) Run(
 
     switch mode {
     case migrateModeEncrypt:
-        stats, runErr = migrator.migrateEncrypt(ctx, spec)
+        stats, runErr = migrator.migrateEncrypt(ctx, specification)
     case migrateModeReencrypt:
-        stats, runErr = migrator.migrateReencrypt(ctx, spec, targetKey)
+        stats, runErr = migrator.migrateReencrypt(ctx, specification, targetKey)
     case migrateModeDecrypt:
-        stats, runErr = migrator.migrateDecrypt(ctx, spec)
+        stats, runErr = migrator.migrateDecrypt(ctx, specification)
     default:
         return exception.NewError("unknown mode", map[string]any{"mode": mode}, nil)
     }
@@ -220,7 +220,7 @@ func (instance *EncryptDatabaseCommand) Run(
         /* the rows already converted travel with the error, since they are what says what a re-run costs */
         return exception.NewError(
             "encrypt database migration failed",
-            map[string]any{"table": spec.Table, "mode": mode, "processedRows": processed},
+            map[string]any{"table": specification.Table, "mode": mode, "processedRows": processed},
             runErr,
         )
     }
@@ -229,12 +229,12 @@ func (instance *EncryptDatabaseCommand) Run(
         logger.Info(
             "encrypt database migration finished",
             map[string]any{
-                "table":               spec.Table,
+                "table":               specification.Table,
                 "mode":                mode,
                 "rows":                processed,
                 "boundFromUnbound":    stats.boundFromUnbound,
                 "sealedFromPlaintext": stats.sealedFromPlaintext,
-                "sealBindings":        boundLabels(spec.SealBindings),
+                "sealBindings":        boundLabels(specification.SealBindings),
             },
         )
     }
@@ -323,13 +323,13 @@ func (instance *EncryptDatabaseCommand) declaredLabelFolding(label string) strin
     return ""
 }
 
-/* isNilSealBindingRef answers true for a typed nil behind the interface too, whose SealBinding would panic */
-func isNilSealBindingRef(ref SealBindingRef) bool {
-    if nil == ref {
+/* isNilSealBindingReference answers true for a typed nil behind the interface too, whose SealBinding would panic */
+func isNilSealBindingReference(reference SealBindingReference) bool {
+    if nil == reference {
         return true
     }
 
-    reflected := reflect.ValueOf(ref)
+    reflected := reflect.ValueOf(reference)
 
     return reflect.Pointer == reflected.Kind() && true == reflected.IsNil()
 }

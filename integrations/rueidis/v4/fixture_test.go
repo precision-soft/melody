@@ -236,7 +236,7 @@ func dialGated(t *testing.T) (redisclient.Client, *gate) {
     client, clientErr := redisclient.NewClient(redisclient.ClientOption{
         InitAddress:      []string{address},
         DisableCache:     true,
-        ConnWriteTimeout: clientConnWriteTimeoutRule.Default,
+        ConnWriteTimeout: clientConnectionWriteTimeoutRule.Default,
         DialCtxFn: func(ctx context.Context, addr string, dialer *net.Dialer, tlsConfig *tls.Config) (net.Conn, error) {
             raw, dialErr := dialer.DialContext(ctx, "tcp", addr)
             if nil != dialErr {

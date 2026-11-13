@@ -15,7 +15,7 @@ type Router interface {
 
 type MatchResult struct {
     Handler         Handler
-    Params          map[string]string
+    Parameters      map[string]string
     RouteAttributes map[string]any
 }
 

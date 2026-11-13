@@ -215,6 +215,7 @@ could not answer, at either door or through a sign-in door's `Handler` or token 
 - http: **Breaking**: `SetSessionCookiePolicy`, through `NewKernel` and a module alike, refuses a policy of `SameSite=None` with `SessionCookieSecureNever`, naming `SessionCookiePolicy.Secure`, where the kernel wrote a cookie every current browser drops, so no session stuck.
 - mailer: **Breaking**: `NewSmtpTransport` refuses an empty `SmtpConfig.Address`, a padded one, one without a host or a port and one whose port the dial cannot read, naming the field, before it judges the timeouts, where it built the transport and failed at the first send's dial.
 - application: **Breaking**: a module whose `Name()` begins or ends with whitespace is refused where it is registered, naming the module's type and the name, and two names differing only by case are one identity: the second is recorded in the aggregated boot report naming both spellings, and neither it nor the modules it provides boots, where `twin` and `Twin` booted as two modules.
+- http: **Breaking**: `Request.Param` and `Request.Params` are renamed `Request.Parameter` and `Request.Parameters`, in `httpcontract.Request` and on the framework's request, and `httpcontract.MatchResult.Params` is `MatchResult.Parameters`; nothing else changes.
 
 ### Removed
 

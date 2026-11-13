@@ -64,9 +64,9 @@ type nilAttributesRequest struct {
 
 func (instance *nilAttributesRequest) HttpRequest() *nethttp.Request { return nil }
 
-func (instance *nilAttributesRequest) Param(name string) (string, bool) { return "", false }
+func (instance *nilAttributesRequest) Parameter(name string) (string, bool) { return "", false }
 
-func (instance *nilAttributesRequest) Params() map[string]string { return nil }
+func (instance *nilAttributesRequest) Parameters() map[string]string { return nil }
 
 func (instance *nilAttributesRequest) Query() bagcontract.ParameterBag { return nil }
 

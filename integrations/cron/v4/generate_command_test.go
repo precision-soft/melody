@@ -60,7 +60,7 @@ func TestRunWritesFileWithEntriesForCommandsImplementingMetadata(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -105,7 +105,7 @@ func TestRunSkipsCommandsWhoseCronScheduleReturnsNil(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -143,7 +143,7 @@ func TestRunWritesHeartbeatOnlyFileWhenNoEntriesAndHeartbeatPathProvided(t *test
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--heartbeat-path", heartbeatPath,
@@ -178,7 +178,7 @@ func TestRunDoesNotWriteFileWhenNoEntriesAndNoHeartbeat(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -209,7 +209,7 @@ func TestRunHonorsPerCommandUserOverride(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -239,7 +239,7 @@ func TestRunHonorsPerCommandLogFileNameOverride(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -272,7 +272,7 @@ func TestRunPreservesRegistrationOrder(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -312,7 +312,7 @@ func TestRunPreservesRegistrationOrderWithinSharedDestination(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -353,7 +353,7 @@ func TestRunDefaultsLogFileNameFromSanitizedCommandName(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -380,9 +380,9 @@ func TestRunUsesParameterDefaultsWhenFlagsNotProvided(t *testing.T) {
     }
 
     configuration := newStubConfiguration(map[string]string{
-        ParameterUser:    "deploy",
-        ParameterLogsDir: filepath.Join(tempDir, "param-logs"),
-        ParameterBinary:  "/opt/melody/app",
+        ParameterUser:          "deploy",
+        ParameterLogsDirectory: filepath.Join(tempDir, "param-logs"),
+        ParameterBinary:        "/opt/melody/app",
     })
 
     _, err := runGenerateCommandWithConfiguration(
@@ -422,7 +422,7 @@ func TestRunCLIFlagOverridesParameterDefault(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "cli-logs"),
+            "--logs-directory", filepath.Join(tempDir, "cli-logs"),
             "--binary", "/usr/local/bin/cli-override",
             "--user", "cli-user",
         },
@@ -464,7 +464,7 @@ func TestRunErrorsWhenNoOutputPathConfigured(t *testing.T) {
     }
 }
 
-func TestRunErrorsWhenLogsDirMissingAndCommandWantsLogging(t *testing.T) {
+func TestRunErrorsWhenLogsDirectoryMissingAndCommandWantsLogging(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
 
@@ -483,15 +483,15 @@ func TestRunErrorsWhenLogsDirMissingAndCommandWantsLogging(t *testing.T) {
         newStubConfiguration(nil),
     )
     if nil == err {
-        t.Fatalf("expected error when logs-dir is missing and a command wants logging, got nil")
+        t.Fatalf("expected error when the logs directory is missing and a command wants logging, got nil")
     }
 
-    if false == strings.Contains(err.Error(), "no logs-dir is configured") {
-        t.Fatalf("expected error to mention missing logs-dir, got: %v", err)
+    if false == strings.Contains(err.Error(), "no logs directory is configured") {
+        t.Fatalf("expected error to mention the missing logs directory, got: %v", err)
     }
 }
 
-func TestRunSucceedsWithoutLogsDirWhenAllSchedulesDisableLogging(t *testing.T) {
+func TestRunSucceedsWithoutLogsDirectoryWhenAllSchedulesDisableLogging(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
 
@@ -523,10 +523,10 @@ func TestRunSucceedsWithoutLogsDirWhenAllSchedulesDisableLogging(t *testing.T) {
     }
 }
 
-func TestRunCreatesLogsDirWhenItDoesNotExist(t *testing.T) {
+func TestRunCreatesLogsDirectoryWhenItDoesNotExist(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
-    logsDir := filepath.Join(tempDir, "var", "log", "cron")
+    logsDirectory := filepath.Join(tempDir, "var", "log", "cron")
 
     commands := []clicontract.Command{
         newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
@@ -537,7 +537,7 @@ func TestRunCreatesLogsDirWhenItDoesNotExist(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", logsDir,
+            "--logs-directory", logsDirectory,
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "apache",
         },
@@ -547,16 +547,16 @@ func TestRunCreatesLogsDirWhenItDoesNotExist(t *testing.T) {
         t.Fatalf("Run returned unexpected error: %v", err)
     }
 
-    info, statErr := os.Stat(logsDir)
+    info, statErr := os.Stat(logsDirectory)
     if nil != statErr {
-        t.Fatalf("expected logs dir %q to exist after generate, got stat error: %v", logsDir, statErr)
+        t.Fatalf("expected logs directory %q to exist after generate, got stat error: %v", logsDirectory, statErr)
     }
     if false == info.IsDir() {
-        t.Fatalf("expected %q to be a directory", logsDir)
+        t.Fatalf("expected %q to be a directory", logsDirectory)
     }
 }
 
-func TestRunErrorsWhenLogsDirCannotBeCreated(t *testing.T) {
+func TestRunErrorsWhenLogsDirectoryCannotBeCreated(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
 
@@ -564,7 +564,7 @@ func TestRunErrorsWhenLogsDirCannotBeCreated(t *testing.T) {
     if writeErr := os.WriteFile(blockingFile, []byte("placeholder"), 0o644); nil != writeErr {
         t.Fatalf("setup: could not create blocking file: %v", writeErr)
     }
-    logsDir := filepath.Join(blockingFile, "logs")
+    logsDirectory := filepath.Join(blockingFile, "logs")
 
     commands := []clicontract.Command{
         newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
@@ -575,14 +575,14 @@ func TestRunErrorsWhenLogsDirCannotBeCreated(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", logsDir,
+            "--logs-directory", logsDirectory,
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "apache",
         },
         newStubConfiguration(nil),
     )
     if nil == err {
-        t.Fatalf("expected error when logs dir cannot be created, got nil")
+        t.Fatalf("expected error when logs directory cannot be created, got nil")
     }
     if false == strings.Contains(err.Error(), "could not create the logs directory") {
         t.Fatalf("expected error to mention logs directory creation failure, got: %v", err)
@@ -605,7 +605,7 @@ func TestRunUsesDestinationFileParameterWhenFlagNotProvided(t *testing.T) {
         t,
         commands,
         []string{
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -638,7 +638,7 @@ func TestRunUsesHeartbeatPathParameterWhenFlagNotProvided(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -657,10 +657,10 @@ func TestRunUsesHeartbeatPathParameterWhenFlagNotProvided(t *testing.T) {
     }
 }
 
-func TestRunAutoDerivesHeartbeatFromLogsDirWhenOptInEnabled(t *testing.T) {
+func TestRunAutoDerivesHeartbeatFromLogsDirectoryWhenOptInEnabled(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
-    logsDir := filepath.Join(tempDir, "logs")
+    logsDirectory := filepath.Join(tempDir, "logs")
 
     commands := []clicontract.Command{
         newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
@@ -675,7 +675,7 @@ func TestRunAutoDerivesHeartbeatFromLogsDirWhenOptInEnabled(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", logsDir,
+            "--logs-directory", logsDirectory,
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "apache",
         },
@@ -688,7 +688,7 @@ func TestRunAutoDerivesHeartbeatFromLogsDirWhenOptInEnabled(t *testing.T) {
     body, _ := os.ReadFile(outputPath)
     content := string(body)
 
-    expectedHeartbeat := "* * * * * apache /bin/touch " + filepath.Join(logsDir, "heartbeat.crontab")
+    expectedHeartbeat := "* * * * * apache /bin/touch " + filepath.Join(logsDirectory, "heartbeat.crontab")
     if false == strings.Contains(content, expectedHeartbeat) {
         t.Fatalf("expected auto-derived heartbeat line %q in:\n%s", expectedHeartbeat, content)
     }
@@ -697,7 +697,7 @@ func TestRunAutoDerivesHeartbeatFromLogsDirWhenOptInEnabled(t *testing.T) {
 func TestRunDoesNotAutoDeriveHeartbeatWhenOptInDisabled(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
-    logsDir := filepath.Join(tempDir, "logs")
+    logsDirectory := filepath.Join(tempDir, "logs")
 
     commands := []clicontract.Command{
         newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
@@ -710,7 +710,7 @@ func TestRunDoesNotAutoDeriveHeartbeatWhenOptInDisabled(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", logsDir,
+            "--logs-directory", logsDirectory,
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "apache",
         },
@@ -731,7 +731,7 @@ func TestRunDoesNotAutoDeriveHeartbeatWhenOptInDisabled(t *testing.T) {
 func TestRunPrefersExplicitHeartbeatPathOverAutoDerive(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
-    logsDir := filepath.Join(tempDir, "logs")
+    logsDirectory := filepath.Join(tempDir, "logs")
     explicitHeartbeatPath := filepath.Join(tempDir, "custom-heartbeat.crontab")
 
     commands := []clicontract.Command{
@@ -748,7 +748,7 @@ func TestRunPrefersExplicitHeartbeatPathOverAutoDerive(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", logsDir,
+            "--logs-directory", logsDirectory,
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "apache",
         },
@@ -766,7 +766,7 @@ func TestRunPrefersExplicitHeartbeatPathOverAutoDerive(t *testing.T) {
         t.Fatalf("expected explicit heartbeat line %q to win over auto-derive in:\n%s", expectedHeartbeat, content)
     }
 
-    autoDerivedPath := filepath.Join(logsDir, "heartbeat.crontab")
+    autoDerivedPath := filepath.Join(logsDirectory, "heartbeat.crontab")
     if true == strings.Contains(content, "/bin/touch "+autoDerivedPath) {
         t.Fatalf("expected auto-derived heartbeat line at %q NOT to appear when explicit is set, got:\n%s", autoDerivedPath, content)
     }
@@ -789,7 +789,7 @@ func TestRunErrorsWhenParameterUserEmptyAndNoFlag(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
         },
         configuration,
@@ -820,7 +820,7 @@ func TestRunUsesParameterUserAsHeartbeatUser(t *testing.T) {
         nil,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--heartbeat-path", heartbeatPath,
         },
@@ -861,7 +861,7 @@ func TestRunGroupsEntriesByDestinationFile(t *testing.T) {
         commands,
         []string{
             "--out", defaultOutputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -919,7 +919,7 @@ func TestRunWritesHeartbeatToEveryDestinationFile(t *testing.T) {
         commands,
         []string{
             "--out", defaultOutputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--heartbeat-path", heartbeatPath,
@@ -959,7 +959,7 @@ func TestRunUsesPerCommandCommandOverride(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -998,7 +998,7 @@ func TestRunDisablesLogRedirectionWhenLogDisabled(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -1046,7 +1046,7 @@ func TestRunGroupsMultipleEntriesIntoSameDestinationFile(t *testing.T) {
         commands,
         []string{
             "--out", defaultOutputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -1095,7 +1095,7 @@ func TestRunHeartbeatOnlyInCustomDestinationsWhenNoDefaultBucket(t *testing.T) {
         commands,
         []string{
             "--out", defaultOutputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--heartbeat-path", heartbeatPath,
@@ -1163,7 +1163,7 @@ func TestRunExpandsMultipleInstancesIntoSeparateEntries(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -1200,7 +1200,7 @@ func TestRunSingleInstanceOmitsMaxInstancesFlag(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -1240,7 +1240,7 @@ func TestRunMultiInstancePreservesCustomCommandPartsAcrossInstances(t *testing.T
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -1285,7 +1285,7 @@ func TestRunRawLogFileNameKeepsColonsInAutoName(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -1319,7 +1319,7 @@ func TestRunSanitizedLogFileNameReplacesColons(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -1350,7 +1350,7 @@ func TestRunFallsBackToOsExecutableWhenBinaryNotConfigured(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--user", "deploy",
         },
         newStubConfiguration(nil),
@@ -1390,7 +1390,7 @@ func TestRunSucceedsWithoutBinaryWhenAllSchedulesHaveCommandOverride(t *testing.
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--user", "deploy",
         },
         newStubConfiguration(nil),
@@ -1421,7 +1421,7 @@ func TestRunHeartbeatCommandFlagOverridesHeartbeatPath(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--heartbeat-path", heartbeatPath,
@@ -1466,7 +1466,7 @@ func TestRunHeartbeatDestinationDefaultRestrictsToDefault(t *testing.T) {
         commands,
         []string{
             "--out", defaultOutputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--heartbeat-path", heartbeatPath,
@@ -1509,7 +1509,7 @@ func TestRunHeartbeatDestinationRelativePath(t *testing.T) {
         commands,
         []string{
             "--out", defaultOutputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--heartbeat-path", heartbeatPath,
@@ -1547,7 +1547,7 @@ func TestRunHeartbeatDestinationErrorsOnUnmatched(t *testing.T) {
         commands,
         []string{
             "--out", defaultOutputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--heartbeat-path", heartbeatPath,
@@ -1563,7 +1563,7 @@ func TestRunHeartbeatDestinationErrorsOnUnmatched(t *testing.T) {
     }
 }
 
-func TestRunRejectsLogFileNameEscapingLogsDir(t *testing.T) {
+func TestRunRejectsLogFileNameEscapingLogsDirectory(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
 
@@ -1579,13 +1579,13 @@ func TestRunRejectsLogFileNameEscapingLogsDir(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
     )
     if nil == err {
-        t.Fatalf("expected error when Schedule.LogFileName escapes logs dir")
+        t.Fatalf("expected error when Schedule.LogFileName escapes logs directory")
     }
 
     if false == strings.Contains(err.Error(), "escapes") {
@@ -1609,7 +1609,7 @@ func TestRunRejectsDestinationFileEscapingDefaultDir(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -1682,7 +1682,7 @@ func TestRunInstancesPreservesCompositeLogExtension(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -1720,7 +1720,7 @@ func TestRunInstancesPreservesRawLogFileName(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -1753,7 +1753,7 @@ func TestRunAtomicWriteLeavesNoTempFileOnSuccess(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -1781,7 +1781,7 @@ func TestRunAtomicWriteLeavesNoTempFileOnSuccess(t *testing.T) {
 func TestRunAtomicWriteHandlesConcurrentRuns(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
-    logsDir := filepath.Join(tempDir, "logs")
+    logsDirectory := filepath.Join(tempDir, "logs")
 
     commands := []clicontract.Command{
         newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
@@ -1797,7 +1797,7 @@ func TestRunAtomicWriteHandlesConcurrentRuns(t *testing.T) {
                 commands,
                 []string{
                     "--out", outputPath,
-                    "--logs-dir", logsDir,
+                    "--logs-directory", logsDirectory,
                     "--binary", "/usr/local/bin/fakeapp",
                     "--user", "deploy",
                 },
@@ -1929,7 +1929,7 @@ func TestRunDispatchesToTemplateFromFlag(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--template", "json-cron",
@@ -1964,7 +1964,7 @@ func TestRunErrorsWhenTemplateNameUnknown(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--template", "k8s_cronjob",
@@ -1991,7 +1991,7 @@ func TestRunRendersK8sTemplateWithImageAndNamespaceFlags(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--template", "k8s",
@@ -2044,7 +2044,7 @@ func TestRunK8sTemplateRejectsResourceNameCollisionAcrossDestinationFiles(t *tes
         commands,
         []string{
             "--out", defaultOutputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--template", "k8s",
@@ -2078,7 +2078,7 @@ func TestRunK8sTemplateWarnsWhenHeartbeatConfigured(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--template", "k8s",
@@ -2110,7 +2110,7 @@ func TestRunK8sTemplateIgnoresUnmatchedHeartbeatDestination(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--template", "k8s",
@@ -2151,7 +2151,7 @@ func TestRunK8sTemplateWithHeartbeatAndEmptyConfigurationWritesNothing(t *testin
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--template", "k8s",
@@ -2193,7 +2193,7 @@ func TestRunCrontabTemplateDoesNotWarnAboutHeartbeat(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--heartbeat-path", heartbeatPath,
@@ -2221,7 +2221,7 @@ func TestRunK8sTemplateErrorsWhenImageMissing(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--template", "k8s",
@@ -2248,7 +2248,7 @@ func TestRunK8sTemplateSuffixesNamesForMultiInstanceCommand(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--template", "k8s",
@@ -2291,7 +2291,7 @@ func TestRunK8sTemplateWithHeartbeatAndNoUserSucceedsAndWarns(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--template", "k8s",
             "--image", "registry/curatorium:latest",
@@ -2311,8 +2311,7 @@ func TestRunK8sTemplateWithHeartbeatAndNoUserSucceedsAndWarns(t *testing.T) {
     }
 }
 
-func TestRunK8sTemplateSucceedsWithoutLogsDir(t *testing.T) {
-    /* the k8s template logs to container stdout and never reads Entry.LogPath, so a k8s run must not inherit the crontab-only logs-dir requirement (ErrNoLogsDir) */
+func TestRunK8sTemplateSucceedsWithoutLogsDirectory(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "cron.yaml")
 
@@ -2332,11 +2331,11 @@ func TestRunK8sTemplateSucceedsWithoutLogsDir(t *testing.T) {
         },
     )
     if nil != runErr {
-        t.Fatalf("Run returned unexpected error for a k8s run without --logs-dir: %v", runErr)
+        t.Fatalf("Run returned unexpected error for a k8s run without --logs-directory: %v", runErr)
     }
 
-    if true == errors.Is(runErr, ErrNoLogsDir) {
-        t.Fatalf("k8s does not redirect to log files; it must not demand a logs dir, got: %v", runErr)
+    if true == errors.Is(runErr, ErrNoLogsDirectory) {
+        t.Fatalf("k8s does not redirect to log files; it must not demand a logs directory, got: %v", runErr)
     }
 
     body, readErr := os.ReadFile(outputPath)
@@ -2366,7 +2365,7 @@ func TestRunInstancesZeroIsNormalizedToOne(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -2405,7 +2404,7 @@ func TestRunInstancesNegativeIsRefusedNamingTheField(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -2447,7 +2446,7 @@ func TestRunHeartbeatDestinationAbsolutePath(t *testing.T) {
         commands,
         []string{
             "--out", defaultOutputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--heartbeat-path", heartbeatPath,
@@ -2488,7 +2487,7 @@ func TestRunErrorsWhenHeartbeatEnabledWithoutUser(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--heartbeat-path", heartbeatPath,
         },
@@ -2512,7 +2511,7 @@ func TestRunCascadesParameterWhenOutFlagIsEmpty(t *testing.T) {
 
     configuration := newStubConfiguration(map[string]string{
         ParameterDestinationFile: parameterOutputPath,
-        ParameterLogsDir:         filepath.Join(tempDir, "param-logs"),
+        ParameterLogsDirectory:   filepath.Join(tempDir, "param-logs"),
         ParameterUser:            "deploy",
     })
 
@@ -2618,7 +2617,7 @@ func TestRunCrontabNoUserTemplateWithHeartbeatAndNoUserSucceeds(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--template", "crontab-no-user",
             "--heartbeat-path", heartbeatPath,
@@ -2640,7 +2639,7 @@ func TestRunPruneEmptiesADestinationThisRunNoLongerProduces(t *testing.T) {
 
     baseArgs := []string{
         "--out", outputPath,
-        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--logs-directory", filepath.Join(tempDir, "logs"),
         "--binary", "/usr/local/bin/fakeapp",
         "--user", "deploy",
     }
@@ -2716,7 +2715,7 @@ func TestRunPruneIsReportedInTheJsonEnvelope(t *testing.T) {
 
     baseArgs := []string{
         "--out", outputPath,
-        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--logs-directory", filepath.Join(tempDir, "logs"),
         "--binary", "/usr/local/bin/fakeapp",
         "--user", "deploy",
     }
@@ -2786,7 +2785,7 @@ func TestRunPruneLeavesAFileItCannotProveItWrote(t *testing.T) {
         },
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--prune",
@@ -2811,7 +2810,7 @@ func TestRunPruneSweepsWhenTheConfigurationBecomesEmpty(t *testing.T) {
 
     baseArgs := []string{
         "--out", outputPath,
-        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--logs-directory", filepath.Join(tempDir, "logs"),
         "--binary", "/usr/local/bin/fakeapp",
         "--user", "deploy",
     }
@@ -2864,7 +2863,7 @@ func TestRunReportsAnEmptyPrunedListWhenNothingIsSwept(t *testing.T) {
         },
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--format=json",
@@ -2898,7 +2897,7 @@ func TestRunWithoutPruneLeavesAStaleDestinationUntouched(t *testing.T) {
 
     baseArgs := []string{
         "--out", outputPath,
-        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--logs-directory", filepath.Join(tempDir, "logs"),
         "--binary", "/usr/local/bin/fakeapp",
         "--user", "deploy",
     }
@@ -2952,7 +2951,7 @@ func TestGenerateCommand_TheSweepDoesNotOpenANamedPipe(t *testing.T) {
             []clicontract.Command{newFakeCommandWithSchedule("job:probe", &testSchedule{Minute: "0", Hour: "*"})},
             []string{
                 "--out", filepath.Join(directory, "current.crontab"),
-                "--logs-dir", directory,
+                "--logs-directory", directory,
                 "--binary", "/usr/bin/app",
                 "--user", "root",
                 "--prune",
@@ -2979,7 +2978,7 @@ func TestGenerateCommand_JsonFormatRendersOneDocument(t *testing.T) {
         []clicontract.Command{newFakeCommandWithSchedule("report:daily", &testSchedule{Minute: "0"})},
         []string{
             "--out", filepath.Join(tempDir, "crontab"),
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--format=json",
@@ -3039,7 +3038,7 @@ func TestGenerateCommand_JsonNamesTheDestinationsWrittenBeforeTheFailure(t *test
         commands,
         []string{
             "--out", filepath.Join(tempDir, "crontab"),
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--format=json",
@@ -3087,7 +3086,7 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
     )
 
     if nil == runErr {
-        t.Fatalf("expected the missing logs-dir to fail the run, got %q", stdout)
+        t.Fatalf("expected the missing logs-directory to fail the run, got %q", stdout)
     }
 
     document := struct {
@@ -3120,8 +3119,8 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
         t.Fatalf("expected the failure to carry its cause, got %q", stdout)
     }
 
-    if false == strings.Contains(document.Error.Cause.Message, "logs-dir") {
-        t.Fatalf("expected the cause to name the missing logs-dir, got %q", document.Error.Cause.Message)
+    if false == strings.Contains(document.Error.Cause.Message, "logs-directory") {
+        t.Fatalf("expected the cause to name the missing logs-directory, got %q", document.Error.Cause.Message)
     }
 
     /* the document carries the failure's details and cause.details, the context and chain the journal carries for the same value */
@@ -3133,7 +3132,7 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
         t.Fatalf("expected the cause chain inside the failure, got %q", stdout)
     }
 
-    if false == strings.Contains(document.Error.Cause.Details["chain"][0], "logs-dir") {
+    if false == strings.Contains(document.Error.Cause.Details["chain"][0], "logs-directory") {
         t.Fatalf("expected the chain to start at the failure itself, got %v", document.Error.Cause.Details["chain"])
     }
 
@@ -3150,7 +3149,7 @@ func TestGenerateCommand_JsonReportsTheFailureAndWhatWasAlreadyWritten(t *testin
         },
         []string{
             "--out", filepath.Join(tempDir, "crontab"),
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--format=json",
@@ -3214,7 +3213,7 @@ func TestGenerateCommand_AcceptsTheStandardVerbosityFlag(t *testing.T) {
         []clicontract.Command{newFakeCommandWithSchedule("report:daily", &testSchedule{Minute: "0"})},
         []string{
             "--out", filepath.Join(tempDir, "crontab"),
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--verbosity=1",
@@ -3302,7 +3301,7 @@ func TestRunAnchorsARelativeParameterPathAtTheProjectDirectory(t *testing.T) {
             ParameterUser:            "deploy",
             ParameterBinary:          "/opt/melody/app",
             ParameterDestinationFile: filepath.Join("var", "cron", "crontab"),
-            ParameterLogsDir:         filepath.Join("var", "log", "cron"),
+            ParameterLogsDirectory:   filepath.Join("var", "log", "cron"),
         },
         projectDirectory,
     )
@@ -3339,9 +3338,9 @@ func TestRunKeepsARelativeFlagPathRelativeToTheWorkingDirectory(t *testing.T) {
 
     configuration := newStubConfigurationWithProjectDirectory(
         map[string]string{
-            ParameterUser:    "deploy",
-            ParameterBinary:  "/opt/melody/app",
-            ParameterLogsDir: filepath.Join(projectDirectory, "var", "log", "cron"),
+            ParameterUser:          "deploy",
+            ParameterBinary:        "/opt/melody/app",
+            ParameterLogsDirectory: filepath.Join(projectDirectory, "var", "log", "cron"),
         },
         projectDirectory,
     )
@@ -3368,7 +3367,7 @@ func TestRunKeepsARelativeFlagPathRelativeToTheWorkingDirectory(t *testing.T) {
 func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
-    logsDir := filepath.Join(tempDir, "logs")
+    logsDirectory := filepath.Join(tempDir, "logs")
 
     commands := []clicontract.Command{
         newFakeCommandWithSchedule("nightly:report", &testSchedule{
@@ -3382,7 +3381,7 @@ func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", logsDir,
+            "--logs-directory", logsDirectory,
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -3391,7 +3390,7 @@ func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
         t.Fatalf("expected the subdirectory log file name to generate, got: %v", err)
     }
 
-    subdirectoryInfo, statErr := os.Stat(filepath.Join(logsDir, "nightly"))
+    subdirectoryInfo, statErr := os.Stat(filepath.Join(logsDirectory, "nightly"))
     if nil != statErr {
         t.Fatalf("expected the log subdirectory to exist after generation: %v", statErr)
     }
@@ -3404,7 +3403,7 @@ func TestRunCreatesTheLogSubdirectoryTheLogFileNameNames(t *testing.T) {
 func TestRun_RefusesAMalformedHeartbeatOptIn(t *testing.T) {
     tempDir := t.TempDir()
     outputPath := filepath.Join(tempDir, "crontab")
-    logsDir := filepath.Join(tempDir, "logs")
+    logsDirectory := filepath.Join(tempDir, "logs")
 
     commands := []clicontract.Command{
         newFakeCommandWithSchedule("backup:run", &testSchedule{Minute: "0", Hour: "2"}),
@@ -3419,7 +3418,7 @@ func TestRun_RefusesAMalformedHeartbeatOptIn(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", logsDir,
+            "--logs-directory", logsDirectory,
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "apache",
         },
@@ -3486,7 +3485,7 @@ func TestGenerateCommand_EntryArgumentsReachTheGeneratedLine(t *testing.T) {
         commands,
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
         },
@@ -3553,7 +3552,7 @@ func TestGenerateCommand_ARegisteredNoUserDialectNeedsNoUserForTheHeartbeat(t *t
         []clicontract.Command{newFakeCommandWithSchedule("job:probe", &testSchedule{Minute: "0", Hour: "*"})},
         []string{
             "--out", filepath.Join(directory, "crontab"),
-            "--logs-dir", directory,
+            "--logs-directory", directory,
             "--binary", "/usr/bin/app",
             "--template", "kubernetes-probe",
             "--heartbeat-path", filepath.Join(directory, "heartbeat.crontab"),
@@ -3748,7 +3747,7 @@ func TestRun_RefusesAMalformedHeartbeatOptInUnderK8s(t *testing.T) {
         commands,
         []string{
             "--out", filepath.Join(tempDir, "cronjobs.yaml"),
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--template", "k8s",
             "--image", "registry.example/app:1",
         },
@@ -3785,7 +3784,7 @@ func TestRunK8sTemplateDoesNotAutoDeriveAHeartbeat(t *testing.T) {
         commands,
         []string{
             "--out", filepath.Join(tempDir, "cronjobs.yaml"),
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--template", "k8s",
             "--image", "registry.example/app:1",
         },
@@ -3865,7 +3864,7 @@ func TestGenerateCommand_PruneLeavesABystanderFileThatQuotesTheMarker(t *testing
         },
         []string{
             "--out", outputPath,
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "deploy",
             "--prune",
@@ -3901,7 +3900,7 @@ func TestRunAnchorsARelativeBinaryParameterAtTheProjectDirectory(t *testing.T) {
             ParameterUser:            "deploy",
             ParameterBinary:          filepath.Join("bin", "app"),
             ParameterDestinationFile: filepath.Join(projectDirectory, "var", "cron", "crontab"),
-            ParameterLogsDir:         filepath.Join(projectDirectory, "var", "log", "cron"),
+            ParameterLogsDirectory:   filepath.Join(projectDirectory, "var", "log", "cron"),
         },
         projectDirectory,
     )
@@ -3932,7 +3931,7 @@ func TestRunKeepsARelativeBinaryFlagRelativeToTheWorkingDirectory(t *testing.T) 
             ParameterUser:            "deploy",
             ParameterBinary:          "/opt/melody/app",
             ParameterDestinationFile: filepath.Join(projectDirectory, "var", "cron", "crontab"),
-            ParameterLogsDir:         filepath.Join(projectDirectory, "var", "log", "cron"),
+            ParameterLogsDirectory:   filepath.Join(projectDirectory, "var", "log", "cron"),
         },
         projectDirectory,
     )
@@ -3985,7 +3984,7 @@ func containsExactLeadingLine(content string, line string) bool {
 
 func ownershipLineArguments(tempDir string, dialect string, extra []string) []string {
     return append([]string{
-        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--logs-directory", filepath.Join(tempDir, "logs"),
         "--binary", "/usr/local/bin/fakeapp",
         "--user", "deploy",
         "--template", dialect,
@@ -4365,14 +4364,14 @@ func TestAtomicWriteFileReplacesADestinationWhoseBasenameFillsTheFilesystemCompo
 }
 
 func TestResolveEntryLogPath_AMultiInstanceNameInADottedSubdirectoryKeepsTheDirectory(t *testing.T) {
-    logsDir := t.TempDir()
+    logsDirectory := t.TempDir()
 
-    resolved, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "cron.d/app.log"}, logsDir, 2, 1, true, "")
+    resolved, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "cron.d/app.log"}, logsDirectory, 2, 1, true, "")
     if nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
-    if filepath.Join(logsDir, "cron.d", "app-1.log") != resolved {
+    if filepath.Join(logsDirectory, "cron.d", "app-1.log") != resolved {
         t.Fatalf("expected the instance suffix on the file's own name, got %q", resolved)
     }
 }
@@ -4400,54 +4399,54 @@ func withLogDirectoryOwnership(t *testing.T, effectiveUserId int, lookup func(st
 }
 
 func TestResolveEntryLogPath_TheSubdirectoriesCreatedForAnEntryAreHandedToItsUserWhenRunningAsRoot(t *testing.T) {
-    logsDir := t.TempDir()
+    logsDirectory := t.TempDir()
     chowned := withLogDirectoryOwnership(t, 0, func(name string) (*user.User, error) {
         return &user.User{Username: name, Uid: "1234", Gid: "5678"}, nil
     })
 
-    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/b/app.log"}, logsDir, 1, 1, true, "deploy"); nil != resolveErr {
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/b/app.log"}, logsDirectory, 1, 1, true, "deploy"); nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
-    expected := []string{filepath.Join(logsDir, "a") + " 1234:5678", filepath.Join(logsDir, "a", "b") + " 1234:5678"}
+    expected := []string{filepath.Join(logsDirectory, "a") + " 1234:5678", filepath.Join(logsDirectory, "a", "b") + " 1234:5678"}
     if fmt.Sprint(expected) != fmt.Sprint(*chowned) {
         t.Fatalf("expected the created directories handed to the entry's user, got %v", *chowned)
     }
 }
 
 func TestResolveEntryLogPath_AnEntryUserTheHostDoesNotKnowLeavesTheDirectoryRootsAndAnswersIt(t *testing.T) {
-    logsDir := t.TempDir()
+    logsDirectory := t.TempDir()
     chowned := withLogDirectoryOwnership(t, 0, func(name string) (*user.User, error) {
         return nil, user.UnknownUserError(name)
     })
 
-    resolved, unownedDirectory, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/b/app.log"}, logsDir, 1, 1, true, "ghost")
+    resolved, unownedDirectory, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/b/app.log"}, logsDirectory, 1, 1, true, "ghost")
     if nil != resolveErr {
         t.Fatalf("expected the generation to continue over a user the host does not know, got %v", resolveErr)
     }
 
-    if filepath.Join(logsDir, "a", "b", "app.log") != resolved || filepath.Join(logsDir, "a") != unownedDirectory || 0 != len(*chowned) {
+    if filepath.Join(logsDirectory, "a", "b", "app.log") != resolved || filepath.Join(logsDirectory, "a") != unownedDirectory || 0 != len(*chowned) {
         t.Fatalf("expected the shallowest created directory answered and nothing handed away, got %q %q %v", resolved, unownedDirectory, *chowned)
     }
 }
 
 func TestResolveEntryLogPath_NothingIsHandedAwayWhenNotRootOrWithoutAUserOrWhenNothingWasCreated(t *testing.T) {
-    logsDir := t.TempDir()
+    logsDirectory := t.TempDir()
     chowned := withLogDirectoryOwnership(t, 1000, func(name string) (*user.User, error) {
         return &user.User{Username: name, Uid: "1234", Gid: "5678"}, nil
     })
 
-    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/app.log"}, logsDir, 1, 1, true, "deploy"); nil != resolveErr {
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/app.log"}, logsDirectory, 1, 1, true, "deploy"); nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
     logDirectoryEffectiveUserId = func() int { return 0 }
 
-    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "b/app.log"}, logsDir, 1, 1, true, ""); nil != resolveErr {
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "b/app.log"}, logsDirectory, 1, 1, true, ""); nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
-    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/app.log"}, logsDir, 1, 1, true, "deploy"); nil != resolveErr {
+    if _, _, resolveErr := resolveEntryLogPath("reports:daily", &EntryConfig{LogFileName: "a/app.log"}, logsDirectory, 1, 1, true, "deploy"); nil != resolveErr {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
@@ -4462,7 +4461,7 @@ func TestRunPruneLeavesAYoungTemporaryFileAloneAndEmptiesAnAgedOne(t *testing.T)
 
     args := []string{
         "--out", outputPath,
-        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--logs-directory", filepath.Join(tempDir, "logs"),
         "--binary", "/usr/local/bin/fakeapp",
         "--user", "deploy",
     }
@@ -4523,7 +4522,7 @@ func TestRunWarnsOfALogDirectoryLeftRootsForAUserTheHostDoesNotKnow(t *testing.T
         },
         []string{
             "--out", filepath.Join(tempDir, "crontab"),
-            "--logs-dir", filepath.Join(tempDir, "logs"),
+            "--logs-directory", filepath.Join(tempDir, "logs"),
             "--binary", "/usr/local/bin/fakeapp",
             "--user", "ghost",
         },

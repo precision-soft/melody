@@ -45,13 +45,13 @@ func (instance *Module) buildDatabase() {
 
     if catalogDefinition, wired := instance.catalogProviderDefinition(); true == wired {
         definitionList = append(definitionList, catalogDefinition)
-        instance.catalogLocation = databaseLocationOf(catalogDefinition.Params)
+        instance.catalogLocation = databaseLocationOf(catalogDefinition.Parameters)
     }
 
     if archiveDefinition, wired := instance.archiveProviderDefinition(); true == wired {
         definitionList = append(definitionList, archiveDefinition)
         instance.archiveWired = true
-        instance.archiveLocation = databaseLocationOf(archiveDefinition.Params)
+        instance.archiveLocation = databaseLocationOf(archiveDefinition.Parameters)
     }
 
     if 0 == len(definitionList) {
@@ -107,7 +107,7 @@ func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefini
     return melodybunorm.ProviderDefinition{
         Name:     databaseManagerName,
         Provider: provider,
-        Params: melodybunorm.ConnectionParameters{
+        Parameters: melodybunorm.ConnectionParameters{
             Host:     host,
             Port:     port,
             Database: instance.environmentValue(environmentKeyMysqlDatabase),
@@ -142,7 +142,7 @@ func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefini
     return melodybunorm.ProviderDefinition{
         Name:     databaseArchiveManagerName,
         Provider: provider,
-        Params: melodybunorm.ConnectionParameters{
+        Parameters: melodybunorm.ConnectionParameters{
             Host:     host,
             Port:     port,
             Database: instance.environmentValue(environmentKeyPgsqlDatabase),

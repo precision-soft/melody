@@ -66,7 +66,7 @@ func TestBoot_TheRootsRoutesRegisterBeforeAnyModules(t *testing.T) {
         t.Fatal("expected /users/me to match a route")
     }
 
-    if identifier, hasIdentifier := matchResult.Params["id"]; true == hasIdentifier {
+    if identifier, hasIdentifier := matchResult.Parameters["id"]; true == hasIdentifier {
         t.Fatalf("expected the root's static route to win the dispatch, but the module's /users/:id matched with id=%q", identifier)
     }
 }

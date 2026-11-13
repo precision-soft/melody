@@ -32,7 +32,7 @@ func TestErrorsIsErrTemplateNotFound(t *testing.T) {
 
     _, err := runGenerateCommand(t, commands, []string{
         "--out", filepath.Join(tempDir, "crontab"),
-        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--logs-directory", filepath.Join(tempDir, "logs"),
         "--binary", "/usr/local/bin/fakeapp",
         "--user", "deploy",
         "--template", "missing-template",
@@ -55,7 +55,7 @@ func TestErrorsIsErrHeartbeatUserMissingFromPreflight(t *testing.T) {
 
     _, err := runGenerateCommand(t, commands, []string{
         "--out", filepath.Join(tempDir, "crontab"),
-        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--logs-directory", filepath.Join(tempDir, "logs"),
         "--binary", "/usr/local/bin/fakeapp",
         "--heartbeat-path", filepath.Join(tempDir, "heartbeat"),
     })
@@ -211,12 +211,12 @@ func TestErrorsIsErrDestinationEscapeFromLogFileName(t *testing.T) {
 
     _, err := runGenerateCommand(t, commands, []string{
         "--out", filepath.Join(tempDir, "crontab"),
-        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--logs-directory", filepath.Join(tempDir, "logs"),
         "--binary", "/usr/local/bin/fakeapp",
         "--user", "deploy",
     })
     if nil == err {
-        t.Fatalf("expected error when LogFileName escapes logs dir, got nil")
+        t.Fatalf("expected error when LogFileName escapes logs directory, got nil")
     }
 
     if false == errors.Is(err, ErrDestinationEscape) {
@@ -236,7 +236,7 @@ func TestErrorsIsErrDestinationEscapeFromDestinationFile(t *testing.T) {
 
     _, err := runGenerateCommand(t, commands, []string{
         "--out", filepath.Join(tempDir, "crontab"),
-        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--logs-directory", filepath.Join(tempDir, "logs"),
         "--binary", "/usr/local/bin/fakeapp",
         "--user", "deploy",
     })
@@ -249,7 +249,7 @@ func TestErrorsIsErrDestinationEscapeFromDestinationFile(t *testing.T) {
     }
 }
 
-func TestErrorsIsErrNoLogsDir(t *testing.T) {
+func TestErrorsIsErrNoLogsDirectory(t *testing.T) {
     tempDir := t.TempDir()
 
     commands := []clicontract.Command{
@@ -262,11 +262,11 @@ func TestErrorsIsErrNoLogsDir(t *testing.T) {
         "--user", "deploy",
     })
     if nil == err {
-        t.Fatalf("expected error when logs-dir is missing and command needs logging, got nil")
+        t.Fatalf("expected error when the logs directory is missing and command needs logging, got nil")
     }
 
-    if false == errors.Is(err, ErrNoLogsDir) {
-        t.Fatalf("expected errors.Is(err, ErrNoLogsDir) to be true, got: %v", err)
+    if false == errors.Is(err, ErrNoLogsDirectory) {
+        t.Fatalf("expected errors.Is(err, ErrNoLogsDirectory) to be true, got: %v", err)
     }
 }
 
@@ -279,7 +279,7 @@ func TestErrorsIsErrHeartbeatDestinationUnmatched(t *testing.T) {
 
     _, err := runGenerateCommand(t, commands, []string{
         "--out", filepath.Join(tempDir, "crontab"),
-        "--logs-dir", filepath.Join(tempDir, "logs"),
+        "--logs-directory", filepath.Join(tempDir, "logs"),
         "--binary", "/usr/local/bin/fakeapp",
         "--user", "deploy",
         "--heartbeat-path", filepath.Join(tempDir, "heartbeat"),

@@ -10,9 +10,9 @@ import (
 type Request interface {
     HttpRequest() *nethttp.Request
 
-    Param(name string) (string, bool)
+    Parameter(name string) (string, bool)
 
-    Params() map[string]string
+    Parameters() map[string]string
 
     Query() bagcontract.ParameterBag
 

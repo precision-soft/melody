@@ -56,7 +56,7 @@ func TestEnvironmentKeys_DeclaresTheTenKeysAndTheirParameters(t *testing.T) {
         ruled     bool
     }{
         {KeyUser, ParameterUser, "cron.KeyDefaults.User", "", false},
-        {KeyLogsDir, ParameterLogsDir, "cron.KeyDefaults.LogsDir", "%kernel.logs_dir%/cron", false},
+        {KeyLogsDirectory, ParameterLogsDirectory, "cron.KeyDefaults.LogsDirectory", "%kernel.logs_dir%/cron", false},
         {KeyBinary, ParameterBinary, "cron.KeyDefaults.Binary", "", false},
         {KeyDestinationFile, ParameterDestinationFile, "cron.KeyDefaults.DestinationFile", "%kernel.project_dir%/generated_conf/cron/crontab", false},
         {KeyHeartbeatPath, ParameterHeartbeatPath, "cron.KeyDefaults.HeartbeatPath", "", false},
@@ -86,10 +86,27 @@ func TestEnvironmentKeys_DeclaresTheTenKeysAndTheirParameters(t *testing.T) {
     }
 }
 
+func TestEnvironmentKeys_TheLogsDirectoryIsSpelledOut(t *testing.T) {
+    if "MELODY_CRON_LOGS_DIRECTORY" != KeyLogsDirectory || "melody.cron.logs_directory" != ParameterLogsDirectory || "logs-directory" != flagNameLogsDirectory {
+        t.Fatalf("expected the spelled-out key, parameter and flag, got %q, %q, %q", KeyLogsDirectory, ParameterLogsDirectory, flagNameLogsDirectory)
+    }
+
+    for _, key := range EnvironmentKeys(KeyDefaults{}) {
+        if "MELODY_CRON_LOGS_DIR" == key.Key || "melody.cron.logs_dir" == key.Parameter {
+            t.Fatalf("expected the abbreviated spelling declared by nothing, got %+v", key)
+        }
+    }
+
+    configuration := newDeclaringConfiguration(t, map[string]string{"MELODY_CRON_LOGS_DIRECTORY": "/var/log/app"}, KeyDefaults{})
+    if value := configuration.MustGet(ParameterLogsDirectory).MustString(); "/var/log/app" != value {
+        t.Fatalf("expected the key read into the parameter, got %q", value)
+    }
+}
+
 func TestEnvironmentKeys_AKeyDefaultsFieldReplacesTheModuleDefault(t *testing.T) {
     keys := EnvironmentKeys(KeyDefaults{
         User:             "www-data",
-        LogsDir:          "/var/log/app",
+        LogsDirectory:    "/var/log/app",
         Binary:           "/usr/local/bin/app",
         DestinationFile:  "/etc/cron.d/app",
         HeartbeatPath:    "/var/run/heartbeat",
@@ -185,8 +202,8 @@ func TestEnvironmentKeys_TheGeneratorRunsOverTheDeclaredKeys(t *testing.T) {
         t.Fatalf("expected the crontab at the declared destination: %v", readErr)
     }
 
-    logsDir := filepath.Join(configuration.Kernel().LogsDir(), "cron")
-    for _, expected := range []string{"0 2 * * * apache /usr/local/bin/fakeapp backup:run", filepath.Join(logsDir, "backup-run.log"), "apache /bin/touch " + filepath.Join(logsDir, "heartbeat.crontab")} {
+    logsDirectory := filepath.Join(configuration.Kernel().LogsDir(), "cron")
+    for _, expected := range []string{"0 2 * * * apache /usr/local/bin/fakeapp backup:run", filepath.Join(logsDirectory, "backup-run.log"), "apache /bin/touch " + filepath.Join(logsDirectory, "heartbeat.crontab")} {
         if false == strings.Contains(string(content), expected) {
             t.Fatalf("expected %q in the crontab, got:\n%s", expected, content)
         }

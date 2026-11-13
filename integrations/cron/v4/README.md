@@ -39,7 +39,7 @@ The module declares ten `.env` keys through the framework's [module keys](../../
 | Key                              | Parameter                        | Module default                                     | Rule                   |
 |----------------------------------|----------------------------------|----------------------------------------------------|------------------------|
 | `MELODY_CRON_USER`               | `melody.cron.user`               | `""`                                               | —                      |
-| `MELODY_CRON_LOGS_DIR`           | `melody.cron.logs_dir`           | `%kernel.logs_dir%/cron`                           | —                      |
+| `MELODY_CRON_LOGS_DIRECTORY`     | `melody.cron.logs_directory`     | `%kernel.logs_dir%/cron`                           | —                      |
 | `MELODY_CRON_BINARY`             | `melody.cron.binary`             | `""` (the running executable)                      | —                      |
 | `MELODY_CRON_DESTINATION_FILE`   | `melody.cron.destination_file`   | `%kernel.project_dir%/generated_conf/cron/crontab` | —                      |
 | `MELODY_CRON_HEARTBEAT_PATH`     | `melody.cron.heartbeat_path`     | `""`                                               | —                      |
@@ -49,7 +49,7 @@ The module declares ten `.env` keys through the framework's [module keys](../../
 | `MELODY_CRON_K8S_NAMESPACE`      | `melody.cron.k8s.namespace`      | `""`                                               | an RFC 1123 label      |
 | `MELODY_CRON_K8S_RESTART_POLICY` | `melody.cron.k8s.restart_policy` | `""` (`OnFailure`)                                 | `OnFailure` or `Never` |
 
-An empty `.env` line takes the default on the three keys with a rule and is the empty value on the seven free-text ones: `MELODY_CRON_DESTINATION_FILE=` and `MELODY_CRON_LOGS_DIR=` leave the generator with no destination and no logs directory, so a run without `--out` is refused and a run without `--logs-dir` refuses an entry that redirects its output.
+An empty `.env` line takes the default on the three keys with a rule and is the empty value on the seven free-text ones: `MELODY_CRON_DESTINATION_FILE=` and `MELODY_CRON_LOGS_DIRECTORY=` leave the generator with no destination and no logs directory, so a run without `--out` is refused and a run without `--logs-directory` refuses an entry that redirects its output.
 
 An application that builds `NewGenerateCommand` in a module of its own, without `cron.Module`, declares the keys from that module's `RegisterEnvironmentKeys` with `cron.EnvironmentKeys(cron.KeyDefaults{})`. A parameter of these names registered by hand is refused at boot.
 

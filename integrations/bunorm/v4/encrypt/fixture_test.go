@@ -118,7 +118,7 @@ func (instance crmEmailBinding) SealBinding() string {
 }
 
 type defaultSecretBinding struct {
-    DefaultCipherRef
+    DefaultCipherReference
 }
 
 func (instance defaultSecretBinding) SealBinding() string {
@@ -136,13 +136,13 @@ func (instance undeclaredBinding) SealBinding() string {
 }
 
 /* installSealBinding declares a marker's binding for one test, the earlier entry restored after it */
-func installSealBinding(t *testing.T, ref SealBindingRef, refuseUnbound bool) {
+func installSealBinding(t *testing.T, reference SealBindingReference, refuseUnbound bool) {
     t.Helper()
 
-    marker := reflect.TypeOf(ref)
+    marker := reflect.TypeOf(reference)
     previous, existed := sealBindingOf(marker)
 
-    storeSealBinding(marker, sealBinding{label: ref.SealBinding(), refuseUnbound: refuseUnbound})
+    storeSealBinding(marker, sealBinding{label: reference.SealBinding(), refuseUnbound: refuseUnbound})
 
     t.Cleanup(func() {
         if true == existed {
@@ -162,7 +162,7 @@ func newCrmCipher(t *testing.T) Cipher {
     t.Helper()
 
     cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "crm-v2", Keys: map[string][]byte{"crm-v1": newKey(11), "crm-v2": newKey(12)}}))
-    installCipher(t, crmCipherRef{}.CipherName(), cipherInstance)
+    installCipher(t, crmCipherReference{}.CipherName(), cipherInstance)
 
     return cipherInstance
 }
@@ -454,7 +454,7 @@ type wrappedCipher struct {
 
 /* accountsNotesBinding is the default cipher's marker of accounts.notes, the column the bound Migrator and command pins run over */
 type accountsNotesBinding struct {
-    DefaultCipherRef
+    DefaultCipherReference
 }
 
 func (instance accountsNotesBinding) SealBinding() string {
@@ -463,7 +463,7 @@ func (instance accountsNotesBinding) SealBinding() string {
 
 /* accountsBodyBinding is a second declared label of the default cipher on the same table */
 type accountsBodyBinding struct {
-    DefaultCipherRef
+    DefaultCipherReference
 }
 
 func (instance accountsBodyBinding) SealBinding() string {
@@ -501,9 +501,9 @@ func updatedValues(stub *scriptedSqlDriver) map[string]string {
     return written
 }
 
-/* boundNotesSpec is the spec of accounts.notes bound to its label */
-func boundNotesSpec(refuseUnbound bool, deterministic bool) TableSpec {
-    return TableSpec{
+/* boundNotesSpec is the specification of accounts.notes bound to its label */
+func boundNotesSpec(refuseUnbound bool, deterministic bool) TableSpecification {
+    return TableSpecification{
         Table:         "accounts",
         PrimaryKey:    "id",
         Columns:       []string{"notes"},
@@ -513,15 +513,15 @@ func boundNotesSpec(refuseUnbound bool, deterministic bool) TableSpec {
 }
 
 /* migrateModeRuns are the three modes of a run, the rotation onto v2 */
-var migrateModeRuns = map[string]func(migrator *Migrator, spec TableSpec) (int, error){
-    "encrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
-        return migrator.MigrateEncrypt(context.Background(), spec)
+var migrateModeRuns = map[string]func(migrator *Migrator, specification TableSpecification) (int, error){
+    "encrypt": func(migrator *Migrator, specification TableSpecification) (int, error) {
+        return migrator.MigrateEncrypt(context.Background(), specification)
     },
-    "reencrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
-        return migrator.MigrateReencrypt(context.Background(), spec, "v2")
+    "reencrypt": func(migrator *Migrator, specification TableSpecification) (int, error) {
+        return migrator.MigrateReencrypt(context.Background(), specification, "v2")
     },
-    "decrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
-        return migrator.MigrateDecrypt(context.Background(), spec)
+    "decrypt": func(migrator *Migrator, specification TableSpecification) (int, error) {
+        return migrator.MigrateDecrypt(context.Background(), specification)
     },
 }
 

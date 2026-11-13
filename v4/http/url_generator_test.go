@@ -19,7 +19,7 @@ func TestGeneratePath_RouteNotFound(t *testing.T) {
     }
 }
 
-func TestGeneratePath_MissingRequiredParam(t *testing.T) {
+func TestGeneratePath_MissingRequiredParameter(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
@@ -38,7 +38,7 @@ func TestGeneratePath_MissingRequiredParam(t *testing.T) {
     }
 }
 
-func TestGeneratePath_OptionalParamIsSkippedWhenMissingAndNoDefault(t *testing.T) {
+func TestGeneratePath_OptionalParameterIsSkippedWhenMissingAndNoDefault(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
@@ -61,7 +61,7 @@ func TestGeneratePath_OptionalParamIsSkippedWhenMissingAndNoDefault(t *testing.T
     }
 }
 
-func TestGeneratePath_DefaultIsUsedWhenParamMissing(t *testing.T) {
+func TestGeneratePath_DefaultIsUsedWhenParameterMissing(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
@@ -172,7 +172,7 @@ func TestGeneratePath_CatchAllSplitsSegmentsAndTrimsSlashes(t *testing.T) {
     }
 }
 
-func TestGeneratePath_EscapesParamSpecialCharacters(t *testing.T) {
+func TestGeneratePath_EscapesParameterSpecialCharacters(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
@@ -196,7 +196,7 @@ func TestGeneratePath_EscapesParamSpecialCharacters(t *testing.T) {
 }
 
 /* A ":param" spans one path segment; a slash in its value would be emitted as %2F, which the net/http server decodes back to "/" before the kernel matches on request.URL.Path, so the link would resolve to a different route or 404. The generator must reject the slash rather than mint such a url. */
-func TestGeneratePath_RejectsSlashInParam(t *testing.T) {
+func TestGeneratePath_RejectsSlashInParameter(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
@@ -215,7 +215,7 @@ func TestGeneratePath_RejectsSlashInParam(t *testing.T) {
     }
 }
 
-func TestGenerateUrl_AddsQueryParamsAndIgnoresEmptyKey(t *testing.T) {
+func TestGenerateUrl_AddsQueryParametersAndIgnoresEmptyKey(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
@@ -420,30 +420,30 @@ func TestGeneratePath_RefusesAPathTheKernelWouldRefuseAsNonCanonical(t *testing.
     router.HandleWithOptions("/tree/*rest...", handler, RouteOptions{Name: "tree", Methods: []string{nethttp.MethodGet}})
 
     for _, testCase := range []struct {
-        routeName string
-        params    map[string]string
+        routeName  string
+        parameters map[string]string
     }{
         {"file", map[string]string{"name": ".."}},
         {"file", map[string]string{"name": "."}},
         {"file", map[string]string{"name": "report "}},
         {"tree", map[string]string{"rest": "a/../b"}},
     } {
-        generated, err := urlGenerator.GeneratePath(testCase.routeName, testCase.params)
+        generated, err := urlGenerator.GeneratePath(testCase.routeName, testCase.parameters)
         if nil == err || false == strings.Contains(err.Error(), "not one the router serves") {
-            t.Fatalf("expected %v refused as a path the router does not serve, generated %q, error %v", testCase.params, generated, err)
+            t.Fatalf("expected %v refused as a path the router does not serve, generated %q, error %v", testCase.parameters, generated, err)
         }
     }
 
     for _, testCase := range []struct {
-        routeName string
-        params    map[string]string
-        path      string
+        routeName  string
+        parameters map[string]string
+        path       string
     }{
         {"file", map[string]string{"name": "a b"}, "/file/a%20b"},
         {"file", map[string]string{"name": "..report"}, "/file/..report"},
         {"tree", map[string]string{"rest": "a/b"}, "/tree/a/b"},
     } {
-        generated, err := urlGenerator.GeneratePath(testCase.routeName, testCase.params)
+        generated, err := urlGenerator.GeneratePath(testCase.routeName, testCase.parameters)
         if nil != err || testCase.path != generated {
             t.Fatalf("expected %q, got %q, error %v", testCase.path, generated, err)
         }

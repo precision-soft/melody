@@ -7,25 +7,25 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-func NewInitCommand(migrations *migrate.Migrations, options Options) *InitCommand {
-    return &InitCommand{
+func NewInitializeCommand(migrations *migrate.Migrations, options Options) *InitializeCommand {
+    return &InitializeCommand{
         base: newBaseCommand(migrations, options),
     }
 }
 
-type InitCommand struct {
+type InitializeCommand struct {
     base baseCommand
 }
 
-func (instance *InitCommand) Name() string {
+func (instance *InitializeCommand) Name() string {
     return instance.base.options.CommandPrefix + ":init"
 }
 
-func (instance *InitCommand) Description() string {
+func (instance *InitializeCommand) Description() string {
     return "Initialize Bun migrations tables"
 }
 
-func (instance *InitCommand) Flags() []clicontract.Flag {
+func (instance *InitializeCommand) Flags() []clicontract.Flag {
     return output.MergeFlags(
         output.StandardFlags(),
         []clicontract.Flag{
@@ -34,11 +34,11 @@ func (instance *InitCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *InitCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-    return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runInit)
+func (instance *InitializeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+    return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runInitialize)
 }
 
-func (instance *InitCommand) runInit(
+func (instance *InitializeCommand) runInitialize(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
@@ -71,4 +71,4 @@ func (instance *InitCommand) runInit(
     return nil
 }
 
-var _ clicontract.Command = (*InitCommand)(nil)
+var _ clicontract.Command = (*InitializeCommand)(nil)

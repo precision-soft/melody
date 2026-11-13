@@ -19,15 +19,15 @@ const k8sNameMaxLength = 52
 
 /* line terminators are refused; every other value is emitted as a double-quoted YAML scalar with remaining control characters escaped by yamlQuote, so colons, spaces and wildcards survive */
 var k8sForbiddenCharacters = []ForbiddenCharacter{
-    {Char: '\n', Reason: "a literal newline terminates the YAML scalar and corrupts the manifest; remove it at the source"},
-    {Char: '\r', Reason: "a carriage return terminates the YAML scalar on parsers that treat CR as a line break; remove it before rendering"},
+    {Character: '\n', Reason: "a literal newline terminates the YAML scalar and corrupts the manifest; remove it at the source"},
+    {Character: '\r', Reason: "a carriage return terminates the YAML scalar on parsers that treat CR as a line break; remove it before rendering"},
 }
 
 /* schedule fields carry the same line-terminator restriction plus a % refusal, since % is not valid in a cron schedule field and the apiserver would refuse the manifest */
 var k8sScheduleForbiddenCharacters = []ForbiddenCharacter{
-    {Char: '%', Reason: "not a valid character in a kubernetes CronJob schedule field; remove it at the source"},
-    {Char: '\n', Reason: "a literal newline terminates the YAML scalar and corrupts the manifest; remove it at the source"},
-    {Char: '\r', Reason: "a carriage return terminates the YAML scalar on parsers that treat CR as a line break; remove it before rendering"},
+    {Character: '%', Reason: "not a valid character in a kubernetes CronJob schedule field; remove it at the source"},
+    {Character: '\n', Reason: "a literal newline terminates the YAML scalar and corrupts the manifest; remove it at the source"},
+    {Character: '\r', Reason: "a carriage return terminates the YAML scalar on parsers that treat CR as a line break; remove it before rendering"},
 }
 
 /* k8sHeaderBlock opens every rendered manifest with the ownership line as leading YAML comments, so --prune reconciles a k8s output directory's file set; emptying a manifest does not retire a CronJob already applied, which needs kubectl apply --prune or an explicit delete. */

@@ -64,7 +64,7 @@ func TestReadWriteSplitter_ReaderRefusesAnUnknownReplicaName(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -88,8 +88,8 @@ func TestReadWriteSplitter_ReaderFallsBackToPrimaryWhenTheReplicaIsUnreachable(t
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Params: testConnectionParameters},
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -118,8 +118,8 @@ func TestReadWriteSplitter_ReaderNamesBothFailuresWhenThePrimaryFailsToo(t *test
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "primary", Provider: &unreachableSplitProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Params: testConnectionParameters},
+            ProviderDefinition{Name: "primary", Provider: &unreachableSplitProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -143,7 +143,7 @@ func TestNewReadWriteSplitter_RefusesAnEmptyReplicaName(t *testing.T) {
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -176,8 +176,8 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderAnsweredNoDatabase(
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "replica", Provider: &noDatabaseSplitProvider{}, Params: testConnectionParameters},
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: &noDatabaseSplitProvider{}, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -203,8 +203,8 @@ func TestReadWriteSplitter_ReaderRefusesAReplicaWhoseProviderRefused(t *testing.
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "replica", Provider: &refusingSplitProvider{}, Params: testConnectionParameters},
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: &refusingSplitProvider{}, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -247,8 +247,8 @@ func TestReadWriteSplitter_ADoubleFailureOverAJournaledPrimaryStaysMarkedLogged(
             context.Background(),
             &fakeLogger{},
             []ProviderDefinition{
-                ProviderDefinition{Name: "primary", Provider: primaryProvider, Params: testConnectionParameters, IsDefault: true},
-                ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Params: testConnectionParameters},
+                ProviderDefinition{Name: "primary", Provider: primaryProvider, Parameters: testConnectionParameters, IsDefault: true},
+                ProviderDefinition{Name: "replica", Provider: &unreachableSplitProvider{}, Parameters: testConnectionParameters},
             },
         )
         if nil != registryErr {
@@ -290,8 +290,8 @@ func TestReadWriteSplitter_AnUnreachableReplicaIsRememberedForTheInterval(t *tes
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "replica", Provider: replica, Params: testConnectionParameters},
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: replica, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -330,8 +330,8 @@ func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
         context.Background(),
         logger,
         []ProviderDefinition{
-            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "replica", Provider: replica, Params: testConnectionParameters},
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: replica, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -368,7 +368,7 @@ func TestReadWriteSplitter_WritesOneWarningPerTransition(t *testing.T) {
 
 /* the option refuses a negative interval where it is written, and a zero one keeps the default */
 func TestNewReadWriteSplitter_AnAbsentReplicaRetryIntervalTakesFiveSeconds(t *testing.T) {
-    registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true}})
+    registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
@@ -379,7 +379,7 @@ func TestNewReadWriteSplitter_AnAbsentReplicaRetryIntervalTakesFiveSeconds(t *te
 }
 
 func TestNewReadWriteSplitter_RefusesAReplicaRetryIntervalOutsideItsRuleNamingTheField(t *testing.T) {
-    registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true}})
+    registry, registryErr := NewManagerRegistry(context.Background(), &fakeLogger{}, []ProviderDefinition{ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true}})
     if nil != registryErr {
         t.Fatalf("registry: %v", registryErr)
     }
@@ -448,8 +448,8 @@ func TestReadWriteSplitter_ReaderReturnsOnACyclicChainFromAProvider(t *testing.T
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            {Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            {Name: "replica", Provider: &cyclicSplitProvider{}, Params: testConnectionParameters},
+            {Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            {Name: "replica", Provider: &cyclicSplitProvider{}, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -486,8 +486,8 @@ func TestReadWriteSplitter_OneReaderProbesALapsedReplicaWhileTheOthersKeepThePri
         context.Background(),
         &fakeLogger{},
         []ProviderDefinition{
-            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Params: testConnectionParameters, IsDefault: true},
-            ProviderDefinition{Name: "replica", Provider: replica, Params: testConnectionParameters},
+            ProviderDefinition{Name: "primary", Provider: &fakeProvider{}, Parameters: testConnectionParameters, IsDefault: true},
+            ProviderDefinition{Name: "replica", Provider: replica, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {

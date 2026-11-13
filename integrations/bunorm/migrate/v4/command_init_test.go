@@ -7,11 +7,11 @@ import (
     "github.com/uptrace/bun/migrate"
 )
 
-func TestInitCommand_CreatesMigrationTables(t *testing.T) {
+func TestInitializeCommand_CreatesMigrationTables(t *testing.T) {
     database, recorder := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
-    command := NewInitCommand(migrate.NewMigrations(), resolvedDefaultOptions)
+    command := NewInitializeCommand(migrate.NewMigrations(), resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color")
     if nil != runErr {
@@ -38,11 +38,11 @@ func TestInitCommand_CreatesMigrationTables(t *testing.T) {
     }
 }
 
-func TestInitCommand_UnknownManagerFails(t *testing.T) {
+func TestInitializeCommand_UnknownManagerFails(t *testing.T) {
     database, _ := newFakeBunDatabase()
     runtimeInstance := newRuntimeWithDatabase(t, database)
 
-    command := NewInitCommand(migrate.NewMigrations(), resolvedDefaultOptions)
+    command := NewInitializeCommand(migrate.NewMigrations(), resolvedDefaultOptions)
 
     rendered, runErr := runMigrationCommand(t, runtimeInstance, command, "--no-color", "--manager", "unknown")
     if nil == runErr {

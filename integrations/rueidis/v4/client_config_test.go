@@ -22,7 +22,7 @@ func TestResolveClient_TheZeroValueIsTheDefault(t *testing.T) {
         t.Fatal("expected the zero client config to leave the client-side cache off")
     }
 
-    if 5*time.Second != resolved.dialTimeout || 5*time.Second != resolved.connWriteTimeout {
+    if 5*time.Second != resolved.dialTimeout || 5*time.Second != resolved.connectionWriteTimeout {
         t.Fatalf("expected the default 5s dial and write deadlines, got %+v", resolved)
     }
 
@@ -39,7 +39,7 @@ func TestResolveClient_KeepsTheConfiguredValues(t *testing.T) {
         SelectDb:               3,
         TlsConfig:              tlsConfig,
         DialTimeout:            bound.Of(time.Millisecond),
-        ConnWriteTimeout:       bound.Of(2 * time.Second),
+        ConnectionWriteTimeout: bound.Of(2 * time.Second),
         BootPingDisabled:       true,
         ClientSideCacheEnabled: true,
         ClientSideCacheBytes:   bound.Of(1 << 20),
@@ -52,7 +52,7 @@ func TestResolveClient_KeepsTheConfiguredValues(t *testing.T) {
         t.Fatalf("expected the plain fields kept, got %+v", resolved)
     }
 
-    if time.Millisecond != resolved.dialTimeout || 2*time.Second != resolved.connWriteTimeout {
+    if time.Millisecond != resolved.dialTimeout || 2*time.Second != resolved.connectionWriteTimeout {
         t.Fatalf("expected 1ms / 2s, got %+v", resolved)
     }
 
@@ -68,8 +68,8 @@ func TestResolveClient_RefusesAFieldOutsideItsRuleNamingIt(t *testing.T) {
     }{
         {field: "ClientConfig.DialTimeout", config: ClientConfig{DialTimeout: bound.UnlimitedDuration()}},
         {field: "ClientConfig.DialTimeout", config: ClientConfig{DialTimeout: bound.Of(time.Microsecond)}},
-        {field: "ClientConfig.ConnWriteTimeout", config: ClientConfig{ConnWriteTimeout: bound.UnlimitedDuration()}},
-        {field: "ClientConfig.ConnWriteTimeout", config: ClientConfig{ConnWriteTimeout: bound.Of(-time.Second)}},
+        {field: "ClientConfig.ConnectionWriteTimeout", config: ClientConfig{ConnectionWriteTimeout: bound.UnlimitedDuration()}},
+        {field: "ClientConfig.ConnectionWriteTimeout", config: ClientConfig{ConnectionWriteTimeout: bound.Of(-time.Second)}},
         {field: "ClientConfig.ClientSideCacheBytes", config: ClientConfig{ClientSideCacheEnabled: true, ClientSideCacheBytes: bound.Of(0)}},
         {field: "ClientConfig.ClientSideCacheBytes", config: ClientConfig{ClientSideCacheEnabled: true, ClientSideCacheBytes: bound.UnlimitedCount()}},
     } {

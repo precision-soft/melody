@@ -341,7 +341,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         handler := matchResult.Handler
-        params := matchResult.Params
+        parameters := matchResult.Parameters
         routeAttributes := matchResult.RouteAttributes
 
         if false == instance.policies.methodPolicy.HeadFallbackDisabled && nethttp.MethodHead == request.Method && nil == handler {
@@ -367,12 +367,12 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
                         if nil != getMatchResult {
                             handler = getMatchResult.Handler
-                            params = getMatchResult.Params
+                            parameters = getMatchResult.Parameters
                             routeAttributes = getMatchResult.RouteAttributes
                         }
 
-                        if nil == params {
-                            params = map[string]string{}
+                        if nil == parameters {
+                            parameters = map[string]string{}
                         }
                         if nil == routeAttributes {
                             routeAttributes = map[string]any{}
@@ -382,7 +382,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             }
         }
 
-        melodyRequest := NewRequest(request, params, runtimeInstance, requestContext)
+        melodyRequest := NewRequest(request, parameters, runtimeInstance, requestContext)
 
         for key, value := range routeAttributes {
             melodyRequest.Attributes().Set(key, value)
@@ -661,7 +661,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         localeValue := ""
-        if value, exists := params[RouteAttributeLocale]; true == exists {
+        if value, exists := parameters[RouteAttributeLocale]; true == exists {
             localeValue = value
         }
         if "" == localeValue {

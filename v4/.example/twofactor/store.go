@@ -20,7 +20,7 @@ import (
 
 /* SecretColumn binds the enrollment's secret to its column: the seal opens through this column alone, so a seal copied in from another bound column does not read. */
 type SecretColumn struct {
-    melodyencrypt.DefaultCipherRef
+    melodyencrypt.DefaultCipherReference
 }
 
 func (instance SecretColumn) SealBinding() string {
@@ -29,7 +29,7 @@ func (instance SecretColumn) SealBinding() string {
 
 /* RecoveryCodesColumn binds the enrollment's recovery codes to their column, as SecretColumn binds the secret. */
 type RecoveryCodesColumn struct {
-    melodyencrypt.DefaultCipherRef
+    melodyencrypt.DefaultCipherReference
 }
 
 func (instance RecoveryCodesColumn) SealBinding() string {
@@ -39,8 +39,8 @@ func (instance RecoveryCodesColumn) SealBinding() string {
 /* SealBindings declares the two bound columns to the encrypt module. Both refuse an unbound value, which holds for a database whose every enrollment was written through the bound types; an enrollment written before the columns were bound is refused and is cleared with example:twofactor:reset or example:db:reset --force. */
 func SealBindings() []melodyencrypt.SealBindingConfig {
     return []melodyencrypt.SealBindingConfig{
-        {Ref: SecretColumn{}, RefuseUnbound: true},
-        {Ref: RecoveryCodesColumn{}, RefuseUnbound: true},
+        {Reference: SecretColumn{}, RefuseUnbound: true},
+        {Reference: RecoveryCodesColumn{}, RefuseUnbound: true},
     }
 }
 

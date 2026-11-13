@@ -477,7 +477,7 @@ func buildErrorContext(
         context["routeName"] = request.RouteName()
         context["routePattern"] = request.RoutePattern()
         context["requestId"] = errorContextRequestId(request)
-        context["params"] = request.Params()
+        context["parameters"] = request.Parameters()
     }
 
     if nil != causeErr && true == debugEnabled {

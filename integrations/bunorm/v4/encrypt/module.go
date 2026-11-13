@@ -13,7 +13,7 @@ import (
     "github.com/uptrace/bun/dialect"
 )
 
-/* ServiceCipher is the service the module publishes its default cipher under, for a component that takes the cipher by injection; a compartment's cipher is reached through its CipherRef only. */
+/* ServiceCipher is the service the module publishes its default cipher under, for a component that takes the cipher by injection; a compartment's cipher is reached through its CipherReference only. */
 const ServiceCipher = "service.encrypt.cipher"
 
 /* ModuleConfig wires the encrypt module. Cipher is the cipher every EncryptedString and EncryptedDeterministicString column seals and opens through, installed when the module registers its services, so every process that loads the module, http, worker and cli alike, reads its columns. Database or DatabaseFactory, at most one, is the database of the melody:encrypt:database bulk command, a factory evaluated at the first command run so a process in another mode never opens it; with neither, no unsuffixed command is registered, and either one needs the Cipher; a prebuilt Database not of the MySQL dialect is refused. Contexts adds one key compartment each. A module with no Cipher and no Contexts is refused at registration, naming the two fields. An application registers the module once, since a module's name is its identity, so every compartment and every binding is declared on one ModuleConfig; a later application in the same process replaces the whole cipher and binding tables of the earlier one, which keeps none of its names or markers. */
@@ -31,13 +31,13 @@ type ModuleConfig struct {
     SealBindings []SealBindingConfig
 }
 
-/* SealBindingConfig declares one bound column. Ref is the marker value its column type is parameterized by. RefuseUnbound, false when left out, makes the column read nothing but a seal bound to it: a seal without a binding and a value without the marker are refused, on the column's Scan and in its equality candidates. Leave it out until every value of the column is a bound seal: deploy the declaration, run melody:encrypt:database --mode encrypt over the column, which seals its plain values and re-seals its unbound seals under the binding, then set it. A declaration the module cannot hold is refused at registration naming ModuleConfig.SealBindings and the index: a nil, typed-nil or pointer-form Ref, a label outside <table>.<column> with each part of [A-Za-z0-9_]{1,64}, a cipher name the module installs no cipher under, a marker with fields, with SealBinding on its pointer receiver or embedding DefaultCipherRef by pointer, a marker declared twice, a label declared twice over one cipher instance under one name or two, and a cipher implemented outside the package. A later registration replaces the whole binding table, so a marker it does not declare is unbound. */
+/* SealBindingConfig declares one bound column. Reference is the marker value its column type is parameterized by. RefuseUnbound, false when left out, makes the column read nothing but a seal bound to it: a seal without a binding and a value without the marker are refused, on the column's Scan and in its equality candidates. Leave it out until every value of the column is a bound seal: deploy the declaration, run melody:encrypt:database --mode encrypt over the column, which seals its plain values and re-seals its unbound seals under the binding, then set it. A declaration the module cannot hold is refused at registration naming ModuleConfig.SealBindings and the index: a nil, typed-nil or pointer-form Reference, a label outside <table>.<column> with each part of [A-Za-z0-9_]{1,64}, a cipher name the module installs no cipher under, a marker with fields, with SealBinding on its pointer receiver or embedding DefaultCipherReference by pointer, a marker declared twice, a label declared twice over one cipher instance under one name or two, and a cipher implemented outside the package. A later registration replaces the whole binding table, so a marker it does not declare is unbound. */
 type SealBindingConfig struct {
-    Ref           SealBindingRef
+    Reference     SealBindingReference
     RefuseUnbound bool
 }
 
-/* CommandContextConfig is one key compartment: its Cipher is installed under Name for the columns bound through a CipherRef naming it, and its Database or DatabaseFactory, at most one, serves melody:encrypt:database:<Name>; with neither, the compartment registers no command. An empty or repeated Name and a nil Cipher are refused at registration. The name selects the registry entry and is not bound into the ciphertext, so two compartments holding the same key under the same id decrypt each other, and a provider merging every compartment's keys lets either read the other's rows. */
+/* CommandContextConfig is one key compartment: its Cipher is installed under Name for the columns bound through a CipherReference naming it, and its Database or DatabaseFactory, at most one, serves melody:encrypt:database:<Name>; with neither, the compartment registers no command. An empty or repeated Name and a nil Cipher are refused at registration. The name selects the registry entry and is not bound into the ciphertext, so two compartments holding the same key under the same id decrypt each other, and a provider merging every compartment's keys lets either read the other's rows. */
 type CommandContextConfig struct {
     Name            string
     Database        *bun.DB
@@ -87,8 +87,8 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 
     bindings := make(map[reflect.Type]sealBinding, len(instance.config.SealBindings))
     for _, bindingConfig := range instance.config.SealBindings {
-        marker := reflect.TypeOf(bindingConfig.Ref)
-        bindings[marker] = sealBinding{label: reflect.Zero(marker).Interface().(SealBindingRef).SealBinding(), refuseUnbound: bindingConfig.RefuseUnbound}
+        marker := reflect.TypeOf(bindingConfig.Reference)
+        bindings[marker] = sealBinding{label: reflect.Zero(marker).Interface().(SealBindingReference).SealBinding(), refuseUnbound: bindingConfig.RefuseUnbound}
     }
 
     replaceRegistries(ciphers, bindings)
@@ -240,48 +240,48 @@ func (instance *Module) validateSealBindings() {
             exception.Panic(exception.NewError(message, refusalContext, nil))
         }
 
-        if nil == bindingConfig.Ref {
-            refuse("encrypt module seal binding has no Ref", nil)
+        if nil == bindingConfig.Reference {
+            refuse("encrypt module seal binding has no Reference", nil)
         }
 
-        marker := reflect.TypeOf(bindingConfig.Ref)
+        marker := reflect.TypeOf(bindingConfig.Reference)
         if reflect.Pointer == marker.Kind() {
-            refuse("encrypt module seal binding Ref is a pointer; a marker must be a zero-size value type", map[string]any{"cipherRef": marker.String()})
+            refuse("encrypt module seal binding Reference is a pointer; a marker must be a zero-size value type", map[string]any{"cipherReference": marker.String()})
         }
 
         if defect := markerShapeDefect(marker); "" != defect {
-            refuse(defect, map[string]any{"cipherRef": marker.String()})
+            refuse(defect, map[string]any{"cipherReference": marker.String()})
         }
 
-        label := bindingConfig.Ref.SealBinding()
+        label := bindingConfig.Reference.SealBinding()
         if false == sealBindingLabelPattern.MatchString(label) {
-            refuse("encrypt module seal binding label must match "+sealBindingLabelPattern.String(), map[string]any{"cipherRef": marker.String(), "sealBinding": label})
+            refuse("encrypt module seal binding label must match "+sealBindingLabelPattern.String(), map[string]any{"cipherReference": marker.String(), "sealBinding": label})
         }
 
-        name := bindingConfig.Ref.CipherName()
-        if _, selectsDefault := bindingConfig.Ref.(defaultCipherSelector); defaultCipherName == name && false == selectsDefault {
-            refuse("encrypt module seal binding names the empty compartment without embedding DefaultCipherRef", map[string]any{"cipherRef": marker.String()})
+        name := bindingConfig.Reference.CipherName()
+        if _, selectsDefault := bindingConfig.Reference.(defaultCipherSelector); defaultCipherName == name && false == selectsDefault {
+            refuse("encrypt module seal binding names the empty compartment without embedding DefaultCipherReference", map[string]any{"cipherReference": marker.String()})
         }
 
         cipherInstance, installed := ciphersByName[name]
         if false == installed {
-            refuse("encrypt module seal binding names a cipher the module does not install", map[string]any{"cipherRef": marker.String(), "cipherName": name})
+            refuse("encrypt module seal binding names a cipher the module does not install", map[string]any{"cipherReference": marker.String(), "cipherName": name})
         }
 
         if true == seenMarkers[marker] {
-            refuse("encrypt module seal binding declares a marker twice", map[string]any{"cipherRef": marker.String()})
+            refuse("encrypt module seal binding declares a marker twice", map[string]any{"cipherReference": marker.String()})
         }
 
         seenMarkers[marker] = true
 
         if _, carriesBinding := cipherInstance.(bindingSealer); false == carriesBinding {
-            refuse("encrypt module seal binding needs the package cipher; a cipher implemented outside the package, a wrapper included, cannot bind a seal", map[string]any{"cipherRef": marker.String(), "cipherName": name})
+            refuse("encrypt module seal binding needs the package cipher; a cipher implemented outside the package, a wrapper included, cannot bind a seal", map[string]any{"cipherReference": marker.String(), "cipherName": name})
         }
 
         /* two markers of one label over one cipher, under one name or two, would open each other's seals, the separation the binding is for lost without a word; the cipher is the package's or the fake, a comparable pointer */
         labelKey := sealBindingLabelKey{cipher: cipherInstance, label: label}
         if true == seenLabels[labelKey] {
-            refuse("encrypt module seal binding declares a label twice under one cipher", map[string]any{"cipherRef": marker.String(), "sealBinding": label, "cipherName": name})
+            refuse("encrypt module seal binding declares a label twice under one cipher", map[string]any{"cipherReference": marker.String(), "sealBinding": label, "cipherName": name})
         }
 
         seenLabels[labelKey] = true
@@ -374,7 +374,7 @@ func (instance *Module) sealBindingsOf(cipherName string) []SealBindingConfig {
     var sealBindings []SealBindingConfig
 
     for _, bindingConfig := range instance.config.SealBindings {
-        if cipherName == bindingConfig.Ref.CipherName() {
+        if cipherName == bindingConfig.Reference.CipherName() {
             sealBindings = append(sealBindings, bindingConfig)
         }
     }

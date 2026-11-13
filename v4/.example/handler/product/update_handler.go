@@ -21,7 +21,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
         }
 
-        id, exists := request.Param("id")
+        id, exists := request.Parameter("id")
         if false == exists {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
         }

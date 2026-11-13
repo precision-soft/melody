@@ -30,38 +30,38 @@ func reflectFieldNames(value any) []string {
     return fieldNames
 }
 
-func TestBackendStructHasStoredCtx(t *testing.T) {
+func TestBackendStructHasStoredContext(t *testing.T) {
     backend := &Backend{}
 
     fields := reflectFieldNames(backend)
-    hasCtx := false
+    hasContext := false
     for _, fieldName := range fields {
         if "ctx" == fieldName {
-            hasCtx = true
+            hasContext = true
             break
         }
     }
 
-    if false == hasCtx {
+    if false == hasContext {
         t.Fatalf("Backend struct must carry a stored `ctx` field for v3.0.x source-compatibility (MEL-165)")
     }
 }
 
-func TestBackendCtxMethodsExist(t *testing.T) {
+func TestBackendContextMethodsExist(t *testing.T) {
     backendType := reflect.TypeOf((*Backend)(nil))
 
     expected := []string{
-        "GetCtx",
-        "SetCtx",
-        "DeleteCtx",
-        "HasCtx",
-        "ClearCtx",
-        "ClearByPrefixCtx",
-        "ManyCtx",
-        "SetMultipleCtx",
-        "DeleteMultipleCtx",
-        "IncrementCtx",
-        "DecrementCtx",
+        "GetContext",
+        "SetContext",
+        "DeleteContext",
+        "HasContext",
+        "ClearContext",
+        "ClearByPrefixContext",
+        "ManyContext",
+        "SetMultipleContext",
+        "DeleteMultipleContext",
+        "IncrementContext",
+        "DecrementContext",
     }
 
     for _, methodName := range expected {
@@ -71,7 +71,7 @@ func TestBackendCtxMethodsExist(t *testing.T) {
     }
 }
 
-func TestBackendLegacyMethodsDelegateToCtx(t *testing.T) {
+func TestBackendLegacyMethodsDelegateToContext(t *testing.T) {
     backendType := reflect.TypeOf((*Backend)(nil))
 
     legacy := []string{
@@ -106,17 +106,17 @@ func TestBackendLegacyMethodsDelegateToCtx(t *testing.T) {
 }
 
 var (
-    _ func(*Backend, context.Context, string) ([]byte, bool, error)            = (*Backend).GetCtx
-    _ func(*Backend, context.Context, string, []byte, bound.Duration) error    = (*Backend).SetCtx
-    _ func(*Backend, context.Context, string) error                            = (*Backend).DeleteCtx
-    _ func(*Backend, context.Context, string) (bool, error)                    = (*Backend).HasCtx
-    _ func(*Backend, context.Context) error                                    = (*Backend).ClearCtx
-    _ func(*Backend, context.Context, string) error                            = (*Backend).ClearByPrefixCtx
-    _ func(*Backend, context.Context, []string) (map[string][]byte, error)     = (*Backend).ManyCtx
-    _ func(*Backend, context.Context, map[string][]byte, bound.Duration) error = (*Backend).SetMultipleCtx
-    _ func(*Backend, context.Context, []string) error                          = (*Backend).DeleteMultipleCtx
-    _ func(*Backend, context.Context, string, int64) (int64, error)            = (*Backend).IncrementCtx
-    _ func(*Backend, context.Context, string, int64) (int64, error)            = (*Backend).DecrementCtx
+    _ func(*Backend, context.Context, string) ([]byte, bool, error)            = (*Backend).GetContext
+    _ func(*Backend, context.Context, string, []byte, bound.Duration) error    = (*Backend).SetContext
+    _ func(*Backend, context.Context, string) error                            = (*Backend).DeleteContext
+    _ func(*Backend, context.Context, string) (bool, error)                    = (*Backend).HasContext
+    _ func(*Backend, context.Context) error                                    = (*Backend).ClearContext
+    _ func(*Backend, context.Context, string) error                            = (*Backend).ClearByPrefixContext
+    _ func(*Backend, context.Context, []string) (map[string][]byte, error)     = (*Backend).ManyContext
+    _ func(*Backend, context.Context, map[string][]byte, bound.Duration) error = (*Backend).SetMultipleContext
+    _ func(*Backend, context.Context, []string) error                          = (*Backend).DeleteMultipleContext
+    _ func(*Backend, context.Context, string, int64) (int64, error)            = (*Backend).IncrementContext
+    _ func(*Backend, context.Context, string, int64) (int64, error)            = (*Backend).DecrementContext
 )
 
 var (
@@ -181,7 +181,7 @@ func TestBackendCloseDoesNotCloseCallerOwnedClient(t *testing.T) {
     }
 }
 
-func TestSetCtx_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
+func TestSetContext_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
     backend, client := liveBackend(t)
 
     for _, refusedTtl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(-time.Hour), bound.Of(time.Second - time.Nanosecond)} {
@@ -196,7 +196,7 @@ func TestSetCtx_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
     }
 }
 
-func TestSetMultipleCtx_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
+func TestSetMultipleContext_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
     backend, client := liveBackend(t)
 
     for _, refusedTtl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(-time.Hour), bound.Of(time.Second - time.Nanosecond)} {
@@ -211,7 +211,7 @@ func TestSetMultipleCtx_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
     }
 }
 
-func TestSetCtx_AnUnlimitedTtlStoresWithoutExpiry(t *testing.T) {
+func TestSetContext_AnUnlimitedTtlStoresWithoutExpiry(t *testing.T) {
     backend, client := liveBackend(t)
 
     if setErr := backend.Set("forever", []byte("payload"), bound.UnlimitedDuration()); nil != setErr {
@@ -223,7 +223,7 @@ func TestSetCtx_AnUnlimitedTtlStoresWithoutExpiry(t *testing.T) {
     }
 }
 
-func TestSetAndGetCtx_RoundTripAPayloadUnderTheConfiguredExpiry(t *testing.T) {
+func TestSetAndGetContext_RoundTripAPayloadUnderTheConfiguredExpiry(t *testing.T) {
     backend, client := liveBackend(t)
 
     if setErr := backend.Set("round-trip", []byte("payload"), bound.Of(time.Minute)); nil != setErr {
@@ -248,7 +248,7 @@ func TestSetAndGetCtx_RoundTripAPayloadUnderTheConfiguredExpiry(t *testing.T) {
     }
 }
 
-func TestGetCtx_AMissingKeyIsAMissRatherThanAFailure(t *testing.T) {
+func TestGetContext_AMissingKeyIsAMissRatherThanAFailure(t *testing.T) {
     backend, _ := liveBackend(t)
 
     payload, found, getErr := backend.Get("absent")
@@ -265,7 +265,7 @@ func TestGetCtx_AMissingKeyIsAMissRatherThanAFailure(t *testing.T) {
     }
 }
 
-func TestHasAndDeleteCtx_ReportAndRemoveOneEntry(t *testing.T) {
+func TestHasAndDeleteContext_ReportAndRemoveOneEntry(t *testing.T) {
     backend, _ := liveBackend(t)
 
     if setErr := backend.Set("present", []byte("payload"), bound.Of(time.Minute)); nil != setErr {
@@ -288,7 +288,7 @@ func TestHasAndDeleteCtx_ReportAndRemoveOneEntry(t *testing.T) {
 }
 
 /* deleting a key that is not there is not a failure: the caller asked for its absence and gets it. */
-func TestDeleteCtx_AnAbsentKeyIsNotAFailure(t *testing.T) {
+func TestDeleteContext_AnAbsentKeyIsNotAFailure(t *testing.T) {
     backend, _ := liveBackend(t)
 
     if deleteErr := backend.Delete("absent"); nil != deleteErr {
@@ -296,7 +296,7 @@ func TestDeleteCtx_AnAbsentKeyIsNotAFailure(t *testing.T) {
     }
 }
 
-func TestManyCtx_AnswersTheHitsAndOmitsTheMisses(t *testing.T) {
+func TestManyContext_AnswersTheHitsAndOmitsTheMisses(t *testing.T) {
     backend, _ := liveBackend(t)
 
     if setErr := backend.SetMultiple(map[string][]byte{
@@ -320,7 +320,7 @@ func TestManyCtx_AnswersTheHitsAndOmitsTheMisses(t *testing.T) {
     }
 }
 
-func TestManyCtx_AnEmptyKeyListIsAnEmptyAnswer(t *testing.T) {
+func TestManyContext_AnEmptyKeyListIsAnEmptyAnswer(t *testing.T) {
     backend, _ := liveBackend(t)
 
     values, manyErr := backend.Many(nil)
@@ -333,7 +333,7 @@ func TestManyCtx_AnEmptyKeyListIsAnEmptyAnswer(t *testing.T) {
     }
 }
 
-func TestDeleteMultipleCtx_RemovesEveryNamedKey(t *testing.T) {
+func TestDeleteMultipleContext_RemovesEveryNamedKey(t *testing.T) {
     backend, _ := liveBackend(t)
 
     if setErr := backend.SetMultiple(map[string][]byte{
@@ -357,7 +357,7 @@ func TestDeleteMultipleCtx_RemovesEveryNamedKey(t *testing.T) {
     }
 }
 
-func TestDeleteMultipleCtx_AnEmptyKeyListIsNotAFailure(t *testing.T) {
+func TestDeleteMultipleContext_AnEmptyKeyListIsNotAFailure(t *testing.T) {
     backend, _ := liveBackend(t)
 
     if deleteErr := backend.DeleteMultiple(nil); nil != deleteErr {
@@ -365,7 +365,7 @@ func TestDeleteMultipleCtx_AnEmptyKeyListIsNotAFailure(t *testing.T) {
     }
 }
 
-func TestSetMultipleCtx_AnEmptyItemMapIsNotAFailure(t *testing.T) {
+func TestSetMultipleContext_AnEmptyItemMapIsNotAFailure(t *testing.T) {
     backend, _ := liveBackend(t)
 
     if setErr := backend.SetMultiple(nil, bound.Of(time.Minute)); nil != setErr {
@@ -373,7 +373,7 @@ func TestSetMultipleCtx_AnEmptyItemMapIsNotAFailure(t *testing.T) {
     }
 }
 
-func TestIncrementAndDecrementCtx_MoveOneCounter(t *testing.T) {
+func TestIncrementAndDecrementContext_MoveOneCounter(t *testing.T) {
     backend, _ := liveBackend(t)
 
     value, incrementErr := backend.Increment("counter", 5)
@@ -396,7 +396,7 @@ func TestIncrementAndDecrementCtx_MoveOneCounter(t *testing.T) {
 }
 
 /* redis refuses to increment a payload that is not an integer, and that refusal must reach the caller rather than be read as a fresh counter — the in-memory backend refuses the same input for the same reason. */
-func TestIncrementCtx_RefusesANonIntegerPayload(t *testing.T) {
+func TestIncrementContext_RefusesANonIntegerPayload(t *testing.T) {
     backend, _ := liveBackend(t)
 
     if setErr := backend.Set("counter", []byte(""), bound.Of(time.Minute)); nil != setErr {
@@ -413,7 +413,7 @@ func TestIncrementCtx_RefusesANonIntegerPayload(t *testing.T) {
     }
 }
 
-func TestClearCtx_RemovesTheWholePrefixAndLeavesTheRestAlone(t *testing.T) {
+func TestClearContext_RemovesTheWholePrefixAndLeavesTheRestAlone(t *testing.T) {
     backend, client := liveBackend(t)
 
     if setErr := backend.SetMultiple(map[string][]byte{
@@ -453,7 +453,7 @@ func TestClearCtx_RemovesTheWholePrefixAndLeavesTheRestAlone(t *testing.T) {
 }
 
 /* the scan pages rather than reading the keyspace in one answer, so the walk is driven past one page with a scan count of one. */
-func TestClearCtx_WalksEveryPageOfTheScan(t *testing.T) {
+func TestClearContext_WalksEveryPageOfTheScan(t *testing.T) {
     _, client := liveBackend(t)
 
     prefix := "melody:test:paged:" + t.Name() + ":"
@@ -490,7 +490,7 @@ func TestClearCtx_WalksEveryPageOfTheScan(t *testing.T) {
     }
 }
 
-func TestClearByPrefixCtx_RemovesOnlyTheNamedSubtree(t *testing.T) {
+func TestClearByPrefixContext_RemovesOnlyTheNamedSubtree(t *testing.T) {
     backend, _ := liveBackend(t)
 
     if setErr := backend.SetMultiple(map[string][]byte{
@@ -516,7 +516,7 @@ func TestClearByPrefixCtx_RemovesOnlyTheNamedSubtree(t *testing.T) {
 }
 
 /* a prefix carrying a glob metacharacter is matched literally, so it neither misses the keys it names nor reaches the siblings a wildcard would. */
-func TestClearByPrefixCtx_MatchesAGlobMetacharacterLiterally(t *testing.T) {
+func TestClearByPrefixContext_MatchesAGlobMetacharacterLiterally(t *testing.T) {
     backend, _ := liveBackend(t)
 
     if setErr := backend.SetMultiple(map[string][]byte{
@@ -540,7 +540,7 @@ func TestClearByPrefixCtx_MatchesAGlobMetacharacterLiterally(t *testing.T) {
     }
 }
 
-func TestClearCtx_AnEmptyPrefixSpaceIsNotAFailure(t *testing.T) {
+func TestClearContext_AnEmptyPrefixSpaceIsNotAFailure(t *testing.T) {
     backend, _ := liveBackend(t)
 
     if clearErr := backend.Clear(); nil != clearErr {
@@ -594,7 +594,7 @@ func TestNormalizeKey_RefusesTheSpellingsRedisCannotCarryAndNamesTheKey(t *testi
 }
 
 /* one malformed key stops the whole batch, so the refusal has to say which one it was — the caller handed in a set and cannot otherwise tell. */
-func TestManyCtx_ABatchRefusalNamesTheOffendingKey(t *testing.T) {
+func TestManyContext_ABatchRefusalNamesTheOffendingKey(t *testing.T) {
     backend, _ := liveBackend(t)
 
     _, manyErr := backend.Many([]string{"good", "bad key", "other"})
@@ -790,7 +790,7 @@ func TestEveryOperation_ReportsAClosedClientInsteadOfAnsweringOverIt(t *testing.
 }
 
 /* the batch delete names the key that stopped it, which is the whole reason the per-key answer is read rather than discarded. */
-func TestDeleteMultipleCtx_AFailureNamesTheKeyAndTheBatchSize(t *testing.T) {
+func TestDeleteMultipleContext_AFailureNamesTheKeyAndTheBatchSize(t *testing.T) {
     backend, client := liveBackend(t)
 
     client.Close()
@@ -815,7 +815,7 @@ func TestDeleteMultipleCtx_AFailureNamesTheKeyAndTheBatchSize(t *testing.T) {
 }
 
 /* the batch set names the key whose write did not land: the commands are built from a map, so without the parallel key list the caller would be told only that something in the batch failed. */
-func TestSetMultipleCtx_AFailureNamesOneOfTheKeys(t *testing.T) {
+func TestSetMultipleContext_AFailureNamesOneOfTheKeys(t *testing.T) {
     backend, client := liveBackend(t)
 
     client.Close()
@@ -871,14 +871,14 @@ func TestClearByPrefix_RefusesTheEmptyPrefix(t *testing.T) {
 
     ctx := context.Background()
 
-    if setErr := backend.SetCtx(ctx, "tenant:1:a", []byte("x"), bound.Of(time.Minute)); nil != setErr {
+    if setErr := backend.SetContext(ctx, "tenant:1:a", []byte("x"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set: %v", setErr)
     }
-    if setErr := backend.SetCtx(ctx, "other:b", []byte("y"), bound.Of(time.Minute)); nil != setErr {
+    if setErr := backend.SetContext(ctx, "other:b", []byte("y"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set: %v", setErr)
     }
 
-    clearErr := backend.ClearByPrefixCtx(ctx, "")
+    clearErr := backend.ClearByPrefixContext(ctx, "")
     if nil == clearErr {
         t.Fatal("expected the empty prefix to be refused")
     }
@@ -887,8 +887,8 @@ func TestClearByPrefix_RefusesTheEmptyPrefix(t *testing.T) {
         t.Fatalf("expected the empty-key refusal, got %v", clearErr)
     }
 
-    hasTenant, _ := backend.HasCtx(ctx, "tenant:1:a")
-    hasOther, _ := backend.HasCtx(ctx, "other:b")
+    hasTenant, _ := backend.HasContext(ctx, "tenant:1:a")
+    hasOther, _ := backend.HasContext(ctx, "other:b")
     if false == hasTenant || false == hasOther {
         t.Fatalf("expected the namespace to survive the refused wipe (tenant=%v other=%v)", hasTenant, hasOther)
     }
@@ -898,7 +898,7 @@ func TestClearByPrefix_RefusesTheEmptyPrefix(t *testing.T) {
 func TestSetMultiple_RefusesANegativeTtlEvenForAnEmptyBatch(t *testing.T) {
     backend, _ := liveBackend(t)
 
-    setErr := backend.SetMultipleCtx(context.Background(), map[string][]byte{}, bound.Of(-time.Second))
+    setErr := backend.SetMultipleContext(context.Background(), map[string][]byte{}, bound.Of(-time.Second))
     if nil == setErr {
         t.Fatal("expected the negative ttl to be refused for the empty batch too")
     }
@@ -914,11 +914,11 @@ func TestIncrement_WrapsTheStoreRefusalWithTheKey(t *testing.T) {
 
     ctx := context.Background()
 
-    if setErr := backend.SetCtx(ctx, "counter", []byte("not-a-number"), bound.Of(time.Minute)); nil != setErr {
+    if setErr := backend.SetContext(ctx, "counter", []byte("not-a-number"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("set: %v", setErr)
     }
 
-    _, incrementErr := backend.IncrementCtx(ctx, "counter", 1)
+    _, incrementErr := backend.IncrementContext(ctx, "counter", 1)
     if nil == incrementErr {
         t.Fatal("expected the non-numeric payload to refuse the increment")
     }
@@ -993,7 +993,7 @@ func TestFirstSetFailure_NamesTheSortedFirstKeyAndCountsTheRest(t *testing.T) {
 }
 
 /* the validation refusal names the sorted-first malformed key, never a map-iteration choice — the nondeterminism the response reporting further down already refuses. Validation runs before anything is sent, so the batch leaves no trace. */
-func TestSetMultipleCtx_NamesTheSortedFirstMalformedKey(t *testing.T) {
+func TestSetMultipleContext_NamesTheSortedFirstMalformedKey(t *testing.T) {
     backend, _ := liveBackend(t)
 
     items := map[string][]byte{
@@ -1171,17 +1171,17 @@ func TestBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
     ctx := context.Background()
 
     for door, call := range map[string]func() error{
-        "GetCtx":            func() error { _, _, err := backend.GetCtx(ctx, "key"); return err },
-        "SetCtx":            func() error { return backend.SetCtx(ctx, "key", []byte("value"), bound.Of(time.Minute)) },
-        "DeleteCtx":         func() error { return backend.DeleteCtx(ctx, "key") },
-        "HasCtx":            func() error { _, err := backend.HasCtx(ctx, "key"); return err },
-        "ClearCtx":          func() error { return backend.ClearCtx(ctx) },
-        "ClearByPrefixCtx":  func() error { return backend.ClearByPrefixCtx(ctx, "prefix") },
-        "ManyCtx":           func() error { _, err := backend.ManyCtx(ctx, []string{"key"}); return err },
-        "SetMultipleCtx":    func() error { return backend.SetMultipleCtx(ctx, map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute)) },
-        "DeleteMultipleCtx": func() error { return backend.DeleteMultipleCtx(ctx, []string{"key"}) },
-        "IncrementCtx":      func() error { _, err := backend.IncrementCtx(ctx, "counter", 1); return err },
-        "DecrementCtx":      func() error { _, err := backend.DecrementCtx(ctx, "counter", 1); return err },
+        "GetContext":            func() error { _, _, err := backend.GetContext(ctx, "key"); return err },
+        "SetContext":            func() error { return backend.SetContext(ctx, "key", []byte("value"), bound.Of(time.Minute)) },
+        "DeleteContext":         func() error { return backend.DeleteContext(ctx, "key") },
+        "HasContext":            func() error { _, err := backend.HasContext(ctx, "key"); return err },
+        "ClearContext":          func() error { return backend.ClearContext(ctx) },
+        "ClearByPrefixContext":  func() error { return backend.ClearByPrefixContext(ctx, "prefix") },
+        "ManyContext":           func() error { _, err := backend.ManyContext(ctx, []string{"key"}); return err },
+        "SetMultipleContext":    func() error { return backend.SetMultipleContext(ctx, map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute)) },
+        "DeleteMultipleContext": func() error { return backend.DeleteMultipleContext(ctx, []string{"key"}) },
+        "IncrementContext":      func() error { _, err := backend.IncrementContext(ctx, "counter", 1); return err },
+        "DecrementContext":      func() error { _, err := backend.DecrementContext(ctx, "counter", 1); return err },
     } {
         if closedErr := call(); nil == closedErr || false == strings.Contains(closedErr.Error(), "cache backend is closed") {
             t.Fatalf("expected %s refused after Close, got %v", door, closedErr)
@@ -1246,12 +1246,12 @@ func newDelayedNamespaceBackend(t *testing.T, delay time.Duration, commandTimeou
         items[key] = []byte("payload")
     }
 
-    if setErr := filler.SetMultipleCtx(context.Background(), items, bound.Of(time.Minute)); nil != setErr {
-        t.Fatalf("SetMultipleCtx: %v", setErr)
+    if setErr := filler.SetMultipleContext(context.Background(), items, bound.Of(time.Minute)); nil != setErr {
+        t.Fatalf("SetMultipleContext: %v", setErr)
     }
 
     t.Cleanup(func() {
-        if clearErr := filler.ClearCtx(context.Background()); nil != clearErr {
+        if clearErr := filler.ClearContext(context.Background()); nil != clearErr {
             t.Errorf("cleanup: %v", clearErr)
         }
     })
@@ -1277,9 +1277,9 @@ func TestClear_BoundsEachRoundTripNotTheWalk(t *testing.T) {
         t.Fatalf("expected a namespace wider than one command timeout cleared, got %v", clearErr)
     }
 
-    values, manyErr := backend.ManyCtx(context.Background(), keys)
+    values, manyErr := backend.ManyContext(context.Background(), keys)
     if nil != manyErr {
-        t.Fatalf("ManyCtx: %v", manyErr)
+        t.Fatalf("ManyContext: %v", manyErr)
     }
 
     if 0 != len(values) {
@@ -1294,9 +1294,9 @@ func TestClearByPrefix_BoundsEachRoundTripNotTheWalk(t *testing.T) {
         t.Fatalf("expected a subtree wider than one command timeout cleared, got %v", clearErr)
     }
 
-    values, manyErr := backend.ManyCtx(context.Background(), keys)
+    values, manyErr := backend.ManyContext(context.Background(), keys)
     if nil != manyErr {
-        t.Fatalf("ManyCtx: %v", manyErr)
+        t.Fatalf("ManyContext: %v", manyErr)
     }
 
     if 0 != len(values) {
@@ -1304,24 +1304,24 @@ func TestClearByPrefix_BoundsEachRoundTripNotTheWalk(t *testing.T) {
     }
 }
 
-func TestClearCtx_TheCallersContextBoundsTheWholeWalk(t *testing.T) {
+func TestClearContext_TheCallersContextBoundsTheWholeWalk(t *testing.T) {
     backend, _ := newDelayedNamespaceBackend(t, 20*time.Millisecond, time.Minute)
 
     ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
     defer cancel()
 
-    if clearErr := backend.ClearCtx(ctx); false == errors.Is(clearErr, context.DeadlineExceeded) {
+    if clearErr := backend.ClearContext(ctx); false == errors.Is(clearErr, context.DeadlineExceeded) {
         t.Fatalf("expected the caller's deadline to end the walk, got %v", clearErr)
     }
 }
 
-func TestClearByPrefixCtx_TheCallersContextBoundsTheWholeWalk(t *testing.T) {
+func TestClearByPrefixContext_TheCallersContextBoundsTheWholeWalk(t *testing.T) {
     backend, _ := newDelayedNamespaceBackend(t, 20*time.Millisecond, time.Minute)
 
     ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
     defer cancel()
 
-    if clearErr := backend.ClearByPrefixCtx(ctx, "key-"); false == errors.Is(clearErr, context.DeadlineExceeded) {
+    if clearErr := backend.ClearByPrefixContext(ctx, "key-"); false == errors.Is(clearErr, context.DeadlineExceeded) {
         t.Fatalf("expected the caller's deadline to end the walk, got %v", clearErr)
     }
 }

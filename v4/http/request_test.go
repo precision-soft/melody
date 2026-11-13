@@ -41,7 +41,7 @@ func TestNewRequest_ValidHttpRequest(t *testing.T) {
         t.Fatalf("expected same http request reference")
     }
 
-    value, exists := request.Param("id")
+    value, exists := request.Parameter("id")
     if false == exists {
         t.Fatalf("expected param 'id' to exist")
     }
@@ -71,17 +71,17 @@ func TestNewRequest_ValidHttpRequest(t *testing.T) {
     }
 }
 
-func TestNewRequest_NilRouteParams(t *testing.T) {
+func TestNewRequest_NilRouteParameters(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test", nil)
 
     request := NewRequest(httpRequest, nil, nil, nil)
 
-    params := request.Params()
-    if nil == params {
-        t.Fatalf("expected non-nil params map")
+    parameters := request.Parameters()
+    if nil == parameters {
+        t.Fatalf("expected non-nil parameters map")
     }
-    if 0 != len(params) {
-        t.Fatalf("expected empty params map, got %d entries", len(params))
+    if 0 != len(parameters) {
+        t.Fatalf("expected empty parameters map, got %d entries", len(parameters))
     }
 }
 
@@ -178,11 +178,11 @@ func TestNewRequest_GetDoesNotParseForm(t *testing.T) {
     }
 
     if true == postBag.Has("key") {
-        t.Fatalf("GET request should not have post params")
+        t.Fatalf("GET request should not have post parameters")
     }
 }
 
-func TestRequest_Input_FallsBackToParams(t *testing.T) {
+func TestRequest_Input_FallsBackToParameters(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test", nil)
 
     request := NewRequest(httpRequest, map[string]string{"pkey": "pval"}, nil, nil)
@@ -198,18 +198,18 @@ func TestRequest_Input_FallsBackToParams(t *testing.T) {
     }
 }
 
-func TestRequest_ParamsCopied(t *testing.T) {
+func TestRequest_ParametersCopied(t *testing.T) {
     httpRequest := httptest.NewRequest("GET", "/test", nil)
     originalParams := map[string]string{"id": "1"}
 
     request := NewRequest(httpRequest, originalParams, nil, nil)
 
-    params := request.Params()
-    params["id"] = "modified"
+    parameters := request.Parameters()
+    parameters["id"] = "modified"
 
-    value, _ := request.Param("id")
+    value, _ := request.Parameter("id")
     if "1" != value {
-        t.Fatalf("original params should not be modified, got: %s", value)
+        t.Fatalf("original parameters should not be modified, got: %s", value)
     }
 }
 

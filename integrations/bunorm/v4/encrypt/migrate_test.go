@@ -28,7 +28,7 @@ func TestEncryptTransform_DeterministicProducesSearchableCiphertext(t *testing.T
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
-    deterministic, transformErr := migrator.encryptTransform(TableSpec{Deterministic: true})("alice@example.com")
+    deterministic, transformErr := migrator.encryptTransform(TableSpecification{Deterministic: true})("alice@example.com")
     if nil != transformErr {
         t.Fatalf("deterministic encrypt transform: %v", transformErr)
     }
@@ -36,7 +36,7 @@ func TestEncryptTransform_DeterministicProducesSearchableCiphertext(t *testing.T
         t.Fatalf("expected the deterministic encrypt transform to be searchable via CiphertextCandidates")
     }
 
-    randomized, randomizedErr := migrator.encryptTransform(TableSpec{Deterministic: false})("alice@example.com")
+    randomized, randomizedErr := migrator.encryptTransform(TableSpecification{Deterministic: false})("alice@example.com")
     if nil != randomizedErr {
         t.Fatalf("randomized encrypt transform: %v", randomizedErr)
     }
@@ -59,7 +59,7 @@ func TestEncryptTransform_DeterministicConvertsAnAlreadyRandomizedValue(t *testi
         t.Fatalf("precondition: a randomized value must not be searchable")
     }
 
-    converted, convertErr := migrator.encryptTransform(TableSpec{Deterministic: true})(randomized)
+    converted, convertErr := migrator.encryptTransform(TableSpecification{Deterministic: true})(randomized)
     if nil != convertErr {
         t.Fatalf("deterministic encrypt transform: %v", convertErr)
     }
@@ -84,7 +84,7 @@ func TestEncryptTransform_DeterministicKeepsTheKeyTheValueCarries(t *testing.T) 
         t.Fatalf("randomized encrypt: %v", randomizedErr)
     }
 
-    converted, convertErr := migrator.encryptTransform(TableSpec{Deterministic: true})(randomizedUnderRetiredKey)
+    converted, convertErr := migrator.encryptTransform(TableSpecification{Deterministic: true})(randomizedUnderRetiredKey)
     if nil != convertErr {
         t.Fatalf("deterministic encrypt transform: %v", convertErr)
     }
@@ -109,7 +109,7 @@ func TestEncryptTransform_DeterministicIsIdempotent(t *testing.T) {
     cipher := NewCipher(provider)
     migrator := &Migrator{cipher: cipher}
 
-    transform := migrator.encryptTransform(TableSpec{Deterministic: true})
+    transform := migrator.encryptTransform(TableSpecification{Deterministic: true})
 
     first, firstErr := transform("alice@example.com")
     if nil != firstErr {
@@ -138,7 +138,7 @@ func TestEncryptTransform_StopsOnAStoredValueThatNoLongerDecrypts(t *testing.T) 
     }
 
     for _, deterministic := range []bool{false, true} {
-        _, convertErr := migrator.encryptTransform(TableSpec{Deterministic: deterministic})(foreign)
+        _, convertErr := migrator.encryptTransform(TableSpecification{Deterministic: deterministic})(foreign)
         if nil == convertErr {
             t.Fatalf("expected the stored undecryptable value to stop the run (deterministic=%v)", deterministic)
         }
@@ -159,7 +159,7 @@ func TestReencryptTransform_ConvertsRandomizedSameKeyValueToDeterministic(t *tes
         t.Fatalf("precondition: randomized value should not be searchable")
     }
 
-    converted, convertErr := migrator.reencryptTransform(TableSpec{Deterministic: true}, "v2")(randomizedUnderTarget)
+    converted, convertErr := migrator.reencryptTransform(TableSpecification{Deterministic: true}, "v2")(randomizedUnderTarget)
     if nil != convertErr {
         t.Fatalf("deterministic reencrypt transform: %v", convertErr)
     }
@@ -170,7 +170,7 @@ func TestReencryptTransform_ConvertsRandomizedSameKeyValueToDeterministic(t *tes
         t.Fatalf("expected the converted value to be searchable via CiphertextCandidates")
     }
 
-    skipped, skipErr := migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2")(randomizedUnderTarget)
+    skipped, skipErr := migrator.reencryptTransform(TableSpecification{Deterministic: false}, "v2")(randomizedUnderTarget)
     if nil != skipErr {
         t.Fatalf("randomized reencrypt transform: %v", skipErr)
     }
@@ -189,7 +189,7 @@ func TestReencryptTransform_RandomizedSameKeyRewritesDeterministicValue(t *testi
         t.Fatalf("precondition: deterministic value should be searchable")
     }
 
-    rewritten, rewriteErr := migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2")(deterministicUnderTarget)
+    rewritten, rewriteErr := migrator.reencryptTransform(TableSpecification{Deterministic: false}, "v2")(deterministicUnderTarget)
     if nil != rewriteErr {
         t.Fatalf("randomized reencrypt transform: %v", rewriteErr)
     }
@@ -211,7 +211,7 @@ func TestReencryptTransform_AKeyChangeKeepsADeterministicSealDeterministic(t *te
 
     deterministicUnderV1, _ := cipher.EncryptDeterministicWithKeyId("alice@example.com", "v1")
 
-    rotated, rotateErr := migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2")(deterministicUnderV1)
+    rotated, rotateErr := migrator.reencryptTransform(TableSpecification{Deterministic: false}, "v2")(deterministicUnderV1)
     if nil != rotateErr {
         t.Fatalf("reencrypt transform: %v", rotateErr)
     }
@@ -232,7 +232,7 @@ func TestReencryptTransform_AKeyChangeKeepsARandomSealRandom(t *testing.T) {
 
     randomUnderV1, _ := cipher.EncryptWithKeyId("alice@example.com", "v1")
 
-    rotated, rotateErr := migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2")(randomUnderV1)
+    rotated, rotateErr := migrator.reencryptTransform(TableSpecification{Deterministic: false}, "v2")(randomUnderV1)
     if nil != rotateErr {
         t.Fatalf("reencrypt transform: %v", rotateErr)
     }
@@ -265,7 +265,7 @@ func TestReencryptTransform_AKeyChangeThroughAForeignCipherKeepsTheMode(t *testi
         {stored: deterministicUnderV1, deterministic: true},
         {stored: randomUnderV1, deterministic: false},
     } {
-        rotated, rotateErr := migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2")(testCase.stored)
+        rotated, rotateErr := migrator.reencryptTransform(TableSpecification{Deterministic: false}, "v2")(testCase.stored)
         if nil != rotateErr {
             t.Fatalf("reencrypt transform (deterministic=%v): %v", testCase.deterministic, rotateErr)
         }
@@ -449,7 +449,7 @@ func TestMigrate_ReportsRowsTheGuardedUpdateDidNotTouch(t *testing.T) {
 
     processed, runErr := migrator.MigrateEncrypt(
         context.Background(),
-        TableSpec{Table: "user", PrimaryKey: "id", Columns: []string{"secret"}},
+        TableSpecification{Table: "user", PrimaryKey: "id", Columns: []string{"secret"}},
     )
 
     if nil == runErr {
@@ -470,7 +470,7 @@ func TestMigrate_CountsRowsTheUpdateApplied(t *testing.T) {
 
     processed, runErr := migrator.MigrateEncrypt(
         context.Background(),
-        TableSpec{Table: "user", PrimaryKey: "id", Columns: []string{"secret"}},
+        TableSpecification{Table: "user", PrimaryKey: "id", Columns: []string{"secret"}},
     )
 
     if nil != runErr {
@@ -488,7 +488,7 @@ func TestApplyRow_GuardsThePreImageOnBytesRatherThanTheColumnCollation(t *testin
 
     if _, runErr := migrator.MigrateEncrypt(
         context.Background(),
-        TableSpec{Table: "user", PrimaryKey: "id", Columns: []string{"secret"}},
+        TableSpecification{Table: "user", PrimaryKey: "id", Columns: []string{"secret"}},
     ); nil != runErr {
         t.Fatalf("unexpected error: %v", runErr)
     }
@@ -705,7 +705,7 @@ func TestMigrateEncrypt_RefusesANarrowColumnBeforeWritingARow(t *testing.T) {
         },
     })
 
-    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}})
+    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}})
     if nil == runErr {
         t.Fatalf("expected the narrow column to refuse the run")
     }
@@ -736,7 +736,7 @@ func TestMigrateRun_RefusesANullPrimaryKeyCursor(t *testing.T) {
         },
     })
 
-    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}})
+    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}})
     if nil == runErr {
         t.Fatalf("expected the NULL cursor value to stop the run")
     }
@@ -773,7 +773,7 @@ func TestMigrateRun_BindsAnIntegerPrimaryKeyCursorAsAnInteger(t *testing.T) {
         },
     })
 
-    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}, BatchSize: bound.Of(1)})
+    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}, BatchSize: bound.Of(1)})
     if nil != runErr {
         t.Fatalf("unexpected run error: %v", runErr)
     }
@@ -820,7 +820,7 @@ func TestTypedPrimaryKeyArgument_ConvertsByTheColumnType(t *testing.T) {
 func TestClassifyRunError_NamesAnInterruptedRun(t *testing.T) {
     migrator := &Migrator{}
 
-    classified := migrator.classifyRunError(TableSpec{Table: "accounts"}, 7, "migrate select failed", fmt.Errorf("query: %w", context.Canceled))
+    classified := migrator.classifyRunError(TableSpecification{Table: "accounts"}, 7, "migrate select failed", fmt.Errorf("query: %w", context.Canceled))
 
     if false == strings.Contains(classified.Error(), "interrupted") {
         t.Fatalf("expected the interruption to name itself, got: %v", classified)
@@ -934,7 +934,7 @@ func TestEncryptMigrate_ConcurrentNormalisationIsSkippedUnderTheDefaultCollation
 
         migrator := NewMigrator(database, cipher)
 
-        processed, runErr := migrator.MigrateEncrypt(ctx, TableSpec{
+        processed, runErr := migrator.MigrateEncrypt(ctx, TableSpecification{
             Table:      table,
             PrimaryKey: "id",
             Columns:    []string{"email"},
@@ -993,16 +993,16 @@ func TestEncryptMigrate_ACancellationOnTheCharsetLookupIsAnInterruption(t *testi
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    spec := TableSpec{
+    specification := TableSpecification{
         Table:      "migrate_interrupted_record",
         PrimaryKey: "id",
         Columns:    []string{"email"},
     }
 
     doors := map[string]func() (int, error){
-        "encrypt":   func() (int, error) { return migrator.MigrateEncrypt(cancelledContext, spec) },
-        "reencrypt": func() (int, error) { return migrator.MigrateReencrypt(cancelledContext, spec, "v1") },
-        "decrypt":   func() (int, error) { return migrator.MigrateDecrypt(cancelledContext, spec) },
+        "encrypt":   func() (int, error) { return migrator.MigrateEncrypt(cancelledContext, specification) },
+        "reencrypt": func() (int, error) { return migrator.MigrateReencrypt(cancelledContext, specification, "v1") },
+        "decrypt":   func() (int, error) { return migrator.MigrateDecrypt(cancelledContext, specification) },
     }
 
     for door, run := range doors {
@@ -1029,7 +1029,7 @@ func TestEncryptMigrate_ACancellationDuringAPageIterationIsAnInterruption(t *tes
         },
     })
 
-    _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{
+    _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpecification{
         Table:      "accounts",
         PrimaryKey: "id",
         Columns:    []string{"email"},
@@ -1090,11 +1090,11 @@ func TestEncryptMigrate_RefusesATargetColumnTooNarrowForTheCiphertext(t *testing
     cipher := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newRampKey()}}))
     migrator := NewMigrator(database, cipher)
 
-    spec := TableSpec{Table: table, PrimaryKey: "id", Columns: []string{"secret"}}
+    specification := TableSpecification{Table: table, PrimaryKey: "id", Columns: []string{"secret"}}
 
-    capacityErr := migrator.EnsureColumnCapacity(ctx, spec)
+    capacityErr := migrator.EnsureColumnCapacity(ctx, specification)
     if nil == capacityErr {
-        processed, runErr := migrator.MigrateEncrypt(ctx, spec)
+        processed, runErr := migrator.MigrateEncrypt(ctx, specification)
 
         var truncated string
         sqlDb.QueryRowContext(ctx, "SELECT secret FROM "+table+" WHERE id = 1").Scan(&truncated)
@@ -1141,11 +1141,11 @@ func TestEncryptMigrate_RefusesATargetColumnTooNarrowForTheCiphertext(t *testing
         t.Fatalf("widen column: %v", widenErr)
     }
 
-    if recheckErr := migrator.EnsureColumnCapacity(ctx, spec); nil != recheckErr {
+    if recheckErr := migrator.EnsureColumnCapacity(ctx, specification); nil != recheckErr {
         t.Fatalf("expected the widened column to be accepted, got %v", recheckErr)
     }
 
-    processed, runErr := migrator.MigrateEncrypt(ctx, spec)
+    processed, runErr := migrator.MigrateEncrypt(ctx, specification)
     if nil != runErr {
         t.Fatalf("migrate the widened column: %v", runErr)
     }
@@ -1167,7 +1167,7 @@ func TestEncryptMigrate_RefusesATargetColumnTooNarrowForTheCiphertext(t *testing
     }
 
     /* a second run over the already-sealed column must not read the ciphertext as a plaintext to be sealed again and demand a wider column for it */
-    if rerunErr := migrator.EnsureColumnCapacity(ctx, spec); nil != rerunErr {
+    if rerunErr := migrator.EnsureColumnCapacity(ctx, specification); nil != rerunErr {
         t.Fatalf("expected a re-run over an already-migrated column to be accepted, got %v", rerunErr)
     }
 }
@@ -1242,11 +1242,11 @@ func TestEncryptMigrate_RefusesARotationToALongerKeyId(t *testing.T) {
 
     migrator := NewMigrator(database, cipher)
 
-    spec := TableSpec{Table: table, PrimaryKey: "id", Columns: []string{"secret"}}
+    specification := TableSpecification{Table: table, PrimaryKey: "id", Columns: []string{"secret"}}
 
-    capacityErr := migrator.EnsureColumnCapacityForReencrypt(ctx, spec, targetKeyId)
+    capacityErr := migrator.EnsureColumnCapacityForReencrypt(ctx, specification, targetKeyId)
     if nil == capacityErr {
-        processed, runErr := migrator.MigrateReencrypt(ctx, spec, targetKeyId)
+        processed, runErr := migrator.MigrateReencrypt(ctx, specification, targetKeyId)
 
         var truncated string
         sqlDb.QueryRowContext(ctx, "SELECT secret FROM "+table+" WHERE id = 1").Scan(&truncated)
@@ -1311,11 +1311,11 @@ func TestEncryptMigrate_RefusesARotationToALongerKeyId(t *testing.T) {
         t.Fatalf("widen column: %v", widenErr)
     }
 
-    if recheckErr := migrator.EnsureColumnCapacityForReencrypt(ctx, spec, targetKeyId); nil != recheckErr {
+    if recheckErr := migrator.EnsureColumnCapacityForReencrypt(ctx, specification, targetKeyId); nil != recheckErr {
         t.Fatalf("expected the widened column to be accepted, got %v", recheckErr)
     }
 
-    processed, runErr := migrator.MigrateReencrypt(ctx, spec, targetKeyId)
+    processed, runErr := migrator.MigrateReencrypt(ctx, specification, targetKeyId)
     if nil != runErr {
         t.Fatalf("rotate the widened column: %v", runErr)
     }
@@ -1341,7 +1341,7 @@ func TestEncryptMigrate_RefusesARotationToALongerKeyId(t *testing.T) {
     }
 
     /* a rotation that changes no key id lengthens nothing, so a column that already holds the result must not be refused */
-    if rerunErr := migrator.EnsureColumnCapacityForReencrypt(ctx, spec, targetKeyId); nil != rerunErr {
+    if rerunErr := migrator.EnsureColumnCapacityForReencrypt(ctx, specification, targetKeyId); nil != rerunErr {
         t.Fatalf("expected a re-run of the same rotation to be accepted, got %v", rerunErr)
     }
 }
@@ -1424,7 +1424,7 @@ func newRotationCipher(t *testing.T) Cipher {
 
 func TestReencryptTransform_RotatesASealStoredAsDataInARandomColumnAsData(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    transform := (&Migrator{cipher: cipherInstance}).reencryptTransform(TableSpec{Deterministic: false}, "v2")
+    transform := (&Migrator{cipher: cipherInstance}).reencryptTransform(TableSpecification{Deterministic: false}, "v2")
 
     for _, testCase := range sealStoredAsDataCases(t, cipherInstance) {
         rotated, rotateErr := transform(storedColumnValue(t, testCase.applicationValue, false))
@@ -1444,7 +1444,7 @@ func TestReencryptTransform_RotatesASealStoredAsDataInARandomColumnAsData(t *tes
 
 func TestReencryptTransform_RotatesASealStoredAsDataInADeterministicColumnAsData(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    transform := (&Migrator{cipher: cipherInstance}).reencryptTransform(TableSpec{Deterministic: true}, "v2")
+    transform := (&Migrator{cipher: cipherInstance}).reencryptTransform(TableSpecification{Deterministic: true}, "v2")
 
     for _, testCase := range sealStoredAsDataCases(t, cipherInstance) {
         rotated, rotateErr := transform(storedColumnValue(t, testCase.applicationValue, true))
@@ -1469,7 +1469,7 @@ func TestReencryptTransform_RotatesASealStoredAsDataInADeterministicColumnAsData
 /* a re-run meets a deterministic column already converted, and a random column being converted: in neither may the decrypted value reach a door that unwraps it */
 func TestEncryptTransform_DeterministicReRunKeepsASealStoredAsDataAsData(t *testing.T) {
     cipherInstance := newRotationCipher(t)
-    transform := (&Migrator{cipher: cipherInstance}).encryptTransform(TableSpec{Deterministic: true})
+    transform := (&Migrator{cipher: cipherInstance}).encryptTransform(TableSpecification{Deterministic: true})
 
     for _, writtenDeterministic := range []bool{true, false} {
         for _, testCase := range sealStoredAsDataCases(t, cipherInstance) {
@@ -1507,9 +1507,9 @@ func TestMigrate_RefusesASealStoredAsDataThroughAForeignCipher(t *testing.T) {
     migrator := &Migrator{cipher: NewFakeCipher()}
 
     transforms := map[string]func(string) (string, error){
-        "rotation of a random column":        migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2"),
-        "rotation of a deterministic column": migrator.reencryptTransform(TableSpec{Deterministic: true}, "v2"),
-        "deterministic encrypt re-run":       migrator.encryptTransform(TableSpec{Deterministic: true}),
+        "rotation of a random column":        migrator.reencryptTransform(TableSpecification{Deterministic: false}, "v2"),
+        "rotation of a deterministic column": migrator.reencryptTransform(TableSpecification{Deterministic: true}, "v2"),
+        "deterministic encrypt re-run":       migrator.encryptTransform(TableSpecification{Deterministic: true}),
     }
 
     for name, transform := range transforms {
@@ -1545,9 +1545,9 @@ func TestMigrate_RefusesAMarkerFamilyPlaintextThroughAWrappedCipher(t *testing.T
     migrator := &Migrator{cipher: wrappedCipher{Cipher: packageCipher}}
 
     for name, transform := range map[string]func(string) (string, error){
-        "rotation of a random column":        migrator.reencryptTransform(TableSpec{Deterministic: false}, "v2"),
-        "rotation of a deterministic column": migrator.reencryptTransform(TableSpec{Deterministic: true}, "v2"),
-        "deterministic encrypt re-run":       migrator.encryptTransform(TableSpec{Deterministic: true}),
+        "rotation of a random column":        migrator.reencryptTransform(TableSpecification{Deterministic: false}, "v2"),
+        "rotation of a deterministic column": migrator.reencryptTransform(TableSpecification{Deterministic: true}, "v2"),
+        "deterministic encrypt re-run":       migrator.encryptTransform(TableSpecification{Deterministic: true}),
     } {
         refused, refusedErr := transform(stored)
         if nil == refusedErr || false == strings.Contains(refusedErr.Error(), "cannot re-seal as data") {
@@ -1581,7 +1581,7 @@ func TestMigrateReencrypt_RotatesASealStoredAsDataEndToEnd(t *testing.T) {
         {fragment: "ORDER BY", columns: []string{"id", "notes"}, rows: rows},
     }
 
-    processed, runErr := migrator.MigrateReencrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}, "v2")
+    processed, runErr := migrator.MigrateReencrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}, "v2")
     if nil != runErr {
         t.Fatalf("rotate: %v", runErr)
     }
@@ -1614,15 +1614,15 @@ func TestMigrateReencrypt_RotatesASealStoredAsDataEndToEnd(t *testing.T) {
 
 /* a stored value of an unknown seal format stops every mode on its row, which the error names, and no update is sent: encrypt would seal it as data, reencrypt under the target key, decrypt would write it back as plaintext */
 func TestMigrator_StopsOnAnUnknownSealFormatInEveryMode(t *testing.T) {
-    for door, run := range map[string]func(migrator *Migrator, spec TableSpec) (int, error){
-        "encrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
-            return migrator.MigrateEncrypt(context.Background(), spec)
+    for door, run := range map[string]func(migrator *Migrator, specification TableSpecification) (int, error){
+        "encrypt": func(migrator *Migrator, specification TableSpecification) (int, error) {
+            return migrator.MigrateEncrypt(context.Background(), specification)
         },
-        "reencrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
-            return migrator.MigrateReencrypt(context.Background(), spec, "v2")
+        "reencrypt": func(migrator *Migrator, specification TableSpecification) (int, error) {
+            return migrator.MigrateReencrypt(context.Background(), specification, "v2")
         },
-        "decrypt": func(migrator *Migrator, spec TableSpec) (int, error) {
-            return migrator.MigrateDecrypt(context.Background(), spec)
+        "decrypt": func(migrator *Migrator, specification TableSpecification) (int, error) {
+            return migrator.MigrateDecrypt(context.Background(), specification)
         },
     } {
         t.Run(door, func(t *testing.T) {
@@ -1641,7 +1641,7 @@ func TestMigrator_StopsOnAnUnknownSealFormatInEveryMode(t *testing.T) {
             })
             migrator.cipher = newRotationCipher(t)
 
-            _, runErr := run(migrator, TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+            _, runErr := run(migrator, TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
             if nil == runErr || false == exception.ChainIs(runErr, ErrSealFormatUnknown) {
                 t.Fatalf("expected the run stopped with ErrSealFormatUnknown, got %v", runErr)
             }
@@ -1659,7 +1659,7 @@ func TestMigrator_StopsOnAnUnknownSealFormatInEveryMode(t *testing.T) {
     }
 }
 
-/* a run over a column the spec does not bind stops at a bound seal, never reads it as unsealed and seals it again */
+/* a run over a column the specification does not bind stops at a bound seal, never reads it as unsealed and seals it again */
 func TestMigrator_StopsOnABoundSealInAColumnTheSpecDoesNotBind(t *testing.T) {
     cipherInstance := newRotationCipher(t)
     bound, _ := cipherInstance.(*aes256Cipher).sealBoundValue("my notes", sealBinding{label: "accounts.notes"}, false)
@@ -1677,14 +1677,14 @@ func TestMigrator_StopsOnABoundSealInAColumnTheSpecDoesNotBind(t *testing.T) {
             })
             migrator.cipher = cipherInstance
 
-            _, runErr := run(migrator, TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+            _, runErr := run(migrator, TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
             if nil == runErr || false == exception.ChainIs(runErr, ErrSealBound) {
                 t.Fatalf("expected the run stopped with ErrSealBound, got %v", runErr)
             }
 
             /* the key is there and the row is intact: the message points at the binding */
-            if chain := strings.Join(exception.BuildCauseChain(runErr, 8), ": "); false == strings.Contains(chain, "TableSpec.SealBindings") {
-                t.Fatalf("expected the refusal to name TableSpec.SealBindings, got %q", chain)
+            if chain := strings.Join(exception.BuildCauseChain(runErr, 8), ": "); false == strings.Contains(chain, "TableSpecification.SealBindings") {
+                t.Fatalf("expected the refusal to name TableSpecification.SealBindings, got %q", chain)
             }
 
             for _, recorded := range stub.recorded() {
@@ -1709,7 +1709,7 @@ func TestMigrator_TheWidthProbeLeavesOutTheMarkerFamily(t *testing.T) {
     })
     migrator.cipher = newRotationCipher(t)
 
-    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
     if nil == runErr || false == exception.ChainIs(runErr, ErrSealFormatUnknown) {
         t.Fatalf("expected the run stopped at the row with ErrSealFormatUnknown, got %v", runErr)
     }
@@ -1736,7 +1736,7 @@ func TestMigrateDecrypt_StopsOnAnUnknownSealFormatThroughAPassThroughCipher(t *t
     })
     migrator.cipher = NewFakeCipher()
 
-    _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+    _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
     if nil == runErr || false == exception.ChainIs(runErr, ErrSealFormatUnknown) {
         t.Fatalf("expected ErrSealFormatUnknown, got %v", runErr)
     }
@@ -1762,7 +1762,7 @@ func TestMigrateDecrypt_StopsOnAPlaintextOfTheMarkerFamily(t *testing.T) {
         },
     }
 
-    _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+    _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
     if nil == runErr || false == strings.Contains(fmt.Sprint(errors.Unwrap(runErr)), "itself an encrypted value") {
         t.Fatalf("expected the run stopped on the marker-family plaintext, got %v", runErr)
     }
@@ -1795,7 +1795,7 @@ func TestMigrateDecrypt_StopsOnARowWhoseDecryptedValueIsASeal(t *testing.T) {
         },
     }
 
-    processed, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+    processed, runErr := migrator.MigrateDecrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
     if nil == runErr {
         t.Fatalf("expected the decrypt run to stop on the row whose decrypted value is a seal, processed=%d", processed)
     }
@@ -1838,7 +1838,7 @@ func TestMigrateEncrypt_ConvertsOnlyAColumnOfAnotherCharsetInItsWidthAndGuard(t 
         {fragment: "ORDER BY", columns: []string{"id", "notes", "code", "digest"}, rows: [][]driver.Value{{"1", "café", "c", "d"}}},
     })
 
-    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes", "code", "digest"}}); nil != runErr {
+    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes", "code", "digest"}}); nil != runErr {
         t.Fatalf("run: %v", runErr)
     }
 
@@ -1907,7 +1907,7 @@ func TestEncryptMigrate_SealsALatin1ColumnAndMeasuresItInConnectionBytes(t *test
             t.Fatalf("%s: expected the five utf8mb4 bytes of the value measured, got %d (%v)", charset, longest, longestErr)
         }
 
-        sealed, runErr := migrator.MigrateEncrypt(ctx, TableSpec{Table: table, PrimaryKey: "id", Columns: []string{"secret"}})
+        sealed, runErr := migrator.MigrateEncrypt(ctx, TableSpecification{Table: table, PrimaryKey: "id", Columns: []string{"secret"}})
         if nil != runErr || 1 != sealed {
             t.Fatalf("%s: expected the row sealed, got %d (%v)", charset, sealed, runErr)
         }
@@ -1932,15 +1932,15 @@ func TestMigrator_RefusesABatchSizeOutsideItsRuleBeforeAnyQuery(t *testing.T) {
         t.Run(name, func(t *testing.T) {
             migrator, scriptedDriver := newScriptedMigrator(t, nil)
             dialectQueries := len(scriptedDriver.recorded())
-            spec := TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}, BatchSize: batchSize}
+            specification := TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}, BatchSize: batchSize}
 
             for door, run := range map[string]func() (int, error){
-                "encrypt":   func() (int, error) { return migrator.MigrateEncrypt(context.Background(), spec) },
-                "reencrypt": func() (int, error) { return migrator.MigrateReencrypt(context.Background(), spec, "v2") },
-                "decrypt":   func() (int, error) { return migrator.MigrateDecrypt(context.Background(), spec) },
+                "encrypt":   func() (int, error) { return migrator.MigrateEncrypt(context.Background(), specification) },
+                "reencrypt": func() (int, error) { return migrator.MigrateReencrypt(context.Background(), specification, "v2") },
+                "decrypt":   func() (int, error) { return migrator.MigrateDecrypt(context.Background(), specification) },
             } {
                 _, runErr := run()
-                if nil == runErr || "TableSpec.BatchSize" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+                if nil == runErr || "TableSpecification.BatchSize" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
                     t.Fatalf("%s: expected the batch size refused naming the field, got %v", door, runErr)
                 }
             }
@@ -1962,7 +1962,7 @@ func TestMigrator_AnAbsentBatchSizePagesByTheDefault(t *testing.T) {
         },
     })
 
-    if _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}}); nil != runErr {
+    if _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"iban"}}); nil != runErr {
         t.Fatalf("unexpected run error: %v", runErr)
     }
 
@@ -2016,7 +2016,7 @@ func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
 
 func TestClassifyRunError_ReturnsOnACyclicChain(t *testing.T) {
     assertReturnsOnACyclicChain(t, func() {
-        if nil == (&Migrator{}).classifyRunError(TableSpec{Table: "account"}, 0, "failed", newCyclicChainError()) {
+        if nil == (&Migrator{}).classifyRunError(TableSpecification{Table: "account"}, 0, "failed", newCyclicChainError()) {
             t.Error("expected the failure")
         }
     })
@@ -2133,7 +2133,7 @@ func TestMigrator_EncryptOverAnUnboundColumnLeavesAGcm1SealUntouched(t *testing.
     migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", sealed}}))
     migrator.cipher = cipherInstance
 
-    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}); nil != runErr {
+    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}); nil != runErr {
         t.Fatalf("unexpected run error: %v", runErr)
     }
 
@@ -2263,19 +2263,19 @@ func TestMigrator_ASealStoredAsDataInABoundColumnStaysData(t *testing.T) {
     unboundData, _ := sealer.sealValue(seal, false)
 
     for name, testCase := range map[string]struct {
-        run    func(migrator *Migrator, spec TableSpec) (int, error)
-        stored string
-        spec   TableSpec
+        run           func(migrator *Migrator, specification TableSpecification) (int, error)
+        stored        string
+        specification TableSpecification
     }{
-        "encrypt converting a bound seal": {run: migrateModeRuns["encrypt"], stored: boundData, spec: boundNotesSpec(false, true)},
-        "encrypt rebinding a gcm1 seal":   {run: migrateModeRuns["encrypt"], stored: unboundData, spec: boundNotesSpec(false, false)},
-        "reencrypt":                       {run: migrateModeRuns["reencrypt"], stored: boundData, spec: boundNotesSpec(false, false)},
+        "encrypt converting a bound seal": {run: migrateModeRuns["encrypt"], stored: boundData, specification: boundNotesSpec(false, true)},
+        "encrypt rebinding a gcm1 seal":   {run: migrateModeRuns["encrypt"], stored: unboundData, specification: boundNotesSpec(false, false)},
+        "reencrypt":                       {run: migrateModeRuns["reencrypt"], stored: boundData, specification: boundNotesSpec(false, false)},
     } {
         t.Run(name, func(t *testing.T) {
             migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", testCase.stored}}))
             migrator.cipher = cipherInstance
 
-            if _, runErr := testCase.run(migrator, testCase.spec); nil != runErr {
+            if _, runErr := testCase.run(migrator, testCase.specification); nil != runErr {
                 t.Fatalf("unexpected run error: %v", runErr)
             }
 
@@ -2296,20 +2296,20 @@ func TestMigrator_RefusesASpecItCannotBind(t *testing.T) {
     cipherInstance := newRotationCipher(t)
 
     for name, testCase := range map[string]struct {
-        cipher Cipher
-        spec   TableSpec
+        cipher        Cipher
+        specification TableSpecification
     }{
         "an unlisted column": {
-            cipher: cipherInstance,
-            spec:   TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}, SealBindings: map[string]ColumnSealBinding{"body": {Label: "accounts.body"}}},
+            cipher:        cipherInstance,
+            specification: TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}, SealBindings: map[string]ColumnSealBinding{"body": {Label: "accounts.body"}}},
         },
         "a label outside the grammar": {
-            cipher: cipherInstance,
-            spec:   TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}, SealBindings: map[string]ColumnSealBinding{"notes": {Label: "notes"}}},
+            cipher:        cipherInstance,
+            specification: TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}, SealBindings: map[string]ColumnSealBinding{"notes": {Label: "notes"}}},
         },
         "a wrapped cipher": {
-            cipher: wrappedCipher{Cipher: cipherInstance},
-            spec:   boundNotesSpec(false, false),
+            cipher:        wrappedCipher{Cipher: cipherInstance},
+            specification: boundNotesSpec(false, false),
         },
     } {
         for door, run := range migrateModeRuns {
@@ -2317,9 +2317,9 @@ func TestMigrator_RefusesASpecItCannotBind(t *testing.T) {
                 migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", "plain"}}))
                 migrator.cipher = testCase.cipher
 
-                _, runErr := run(migrator, testCase.spec)
-                if nil == runErr || "TableSpec.SealBindings" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
-                    t.Fatalf("expected a refusal naming TableSpec.SealBindings, got %v", runErr)
+                _, runErr := run(migrator, testCase.specification)
+                if nil == runErr || "TableSpecification.SealBindings" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+                    t.Fatalf("expected a refusal naming TableSpecification.SealBindings, got %v", runErr)
                 }
 
                 if queries := runQueries(stub); 0 != len(queries) {
@@ -2384,7 +2384,7 @@ func TestMigrator_CountsNoBindingOnAnUnboundColumn(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, scriptedNotesTable([][]driver.Value{{"1", random}}))
     migrator.cipher = cipherInstance
 
-    stats, runErr := migrator.migrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}, Deterministic: true})
+    stats, runErr := migrator.migrateEncrypt(context.Background(), TableSpecification{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}, Deterministic: true})
     if nil != runErr {
         t.Fatalf("unexpected run error: %v", runErr)
     }
@@ -2442,8 +2442,8 @@ func TestMigrator_DecryptRefusesARefusingBindingBeforeAnyQuery(t *testing.T) {
     migrator.cipher = cipherInstance
 
     _, runErr := migrator.MigrateDecrypt(context.Background(), boundNotesSpec(true, false))
-    if nil == runErr || "TableSpec.SealBindings" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
-        t.Fatalf("expected a refusal naming TableSpec.SealBindings, got %v", runErr)
+    if nil == runErr || "TableSpecification.SealBindings" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
+        t.Fatalf("expected a refusal naming TableSpecification.SealBindings, got %v", runErr)
     }
 
     if queries := runQueries(stub); 0 != len(queries) {
@@ -2451,7 +2451,7 @@ func TestMigrator_DecryptRefusesARefusingBindingBeforeAnyQuery(t *testing.T) {
     }
 }
 
-/* one spec binding one column and leaving the other unbound runs each under its own kind */
+/* one specification binding one column and leaving the other unbound runs each under its own kind */
 func TestMigrator_ASpecBindsItsBoundColumnAlone(t *testing.T) {
     cipherInstance := newRotationCipher(t)
     migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
@@ -2465,10 +2465,10 @@ func TestMigrator_ASpecBindsItsBoundColumnAlone(t *testing.T) {
     })
     migrator.cipher = cipherInstance
 
-    spec := boundNotesSpec(false, false)
-    spec.Columns = []string{"notes", "body"}
+    specification := boundNotesSpec(false, false)
+    specification.Columns = []string{"notes", "body"}
 
-    if _, runErr := migrator.MigrateEncrypt(context.Background(), spec); nil != runErr {
+    if _, runErr := migrator.MigrateEncrypt(context.Background(), specification); nil != runErr {
         t.Fatalf("unexpected run error: %v", runErr)
     }
 
@@ -2490,7 +2490,7 @@ func TestMigrator_ASpecBindsItsBoundColumnAlone(t *testing.T) {
     }
 }
 
-/* the fake cipher carries the binding door as the identity, so a bound spec over it changes nothing */
+/* the fake cipher carries the binding door as the identity, so a bound specification over it changes nothing */
 func TestMigrator_ABoundSpecOverTheFakeCipherIsTheIdentity(t *testing.T) {
     for door, run := range migrateModeRuns {
         t.Run(door, func(t *testing.T) {

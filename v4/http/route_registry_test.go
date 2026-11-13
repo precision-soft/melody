@@ -198,8 +198,8 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherRequirement(t *testing.T
             t.Fatalf("expected /item/%s to be reachable", identifier)
         }
 
-        if identifier != routeMatch.Params["id"] {
-            t.Fatalf("expected the identifier to be bound to %q, got %q", identifier, routeMatch.Params["id"])
+        if identifier != routeMatch.Parameters["id"] {
+            t.Fatalf("expected the identifier to be bound to %q, got %q", identifier, routeMatch.Parameters["id"])
         }
     }
 

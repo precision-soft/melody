@@ -25,7 +25,7 @@ import (
 
 const (
     flagNameOutput               = "out"
-    flagNameLogsDir              = "logs-dir"
+    flagNameLogsDirectory        = "logs-directory"
     flagNameBinary               = "binary"
     flagNameDefaultUser          = "user"
     flagNameHeartbeatPath        = "heartbeat-path"
@@ -87,8 +87,8 @@ func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
             Usage: "path where the crontab will be written; overrides the melody.cron.destination_file parameter",
         },
         &clicontract.StringFlag{
-            Name:  flagNameLogsDir,
-            Usage: "directory used in the log redirection of generated entries; overrides the melody.cron.logs_dir parameter",
+            Name:  flagNameLogsDirectory,
+            Usage: "directory used in the log redirection of generated entries; overrides the melody.cron.logs_directory parameter",
         },
         &clicontract.StringFlag{
             Name:  flagNameBinary,
@@ -100,7 +100,7 @@ func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
         },
         &clicontract.StringFlag{
             Name:  flagNameHeartbeatPath,
-            Usage: "if set, a 'touch <path>' entry runs every minute as the default user; overrides the melody.cron.heartbeat_path parameter and the melody.cron.heartbeat.enabled opt-in (which auto-derives <logs-dir>/heartbeat.crontab when neither is set)",
+            Usage: "if set, a 'touch <path>' entry runs every minute as the default user; overrides the melody.cron.heartbeat_path parameter and the melody.cron.heartbeat.enabled opt-in (which auto-derives <logs-directory>/heartbeat.crontab when neither is set)",
         },
         &clicontract.StringSliceFlag{
             Name:  flagNameHeartbeatCommand,
@@ -172,7 +172,7 @@ type runOptions struct {
     logDirectoryOwnership *logDirectoryOwnership
     template              Template
     outputPath            string
-    logsDir               string
+    logsDirectory         string
     binary                string
     defaultUserName       string
     heartbeatPath         string
@@ -301,35 +301,35 @@ func (instance *GenerateCommand) resolveRunOptions(
     }
     options.outputPath = absoluteOutputPath
 
-    logsDir := resolveDefaultPath(commandContext, configuration, flagNameLogsDir, ParameterLogsDir)
-    if "" != logsDir {
-        absoluteLogsDir, logsDirAbsErr := filepath.Abs(logsDir)
-        if nil != logsDirAbsErr {
+    logsDirectory := resolveDefaultPath(commandContext, configuration, flagNameLogsDirectory, ParameterLogsDirectory)
+    if "" != logsDirectory {
+        absoluteLogsDirectory, logsDirectoryAbsErr := filepath.Abs(logsDirectory)
+        if nil != logsDirectoryAbsErr {
             return nil, exception.NewError(
-                "cron: could not resolve absolute path for logs dir",
-                exceptioncontract.Context{"path": logsDir},
-                logsDirAbsErr,
+                "cron: could not resolve absolute path for logs directory",
+                exceptioncontract.Context{"path": logsDirectory},
+                logsDirectoryAbsErr,
             )
         }
-        logsDir = absoluteLogsDir
+        logsDirectory = absoluteLogsDirectory
 
         /* the logs directory is created before anything is rendered, because under system cron a shell whose redirection cannot create its file aborts the command; creating it is idempotent, so a run that fails later leaves it behind */
-        if mkdirErr := os.MkdirAll(logsDir, 0o755); nil != mkdirErr {
+        if mkdirErr := os.MkdirAll(logsDirectory, 0o755); nil != mkdirErr {
             return nil, exception.NewError(
                 "cron: could not create the logs directory",
-                exceptioncontract.Context{"directory": logsDir},
+                exceptioncontract.Context{"directory": logsDirectory},
                 mkdirErr,
             )
         }
     }
-    options.logsDir = logsDir
+    options.logsDirectory = logsDirectory
 
     /* a relative melody.cron.binary is anchored under the project like its three sibling paths, while a relative --binary keeps the shell's convention */
     options.binary = resolveDefaultPath(commandContext, configuration, flagNameBinary, ParameterBinary)
     options.defaultUserName = resolveDefault(commandContext, configuration, flagNameDefaultUser, ParameterUser)
 
     heartbeatPath := resolveDefaultPath(commandContext, configuration, flagNameHeartbeatPath, ParameterHeartbeatPath)
-    if "" == heartbeatPath && "" != logsDir {
+    if "" == heartbeatPath && "" != logsDirectory {
         autoEnabled, autoEnabledErr := isHeartbeatAutoEnabled(configuration)
         if nil != autoEnabledErr {
             return nil, autoEnabledErr
@@ -337,7 +337,7 @@ func (instance *GenerateCommand) resolveRunOptions(
 
         /* a malformed heartbeat opt-in fails under every template, while the derived path stays crontab-only so the k8s template never arms the dropped-heartbeat warning on a setting nobody made */
         if true == autoEnabled && false == isK8s {
-            heartbeatPath = filepath.Join(logsDir, "heartbeat.crontab")
+            heartbeatPath = filepath.Join(logsDirectory, "heartbeat.crontab")
         }
     }
     if "" != heartbeatPath {
@@ -404,14 +404,14 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
     }
     options.binary = binary
 
-    /* only the crontab template redirects output to a log file; the k8s template logs to stdout, so it does not inherit the logs-dir requirement */
+    /* only the crontab template redirects output to a log file; the k8s template logs to stdout, so it does not inherit the logs-directory requirement */
     requiresLogPath := false == options.rendersK8s()
 
     entries := make([]Entry, 0, len(scheduledCommands))
     for _, scheduled := range scheduledCommands {
         config := scheduled.Config
 
-        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, &config, binary, options.defaultUserName, options.logsDir, requiresLogPath, options.logDirectoryOwnership)
+        expanded, expandErr := expandEntriesForCommand(scheduled.CommandName, &config, binary, options.defaultUserName, options.logsDirectory, requiresLogPath, options.logDirectoryOwnership)
         if nil != expandErr {
             return nil, expandErr
         }
@@ -1062,7 +1062,7 @@ func expandEntriesForCommand(
     config *EntryConfig,
     binary string,
     defaultUserName string,
-    logsDir string,
+    logsDirectory string,
     requiresLogPath bool,
     ownership *logDirectoryOwnership,
 ) ([]Entry, error) {
@@ -1084,7 +1084,7 @@ func expandEntriesForCommand(
 
     entries := make([]Entry, 0, instances)
     for index := 1; index <= instances; index++ {
-        logPath, unownedDirectory, logPathErr := resolveEntryLogPath(commandName, config, logsDir, instances, index, requiresLogPath, logDirectoryOwner)
+        logPath, unownedDirectory, logPathErr := resolveEntryLogPath(commandName, config, logsDirectory, instances, index, requiresLogPath, logDirectoryOwner)
         if nil != logPathErr {
             return nil, logPathErr
         }
@@ -1130,7 +1130,7 @@ func expandEntriesForCommand(
 func resolveEntryLogPath(
     commandName string,
     config *EntryConfig,
-    logsDir string,
+    logsDirectory string,
     instances int,
     index int,
     requiresLogPath bool,
@@ -1140,20 +1140,20 @@ func resolveEntryLogPath(
         return "", "", nil
     }
 
-    /* the active template does not redirect output to a log file (k8s), so there is no log path to resolve and no logs-dir to demand */
+    /* the active template does not redirect output to a log file (k8s), so there is no log path to resolve and no logs-directory to demand */
     if false == requiresLogPath {
         return "", "", nil
     }
 
-    if "" == logsDir {
+    if "" == logsDirectory {
         return "", "", exception.NewError(
-            "cron: command wants log redirection but no logs-dir is configured; set --logs-dir, set the MELODY_CRON_LOGS_DIR key, or set EntryConfig.LogDisabled=true",
+            "cron: command wants log redirection but no logs directory is configured; set --logs-directory, set the MELODY_CRON_LOGS_DIRECTORY key, or set EntryConfig.LogDisabled=true",
             exceptioncontract.Context{
                 "command":   commandName,
-                "flag":      flagNameLogsDir,
-                "parameter": ParameterLogsDir,
+                "flag":      flagNameLogsDirectory,
+                "parameter": ParameterLogsDirectory,
             },
-            ErrNoLogsDir,
+            ErrNoLogsDirectory,
         )
     }
 
@@ -1172,24 +1172,24 @@ func resolveEntryLogPath(
         logFileName = filepath.Join(filepath.Dir(logFileName), fmt.Sprintf("%s-%d%s", base, index, extension))
     }
 
-    joined := filepath.Join(logsDir, logFileName)
-    cleanedLogsDir := filepath.Clean(logsDir)
+    joined := filepath.Join(logsDirectory, logFileName)
+    cleanedLogsDirectory := filepath.Clean(logsDirectory)
 
-    if false == isWithinDirectory(joined, cleanedLogsDir) {
+    if false == isWithinDirectory(joined, cleanedLogsDirectory) {
         return "", "", exception.NewError(
-            "cron: EntryConfig.LogFileName resolves to a path that escapes the logs directory; use a file name that stays within the logs dir",
+            "cron: EntryConfig.LogFileName resolves to a path that escapes the logs directory; use a file name that stays within the logs directory",
             exceptioncontract.Context{
-                "command":      commandName,
-                "logFileName":  config.LogFileName,
-                "resolvedPath": joined,
-                "logsDir":      cleanedLogsDir,
+                "command":       commandName,
+                "logFileName":   config.LogFileName,
+                "resolvedPath":  joined,
+                "logsDirectory": cleanedLogsDirectory,
             },
             ErrDestinationEscape,
         )
     }
 
-    /* a LogFileName with a subdirectory stays within the logs dir but nothing else creates that subdirectory, and under system cron the shell aborts the command when the >> redirection cannot create its file */
-    missingDirectories := missingDirectoriesBelow(filepath.Dir(joined), cleanedLogsDir)
+    /* a LogFileName with a subdirectory stays within the logs directory but nothing else creates that subdirectory, and under system cron the shell aborts the command when the >> redirection cannot create its file */
+    missingDirectories := missingDirectoriesBelow(filepath.Dir(joined), cleanedLogsDirectory)
 
     if mkdirErr := os.MkdirAll(filepath.Dir(joined), 0o755); nil != mkdirErr {
         return "", "", exception.NewError(

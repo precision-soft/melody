@@ -42,7 +42,7 @@ func TestValidateNoForbiddenCharactersAllowsCleanTokens(t *testing.T) {
 
 func TestValidateNoForbiddenCharactersWithCustomList(t *testing.T) {
     custom := []ForbiddenCharacter{
-        {Char: '\t', Reason: "tabs break YAML"},
+        {Character: '\t', Reason: "tabs break YAML"},
     }
 
     err := ValidateNoForbiddenCharacters([]string{"has\ttab"}, custom, "yaml entry")

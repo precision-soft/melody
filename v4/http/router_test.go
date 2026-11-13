@@ -138,14 +138,14 @@ func TestRouter_HandlerErrorConvertedTo500(t *testing.T) {
     }
 }
 
-func TestRouter_ParamExtraction(t *testing.T) {
+func TestRouter_ParameterExtraction(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
         nethttp.MethodGet,
         "/user/:id",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            value, exists := request.Param("id")
+            value, exists := request.Parameter("id")
             if false == exists {
                 return TextResponse(500, "missing id"), nil
             }
@@ -279,8 +279,8 @@ func TestRouter_Match_EmptySegmentDoesNotSatisfyNamedParameter(t *testing.T) {
         t.Fatalf("expected a supplied identifier to match")
     }
 
-    if "7" != routeMatch.Params["id"] {
-        t.Fatalf("expected the identifier to be bound, got %q", routeMatch.Params["id"])
+    if "7" != routeMatch.Parameters["id"] {
+        t.Fatalf("expected the identifier to be bound, got %q", routeMatch.Parameters["id"])
     }
 }
 
@@ -395,12 +395,12 @@ func TestRouter_AddRoute_NonTrailingOptionalWithADefaultSurvivesASuppliedEmptyVa
         t.Fatalf("expected the generated path %q to match the route it came from", generatedPath)
     }
 
-    if "en" != routeMatch.Params["locale"] {
-        t.Fatalf("expected the locale to be bound to the default, got %q", routeMatch.Params["locale"])
+    if "en" != routeMatch.Parameters["locale"] {
+        t.Fatalf("expected the locale to be bound to the default, got %q", routeMatch.Parameters["locale"])
     }
 
-    if "2" != routeMatch.Params["page"] {
-        t.Fatalf("expected the page to be bound, got %q", routeMatch.Params["page"])
+    if "2" != routeMatch.Parameters["page"] {
+        t.Fatalf("expected the page to be bound, got %q", routeMatch.Parameters["page"])
     }
 }
 
@@ -500,8 +500,8 @@ func TestRouter_AddRoute_ServesATrailingOptionalReachedThroughTheRoot(t *testing
         t.Fatalf("expected the generated path %q to match the route it came from", generatedPath)
     }
 
-    if _, bound := matchResult.Params["page"]; true == bound {
-        t.Fatalf("expected the omitted optional to stay unbound, got %v", matchResult.Params)
+    if _, bound := matchResult.Parameters["page"]; true == bound {
+        t.Fatalf("expected the omitted optional to stay unbound, got %v", matchResult.Parameters)
     }
 }
 
@@ -626,7 +626,7 @@ func TestControllerHandler_ANamedRouteServesTheControllerUnderTheNameTheGenerato
     router.HandleWithOptions(
         "/articles/:id",
         ControllerHandler(func(request httpcontract.Request) (httpcontract.Response, error) {
-            identifier, _ := request.Param("id")
+            identifier, _ := request.Parameter("id")
 
             return TextResponse(nethttp.StatusOK, identifier), nil
         }),
@@ -817,13 +817,13 @@ func TestRouterRegistration_AcceptsLocalesSuppliedByADefault(t *testing.T) {
         },
     )
 
-    handler, params, _ := router.match(nethttp.MethodGet, "/articles", "", "https")
+    handler, parameters, _ := router.match(nethttp.MethodGet, "/articles", "", "https")
     if nil == handler {
         t.Fatalf("expected a route whose locale comes from a default to be reachable")
     }
 
-    if "en" != params[RouteAttributeLocale] {
-        t.Fatalf("expected the default locale to reach the handler, got %q", params[RouteAttributeLocale])
+    if "en" != parameters[RouteAttributeLocale] {
+        t.Fatalf("expected the default locale to reach the handler, got %q", parameters[RouteAttributeLocale])
     }
 }
 
@@ -862,9 +862,9 @@ func TestRouterMatch_TheAsteriskFormIsNotPathRouted(t *testing.T) {
 
     router.Handle(nethttp.MethodOptions, "/:anything", routeRegistryTestHandler())
 
-    handler, params, _ := router.match(nethttp.MethodOptions, "*", "", "https")
+    handler, parameters, _ := router.match(nethttp.MethodOptions, "*", "", "https")
     if nil != handler {
-        t.Fatalf("expected the asterisk-form target not to be offered to a parameter route, bound %v", params)
+        t.Fatalf("expected the asterisk-form target not to be offered to a parameter route, bound %v", parameters)
     }
 
     if 0 != len(router.AllowedMethods("*", "", "https")) {
@@ -878,13 +878,13 @@ func TestRouterMatch_AnEncodedSlashDoesNotSplitASegment(t *testing.T) {
     router.Handle(nethttp.MethodGet, "/admin/users", routeRegistryTestHandler())
     router.Handle(nethttp.MethodGet, "/:name", routeRegistryTestHandler())
 
-    handler, params, _ := router.match(nethttp.MethodGet, "/admin%2Fusers", "", "https")
+    handler, parameters, _ := router.match(nethttp.MethodGet, "/admin%2Fusers", "", "https")
     if nil == handler {
         t.Fatalf("expected the encoded spelling to match the single-segment route")
     }
 
-    if "admin/users" != params["name"] {
-        t.Fatalf("expected the encoded separator to stay inside the bound value, got %q", params["name"])
+    if "admin/users" != parameters["name"] {
+        t.Fatalf("expected the encoded separator to stay inside the bound value, got %q", parameters["name"])
     }
 }
 
@@ -893,9 +893,9 @@ func TestRouterMatch_AnEncodedSegmentIsUnescapedForTheHandler(t *testing.T) {
 
     router.Handle(nethttp.MethodGet, "/article/:slug", routeRegistryTestHandler())
 
-    _, params, _ := router.match(nethttp.MethodGet, "/article/hello%20world", "", "https")
-    if "hello world" != params["slug"] {
-        t.Fatalf("expected the segment to be unescaped for the handler, got %q", params["slug"])
+    _, parameters, _ := router.match(nethttp.MethodGet, "/article/hello%20world", "", "https")
+    if "hello world" != parameters["slug"] {
+        t.Fatalf("expected the segment to be unescaped for the handler, got %q", parameters["slug"])
     }
 }
 
@@ -941,7 +941,7 @@ func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
     router.HandleWithOptions(
         "/files/*path",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            pathValue, _ := request.Param("path")
+            pathValue, _ := request.Parameter("path")
             captured = append(captured, pathValue)
 
             return TextResponse(200, "ok"), nil
@@ -980,7 +980,7 @@ func TestRouter_CatchAllBindsALiteralEncodedSeparatorAsTheEncodedSeparator(t *te
     router.HandleWithOptions(
         "/files/*path",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            pathValue, _ := request.Param("path")
+            pathValue, _ := request.Parameter("path")
             captured = append(captured, pathValue)
 
             return TextResponse(200, "ok"), nil

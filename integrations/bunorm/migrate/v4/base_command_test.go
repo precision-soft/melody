@@ -35,7 +35,7 @@ func TestResolveDatabase_UnknownManagerReturnsErrorInsteadOfPanic(t *testing.T) 
         context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
-            bunorm.ProviderDefinition{Name: "primary", Provider: &stubProvider{}, Params: testConnectionParameters, IsDefault: true},
+            bunorm.ProviderDefinition{Name: "primary", Provider: &stubProvider{}, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -99,8 +99,8 @@ func pinTestRegistry(t *testing.T) *bunorm.ManagerRegistry {
         context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
-            bunorm.ProviderDefinition{Name: "platform", Provider: &fakeDatabaseProvider{database: platformDatabase}, Params: testConnectionParameters, IsDefault: true},
-            bunorm.ProviderDefinition{Name: "payment", Provider: &fakeDatabaseProvider{database: paymentDatabase}, Params: testConnectionParameters},
+            bunorm.ProviderDefinition{Name: "platform", Provider: &fakeDatabaseProvider{database: platformDatabase}, Parameters: testConnectionParameters, IsDefault: true},
+            bunorm.ProviderDefinition{Name: "payment", Provider: &fakeDatabaseProvider{database: paymentDatabase}, Parameters: testConnectionParameters},
         },
     )
     if nil != registryErr {
@@ -288,10 +288,10 @@ func TestResolveDatabase_PrefersTheDedicatedMigrationConnection(t *testing.T) {
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
             bunorm.ProviderDefinition{
-                Name:      "primary",
-                Provider:  &migrationCapableDatabaseProvider{database: ordinaryDatabase, migrationDatabase: migrationDatabase},
-                Params:    testConnectionParameters,
-                IsDefault: true,
+                Name:       "primary",
+                Provider:   &migrationCapableDatabaseProvider{database: ordinaryDatabase, migrationDatabase: migrationDatabase},
+                Parameters: testConnectionParameters,
+                IsDefault:  true,
             },
         },
     )
@@ -434,7 +434,7 @@ func TestResolveDatabase_TheReleaseEndsTheDedicatedMigrationConnection(t *testin
         context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
-            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -511,7 +511,7 @@ func TestResolveDatabase_TheReleaseReportsAFailedClose(t *testing.T) {
         context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
-            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {
@@ -602,7 +602,7 @@ func TestResolveDatabase_TheSuccessfulReleaseIsSilent(t *testing.T) {
         context.Background(),
         logging.NewNopLogger(),
         []bunorm.ProviderDefinition{
-            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Params: testConnectionParameters, IsDefault: true},
+            bunorm.ProviderDefinition{Name: "primary", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
         },
     )
     if nil != registryErr {

@@ -65,12 +65,12 @@ func (instance *HttpTestRequest) HttpRequest() *http.Request {
     return instance.httpRequestValue
 }
 
-func (instance *HttpTestRequest) Param(name string) (string, bool) {
+func (instance *HttpTestRequest) Parameter(name string) (string, bool) {
     value, ok := instance.paramsValue[name]
     return value, ok
 }
 
-func (instance *HttpTestRequest) Params() map[string]string {
+func (instance *HttpTestRequest) Parameters() map[string]string {
     return internal.CopyStringMap[string](instance.paramsValue)
 }
 

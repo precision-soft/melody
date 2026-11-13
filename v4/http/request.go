@@ -93,7 +93,7 @@ func NewRequest(
 
     return &Request{
         httpRequest:     httpRequest,
-        params:          routeParams,
+        parameters:      routeParams,
         query:           queryBag,
         post:            postBag,
         attributes:      attributesBag,
@@ -105,7 +105,7 @@ func NewRequest(
 
 type Request struct {
     httpRequest     *nethttp.Request
-    params          map[string]string
+    parameters      map[string]string
     query           bagcontract.ParameterBag
     post            bagcontract.ParameterBag
     attributes      bagcontract.ParameterBag
@@ -119,16 +119,16 @@ func (instance *Request) HttpRequest() *nethttp.Request {
     return instance.httpRequest
 }
 
-func (instance *Request) Param(name string) (string, bool) {
-    value, exists := instance.params[name]
+func (instance *Request) Parameter(name string) (string, bool) {
+    value, exists := instance.parameters[name]
 
     return value, exists
 }
 
-func (instance *Request) Params() map[string]string {
-    copied := make(map[string]string, len(instance.params))
+func (instance *Request) Parameters() map[string]string {
+    copied := make(map[string]string, len(instance.parameters))
 
-    for key, value := range instance.params {
+    for key, value := range instance.parameters {
         copied[key] = value
     }
 
@@ -244,7 +244,7 @@ func (instance *Request) FormValue(key string) string {
     return instance.httpRequest.FormValue(key)
 }
 
-/* Input answers a request parameter by name from the parsed form body — a POST, PUT or PATCH carrying a urlencoded media type; a multipart body is left unparsed to keep its disk spooling, and neither it nor a json body is a source —, then the query string, then the route parameters: the first source that has the key answers. A handler that must have the value the router bound reads Params. A repeated key answers its first value, as FormValue does; bag.StringSlice reads the whole array. */
+/* Input answers a request parameter by name from the parsed form body — a POST, PUT or PATCH carrying a urlencoded media type; a multipart body is left unparsed to keep its disk spooling, and neither it nor a json body is a source —, then the query string, then the route parameters: the first source that has the key answers. A handler that must have the value the router bound reads Parameters. A repeated key answers its first value, as FormValue does; bag.StringSlice reads the whole array. */
 func (instance *Request) Input(key string) string {
     if nil != instance.post && true == instance.post.Has(key) {
         return firstStringValue(instance.post, key)
@@ -254,8 +254,8 @@ func (instance *Request) Input(key string) string {
         return firstStringValue(instance.query, key)
     }
 
-    if nil != instance.params {
-        value, exists := instance.params[key]
+    if nil != instance.parameters {
+        value, exists := instance.parameters[key]
         if true == exists {
             return value
         }

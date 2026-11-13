@@ -67,32 +67,32 @@ func TestNewHttpTestRequest_TwoRequestsDoNotShareTheirBags(t *testing.T) {
     }
 }
 
-func TestHttpTestRequest_ParamSeparatesAnAbsentParameterFromAnEmptyOne(t *testing.T) {
+func TestHttpTestRequest_ParameterSeparatesAnAbsentParameterFromAnEmptyOne(t *testing.T) {
     request := NewHttpTestRequest(http.MethodGet, "/articles/7").(*HttpTestRequest)
     request.paramsValue["id"] = "7"
     request.paramsValue["slug"] = ""
 
-    value, ok := request.Param("id")
+    value, ok := request.Parameter("id")
     if false == ok || "7" != value {
         t.Fatalf("expected a seeded parameter to be found, got %q, %t", value, ok)
     }
 
-    value, ok = request.Param("slug")
+    value, ok = request.Parameter("slug")
     if false == ok || "" != value {
         t.Fatalf("expected a seeded empty parameter to be found, got %q, %t", value, ok)
     }
 
-    value, ok = request.Param("missing")
+    value, ok = request.Parameter("missing")
     if true == ok || "" != value {
         t.Fatalf("expected an absent parameter to be reported absent, got %q, %t", value, ok)
     }
 }
 
-func TestHttpTestRequest_ParamsHandsOutACopyRatherThanTheLiveMap(t *testing.T) {
+func TestHttpTestRequest_ParametersHandsOutACopyRatherThanTheLiveMap(t *testing.T) {
     request := NewHttpTestRequest(http.MethodGet, "/articles/7").(*HttpTestRequest)
     request.paramsValue["id"] = "7"
 
-    handedOut := request.Params()
+    handedOut := request.Parameters()
     handedOut["id"] = "9"
     handedOut["injected"] = "value"
 
@@ -104,7 +104,7 @@ func TestHttpTestRequest_ParamsHandsOutACopyRatherThanTheLiveMap(t *testing.T) {
         t.Fatalf("expected a key added to the handed-out map to stay out of the request")
     }
 
-    if "7" != request.Params()["id"] {
+    if "7" != request.Parameters()["id"] {
         t.Fatalf("expected a second read to answer the request's own value")
     }
 }

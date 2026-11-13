@@ -292,14 +292,14 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
     return generatedPath, nil
 }
 
-func (instance *UrlGenerator) GenerateUrl(routeName string, params map[string]string, queryParams map[string]string) (string, error) {
-    pathValue, err := instance.GeneratePath(routeName, params)
+func (instance *UrlGenerator) GenerateUrl(routeName string, parameters map[string]string, queryParameters map[string]string) (string, error) {
+    pathValue, err := instance.GeneratePath(routeName, parameters)
     if nil != err {
         return "", err
     }
 
     queryValues := url.Values{}
-    for key, value := range queryParams {
+    for key, value := range queryParameters {
         if "" == key {
             continue
         }

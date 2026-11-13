@@ -187,7 +187,7 @@ func (instance *Backend) refuseWhenClosed() error {
     return nil
 }
 
-func (instance *Backend) GetCtx(ctx context.Context, key string) ([]byte, bool, error) {
+func (instance *Backend) GetContext(ctx context.Context, key string) ([]byte, bool, error) {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return nil, false, closedErr
     }
@@ -217,15 +217,15 @@ func (instance *Backend) GetCtx(ctx context.Context, key string) ([]byte, bool, 
     return payload, true, nil
 }
 
-/* Deprecated: prefer GetCtx, which takes ctx per call. */
+/* Deprecated: prefer GetContext, which takes ctx per call. */
 func (instance *Backend) Get(key string) ([]byte, bool, error) {
     ctx, cancel := instance.operationContext()
     defer cancel()
 
-    return instance.GetCtx(ctx, key)
+    return instance.GetContext(ctx, key)
 }
 
-func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte, ttl bound.Duration) error {
+func (instance *Backend) SetContext(ctx context.Context, key string, payload []byte, ttl bound.Duration) error {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return closedErr
     }
@@ -253,15 +253,15 @@ func (instance *Backend) SetCtx(ctx context.Context, key string, payload []byte,
     ).Error()
 }
 
-/* Deprecated: prefer SetCtx, which takes ctx per call. */
+/* Deprecated: prefer SetContext, which takes ctx per call. */
 func (instance *Backend) Set(key string, payload []byte, ttl bound.Duration) error {
     ctx, cancel := instance.operationContext()
     defer cancel()
 
-    return instance.SetCtx(ctx, key, payload, ttl)
+    return instance.SetContext(ctx, key, payload, ttl)
 }
 
-func (instance *Backend) DeleteCtx(ctx context.Context, key string) error {
+func (instance *Backend) DeleteContext(ctx context.Context, key string) error {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return closedErr
     }
@@ -277,15 +277,15 @@ func (instance *Backend) DeleteCtx(ctx context.Context, key string) error {
     ).Error()
 }
 
-/* Deprecated: prefer DeleteCtx, which takes ctx per call. */
+/* Deprecated: prefer DeleteContext, which takes ctx per call. */
 func (instance *Backend) Delete(key string) error {
     ctx, cancel := instance.operationContext()
     defer cancel()
 
-    return instance.DeleteCtx(ctx, key)
+    return instance.DeleteContext(ctx, key)
 }
 
-func (instance *Backend) HasCtx(ctx context.Context, key string) (bool, error) {
+func (instance *Backend) HasContext(ctx context.Context, key string) (bool, error) {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return false, closedErr
     }
@@ -311,19 +311,19 @@ func (instance *Backend) HasCtx(ctx context.Context, key string) (bool, error) {
     return 0 != count, nil
 }
 
-/* Deprecated: prefer HasCtx, which takes ctx per call. */
+/* Deprecated: prefer HasContext, which takes ctx per call. */
 func (instance *Backend) Has(key string) (bool, error) {
     ctx, cancel := instance.operationContext()
     defer cancel()
 
-    return instance.HasCtx(ctx, key)
+    return instance.HasContext(ctx, key)
 }
 
-func (instance *Backend) ClearCtx(ctx context.Context) error {
+func (instance *Backend) ClearContext(ctx context.Context) error {
     return instance.clear(callerRoundTrip(ctx))
 }
 
-/* Deprecated: prefer ClearCtx, which takes ctx per call. The command timeout bounds each SCAN and each DEL rather than the walk, whose length is the size of the namespace. */
+/* Deprecated: prefer ClearContext, which takes ctx per call. The command timeout bounds each SCAN and each DEL rather than the walk, whose length is the size of the namespace. */
 func (instance *Backend) Clear() error {
     return instance.clear(instance.operationContext)
 }
@@ -349,12 +349,12 @@ func (instance *Backend) deleteMatching(roundTrip roundTripContext, pattern stri
     return instance.deleteKeysInBatches(roundTrip, keys)
 }
 
-/* ClearByPrefixCtx refuses the empty prefix as every other operation refuses the empty key: a run-time prefix that comes out empty, "tenant:" plus an unresolved id, would select the whole namespace. ClearCtx is the door for the whole namespace. */
-func (instance *Backend) ClearByPrefixCtx(ctx context.Context, prefix string) error {
+/* ClearByPrefixContext refuses the empty prefix as every other operation refuses the empty key: a run-time prefix that comes out empty, "tenant:" plus an unresolved id, would select the whole namespace. ClearContext is the door for the whole namespace. */
+func (instance *Backend) ClearByPrefixContext(ctx context.Context, prefix string) error {
     return instance.clearByPrefix(callerRoundTrip(ctx), prefix)
 }
 
-/* Deprecated: prefer ClearByPrefixCtx, which takes ctx per call. The command timeout bounds each SCAN and each DEL rather than the walk, whose length is the size of the subtree. */
+/* Deprecated: prefer ClearByPrefixContext, which takes ctx per call. The command timeout bounds each SCAN and each DEL rather than the walk, whose length is the size of the subtree. */
 func (instance *Backend) ClearByPrefix(prefix string) error {
     return instance.clearByPrefix(instance.operationContext, prefix)
 }
@@ -372,7 +372,7 @@ func (instance *Backend) clearByPrefix(roundTrip roundTripContext, prefix string
     return instance.deleteMatching(roundTrip, escapeRedisGlobMeta(normalizedPrefix)+"*")
 }
 
-func (instance *Backend) ManyCtx(ctx context.Context, keys []string) (map[string][]byte, error) {
+func (instance *Backend) ManyContext(ctx context.Context, keys []string) (map[string][]byte, error) {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return nil, closedErr
     }
@@ -425,15 +425,15 @@ func (instance *Backend) ManyCtx(ctx context.Context, keys []string) (map[string
     return result, nil
 }
 
-/* Deprecated: prefer ManyCtx, which takes ctx per call. */
+/* Deprecated: prefer ManyContext, which takes ctx per call. */
 func (instance *Backend) Many(keys []string) (map[string][]byte, error) {
     ctx, cancel := instance.operationContext()
     defer cancel()
 
-    return instance.ManyCtx(ctx, keys)
+    return instance.ManyContext(ctx, keys)
 }
 
-func (instance *Backend) SetMultipleCtx(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
+func (instance *Backend) SetMultipleContext(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return closedErr
     }
@@ -511,15 +511,15 @@ func (instance *Backend) firstSetFailure(setErrors map[string]error, requestedCo
     )
 }
 
-/* Deprecated: prefer SetMultipleCtx, which takes ctx per call. */
+/* Deprecated: prefer SetMultipleContext, which takes ctx per call. */
 func (instance *Backend) SetMultiple(items map[string][]byte, ttl bound.Duration) error {
     ctx, cancel := instance.operationContext()
     defer cancel()
 
-    return instance.SetMultipleCtx(ctx, items, ttl)
+    return instance.SetMultipleContext(ctx, items, ttl)
 }
 
-func (instance *Backend) DeleteMultipleCtx(ctx context.Context, keys []string) error {
+func (instance *Backend) DeleteMultipleContext(ctx context.Context, keys []string) error {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return closedErr
     }
@@ -545,15 +545,15 @@ func (instance *Backend) DeleteMultipleCtx(ctx context.Context, keys []string) e
     ))
 }
 
-/* Deprecated: prefer DeleteMultipleCtx, which takes ctx per call. */
+/* Deprecated: prefer DeleteMultipleContext, which takes ctx per call. */
 func (instance *Backend) DeleteMultiple(keys []string) error {
     ctx, cancel := instance.operationContext()
     defer cancel()
 
-    return instance.DeleteMultipleCtx(ctx, keys)
+    return instance.DeleteMultipleContext(ctx, keys)
 }
 
-func (instance *Backend) IncrementCtx(ctx context.Context, key string, delta int64) (int64, error) {
+func (instance *Backend) IncrementContext(ctx context.Context, key string, delta int64) (int64, error) {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return 0, closedErr
     }
@@ -579,15 +579,15 @@ func (instance *Backend) IncrementCtx(ctx context.Context, key string, delta int
     return value, nil
 }
 
-/* Deprecated: prefer IncrementCtx, which takes ctx per call. */
+/* Deprecated: prefer IncrementContext, which takes ctx per call. */
 func (instance *Backend) Increment(key string, delta int64) (int64, error) {
     ctx, cancel := instance.operationContext()
     defer cancel()
 
-    return instance.IncrementCtx(ctx, key, delta)
+    return instance.IncrementContext(ctx, key, delta)
 }
 
-func (instance *Backend) DecrementCtx(ctx context.Context, key string, delta int64) (int64, error) {
+func (instance *Backend) DecrementContext(ctx context.Context, key string, delta int64) (int64, error) {
     if closedErr := instance.refuseWhenClosed(); nil != closedErr {
         return 0, closedErr
     }
@@ -613,12 +613,12 @@ func (instance *Backend) DecrementCtx(ctx context.Context, key string, delta int
     return value, nil
 }
 
-/* Deprecated: prefer DecrementCtx, which takes ctx per call. */
+/* Deprecated: prefer DecrementContext, which takes ctx per call. */
 func (instance *Backend) Decrement(key string, delta int64) (int64, error) {
     ctx, cancel := instance.operationContext()
     defer cancel()
 
-    return instance.DecrementCtx(ctx, key, delta)
+    return instance.DecrementContext(ctx, key, delta)
 }
 
 /* CloseWithContext marks the backend closed and refuses every later operation, as the in-memory backend does; it waits for nothing. The shared client belongs to the composition root and is not closed here; the parent package's Connection wrapper is what the container's teardown closes. */

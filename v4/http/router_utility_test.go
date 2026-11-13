@@ -935,7 +935,7 @@ func TestControllerHandler_PanicsWhenSecondResultIsNotError(t *testing.T) {
     )
 }
 
-func TestMatchPath_WildcardLocale_SetsLocaleParam(t *testing.T) {
+func TestMatchPath_WildcardLocale_SetsLocaleParameter(t *testing.T) {
     routeDefinition := route{
         pattern:      "/*_locale...",
         parts:        splitPath("/*_locale..."),
@@ -943,13 +943,13 @@ func TestMatchPath_WildcardLocale_SetsLocaleParam(t *testing.T) {
     }
 
     pathSegments := splitPath("/en")
-    params, matched := matchPath(routeDefinition, pathSegments)
+    parameters, matched := matchPath(routeDefinition, pathSegments)
 
     if false == matched {
         t.Fatalf("expected path to match")
     }
 
-    value, exists := params[RouteAttributeLocale]
+    value, exists := parameters[RouteAttributeLocale]
     if false == exists {
         t.Fatalf("expected _locale param to exist")
     }
@@ -959,7 +959,7 @@ func TestMatchPath_WildcardLocale_SetsLocaleParam(t *testing.T) {
     }
 }
 
-func TestMatchPath_WildcardLocale_CatchAll_SetsLocaleParam(t *testing.T) {
+func TestMatchPath_WildcardLocale_CatchAll_SetsLocaleParameter(t *testing.T) {
     routeDefinition := route{
         pattern:      "/prefix/*_locale...",
         parts:        splitPath("/prefix/*_locale..."),
@@ -967,18 +967,18 @@ func TestMatchPath_WildcardLocale_CatchAll_SetsLocaleParam(t *testing.T) {
     }
 
     pathSegments := splitPath("/prefix/en/extra")
-    params, matched := matchPath(routeDefinition, pathSegments)
+    parameters, matched := matchPath(routeDefinition, pathSegments)
 
     if false == matched {
         t.Fatalf("expected path to match")
     }
 
-    if "en/extra" != params[RouteAttributeLocale] {
-        t.Fatalf("expected _locale catch-all to be 'en/extra', got: %s", params[RouteAttributeLocale])
+    if "en/extra" != parameters[RouteAttributeLocale] {
+        t.Fatalf("expected _locale catch-all to be 'en/extra', got: %s", parameters[RouteAttributeLocale])
     }
 }
 
-func TestMatchPath_WildcardNonLocale_DoesNotSetLocaleParam(t *testing.T) {
+func TestMatchPath_WildcardNonLocale_DoesNotSetLocaleParameter(t *testing.T) {
     routeDefinition := route{
         pattern:      "/*path...",
         parts:        splitPath("/*path..."),
@@ -986,23 +986,23 @@ func TestMatchPath_WildcardNonLocale_DoesNotSetLocaleParam(t *testing.T) {
     }
 
     pathSegments := splitPath("/some/path")
-    params, matched := matchPath(routeDefinition, pathSegments)
+    parameters, matched := matchPath(routeDefinition, pathSegments)
 
     if false == matched {
         t.Fatalf("expected path to match")
     }
 
-    _, exists := params[RouteAttributeLocale]
+    _, exists := parameters[RouteAttributeLocale]
     if true == exists {
         t.Fatalf("expected _locale param not to be set for non-locale wildcard")
     }
 
-    if "some/path" != params["path"] {
-        t.Fatalf("expected path param to be 'some/path', got: %s", params["path"])
+    if "some/path" != parameters["path"] {
+        t.Fatalf("expected path param to be 'some/path', got: %s", parameters["path"])
     }
 }
 
-func TestMatchPath_ParamLocale_SetsLocaleParam(t *testing.T) {
+func TestMatchPath_ParameterLocale_SetsLocaleParameter(t *testing.T) {
     routeDefinition := route{
         pattern:      "/page/:_locale",
         parts:        splitPath("/page/:_locale"),
@@ -1010,14 +1010,14 @@ func TestMatchPath_ParamLocale_SetsLocaleParam(t *testing.T) {
     }
 
     pathSegments := splitPath("/page/fr")
-    params, matched := matchPath(routeDefinition, pathSegments)
+    parameters, matched := matchPath(routeDefinition, pathSegments)
 
     if false == matched {
         t.Fatalf("expected path to match")
     }
 
-    if "fr" != params[RouteAttributeLocale] {
-        t.Fatalf("expected _locale param to be 'fr', got: %s", params[RouteAttributeLocale])
+    if "fr" != parameters[RouteAttributeLocale] {
+        t.Fatalf("expected _locale param to be 'fr', got: %s", parameters[RouteAttributeLocale])
     }
 }
 

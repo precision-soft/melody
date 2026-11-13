@@ -47,7 +47,7 @@ type managerOpen struct {
     openError error
 }
 
-/* NewManagerRegistry builds a container-level registry over lazily-dialed pools, bound to ctx. Container-level deliberately: a *bun.DB is a connection pool — the process-lifetime shape of database/sql — and per-unit work takes a transaction or a Conn from the pool, not a pool per scope. A provider that implements ContextOpener has its lazy opens run under ctx, so a shutdown that cancels it refuses an open not yet started and reaches the attempt's cancellable steps — the configuration hook, the boot ping, a retry sleep — in flight, its dial and handshake bounded by the connect timeout under the context. A nil ctx reads as context.Background(). A nil logger is refused. The definitions are read in order and refused by position: an empty name, a nil provider, an empty Params.Host or Params.Database, a duplicate name, more than one default. */
+/* NewManagerRegistry builds a container-level registry over lazily-dialed pools, bound to ctx. Container-level deliberately: a *bun.DB is a connection pool — the process-lifetime shape of database/sql — and per-unit work takes a transaction or a Conn from the pool, not a pool per scope. A provider that implements ContextOpener has its lazy opens run under ctx, so a shutdown that cancels it refuses an open not yet started and reaches the attempt's cancellable steps — the configuration hook, the boot ping, a retry sleep — in flight, its dial and handshake bounded by the connect timeout under the context. A nil ctx reads as context.Background(). A nil logger is refused. The definitions are read in order and refused by position: an empty name, a nil provider, an empty Parameters.Host or Parameters.Database, a duplicate name, more than one default. */
 func NewManagerRegistry(ctx context.Context, logger loggingcontract.Logger, providerDefinitions []ProviderDefinition) (*ManagerRegistry, error) {
     if true == isNilInterface(logger) {
         return nil, ErrLoggerIsRequired
@@ -74,12 +74,12 @@ func NewManagerRegistry(ctx context.Context, logger loggingcontract.Logger, prov
             return nil, providerDefinitionRefusal(ErrProviderIsRequired, position, providerDefinition.Name)
         }
 
-        if "" == providerDefinition.Params.Host {
-            return nil, providerDefinitionFieldRefusal(ErrConnectionHostIsRequired, position, providerDefinition.Name, "ProviderDefinition.Params.Host")
+        if "" == providerDefinition.Parameters.Host {
+            return nil, providerDefinitionFieldRefusal(ErrConnectionHostIsRequired, position, providerDefinition.Name, "ProviderDefinition.Parameters.Host")
         }
 
-        if "" == providerDefinition.Params.Database {
-            return nil, providerDefinitionFieldRefusal(ErrConnectionDatabaseIsRequired, position, providerDefinition.Name, "ProviderDefinition.Params.Database")
+        if "" == providerDefinition.Parameters.Database {
+            return nil, providerDefinitionFieldRefusal(ErrConnectionDatabaseIsRequired, position, providerDefinition.Name, "ProviderDefinition.Parameters.Database")
         }
 
         if _, exists := providerDefinitionByName[providerDefinition.Name]; true == exists {
@@ -193,7 +193,7 @@ func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, 
         close(migrationOpenDone)
     }()
 
-    database, openErr := instance.openProviderMigrationDatabase(migrationProvider, providerDefinition.Params)
+    database, openErr := instance.openProviderMigrationDatabase(migrationProvider, providerDefinition.Parameters)
     if nil != openErr {
         if nil != database {
             _ = database.Close()
@@ -469,7 +469,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
             panic(recovered)
         }
     }()
-    database, openErr := instance.openProviderDatabase(providerDefinition.Provider, providerDefinition.Params)
+    database, openErr := instance.openProviderDatabase(providerDefinition.Provider, providerDefinition.Parameters)
     providerReturned = true
 
     /* the publish runs in a closure with a deferred unlock: it calls into the freshly opened database, and a panic there would otherwise unwind with the lock held, whereupon the recovery defer above re-acquires the same non-reentrant mutex and wedges the whole registry with no waiter ever released */

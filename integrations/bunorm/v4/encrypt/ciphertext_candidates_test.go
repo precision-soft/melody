@@ -45,7 +45,7 @@ func TestCiphertextCandidatesFor_RefusingUnboundAnswersBoundAlone(t *testing.T) 
 func TestCiphertextCandidatesFor_AnUnboundMarkerAnswersTheCipherCandidates(t *testing.T) {
     cipherInstance := newCrmCipher(t)
 
-    fromMarker, _ := CiphertextCandidatesFor[crmCipherRef]("RO49AAAA1B31007593840000")
+    fromMarker, _ := CiphertextCandidatesFor[crmCipherReference]("RO49AAAA1B31007593840000")
     fromCipher, _ := cipherInstance.CiphertextCandidates("RO49AAAA1B31007593840000")
 
     if len(fromMarker) != len(fromCipher) || string(fromMarker[0]) != string(fromCipher[0]) || string(fromMarker[1]) != string(fromCipher[1]) {

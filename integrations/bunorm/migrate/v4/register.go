@@ -16,7 +16,7 @@ func RegisterCommands(
     }
 
     return []contract.Command{
-        NewInitCommand(migrations, options),
+        NewInitializeCommand(migrations, options),
         NewMigrateCommand(migrations, options),
         NewRollbackCommand(migrations, options),
         NewStatusCommand(migrations, options),

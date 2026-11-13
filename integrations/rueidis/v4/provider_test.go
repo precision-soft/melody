@@ -106,7 +106,7 @@ func TestProvider_Open_EmptyAddressFails(t *testing.T) {
 
 func TestProvider_Open_UnreachableAddressFailsWithoutLeakingPassword(t *testing.T) {
     provider := NewProvider(ProviderConfig{
-        Client:  ClientConfig{DialTimeout: bound.Of(250 * time.Millisecond), ConnWriteTimeout: bound.Of(250 * time.Millisecond)},
+        Client:  ClientConfig{DialTimeout: bound.Of(250 * time.Millisecond), ConnectionWriteTimeout: bound.Of(250 * time.Millisecond)},
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(500 * time.Millisecond), CommandTimeout: bound.Of(500 * time.Millisecond)},
         Retry:   RetryConfig{MaxAttempts: bound.Of(1)},
     })
@@ -236,7 +236,7 @@ func TestProvider_OpenWithRetry_ReportsEachRetryAndTheExhaustionOnTheLoggerItIsH
     logger := &capturingLogger{}
 
     provider := NewProvider(ProviderConfig{
-        Client:  ClientConfig{DialTimeout: bound.Of(250 * time.Millisecond), ConnWriteTimeout: bound.Of(250 * time.Millisecond)},
+        Client:  ClientConfig{DialTimeout: bound.Of(250 * time.Millisecond), ConnectionWriteTimeout: bound.Of(250 * time.Millisecond)},
         Timeout: TimeoutConfig{ConnectTimeout: bound.Of(500 * time.Millisecond), CommandTimeout: bound.Of(500 * time.Millisecond)},
         Retry:   RetryConfig{MaxAttempts: bound.Of(2), InitialDelay: bound.Of(time.Millisecond), MaxDelay: bound.Of(time.Millisecond), BackoffMultiplier: 1},
         Logger:  logger,

@@ -953,13 +953,13 @@ func matchesScheme(schemes []string, scheme string) bool {
 }
 
 /* matchesLocale is read by the matcher and by AllowedMethods alike. A route declaring no locales accepts every one; a route declaring some refuses a path carrying none. */
-func matchesLocale(locales []string, params map[string]string) bool {
+func matchesLocale(locales []string, parameters map[string]string) bool {
     if 0 == len(locales) {
         return true
     }
 
     localeValue := ""
-    if value, exists := params[RouteAttributeLocale]; true == exists {
+    if value, exists := parameters[RouteAttributeLocale]; true == exists {
         localeValue = value
     }
 
@@ -992,7 +992,7 @@ func matchPath(
     pathSegments []string,
 ) (map[string]string, bool) {
     patternSegments := routeDefinition.parts
-    params := make(map[string]string)
+    parameters := make(map[string]string)
 
     pathIndex := 0
     patternIndex := 0
@@ -1027,13 +1027,13 @@ func matchPath(
                         }
                     }
 
-                    params[wildcardName] = rest
+                    parameters[wildcardName] = rest
                     if RouteAttributeLocale == wildcardName {
-                        params[RouteAttributeLocale] = rest
+                        parameters[RouteAttributeLocale] = rest
                     }
                 }
 
-                return params, true
+                return parameters, true
             }
 
             if pathIndex >= len(pathSegments) {
@@ -1048,9 +1048,9 @@ func matchPath(
                     }
                 }
 
-                params[wildcardName] = pathPart
+                parameters[wildcardName] = pathPart
                 if RouteAttributeLocale == wildcardName {
-                    params[RouteAttributeLocale] = pathPart
+                    parameters[RouteAttributeLocale] = pathPart
                 }
             }
 
@@ -1102,10 +1102,10 @@ func matchPath(
                 }
             }
 
-            params[paramName] = pathPart
+            parameters[paramName] = pathPart
 
             if RouteAttributeLocale == paramName {
-                params[RouteAttributeLocale] = pathPart
+                parameters[RouteAttributeLocale] = pathPart
             }
 
             pathIndex++
@@ -1126,7 +1126,7 @@ func matchPath(
         return nil, false
     }
 
-    return params, true
+    return parameters, true
 }
 
 /* requestPathIsRoutable reports whether the target is origin-form: the asterisk-form of OPTIONS and an authority-form CONNECT are not path-routed, so "*" never binds a parameter. */

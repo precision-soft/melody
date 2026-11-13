@@ -46,10 +46,10 @@ func TestDatabaseOpenedBy_NamesTheManagerAndItsLocationWhenTheOpenRefuses(t *tes
         melodylogging.NewNopLogger(),
         []melodybunorm.ProviderDefinition{
             melodybunorm.ProviderDefinition{
-                Name:      "declared",
-                Provider:  melodypgsql.NewProvider(melodypgsql.ProviderConfig{Retry: melodypgsql.RetryConfig{MaxAttempts: bound.Of(1)}}),
-                Params:    melodybunorm.ConnectionParameters{Host: "127.0.0.1", Port: "1", Database: "never", User: "nobody"},
-                IsDefault: true,
+                Name:       "declared",
+                Provider:   melodypgsql.NewProvider(melodypgsql.ProviderConfig{Retry: melodypgsql.RetryConfig{MaxAttempts: bound.Of(1)}}),
+                Parameters: melodybunorm.ConnectionParameters{Host: "127.0.0.1", Port: "1", Database: "never", User: "nobody"},
+                IsDefault:  true,
             },
         },
     )
@@ -274,15 +274,15 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
         melodylogging.NewNopLogger(),
         []melodybunorm.ProviderDefinition{
             melodybunorm.ProviderDefinition{
-                Name:      databaseManagerName,
-                Provider:  catalogProvider,
-                Params:    melodybunorm.ConnectionParameters{Host: "mysql", Port: "3306", Database: "catalogue", User: "melody"},
-                IsDefault: true,
+                Name:       databaseManagerName,
+                Provider:   catalogProvider,
+                Parameters: melodybunorm.ConnectionParameters{Host: "mysql", Port: "3306", Database: "catalogue", User: "melody"},
+                IsDefault:  true,
             },
             melodybunorm.ProviderDefinition{
-                Name:     databaseArchiveManagerName,
-                Provider: archiveProvider,
-                Params:   melodybunorm.ConnectionParameters{Host: "postgres", Port: "5432", Database: "archive", User: "melody"},
+                Name:       databaseArchiveManagerName,
+                Provider:   archiveProvider,
+                Parameters: melodybunorm.ConnectionParameters{Host: "postgres", Port: "5432", Database: "archive", User: "melody"},
             },
         },
     )
