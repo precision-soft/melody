@@ -7,6 +7,7 @@ import (
     "slices"
     "strings"
     "sync"
+    "sync/atomic"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
@@ -29,7 +30,8 @@ import (
 type RouteRegistrar func(kernelInstance kernelcontract.Kernel)
 
 type Application struct {
-    booted bool
+    booted     bool
+    runStarted atomic.Bool
     /* raised for the boot window so the module doors refuse a registration from inside a module boot hook: the phase loops iterate a snapshot, so such a module would receive only the hooks of the phases not yet run */
     booting             bool
     ctx                 context.Context
@@ -271,7 +273,12 @@ func (instance *Application) ProcessRole() string {
     return instance.runtimeFlags.Role()
 }
 
+/* Run serves the application once: a second call panics naming the misuse, before anything is booted or marked serving. */
 func (instance *Application) Run() {
+    if false == instance.runStarted.CompareAndSwap(false, true) {
+        exception.Panic(exception.NewError("application run called twice", nil, nil))
+    }
+
     _ = instance.Boot()
 
     /* from here the wiring is done and a late Resolve is an error instead of a silent rewrite under readers that already read their values */

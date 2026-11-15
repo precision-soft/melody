@@ -1360,3 +1360,30 @@ func TestRegister_CopiesATypedNilRootStreamAsTheNilTheEngineDefaults(t *testing.
         t.Fatalf("expected the typed nil streams copied as nil, got %#v %#v", registered.Writer, registered.ErrWriter)
     }
 }
+
+func TestRegister_TheErrorLineCarriesTheCauseChain(t *testing.T) {
+    errorBuffer := &bytes.Buffer{}
+
+    rootCommand := NewCommandContext("app", "desc")
+    rootCommand.Writer = &bytes.Buffer{}
+    rootCommand.ErrWriter = errorBuffer
+
+    Register(
+        rootCommand,
+        &testCommand{
+            nameValue:        "hello",
+            descriptionValue: "hello",
+            flagsValue:       output.StandardFlags(),
+            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                return exception.NewError("import failed", nil, exception.NewError("row 7 refused", nil, errors.New("duplicate key")))
+            },
+        },
+        newTestRuntime(t),
+    )
+
+    _ = rootCommand.Run(context.Background(), []string{"app", "hello"})
+
+    if false == strings.Contains(errorBuffer.String(), "[error] import failed: cause 1: row 7 refused: cause 2: duplicate key") {
+        t.Fatalf("expected the cause chain on the error line, got %q", errorBuffer.String())
+    }
+}

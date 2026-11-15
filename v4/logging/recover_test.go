@@ -263,7 +263,7 @@ func TestEchoExitToStderr_WritesOneLineForNonZeroExit(t *testing.T) {
         os.Stderr = originalStderr
     }()
 
-    echoExitToStderr(exception.NewError("http server error", nil, nil), 1)
+    echoExitToStderr(exception.NewError("http server error", nil, nil), 1, 8)
 
     _ = writeEnd.Close()
     os.Stderr = originalStderr
@@ -290,7 +290,7 @@ func TestEchoExitToStderr_StaysSilentForZeroExit(t *testing.T) {
         os.Stderr = originalStderr
     }()
 
-    echoExitToStderr(exception.NewError("clean exit", nil, nil), 0)
+    echoExitToStderr(exception.NewError("clean exit", nil, nil), 0, 8)
 
     _ = writeEnd.Close()
     os.Stderr = originalStderr
@@ -1546,7 +1546,7 @@ func TestEchoExitToStderr_EscapesAControlCharacterOfTheErrorText(t *testing.T) {
     savedStandardError := os.Stderr
     os.Stderr = writeEnd
 
-    echoExitToStderr(errors.New("before"+string(rune(0x1b))+"[31mafter"), 1)
+    echoExitToStderr(errors.New("before"+string(rune(0x1b))+"[31mafter"), 1, 8)
 
     os.Stderr = savedStandardError
     _ = writeEnd.Close()
@@ -1639,5 +1639,86 @@ func TestRunShieldedStep_AnAbandonmentOnAStalledStderrStillReturns(t *testing.T)
         }
     case <-time.After(2 * time.Second):
         t.Fatal("the abandonment's echo on a stalled stderr held the shield")
+    }
+}
+
+func captureExitEcho(t *testing.T, err error, causeChainDepth int) string {
+    t.Helper()
+
+    readEnd, writeEnd, pipeErr := os.Pipe()
+    if nil != pipeErr {
+        t.Fatalf("unexpected pipe error: %v", pipeErr)
+    }
+
+    originalStderr := os.Stderr
+    os.Stderr = writeEnd
+    defer func() {
+        os.Stderr = originalStderr
+    }()
+
+    echoExitToStderr(err, 1, causeChainDepth)
+
+    _ = writeEnd.Close()
+    os.Stderr = originalStderr
+
+    output, readErr := io.ReadAll(readEnd)
+    if nil != readErr {
+        t.Fatalf("unexpected read error: %v", readErr)
+    }
+
+    return string(output)
+}
+
+func TestEchoExitToStderr_AppendsTheCauseChainInOrder(t *testing.T) {
+    chained := exception.NewError("http server error", nil, exception.NewError("listener failed", nil, errors.New("address in use")))
+
+    output := captureExitEcho(t, chained, 8)
+
+    if "melody: exiting with code 1 after unrecovered error: http server error: cause 1: listener failed: cause 2: address in use\n" != output {
+        t.Fatalf("expected the chain after the message, got %q", output)
+    }
+}
+
+func TestEchoExitToStderr_TheChainStopsAtTheLoggersDepth(t *testing.T) {
+    chained := exception.NewError("http server error", nil, exception.NewError("listener failed", nil, errors.New("address in use")))
+
+    output := captureExitEcho(t, chained, 1)
+
+    if false == strings.Contains(output, "cause 1: listener failed") || true == strings.Contains(output, "address in use") {
+        t.Fatalf("expected one link at depth 1, got %q", output)
+    }
+}
+
+type depthReportingCaptureLogger struct {
+    *captureLogger
+    depth int
+}
+
+func (instance *depthReportingCaptureLogger) CauseChainDepth() int {
+    return instance.depth
+}
+
+func TestLogOnRecoverAndExit_TheExitLineFollowsTheLoggersCauseChainDepth(t *testing.T) {
+    if "1" == os.Getenv(logOnRecoverAndExitProbeMarker) {
+        LogOnRecoverAndExit(
+            &depthReportingCaptureLogger{captureLogger: &captureLogger{}, depth: 1},
+            exception.NewError("boom", nil, exception.NewError("first cause", nil, errors.New("second cause"))),
+            1,
+            ExitConfig{},
+        )
+
+        return
+    }
+
+    command := exec.Command(
+        os.Args[0],
+        "-test.run=^TestLogOnRecoverAndExit_TheExitLineFollowsTheLoggersCauseChainDepth$",
+    )
+    command.Env = append(os.Environ(), logOnRecoverAndExitProbeMarker+"=1")
+
+    output, _ := command.CombinedOutput()
+
+    if false == strings.Contains(string(output), "boom: cause 1: first cause") || true == strings.Contains(string(output), "second cause") {
+        t.Fatalf("expected the exit line cut at the logger's depth of one link, got %q", string(output))
     }
 }

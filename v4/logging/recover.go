@@ -210,7 +210,7 @@ func LogOnRecoverAndExit(
             _ = recover()
         }()
 
-        echoExitToStderr(err, resolvedExitCode)
+        echoExitToStderr(err, resolvedExitCode, CauseChainDepth(logger))
     }()
 
     select {
@@ -476,20 +476,24 @@ func isAlreadyLoggedValue(recovered any) bool {
     return exception.IsAlreadyLogged(err)
 }
 
-/* echoExitToStderr writes one final line before a fatal exit so a non-zero exit is never completely silent on the standard streams, whatever destination the configured logger has. */
-func echoExitToStderr(err error, exitCode int) {
+/* echoExitToStderr writes one final line before a fatal exit so a non-zero exit is never completely silent on the standard streams, whatever destination the configured logger has; the cause chain follows the message, to the logger's depth. */
+func echoExitToStderr(err error, exitCode int, causeChainDepth int) {
     if 0 == exitCode {
         return
     }
 
     message := "-"
+    var causeChain []string
     if nil != err {
         /* a recovered value's Error() can be the dereference that made it panic, so it is rendered through LogContext, under a recover */
-        rendered, isRendered := exception.LogContext(err, exception.LogContextConfig{})["error"].(string)
+        errorContext := exception.LogContext(err, exception.LogContextConfig{CauseChainDepth: causeChainDepth})
+        rendered, isRendered := errorContext["error"].(string)
         if true == isRendered && "" != rendered {
             message = rendered
         }
+
+        causeChain, _ = errorContext["causeChain"].([]string)
     }
 
-    _, _ = fmt.Fprintf(os.Stderr, "melody: exiting with code %d after unrecovered error: %s\n", exitCode, internal.EscapeControlCharacters(message))
+    _, _ = fmt.Fprintf(os.Stderr, "melody: exiting with code %d after unrecovered error: %s\n", exitCode, internal.AppendCauseChain(internal.EscapeControlCharacters(message), causeChain))
 }

@@ -252,6 +252,14 @@ A `Changes` that is not a json array, an `Entry` built by hand, is written as a 
 
 **Remedy.** Pass the request's context, `runtimeInstance.Context()` in a handler, as the first argument of every call; replace `GetCtx` and its siblings with the plain names; drop the context from `NewBackend` and the `WithContext` call; declare the context first on an implementation of the application's own, refusing a nil one through `cachecontract.RefuseNilContext`; and write `ConnectionWriteTimeout:`. A call that must outlive the command timeout raises `BackendConfig.CommandTimeout`.
 
+### Application: a second `Run` panics, and the exit line carries the cause chain
+
+**What changed.** A second [`Application.Run`](../application/application.go) panics with `application run called twice` before anything is booted or marked serving. The line [`LogOnRecoverAndExit`](../logging/recover.go) echoes to stderr before a non-zero exit and a failed command's `[error]` line append the cause chain after the message, `: cause 1: …: cause 2: …`.
+
+**Symptom.** A `main` that called `Run` twice panics on the second call. Tooling that matches the whole stderr line sees the causes after the message.
+
+**Remedy.** Call `Run` once and return from `main`; match the line's prefix, which is unchanged.
+
 ### Config: the kernel's directories are spelled out, Go names, parameters and the public directory key
 
 **What changed.** The [kernel configuration](../config/contract/kernel.go) answers `ProjectDirectory()`, `LogsDirectory()` and `CacheDirectory()`, and the [http configuration](../config/contract/http.go) `PublicDirectory()`. The parameters are `kernel.project_directory`, `kernel.logs_directory`, `kernel.cache_directory` and `kernel.public_directory`, exported as `KernelProjectDirectory`, `KernelLogsDirectory`, `KernelCacheDirectory` and `KernelPublicDirectory`, and the public directory's key is `MELODY_PUBLIC_DIRECTORY`, exported as `PublicDirectoryKey`. The resolved directories are unchanged, and so are the cron module's defaults, which now name the new parameters. A refusal or a journal line naming the public directory carries it under `publicDirectory`.

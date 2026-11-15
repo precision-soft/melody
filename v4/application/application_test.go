@@ -1610,3 +1610,19 @@ func TestCloseWithContext_RefusesANilContextAndLeavesTheTeardownToALaterCall(t *
         t.Fatalf("expected the later call to run the teardown and report its failure")
     }
 }
+
+func TestRun_ASecondRunIsRefusedBeforeAnythingIsTouched(t *testing.T) {
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment})
+
+    originalArguments := os.Args
+    os.Args = []string{"application", "--version"}
+    defer func() {
+        os.Args = originalArguments
+    }()
+
+    applicationInstance.Run()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        applicationInstance.Run()
+    }, "application run called twice")
+}
