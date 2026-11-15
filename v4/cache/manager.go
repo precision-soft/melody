@@ -71,8 +71,8 @@ func (instance *Manager) NormalizeStoredValue(value any) (any, error) {
     return normalized, nil
 }
 
-func (instance *Manager) Get(key string) (any, bool, error) {
-    payload, exists, getErr := instance.backend.Get(key)
+func (instance *Manager) Get(ctx context.Context, key string) (any, bool, error) {
+    payload, exists, getErr := instance.backend.Get(ctx, key)
     getErr = normalizeThirdPartyError(getErr)
     if nil != getErr {
         return nil, false, getErr
@@ -94,7 +94,7 @@ func (instance *Manager) Get(key string) (any, bool, error) {
     return value, true, nil
 }
 
-func (instance *Manager) Set(key string, value any, ttl bound.Duration) error {
+func (instance *Manager) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
     payload, serializeErr := instance.serializer.Serialize(value)
     serializeErr = normalizeThirdPartyError(serializeErr)
     if nil != serializeErr {
@@ -105,26 +105,26 @@ func (instance *Manager) Set(key string, value any, ttl bound.Duration) error {
         )
     }
 
-    return normalizeThirdPartyError(instance.backend.Set(key, payload, ttl))
+    return normalizeThirdPartyError(instance.backend.Set(ctx, key, payload, ttl))
 }
 
-func (instance *Manager) Delete(key string) error {
-    return normalizeThirdPartyError(instance.backend.Delete(key))
+func (instance *Manager) Delete(ctx context.Context, key string) error {
+    return normalizeThirdPartyError(instance.backend.Delete(ctx, key))
 }
 
-func (instance *Manager) Has(key string) (bool, error) {
-    hasValue, hasErr := instance.backend.Has(key)
+func (instance *Manager) Has(ctx context.Context, key string) (bool, error) {
+    hasValue, hasErr := instance.backend.Has(ctx, key)
 
     return hasValue, normalizeThirdPartyError(hasErr)
 }
 
-func (instance *Manager) Clear() error {
-    return normalizeThirdPartyError(instance.backend.Clear())
+func (instance *Manager) Clear(ctx context.Context) error {
+    return normalizeThirdPartyError(instance.backend.Clear(ctx))
 }
 
 /* Many answers the values of the keys that are present. An entry whose payload does not deserialize is left out as an absent key is, and its keys come back in a DeserializationError beside the values that decoded. */
-func (instance *Manager) Many(keys []string) (map[string]any, error) {
-    payloadsByKey, manyErr := instance.backend.Many(keys)
+func (instance *Manager) Many(ctx context.Context, keys []string) (map[string]any, error) {
+    payloadsByKey, manyErr := instance.backend.Many(ctx, keys)
     manyErr = normalizeThirdPartyError(manyErr)
     if nil != manyErr {
         return nil, manyErr
@@ -182,7 +182,7 @@ func serializationErrorText(err error) (text string) {
 }
 
 /* SetMultiple serializes every entry before the backend sees any, so a refusal writes nothing. The refusal names every refused key under "keys", sorted, with "key" the first of them, and each key's own reason under "causeByKey"; every entry is serialized even after the first refusal, so the list is whole. */
-func (instance *Manager) SetMultiple(items map[string]any, ttl bound.Duration) error {
+func (instance *Manager) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
     payloads := make(map[string][]byte, len(items))
     var refusedKeys []string
     var refusalByKey map[string]error
@@ -216,23 +216,23 @@ func (instance *Manager) SetMultiple(items map[string]any, ttl bound.Duration) e
         )
     }
 
-    return normalizeThirdPartyError(instance.backend.SetMultiple(payloads, ttl))
+    return normalizeThirdPartyError(instance.backend.SetMultiple(ctx, payloads, ttl))
 }
 
-func (instance *Manager) DeleteMultiple(keys []string) error {
-    return normalizeThirdPartyError(instance.backend.DeleteMultiple(keys))
+func (instance *Manager) DeleteMultiple(ctx context.Context, keys []string) error {
+    return normalizeThirdPartyError(instance.backend.DeleteMultiple(ctx, keys))
 }
 
 /* Increment adds delta to a counter through the backend's native operation, so a distributed backend keeps it atomic. The count bypasses the serializer and is stored as decimal text, so a counter key is read with GetCounter and never mixed with Set. */
-func (instance *Manager) Increment(key string, delta int64) (int64, error) {
-    newValue, incrementErr := instance.backend.Increment(key, delta)
+func (instance *Manager) Increment(ctx context.Context, key string, delta int64) (int64, error) {
+    newValue, incrementErr := instance.backend.Increment(ctx, key, delta)
 
     return newValue, normalizeThirdPartyError(incrementErr)
 }
 
 /* GetCounter reads a key written by Increment or Decrement. Those operations are backend-native and store the count as decimal text rather than through the serializer, so Get would hand the raw payload to a deserializer that does not expect it. */
-func (instance *Manager) GetCounter(key string) (int64, bool, error) {
-    payload, exists, getErr := instance.backend.Get(key)
+func (instance *Manager) GetCounter(ctx context.Context, key string) (int64, bool, error) {
+    payload, exists, getErr := instance.backend.Get(ctx, key)
     getErr = normalizeThirdPartyError(getErr)
     if nil != getErr {
         return 0, false, getErr
@@ -257,8 +257,8 @@ func (instance *Manager) GetCounter(key string) (int64, bool, error) {
     return parsedValue, true, nil
 }
 
-func (instance *Manager) Decrement(key string, delta int64) (int64, error) {
-    newValue, decrementErr := instance.backend.Decrement(key, delta)
+func (instance *Manager) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
+    newValue, decrementErr := instance.backend.Decrement(ctx, key, delta)
 
     return newValue, normalizeThirdPartyError(decrementErr)
 }

@@ -127,12 +127,12 @@ type sequenceCache struct {
 
 const readingCacheKeyUnderTest = "catalog.reading"
 
-func (instance *sequenceCache) Set(key string, value any, ttl bound.Duration) error {
+func (instance *sequenceCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
     if readingCacheKeyUnderTest == key {
         instance.sequence.record("refresh")
     }
 
-    return instance.Cache.Set(key, value, ttl)
+    return instance.Cache.Set(context.Background(), key, value, ttl)
 }
 
 /* sequenceArchive is the archive as the command reaches it: one row per instant, refused as the real ones refuse it, every append on the ledger */

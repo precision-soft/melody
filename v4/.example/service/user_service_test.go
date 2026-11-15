@@ -377,7 +377,7 @@ func TestFindByIdAnswersARowFoundForAnotherSpellingAsAbsentAndCachesNothing(t *t
         }
     }
 
-    if cached, exists, _ := cacheInstance.Get(CacheKeyUserById(editor.Id + " ")); true == exists && nil != cached {
+    if cached, exists, _ := cacheInstance.Get(context.Background(), CacheKeyUserById(editor.Id + " ")); true == exists && nil != cached {
         t.Fatalf("the padded identifier holds an account in the cache: %+v", cached)
     }
 

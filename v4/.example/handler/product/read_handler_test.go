@@ -13,8 +13,11 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 var conversionQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
@@ -208,18 +211,21 @@ type stubViewRecorder struct {
     views     int64
     recordErr error
     recorded  []string
+    contexts  []context.Context
 }
 
-func (instance *stubViewRecorder) RecordView(id string) (int64, error) {
+func (instance *stubViewRecorder) RecordView(ctx context.Context, id string) (int64, error) {
     instance.recorded = append(instance.recorded, id)
+    instance.contexts = append(instance.contexts, ctx)
 
     return instance.views, instance.recordErr
 }
 
 func TestRecordedViews_AnswersTheCountTheServiceRecorded(t *testing.T) {
     recorder := &stubViewRecorder{views: 7}
+    runtimeInstance := newViewRecorderRuntime()
 
-    views := recordedViews(nil, recorder, "prod-1")
+    views := recordedViews(runtimeInstance, recorder, "prod-1")
     if nil == views || 7 != *views {
         t.Fatalf("expected 7 views, got %v", views)
     }
@@ -227,10 +233,22 @@ func TestRecordedViews_AnswersTheCountTheServiceRecorded(t *testing.T) {
     if 1 != len(recorder.recorded) || "prod-1" != recorder.recorded[0] {
         t.Fatalf("expected one view recorded for prod-1, got %q", recorder.recorded)
     }
+
+    if runtimeInstance.Context() != recorder.contexts[0] {
+        t.Fatalf("expected the view counted under the request's context")
+    }
+}
+
+type viewRecorderContextKey struct{}
+
+func newViewRecorderRuntime() melodyruntimecontract.Runtime {
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+
+    return melodyruntime.New(context.WithValue(context.Background(), viewRecorderContextKey{}, "request"), containerInstance.NewScope(), containerInstance)
 }
 
 func TestRecordedViews_LeavesTheCountOutWhenTheCacheRefused(t *testing.T) {
-    views := recordedViews(nil, &stubViewRecorder{views: 7, recordErr: errors.New("cache down")}, "prod-1")
+    views := recordedViews(newViewRecorderRuntime(), &stubViewRecorder{views: 7, recordErr: errors.New("cache down")}, "prod-1")
     if nil != views {
         t.Fatalf("expected no count when the counter could not be written, got %d", *views)
     }
@@ -298,7 +316,7 @@ func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
         if nil != currencyListErr {
             t.Fatalf("read the currencies: %v", currencyListErr)
         }
-        if setErr := fixture.cache.Set(service.CacheKeyCurrencyList, currencyList, melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := fixture.cache.Set(context.Background(), service.CacheKeyCurrencyList, currencyList, melodybound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("prime the currencies: %v", setErr)
         }
         fixture.requestContext = endedRequestContext()
@@ -322,7 +340,7 @@ func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
         if nil != categoryListErr {
             t.Fatalf("read the categories: %v", categoryListErr)
         }
-        if setErr := fixture.cache.Set(service.CacheKeyCategoryList, categoryList, melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := fixture.cache.Set(context.Background(), service.CacheKeyCategoryList, categoryList, melodybound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("prime the categories: %v", setErr)
         }
         fixture.requestContext = endedRequestContext()

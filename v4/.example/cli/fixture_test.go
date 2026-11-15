@@ -110,7 +110,7 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
                 service.CacheKeyUserByUsername(updatedEvent.User().Username),
                 service.CacheKeyUserList,
             } {
-                if deleteErr := cacheInstance.Delete(key); nil != deleteErr {
+                if deleteErr := cacheInstance.Delete(context.Background(), key); nil != deleteErr {
                     return deleteErr
                 }
             }
@@ -318,7 +318,7 @@ type clearCountingCache struct {
     refusal    error
 }
 
-func (instance *clearCountingCache) Clear() error {
+func (instance *clearCountingCache) Clear(ctx context.Context) error {
     instance.mutex.Lock()
     instance.clearCount = instance.clearCount + 1
     onClear := instance.onClear
@@ -333,7 +333,7 @@ func (instance *clearCountingCache) Clear() error {
         return refusal
     }
 
-    return instance.Cache.Clear()
+    return instance.Cache.Clear(context.Background())
 }
 
 func (instance *clearCountingCache) clears() int {

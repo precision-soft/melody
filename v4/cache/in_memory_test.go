@@ -28,12 +28,12 @@ func TestInMemoryBackend_SetGet_HappyPath(t *testing.T) {
     })
     defer backend.CloseWithContext(context.Background())
 
-    err := backend.Set("product.1", []byte("payload"), bound.UnlimitedDuration())
+    err := backend.Set(context.Background(), "product.1", []byte("payload"), bound.UnlimitedDuration())
     if nil != err {
         t.Fatalf("set error: %v", err)
     }
 
-    value, exists, err := backend.Get("product.1")
+    value, exists, err := backend.Get(context.Background(), "product.1")
     if nil != err {
         t.Fatalf("get error: %v", err)
     }
@@ -55,14 +55,14 @@ func TestInMemoryBackend_TtlExpiry(t *testing.T) {
     })
     defer backend.CloseWithContext(context.Background())
 
-    err := backend.Set("product.1", []byte("payload"), bound.Of(2*time.Second))
+    err := backend.Set(context.Background(), "product.1", []byte("payload"), bound.Of(2*time.Second))
     if nil != err {
         t.Fatalf("set error: %v", err)
     }
 
     clockInstance.now = time.Unix(20, 0)
 
-    _, exists, err := backend.Get("product.1")
+    _, exists, err := backend.Get(context.Background(), "product.1")
     if nil != err {
         t.Fatalf("get error: %v", err)
     }
@@ -81,26 +81,26 @@ func TestInMemoryBackend_LruEviction(t *testing.T) {
     })
     defer backend.CloseWithContext(context.Background())
 
-    _ = backend.Set("a", []byte("a"), bound.UnlimitedDuration())
-    _ = backend.Set("b", []byte("b"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "a", []byte("a"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "b", []byte("b"), bound.UnlimitedDuration())
 
     clockInstance.now = clockInstance.now.Add(recencyPromotionInterval)
 
-    _, _, _ = backend.Get("a")
+    _, _, _ = backend.Get(context.Background(), "a")
 
-    _ = backend.Set("c", []byte("c"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "c", []byte("c"), bound.UnlimitedDuration())
 
-    _, exists, _ := backend.Get("b")
+    _, exists, _ := backend.Get(context.Background(), "b")
     if true == exists {
         t.Fatalf("expected b to be evicted")
     }
 
-    _, exists, _ = backend.Get("a")
+    _, exists, _ = backend.Get(context.Background(), "a")
     if false == exists {
         t.Fatalf("expected a to remain")
     }
 
-    _, exists, _ = backend.Get("c")
+    _, exists, _ = backend.Get(context.Background(), "c")
     if false == exists {
         t.Fatalf("expected c to exist")
     }
@@ -116,21 +116,21 @@ func TestInMemoryBackend_AReadInsideThePromotionIntervalLeavesTheRecencyOrderWhe
     })
     defer backend.CloseWithContext(context.Background())
 
-    _ = backend.Set("a", []byte("a"), bound.UnlimitedDuration())
-    _ = backend.Set("b", []byte("b"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "a", []byte("a"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "b", []byte("b"), bound.UnlimitedDuration())
 
     clockInstance.now = clockInstance.now.Add(recencyPromotionInterval - time.Nanosecond)
 
-    _, _, _ = backend.Get("a")
+    _, _, _ = backend.Get(context.Background(), "a")
 
-    _ = backend.Set("c", []byte("c"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "c", []byte("c"), bound.UnlimitedDuration())
 
-    _, exists, _ := backend.Get("a")
+    _, exists, _ := backend.Get(context.Background(), "a")
     if true == exists {
         t.Fatalf("expected the read inside the promotion interval to leave a at the back, so a is the victim")
     }
 
-    _, exists, _ = backend.Get("b")
+    _, exists, _ = backend.Get(context.Background(), "b")
     if false == exists {
         t.Fatalf("expected b to remain")
     }
@@ -146,11 +146,11 @@ func TestInMemoryBackend_AReadRefreshesTheAccessMarkEvenWithoutAPromotion(t *tes
     })
     defer backend.CloseWithContext(context.Background())
 
-    _ = backend.Set("a", []byte("a"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "a", []byte("a"), bound.UnlimitedDuration())
 
     clockInstance.now = clockInstance.now.Add(time.Millisecond)
 
-    _, _, _ = backend.Get("a")
+    _, _, _ = backend.Get(context.Background(), "a")
 
     backend.mutex.RLock()
     entry := backend.entries["a"]
@@ -179,43 +179,43 @@ func TestInMemoryBackend_RefusesEmptyKey(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if setErr := backend.Set("", []byte("1"), bound.UnlimitedDuration()); nil == setErr {
+    if setErr := backend.Set(context.Background(), "", []byte("1"), bound.UnlimitedDuration()); nil == setErr {
         t.Fatalf("expected Set to refuse the empty key")
     }
 
-    if _, _, getErr := backend.Get(""); nil == getErr {
+    if _, _, getErr := backend.Get(context.Background(), ""); nil == getErr {
         t.Fatalf("expected Get to refuse the empty key")
     }
 
-    if _, hasErr := backend.Has(""); nil == hasErr {
+    if _, hasErr := backend.Has(context.Background(), ""); nil == hasErr {
         t.Fatalf("expected Has to refuse the empty key")
     }
 
-    if deleteErr := backend.Delete(""); nil == deleteErr {
+    if deleteErr := backend.Delete(context.Background(), ""); nil == deleteErr {
         t.Fatalf("expected Delete to refuse the empty key")
     }
 
-    if _, manyErr := backend.Many([]string{"a", ""}); nil == manyErr {
+    if _, manyErr := backend.Many(context.Background(), []string{"a", ""}); nil == manyErr {
         t.Fatalf("expected Many to refuse the empty key")
     }
 
-    if setMultipleErr := backend.SetMultiple(map[string][]byte{"": []byte("1")}, bound.UnlimitedDuration()); nil == setMultipleErr {
+    if setMultipleErr := backend.SetMultiple(context.Background(), map[string][]byte{"": []byte("1")}, bound.UnlimitedDuration()); nil == setMultipleErr {
         t.Fatalf("expected SetMultiple to refuse the empty key")
     }
 
-    if deleteMultipleErr := backend.DeleteMultiple([]string{""}); nil == deleteMultipleErr {
+    if deleteMultipleErr := backend.DeleteMultiple(context.Background(), []string{""}); nil == deleteMultipleErr {
         t.Fatalf("expected DeleteMultiple to refuse the empty key")
     }
 
-    if _, incrementErr := backend.Increment("", 1); nil == incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "", 1); nil == incrementErr {
         t.Fatalf("expected Increment to refuse the empty key")
     }
 
-    if _, decrementErr := backend.Decrement("", 1); nil == decrementErr {
+    if _, decrementErr := backend.Decrement(context.Background(), "", 1); nil == decrementErr {
         t.Fatalf("expected Decrement to refuse the empty key")
     }
 
-    if _, exists, _ := backend.Get("a"); true == exists {
+    if _, exists, _ := backend.Get(context.Background(), "a"); true == exists {
         t.Fatalf("expected no entry to have been written through a refused key")
     }
 }
@@ -225,7 +225,7 @@ func TestInMemoryBackend_RefusesOperationsAfterClose(t *testing.T) {
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
 
-    if setErr := backend.Set("a", []byte("1"), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(context.Background(), "a", []byte("1"), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -233,43 +233,43 @@ func TestInMemoryBackend_RefusesOperationsAfterClose(t *testing.T) {
         t.Fatalf("close error: %v", closeErr)
     }
 
-    if setErr := backend.Set("b", []byte("2"), bound.UnlimitedDuration()); nil == setErr {
+    if setErr := backend.Set(context.Background(), "b", []byte("2"), bound.UnlimitedDuration()); nil == setErr {
         t.Fatalf("expected Set to refuse a closed backend")
     }
 
-    if _, _, getErr := backend.Get("a"); nil == getErr {
+    if _, _, getErr := backend.Get(context.Background(), "a"); nil == getErr {
         t.Fatalf("expected Get to refuse a closed backend")
     }
 
-    if _, hasErr := backend.Has("a"); nil == hasErr {
+    if _, hasErr := backend.Has(context.Background(), "a"); nil == hasErr {
         t.Fatalf("expected Has to refuse a closed backend")
     }
 
-    if deleteErr := backend.Delete("a"); nil == deleteErr {
+    if deleteErr := backend.Delete(context.Background(), "a"); nil == deleteErr {
         t.Fatalf("expected Delete to refuse a closed backend")
     }
 
-    if clearErr := backend.Clear(); nil == clearErr {
+    if clearErr := backend.Clear(context.Background()); nil == clearErr {
         t.Fatalf("expected Clear to refuse a closed backend")
     }
 
-    if _, manyErr := backend.Many([]string{"a"}); nil == manyErr {
+    if _, manyErr := backend.Many(context.Background(), []string{"a"}); nil == manyErr {
         t.Fatalf("expected Many to refuse a closed backend")
     }
 
-    if setMultipleErr := backend.SetMultiple(map[string][]byte{"c": []byte("3")}, bound.UnlimitedDuration()); nil == setMultipleErr {
+    if setMultipleErr := backend.SetMultiple(context.Background(), map[string][]byte{"c": []byte("3")}, bound.UnlimitedDuration()); nil == setMultipleErr {
         t.Fatalf("expected SetMultiple to refuse a closed backend")
     }
 
-    if deleteMultipleErr := backend.DeleteMultiple([]string{"a"}); nil == deleteMultipleErr {
+    if deleteMultipleErr := backend.DeleteMultiple(context.Background(), []string{"a"}); nil == deleteMultipleErr {
         t.Fatalf("expected DeleteMultiple to refuse a closed backend")
     }
 
-    if _, incrementErr := backend.Increment("n", 1); nil == incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "n", 1); nil == incrementErr {
         t.Fatalf("expected Increment to refuse a closed backend")
     }
 
-    if _, decrementErr := backend.Decrement("n", 1); nil == decrementErr {
+    if _, decrementErr := backend.Decrement(context.Background(), "n", 1); nil == decrementErr {
         t.Fatalf("expected Decrement to refuse a closed backend")
     }
 
@@ -285,22 +285,22 @@ func TestInMemoryBackend_RefusesAnAbsentTtlAndOneBelowItsMinimum(t *testing.T) {
     defer backend.CloseWithContext(context.Background())
 
     for _, refusedTtl := range []bound.Duration{{}, bound.Of(time.Duration(0)), bound.Of(-time.Second), bound.Of(time.Second - time.Nanosecond)} {
-        setErr := backend.Set("a", []byte("1"), refusedTtl)
+        setErr := backend.Set(context.Background(), "a", []byte("1"), refusedTtl)
         if nil == setErr || "ttl" != exception.LogContext(setErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("expected Set to refuse the ttl %s naming it, got %v", refusedTtl, setErr)
         }
 
-        setMultipleErr := backend.SetMultiple(map[string][]byte{"b": []byte("2")}, refusedTtl)
+        setMultipleErr := backend.SetMultiple(context.Background(), map[string][]byte{"b": []byte("2")}, refusedTtl)
         if nil == setMultipleErr || "ttl" != exception.LogContext(setMultipleErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("expected SetMultiple to refuse the ttl %s naming it, got %v", refusedTtl, setMultipleErr)
         }
     }
 
-    if _, exists, _ := backend.Get("a"); true == exists {
+    if _, exists, _ := backend.Get(context.Background(), "a"); true == exists {
         t.Fatalf("expected the refused write not to have stored anything")
     }
 
-    if setErr := backend.Set("a", []byte("1"), bound.Of(time.Second)); nil != setErr {
+    if setErr := backend.Set(context.Background(), "a", []byte("1"), bound.Of(time.Second)); nil != setErr {
         t.Fatalf("expected the minimum ttl to be admitted, got %v", setErr)
     }
 }
@@ -311,23 +311,23 @@ func TestInMemoryBackend_IncrementRefusesEmptyPayload(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if setErr := backend.Set("marker", []byte(""), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(context.Background(), "marker", []byte(""), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
-    if _, incrementErr := backend.Increment("marker", 1); nil == incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "marker", 1); nil == incrementErr {
         t.Fatalf("expected Increment to refuse an empty payload")
     }
 
-    if setErr := backend.Set("blank", []byte("   "), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(context.Background(), "blank", []byte("   "), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
-    if _, incrementErr := backend.Increment("blank", 1); nil == incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "blank", 1); nil == incrementErr {
         t.Fatalf("expected Increment to refuse a blank payload")
     }
 
-    value, exists, getErr := backend.Get("marker")
+    value, exists, getErr := backend.Get(context.Background(), "marker")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -342,9 +342,9 @@ func TestInMemoryBackend_Get_ReturnsCopyOfBytes(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    _ = backend.Set("a", []byte{1, 2, 3}, bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "a", []byte{1, 2, 3}, bound.UnlimitedDuration())
 
-    value, exists, err := backend.Get("a")
+    value, exists, err := backend.Get(context.Background(), "a")
     if nil != err {
         t.Fatalf("get error: %v", err)
     }
@@ -354,7 +354,7 @@ func TestInMemoryBackend_Get_ReturnsCopyOfBytes(t *testing.T) {
 
     value[0] = 9
 
-    valueAgain, exists, err := backend.Get("a")
+    valueAgain, exists, err := backend.Get(context.Background(), "a")
     if nil != err {
         t.Fatalf("get error: %v", err)
     }
@@ -372,10 +372,10 @@ func TestInMemoryBackend_ManySetMultipleDeleteMultipleClearDeleteHas(t *testing.
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    _ = backend.Set("a", []byte("1"), bound.UnlimitedDuration())
-    _ = backend.Set("b", []byte("2"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "a", []byte("1"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "b", []byte("2"), bound.UnlimitedDuration())
 
-    hasValue, err := backend.Has("a")
+    hasValue, err := backend.Has(context.Background(), "a")
     if nil != err {
         t.Fatalf("has error: %v", err)
     }
@@ -383,7 +383,7 @@ func TestInMemoryBackend_ManySetMultipleDeleteMultipleClearDeleteHas(t *testing.
         t.Fatalf("expected has true")
     }
 
-    values, err := backend.Many([]string{"a", "b", "c"})
+    values, err := backend.Many(context.Background(), []string{"a", "b", "c"})
     if nil != err {
         t.Fatalf("many error: %v", err)
     }
@@ -398,6 +398,7 @@ func TestInMemoryBackend_ManySetMultipleDeleteMultipleClearDeleteHas(t *testing.
     }
 
     err = backend.SetMultiple(
+        context.Background(),
         map[string][]byte{
             "c": []byte("3"),
             "d": []byte("4"),
@@ -408,7 +409,7 @@ func TestInMemoryBackend_ManySetMultipleDeleteMultipleClearDeleteHas(t *testing.
         t.Fatalf("setMultiple error: %v", err)
     }
 
-    values, err = backend.Many([]string{"c", "d"})
+    values, err = backend.Many(context.Background(), []string{"c", "d"})
     if nil != err {
         t.Fatalf("many error: %v", err)
     }
@@ -419,12 +420,12 @@ func TestInMemoryBackend_ManySetMultipleDeleteMultipleClearDeleteHas(t *testing.
         t.Fatalf("unexpected d")
     }
 
-    err = backend.DeleteMultiple([]string{"c", "d"})
+    err = backend.DeleteMultiple(context.Background(), []string{"c", "d"})
     if nil != err {
         t.Fatalf("deleteMultiple error: %v", err)
     }
 
-    _, exists, err := backend.Get("c")
+    _, exists, err := backend.Get(context.Background(), "c")
     if nil != err {
         t.Fatalf("get error: %v", err)
     }
@@ -432,12 +433,12 @@ func TestInMemoryBackend_ManySetMultipleDeleteMultipleClearDeleteHas(t *testing.
         t.Fatalf("expected c deleted")
     }
 
-    err = backend.Delete("a")
+    err = backend.Delete(context.Background(), "a")
     if nil != err {
         t.Fatalf("delete error: %v", err)
     }
 
-    _, exists, err = backend.Get("a")
+    _, exists, err = backend.Get(context.Background(), "a")
     if nil != err {
         t.Fatalf("get error: %v", err)
     }
@@ -445,12 +446,12 @@ func TestInMemoryBackend_ManySetMultipleDeleteMultipleClearDeleteHas(t *testing.
         t.Fatalf("expected a deleted")
     }
 
-    err = backend.Clear()
+    err = backend.Clear(context.Background())
     if nil != err {
         t.Fatalf("clear error: %v", err)
     }
 
-    _, exists, err = backend.Get("b")
+    _, exists, err = backend.Get(context.Background(), "b")
     if nil != err {
         t.Fatalf("get error: %v", err)
     }
@@ -465,7 +466,7 @@ func TestInMemoryBackend_IncrementDecrement_HappyPath(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    value, err := backend.Increment("n", 1)
+    value, err := backend.Increment(context.Background(), "n", 1)
     if nil != err {
         t.Fatalf("increment error: %v", err)
     }
@@ -473,7 +474,7 @@ func TestInMemoryBackend_IncrementDecrement_HappyPath(t *testing.T) {
         t.Fatalf("expected 1")
     }
 
-    value, err = backend.Increment("n", 2)
+    value, err = backend.Increment(context.Background(), "n", 2)
     if nil != err {
         t.Fatalf("increment error: %v", err)
     }
@@ -481,7 +482,7 @@ func TestInMemoryBackend_IncrementDecrement_HappyPath(t *testing.T) {
         t.Fatalf("expected 3")
     }
 
-    value, err = backend.Decrement("n", 1)
+    value, err = backend.Decrement(context.Background(), "n", 1)
     if nil != err {
         t.Fatalf("decrement error: %v", err)
     }
@@ -496,9 +497,9 @@ func TestInMemoryBackend_Increment_AcceptsExactlyTheRedisIntegerGrammar(t *testi
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    _ = backend.Set("n", []byte("10"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "n", []byte("10"), bound.UnlimitedDuration())
 
-    value, err := backend.Increment("n", 5)
+    value, err := backend.Increment(context.Background(), "n", 5)
     if nil != err {
         t.Fatalf("increment error: %v", err)
     }
@@ -506,9 +507,9 @@ func TestInMemoryBackend_Increment_AcceptsExactlyTheRedisIntegerGrammar(t *testi
         t.Fatalf("expected 15")
     }
 
-    _ = backend.Set("negative", []byte("-3"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "negative", []byte("-3"), bound.UnlimitedDuration())
 
-    value, err = backend.Increment("negative", 1)
+    value, err = backend.Increment(context.Background(), "negative", 1)
     if nil != err {
         t.Fatalf("increment error: %v", err)
     }
@@ -517,9 +518,9 @@ func TestInMemoryBackend_Increment_AcceptsExactlyTheRedisIntegerGrammar(t *testi
     }
 
     for _, payload := range []string{"not-a-number", " 10 ", "+10", "007", "-0", ""} {
-        _ = backend.Set("bad", []byte(payload), bound.UnlimitedDuration())
+        _ = backend.Set(context.Background(), "bad", []byte(payload), bound.UnlimitedDuration())
 
-        if _, err = backend.Increment("bad", 1); nil == err {
+        if _, err = backend.Increment(context.Background(), "bad", 1); nil == err {
             t.Fatalf("expected the payload %q to be refused the way redis refuses it", payload)
         }
     }
@@ -531,9 +532,9 @@ func TestInMemoryBackend_IncrementOverflow_ReturnsError(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    _ = backend.Set("n", []byte("9223372036854775807"), bound.UnlimitedDuration())
+    _ = backend.Set(context.Background(), "n", []byte("9223372036854775807"), bound.UnlimitedDuration())
 
-    _, err := backend.Increment("n", 1)
+    _, err := backend.Increment(context.Background(), "n", 1)
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -545,7 +546,7 @@ func TestInMemoryBackend_Decrement_MinInt64Delta_ReturnsError(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    _, err := backend.Decrement("n", math.MinInt64)
+    _, err := backend.Decrement(context.Background(), "n", math.MinInt64)
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -557,17 +558,17 @@ func TestInMemoryBackend_IncrementPreservesExistingTtl(t *testing.T) {
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
 
-    if setErr := backend.Set("counter", []byte("0"), bound.Of(10*time.Second)); nil != setErr {
+    if setErr := backend.Set(context.Background(), "counter", []byte("0"), bound.Of(10*time.Second)); nil != setErr {
         t.Fatalf("Set returned an error: %v", setErr)
     }
 
-    if _, incrementErr := backend.Increment("counter", 1); nil != incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "counter", 1); nil != incrementErr {
         t.Fatalf("Increment returned an error: %v", incrementErr)
     }
 
     clockInstance.now = start.Add(11 * time.Second)
 
-    _, found, getErr := backend.Get("counter")
+    _, found, getErr := backend.Get(context.Background(), "counter")
     if nil != getErr {
         t.Fatalf("Get returned an error: %v", getErr)
     }
@@ -583,13 +584,13 @@ func TestInMemoryBackend_IncrementOnFreshKeyHasNoExpiry(t *testing.T) {
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
 
-    if _, incrementErr := backend.Increment("fresh", 1); nil != incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "fresh", 1); nil != incrementErr {
         t.Fatalf("Increment returned an error: %v", incrementErr)
     }
 
     clockInstance.now = start.Add(365 * 24 * time.Hour)
 
-    value, found, getErr := backend.Get("fresh")
+    value, found, getErr := backend.Get(context.Background(), "fresh")
     if nil != getErr {
         t.Fatalf("Get returned an error: %v", getErr)
     }
@@ -612,10 +613,10 @@ func TestInMemoryBackend_CleanupExpired_SweepsBeyondOneChunk(t *testing.T) {
     entryCount := cleanupChunkSize*2 + 7
 
     for index := 0; index < entryCount; index++ {
-        _ = backend.Set(fmt.Sprintf("expiring-%d", index), []byte("value"), bound.Of(time.Minute))
+        _ = backend.Set(context.Background(), fmt.Sprintf("expiring-%d", index), []byte("value"), bound.Of(time.Minute))
     }
 
-    _ = backend.Set("surviving", []byte("value"), bound.Of(time.Hour))
+    _ = backend.Set(context.Background(), "surviving", []byte("value"), bound.Of(time.Hour))
 
     clockInstance.now = clockInstance.now.Add(2 * time.Minute)
 
@@ -629,7 +630,7 @@ func TestInMemoryBackend_CleanupExpired_SweepsBeyondOneChunk(t *testing.T) {
         t.Fatalf("expected only the unexpired entry to survive the sweep, got %d of %d", remaining, entryCount+1)
     }
 
-    if _, exists, _ := backend.Get("surviving"); false == exists {
+    if _, exists, _ := backend.Get(context.Background(), "surviving"); false == exists {
         t.Fatalf("expected the unexpired entry to survive")
     }
 }
@@ -640,20 +641,20 @@ func TestInMemoryBackend_Eviction_PrefersAnExpiredVictimWithinTheProbeWindow(t *
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(3), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    _ = backend.Set("expiring", []byte("value"), bound.Of(time.Minute))
-    _ = backend.Set("keep-one", []byte("value"), bound.Of(time.Hour))
-    _ = backend.Set("keep-two", []byte("value"), bound.Of(time.Hour))
+    _ = backend.Set(context.Background(), "expiring", []byte("value"), bound.Of(time.Minute))
+    _ = backend.Set(context.Background(), "keep-one", []byte("value"), bound.Of(time.Hour))
+    _ = backend.Set(context.Background(), "keep-two", []byte("value"), bound.Of(time.Hour))
 
     clockInstance.now = clockInstance.now.Add(2 * time.Minute)
 
-    _ = backend.Set("fresh", []byte("value"), bound.Of(time.Hour))
+    _ = backend.Set(context.Background(), "fresh", []byte("value"), bound.Of(time.Hour))
 
-    if _, exists, _ := backend.Get("expiring"); true == exists {
+    if _, exists, _ := backend.Get(context.Background(), "expiring"); true == exists {
         t.Fatalf("expected the expired entry to be the eviction victim")
     }
 
     for _, key := range []string{"keep-one", "keep-two", "fresh"} {
-        if _, exists, _ := backend.Get(key); false == exists {
+        if _, exists, _ := backend.Get(context.Background(), key); false == exists {
             t.Fatalf("expected %q to survive the eviction", key)
         }
     }
@@ -716,7 +717,7 @@ func TestNewInMemoryBackend_AnAbsentMaxItemsIsTenThousandAndUnlimitedLiftsTheCei
     defer defaultBackend.CloseWithContext(context.Background())
 
     for index := 0; index <= 10_000; index++ {
-        if setErr := defaultBackend.Set("key-"+strconv.Itoa(index), []byte("1"), bound.UnlimitedDuration()); nil != setErr {
+        if setErr := defaultBackend.Set(context.Background(), "key-"+strconv.Itoa(index), []byte("1"), bound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("set error: %v", setErr)
         }
     }
@@ -729,7 +730,7 @@ func TestNewInMemoryBackend_AnAbsentMaxItemsIsTenThousandAndUnlimitedLiftsTheCei
     defer unlimitedBackend.CloseWithContext(context.Background())
 
     for index := 0; index <= 10_000; index++ {
-        if setErr := unlimitedBackend.Set("key-"+strconv.Itoa(index), []byte("1"), bound.UnlimitedDuration()); nil != setErr {
+        if setErr := unlimitedBackend.Set(context.Background(), "key-"+strconv.Itoa(index), []byte("1"), bound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("set error: %v", setErr)
         }
     }
@@ -788,32 +789,32 @@ func TestInMemoryBackend_HasSeparatesAbsentFromLapsedFromLive(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if err := backend.Set("live", []byte("payload"), bound.UnlimitedDuration()); nil != err {
+    if err := backend.Set(context.Background(), "live", []byte("payload"), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
-    if err := backend.Set("lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
+    if err := backend.Set(context.Background(), "lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
-    exists, hasErr := backend.Has("absent")
+    exists, hasErr := backend.Has(context.Background(), "absent")
     if nil != hasErr || true == exists {
         t.Fatalf("expected an absent key to answer false, got %t, %v", exists, hasErr)
     }
 
-    exists, hasErr = backend.Has("live")
+    exists, hasErr = backend.Has(context.Background(), "live")
     if nil != hasErr || false == exists {
         t.Fatalf("expected a live key to answer true, got %t, %v", exists, hasErr)
     }
 
     clockInstance.now = time.Unix(20, 0)
 
-    exists, hasErr = backend.Has("lapsing")
+    exists, hasErr = backend.Has(context.Background(), "lapsing")
     if nil != hasErr || true == exists {
         t.Fatalf("expected a lapsed key to answer false, got %t, %v", exists, hasErr)
     }
 
-    exists, hasErr = backend.Has("live")
+    exists, hasErr = backend.Has(context.Background(), "live")
     if nil != hasErr || false == exists {
         t.Fatalf("expected the entry without a ttl to survive the clock, got %t, %v", exists, hasErr)
     }
@@ -825,17 +826,17 @@ func TestInMemoryBackend_ManySkipsTheKeysItCannotServe(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if err := backend.Set("live", []byte("payload"), bound.UnlimitedDuration()); nil != err {
+    if err := backend.Set(context.Background(), "live", []byte("payload"), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
-    if err := backend.Set("lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
+    if err := backend.Set(context.Background(), "lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
     clockInstance.now = time.Unix(20, 0)
 
-    result, manyErr := backend.Many([]string{"live", "lapsing", "absent"})
+    result, manyErr := backend.Many(context.Background(), []string{"live", "lapsing", "absent"})
     if nil != manyErr {
         t.Fatalf("unexpected many error: %v", manyErr)
     }
@@ -848,7 +849,7 @@ func TestInMemoryBackend_ManySkipsTheKeysItCannotServe(t *testing.T) {
         t.Fatalf("unexpected payload: %q", result["live"])
     }
 
-    result, manyErr = backend.Many([]string{"absent", "lapsing"})
+    result, manyErr = backend.Many(context.Background(), []string{"absent", "lapsing"})
     if nil != manyErr {
         t.Fatalf("unexpected many error: %v", manyErr)
     }
@@ -864,19 +865,19 @@ func TestInMemoryBackend_DeletingAnAbsentKeyIsANoOp(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if err := backend.Set("kept", []byte("payload"), bound.UnlimitedDuration()); nil != err {
+    if err := backend.Set(context.Background(), "kept", []byte("payload"), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
-    if err := backend.Delete("absent"); nil != err {
+    if err := backend.Delete(context.Background(), "absent"); nil != err {
         t.Fatalf("expected deleting an absent key to succeed, got %v", err)
     }
 
-    if err := backend.DeleteMultiple([]string{"absent", "other"}); nil != err {
+    if err := backend.DeleteMultiple(context.Background(), []string{"absent", "other"}); nil != err {
         t.Fatalf("expected deleting absent keys to succeed, got %v", err)
     }
 
-    _, exists, getErr := backend.Get("kept")
+    _, exists, getErr := backend.Get(context.Background(), "kept")
     if nil != getErr || false == exists {
         t.Fatalf("expected the untouched key to survive, got %t, %v", exists, getErr)
     }
@@ -892,20 +893,20 @@ func TestInMemoryBackend_TheExactInstantOfExpiryIsAlreadyLapsed(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if err := backend.Set("lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
+    if err := backend.Set(context.Background(), "lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
     clockInstance.now = time.Unix(11, 999999999)
 
-    _, exists, getErr := backend.Get("lapsing")
+    _, exists, getErr := backend.Get(context.Background(), "lapsing")
     if nil != getErr || false == exists {
         t.Fatalf("expected the entry to be alive a nanosecond before its expiry, got %t, %v", exists, getErr)
     }
 
     clockInstance.now = time.Unix(12, 0)
 
-    _, exists, getErr = backend.Get("lapsing")
+    _, exists, getErr = backend.Get(context.Background(), "lapsing")
     if nil != getErr || true == exists {
         t.Fatalf("expected the entry to be lapsed at the exact instant of its expiry, got %t, %v", exists, getErr)
     }
@@ -917,15 +918,15 @@ func TestInMemoryBackend_DecrementIsRefusedRatherThanWrappingPastTheSmallestInt6
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if err := backend.Set("counter", []byte(fmt.Sprintf("%d", int64(math.MinInt64)+1)), bound.UnlimitedDuration()); nil != err {
+    if err := backend.Set(context.Background(), "counter", []byte(fmt.Sprintf("%d", int64(math.MinInt64)+1)), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
-    if _, decrementErr := backend.Decrement("counter", 1); nil != decrementErr {
+    if _, decrementErr := backend.Decrement(context.Background(), "counter", 1); nil != decrementErr {
         t.Fatalf("expected the decrement that exactly reaches the bound to succeed, got %v", decrementErr)
     }
 
-    newValue, decrementErr := backend.Decrement("counter", 1)
+    newValue, decrementErr := backend.Decrement(context.Background(), "counter", 1)
     if nil == decrementErr {
         t.Fatalf("expected the decrement past the smallest int64 to be refused, got %d", newValue)
     }
@@ -934,7 +935,7 @@ func TestInMemoryBackend_DecrementIsRefusedRatherThanWrappingPastTheSmallestInt6
         t.Fatalf("expected the refused decrement to answer zero, got %d", newValue)
     }
 
-    stored, exists, getErr := backend.Get("counter")
+    stored, exists, getErr := backend.Get(context.Background(), "counter")
     if nil != getErr || false == exists {
         t.Fatalf("unexpected get error: %t, %v", exists, getErr)
     }
@@ -950,17 +951,17 @@ func TestInMemoryBackend_IncrementStartsOverOnceTheCounterHasLapsed(t *testing.T
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if _, err := backend.Increment("window", 5); nil != err {
+    if _, err := backend.Increment(context.Background(), "window", 5); nil != err {
         t.Fatalf("unexpected increment error: %v", err)
     }
 
-    if err := backend.Set("window", []byte("5"), bound.Of(2*time.Second)); nil != err {
+    if err := backend.Set(context.Background(), "window", []byte("5"), bound.Of(2*time.Second)); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
     clockInstance.now = time.Unix(20, 0)
 
-    newValue, incrementErr := backend.Increment("window", 1)
+    newValue, incrementErr := backend.Increment(context.Background(), "window", 1)
     if nil != incrementErr {
         t.Fatalf("unexpected increment error: %v", incrementErr)
     }
@@ -976,11 +977,11 @@ func TestInMemoryBackend_TheTickerDrivesTheSweep(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if err := backend.Set("lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
+    if err := backend.Set(context.Background(), "lapsing", []byte("payload"), bound.Of(2*time.Second)); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
-    if err := backend.Set("kept", []byte("payload"), bound.UnlimitedDuration()); nil != err {
+    if err := backend.Set(context.Background(), "kept", []byte("payload"), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
@@ -996,7 +997,7 @@ func TestInMemoryBackend_TheTickerDrivesTheSweep(t *testing.T) {
         backend.mutex.RUnlock()
 
         if 1 == remaining {
-            _, exists, getErr := backend.Get("kept")
+            _, exists, getErr := backend.Get(context.Background(), "kept")
             if nil != getErr || false == exists {
                 t.Fatalf("expected the sweep to leave the entry without a ttl alone, got %t, %v", exists, getErr)
             }
@@ -1057,7 +1058,7 @@ func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMa
         backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
         defer backend.CloseWithContext(context.Background())
 
-        if err := backend.Set("real", []byte("payload"), bound.UnlimitedDuration()); nil != err {
+        if err := backend.Set(context.Background(), "real", []byte("payload"), bound.UnlimitedDuration()); nil != err {
             t.Fatalf("unexpected set error: %v", err)
         }
 
@@ -1081,7 +1082,7 @@ func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMa
         backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
         defer backend.CloseWithContext(context.Background())
 
-        if err := backend.Set("real", []byte("payload"), bound.UnlimitedDuration()); nil != err {
+        if err := backend.Set(context.Background(), "real", []byte("payload"), bound.UnlimitedDuration()); nil != err {
             t.Fatalf("unexpected set error: %v", err)
         }
 
@@ -1110,7 +1111,7 @@ func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMa
         backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
         defer backend.CloseWithContext(context.Background())
 
-        if err := backend.Set("real", []byte("payload"), bound.UnlimitedDuration()); nil != err {
+        if err := backend.Set(context.Background(), "real", []byte("payload"), bound.UnlimitedDuration()); nil != err {
             t.Fatalf("unexpected set error: %v", err)
         }
 
@@ -1165,7 +1166,7 @@ func TestInMemoryBackend_TheExpiringDeleteToleratesAKeyThatIsAlreadyGone(t *test
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if err := backend.Set("kept", []byte("payload"), bound.UnlimitedDuration()); nil != err {
+    if err := backend.Set(context.Background(), "kept", []byte("payload"), bound.UnlimitedDuration()); nil != err {
         t.Fatalf("unexpected set error: %v", err)
     }
 
@@ -1194,7 +1195,7 @@ func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
         key := fmt.Sprintf("key.%d", keyIndex)
         keys = append(keys, key)
 
-        if err := backend.Set(key, []byte("payload"), bound.UnlimitedDuration()); nil != err {
+        if err := backend.Set(context.Background(), key, []byte("payload"), bound.UnlimitedDuration()); nil != err {
             t.Fatalf("unexpected set error: %v", err)
         }
     }
@@ -1207,7 +1208,7 @@ func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
 
         for round := 0; round < rounds; round = round + 1 {
             for _, key := range keys {
-                _, _, _ = backend.Get(key)
+                _, _, _ = backend.Get(context.Background(), key)
             }
         }
     }()
@@ -1216,7 +1217,7 @@ func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
         defer waitGroup.Done()
 
         for round := 0; round < rounds; round = round + 1 {
-            _, _ = backend.Many(keys)
+            _, _ = backend.Many(context.Background(), keys)
         }
     }()
 
@@ -1225,8 +1226,8 @@ func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
 
         for round := 0; round < rounds; round = round + 1 {
             for _, key := range keys {
-                _ = backend.Delete(key)
-                _ = backend.Set(key, []byte("payload"), bound.UnlimitedDuration())
+                _ = backend.Delete(context.Background(), key)
+                _ = backend.Set(context.Background(), key, []byte("payload"), bound.UnlimitedDuration())
             }
         }
     }()
@@ -1259,33 +1260,33 @@ func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
         "newlines": "user\nprofile",
         "too long": longKey,
     } {
-        if setErr := backend.Set(key, []byte("payload"), bound.Of(time.Minute)); nil == setErr {
+        if setErr := backend.Set(context.Background(), key, []byte("payload"), bound.Of(time.Minute)); nil == setErr {
             t.Fatalf("expected the %s key to be refused by Set", name)
         }
 
-        if _, _, getErr := backend.Get(key); nil == getErr {
+        if _, _, getErr := backend.Get(context.Background(), key); nil == getErr {
             t.Fatalf("expected the %s key to be refused by Get", name)
         }
 
-        if _, incrementErr := backend.Increment(key, 1); nil == incrementErr {
+        if _, incrementErr := backend.Increment(context.Background(), key, 1); nil == incrementErr {
             t.Fatalf("expected the %s key to be refused by Increment", name)
         }
     }
 
-    if setMultipleErr := backend.SetMultiple(map[string][]byte{"a b": []byte("x")}, bound.Of(time.Minute)); nil == setMultipleErr {
+    if setMultipleErr := backend.SetMultiple(context.Background(), map[string][]byte{"a b": []byte("x")}, bound.Of(time.Minute)); nil == setMultipleErr {
         t.Fatal("expected the spaced key to be refused by SetMultiple")
     }
 
-    if _, manyErr := backend.Many([]string{"good", "with space"}); nil == manyErr {
+    if _, manyErr := backend.Many(context.Background(), []string{"good", "with space"}); nil == manyErr {
         t.Fatal("expected the spaced key to be refused by Many")
     }
 
     keyAtTheBound := strings.Repeat("k", 1024)
-    if setErr := backend.Set(keyAtTheBound, []byte("payload"), bound.Of(time.Minute)); nil != setErr {
+    if setErr := backend.Set(context.Background(), keyAtTheBound, []byte("payload"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("expected a key of exactly 1024 bytes stored, got %v", setErr)
     }
 
-    if payload, found, getErr := backend.Get(keyAtTheBound); nil != getErr || false == found || "payload" != string(payload) {
+    if payload, found, getErr := backend.Get(context.Background(), keyAtTheBound); nil != getErr || false == found || "payload" != string(payload) {
         t.Fatalf("expected the key at the bound read back, got %q found %v error %v", payload, found, getErr)
     }
 }
@@ -1299,7 +1300,7 @@ func TestInMemoryBackend_RefusalOrderMatchesTheRedisBackend(t *testing.T) {
         t.Fatalf("Close: %v", closeErr)
     }
 
-    _, _, getErr := closed.Get("")
+    _, _, getErr := closed.Get(context.Background(), "")
     if nil == getErr || false == strings.Contains(getErr.Error(), "cache backend is closed") {
         t.Fatalf("expected the closed refusal to win over the key judgment, got %v", getErr)
     }
@@ -1309,7 +1310,7 @@ func TestInMemoryBackend_RefusalOrderMatchesTheRedisBackend(t *testing.T) {
         _ = open.CloseWithContext(context.Background())
     }()
 
-    setErr := open.SetMultiple(map[string][]byte{"bad key": []byte("payload")}, bound.Of(-time.Second))
+    setErr := open.SetMultiple(context.Background(), map[string][]byte{"bad key": []byte("payload")}, bound.Of(-time.Second))
     if nil == setErr || "ttl" != exception.LogContext(setErr, exception.LogContextConfig{})["field"] {
         t.Fatalf("expected the batch ttl judgment to precede the key judgment, got %v", setErr)
     }
@@ -1321,11 +1322,11 @@ func TestInMemoryBackend_ANilPayloadReadsBackEmptyNonNil(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if setErr := backend.Set("k", nil, bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(context.Background(), "k", nil, bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set failed: %v", setErr)
     }
 
-    payload, exists, getErr := backend.Get("k")
+    payload, exists, getErr := backend.Get(context.Background(), "k")
     if nil != getErr || false == exists {
         t.Fatalf("get failed: exists=%v err=%v", exists, getErr)
     }
@@ -1347,7 +1348,7 @@ func TestInMemoryBackend_SetMultipleNamesTheSortedFirstMalformedKey(t *testing.T
     }
 
     for attempt := 0; attempt < 8; attempt++ {
-        setErr := backend.SetMultiple(items, bound.UnlimitedDuration())
+        setErr := backend.SetMultiple(context.Background(), items, bound.UnlimitedDuration())
         if nil == setErr {
             t.Fatal("expected the malformed keys to be refused")
         }
@@ -1368,7 +1369,7 @@ func TestInMemoryBackend_DecrementRefusesTheClosedBackendBeforeTheDeltaMagnitude
         t.Fatalf("Close returned an error: %v", closeErr)
     }
 
-    _, decrementErr := backend.Decrement("counter", math.MinInt64)
+    _, decrementErr := backend.Decrement(context.Background(), "counter", math.MinInt64)
     if nil == decrementErr {
         t.Fatalf("expected a refusal from a closed backend")
     }
@@ -1384,7 +1385,7 @@ func TestInMemoryBackend_DecrementRefusesTheMalformedKeyBeforeTheDeltaMagnitude(
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    _, decrementErr := backend.Decrement("bad key", math.MinInt64)
+    _, decrementErr := backend.Decrement(context.Background(), "bad key", math.MinInt64)
     if nil == decrementErr {
         t.Fatalf("expected a refusal for the malformed key")
     }
@@ -1429,25 +1430,25 @@ func TestInMemoryBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
     _ = backend.CloseWithContext(t.Context())
 
     for door, call := range map[string]func() error{
-        "Get":    func() error { _, _, err := backend.Get("key"); return err },
-        "Has":    func() error { _, err := backend.Has("key"); return err },
-        "Set":    func() error { return backend.Set("key", []byte("value"), bound.Of(time.Minute)) },
-        "Delete": func() error { return backend.Delete("key") },
-        "Clear":  func() error { return backend.Clear() },
-        "Many":   func() error { _, err := backend.Many([]string{"key"}); return err },
+        "Get":    func() error { _, _, err := backend.Get(context.Background(), "key"); return err },
+        "Has":    func() error { _, err := backend.Has(context.Background(), "key"); return err },
+        "Set":    func() error { return backend.Set(context.Background(), "key", []byte("value"), bound.Of(time.Minute)) },
+        "Delete": func() error { return backend.Delete(context.Background(), "key") },
+        "Clear":  func() error { return backend.Clear(context.Background()) },
+        "Many":   func() error { _, err := backend.Many(context.Background(), []string{"key"}); return err },
         "SetMultiple": func() error {
-            return backend.SetMultiple(map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute))
+            return backend.SetMultiple(context.Background(), map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute))
         },
-        "DeleteMultiple": func() error { return backend.DeleteMultiple([]string{"key"}) },
-        "Increment":      func() error { _, err := backend.Increment("counter", 1); return err },
-        "Decrement":      func() error { _, err := backend.Decrement("counter", 1); return err },
+        "DeleteMultiple": func() error { return backend.DeleteMultiple(context.Background(), []string{"key"}) },
+        "Increment":      func() error { _, err := backend.Increment(context.Background(), "counter", 1); return err },
+        "Decrement":      func() error { _, err := backend.Decrement(context.Background(), "counter", 1); return err },
     } {
         if closedErr := call(); nil == closedErr || false == strings.Contains(closedErr.Error(), "cache backend is closed") {
             t.Fatalf("expected %s refused after Close, got %v", door, closedErr)
         }
     }
 
-    if setErr := sibling.Set("key", []byte("value"), bound.Of(time.Minute)); nil != setErr {
+    if setErr := sibling.Set(context.Background(), "key", []byte("value"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("expected a sibling backend untouched by the close, got %v", setErr)
     }
 }
@@ -1458,11 +1459,11 @@ func TestInMemoryBackend_IncrementOnAnOutOfRangePayloadKeepsThePayloadOutOfTheCh
     defer backend.CloseWithContext(context.Background())
 
     payload := "999999999999999999999999999999"
-    if setErr := backend.Set("counter", []byte(payload), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(context.Background(), "counter", []byte(payload), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
-    _, incrementErr := backend.Increment("counter", 1)
+    _, incrementErr := backend.Increment(context.Background(), "counter", 1)
     if nil == incrementErr {
         t.Fatalf("expected the out-of-range payload to be refused")
     }
@@ -1481,11 +1482,11 @@ func TestInMemoryBackend_IncrementOnATextPayloadKeepsThePayloadOutOfTheRefusal(t
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
     defer backend.CloseWithContext(context.Background())
 
-    if setErr := backend.Set("counter", []byte("not-a-number-but-a-secret"), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(context.Background(), "counter", []byte("not-a-number-but-a-secret"), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
-    _, incrementErr := backend.Increment("counter", 1)
+    _, incrementErr := backend.Increment(context.Background(), "counter", 1)
     melodyErr, isMelodyErr := incrementErr.(*exception.Error)
     if false == isMelodyErr || "cache value is not a valid int64" != melodyErr.Message() {
         t.Fatalf("expected the textual payload to be refused, got %v", incrementErr)
@@ -1572,5 +1573,121 @@ func TestInMemoryBackend_CloseWithContextAnswersTheDeadlineOverAParkedCleanupLoo
 
     if closeErr := backend.CloseWithContext(t.Context()); nil != closeErr {
         t.Fatalf("expected the released loop to let a later close finish, got %v", closeErr)
+    }
+}
+
+func inMemoryContextOperations(backend *InMemoryBackend) map[string]func(ctx context.Context, key string) error {
+    return map[string]func(ctx context.Context, key string) error{
+        "Get": func(ctx context.Context, key string) error {
+            _, _, err := backend.Get(ctx, key)
+            return err
+        },
+        "Set": func(ctx context.Context, key string) error {
+            return backend.Set(ctx, key, []byte("written"), bound.Of(time.Minute))
+        },
+        "Delete": func(ctx context.Context, key string) error {
+            return backend.Delete(ctx, key)
+        },
+        "Has": func(ctx context.Context, key string) error {
+            _, err := backend.Has(ctx, key)
+            return err
+        },
+        "Clear": func(ctx context.Context, key string) error {
+            return backend.Clear(ctx)
+        },
+        "Many": func(ctx context.Context, key string) error {
+            _, err := backend.Many(ctx, []string{key})
+            return err
+        },
+        "SetMultiple": func(ctx context.Context, key string) error {
+            return backend.SetMultiple(ctx, map[string][]byte{key: []byte("written")}, bound.Of(time.Minute))
+        },
+        "DeleteMultiple": func(ctx context.Context, key string) error {
+            return backend.DeleteMultiple(ctx, []string{key})
+        },
+        "Increment": func(ctx context.Context, key string) error {
+            _, err := backend.Increment(ctx, key, 1)
+            return err
+        },
+        "Decrement": func(ctx context.Context, key string) error {
+            _, err := backend.Decrement(ctx, key, 1)
+            return err
+        },
+    }
+}
+
+func TestInMemoryBackend_EveryOperationRefusesANilContextFirst(t *testing.T) {
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)})
+    if closeErr := backend.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    var absentContext *zzTypedNilContext
+
+    for name, operation := range inMemoryContextOperations(backend) {
+        for _, operationContext := range []context.Context{nil, absentContext} {
+            operationErr := operation(operationContext, "")
+            if nil == operationErr || "cache context is nil" != operationErr.Error() {
+                t.Fatalf("%s: expected the absent context refused first, got %v", name, operationErr)
+            }
+        }
+    }
+}
+
+func TestInMemoryBackend_ADoneContextIsAnsweredAfterTheArgumentsAndTouchesNothing(t *testing.T) {
+    canceledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    for name := range inMemoryContextOperations(nil) {
+        backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)})
+
+        if setErr := backend.Set(context.Background(), "held", []byte("7"), bound.Of(time.Minute)); nil != setErr {
+            t.Fatalf("planting: %v", setErr)
+        }
+
+        operation := inMemoryContextOperations(backend)[name]
+
+        if "Clear" != name {
+            if keyErr := operation(canceledContext, ""); nil == keyErr || true == errors.Is(keyErr, context.Canceled) {
+                t.Fatalf("%s: expected the malformed key refused before the done context, got %v", name, keyErr)
+            }
+        }
+
+        for _, key := range []string{"held", "fresh"} {
+            if doneErr := operation(canceledContext, key); false == errors.Is(doneErr, context.Canceled) {
+                t.Fatalf("%s %s: expected the done context's error, got %v", name, key, doneErr)
+            }
+        }
+
+        payload, exists, getErr := backend.Get(context.Background(), "held")
+        if nil != getErr || false == exists || "7" != string(payload) {
+            t.Fatalf("%s: expected the held entry untouched, got %q, %v, %v", name, payload, exists, getErr)
+        }
+
+        if freshExists, hasErr := backend.Has(context.Background(), "fresh"); nil != hasErr || true == freshExists {
+            t.Fatalf("%s: expected nothing written under the done context, got %v, %v", name, freshExists, hasErr)
+        }
+
+        _ = backend.CloseWithContext(context.Background())
+    }
+}
+
+func TestInMemoryBackend_AnEmptyBatchUnderADoneContextAnswersItsError(t *testing.T) {
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)})
+    defer backend.CloseWithContext(context.Background())
+
+    canceledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, manyErr := backend.Many(canceledContext, nil); false == errors.Is(manyErr, context.Canceled) {
+        t.Fatalf("Many: expected the done context's error, got %v", manyErr)
+    }
+
+    if setErr := backend.SetMultiple(canceledContext, nil, bound.Of(time.Minute)); false == errors.Is(setErr, context.Canceled) {
+        t.Fatalf("SetMultiple: expected the done context's error, got %v", setErr)
+    }
+
+    if deleteErr := backend.DeleteMultiple(canceledContext, nil); false == errors.Is(deleteErr, context.Canceled) {
+        t.Fatalf("DeleteMultiple: expected the done context's error, got %v", deleteErr)
     }
 }

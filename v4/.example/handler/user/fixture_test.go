@@ -224,7 +224,7 @@ type valueCache struct {
     values map[string]any
 }
 
-func (instance *valueCache) Get(key string) (any, bool, error) {
+func (instance *valueCache) Get(ctx context.Context, key string) (any, bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -233,7 +233,7 @@ func (instance *valueCache) Get(key string) (any, bool, error) {
     return value, exists, nil
 }
 
-func (instance *valueCache) Set(key string, value any, ttl melodybound.Duration) error {
+func (instance *valueCache) Set(ctx context.Context, key string, value any, ttl melodybound.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -242,7 +242,7 @@ func (instance *valueCache) Set(key string, value any, ttl melodybound.Duration)
     return nil
 }
 
-func (instance *valueCache) Delete(key string) error {
+func (instance *valueCache) Delete(ctx context.Context, key string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -251,7 +251,7 @@ func (instance *valueCache) Delete(key string) error {
     return nil
 }
 
-func (instance *valueCache) Has(key string) (bool, error) {
+func (instance *valueCache) Has(ctx context.Context, key string) (bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -260,7 +260,7 @@ func (instance *valueCache) Has(key string) (bool, error) {
     return exists, nil
 }
 
-func (instance *valueCache) Clear() error {
+func (instance *valueCache) Clear(ctx context.Context) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -269,7 +269,7 @@ func (instance *valueCache) Clear() error {
     return nil
 }
 
-func (instance *valueCache) Many(keys []string) (map[string]any, error) {
+func (instance *valueCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -283,7 +283,7 @@ func (instance *valueCache) Many(keys []string) (map[string]any, error) {
     return result, nil
 }
 
-func (instance *valueCache) SetMultiple(items map[string]any, ttl melodybound.Duration) error {
+func (instance *valueCache) SetMultiple(ctx context.Context, items map[string]any, ttl melodybound.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -294,7 +294,7 @@ func (instance *valueCache) SetMultiple(items map[string]any, ttl melodybound.Du
     return nil
 }
 
-func (instance *valueCache) DeleteMultiple(keys []string) error {
+func (instance *valueCache) DeleteMultiple(ctx context.Context, keys []string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -305,11 +305,11 @@ func (instance *valueCache) DeleteMultiple(keys []string) error {
     return nil
 }
 
-func (instance *valueCache) Increment(key string, delta int64) (int64, error) {
+func (instance *valueCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
     return 0, nil
 }
 
-func (instance *valueCache) Decrement(key string, delta int64) (int64, error) {
+func (instance *valueCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
     return 0, nil
 }
 

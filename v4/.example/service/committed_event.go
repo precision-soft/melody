@@ -29,7 +29,7 @@ func dispatchCommitted(
 
     failureErr := dispatchErr
     for _, cacheKey := range cacheKeyList {
-        if deleteErr := cacheInstance.Delete(cacheKey); nil != deleteErr {
+        if deleteErr := cacheInstance.Delete(runtimeInstance.Context(), cacheKey); nil != deleteErr {
             failureErr = errors.Join(failureErr, deleteErr)
         }
     }

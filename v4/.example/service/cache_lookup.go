@@ -19,7 +19,7 @@ func rememberEntityOrAbsence(
     cacheKey string,
     loader func(ctx context.Context) (any, error),
 ) (any, error) {
-    cached, exists, getErr := cacheInstance.Get(cacheKey)
+    cached, exists, getErr := cacheInstance.Get(ctx, cacheKey)
     if nil == getErr && true == exists {
         return cached, nil
     }
@@ -49,7 +49,7 @@ func rememberEntityOrAbsence(
         return computed, nil
     }
 
-    setErr := cacheInstance.Set(cacheKey, computed, melodybound.Of(entityCacheTtl))
+    setErr := cacheInstance.Set(ctx, cacheKey, computed, melodybound.Of(entityCacheTtl))
     if nil != setErr {
         return nil, setErr
     }

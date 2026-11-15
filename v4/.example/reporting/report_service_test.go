@@ -204,13 +204,13 @@ type readingCache struct {
     ttls   map[string]melodybound.Duration
 }
 
-func (instance *readingCache) Get(key string) (any, bool, error) {
+func (instance *readingCache) Get(ctx context.Context, key string) (any, bool, error) {
     value, exists := instance.values[key]
 
     return value, exists, nil
 }
 
-func (instance *readingCache) Set(key string, value any, ttl melodybound.Duration) error {
+func (instance *readingCache) Set(ctx context.Context, key string, value any, ttl melodybound.Duration) error {
     instance.values[key] = value
 
     if nil == instance.ttls {
@@ -221,25 +221,25 @@ func (instance *readingCache) Set(key string, value any, ttl melodybound.Duratio
     return nil
 }
 
-func (instance *readingCache) Delete(key string) error {
+func (instance *readingCache) Delete(ctx context.Context, key string) error {
     delete(instance.values, key)
 
     return nil
 }
 
-func (instance *readingCache) Has(key string) (bool, error) {
+func (instance *readingCache) Has(ctx context.Context, key string) (bool, error) {
     _, exists := instance.values[key]
 
     return exists, nil
 }
 
-func (instance *readingCache) Clear() error {
+func (instance *readingCache) Clear(ctx context.Context) error {
     instance.values = map[string]any{}
 
     return nil
 }
 
-func (instance *readingCache) Many(keys []string) (map[string]any, error) {
+func (instance *readingCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
     result := map[string]any{}
     for _, key := range keys {
         if value, exists := instance.values[key]; true == exists {
@@ -250,7 +250,7 @@ func (instance *readingCache) Many(keys []string) (map[string]any, error) {
     return result, nil
 }
 
-func (instance *readingCache) SetMultiple(items map[string]any, ttl melodybound.Duration) error {
+func (instance *readingCache) SetMultiple(ctx context.Context, items map[string]any, ttl melodybound.Duration) error {
     for key, value := range items {
         instance.values[key] = value
     }
@@ -258,7 +258,7 @@ func (instance *readingCache) SetMultiple(items map[string]any, ttl melodybound.
     return nil
 }
 
-func (instance *readingCache) DeleteMultiple(keys []string) error {
+func (instance *readingCache) DeleteMultiple(ctx context.Context, keys []string) error {
     for _, key := range keys {
         delete(instance.values, key)
     }
@@ -266,11 +266,11 @@ func (instance *readingCache) DeleteMultiple(keys []string) error {
     return nil
 }
 
-func (instance *readingCache) Increment(key string, delta int64) (int64, error) {
+func (instance *readingCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
     return 0, nil
 }
 
-func (instance *readingCache) Decrement(key string, delta int64) (int64, error) {
+func (instance *readingCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
     return 0, nil
 }
 

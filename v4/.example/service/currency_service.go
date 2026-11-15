@@ -288,7 +288,7 @@ func (instance *CurrencyService) UpdateRate(
     }
 
     if true == quote.NamesTheSameReadingAs(currency.Quote()) {
-        if dropErr := instance.healCachedCurrency(currency); nil != dropErr {
+        if dropErr := instance.healCachedCurrency(ctx, currency); nil != dropErr {
             return nil, RateUpdateUnchanged, dropErr
         }
 
@@ -319,7 +319,7 @@ func (instance *CurrencyService) UpdateRate(
             return current, RateUpdateStale, nil
         }
 
-        if dropErr := instance.healCachedCurrency(current); nil != dropErr {
+        if dropErr := instance.healCachedCurrency(ctx, current); nil != dropErr {
             return nil, RateUpdateUnchanged, dropErr
         }
 
@@ -354,19 +354,19 @@ func isOlderReading(quote entity.RateQuote, held entity.RateQuote) bool {
 }
 
 /* healCachedCurrency makes the two entries a currency is served from, the same two the updated listener drops, agree with a row that did not move, without the event. Each entry is read first and dropped only when it is not the row, compared field for field, because the heal stands in for any invalidation that failed before it, the rename's included. An absent entry is left absent: the next reader fills it from the row. */
-func (instance *CurrencyService) healCachedCurrency(currency *entity.Currency) error {
+func (instance *CurrencyService) healCachedCurrency(ctx context.Context, currency *entity.Currency) error {
     byIdKey := CacheKeyCurrencyById(currency.Id)
 
-    cached, exists, getErr := instance.cache.Get(byIdKey)
+    cached, exists, getErr := instance.cache.Get(ctx, byIdKey)
     if nil != getErr || (true == exists && false == cachedCurrencyIsRow(cached, currency)) {
-        if byIdErr := instance.cache.Delete(byIdKey); nil != byIdErr {
+        if byIdErr := instance.cache.Delete(ctx, byIdKey); nil != byIdErr {
             return byIdErr
         }
     }
 
-    cachedList, listExists, listErr := instance.cache.Get(CacheKeyCurrencyList)
+    cachedList, listExists, listErr := instance.cache.Get(ctx, CacheKeyCurrencyList)
     if nil != listErr || (true == listExists && false == cachedListCarriesRow(cachedList, currency)) {
-        return instance.cache.Delete(CacheKeyCurrencyList)
+        return instance.cache.Delete(ctx, CacheKeyCurrencyList)
     }
 
     return nil

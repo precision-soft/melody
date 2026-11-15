@@ -217,7 +217,7 @@ func TestApiHistoryHandler_ServesTheCachedReadingAsTheCurrentOne(t *testing.T) {
     cacheInstance := melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(16), CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()}), examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
     t.Cleanup(func() { _ = cacheInstance.CloseWithContext(context.Background()) })
 
-    if setErr := cacheInstance.Set("catalog.reading", "products=7 journal=3 recorded_at=2026-10-06T10:00:00Z", melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := cacheInstance.Set(context.Background(), "catalog.reading", "products=7 journal=3 recorded_at=2026-10-06T10:00:00Z", melodybound.Of(time.Hour)); nil != setErr {
         t.Fatalf("prime the reading: %v", setErr)
     }
 
@@ -236,7 +236,7 @@ func TestApiHistoryHandler_TakesTheCurrentReadingOnAColdCache(t *testing.T) {
         t.Fatalf("expected a reading taken now on the cold cache, got %v", current)
     }
 
-    if held, _ := cacheInstance.Has("catalog.reading"); false == held {
+    if held, _ := cacheInstance.Has(context.Background(), "catalog.reading"); false == held {
         t.Fatalf("expected the reading taken on the cold cache left there for the next caller")
     }
 }

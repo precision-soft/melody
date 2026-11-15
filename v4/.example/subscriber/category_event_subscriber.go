@@ -43,12 +43,12 @@ func (instance *CategoryEventSubscriber) onCategoryCreated() melodyeventcontract
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(service.CacheKeyCategoryById(payloadInstance.Category().Id))
+        byIdDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryById(payloadInstance.Category().Id))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
-        listDeleteErr := cacheInstance.Delete(service.CacheKeyCategoryList)
+        listDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryList)
         if nil != listDeleteErr {
             return listDeleteErr
         }
@@ -75,12 +75,12 @@ func (instance *CategoryEventSubscriber) onCategoryUpdated() melodyeventcontract
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(service.CacheKeyCategoryById(payloadInstance.Category().Id))
+        byIdDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryById(payloadInstance.Category().Id))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
-        listDeleteErr := cacheInstance.Delete(service.CacheKeyCategoryList)
+        listDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryList)
         if nil != listDeleteErr {
             return listDeleteErr
         }
@@ -107,12 +107,12 @@ func (instance *CategoryEventSubscriber) onCategoryDeleted() melodyeventcontract
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(service.CacheKeyCategoryById(payloadInstance.CategoryId()))
+        byIdDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryById(payloadInstance.CategoryId()))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
-        listDeleteErr := cacheInstance.Delete(service.CacheKeyCategoryList)
+        listDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryList)
         if nil != listDeleteErr {
             return listDeleteErr
         }

@@ -28,12 +28,12 @@ type deleteCountingCache struct {
     deletes map[string]int
 }
 
-func (instance *deleteCountingCache) Delete(key string) error {
+func (instance *deleteCountingCache) Delete(ctx context.Context, key string) error {
     instance.mutex.Lock()
     instance.deletes[key]++
     instance.mutex.Unlock()
 
-    return instance.Cache.Delete(key)
+    return instance.Cache.Delete(context.Background(), key)
 }
 
 /* userUpdateUnderTest answers a runtime holding only the cache: the listener drops its entries before it notifies, so the notification hub it cannot resolve ends the call after the drops under test */
@@ -75,7 +75,7 @@ func TestUserEventSubscriber_DropsBothSpellingsOnARename(t *testing.T) {
         service.CacheKeyUserList,
     }
     for _, key := range keyList {
-        if setErr := cacheInstance.Set(key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := cacheInstance.Set(context.Background(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("prime %s: %v", key, setErr)
         }
     }
@@ -83,7 +83,7 @@ func TestUserEventSubscriber_DropsBothSpellingsOnARename(t *testing.T) {
     dispatchUserUpdated(runtimeInstance, renamed, "ada")
 
     for _, key := range keyList {
-        if held, _ := cacheInstance.Has(key); true == held {
+        if held, _ := cacheInstance.Has(context.Background(), key); true == held {
             t.Fatalf("expected %s dropped after the rename", key)
         }
     }

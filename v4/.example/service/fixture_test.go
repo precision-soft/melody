@@ -71,7 +71,7 @@ func (instance *ttlRecordingCache) writesFor(key string) []cacheWrite {
     return matched
 }
 
-func (instance *ttlRecordingCache) Get(key string) (any, bool, error) {
+func (instance *ttlRecordingCache) Get(ctx context.Context, key string) (any, bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -80,7 +80,7 @@ func (instance *ttlRecordingCache) Get(key string) (any, bool, error) {
     return value, exists, nil
 }
 
-func (instance *ttlRecordingCache) Set(key string, value any, ttl melodybound.Duration) error {
+func (instance *ttlRecordingCache) Set(ctx context.Context, key string, value any, ttl melodybound.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -90,7 +90,7 @@ func (instance *ttlRecordingCache) Set(key string, value any, ttl melodybound.Du
     return nil
 }
 
-func (instance *ttlRecordingCache) Delete(key string) error {
+func (instance *ttlRecordingCache) Delete(ctx context.Context, key string) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -110,7 +110,7 @@ func (instance *ttlRecordingCache) deletedKeyList() []string {
     return append([]string{}, instance.deletedKeys...)
 }
 
-func (instance *ttlRecordingCache) Has(key string) (bool, error) {
+func (instance *ttlRecordingCache) Has(ctx context.Context, key string) (bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -119,7 +119,7 @@ func (instance *ttlRecordingCache) Has(key string) (bool, error) {
     return exists, nil
 }
 
-func (instance *ttlRecordingCache) Clear() error {
+func (instance *ttlRecordingCache) Clear(ctx context.Context) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -128,7 +128,7 @@ func (instance *ttlRecordingCache) Clear() error {
     return nil
 }
 
-func (instance *ttlRecordingCache) Many(keys []string) (map[string]any, error) {
+func (instance *ttlRecordingCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -142,9 +142,9 @@ func (instance *ttlRecordingCache) Many(keys []string) (map[string]any, error) {
     return result, nil
 }
 
-func (instance *ttlRecordingCache) SetMultiple(items map[string]any, ttl melodybound.Duration) error {
+func (instance *ttlRecordingCache) SetMultiple(ctx context.Context, items map[string]any, ttl melodybound.Duration) error {
     for key, value := range items {
-        if setErr := instance.Set(key, value, ttl); nil != setErr {
+        if setErr := instance.Set(ctx, key, value, ttl); nil != setErr {
             return setErr
         }
     }
@@ -152,9 +152,9 @@ func (instance *ttlRecordingCache) SetMultiple(items map[string]any, ttl melodyb
     return nil
 }
 
-func (instance *ttlRecordingCache) DeleteMultiple(keys []string) error {
+func (instance *ttlRecordingCache) DeleteMultiple(ctx context.Context, keys []string) error {
     for _, key := range keys {
-        if deleteErr := instance.Delete(key); nil != deleteErr {
+        if deleteErr := instance.Delete(ctx, key); nil != deleteErr {
             return deleteErr
         }
     }
@@ -162,11 +162,11 @@ func (instance *ttlRecordingCache) DeleteMultiple(keys []string) error {
     return nil
 }
 
-func (instance *ttlRecordingCache) Increment(key string, delta int64) (int64, error) {
+func (instance *ttlRecordingCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
     return 0, nil
 }
 
-func (instance *ttlRecordingCache) Decrement(key string, delta int64) (int64, error) {
+func (instance *ttlRecordingCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
     return 0, nil
 }
 
@@ -337,7 +337,7 @@ func assertPaddedIdentifierAnsweredAbsent(t *testing.T, cacheInstance *ttlRecord
         }
     }
 
-    if cached, exists, _ := cacheInstance.Get(cacheKey(id + " ")); true == exists && nil != cached {
+    if cached, exists, _ := cacheInstance.Get(context.Background(), cacheKey(id + " ")); true == exists && nil != cached {
         t.Fatalf("the padded identifier holds a row in the cache: %+v", cached)
     }
 
@@ -451,7 +451,7 @@ func (instance *catalogueUnderTest) prime(t *testing.T, keyList ...string) {
     t.Helper()
 
     for _, key := range keyList {
-        if setErr := instance.cache.Set(key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+        if setErr := instance.cache.Set(context.Background(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("prime %s: %v", key, setErr)
         }
     }
@@ -466,13 +466,13 @@ func (instance *catalogueUnderTest) assertCommittedDispatchFailure(t *testing.T,
         t.Fatalf("expected one error record of the failed event, got %v", records)
     }
 
-    context, _ := records[0]["context"].(melodyloggingcontract.Context)
-    if eventName != context["event"] || entityId != context["entityId"] {
+    recordContext, _ := records[0]["context"].(melodyloggingcontract.Context)
+    if eventName != recordContext["event"] || entityId != recordContext["entityId"] {
         t.Fatalf("expected the record to name %s and %s, got %v", eventName, entityId, records[0])
     }
 
     for _, key := range keyList {
-        if held, _ := instance.cache.Has(key); true == held {
+        if held, _ := instance.cache.Has(context.Background(), key); true == held {
             t.Fatalf("expected %s dropped after the failed event", key)
         }
     }

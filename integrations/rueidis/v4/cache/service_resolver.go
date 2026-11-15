@@ -1,8 +1,6 @@
 package cache
 
 import (
-    "context"
-
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     melodycache "github.com/precision-soft/melody/v4/cache"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
@@ -16,7 +14,7 @@ type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-/* RegisterBackendService resolves the configuration at the call, so a nil client or a limit outside its rule fails the boot rather than the first resolve. The context-less operations are bounded by BackendConfig.CommandTimeout, 1s when left out. */
+/* RegisterBackendService resolves the configuration at the call, so a nil client or a limit outside its rule fails the boot rather than the first resolve. Each round trip is bounded by BackendConfig.CommandTimeout, 1s when left out, on top of the caller's context. */
 func RegisterBackendService(registrar ServiceRegistrar, client rueidis.Client, config BackendConfig) {
     if nil == client {
         exception.Panic(exception.NewError("redis client is nil", nil, nil))
@@ -36,8 +34,7 @@ func RegisterBackendService(registrar ServiceRegistrar, client rueidis.Client, c
             }
 
             return &BackendService{
-                client:  client,
-                backend: newBackendFromResolved(context.Background(), client, resolved),
+                backend: newBackendFromResolved(client, resolved),
             }, nil
         },
         container.RegisterOptions{},

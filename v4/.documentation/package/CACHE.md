@@ -243,6 +243,8 @@ func loadUserProfile(
   computation finish and store for the callers after.
 - The context, `Remember`'s first parameter, ties the **wait** to the request that opened it, and nothing else; a nil one is refused. A caller that serves an http request passes `request.HttpRequest().Context()` — the melody `Request` carries no `Context()` of its own — or the handler's `runtimeInstance.Context()`, which the kernel builds on that same context and which the example's handlers hand their services' read doors, so a client that disconnected releases the goroutine that served it, with its scope, its session and everything else the request reached, before the 30s wait ends. The context ends that one caller's wait with `cache remember wait canceled by the caller context`, carrying `context.Canceled` or `context.DeadlineExceeded` as the cause; it never ends the computation, which belongs to the leader and is awaited by everyone coalesced onto it. What cancels the computation is still the last waiter leaving, and only on the cancelable flight, the default. An answer already memoized when the wait begins is handed over whatever the context says. Where the **callback** is what should stop, give it its own deadline: the context it receives
   is the flight's, not the caller's — except on the uncoalesced path (`StampedeProtectionDisabled`, or a value-kind `Cache`), where there is no flight and the callback runs under the caller's context.
+- Every operation of a `Cache` and a `Backend` takes the caller's context first. A nil or typed-nil context is refused with `cache context is nil` before anything else is judged, the closed backend included; a context already done answers its own error once the arguments are judged, before the store is touched, so a refused key still answers the key's refusal. The `rueidis` backend bounds each round trip by the earlier of the context's deadline and its `BackendConfig.CommandTimeout`, and a `Clear` walk by the context as a whole.
+- `Remember` reads the cache under the caller's context; a flight's leader reads and stores under the flight's context, and the uncoalesced path stores under the caller's, so a caller gone before that store is answered the context's error and nothing is stored.
 - `Manager.Increment` and `Manager.Decrement` are backend-native, so a distributed backend keeps them atomic and the count is stored as decimal text rather than through the serializer. Read such a key with [`Manager.GetCounter`](../../cache/manager.go), never with `Get`, and do not mix `Set` onto the same key. See [`cache/manager.go`](../../cache/manager.go).
 - `Remember` uses a single-flight mechanism when stampede protection is enabled (default). See [`cache/remember.go`](../../cache/remember.go).
 - `Remember` groups in-flight calls by cache instance, key, and cancelability (cancelable callers are isolated from non-cancelable callers). See [`cache/remember.go`](../../cache/remember.go).
@@ -261,18 +263,18 @@ func loadUserProfile(
 package main
 
 type Cache interface {
-    Get(key string) (any, bool, error)
-    Set(key string, value any, ttl bound.Duration) error
-    Delete(key string) error
-    Has(key string) (bool, error)
-    Clear() error
+    Get(ctx context.Context, key string) (any, bool, error)
+    Set(ctx context.Context, key string, value any, ttl bound.Duration) error
+    Delete(ctx context.Context, key string) error
+    Has(ctx context.Context, key string) (bool, error)
+    Clear(ctx context.Context) error
 
-    Many(keys []string) (map[string]any, error)
-    SetMultiple(items map[string]any, ttl bound.Duration) error
-    DeleteMultiple(keys []string) error
+    Many(ctx context.Context, keys []string) (map[string]any, error)
+    SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error
+    DeleteMultiple(ctx context.Context, keys []string) error
 
-    Increment(key string, delta int64) (int64, error)
-    Decrement(key string, delta int64) (int64, error)
+    Increment(ctx context.Context, key string, delta int64) (int64, error)
+    Decrement(ctx context.Context, key string, delta int64) (int64, error)
 
     CloseWithContext(closeContext context.Context) error
 }

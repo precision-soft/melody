@@ -55,7 +55,7 @@ func resolveCache(runtimeInstance melodyruntimecontract.Runtime) (melodycachecon
 
 /* clearResolvedCache is the clear over a cache already resolved, for example:db:reset, which resolves it before its first drop so a cache it cannot reach refuses the reset before anything is touched. */
 func clearResolvedCache(runtimeInstance melodyruntimecontract.Runtime, cacheInstance melodycachecontract.Cache, writer io.Writer, caller string) error {
-    if clearErr := cacheInstance.Clear(); nil != clearErr {
+    if clearErr := cacheInstance.Clear(runtimeInstance.Context()); nil != clearErr {
         return exception.NewError(caller+": clearing the cache did not complete", nil, clearErr)
     }
 

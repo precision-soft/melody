@@ -105,13 +105,13 @@ func TestRegisterBackendService_HandsTheConfigToTheBackend(t *testing.T) {
         t.Fatalf("expected the config to reach the registered backend, got timeout %v, max key length %d, scan count %d and delete batch %d", service.backend.commandTimeout, service.backend.maxKeyLength, service.backend.scanCount, service.backend.deleteBatch)
     }
 
-    _ = service.Set("warm", []byte("x"), melodybound.UnlimitedDuration())
-    _ = service.Delete("warm")
+    _ = service.Set(context.Background(), "warm", []byte("x"), melodybound.UnlimitedDuration())
+    _ = service.Delete(context.Background(), "warm")
 
     backendGate.Wedge()
 
     getErr := awaitOutcome(t, registeredBackendProbeBudget, func() error {
-        _, _, err := service.Get("key")
+        _, _, err := service.Get(context.Background(), "key")
 
         return err
     })
@@ -129,14 +129,14 @@ func TestRegisterBackendService_AnAbsentCommandTimeoutRefusesAWedgedReadWithinOn
 
     service := container.MustFromResolver[*BackendService](t.Context(), serviceContainer, melodycache.ServiceCacheBackend)
 
-    _ = service.Set("warm", []byte("x"), melodybound.UnlimitedDuration())
-    _ = service.Delete("warm")
+    _ = service.Set(context.Background(), "warm", []byte("x"), melodybound.UnlimitedDuration())
+    _ = service.Delete(context.Background(), "warm")
 
     backendGate.Wedge()
 
     startedAt := time.Now()
     getErr := awaitOutcome(t, registeredBackendProbeBudget, func() error {
-        _, _, err := service.Get("key")
+        _, _, err := service.Get(context.Background(), "key")
 
         return err
     })
@@ -149,7 +149,7 @@ func TestRegisterBackendService_AnAbsentCommandTimeoutRefusesAWedgedReadWithinOn
     }
 }
 
-func TestRegisterBackendService_AnAbsentConfigBoundsTheContextLessOperationsAtOneSecond(t *testing.T) {
+func TestRegisterBackendService_AnAbsentConfigBoundsEachRoundTripAtOneSecond(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     registrar := &containerRegistrar{target: serviceContainer}
     RegisterBackendService(registrar, &teardownSpyClient{}, BackendConfig{})

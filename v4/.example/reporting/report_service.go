@@ -101,7 +101,7 @@ type CatalogReading struct {
 /* Reading yields the current reading, from the cache when the scheduled refresh left one there; a cached reading keeps the instant it was taken at, so the caller can tell how old the answer is. */
 func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogReading, error) {
     /* one round trip: Get answers presence and value together, so no entry can expire between two reads */
-    stored, cached, getErr := instance.cache.Get(catalogReadingCacheKey)
+    stored, cached, getErr := instance.cache.Get(ctx, catalogReadingCacheKey)
     if nil != getErr {
         return nil, getErr
     }
@@ -143,7 +143,7 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
         " " + catalogReadingJournalCountField + strconv.Itoa(journalCount) +
         " " + catalogReadingRecordedAtField + recordedAt.UTC().Format(time.RFC3339)
 
-    setErr := instance.cache.Set(catalogReadingCacheKey, payload, melodybound.Of(catalogReadingLifetime(instance.refreshInterval)))
+    setErr := instance.cache.Set(ctx, catalogReadingCacheKey, payload, melodybound.Of(catalogReadingLifetime(instance.refreshInterval)))
     if nil != setErr {
         return nil, setErr
     }

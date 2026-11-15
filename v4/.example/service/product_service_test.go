@@ -26,7 +26,7 @@ func TestProductService_RecordViewCountsEachReadOnTheProductsOwnCounter(t *testi
     productService := NewProductService(nil, nil, nil, manager, nil, nil)
 
     for expected := int64(1); expected <= 2; expected++ {
-        views, recordErr := productService.RecordView("prod-1")
+        views, recordErr := productService.RecordView(context.Background(), "prod-1")
         if nil != recordErr {
             t.Fatalf("record: %v", recordErr)
         }
@@ -36,12 +36,12 @@ func TestProductService_RecordViewCountsEachReadOnTheProductsOwnCounter(t *testi
         }
     }
 
-    other, otherErr := productService.RecordView("prod-2")
+    other, otherErr := productService.RecordView(context.Background(), "prod-2")
     if nil != otherErr || 1 != other {
         t.Fatalf("expected another product to count from one, got %d (%v)", other, otherErr)
     }
 
-    stored, exists, readErr := manager.GetCounter(CacheKeyProductViews("prod-1"))
+    stored, exists, readErr := manager.GetCounter(context.Background(), CacheKeyProductViews("prod-1"))
     if nil != readErr || false == exists || 2 != stored {
         t.Fatalf("expected the counter under the product's key to hold 2, got %d exists=%t (%v)", stored, exists, readErr)
     }

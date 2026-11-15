@@ -996,7 +996,7 @@ type refusingCache struct {
     *ttlRecordingCache
 }
 
-func (instance *refusingCache) Delete(key string) error {
+func (instance *refusingCache) Delete(ctx context.Context, key string) error {
     return errors.New("redis: connection refused")
 }
 

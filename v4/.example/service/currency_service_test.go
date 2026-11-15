@@ -136,10 +136,10 @@ func TestCurrencyServiceUpdateRate_AnswersUnchangedWithoutWritingAndDropsTheCach
        never ran: both entries are planted holding the quote from BEFORE that write, which is the state the
        heal exists for, and must be dropped by the second call, not by an event */
     stale := entity.NewCurrency("cur-usd", "USD", "US Dollar", 1.08, currencyQuoteInstant)
-    if setErr := currencyService.cache.Set(CacheKeyCurrencyById("cur-usd"), stale, melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := currencyService.cache.Set(context.Background(), CacheKeyCurrencyById("cur-usd"), stale, melodybound.Of(time.Hour)); nil != setErr {
         t.Fatalf("planting the stale by-id entry failed: %v", setErr)
     }
-    if setErr := currencyService.cache.Set(CacheKeyCurrencyList, []*entity.Currency{stale}, melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := currencyService.cache.Set(context.Background(), CacheKeyCurrencyList, []*entity.Currency{stale}, melodybound.Of(time.Hour)); nil != setErr {
         t.Fatalf("planting the stale list failed: %v", setErr)
     }
 
@@ -217,10 +217,10 @@ func TestCurrencyServiceUpdateRate_DropsACachedEntryAtTheQuoteThatIsNotTheRow(t 
     }
 
     renamed := entity.NewCurrency("cur-usd", "USD", "Old Dollar Name", 1.0842, quotedAt)
-    if setErr := currencyService.cache.Set(CacheKeyCurrencyById("cur-usd"), renamed, melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := currencyService.cache.Set(context.Background(), CacheKeyCurrencyById("cur-usd"), renamed, melodybound.Of(time.Hour)); nil != setErr {
         t.Fatalf("planting the by-id entry failed: %v", setErr)
     }
-    if setErr := currencyService.cache.Set(CacheKeyCurrencyList, []*entity.Currency{renamed}, melodybound.Of(time.Hour)); nil != setErr {
+    if setErr := currencyService.cache.Set(context.Background(), CacheKeyCurrencyList, []*entity.Currency{renamed}, melodybound.Of(time.Hour)); nil != setErr {
         t.Fatalf("planting the list failed: %v", setErr)
     }
 

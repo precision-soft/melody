@@ -32,7 +32,7 @@ type BackendConfig struct {
     /* MaxKeyLength bounds the key the caller hands in, before the prefix is put in front of it, since the prefix is the operator's and must not change which keys are refused: 1024 by default, at least 1, unlimited refused. */
     MaxKeyLength bound.Count
 
-    /* CommandTimeout bounds every operation dispatched without a caller context, each SCAN and DEL round trip of a Clear on its own, so a store that accepts connections but stops answering cannot hold a request-path read, which the client retries for as long as its context allows: 1s by default, at least 1ms, unlimited refused. */
+    /* CommandTimeout bounds every round trip on top of the caller's context, each SCAN and DEL of a Clear on its own while the caller's deadline bounds the walk, so a store that accepts connections but stops answering cannot hold a request-path read, which the client retries for as long as its context allows: 1s by default, at least 1ms, unlimited refused. */
     CommandTimeout bound.Duration
 }
 
@@ -103,8 +103,8 @@ func resolveBackendConfig(config BackendConfig) (resolvedBackend, error) {
     }, nil
 }
 
-/* NewBackend builds the redis-backed cache over the context its context-less doors derive from, nil read as the background context; a nil client or a limit outside its rule is the error, naming the field. */
-func NewBackend(ctx context.Context, client rueidis.Client, config BackendConfig) (*Backend, error) {
+/* NewBackend builds the redis-backed cache; a nil client or a limit outside its rule is the error, naming the field. */
+func NewBackend(client rueidis.Client, config BackendConfig) (*Backend, error) {
     if nil == client {
         return nil, exception.NewError(
             "redis client is nil",
@@ -118,18 +118,12 @@ func NewBackend(ctx context.Context, client rueidis.Client, config BackendConfig
         return nil, resolveErr
     }
 
-    return newBackendFromResolved(ctx, client, resolved), nil
+    return newBackendFromResolved(client, resolved), nil
 }
 
-/* newBackendFromResolved builds a backend from values already resolved, so a handle minted per request neither re-resolves nor fails */
-func newBackendFromResolved(ctx context.Context, client rueidis.Client, resolved resolvedBackend) *Backend {
-    if nil == ctx {
-        ctx = context.Background()
-    }
-
+func newBackendFromResolved(client rueidis.Client, resolved resolvedBackend) *Backend {
     return &Backend{
         client:         client,
-        ctx:            ctx,
         prefix:         resolved.prefix,
         scanCount:      resolved.scanCount,
         deleteBatch:    resolved.deleteBatch,
@@ -140,43 +134,40 @@ func newBackendFromResolved(ctx context.Context, client rueidis.Client, resolved
 
 type Backend struct {
     client         rueidis.Client
-    ctx            context.Context
     prefix         string
     scanCount      int
     deleteBatch    int
     maxKeyLength   int
     commandTimeout time.Duration
     closed         atomic.Bool
-    /* ownerClosed is the closed flag of the backend this handle was derived from, nil on a backend built directly: a handle WithContext mints per request lives exactly as long as its owner, so the owner's CloseWithContext must reach it. A sibling backend over the same client stays independent; the client belongs to whoever built it. */
-    ownerClosed *atomic.Bool
 }
 
 /* roundTripContext answers the context one store round trip of a walk runs on. */
 type roundTripContext func() (context.Context, context.CancelFunc)
 
-/* callerRoundTrip keeps every round trip of a walk on the caller's one context, whose deadline bounds the walk as a whole. */
-func callerRoundTrip(ctx context.Context) roundTripContext {
+/* commandContext bounds one round trip by the command timeout on top of the caller's context, the earlier deadline winning. */
+func (instance *Backend) commandContext(ctx context.Context) (context.Context, context.CancelFunc) {
+    return context.WithTimeout(ctx, instance.commandTimeout)
+}
+
+/* walkRoundTrip gives every round trip of a walk its own command timeout under the caller's one context, whose deadline bounds the walk as a whole. */
+func (instance *Backend) walkRoundTrip(ctx context.Context) roundTripContext {
     return func() (context.Context, context.CancelFunc) {
-        return ctx, func() {}
+        return instance.commandContext(ctx)
     }
 }
 
-/* operationContext bounds an operation dispatched without a caller context: the constructor's context plus the command timeout. */
-func (instance *Backend) operationContext() (context.Context, context.CancelFunc) {
-    return context.WithTimeout(instance.ctx, instance.commandTimeout)
+func (instance *Backend) refuseBeforeArguments(ctx context.Context) error {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return nilErr
+    }
+
+    return instance.refuseWhenClosed()
 }
 
-/* refuseWhenClosed answers the refusal every operation gives after CloseWithContext, as the in-memory backend behind the same contract does, so a teardown-ordering bug surfaces at once; a derived handle reads its owner's flag too. */
+/* refuseWhenClosed answers the refusal every operation gives after CloseWithContext, as the in-memory backend behind the same contract does, so a teardown-ordering bug surfaces at once. */
 func (instance *Backend) refuseWhenClosed() error {
     if true == instance.closed.Load() {
-        return exception.NewError(
-            "cache backend is closed",
-            nil,
-            nil,
-        )
-    }
-
-    if nil != instance.ownerClosed && true == instance.ownerClosed.Load() {
         return exception.NewError(
             "cache backend is closed",
             nil,
@@ -187,9 +178,9 @@ func (instance *Backend) refuseWhenClosed() error {
     return nil
 }
 
-func (instance *Backend) GetContext(ctx context.Context, key string) ([]byte, bool, error) {
-    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
-        return nil, false, closedErr
+func (instance *Backend) Get(ctx context.Context, key string) ([]byte, bool, error) {
+    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+        return nil, false, refusalErr
     }
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
@@ -197,8 +188,15 @@ func (instance *Backend) GetContext(ctx context.Context, key string) ([]byte, bo
         return nil, false, normalizeErr
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return nil, false, doneErr
+    }
+
+    commandContext, cancel := instance.commandContext(ctx)
+    defer cancel()
+
     response := instance.client.Do(
-        ctx,
+        commandContext,
         instance.client.B().Get().Key(normalizedKey).Build(),
     )
     if err := response.Error(); nil != err {
@@ -217,17 +215,9 @@ func (instance *Backend) GetContext(ctx context.Context, key string) ([]byte, bo
     return payload, true, nil
 }
 
-/* Deprecated: prefer GetContext, which takes ctx per call. */
-func (instance *Backend) Get(key string) ([]byte, bool, error) {
-    ctx, cancel := instance.operationContext()
-    defer cancel()
-
-    return instance.GetContext(ctx, key)
-}
-
-func (instance *Backend) SetContext(ctx context.Context, key string, payload []byte, ttl bound.Duration) error {
-    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
-        return closedErr
+func (instance *Backend) Set(ctx context.Context, key string, payload []byte, ttl bound.Duration) error {
+    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+        return refusalErr
     }
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
@@ -247,23 +237,22 @@ func (instance *Backend) SetContext(ctx context.Context, key string, payload []b
         command = instance.client.B().Set().Key(normalizedKey).Value(rueidis.BinaryString(payload)).Build()
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
+    }
+
+    commandContext, cancel := instance.commandContext(ctx)
+    defer cancel()
+
     return instance.client.Do(
-        ctx,
+        commandContext,
         command,
     ).Error()
 }
 
-/* Deprecated: prefer SetContext, which takes ctx per call. */
-func (instance *Backend) Set(key string, payload []byte, ttl bound.Duration) error {
-    ctx, cancel := instance.operationContext()
-    defer cancel()
-
-    return instance.SetContext(ctx, key, payload, ttl)
-}
-
-func (instance *Backend) DeleteContext(ctx context.Context, key string) error {
-    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
-        return closedErr
+func (instance *Backend) Delete(ctx context.Context, key string) error {
+    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+        return refusalErr
     }
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
@@ -271,23 +260,22 @@ func (instance *Backend) DeleteContext(ctx context.Context, key string) error {
         return normalizeErr
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
+    }
+
+    commandContext, cancel := instance.commandContext(ctx)
+    defer cancel()
+
     return instance.client.Do(
-        ctx,
+        commandContext,
         instance.client.B().Del().Key(normalizedKey).Build(),
     ).Error()
 }
 
-/* Deprecated: prefer DeleteContext, which takes ctx per call. */
-func (instance *Backend) Delete(key string) error {
-    ctx, cancel := instance.operationContext()
-    defer cancel()
-
-    return instance.DeleteContext(ctx, key)
-}
-
-func (instance *Backend) HasContext(ctx context.Context, key string) (bool, error) {
-    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
-        return false, closedErr
+func (instance *Backend) Has(ctx context.Context, key string) (bool, error) {
+    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+        return false, refusalErr
     }
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
@@ -295,8 +283,15 @@ func (instance *Backend) HasContext(ctx context.Context, key string) (bool, erro
         return false, normalizeErr
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return false, doneErr
+    }
+
+    commandContext, cancel := instance.commandContext(ctx)
+    defer cancel()
+
     response := instance.client.Do(
-        ctx,
+        commandContext,
         instance.client.B().Exists().Key(normalizedKey).Build(),
     )
     if err := response.Error(); nil != err {
@@ -311,29 +306,16 @@ func (instance *Backend) HasContext(ctx context.Context, key string) (bool, erro
     return 0 != count, nil
 }
 
-/* Deprecated: prefer HasContext, which takes ctx per call. */
-func (instance *Backend) Has(key string) (bool, error) {
-    ctx, cancel := instance.operationContext()
-    defer cancel()
-
-    return instance.HasContext(ctx, key)
-}
-
-func (instance *Backend) ClearContext(ctx context.Context) error {
-    return instance.clear(callerRoundTrip(ctx))
-}
-
-/* Deprecated: prefer ClearContext, which takes ctx per call. The command timeout bounds each SCAN and each DEL rather than the walk, whose length is the size of the namespace. */
-func (instance *Backend) Clear() error {
-    return instance.clear(instance.operationContext)
-}
-
-func (instance *Backend) clear(roundTrip roundTripContext) error {
-    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
-        return closedErr
+func (instance *Backend) Clear(ctx context.Context) error {
+    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+        return refusalErr
     }
 
-    return instance.deleteMatching(roundTrip, escapeRedisGlobMeta(instance.prefix)+"*")
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
+    }
+
+    return instance.deleteMatching(instance.walkRoundTrip(ctx), escapeRedisGlobMeta(instance.prefix)+"*")
 }
 
 func (instance *Backend) deleteMatching(roundTrip roundTripContext, pattern string) error {
@@ -349,19 +331,10 @@ func (instance *Backend) deleteMatching(roundTrip roundTripContext, pattern stri
     return instance.deleteKeysInBatches(roundTrip, keys)
 }
 
-/* ClearByPrefixContext refuses the empty prefix as every other operation refuses the empty key: a run-time prefix that comes out empty, "tenant:" plus an unresolved id, would select the whole namespace. ClearContext is the door for the whole namespace. */
-func (instance *Backend) ClearByPrefixContext(ctx context.Context, prefix string) error {
-    return instance.clearByPrefix(callerRoundTrip(ctx), prefix)
-}
-
-/* Deprecated: prefer ClearByPrefixContext, which takes ctx per call. The command timeout bounds each SCAN and each DEL rather than the walk, whose length is the size of the subtree. */
-func (instance *Backend) ClearByPrefix(prefix string) error {
-    return instance.clearByPrefix(instance.operationContext, prefix)
-}
-
-func (instance *Backend) clearByPrefix(roundTrip roundTripContext, prefix string) error {
-    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
-        return closedErr
+/* ClearByPrefix refuses the empty prefix as every other operation refuses the empty key: a run-time prefix that comes out empty, "tenant:" plus an unresolved id, would select the whole namespace. Clear is the door for the whole namespace. */
+func (instance *Backend) ClearByPrefix(ctx context.Context, prefix string) error {
+    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+        return refusalErr
     }
 
     normalizedPrefix, normalizeErr := instance.normalizeKey(prefix)
@@ -369,18 +342,19 @@ func (instance *Backend) clearByPrefix(roundTrip roundTripContext, prefix string
         return normalizeErr
     }
 
-    return instance.deleteMatching(roundTrip, escapeRedisGlobMeta(normalizedPrefix)+"*")
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
+    }
+
+    return instance.deleteMatching(instance.walkRoundTrip(ctx), escapeRedisGlobMeta(normalizedPrefix)+"*")
 }
 
-func (instance *Backend) ManyContext(ctx context.Context, keys []string) (map[string][]byte, error) {
-    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
-        return nil, closedErr
+func (instance *Backend) Many(ctx context.Context, keys []string) (map[string][]byte, error) {
+    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+        return nil, refusalErr
     }
 
     result := make(map[string][]byte, len(keys))
-    if 0 == len(keys) {
-        return result, nil
-    }
 
     normalizedKeys := make([]string, 0, len(keys))
     for _, key := range keys {
@@ -392,9 +366,20 @@ func (instance *Backend) ManyContext(ctx context.Context, keys []string) (map[st
         normalizedKeys = append(normalizedKeys, normalizedKey)
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return nil, doneErr
+    }
+
+    if 0 == len(normalizedKeys) {
+        return result, nil
+    }
+
+    commandContext, cancel := instance.commandContext(ctx)
+    defer cancel()
+
     values, err := rueidis.MGet(
         instance.client,
-        ctx,
+        commandContext,
         normalizedKeys,
     )
     if nil != err {
@@ -425,27 +410,15 @@ func (instance *Backend) ManyContext(ctx context.Context, keys []string) (map[st
     return result, nil
 }
 
-/* Deprecated: prefer ManyContext, which takes ctx per call. */
-func (instance *Backend) Many(keys []string) (map[string][]byte, error) {
-    ctx, cancel := instance.operationContext()
-    defer cancel()
-
-    return instance.ManyContext(ctx, keys)
-}
-
-func (instance *Backend) SetMultipleContext(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
-    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
-        return closedErr
+func (instance *Backend) SetMultiple(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
+    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+        return refusalErr
     }
 
-    /* the ttl is judged before the empty early-return, as the in-memory backend judges it, so an invalid ttl is refused whether or not the batch is empty */
+    /* the ttl is judged before the keys, as the in-memory backend judges it, so an invalid ttl is refused whether or not the batch is empty */
     expiry, ttlErr := cachecontract.ResolveTtl(ttl)
     if nil != ttlErr {
         return ttlErr
-    }
-
-    if 0 == len(items) {
-        return nil
     }
 
     /* the batch is walked over sorted keys, so the validation refusal names the same first key for the same batch on every call; the keys travel beside the commands because a failing response is identified by position only */
@@ -476,9 +449,20 @@ func (instance *Backend) SetMultipleContext(ctx context.Context, items map[strin
         commands = append(commands, command)
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
+    }
+
+    if 0 == len(commands) {
+        return nil
+    }
+
+    commandContext, cancel := instance.commandContext(ctx)
+    defer cancel()
+
     /* every failing response is collected before one is reported, as the delete sibling does, so the report is deterministic and shows how much of the batch failed */
     setErrors := make(map[string]error, len(commandKeys))
-    for index, response := range instance.client.DoMulti(ctx, commands...) {
+    for index, response := range instance.client.DoMulti(commandContext, commands...) {
         if err := response.Error(); nil != err {
             setErrors[commandKeys[index]] = err
         }
@@ -511,21 +495,9 @@ func (instance *Backend) firstSetFailure(setErrors map[string]error, requestedCo
     )
 }
 
-/* Deprecated: prefer SetMultipleContext, which takes ctx per call. */
-func (instance *Backend) SetMultiple(items map[string][]byte, ttl bound.Duration) error {
-    ctx, cancel := instance.operationContext()
-    defer cancel()
-
-    return instance.SetMultipleContext(ctx, items, ttl)
-}
-
-func (instance *Backend) DeleteMultipleContext(ctx context.Context, keys []string) error {
-    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
-        return closedErr
-    }
-
-    if 0 == len(keys) {
-        return nil
+func (instance *Backend) DeleteMultiple(ctx context.Context, keys []string) error {
+    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+        return refusalErr
     }
 
     normalizedKeys := make([]string, 0, len(keys))
@@ -538,24 +510,27 @@ func (instance *Backend) DeleteMultipleContext(ctx context.Context, keys []strin
         normalizedKeys = append(normalizedKeys, normalizedKey)
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
+    }
+
+    if 0 == len(normalizedKeys) {
+        return nil
+    }
+
+    commandContext, cancel := instance.commandContext(ctx)
+    defer cancel()
+
     return instance.firstDeleteFailure(rueidis.MDel(
         instance.client,
-        ctx,
+        commandContext,
         normalizedKeys,
     ))
 }
 
-/* Deprecated: prefer DeleteMultipleContext, which takes ctx per call. */
-func (instance *Backend) DeleteMultiple(keys []string) error {
-    ctx, cancel := instance.operationContext()
-    defer cancel()
-
-    return instance.DeleteMultipleContext(ctx, keys)
-}
-
-func (instance *Backend) IncrementContext(ctx context.Context, key string, delta int64) (int64, error) {
-    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
-        return 0, closedErr
+func (instance *Backend) Increment(ctx context.Context, key string, delta int64) (int64, error) {
+    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+        return 0, refusalErr
     }
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
@@ -563,8 +538,15 @@ func (instance *Backend) IncrementContext(ctx context.Context, key string, delta
         return 0, normalizeErr
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return 0, doneErr
+    }
+
+    commandContext, cancel := instance.commandContext(ctx)
+    defer cancel()
+
     response := instance.client.Do(
-        ctx,
+        commandContext,
         instance.client.B().Incrby().Key(normalizedKey).Increment(delta).Build(),
     )
     if err := response.Error(); nil != err {
@@ -579,17 +561,9 @@ func (instance *Backend) IncrementContext(ctx context.Context, key string, delta
     return value, nil
 }
 
-/* Deprecated: prefer IncrementContext, which takes ctx per call. */
-func (instance *Backend) Increment(key string, delta int64) (int64, error) {
-    ctx, cancel := instance.operationContext()
-    defer cancel()
-
-    return instance.IncrementContext(ctx, key, delta)
-}
-
-func (instance *Backend) DecrementContext(ctx context.Context, key string, delta int64) (int64, error) {
-    if closedErr := instance.refuseWhenClosed(); nil != closedErr {
-        return 0, closedErr
+func (instance *Backend) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
+    if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
+        return 0, refusalErr
     }
 
     normalizedKey, normalizeErr := instance.normalizeKey(key)
@@ -597,8 +571,15 @@ func (instance *Backend) DecrementContext(ctx context.Context, key string, delta
         return 0, normalizeErr
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return 0, doneErr
+    }
+
+    commandContext, cancel := instance.commandContext(ctx)
+    defer cancel()
+
     response := instance.client.Do(
-        ctx,
+        commandContext,
         instance.client.B().Decrby().Key(normalizedKey).Decrement(delta).Build(),
     )
     if err := response.Error(); nil != err {
@@ -611,14 +592,6 @@ func (instance *Backend) DecrementContext(ctx context.Context, key string, delta
     }
 
     return value, nil
-}
-
-/* Deprecated: prefer DecrementContext, which takes ctx per call. */
-func (instance *Backend) Decrement(key string, delta int64) (int64, error) {
-    ctx, cancel := instance.operationContext()
-    defer cancel()
-
-    return instance.DecrementContext(ctx, key, delta)
 }
 
 /* CloseWithContext marks the backend closed and refuses every later operation, as the in-memory backend does; it waits for nothing. The shared client belongs to the composition root and is not closed here; the parent package's Connection wrapper is what the container's teardown closes. */

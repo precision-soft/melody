@@ -33,21 +33,21 @@ func liveBackend(t *testing.T) (*Backend, rueidis.Client) {
 
     prefix := "melody:test:" + t.Name() + ":"
 
-    backend, backendErr := NewBackend(context.Background(), client, BackendConfig{Prefix: prefix})
+    backend, backendErr := NewBackend(client, BackendConfig{Prefix: prefix})
     if nil != backendErr {
         t.Fatalf("could not build the backend: %v", backendErr)
     }
 
     t.Cleanup(func() {
         /* the cleanup clears through its own backend: a test that closed the one under test would otherwise leave its keys behind, since a closed backend refuses Clear like every other operation */
-        cleaner, cleanerErr := NewBackend(context.Background(), client, BackendConfig{Prefix: prefix})
+        cleaner, cleanerErr := NewBackend(client, BackendConfig{Prefix: prefix})
         if nil != cleanerErr {
             t.Logf("could not build the cleanup backend: %v", cleanerErr)
 
             return
         }
 
-        if clearErr := cleaner.Clear(); nil != clearErr {
+        if clearErr := cleaner.Clear(context.Background()); nil != clearErr {
             t.Logf("could not clear the test prefix: %v", clearErr)
         }
     })

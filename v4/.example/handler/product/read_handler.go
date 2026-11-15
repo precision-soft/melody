@@ -1,6 +1,7 @@
 package product
 
 import (
+    "context"
     "errors"
     "fmt"
     "math"
@@ -133,12 +134,12 @@ type readResponse struct {
 
 /* productViewRecorder is the one door of the product service the read handler counts through */
 type productViewRecorder interface {
-    RecordView(id string) (int64, error)
+    RecordView(ctx context.Context, id string) (int64, error)
 }
 
 /* recordedViews counts the read and answers the count, or nothing when the cache refused: the counter is a hint, so its failure is journaled at warning and the product is still answered */
 func recordedViews(runtimeInstance melodyruntimecontract.Runtime, recorder productViewRecorder, productId string) *int64 {
-    views, recordErr := recorder.RecordView(productId)
+    views, recordErr := recorder.RecordView(runtimeInstance.Context(), productId)
     if nil != recordErr {
         examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(
             "the product view could not be counted",

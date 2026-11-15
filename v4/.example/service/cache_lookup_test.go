@@ -121,7 +121,7 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
 /* the probe is on a hit that found something, because that is the only hit the early return changes: a remembered absence is answered the same way with or without it, since Remember reads the store itself and writes nothing on a hit and a nil computed value is returned before the second write, while a found entity would be re-stored by every reader, one cache write per request served from memory. */
 func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
-    if setErr := cacheInstance.Set("hit-key", "entity", melodybound.Of(entityCacheTtl)); nil != setErr {
+    if setErr := cacheInstance.Set(context.Background(), "hit-key", "entity", melodybound.Of(entityCacheTtl)); nil != setErr {
         t.Fatalf("seed: %v", setErr)
     }
 
@@ -158,7 +158,7 @@ func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.
    keeps trying still lapses on its own schedule. */
 func TestRememberEntityOrAbsenceLeavesARememberedAbsenceUntouched(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
-    if setErr := cacheInstance.Set("absent-hit-key", nil, melodybound.Of(absenceCacheTtl)); nil != setErr {
+    if setErr := cacheInstance.Set(context.Background(), "absent-hit-key", nil, melodybound.Of(absenceCacheTtl)); nil != setErr {
         t.Fatalf("seed: %v", setErr)
     }
 

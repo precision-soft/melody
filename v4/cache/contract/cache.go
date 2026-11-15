@@ -7,25 +7,25 @@ import (
 )
 
 type Cache interface {
-    Get(key string) (any, bool, error)
+    Get(ctx context.Context, key string) (any, bool, error)
 
-    Set(key string, value any, ttl bound.Duration) error
+    Set(ctx context.Context, key string, value any, ttl bound.Duration) error
 
-    Delete(key string) error
+    Delete(ctx context.Context, key string) error
 
-    Has(key string) (bool, error)
+    Has(ctx context.Context, key string) (bool, error)
 
-    Clear() error
+    Clear(ctx context.Context) error
 
-    Many(keys []string) (map[string]any, error)
+    Many(ctx context.Context, keys []string) (map[string]any, error)
 
-    SetMultiple(items map[string]any, ttl bound.Duration) error
+    SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error
 
-    DeleteMultiple(keys []string) error
+    DeleteMultiple(ctx context.Context, keys []string) error
 
-    Increment(key string, delta int64) (int64, error)
+    Increment(ctx context.Context, key string, delta int64) (int64, error)
 
-    Decrement(key string, delta int64) (int64, error)
+    Decrement(ctx context.Context, key string, delta int64) (int64, error)
 
     CloseWithContext(closeContext context.Context) error
 }

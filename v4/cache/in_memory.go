@@ -183,7 +183,11 @@ func refuseInvalidKeyList(keys []string) error {
     return nil
 }
 
-func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
+func (instance *InMemoryBackend) Get(ctx context.Context, key string) ([]byte, bool, error) {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return nil, false, nilErr
+    }
+
     now := instance.clock.Now()
 
     instance.mutex.RLock()
@@ -195,6 +199,11 @@ func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
     if keyErr := validateKey(key); nil != keyErr {
         instance.mutex.RUnlock()
         return nil, false, keyErr
+    }
+
+    if doneErr := ctx.Err(); nil != doneErr {
+        instance.mutex.RUnlock()
+        return nil, false, doneErr
     }
 
     entry, exists := instance.entries[key]
@@ -236,7 +245,11 @@ func (instance *InMemoryBackend) Get(key string) ([]byte, bool, error) {
     return payload, true, nil
 }
 
-func (instance *InMemoryBackend) Has(key string) (bool, error) {
+func (instance *InMemoryBackend) Has(ctx context.Context, key string) (bool, error) {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return false, nilErr
+    }
+
     now := instance.clock.Now()
 
     instance.mutex.RLock()
@@ -248,6 +261,11 @@ func (instance *InMemoryBackend) Has(key string) (bool, error) {
     if keyErr := validateKey(key); nil != keyErr {
         instance.mutex.RUnlock()
         return false, keyErr
+    }
+
+    if doneErr := ctx.Err(); nil != doneErr {
+        instance.mutex.RUnlock()
+        return false, doneErr
     }
 
     entry, exists := instance.entries[key]
@@ -266,10 +284,15 @@ func (instance *InMemoryBackend) Has(key string) (bool, error) {
 }
 
 func (instance *InMemoryBackend) Set(
+    ctx context.Context,
     key string,
     payload []byte,
     ttl bound.Duration,
 ) error {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return nilErr
+    }
+
     now := instance.clock.Now()
 
     instance.mutex.Lock()
@@ -288,6 +311,10 @@ func (instance *InMemoryBackend) Set(
         return ttlErr
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
+    }
+
     instance.saveLocked(
         key,
         payload,
@@ -298,7 +325,11 @@ func (instance *InMemoryBackend) Set(
     return nil
 }
 
-func (instance *InMemoryBackend) Delete(key string) error {
+func (instance *InMemoryBackend) Delete(ctx context.Context, key string) error {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return nilErr
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -310,17 +341,29 @@ func (instance *InMemoryBackend) Delete(key string) error {
         return keyErr
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
+    }
+
     instance.deleteLocked(key)
 
     return nil
 }
 
-func (instance *InMemoryBackend) Clear() error {
+func (instance *InMemoryBackend) Clear(ctx context.Context) error {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return nilErr
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     if true == instance.closed {
         return closedBackendError()
+    }
+
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
     }
 
     instance.entries = make(map[string]*lruEntry)
@@ -329,7 +372,11 @@ func (instance *InMemoryBackend) Clear() error {
     return nil
 }
 
-func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) {
+func (instance *InMemoryBackend) Many(ctx context.Context, keys []string) (map[string][]byte, error) {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return nil, nilErr
+    }
+
     now := instance.clock.Now()
 
     result := make(map[string][]byte, len(keys))
@@ -348,6 +395,11 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
     if refuseErr := refuseInvalidKeyList(keys); nil != refuseErr {
         instance.mutex.RUnlock()
         return nil, refuseErr
+    }
+
+    if doneErr := ctx.Err(); nil != doneErr {
+        instance.mutex.RUnlock()
+        return nil, doneErr
     }
 
     for _, key := range keys {
@@ -402,7 +454,11 @@ func (instance *InMemoryBackend) Many(keys []string) (map[string][]byte, error) 
     return result, nil
 }
 
-func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl bound.Duration) error {
+func (instance *InMemoryBackend) SetMultiple(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return nilErr
+    }
+
     now := instance.clock.Now()
 
     instance.mutex.Lock()
@@ -431,6 +487,10 @@ func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl bound.
         }
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
+    }
+
     for key, payload := range items {
         instance.saveLocked(
             key,
@@ -443,7 +503,11 @@ func (instance *InMemoryBackend) SetMultiple(items map[string][]byte, ttl bound.
     return nil
 }
 
-func (instance *InMemoryBackend) DeleteMultiple(keys []string) error {
+func (instance *InMemoryBackend) DeleteMultiple(ctx context.Context, keys []string) error {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return nilErr
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -455,6 +519,10 @@ func (instance *InMemoryBackend) DeleteMultiple(keys []string) error {
         return refuseErr
     }
 
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
+    }
+
     for _, key := range keys {
         instance.deleteLocked(key)
     }
@@ -462,11 +530,19 @@ func (instance *InMemoryBackend) DeleteMultiple(keys []string) error {
     return nil
 }
 
-func (instance *InMemoryBackend) Increment(key string, delta int64) (int64, error) {
-    return instance.incrementValue(key, delta)
+func (instance *InMemoryBackend) Increment(ctx context.Context, key string, delta int64) (int64, error) {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return 0, nilErr
+    }
+
+    return instance.incrementValue(ctx, key, delta)
 }
 
-func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, error) {
+func (instance *InMemoryBackend) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return 0, nilErr
+    }
+
     /* the magnitude of the delta is judged after the closed backend and the key, the order the shared contract fixes for every implementation */
     if refusalErr := instance.refuseClosedOrInvalidKey(key); nil != refusalErr {
         return 0, refusalErr
@@ -482,7 +558,7 @@ func (instance *InMemoryBackend) Decrement(key string, delta int64) (int64, erro
         )
     }
 
-    return instance.incrementValue(key, -delta)
+    return instance.incrementValue(ctx, key, -delta)
 }
 
 /* refuseClosedOrInvalidKey answers the two refusals incrementValue makes under its own lock, in the same order. The flag is read under the lock every writer takes, and a CloseWithContext landing after the read is caught by incrementValue itself. */
@@ -535,6 +611,7 @@ func (instance *InMemoryBackend) stopCleanupLoop() {
 }
 
 func (instance *InMemoryBackend) incrementValue(
+    ctx context.Context,
     key string,
     delta int64,
 ) (int64, error) {
@@ -549,6 +626,10 @@ func (instance *InMemoryBackend) incrementValue(
 
     if keyErr := validateKey(key); nil != keyErr {
         return 0, keyErr
+    }
+
+    if doneErr := ctx.Err(); nil != doneErr {
+        return 0, doneErr
     }
 
     entry, exists := instance.getEntryLocked(key, now)

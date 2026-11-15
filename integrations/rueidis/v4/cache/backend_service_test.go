@@ -2,10 +2,10 @@ package cache
 
 import (
     "context"
+    "errors"
     "strings"
     "time"
 
-    "reflect"
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -13,36 +13,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/runtime"
 )
-
-func TestBackendServiceWithContextReturnType(t *testing.T) {
-    method, found := reflect.TypeOf((*BackendService)(nil)).MethodByName("WithContext")
-    if false == found {
-        t.Fatalf("BackendService must expose WithContext")
-    }
-
-    methodType := method.Type
-    if 1 != methodType.NumOut() {
-        t.Fatalf("WithContext must return exactly one value, got %d", methodType.NumOut())
-    }
-
-    returnTypeName := methodType.Out(0).String()
-    if "*cache.Backend" != returnTypeName {
-        t.Fatalf("WithContext must return *cache.Backend for v3.0.x compatibility, got %q", returnTypeName)
-    }
-}
-
-func TestBackendServiceWithNilContextFallsBackToStoredBackend(t *testing.T) {
-    underlying := &Backend{ctx: context.Background()}
-    service := &BackendService{
-        client:  nil,
-        backend: underlying,
-    }
-
-    bound := service.WithContext(nil)
-    if bound != underlying {
-        t.Fatalf("WithContext(nil) must return the stored backend unchanged")
-    }
-}
 
 /* liveService answers a service over the redis the validation lane starts, under a prefix unique to the calling test. */
 func liveService(t *testing.T) *BackendService {
@@ -57,14 +27,14 @@ func liveService(t *testing.T) *BackendService {
 
     t.Cleanup(func() {
         /* the cleanup clears through its own backend: a test that closed the service under test would otherwise leave its keys behind, since a closed backend refuses Clear like every other operation */
-        cleaner, cleanerErr := NewBackend(context.Background(), client, BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":"})
+        cleaner, cleanerErr := NewBackend(client, BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":"})
         if nil != cleanerErr {
             t.Logf("could not build the cleanup backend: %v", cleanerErr)
 
             return
         }
 
-        if clearErr := cleaner.Clear(); nil != clearErr {
+        if clearErr := cleaner.Clear(context.Background()); nil != clearErr {
             t.Logf("could not clear the test prefix: %v", clearErr)
         }
     })
@@ -82,29 +52,29 @@ func TestNewBackendService_RefusesANilClient(t *testing.T) {
 func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
     service := liveService(t)
 
-    if setErr := service.Set("one", []byte("first"), bound.Of(time.Minute)); nil != setErr {
+    if setErr := service.Set(context.Background(), "one", []byte("first"), bound.Of(time.Minute)); nil != setErr {
         t.Fatalf("Set: %v", setErr)
     }
 
-    payload, found, getErr := service.Get("one")
+    payload, found, getErr := service.Get(context.Background(), "one")
     if nil != getErr || false == found || "first" != string(payload) {
         t.Fatalf("Get = %q, %v, %v", string(payload), found, getErr)
     }
 
-    present, hasErr := service.Has("one")
+    present, hasErr := service.Has(context.Background(), "one")
     if nil != hasErr || false == present {
         t.Fatalf("Has = %v, %v", present, hasErr)
     }
 
-    if deleteErr := service.Delete("one"); nil != deleteErr {
+    if deleteErr := service.Delete(context.Background(), "one"); nil != deleteErr {
         t.Fatalf("Delete: %v", deleteErr)
     }
 
-    if present, hasErr = service.Has("one"); nil != hasErr || true == present {
+    if present, hasErr = service.Has(context.Background(), "one"); nil != hasErr || true == present {
         t.Fatalf("Has after Delete = %v, %v", present, hasErr)
     }
 
-    if setMultipleErr := service.SetMultiple(map[string][]byte{
+    if setMultipleErr := service.SetMultiple(context.Background(), map[string][]byte{
         "session:a": []byte("alpha"),
         "session:b": []byte("beta"),
         "profile:a": []byte("gamma"),
@@ -112,39 +82,39 @@ func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
         t.Fatalf("SetMultiple: %v", setMultipleErr)
     }
 
-    values, manyErr := service.Many([]string{"session:a", "session:b"})
+    values, manyErr := service.Many(context.Background(), []string{"session:a", "session:b"})
     if nil != manyErr || 2 != len(values) {
         t.Fatalf("Many = %v, %v", values, manyErr)
     }
 
-    if deleteMultipleErr := service.DeleteMultiple([]string{"session:a"}); nil != deleteMultipleErr {
+    if deleteMultipleErr := service.DeleteMultiple(context.Background(), []string{"session:a"}); nil != deleteMultipleErr {
         t.Fatalf("DeleteMultiple: %v", deleteMultipleErr)
     }
 
-    if clearByPrefixErr := service.ClearByPrefix("session:"); nil != clearByPrefixErr {
+    if clearByPrefixErr := service.ClearByPrefix(context.Background(), "session:"); nil != clearByPrefixErr {
         t.Fatalf("ClearByPrefix: %v", clearByPrefixErr)
     }
 
-    values, manyErr = service.Many([]string{"session:b", "profile:a"})
+    values, manyErr = service.Many(context.Background(), []string{"session:b", "profile:a"})
     if nil != manyErr || 1 != len(values) || "gamma" != string(values["profile:a"]) {
         t.Fatalf("ClearByPrefix must remove only its subtree, got %v, %v", values, manyErr)
     }
 
-    counter, incrementErr := service.Increment("counter", 4)
+    counter, incrementErr := service.Increment(context.Background(), "counter", 4)
     if nil != incrementErr || 4 != counter {
         t.Fatalf("Increment = %d, %v", counter, incrementErr)
     }
 
-    counter, decrementErr := service.Decrement("counter", 1)
+    counter, decrementErr := service.Decrement(context.Background(), "counter", 1)
     if nil != decrementErr || 3 != counter {
         t.Fatalf("Decrement = %d, %v", counter, decrementErr)
     }
 
-    if clearErr := service.Clear(); nil != clearErr {
+    if clearErr := service.Clear(context.Background()); nil != clearErr {
         t.Fatalf("Clear: %v", clearErr)
     }
 
-    if values, manyErr = service.Many([]string{"profile:a", "counter"}); nil != manyErr || 0 != len(values) {
+    if values, manyErr = service.Many(context.Background(), []string{"profile:a", "counter"}); nil != manyErr || 0 != len(values) {
         t.Fatalf("Clear must empty the prefix, got %v, %v", values, manyErr)
     }
 }
@@ -157,7 +127,7 @@ func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.
         t.Fatalf("Close: %v", closeErr)
     }
 
-    setErr := service.Set("after-close", []byte("payload"), bound.Of(time.Minute))
+    setErr := service.Set(context.Background(), "after-close", []byte("payload"), bound.Of(time.Minute))
     if nil == setErr {
         t.Fatal("expected the closed service to refuse")
     }
@@ -166,20 +136,20 @@ func TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen(t *testing.
         t.Fatalf("expected the in-memory backend's refusal, got %v", setErr)
     }
 
-    sibling, siblingErr := NewBackend(context.Background(), service.client, BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":sibling:"})
+    sibling, siblingErr := NewBackend(service.backend.client, BackendConfig{Prefix: "melody:test:service:" + t.Name() + ":sibling:"})
     if nil != siblingErr {
         t.Fatalf("sibling backend: %v", siblingErr)
     }
     t.Cleanup(func() {
-        _ = sibling.Clear()
+        _ = sibling.Clear(context.Background())
     })
 
-    if siblingSetErr := sibling.Set("after-close", []byte("payload"), bound.Of(time.Minute)); nil != siblingSetErr {
+    if siblingSetErr := sibling.Set(context.Background(), "after-close", []byte("payload"), bound.Of(time.Minute)); nil != siblingSetErr {
         t.Fatalf("the provider-owned client must stay open, got %v", siblingSetErr)
     }
 }
 
-func TestBackendService_BackendAnswersTheStoredInstanceAndWithContextBindsANewOne(t *testing.T) {
+func TestBackendService_BackendAnswersTheStoredInstance(t *testing.T) {
     service := liveService(t)
 
     stored := service.Backend()
@@ -187,43 +157,12 @@ func TestBackendService_BackendAnswersTheStoredInstanceAndWithContextBindsANewOn
         t.Fatal("Backend must answer the stored instance")
     }
 
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
-
-    bound := service.WithContext(ctx)
-    if bound == stored {
-        t.Fatal("WithContext must bind a new instance rather than rewrite the stored one")
-    }
-
-    if ctx != bound.ctx {
-        t.Fatal("the bound instance must carry the context it was given")
-    }
-
-    if stored.prefix != bound.prefix || stored.scanCount != bound.scanCount || stored.deleteBatch != bound.deleteBatch {
-        t.Fatal("the bound instance must keep the stored configuration")
+    if stored != service.Backend() {
+        t.Fatal("Backend must answer the same instance on every call")
     }
 }
 
-func TestBackendService_WithContextInheritsEveryResolvedValue(t *testing.T) {
-    service, serviceErr := NewBackendService(&closeTrackingClient{}, BackendConfig{
-        Prefix:         "melody:test:inherit:",
-        ScanCount:      bound.Of(11),
-        DeleteBatch:    bound.Of(13),
-        MaxKeyLength:   bound.Of(17),
-        CommandTimeout: bound.Of(19 * time.Millisecond),
-    })
-    if nil != serviceErr {
-        t.Fatalf("NewBackendService: %v", serviceErr)
-    }
-
-    handle := service.WithContext(context.Background())
-
-    if "melody:test:inherit:" != handle.prefix || 11 != handle.scanCount || 13 != handle.deleteBatch || 17 != handle.maxKeyLength || 19*time.Millisecond != handle.commandTimeout {
-        t.Fatalf("expected the handle to carry the owner's values, got %q, %d, %d, %d, %v", handle.prefix, handle.scanCount, handle.deleteBatch, handle.maxKeyLength, handle.commandTimeout)
-    }
-}
-
-func TestBackendFromRuntime_BindsTheRequestContextToTheRegisteredService(t *testing.T) {
+func TestBackendFromRuntime_AnswersTheRegisteredServicesBackend(t *testing.T) {
     service := liveService(t)
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -233,39 +172,38 @@ func TestBackendFromRuntime_BindsTheRequestContextToTheRegisteredService(t *test
         container.RegisterOptions{},
     )
 
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+    runtimeInstance := runtime.New(t.Context(), serviceContainer.NewScope(), serviceContainer)
 
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
-
-    bound := BackendFromRuntime(runtimeInstance, "cache.backend")
-    if nil == bound {
-        t.Fatal("BackendFromRuntime must answer a backend")
-    }
-
-    if ctx != bound.ctx {
-        t.Fatal("the answered backend must carry the runtime's context")
+    answered := BackendFromRuntime(runtimeInstance, "cache.backend")
+    if service.Backend() != answered {
+        t.Fatal("BackendFromRuntime must answer the registered service's backend")
     }
 }
 
-/* the service's Close reaches the handles WithContext minted: the runtime door mints one per request over the same client, and a handle that ignored the close would quietly keep serving through a client whose owner already ended this backend — the exact scenario the closed flag exists to surface. The sibling-backend half of the contract — a backend built directly over the same client stays open — is pinned by TestBackendService_CloseRefusesLaterCallsAndLeavesTheClientOpen. */
-func TestBackendService_CloseReachesTheWithContextHandles(t *testing.T) {
+
+func TestBackendService_EveryDoorHandsTheCallersContextToTheBackend(t *testing.T) {
     service := liveService(t)
 
-    before := service.WithContext(context.Background())
+    canceledContext, cancel := context.WithCancel(context.Background())
+    cancel()
 
-    if closeErr := service.CloseWithContext(t.Context()); nil != closeErr {
-        t.Fatalf("Close: %v", closeErr)
+    doors := map[string]func() error{
+        "Get":            func() error { _, _, err := service.Get(canceledContext, "key"); return err },
+        "Set":            func() error { return service.Set(canceledContext, "key", []byte("value"), bound.Of(time.Minute)) },
+        "Delete":         func() error { return service.Delete(canceledContext, "key") },
+        "Has":            func() error { _, err := service.Has(canceledContext, "key"); return err },
+        "Clear":          func() error { return service.Clear(canceledContext) },
+        "ClearByPrefix":  func() error { return service.ClearByPrefix(canceledContext, "key") },
+        "Many":           func() error { _, err := service.Many(canceledContext, []string{"key"}); return err },
+        "SetMultiple":    func() error { return service.SetMultiple(canceledContext, map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute)) },
+        "DeleteMultiple": func() error { return service.DeleteMultiple(canceledContext, []string{"key"}) },
+        "Increment":      func() error { _, err := service.Increment(canceledContext, "counter", 1); return err },
+        "Decrement":      func() error { _, err := service.Decrement(canceledContext, "counter", 1); return err },
     }
 
-    _, _, getErr := before.Get("any")
-    if nil == getErr || false == strings.Contains(getErr.Error(), "cache backend is closed") {
-        t.Fatalf("expected the handle minted before the close to refuse after it, got %v", getErr)
-    }
-
-    after := service.WithContext(context.Background())
-    setErr := after.Set("any", []byte("payload"), bound.Of(time.Minute))
-    if nil == setErr || false == strings.Contains(setErr.Error(), "cache backend is closed") {
-        t.Fatalf("expected the handle minted after the close to refuse, got %v", setErr)
+    for door, call := range doors {
+        if doorErr := call(); false == errors.Is(doorErr, context.Canceled) {
+            t.Fatalf("%s: expected the caller's done context to reach the backend, got %v", door, doorErr)
+        }
     }
 }

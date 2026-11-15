@@ -200,7 +200,7 @@ func (instance *UserService) GrantRole(
     }
 
     if repository.GrantRoleAlreadyHeld == outcome {
-        if dropErr := instance.dropCachedUser(account); nil != dropErr {
+        if dropErr := instance.dropCachedUser(ctx, account); nil != dropErr {
             return nil, outcome, dropErr
         }
 
@@ -226,7 +226,7 @@ func (instance *UserService) GrantRole(
 
 /* dropCachedUser drops the entries an account is served from — by id, by username and the list — the same
    three the updated listener drops, by the keys and without the event. */
-func (instance *UserService) dropCachedUser(account *entity.User) error {
+func (instance *UserService) dropCachedUser(ctx context.Context, account *entity.User) error {
     if nil == account {
         return nil
     }
@@ -237,7 +237,7 @@ func (instance *UserService) dropCachedUser(account *entity.User) error {
     }
 
     for _, key := range keyList {
-        if deleteErr := instance.cache.Delete(key); nil != deleteErr {
+        if deleteErr := instance.cache.Delete(ctx, key); nil != deleteErr {
             return deleteErr
         }
     }

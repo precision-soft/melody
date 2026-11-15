@@ -146,7 +146,7 @@ type refusingRateCache struct {
     melodycachecontract.Cache
 }
 
-func (instance *refusingRateCache) Delete(key string) error {
+func (instance *refusingRateCache) Delete(ctx context.Context, key string) error {
     return errors.New("redis: connection refused")
 }
 
@@ -158,7 +158,7 @@ func TestCurrencyRefreshRatesCommandNamesTheCacheDropThatFailedOverAnUnchangedQu
     runtimeInstance := rateRefreshCommandRuntime(t, `{"base":"EUR","asOf":"2026-01-01T00:00:00Z","rates":{"EUR":1,"USD":1.1,"RON":5.05}}`, nil, func(cache melodycachecontract.Cache) melodycachecontract.Cache {
         for _, currencyId := range []string{"cur-eur", "cur-usd", "cur-ron"} {
             stale := entity.NewCurrency(currencyId, "", "", 9.9, time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC))
-            if setErr := cache.Set(service.CacheKeyCurrencyById(currencyId), stale, bound.Of(time.Hour)); nil != setErr {
+            if setErr := cache.Set(context.Background(), service.CacheKeyCurrencyById(currencyId), stale, bound.Of(time.Hour)); nil != setErr {
                 t.Fatalf("planting the stale entry of %s failed: %v", currencyId, setErr)
             }
         }

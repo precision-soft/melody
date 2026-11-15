@@ -184,20 +184,20 @@ Package: [`cache`](./cache). [`cache.NewBackend(ctx, client, BackendConfig)`](./
 - `ScanCount` — the `COUNT` hint of the `SCAN` walk `Clear` and `ClearByPrefix` run: 1000 when left out, at least 1, unlimited refused.
 - `DeleteBatch` — how many keys one `DEL` carries: 500 when left out, at least 1, unlimited refused.
 - `MaxKeyLength` — the key bound the refusals are measured against, on the key the caller hands in, before the prefix: 1024 when left out, at least 1, unlimited refused.
-- `CommandTimeout` — bounds every operation dispatched without a caller context, each `SCAN` and `DEL` round trip of a `Clear` or a `ClearByPrefix` on its own, so the size of a namespace is not capped by it: 1s when left out, at least 1ms, unlimited refused. Unbounded, a request-path read against a store that accepts connections but stops answering would be retried for as long as the context allows and hang the handler. The ctx-first variants run on the caller's context alone.
+- `CommandTimeout` — bounds every round trip on top of the caller's context, the earlier deadline winning, each `SCAN` and `DEL` round trip of a `Clear` or a `ClearByPrefix` on its own while the caller's context bounds the walk, so the size of a namespace is not capped by it: 1s when left out, at least 1ms, unlimited refused. Unbounded, a request-path read against a store that accepts connections but stops answering would be retried for as long as the context allows and hang the handler.
 
 ### BackendFromRuntime
 
 Helper: [`cache.BackendFromRuntime`](./cache/backend_service.go)
 
-Returns a per-request `*Backend` handle bound to the runtime's context, minted through `BackendService.WithContext`, so its operations carry the request's deadline and its owner's `CloseWithContext` reaches it. Despite carrying no `Must` in its name, it panics when the service is absent or mistyped — the signature has no error slot to answer through, so treat it as the Must door it is:
+Returns the registered service's `*Backend`; every operation takes the caller's context first, so the request's deadline travels with each call. Despite carrying no `Must` in its name, it panics when the service is absent or mistyped — the signature has no error slot to answer through, so treat it as the Must door it is:
 
 ```go
 package main
 
 func main() {
-    scopedBackend := rueidiscache.BackendFromRuntime(runtimeInstance, cache.ServiceCacheBackend)
-    scopedBackend.Get("my-key")
+    backend := rueidiscache.BackendFromRuntime(runtimeInstance, cache.ServiceCacheBackend)
+    backend.Get(runtimeInstance.Context(), "my-key")
 }
 ```
 

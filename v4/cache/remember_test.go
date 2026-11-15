@@ -29,7 +29,7 @@ func TestRemember_ReturnsCachedValueWithoutCallingCallback(t *testing.T) {
 
     cacheInstance := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    setErr := cacheInstance.Set("k", "v", bound.UnlimitedDuration())
+    setErr := cacheInstance.Set(context.Background(), "k", "v", bound.UnlimitedDuration())
     if nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
@@ -89,7 +89,7 @@ func TestRemember_CallsCallbackAndStoresValue(t *testing.T) {
         t.Fatalf("unexpected value")
     }
 
-    storedValue, exists, getErr := cacheInstance.Get("k")
+    storedValue, exists, getErr := cacheInstance.Get(context.Background(), "k")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -131,7 +131,7 @@ func TestRemember_PropagatesCallbackErrorAndDoesNotStore(t *testing.T) {
         t.Fatalf("expected callback error to propagate")
     }
 
-    _, exists, getErr := cacheInstance.Get("k")
+    _, exists, getErr := cacheInstance.Get(context.Background(), "k")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -167,7 +167,7 @@ func TestRemember_AnUnlimitedTtlKeepsTheValue(t *testing.T) {
 
     clockInstance.now = time.Unix(10+3600, 0)
 
-    value, exists, getErr := cacheInstance.Get("k")
+    value, exists, getErr := cacheInstance.Get(context.Background(), "k")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -745,7 +745,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if setErr := backend.Set("poisoned", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
+    if setErr := backend.Set(context.Background(), "poisoned", []byte("{not json"), bound.UnlimitedDuration()); nil != setErr {
         t.Fatalf("set error: %v", setErr)
     }
 
@@ -765,7 +765,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
         t.Fatalf("unexpected value: %v", value)
     }
 
-    storedValue, exists, getErr := cacheManager.Get("poisoned")
+    storedValue, exists, getErr := cacheManager.Get(context.Background(), "poisoned")
     if nil != getErr {
         t.Fatalf("expected the corrupt payload to have been overwritten, got: %v", getErr)
     }
@@ -800,7 +800,7 @@ func TestRemember_CallbackTypedNilErrorIsSuccess(t *testing.T) {
         t.Fatalf("unexpected value: %v", value)
     }
 
-    storedValue, exists, getErr := cacheManager.Get("typed.nil.callback")
+    storedValue, exists, getErr := cacheManager.Get(context.Background(), "typed.nil.callback")
     if nil != getErr || false == exists || "computed" != storedValue.(string) {
         t.Fatalf("expected the computed value to have been stored, got exists=%v value=%v err=%v", exists, storedValue, getErr)
     }
@@ -816,44 +816,44 @@ type testValueKindCache struct {
     inner *Manager
 }
 
-func (instance testValueKindCache) Get(key string) (any, bool, error) {
-    return instance.inner.Get(key)
+func (instance testValueKindCache) Get(ctx context.Context, key string) (any, bool, error) {
+    return instance.inner.Get(context.Background(), key)
 }
 
-func (instance testValueKindCache) Set(key string, value any, ttl bound.Duration) error {
-    return instance.inner.Set(key, value, ttl)
+func (instance testValueKindCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
+    return instance.inner.Set(context.Background(), key, value, ttl)
 }
 
-func (instance testValueKindCache) Delete(key string) error {
-    return instance.inner.Delete(key)
+func (instance testValueKindCache) Delete(ctx context.Context, key string) error {
+    return instance.inner.Delete(context.Background(), key)
 }
 
-func (instance testValueKindCache) Has(key string) (bool, error) {
-    return instance.inner.Has(key)
+func (instance testValueKindCache) Has(ctx context.Context, key string) (bool, error) {
+    return instance.inner.Has(context.Background(), key)
 }
 
-func (instance testValueKindCache) Clear() error {
-    return instance.inner.Clear()
+func (instance testValueKindCache) Clear(ctx context.Context) error {
+    return instance.inner.Clear(context.Background())
 }
 
-func (instance testValueKindCache) Many(keys []string) (map[string]any, error) {
-    return instance.inner.Many(keys)
+func (instance testValueKindCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
+    return instance.inner.Many(context.Background(), keys)
 }
 
-func (instance testValueKindCache) SetMultiple(items map[string]any, ttl bound.Duration) error {
-    return instance.inner.SetMultiple(items, ttl)
+func (instance testValueKindCache) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
+    return instance.inner.SetMultiple(context.Background(), items, ttl)
 }
 
-func (instance testValueKindCache) DeleteMultiple(keys []string) error {
-    return instance.inner.DeleteMultiple(keys)
+func (instance testValueKindCache) DeleteMultiple(ctx context.Context, keys []string) error {
+    return instance.inner.DeleteMultiple(context.Background(), keys)
 }
 
-func (instance testValueKindCache) Increment(key string, delta int64) (int64, error) {
-    return instance.inner.Increment(key, delta)
+func (instance testValueKindCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
+    return instance.inner.Increment(context.Background(), key, delta)
 }
 
-func (instance testValueKindCache) Decrement(key string, delta int64) (int64, error) {
-    return instance.inner.Decrement(key, delta)
+func (instance testValueKindCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
+    return instance.inner.Decrement(context.Background(), key, delta)
 }
 
 func (instance testValueKindCache) CloseWithContext(closeContext context.Context) error {
@@ -928,44 +928,44 @@ type testPanickingSetCache struct {
     inner *Manager
 }
 
-func (instance *testPanickingSetCache) Get(key string) (any, bool, error) {
-    return instance.inner.Get(key)
+func (instance *testPanickingSetCache) Get(ctx context.Context, key string) (any, bool, error) {
+    return instance.inner.Get(context.Background(), key)
 }
 
-func (instance *testPanickingSetCache) Set(key string, value any, ttl bound.Duration) error {
+func (instance *testPanickingSetCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
     panic("backend exploded")
 }
 
-func (instance *testPanickingSetCache) Delete(key string) error {
-    return instance.inner.Delete(key)
+func (instance *testPanickingSetCache) Delete(ctx context.Context, key string) error {
+    return instance.inner.Delete(context.Background(), key)
 }
 
-func (instance *testPanickingSetCache) Has(key string) (bool, error) {
-    return instance.inner.Has(key)
+func (instance *testPanickingSetCache) Has(ctx context.Context, key string) (bool, error) {
+    return instance.inner.Has(context.Background(), key)
 }
 
-func (instance *testPanickingSetCache) Clear() error {
-    return instance.inner.Clear()
+func (instance *testPanickingSetCache) Clear(ctx context.Context) error {
+    return instance.inner.Clear(context.Background())
 }
 
-func (instance *testPanickingSetCache) Many(keys []string) (map[string]any, error) {
-    return instance.inner.Many(keys)
+func (instance *testPanickingSetCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
+    return instance.inner.Many(context.Background(), keys)
 }
 
-func (instance *testPanickingSetCache) SetMultiple(items map[string]any, ttl bound.Duration) error {
-    return instance.inner.SetMultiple(items, ttl)
+func (instance *testPanickingSetCache) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
+    return instance.inner.SetMultiple(context.Background(), items, ttl)
 }
 
-func (instance *testPanickingSetCache) DeleteMultiple(keys []string) error {
-    return instance.inner.DeleteMultiple(keys)
+func (instance *testPanickingSetCache) DeleteMultiple(ctx context.Context, keys []string) error {
+    return instance.inner.DeleteMultiple(context.Background(), keys)
 }
 
-func (instance *testPanickingSetCache) Increment(key string, delta int64) (int64, error) {
-    return instance.inner.Increment(key, delta)
+func (instance *testPanickingSetCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
+    return instance.inner.Increment(context.Background(), key, delta)
 }
 
-func (instance *testPanickingSetCache) Decrement(key string, delta int64) (int64, error) {
-    return instance.inner.Decrement(key, delta)
+func (instance *testPanickingSetCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
+    return instance.inner.Decrement(context.Background(), key, delta)
 }
 
 func (instance *testPanickingSetCache) CloseWithContext(closeContext context.Context) error {
@@ -1005,6 +1005,8 @@ type testScriptedCache struct {
     getCallCount int
     setErr       error
     setCallCount int
+    getContexts  []context.Context
+    setContexts  []context.Context
 }
 
 type testScriptedGetResult struct {
@@ -1013,12 +1015,13 @@ type testScriptedGetResult struct {
     err    error
 }
 
-func (instance *testScriptedCache) Get(key string) (any, bool, error) {
+func (instance *testScriptedCache) Get(ctx context.Context, key string) (any, bool, error) {
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
     index := instance.getCallCount
     instance.getCallCount = instance.getCallCount + 1
+    instance.getContexts = append(instance.getContexts, ctx)
 
     if index >= len(instance.getResults) {
         return nil, false, nil
@@ -1029,11 +1032,12 @@ func (instance *testScriptedCache) Get(key string) (any, bool, error) {
     return result.value, result.exists, result.err
 }
 
-func (instance *testScriptedCache) Set(key string, value any, ttl bound.Duration) error {
+func (instance *testScriptedCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
     instance.setCallCount = instance.setCallCount + 1
+    instance.setContexts = append(instance.setContexts, ctx)
 
     return instance.setErr
 }
@@ -1052,27 +1056,27 @@ func (instance *testScriptedCache) setCalls() int {
     return instance.setCallCount
 }
 
-func (instance *testScriptedCache) Delete(key string) error { return nil }
+func (instance *testScriptedCache) Delete(ctx context.Context, key string) error { return nil }
 
-func (instance *testScriptedCache) Has(key string) (bool, error) { return false, nil }
+func (instance *testScriptedCache) Has(ctx context.Context, key string) (bool, error) { return false, nil }
 
-func (instance *testScriptedCache) Clear() error { return nil }
+func (instance *testScriptedCache) Clear(ctx context.Context) error { return nil }
 
-func (instance *testScriptedCache) Many(keys []string) (map[string]any, error) {
+func (instance *testScriptedCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
     return map[string]any{}, nil
 }
 
-func (instance *testScriptedCache) SetMultiple(items map[string]any, ttl bound.Duration) error {
+func (instance *testScriptedCache) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
     return nil
 }
 
-func (instance *testScriptedCache) DeleteMultiple(keys []string) error { return nil }
+func (instance *testScriptedCache) DeleteMultiple(ctx context.Context, keys []string) error { return nil }
 
-func (instance *testScriptedCache) Increment(key string, delta int64) (int64, error) {
+func (instance *testScriptedCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
     return 0, nil
 }
 
-func (instance *testScriptedCache) Decrement(key string, delta int64) (int64, error) {
+func (instance *testScriptedCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
     return 0, nil
 }
 
@@ -1521,7 +1525,7 @@ type panickingRememberCache struct {
     panicValue error
 }
 
-func (instance *panickingRememberCache) Get(key string) (any, bool, error) {
+func (instance *panickingRememberCache) Get(ctx context.Context, key string) (any, bool, error) {
     panic(instance.panicValue)
 }
 
@@ -1642,12 +1646,17 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
             return "value", nil
         },
     )
-    if nil != rememberErr {
-        t.Fatalf("remember error: %v", rememberErr)
-    }
 
     if false == errors.Is(observedContextError, context.Canceled) {
         t.Fatalf("expected the uncoalesced callback to run under the caller context, saw %v", observedContextError)
+    }
+
+    if false == errors.Is(rememberErr, context.Canceled) {
+        t.Fatalf("expected the store under the canceled caller context to answer its error, got %v", rememberErr)
+    }
+
+    if _, exists, getErr := cacheManager.Get(context.Background(), "report.uncoalesced"); nil != getErr || true == exists {
+        t.Fatalf("expected nothing stored under the canceled caller context, got %v, %v", exists, getErr)
     }
 }
 
@@ -1682,7 +1691,7 @@ func TestRemember_AValueTheSerializerCannotReadBackIsNotStored(t *testing.T) {
             t.Fatalf("expected the value the serializer cannot read back to be refused (protection disabled %v)", config.StampedeProtectionDisabled)
         }
 
-        if _, exists, _ := backend.Get("remember:unreadable"); true == exists {
+        if _, exists, _ := backend.Get(context.Background(), "remember:unreadable"); true == exists {
             t.Fatalf("expected the refused value to stay out of the backend (protection disabled %v)", config.StampedeProtectionDisabled)
         }
 
@@ -1776,7 +1785,7 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, config RememberConfig
 
     deadline := time.Now().Add(waitFor)
     for {
-        _, exists, _ := backend.Get("remember:bounded-wait")
+        _, exists, _ := backend.Get(context.Background(), "remember:bounded-wait")
         if true == exists || false == time.Now().Before(deadline) {
             return exists, int(calls.Load())
         }
@@ -1838,7 +1847,7 @@ func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testin
             t.Fatalf("expected the refusal to name the key, got %v (protection disabled %v)", exception.LogContext(rememberErr, exception.LogContextConfig{}), config.StampedeProtectionDisabled)
         }
 
-        if _, exists, _ := backend.Get("remember:unencodable"); true == exists {
+        if _, exists, _ := backend.Get(context.Background(), "remember:unencodable"); true == exists {
             t.Fatalf("expected the refused value to stay out of the backend (protection disabled %v)", config.StampedeProtectionDisabled)
         }
 
@@ -2226,5 +2235,57 @@ func TestRemember_AnUnlimitedWaitIsHandedTheLeadersValue(t *testing.T) {
 
     if err := <-leaderDone; nil != err {
         t.Fatalf("leader error: %v", err)
+    }
+}
+
+type rememberContextKey struct{}
+
+func TestRemember_TheCallerReadsUnderItsContextAndTheFlightReadsAndStoresUnderItsOwn(t *testing.T) {
+    scriptedCache := &testScriptedCache{}
+    callerContext := context.WithValue(context.Background(), rememberContextKey{}, "caller")
+
+    var flightContext context.Context
+
+    _, rememberErr := Remember(callerContext, scriptedCache, "flight.contexts", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context) (any, error) {
+        flightContext = ctx
+        return "value", nil
+    })
+    if nil != rememberErr {
+        t.Fatalf("remember: %v", rememberErr)
+    }
+
+    scriptedCache.stateMutex.Lock()
+    defer scriptedCache.stateMutex.Unlock()
+
+    if 2 != len(scriptedCache.getContexts) || 1 != len(scriptedCache.setContexts) {
+        t.Fatalf("expected two reads and one store, got %d and %d", len(scriptedCache.getContexts), len(scriptedCache.setContexts))
+    }
+
+    if callerContext != scriptedCache.getContexts[0] {
+        t.Fatal("expected the first read under the caller's context")
+    }
+
+    if nil == flightContext || callerContext == flightContext {
+        t.Fatal("expected the callback to run under a flight context of its own")
+    }
+
+    if flightContext != scriptedCache.getContexts[1] || flightContext != scriptedCache.setContexts[0] {
+        t.Fatal("expected the leader to read and store under the flight's context")
+    }
+}
+
+func TestReadOwnStoredValue_ReadsUnderTheFlightContext(t *testing.T) {
+    scriptedCache := &testScriptedCache{getResults: []testScriptedGetResult{{value: "stored", exists: true}}}
+    flightContext := context.WithValue(context.Background(), rememberContextKey{}, "flight")
+
+    value, readErr := readOwnStoredValue(scriptedCache, "own.read", bound.Of(time.Minute), flightContext, func(ctx context.Context) (any, error) {
+        return "computed", nil
+    })
+    if nil != readErr || "stored" != value {
+        t.Fatalf("expected the stored value, got %v, %v", value, readErr)
+    }
+
+    if 1 != len(scriptedCache.getContexts) || flightContext != scriptedCache.getContexts[0] {
+        t.Fatal("expected the own read under the flight's context")
     }
 }

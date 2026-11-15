@@ -485,14 +485,14 @@ func TestApplicationRegisterCache_TheFallbackBackendIsBoundedAtTheDefaultCeiling
         key := "key-" + strconv.Itoa(index)
         keys = append(keys, key)
 
-        if setErr := backend.Set(key, []byte("1"), bound.UnlimitedDuration()); nil != setErr {
+        if setErr := backend.Set(context.Background(), key, []byte("1"), bound.UnlimitedDuration()); nil != setErr {
             t.Fatalf("set error: %v", setErr)
         }
     }
 
     stored := 0
     for _, key := range keys {
-        if found, _ := backend.Has(key); true == found {
+        if found, _ := backend.Has(context.Background(), key); true == found {
             stored++
         }
     }

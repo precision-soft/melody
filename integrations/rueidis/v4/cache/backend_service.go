@@ -11,92 +11,67 @@ import (
 )
 
 func NewBackendService(client rueidis.Client, config BackendConfig) (*BackendService, error) {
-    backend, err := NewBackend(context.Background(), client, config)
+    backend, err := NewBackend(client, config)
     if nil != err {
         return nil, err
     }
 
     return &BackendService{
-        client:  client,
         backend: backend,
     }, nil
 }
 
-/* BackendService holds a redis client and the cache backend built over it, both fixed at construction. The entries live in redis, so one service serves concurrent callers without a lock; the one state it changes is the backend's closed flag, an atomic that CloseWithContext sets and every handle WithContext minted reads. */
+/* BackendService holds the cache backend built over a redis client, fixed at construction. The entries live in redis, so one service serves concurrent callers without a lock; the one state it changes is the backend's closed flag, an atomic that CloseWithContext sets. */
 type BackendService struct {
-    client  rueidis.Client
     backend *Backend
-}
-
-/* WithContext binds a fresh handle to the given context over the same client and configuration. The handle shares the service's closed state, since the runtime door mints one per request and a handle ignoring CloseWithContext would keep serving after its owner ended. */
-func (instance *BackendService) WithContext(ctx context.Context) *Backend {
-    if nil == ctx {
-        return instance.backend
-    }
-
-    backend := newBackendFromResolved(
-        ctx,
-        instance.client,
-        resolvedBackend{
-            prefix:         instance.backend.prefix,
-            scanCount:      instance.backend.scanCount,
-            deleteBatch:    instance.backend.deleteBatch,
-            maxKeyLength:   instance.backend.maxKeyLength,
-            commandTimeout: instance.backend.commandTimeout,
-        },
-    )
-
-    backend.ownerClosed = &instance.backend.closed
-
-    return backend
 }
 
 func (instance *BackendService) Backend() *Backend {
     return instance.backend
 }
 
-func (instance *BackendService) Get(key string) ([]byte, bool, error) {
-    return instance.backend.Get(key)
+func (instance *BackendService) Get(ctx context.Context, key string) ([]byte, bool, error) {
+    return instance.backend.Get(ctx, key)
 }
 
-func (instance *BackendService) Set(key string, payload []byte, ttl bound.Duration) error {
-    return instance.backend.Set(key, payload, ttl)
+func (instance *BackendService) Set(ctx context.Context, key string, payload []byte, ttl bound.Duration) error {
+    return instance.backend.Set(ctx, key, payload, ttl)
 }
 
-func (instance *BackendService) Delete(key string) error {
-    return instance.backend.Delete(key)
+func (instance *BackendService) Delete(ctx context.Context, key string) error {
+    return instance.backend.Delete(ctx, key)
 }
 
-func (instance *BackendService) Has(key string) (bool, error) {
-    return instance.backend.Has(key)
+func (instance *BackendService) Has(ctx context.Context, key string) (bool, error) {
+    return instance.backend.Has(ctx, key)
 }
 
-func (instance *BackendService) Clear() error {
-    return instance.backend.Clear()
+func (instance *BackendService) Clear(ctx context.Context) error {
+    return instance.backend.Clear(ctx)
 }
 
-func (instance *BackendService) ClearByPrefix(prefix string) error {
-    return instance.backend.ClearByPrefix(prefix)
+func (instance *BackendService) ClearByPrefix(ctx context.Context, prefix string) error {
+    return instance.backend.ClearByPrefix(ctx, prefix)
 }
 
-func (instance *BackendService) Many(keys []string) (map[string][]byte, error) {
-    return instance.backend.Many(keys)
+func (instance *BackendService) Many(ctx context.Context, keys []string) (map[string][]byte, error) {
+    return instance.backend.Many(ctx, keys)
 }
 
-func (instance *BackendService) SetMultiple(items map[string][]byte, ttl bound.Duration) error {
-    return instance.backend.SetMultiple(items, ttl)
+func (instance *BackendService) SetMultiple(ctx context.Context, items map[string][]byte, ttl bound.Duration) error {
+    return instance.backend.SetMultiple(ctx, items, ttl)
 }
 
-func (instance *BackendService) DeleteMultiple(keys []string) error {
-    return instance.backend.DeleteMultiple(keys)
+func (instance *BackendService) DeleteMultiple(ctx context.Context, keys []string) error {
+    return instance.backend.DeleteMultiple(ctx, keys)
 }
 
-func (instance *BackendService) Increment(key string, delta int64) (int64, error) {
-    return instance.backend.Increment(key, delta)
+func (instance *BackendService) Increment(ctx context.Context, key string, delta int64) (int64, error) {
+    return instance.backend.Increment(ctx, key, delta)
 }
 
-func (instance *BackendService) Decrement(key string, delta int64) (int64, error) {
-    return instance.backend.Decrement(key, delta)
+func (instance *BackendService) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
+    return instance.backend.Decrement(ctx, key, delta)
 }
 
 func (instance *BackendService) CloseWithContext(closeContext context.Context) error {
@@ -105,7 +80,7 @@ func (instance *BackendService) CloseWithContext(closeContext context.Context) e
 
 var _ cachecontract.Backend = (*BackendService)(nil)
 
-/* BackendFromRuntime panics when the service is absent, despite carrying no Must in its name: it wraps the framework's MustFromRuntime and has no error slot. The name stays for compatibility. */
+/* BackendFromRuntime panics when the service is absent, despite carrying no Must in its name: it wraps the framework's MustFromRuntime and has no error slot. */
 func BackendFromRuntime(runtimeInstance runtimecontract.Runtime, serviceName string) *Backend {
-    return runtime.MustFromRuntime[*BackendService](runtimeInstance, serviceName).WithContext(runtimeInstance.Context())
+    return runtime.MustFromRuntime[*BackendService](runtimeInstance, serviceName).Backend()
 }
