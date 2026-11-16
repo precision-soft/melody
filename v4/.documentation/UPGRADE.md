@@ -128,6 +128,14 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Remedy.** Write `'#'` for a literal `#` in a plural branch and `''` for an apostrophe followed by `#`. Register each locale under one spelling; the request locale no longer needs normalizing to that spelling.
 
+### Bunorm encrypt: the migrator judges its specification against the schema
+
+**What changed.** The [encrypt `Migrator`](../../integrations/bunorm/v4/encrypt/migrate.go) runs on one connection and, before the first row, matches every column and the key to the table letter case aside, proves the key unique and not NULL, and refuses a decrypt into a character column that is not `utf8mb4` under a non-strict `sql_mode`. A duplicate-entry or incorrect-string refusal from the server is reported without its message.
+
+**Symptom.** A run over a key that is not unique, a nullable unique key, or a column name the table does not have fails before it reads a row; a decrypt into a `latin1` column under a non-strict session fails naming the column, its character set and the mode.
+
+**Remedy.** Name a key that is the primary key or the only column of a unique `NOT NULL` index; set `STRICT_TRANS_TABLES` for the session (`sql_mode` in the DSN) or convert the column to `utf8mb4` before a decrypt.
+
 ### Http: an informational status is no final answer
 
 **What changed.** A response whose status is between 100 and 199, 101 aside, is refused before anything is written and answered as the rendered 500. net/http sends a 1xx as an interim header and answers an implicit 200 after it, so the handler's body went out as a success. 101 stays admitted, the connection upgrade.

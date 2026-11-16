@@ -60,6 +60,7 @@ func (instance *Migrator) resolveSpecificationBindings(specification TableSpecif
     listed := make(map[string]bool, len(specification.Columns))
     for _, column := range specification.Columns {
         listed[column] = true
+        listed[strings.ToLower(column)] = true
     }
 
     if _, carriesBinding := instance.cipher.(bindingSealer); false == carriesBinding {
@@ -72,7 +73,8 @@ func (instance *Migrator) resolveSpecificationBindings(specification TableSpecif
 
     bindings := make(map[string]sealBinding, len(specification.SealBindings))
     for column, columnBinding := range specification.SealBindings {
-        if false == listed[column] {
+        /* a column is listed letter case aside, as MySQL names it, so a binding spelled unlike its column is judged once the schema has resolved both */
+        if false == listed[column] && false == listed[strings.ToLower(column)] {
             return nil, exception.NewError(
                 "migrate seal binding names a column the specification does not list",
                 map[string]any{"field": "TableSpecification.SealBindings", "table": specification.Table, "column": column},
@@ -97,6 +99,8 @@ func (instance *Migrator) resolveSpecificationBindings(specification TableSpecif
 type Migrator struct {
     db     *bun.DB
     cipher Cipher
+    /* session is the connection a run is pinned to, nil outside a run */
+    session sqlSession
 }
 
 func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
@@ -119,6 +123,31 @@ func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
     return &Migrator{db: db, cipher: cipher}
 }
 
+/* judged pins one connection for the run and judges the specification against the schema on it, answering the migrator and the specification the run uses, in the table's spelling, and the release */
+func (instance *Migrator) judged(ctx context.Context, specification TableSpecification, mode string) (*Migrator, TableSpecification, func(), error) {
+    pinned, release, pinErr := instance.pinSession(ctx)
+    if nil != pinErr {
+        return nil, specification, nil, instance.classifyRunError(specification, 0, "", pinErr)
+    }
+
+    /* released here on every way out but success, a panic inside a judge query included, where the caller's own defer is not registered yet */
+    succeeded := false
+    defer func() {
+        if false == succeeded {
+            release()
+        }
+    }()
+
+    resolved, judgeErr := pinned.judgeSpecificationAgainstTheSchema(ctx, specification, mode)
+    if nil != judgeErr {
+        return nil, specification, nil, pinned.classifyRunError(specification, 0, "", judgeErr)
+    }
+
+    succeeded = true
+
+    return pinned, resolved, release, nil
+}
+
 /* MigrateEncrypt runs EnsureColumnCapacity before the first write, so a programmatic caller gets the width check the command runs. Over a column TableSpecification.SealBindings binds, a value without the marker is sealed under the binding and a seal without one is re-sealed under it, its key and mode kept, so the run brings the column to the form its bound type writes. */
 func (instance *Migrator) MigrateEncrypt(ctx context.Context, specification TableSpecification) (int, error) {
     stats, runErr := instance.migrateEncrypt(ctx, specification)
@@ -132,17 +161,27 @@ func (instance *Migrator) migrateEncrypt(ctx context.Context, specification Tabl
         return migrateStats{}, batchSizeErr
     }
 
-    bindings, bindingsErr := instance.resolveSpecificationBindings(specification)
+    if _, bindingsErr := instance.resolveSpecificationBindings(specification); nil != bindingsErr {
+        return migrateStats{}, bindingsErr
+    }
+
+    pinned, resolved, release, judgeErr := instance.judged(ctx, specification, migrateModeEncrypt)
+    if nil != judgeErr {
+        return migrateStats{}, judgeErr
+    }
+    defer release()
+
+    bindings, bindingsErr := pinned.resolveSpecificationBindings(resolved)
     if nil != bindingsErr {
         return migrateStats{}, bindingsErr
     }
 
-    /* the width check's queries are the run's first, so a cancellation landing on one is named an interruption, as one landing inside the run */
-    if capacityErr := instance.ensureColumnCapacity(ctx, specification, ""); nil != capacityErr {
-        return migrateStats{}, instance.classifyRunError(specification, 0, "", capacityErr)
+    /* the width check's queries are the run's first after the judge, so a cancellation landing on one is named an interruption, as one landing inside the run */
+    if capacityErr := pinned.ensureColumnCapacity(ctx, resolved, ""); nil != capacityErr {
+        return migrateStats{}, pinned.classifyRunError(resolved, 0, "", capacityErr)
     }
 
-    return instance.run(ctx, specification, batchSize, columnTransform(bindings, instance.encryptTransform(specification), instance.encryptBoundTransform(specification)))
+    return pinned.run(ctx, resolved, batchSize, columnTransform(bindings, pinned.encryptTransform(resolved), pinned.encryptBoundTransform(resolved)))
 }
 
 /* MigrateReencrypt runs its own EnsureColumnCapacityForReencrypt first, for the reason on MigrateEncrypt. Over a bound column every value it writes is sealed under the binding, and a stored seal is already the target only when it is bound and under the target key. */
@@ -162,16 +201,26 @@ func (instance *Migrator) migrateReencrypt(ctx context.Context, specification Ta
         return migrateStats{}, exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": specification.Table}, nil)
     }
 
-    bindings, bindingsErr := instance.resolveSpecificationBindings(specification)
+    if _, bindingsErr := instance.resolveSpecificationBindings(specification); nil != bindingsErr {
+        return migrateStats{}, bindingsErr
+    }
+
+    pinned, resolved, release, judgeErr := instance.judged(ctx, specification, migrateModeReencrypt)
+    if nil != judgeErr {
+        return migrateStats{}, judgeErr
+    }
+    defer release()
+
+    bindings, bindingsErr := pinned.resolveSpecificationBindings(resolved)
     if nil != bindingsErr {
         return migrateStats{}, bindingsErr
     }
 
-    if capacityErr := instance.ensureColumnCapacity(ctx, specification, targetKeyId); nil != capacityErr {
-        return migrateStats{}, instance.classifyRunError(specification, 0, "", capacityErr)
+    if capacityErr := pinned.ensureColumnCapacity(ctx, resolved, targetKeyId); nil != capacityErr {
+        return migrateStats{}, pinned.classifyRunError(resolved, 0, "", capacityErr)
     }
 
-    return instance.run(ctx, specification, batchSize, columnTransform(bindings, instance.reencryptTransform(specification, targetKeyId), instance.reencryptBoundTransform(specification, targetKeyId)))
+    return pinned.run(ctx, resolved, batchSize, columnTransform(bindings, pinned.reencryptTransform(resolved, targetKeyId), pinned.reencryptBoundTransform(resolved, targetKeyId)))
 }
 
 /* MigrateDecrypt stops the run on a row whose stored value is of a seal format this build does not read, whatever the cipher's Decrypt answers for it, and on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. A bound column is opened under its binding. */
@@ -203,7 +252,18 @@ func (instance *Migrator) migrateDecrypt(ctx context.Context, specification Tabl
         }
     }
 
-    return instance.run(ctx, specification, batchSize, columnTransform(bindings, instance.decryptTransform(), instance.decryptBoundTransform()))
+    pinned, resolved, release, judgeErr := instance.judged(ctx, specification, migrateModeDecrypt)
+    if nil != judgeErr {
+        return migrateStats{}, judgeErr
+    }
+    defer release()
+
+    resolvedBindings, resolvedBindingsErr := pinned.resolveSpecificationBindings(resolved)
+    if nil != resolvedBindingsErr {
+        return migrateStats{}, resolvedBindingsErr
+    }
+
+    return pinned.run(ctx, resolved, batchSize, columnTransform(resolvedBindings, pinned.decryptTransform(), pinned.decryptBoundTransform()))
 }
 
 func (instance *Migrator) decryptTransform() func(string) (string, error) {
@@ -483,7 +543,12 @@ func (instance *Migrator) reencryptTransform(specification TableSpecification, t
 
 /* EnsureColumnCapacity refuses a migration whose ciphertext could not fit back into the column it is read from. Under a non-strict sql_mode an overflowing UPDATE succeeds with a truncated ciphertext that never authenticates again, so the requirement is set before the first row by sealing a probe as long as the longest value not yet sealed, with the cipher the run uses. It cannot bound a longer value written concurrently, and a key rotation is covered by EnsureColumnCapacityForReencrypt. */
 func (instance *Migrator) EnsureColumnCapacity(ctx context.Context, specification TableSpecification) error {
-    return instance.ensureColumnCapacity(ctx, specification, "")
+    resolved, resolveErr := instance.resolveColumnSpelling(ctx, specification)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return instance.ensureColumnCapacity(ctx, resolved, "")
 }
 
 /* EnsureColumnCapacityForReencrypt is EnsureColumnCapacity for a key rotation, which rewrites values already sealed: re-sealing under another key id changes each stored length by the difference between the two ids. The widest result comes from one aggregate over the column, and the plaintext still in it is sized under the target key id. */
@@ -492,7 +557,12 @@ func (instance *Migrator) EnsureColumnCapacityForReencrypt(ctx context.Context, 
         return exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": specification.Table}, nil)
     }
 
-    return instance.ensureColumnCapacity(ctx, specification, targetKeyId)
+    resolved, resolveErr := instance.resolveColumnSpelling(ctx, specification)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return instance.ensureColumnCapacity(ctx, resolved, targetKeyId)
 }
 
 /* ensureColumnCapacity is both checks: an empty targetKeyId means the run only seals what is not sealed yet, and a non-empty one means it also rewrites what is. */
@@ -582,7 +652,7 @@ func (instance *Migrator) longestUnsealedLength(ctx context.Context, table strin
 
     var longest sql.NullInt64
 
-    scanErr := instance.db.DB.QueryRowContext(ctx, probeSql, markerFamily+"%").Scan(&longest)
+    scanErr := instance.queries().QueryRowContext(ctx, probeSql, markerFamily+"%").Scan(&longest)
     if nil != scanErr {
         return 0, false, exception.NewError(
             "migrate could not measure the widest value of the target column",
@@ -612,7 +682,7 @@ func (instance *Migrator) longestSealedLengthWithoutKeyId(ctx context.Context, t
     var longest sql.NullInt64
 
     /* a bound and an unbound prefix are equally long, so one offset skips either */
-    scanErr := instance.db.DB.QueryRowContext(ctx, probeSql, len(markerPrefix)+1, markerPrefix+"%", boundMarkerPrefix+"%").Scan(&longest)
+    scanErr := instance.queries().QueryRowContext(ctx, probeSql, len(markerPrefix)+1, markerPrefix+"%", boundMarkerPrefix+"%").Scan(&longest)
     if nil != scanErr {
         return 0, false, exception.NewError(
             "migrate could not measure the widest encrypted value of the target column",
@@ -634,7 +704,7 @@ func (instance *Migrator) columnWidth(ctx context.Context, table string, column 
     var width sql.NullInt64
     var octetWidth sql.NullInt64
 
-    scanErr := instance.db.DB.QueryRowContext(
+    scanErr := instance.queries().QueryRowContext(
         ctx,
         "SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
         table,
@@ -762,9 +832,9 @@ func (instance *Migrator) run(ctx context.Context, specification TableSpecificat
 
         /* the first page must not be keyset-filtered: WHERE pk > '' coerces to pk > 0 on an integer key and would silently skip rows whose primary key is zero or negative. */
         if false == hasCursor {
-            rows, queryErr = instance.db.DB.QueryContext(ctx, firstSelectSql, batchSize)
+            rows, queryErr = instance.queries().QueryContext(ctx, firstSelectSql, batchSize)
         } else {
-            rows, queryErr = instance.db.DB.QueryContext(ctx, nextSelectSql, cursor, batchSize)
+            rows, queryErr = instance.queries().QueryContext(ctx, nextSelectSql, cursor, batchSize)
         }
         if nil != queryErr {
             return stats, instance.classifyRunError(specification, stats.rows, "migrate select failed", queryErr)
@@ -900,8 +970,13 @@ func (instance *Migrator) applyRow(ctx context.Context, specification TableSpeci
         whereClause,
     )
 
-    result, execErr := instance.db.DB.ExecContext(ctx, updateSql, arguments...)
+    result, execErr := instance.queries().ExecContext(ctx, updateSql, arguments...)
     if nil != execErr {
+        /* a duplicate entry or an incorrect string value is quoted by the server, and under a decrypt the value is a plaintext: the message stays out of the journal and of stderr */
+        if withheld, isWithheld := withholdQuotedValue(execErr); true == isWithheld {
+            return false, migrateStats{}, exception.NewError("migrate update failed", map[string]any{"table": specification.Table, "columns": specification.Columns, "id": row.primaryKey}, withheld)
+        }
+
         return false, migrateStats{}, exception.NewError("migrate update failed", map[string]any{"table": specification.Table, "id": row.primaryKey}, execErr)
     }
 
@@ -1010,7 +1085,7 @@ func columnBytes(column string, charset string) string {
 
 /* columnCharsets answers the charset of each column of the table, read once per run; a column without one, a binary type, answers the empty string. */
 func (instance *Migrator) columnCharsets(ctx context.Context, table string) (map[string]string, error) {
-    rows, queryErr := instance.db.DB.QueryContext(
+    rows, queryErr := instance.queries().QueryContext(
         ctx,
         "SELECT COLUMN_NAME, CHARACTER_SET_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
         table,

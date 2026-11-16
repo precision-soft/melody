@@ -341,6 +341,15 @@ func (instance *stubMigrateStatement) Exec(arguments []driver.Value) (driver.Res
 }
 
 func (instance *stubMigrateStatement) Query(arguments []driver.Value) (driver.Rows, error) {
+    /* the schema judge asks for the table's columns, its indexes and the session's sql_mode: the stub's table is user(id, secret), keyed by id, under a strict session */
+    if true == strings.Contains(instance.query, "IS_NULLABLE") {
+        return &stubMigrateRows{columns: []string{"COLUMN_NAME", "IS_NULLABLE"}, remaining: [][]driver.Value{{"id", "NO"}, {"secret", "NO"}}}, nil
+    }
+
+    if true == strings.Contains(instance.query, "STATISTICS") {
+        return &stubMigrateRows{columns: []string{"INDEX_NAME", "COLUMN_NAME", "NON_UNIQUE"}, remaining: [][]driver.Value{{"PRIMARY", "id", int64(0)}}}, nil
+    }
+
     /* the capacity pre-flight probes the widest value not already sealed; the stub answers "no such value" so the probe returns a row rather than no rows at all */
     if true == strings.Contains(instance.query, "MAX(LENGTH(") {
         return &stubMigrateRows{columns: []string{"longest"}, remaining: [][]driver.Value{{nil}}}, nil
@@ -693,6 +702,7 @@ func TestColumnWidth_ReadsAVarcharInCharacters(t *testing.T) {
 /* the capacity check runs inside the migration, so the programmatic caller gets it too */
 func TestMigrateEncrypt_RefusesANarrowColumnBeforeWritingARow(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
+        {fragment: "IS_NULLABLE", columns: []string{"COLUMN_NAME", "IS_NULLABLE"}, rows: [][]driver.Value{{"id", "NO"}, {"iban", "NO"}}},
         {
             fragment: "NOT LIKE",
             columns:  []string{"longest"},

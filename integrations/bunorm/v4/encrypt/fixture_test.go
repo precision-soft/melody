@@ -1,6 +1,7 @@
 package encrypt
 
 import (
+    "slices"
     "bytes"
     "context"
     "database/sql"
@@ -239,13 +240,40 @@ type recordedScriptedQuery struct {
 
 type scriptedSqlDriver struct {
     mutex          sync.Mutex
+    /* execErr is what every Exec answers when set, a server refusal of the run's write */
+    execErr        error
     responses      []scriptedSqlResponse
     queries        []string
+    /* connectionOf is the number of the connection each recorded query ran on, beside queries */
+    connectionOf   []int
+    opened         int
+    /* failFirstPing makes the first connection's ping answer a bad connection */
+    failFirstPing  bool
     queryArguments []recordedScriptedQuery
 }
 
 func (instance *scriptedSqlDriver) Open(name string) (driver.Conn, error) {
-    return &scriptedSqlConnection{shared: instance}, nil
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.opened++
+
+    return &scriptedSqlConnection{shared: instance, number: instance.opened}, nil
+}
+
+/* connectionsOf answers the connections the recorded queries containing the fragment ran on, distinct */
+func (instance *scriptedSqlDriver) connectionsOf(fragment string) map[int]bool {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    numbers := map[int]bool{}
+    for index, query := range instance.queries {
+        if true == strings.Contains(query, fragment) {
+            numbers[instance.connectionOf[index]] = true
+        }
+    }
+
+    return numbers
 }
 
 func (instance *scriptedSqlDriver) recorded() []string {
@@ -264,14 +292,25 @@ func (instance *scriptedSqlDriver) recordedArguments() []recordedScriptedQuery {
 
 type scriptedSqlConnection struct {
     shared *scriptedSqlDriver
+    number int
 }
 
 func (instance *scriptedSqlConnection) Prepare(query string) (driver.Stmt, error) {
     instance.shared.mutex.Lock()
     instance.shared.queries = append(instance.shared.queries, query)
+    instance.shared.connectionOf = append(instance.shared.connectionOf, instance.number)
     instance.shared.mutex.Unlock()
 
     return &scriptedSqlStatement{shared: instance.shared, query: query}, nil
+}
+
+/* Ping fails the first connection when the script asks it to, the shape of a pooled connection the server closed while idle */
+func (instance *scriptedSqlConnection) Ping(ctx context.Context) error {
+    if true == instance.shared.failFirstPing && 1 == instance.number {
+        return driver.ErrBadConn
+    }
+
+    return nil
 }
 
 func (instance *scriptedSqlConnection) Close() error {
@@ -302,14 +341,19 @@ func (instance *scriptedSqlStatement) Exec(arguments []driver.Value) (driver.Res
         query:     instance.query,
         arguments: append([]driver.Value(nil), arguments...),
     })
+    execErr := instance.shared.execErr
     instance.shared.mutex.Unlock()
+
+    if nil != execErr {
+        return nil, execErr
+    }
 
     return driver.RowsAffected(1), nil
 }
 
 func (instance *scriptedSqlStatement) Query(arguments []driver.Value) (driver.Rows, error) {
     instance.shared.mutex.Lock()
-    responses := instance.shared.responses
+    responses := withSchemaJudgeDefaults(instance.shared.responses)
     instance.shared.queryArguments = append(instance.shared.queryArguments, recordedScriptedQuery{
         query:     instance.query,
         arguments: append([]driver.Value(nil), arguments...),
@@ -387,6 +431,7 @@ func newScriptedMigrator(t *testing.T, responses []scriptedSqlResponse) (*Migrat
         responses = append([]scriptedSqlResponse{{fragment: "CHARACTER_SET_NAME", columns: []string{"COLUMN_NAME", "CHARACTER_SET_NAME"}}}, responses...)
     }
 
+
     stub := &scriptedSqlDriver{responses: responses}
     driverName := fmt.Sprintf("scripted-migrate-%d", scriptedSqlSequence.Add(1))
     sql.Register(driverName, stub)
@@ -404,6 +449,58 @@ func newScriptedMigrator(t *testing.T, responses []scriptedSqlResponse) (*Migrat
         db:     bun.NewDB(sqlDatabase, mysqldialect.New()),
         cipher: NewCipher(provider),
     }, stub
+}
+
+/* withSchemaJudgeDefaults answers the judge's three queries for a script that does not: the table holds the columns the script's select reads, every one NOT NULL, the first the primary key, under a strict session; a script that answers one of them itself keeps its own */
+func withSchemaJudgeDefaults(responses []scriptedSqlResponse) []scriptedSqlResponse {
+    answers := func(fragment string) bool {
+        for _, response := range responses {
+            if true == strings.Contains(response.fragment, fragment) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    columns := []string{"id"}
+    for _, response := range responses {
+        if "ORDER BY" == response.fragment && 0 < len(response.columns) {
+            columns = response.columns
+        }
+    }
+
+    for _, response := range responses {
+        if "CHARACTER_SET_NAME" != response.fragment {
+            continue
+        }
+
+        for _, row := range response.rows {
+            if name, isName := row[0].(string); true == isName && false == slices.Contains(columns, name) {
+                columns = append(columns, name)
+            }
+        }
+    }
+
+    defaults := make([]scriptedSqlResponse, 0, 3)
+    if false == answers("IS_NULLABLE") {
+        rows := make([][]driver.Value, 0, len(columns))
+        for _, column := range columns {
+            rows = append(rows, []driver.Value{column, "NO"})
+        }
+
+        defaults = append(defaults, scriptedSqlResponse{fragment: "IS_NULLABLE", columns: []string{"COLUMN_NAME", "IS_NULLABLE"}, rows: rows})
+    }
+
+    if false == answers("STATISTICS") {
+        defaults = append(defaults, scriptedSqlResponse{fragment: "STATISTICS", columns: []string{"INDEX_NAME", "COLUMN_NAME", "NON_UNIQUE"}, rows: [][]driver.Value{{"PRIMARY", columns[0], int64(0)}}})
+    }
+
+    if false == answers("sql_mode") {
+        defaults = append(defaults, scriptedSqlResponse{fragment: "@@SESSION.sql_mode", columns: []string{"@@SESSION.sql_mode"}, rows: [][]driver.Value{{"STRICT_TRANS_TABLES"}}})
+    }
+
+    return append(defaults, responses...)
 }
 
 type fakeRuntime struct{}

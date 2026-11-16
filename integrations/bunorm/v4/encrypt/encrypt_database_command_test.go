@@ -17,6 +17,7 @@ import (
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
 
+    "github.com/go-sql-driver/mysql"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 
@@ -188,7 +189,7 @@ func TestEncryptDatabaseCommand_WritesTheCauseChainOfARefusedRun(t *testing.T) {
         t.Fatalf("expected the error to keep its message, got: %v", runErr)
     }
 
-    expected := `encrypt database migration failed: migrate column charset lookup failed: connection refused\r\x1b[2Kforged` + "\n"
+    expected := `encrypt database migration failed: migrate could not take a connection for the run: connection refused\r\x1b[2Kforged` + "\n"
     if expected != errorOutput.String() {
         t.Fatalf("expected the error stream to read %q, got %q", expected, errorOutput.String())
     }
@@ -561,5 +562,35 @@ func TestEncryptDatabaseCommand_RefusesAFlagItsModeDoesNotRead(t *testing.T) {
         if nil == runErr || message != runErr.Error() {
             t.Fatalf("expected %q, got %v", message, runErr)
         }
+    }
+}
+
+/* a write the server refuses during a decrypt quotes the plaintext in its message; the error stream carries the refusal's number and never the value */
+func TestEncryptDatabaseCommand_TheErrorStreamOfARefusedDecryptWriteHoldsTheNumberNotTheValue(t *testing.T) {
+    cipherInstance := NewCipher(NewStaticKeyProvider(KeyRing{CurrentKeyId: "v1", Keys: map[string][]byte{"v1": newKey(1)}}))
+    sealed, sealErr := cipherInstance.Encrypt("secret plaintext")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    command, stub := newScriptedNotesCommand(t, cipherInstance, [][]driver.Value{{"1", sealed}})
+    stub.execErr = &mysql.MySQLError{Number: 1062, SQLState: [5]byte{'2', '3', '0', '0', '0'}, Message: "Duplicate entry 'secret plaintext' for key 'notes'"}
+
+    errorOutput := &bytes.Buffer{}
+    engineCommand := &clicontract.CommandContext{
+        Name:      command.Name(),
+        Flags:     command.Flags(),
+        Writer:    &bytes.Buffer{},
+        ErrWriter: errorOutput,
+        ExitErrHandler: func(context.Context, *clicontract.CommandContext, error) {
+        },
+        Action: func(_ context.Context, actionCommand *clicontract.CommandContext) error {
+            return command.Run(fakeRuntime{}, actionCommand)
+        },
+    }
+    _ = engineCommand.Run(context.Background(), []string{command.Name(), "--table", "accounts", "--column", "notes", "--mode", "decrypt"})
+
+    if true == strings.Contains(errorOutput.String(), "secret plaintext") || false == strings.Contains(errorOutput.String(), "1062 (23000)") {
+        t.Fatalf("expected the error stream to hold the number and not the value, got %q", errorOutput.String())
     }
 }
