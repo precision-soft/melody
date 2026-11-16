@@ -206,17 +206,29 @@ func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, 
         return nil, false, ErrProviderReturnedNilDatabase
     }
 
+    kept, keptExisting, keepErr := instance.keepMigrationDatabase(name, database)
+    if nil != keepErr || true == keptExisting {
+        /* the loser of the open race, or a database opened into a registry closed meanwhile, is closed outside the lock, so a slow close does not hold every other registry call */
+        _ = database.Close()
+    }
+
+    if nil != keepErr {
+        return nil, false, keepErr
+    }
+
+    return kept, true, nil
+}
+
+/* keepMigrationDatabase registers the database under the lock, or answers the one another call registered first; keptExisting tells the caller its own database lost the race */
+func (instance *ManagerRegistry) keepMigrationDatabase(name string, database *bun.DB) (*bun.DB, bool, error) {
     instance.lock.Lock()
     defer instance.lock.Unlock()
 
     if true == instance.closed {
-        _ = database.Close()
-
         return nil, false, ErrManagerRegistryClosed
     }
 
     if existingDatabase, exists := instance.migrationDatabases[name]; true == exists {
-        _ = database.Close()
         instance.migrationHolders[name]++
 
         return existingDatabase, true, nil
@@ -225,7 +237,7 @@ func (instance *ManagerRegistry) MigrationDatabase(name string) (*bun.DB, bool, 
     instance.migrationDatabases[name] = database
     instance.migrationHolders[name] = 1
 
-    return database, true, nil
+    return database, false, nil
 }
 
 /* CloseMigrationDatabase releases one hold on the dedicated migration connection opened for one definition, and with the last hold ends it and forgets it, so the next MigrationDatabase opens a fresh one; an empty name selects the default. That connection lifts the driver deadlines and recycles nothing, so it must not outlive the migration run. A name with no migration connection closes nothing, and a closed registry refuses the call. */
@@ -472,6 +484,9 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
     database, openErr := instance.openProviderDatabase(providerDefinition.Provider, providerDefinition.Parameters)
     providerReturned = true
 
+    /* a database opened into a registry closed meanwhile is closed after the lock is released, so a slow close does not hold every other registry call; the teardown photographed this open before the publish deleted it, so it still waits for it */
+    var refusedDatabase *bun.DB
+
     /* the publish runs in a closure with a deferred unlock: it calls into the freshly opened database, and a panic there would otherwise unwind with the lock held, whereupon the recovery defer above re-acquires the same non-reentrant mutex and wedges the whole registry with no waiter ever released */
     func() {
         instance.lock.Lock()
@@ -481,6 +496,7 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
 
         if nil != openErr {
             /* the Provider contract does not promise a nil database beside a non-nil error, and a pool handed over with an error would otherwise be the last reference anyone holds */
+            /* closed under the lock, as the entry is deleted here: a teardown photographing the in-flight opens would otherwise miss this one and return with its pool still open */
             if nil != database {
                 _ = database.Close()
             }
@@ -509,8 +525,8 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
         }
 
         if true == instance.closed {
-            /* CloseWithContext ran while this open was in flight: it already iterated the manager map without this entry, so memoizing the manager now would leak its connection pool. Close the freshly opened database and refuse. */
-            _ = database.Close()
+            /* CloseWithContext ran while this open was in flight: it already iterated the manager map without this entry, so memoizing the manager now would leak its connection pool. The freshly opened database is closed once the lock is released, and the open refused. */
+            refusedDatabase = database
             pendingOpen.openError = ErrManagerRegistryClosed
 
             return
@@ -520,6 +536,11 @@ func (instance *ManagerRegistry) Manager(name string) (*Manager, error) {
         instance.managers[name] = manager
         pendingOpen.manager = manager
     }()
+
+    /* closed before the waiters are released, so a teardown waiting on this open never finishes with its pool still open */
+    if nil != refusedDatabase {
+        _ = refusedDatabase.Close()
+    }
 
     settled = true
 

@@ -12,6 +12,7 @@ import (
     "time"
     "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/cli"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/exception"
@@ -204,8 +205,35 @@ func TestCommandOutput_PrintMigrationsBlock(t *testing.T) {
         t.Fatalf("missing migration row in %q", rendered)
     }
 
-    if false == strings.Contains(rendered, strings.Repeat("m", 46)+"...") {
-        t.Fatalf("long migration name not truncated to 49 characters in %q", rendered)
+    if false == strings.Contains(rendered, "| "+longName+" |") {
+        t.Fatalf("expected the long name printed whole, the column following it, in %q", rendered)
+    }
+}
+
+func TestCommandOutput_TwoNamesSharingTheirFirstRunesPrintApart(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    shared := strings.Repeat("m", 46)
+    instance.printMigrationsBlock("pending", "PENDING", []string{shared + "_create_users", shared + "_create_orders"})
+
+    rendered := buffer.String()
+    if false == strings.Contains(rendered, shared+"_create_users") || false == strings.Contains(rendered, shared+"_create_orders") {
+        t.Fatalf("expected both names printed apart in %q", rendered)
+    }
+}
+
+func TestCommandOutput_ANameWrapsWhereTheTableWouldPassItsMaximumWidth(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.option.TableMaxWidth = bound.Of(30)
+    instance.printMigrationsBlock("pending", "PENDING", []string{strings.Repeat("m", 60)})
+
+    for _, line := range strings.Split(strings.TrimSpace(buffer.String()), "\n")[1:] {
+        if 30 < utf8.RuneCountInString(line) {
+            t.Fatalf("expected every row within 30 runes, got %q", line)
+        }
+    }
+
+    if 2 != strings.Count(buffer.String(), "| "+strings.Repeat("m", 26)+" |") || false == strings.Contains(buffer.String(), "| "+strings.Repeat("m", 8)+strings.Repeat(" ", 18)+" |") {
+        t.Fatalf("expected the name wrapped onto continuation rows at the table's width in %q", buffer.String())
     }
 }
 

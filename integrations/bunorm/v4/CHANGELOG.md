@@ -48,6 +48,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `audit/change.go`: `ChangeSet` leaves out a field whose `bun` tag carries `scanonly`, bare, after a column name or beside another option, and a relation named before its `rel` or `m2m` option, a comma inside a parenthesised or quoted option value not splitting the tag, where the before image never loaded a scan-only field and every update recorded it as changed.
+- `manager_registry.go`: the database that loses the migration open race and a database opened into a registry closed meanwhile are closed after the registry lock is released, before the open's waiters are, where a close the driver parked held every other registry call.
 - `audit/track.go`: `Tracker.Update`, and `Tracker.Delete` under `CaptureDeleteBeforeImage`, read the stored row into a model holding the primary key alone, where they read it into a copy of the new model and a column that decodes into what is already there, a json map, kept the new model's keys: an update that only added a key was recorded with an empty change set.
 - `split.go`: once `ReplicaRetryInterval` lapses one reader dials the unreachable replica and the readers beside it keep the primary, where every reader of that replica waited on the one pending open for the provider's whole retry budget.
 - `audit/recorder.go`, `audit/async_storage.go`: the dead-letter record carries the entry's `actor`, `transactionId` and `createdAt`, where a replayed entry could not say who made the change.

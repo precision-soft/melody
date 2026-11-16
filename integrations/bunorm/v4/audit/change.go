@@ -449,6 +449,14 @@ func auditFieldName(field reflect.StructField) (string, bool) {
         return field.Name, false
     }
 
+    /* a scan-only field is not in bun's Fields, so the before image never loads it and an update never writes it, and a relation is not a column: neither is part of the row's change set, wherever the option stands */
+    options := parseBunTagOptions(tag)
+    for _, option := range []string{"scanonly", "rel", "m2m"} {
+        if _, has := options[option]; true == has {
+            return "", true
+        }
+    }
+
     first := tag
     if comma := strings.IndexByte(tag, ','); -1 != comma {
         first = tag[:comma]
@@ -463,4 +471,51 @@ func auditFieldName(field reflect.StructField) (string, bool) {
     }
 
     return first, false
+}
+
+/* parseBunTagOptions answers the options of a bun tag, every token after the column name, keyed by the part before a colon; a comma inside parentheses or a quoted value does not split, as bun's own tag parser reads it */
+func parseBunTagOptions(tag string) map[string]string {
+    options := map[string]string{}
+
+    for position, token := range splitBunTag(tag) {
+        key, value, hasValue := strings.Cut(token, ":")
+        if 0 == position && false == hasValue {
+            continue
+        }
+
+        options[key] = value
+    }
+
+    return options
+}
+
+func splitBunTag(tag string) []string {
+    tokens := []string{}
+    depth := 0
+    quoted := false
+    start := 0
+
+    for index := 0; index < len(tag); index++ {
+        switch tag[index] {
+        case '\\':
+            index++
+        case '"':
+            quoted = false == quoted
+        case '(':
+            if false == quoted {
+                depth++
+            }
+        case ')':
+            if false == quoted && 0 < depth {
+                depth--
+            }
+        case ',':
+            if false == quoted && 0 == depth {
+                tokens = append(tokens, tag[start:index])
+                start = index + 1
+            }
+        }
+    }
+
+    return append(tokens, tag[start:])
 }

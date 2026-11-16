@@ -2072,7 +2072,7 @@ func (instance *errorBesideAPanickingCloseProvider) Open(params ConnectionParame
 
     <-instance.releaseOpen
 
-    /* the Provider contract allows a database beside an error, and the publish closes it — which is where the panic below is raised, one stage past the provider */
+    /* the Provider contract allows a database beside an error, and the publish closes it under the lock as it deletes the open's entry — which is where the panic below is raised, one stage past the provider */
     return instance.database, errors.New("the provider refused the dial")
 }
 
@@ -3378,4 +3378,268 @@ func TestManagerRegistry_AnOpenRefusedOnACyclicChainAfterTheCloseAnswersItsWaite
             t.Error("expected the provider's refusal")
         }
     })
+}
+
+/* a database opened into a registry closed meanwhile is closed outside the registry lock, so a close the driver parks does not hold every other registry call */
+func TestManagerRegistry_AParkedCloseOfARefusedMigrationDatabaseHoldsNoOtherCall(t *testing.T) {
+    database, closeEntered, releaseClose := newBlockingCloseDatabase()
+    defer close(releaseClose)
+
+    openStarted := make(chan struct{})
+    releaseOpen := make(chan struct{})
+
+    registry, registryErr := NewManagerRegistry(
+        context.Background(),
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "main", Provider: &configurableMigrationProvider{migrationDatabase: database, openStarted: openStarted, releaseOpen: releaseOpen}, Parameters: testConnectionParameters, IsDefault: true},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    go func() {
+        registry.MigrationDatabase("main")
+    }()
+
+    <-openStarted
+
+    go func() {
+        registry.CloseWithContext(context.Background())
+    }()
+
+    deadline := time.Now().Add(2 * time.Second)
+    for {
+        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+            break
+        }
+
+        if true == time.Now().After(deadline) {
+            close(releaseOpen)
+            t.Fatal("the registry never published its close")
+        }
+
+        time.Sleep(time.Millisecond)
+    }
+
+    close(releaseOpen)
+
+    select {
+    case <-closeEntered:
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected the refused migration database closed")
+    }
+
+    answered := make(chan struct{})
+    go func() {
+        registry.Manager("another name")
+        close(answered)
+    }()
+
+    select {
+    case <-answered:
+    case <-time.After(time.Second):
+        t.Fatal("expected a registry call to answer while the refused database's close is parked")
+    }
+}
+
+func TestManagerRegistry_AParkedCloseOfARefusedManagerDatabaseHoldsNoOtherCall(t *testing.T) {
+    database, closeEntered, releaseClose := newBlockingCloseDatabase()
+    defer close(releaseClose)
+
+    openStarted := make(chan struct{})
+    releaseOpen := make(chan struct{})
+
+    registry, registryErr := NewManagerRegistry(
+        context.Background(),
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "x", Provider: &closeRaceProvider{database: database, openStarted: openStarted, releaseOpen: releaseOpen}, Parameters: testConnectionParameters, IsDefault: true},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    go func() {
+        registry.Manager("x")
+    }()
+
+    <-openStarted
+
+    go func() {
+        registry.CloseWithContext(context.Background())
+    }()
+
+    deadline := time.Now().Add(2 * time.Second)
+    for {
+        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+            break
+        }
+
+        if true == time.Now().After(deadline) {
+            close(releaseOpen)
+            t.Fatal("the registry never published its close")
+        }
+
+        time.Sleep(time.Millisecond)
+    }
+
+    close(releaseOpen)
+
+    select {
+    case <-closeEntered:
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected the refused manager database closed")
+    }
+
+    answered := make(chan struct{})
+    go func() {
+        registry.Manager("another name")
+        close(answered)
+    }()
+
+    select {
+    case <-answered:
+    case <-time.After(time.Second):
+        t.Fatal("expected a registry call to answer while the refused database's close is parked")
+    }
+}
+
+/* racingMigrationProvider holds every OpenForMigration until both calls of the race are in flight, then answers each its own database */
+type racingMigrationProvider struct {
+    configurableMigrationProvider
+    arrived   sync.WaitGroup
+    databases chan *bun.DB
+}
+
+func (instance *racingMigrationProvider) OpenForMigration(params ConnectionParameters, logger loggingcontract.Logger) (*bun.DB, error) {
+    instance.arrived.Done()
+    instance.arrived.Wait()
+
+    return <-instance.databases, nil
+}
+
+func TestManagerRegistry_TheLoserOfTheMigrationOpenRaceIsClosedOutsideTheLock(t *testing.T) {
+    first, firstClosed, releaseFirst := newBlockingCloseDatabase()
+    second, secondClosed, releaseSecond := newBlockingCloseDatabase()
+    defer close(releaseFirst)
+    defer close(releaseSecond)
+
+    provider := &racingMigrationProvider{databases: make(chan *bun.DB, 2)}
+    provider.arrived.Add(2)
+    provider.databases <- first
+    provider.databases <- second
+
+    registry, registryErr := NewManagerRegistry(
+        context.Background(),
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "main", Provider: provider, Parameters: testConnectionParameters, IsDefault: true},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    results := make(chan *bun.DB, 2)
+    for range 2 {
+        go func() {
+            database, _, _ := registry.MigrationDatabase("main")
+            results <- database
+        }()
+    }
+
+    select {
+    case <-firstClosed:
+    case <-secondClosed:
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected the loser of the race closed")
+    }
+
+    answered := make(chan struct{})
+    go func() {
+        registry.Manager("another name")
+        close(answered)
+    }()
+
+    select {
+    case <-answered:
+    case <-time.After(time.Second):
+        t.Fatal("expected a registry call to answer while the loser's close is parked")
+    }
+
+    winner := <-results
+    if nil == winner {
+        t.Fatal("expected the winner of the race answered")
+    }
+}
+
+func TestManagerRegistry_ATeardownWaitsForTheParkedCloseOfARefusedManagerDatabase(t *testing.T) {
+    database, closeEntered, releaseClose := newBlockingCloseDatabase()
+
+    openStarted := make(chan struct{})
+    releaseOpen := make(chan struct{})
+
+    registry, registryErr := NewManagerRegistry(
+        context.Background(),
+        &fakeLogger{},
+        []ProviderDefinition{
+            ProviderDefinition{Name: "x", Provider: &closeRaceProvider{database: database, openStarted: openStarted, releaseOpen: releaseOpen}, Parameters: testConnectionParameters, IsDefault: true},
+        },
+    )
+    if nil != registryErr {
+        t.Fatalf("registry error: %v", registryErr)
+    }
+
+    opened := make(chan struct{})
+    go func() {
+        registry.Manager("x")
+        close(opened)
+    }()
+
+    <-openStarted
+
+    tornDown := make(chan struct{})
+    go func() {
+        registry.CloseWithContext(context.Background())
+        close(tornDown)
+    }()
+
+    deadline := time.Now().Add(2 * time.Second)
+    for {
+        if _, probeErr := registry.Manager("a name this registry never had"); true == errors.Is(probeErr, ErrManagerRegistryClosed) {
+            break
+        }
+
+        if true == time.Now().After(deadline) {
+            close(releaseOpen)
+            close(releaseClose)
+            t.Fatal("the registry never published its close")
+        }
+
+        time.Sleep(time.Millisecond)
+    }
+
+    close(releaseOpen)
+    <-closeEntered
+
+    select {
+    case <-tornDown:
+        close(releaseClose)
+        t.Fatal("expected the teardown to wait while the refused database's close is parked")
+    case <-opened:
+        close(releaseClose)
+        t.Fatal("expected the open's caller held until the refused database is closed")
+    case <-time.After(100 * time.Millisecond):
+    }
+
+    close(releaseClose)
+
+    select {
+    case <-tornDown:
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected the teardown to return once the close is released")
+    }
 }

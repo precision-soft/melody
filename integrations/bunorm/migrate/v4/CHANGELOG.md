@@ -27,5 +27,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `output.go`: the name column of a migrations listing follows the longest name, counted in runes, bounded by `Option.TableMaxWidth`, a longer name wrapping onto continuation rows, where every name was cut at 46 characters and two names sharing their first 46 printed alike.
 - output: a migration's error whose `Unwrap` chain reaches itself no longer holds the command that renders it.
 

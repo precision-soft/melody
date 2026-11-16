@@ -916,3 +916,94 @@ func TestChangeSet_RedactsAnEmptyContainerOfAnEncryptedCarryingType(t *testing.T
         t.Fatalf("expected the encrypted-carrying container to be redacted by its type alone, got old=%v", changes[0].Old)
     }
 }
+
+func TestChangeSet_LeavesAScanOnlyFieldOut(t *testing.T) {
+    type bareOption struct {
+        Id    int64  `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64  `bun:",scanonly"`
+    }
+
+    type namedOption struct {
+        Id    int64  `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64  `bun:"total,scanonly"`
+    }
+
+    type optionAfterAnother struct {
+        Id    int64  `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64  `bun:"total,nullzero,scanonly"`
+    }
+
+    type optionBeforeAnother struct {
+        Id    int64  `bun:"id,pk"`
+        Name  string `bun:"name"`
+        Total int64  `bun:"total,scanonly,nullzero"`
+    }
+
+    for _, row := range []struct {
+        label  string
+        before any
+        after  any
+    }{
+        {label: "bare option", before: bareOption{Id: 1, Name: "old"}, after: bareOption{Id: 1, Name: "new", Total: 7}},
+        {label: "option after a column name", before: namedOption{Id: 1, Name: "old"}, after: namedOption{Id: 1, Name: "new", Total: 7}},
+        {label: "option after another option", before: optionAfterAnother{Id: 1, Name: "old"}, after: optionAfterAnother{Id: 1, Name: "new", Total: 7}},
+        {label: "option before another option", before: optionBeforeAnother{Id: 1, Name: "old"}, after: optionBeforeAnother{Id: 1, Name: "new", Total: 7}},
+    } {
+        changes := ChangeSet(row.before, row.after)
+
+        if _, found := findChange(changes, "Total"); true == found {
+            t.Fatalf("%s: expected the scan-only field left out, got %+v", row.label, changes)
+        }
+
+        if _, found := findChange(changes, "total"); true == found {
+            t.Fatalf("%s: expected the scan-only field left out, got %+v", row.label, changes)
+        }
+
+        if _, found := findChange(changes, "name"); false == found {
+            t.Fatalf("%s: expected the column change kept, got %+v", row.label, changes)
+        }
+    }
+}
+
+func TestChangeSet_KeepsAColumnNamedLikeAnOptionAndReadsQuotedValuesWhole(t *testing.T) {
+    type namedScanOnly struct {
+        Id       int64  `bun:"id,pk"`
+        ScanOnly string `bun:"scanonly"`
+    }
+
+    type namedScanOnlyWithOption struct {
+        Id       int64  `bun:"id,pk"`
+        ScanOnly string `bun:"scanonly,nullzero"`
+    }
+
+    type parenthesisedDefault struct {
+        Id     int64  `bun:"id,pk"`
+        Status string `bun:"status,default:coalesce(a,scanonly,b)"`
+    }
+
+    type namedRelation struct {
+        Id     int64    `bun:"id,pk"`
+        Name   string   `bun:"name"`
+        Orders []string `bun:"orders,rel:has-many,join:id=user_id"`
+    }
+
+    for _, row := range []struct {
+        label  string
+        before any
+        after  any
+        field  string
+        kept   bool
+    }{
+        {label: "a column named scanonly", before: namedScanOnly{Id: 1, ScanOnly: "a"}, after: namedScanOnly{Id: 1, ScanOnly: "b"}, field: "scanonly", kept: true},
+        {label: "a column named scanonly beside an option", before: namedScanOnlyWithOption{Id: 1, ScanOnly: "a"}, after: namedScanOnlyWithOption{Id: 1, ScanOnly: "b"}, field: "scanonly", kept: true},
+        {label: "a parenthesised default holding the word", before: parenthesisedDefault{Id: 1, Status: "a"}, after: parenthesisedDefault{Id: 1, Status: "b"}, field: "status", kept: true},
+        {label: "a relation named before its rel option", before: namedRelation{Id: 1, Name: "a", Orders: []string{"x"}}, after: namedRelation{Id: 1, Name: "b", Orders: []string{"y"}}, field: "orders", kept: false},
+    } {
+        if _, found := findChange(ChangeSet(row.before, row.after), row.field); row.kept != found {
+            t.Fatalf("%s: expected %s kept %v", row.label, row.field, row.kept)
+        }
+    }
+}

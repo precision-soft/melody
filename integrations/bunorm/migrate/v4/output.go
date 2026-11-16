@@ -6,9 +6,12 @@ import (
     "io"
     "reflect"
     "strconv"
+    "strings"
     "sync"
     "time"
+    "unicode/utf8"
 
+    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/cli"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/exception"
@@ -394,12 +397,49 @@ func (instance *commandOutput) printMigrationsBlock(key string, title string, na
         return
     }
 
-    _, _ = fmt.Fprintln(instance.writer, title)
-    _, _ = fmt.Fprintln(instance.writer, "| name                                              |")
-    _, _ = fmt.Fprintln(instance.writer, "| ------------------------------------------------- |")
+    cells := make([]string, 0, len(names))
+    width := len("name")
     for _, name := range names {
-        _, _ = fmt.Fprintf(instance.writer, "| %-49s |\n", truncateString(escapeControlCharacters(name, false), 49))
+        cell := escapeControlCharacters(name, false)
+        cells = append(cells, cell)
+        width = max(width, utf8.RuneCountInString(cell))
     }
+
+    /* the column follows the longest name, in runes, bounded by Option.TableMaxWidth with the border and the padding counted; a longer name wraps onto continuation rows, so no two names print alike */
+    if maximum := instance.tableMaxWidth(); 0 < maximum {
+        width = min(width, max(maximum-4, len("name")))
+    }
+
+    _, _ = fmt.Fprintln(instance.writer, title)
+    _, _ = fmt.Fprintf(instance.writer, "| %s |\n", padRight("name", width))
+    _, _ = fmt.Fprintf(instance.writer, "| %s |\n", strings.Repeat("-", width))
+    for _, cell := range cells {
+        runes := []rune(cell)
+        for 0 < len(runes) {
+            chunk := runes[:min(width, len(runes))]
+            runes = runes[len(chunk):]
+            _, _ = fmt.Fprintf(instance.writer, "| %s |\n", padRight(string(chunk), width))
+        }
+    }
+}
+
+/* tableMaxWidth answers the table width the command's option asks, 0 for unlimited */
+func (instance *commandOutput) tableMaxWidth() int {
+    resolved, resolveErr := bound.Resolve(instance.option.TableMaxWidth, output.OptionTableMaxWidthRule)
+    if nil != resolveErr || true == resolved.Unlimited {
+        return 0
+    }
+
+    return resolved.Value
+}
+
+/* padRight pads by runes, so a name of multi-byte runes that each fill one terminal cell lines its border up with the others; a wide rune (an ideogram, an emoji) is counted as one */
+func padRight(value string, width int) string {
+    if count := utf8.RuneCountInString(value); count < width {
+        return value + strings.Repeat(" ", width-count)
+    }
+
+    return value
 }
 
 func (instance *commandOutput) printFilesBlock(files []string) {
