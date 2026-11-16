@@ -58,10 +58,10 @@ func newBunUserRepository(storage *persistence.CatalogStorage) *bunUserRepositor
     return &bunUserRepository{database: storage.Database(), tracker: storage.Tracker(), recorder: storage.Recorder(), seedsAccounts: storage.SeedsAccounts()}
 }
 
-/* bunUserRepository keeps the directory in the database and its history beside it. Every write goes through the audit tracker, the password recorded as changed without its value; GrantRole, which runs its own transaction, records through the recorder inside it. */
 /* userIdentifierMintLockName names the advisory lock the creates of melody_example_v4_user mint their identifiers under */
 const userIdentifierMintLockName = "melody_example_v4_user.id"
 
+/* bunUserRepository keeps the directory in the database and its history beside it. Every write goes through the audit tracker, the password recorded as changed without its value; GrantRole, which runs its own transaction, records through the recorder inside it. */
 type bunUserRepository struct {
     database      *bun.DB
     tracker       *melodyaudit.Tracker

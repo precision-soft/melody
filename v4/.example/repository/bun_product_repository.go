@@ -63,10 +63,10 @@ func newBunProductRepository(storage *persistence.CatalogStorage) *bunProductRep
     return &bunProductRepository{database: storage.Database(), tracker: storage.Tracker(), recorder: storage.Recorder()}
 }
 
-/* bunProductRepository keeps the catalogue in the database and its history beside it. Every write goes through the audit tracker, which performs it and records the field-level change in one transaction, so the catalogue never holds a version of a row the trail cannot account for. */
 /* productIdentifierMintLockName names the advisory lock the creates of melody_example_v4_product mint their identifiers under */
 const productIdentifierMintLockName = "melody_example_v4_product.id"
 
+/* bunProductRepository keeps the catalogue in the database and its history beside it. Every write goes through the audit tracker, which performs it and records the field-level change in one transaction, so the catalogue never holds a version of a row the trail cannot account for. */
 type bunProductRepository struct {
     database *bun.DB
     tracker  *melodyaudit.Tracker

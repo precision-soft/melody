@@ -155,7 +155,7 @@ func (instance *sequenceArchive) Append(ctx context.Context, record *repository.
 
     for _, existing := range instance.rows {
         if true == existing.TakenAt.Equal(record.TakenAt) {
-            return errors.New("reading already recorded")
+            return repository.ErrReadingAlreadyRecorded
         }
     }
 

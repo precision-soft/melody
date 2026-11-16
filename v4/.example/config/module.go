@@ -87,7 +87,7 @@ type Module struct {
     databaseRegistry *melodybunorm.ManagerRegistry
     catalogueWired   bool
 
-    /* processContext is what the registry's lazy opens are bound to: the archive is opened at the first resolution of the service that publishes it, on a request or a command, and an open that outlives the process's signal is an open the teardown waits for */
+    /* processContext is what the registry's lazy opens, the boot bucket check and the outbox schema are bound to: the archive is opened at the first resolution of the service that publishes it, on a request or a command, and an open that outlives the process's signal is an open the teardown waits for */
     processContext context.Context
 
     /* trustedProxyResolver is the one client resolver both budgets read the client through; the list it resolves is re-read on a schedule, so a balancer restarted onto a new address is trusted again within the interval */

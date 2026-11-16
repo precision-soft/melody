@@ -159,7 +159,6 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     router.HandleWithOptions(route.UsersApiDeletePattern, instance.throttledWrite(handleruser.ApiDeleteHandler()), frontendRoute(route.UsersApiDeleteName, "DELETE"))
 }
 
-/* frontendRoute marks a route as exposed in the frontend zone so its URL is generatable by name from the route manifest (window.melodyRoutes) that the admin SPA resolves data-route / route(...) calls against. */
 /* registerCurrencyApiRoutes registers the four currency api doors through one route group, which prefixes their patterns and names; the writes sit behind the catalogue's write budget */
 func (instance *Module) registerCurrencyApiRoutes(router melodyhttpcontract.Router) {
     currencyApi := router.Group(
@@ -174,6 +173,7 @@ func (instance *Module) registerCurrencyApiRoutes(router melodyhttpcontract.Rout
     currencyApi.HandleWithOptions(route.CurrenciesApiDeleteRelativePattern, instance.throttledWrite(handlercurrency.ApiDeleteHandler()), frontendRoute(route.CurrenciesApiDeleteRelativeName, "DELETE"))
 }
 
+/* frontendRoute marks a route as exposed in the frontend zone so its URL is generatable by name from the route manifest (window.melodyRoutes) that the admin SPA resolves data-route / route(...) calls against. */
 func frontendRoute(name string, method string) melodyhttpcontract.RouteOptions {
     return melodyhttp.RouteOptions{Name: name, Methods: []string{method}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZoneFrontend)}
 }

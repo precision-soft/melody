@@ -2,6 +2,7 @@ package repository
 
 import (
     "context"
+    "errors"
     "testing"
     "time"
 )
@@ -23,7 +24,7 @@ func TestInMemoryCatalogReadingRepositoryRefusesASecondReadingAtTheSameInstant(t
         t.Fatal("expected a second reading at the same instant to be refused")
     }
 
-    if "reading already recorded" != appendErr.Error() {
+    if false == errors.Is(appendErr, ErrReadingAlreadyRecorded) {
         t.Fatalf("expected the refusal the postgres sister answers, got %q", appendErr.Error())
     }
 
@@ -47,7 +48,7 @@ func TestInMemoryCatalogReadingRepositoryRefusesOneInstantSpelledInAnotherZone(t
     }
 
     second := &CatalogReadingRecord{TakenAt: takenAt.In(time.FixedZone("EEST", 3*60*60)), Headline: "catalog", Payload: "products=99", ProductCount: 99, JournalCount: 0}
-    if appendErr := repositoryInstance.Append(context.Background(), second); nil == appendErr || "reading already recorded" != appendErr.Error() {
+    if appendErr := repositoryInstance.Append(context.Background(), second); false == errors.Is(appendErr, ErrReadingAlreadyRecorded) {
         t.Fatalf("expected the same instant in another zone to be refused as a duplicate, got %v", appendErr)
     }
 }

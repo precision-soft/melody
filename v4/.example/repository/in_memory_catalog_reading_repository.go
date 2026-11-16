@@ -2,7 +2,6 @@ package repository
 
 import (
     "context"
-    "fmt"
     "sort"
     "sync"
     "time"
@@ -29,7 +28,7 @@ func (instance *inMemoryCatalogReadingRepository) Append(ctx context.Context, re
     /* the instant is keyed in UTC, which also strips the monotonic reading: a time.Time map key compares location and monotonic clock too, so one instant spelled in two zones would otherwise be two readings, where the postgres sister's key column holds one */
     instant := reading.TakenAt.UTC()
     if _, recorded := instance.readingByInstant[instant]; true == recorded {
-        return fmt.Errorf("reading already recorded")
+        return ErrReadingAlreadyRecorded
     }
 
     instance.readingByInstant[instant] = copyOfReading(reading)

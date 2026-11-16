@@ -385,7 +385,7 @@ func (instance *recordingReadingRepository) Append(ctx context.Context, reading 
 
     for _, existing := range instance.appended {
         if true == existing.TakenAt.Equal(reading.TakenAt) {
-            return fmt.Errorf("reading already recorded")
+            return fmt.Errorf("archive: %w", repository.ErrReadingAlreadyRecorded)
         }
     }
 

@@ -191,7 +191,7 @@ func (instance *CatalogReportService) Archive(runtimeInstance melodyruntimecontr
         return true, nil
     }
 
-    if readingAlreadyRecordedMessage == appendErr.Error() {
+    if true == errors.Is(appendErr, repository.ErrReadingAlreadyRecorded) {
         return false, nil
     }
 
@@ -212,8 +212,6 @@ func ArchivedInstantOf(recordedAt time.Time) time.Time {
     return recordedAt.UTC().Truncate(time.Second)
 }
 
-/* readingAlreadyRecordedMessage is the sentence both archive implementations answer a duplicate instant with, compared rather than wrapped because one reaches it through a postgres SQLSTATE and the other through a map lookup. */
-const readingAlreadyRecordedMessage = "reading already recorded"
 
 /* RecentReadings lists the archive, newest first, resolving it when asked, so the history door is the one request that touches the second database. */
 func (instance *CatalogReportService) RecentReadings(runtimeInstance melodyruntimecontract.Runtime, limit int) ([]*repository.CatalogReadingRecord, error) {

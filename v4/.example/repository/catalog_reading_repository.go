@@ -2,6 +2,7 @@ package repository
 
 import (
     "context"
+    "errors"
     "fmt"
     "time"
 
@@ -22,9 +23,12 @@ type CatalogReadingRecord struct {
     JournalCount int
 }
 
+/* ErrReadingAlreadyRecorded is the refusal of a second reading at an instant already archived, matched with errors.Is through any wrapping */
+var ErrReadingAlreadyRecorded = errors.New("reading already recorded")
+
 /* CatalogReadingRepository is the archive of catalogue readings: the scheduled refresh appends one and the read door lists the most recent. Every method carries a context and an error, so a listing that cannot reach postgres says so rather than answering an empty archive. */
 type CatalogReadingRepository interface {
-    /* Append records one reading; a second reading at the same instant is refused with "reading already recorded", since the instant is a reading's identity. */
+    /* Append records one reading; a second reading at the same instant is refused with ErrReadingAlreadyRecorded, since the instant is a reading's identity. */
     Append(ctx context.Context, reading *CatalogReadingRecord) error
 
     /* Recent lists the newest readings first, at most limit of them; a non-positive limit answers the empty list, never the whole archive. */

@@ -64,7 +64,7 @@ func (instance *SecurityAuthenticationEventSubscriber) onLoginSuccess() melodyev
                 "path":           path,
                 "userIdentifier": userIdentifier,
                 "roles":          roles,
-                "occurredAt":     time.Now().UTC().Format(time.RFC3339),
+                "occurredAt":     eventValue.Timestamp().UTC().Format(time.RFC3339),
             },
         )
 
@@ -98,13 +98,13 @@ func (instance *SecurityAuthenticationEventSubscriber) onLoginFailure() melodyev
         }
 
         logger := melodylogging.LoggerMustFromRuntime(runtimeInstance)
-        logger.Info(
+        logger.Warning(
             "security login failure",
             loggingcontract.Context{
                 "method":     method,
                 "path":       path,
                 "error":      errString,
-                "occurredAt": time.Now().UTC().Format(time.RFC3339),
+                "occurredAt": eventValue.Timestamp().UTC().Format(time.RFC3339),
             },
         )
 

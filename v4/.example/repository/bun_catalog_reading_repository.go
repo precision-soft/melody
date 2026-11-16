@@ -2,7 +2,6 @@ package repository
 
 import (
     "context"
-    "fmt"
     "time"
 
     melodypgsql "github.com/precision-soft/melody/integrations/bunorm/pgsql/v4"
@@ -48,7 +47,7 @@ type bunCatalogReadingRepository struct {
     database *bun.DB
 }
 
-/* Append writes one reading and answers "reading already recorded" for the primary key's refusal. The refusal is read through pgsql.IsDuplicateKey, the typed SQLSTATE through errors.As, so it is seen through an exception's wrapping and not confused with an error whose text carries the digits. A reading's identity is the instant it was taken at, so the constraint is the check and no read precedes the insert. */
+/* Append writes one reading and answers ErrReadingAlreadyRecorded for the primary key's refusal. The refusal is read through pgsql.IsDuplicateKey, the typed SQLSTATE through errors.As, so it is seen through an exception's wrapping and not confused with an error whose text carries the digits. A reading's identity is the instant it was taken at, so the constraint is the check and no read precedes the insert. */
 func (instance *bunCatalogReadingRepository) Append(ctx context.Context, reading *CatalogReadingRecord) error {
     if validateErr := validateCatalogReading(reading); nil != validateErr {
         return validateErr
@@ -87,7 +86,7 @@ func (instance *bunCatalogReadingRepository) Count(ctx context.Context) (int, er
     return instance.database.NewSelect().Model((*catalogReadingRow)(nil)).Count(ctx)
 }
 
-/* asReadingAlreadyRecorded turns the archive's own conflict into the promised sentence and answers every other failure untouched, so a dropped connection is not reported as a reading already there. */
+/* asReadingAlreadyRecorded turns the archive's own conflict into ErrReadingAlreadyRecorded and answers every other failure untouched, so a dropped connection is not reported as a reading already there. */
 func asReadingAlreadyRecorded(writeErr error) error {
     if nil == writeErr {
         return nil
@@ -97,5 +96,5 @@ func asReadingAlreadyRecorded(writeErr error) error {
         return writeErr
     }
 
-    return fmt.Errorf("reading already recorded")
+    return ErrReadingAlreadyRecorded
 }

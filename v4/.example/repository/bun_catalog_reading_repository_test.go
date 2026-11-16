@@ -39,8 +39,8 @@ func TestAsReadingAlreadyRecordedMapsTheArchivesOwnConflict(t *testing.T) {
         t.Fatal("expected a duplicate key to be mapped, got nil")
     }
 
-    if "reading already recorded" != mapped.Error() {
-        t.Fatalf("expected the archive's own sentence, got %q", mapped.Error())
+    if false == errors.Is(mapped, ErrReadingAlreadyRecorded) {
+        t.Fatalf("expected ErrReadingAlreadyRecorded, got %q", mapped.Error())
     }
 }
 
@@ -49,7 +49,7 @@ func TestAsReadingAlreadyRecordedSeesThroughWrapping(t *testing.T) {
     wrapped := fmt.Errorf("inserting the reading: %w", &sqlStateError{state: "23505"})
 
     mapped := asReadingAlreadyRecorded(wrapped)
-    if nil == mapped || "reading already recorded" != mapped.Error() {
+    if false == errors.Is(mapped, ErrReadingAlreadyRecorded) {
         t.Fatalf("expected a wrapped duplicate to be mapped, got %v", mapped)
     }
 }

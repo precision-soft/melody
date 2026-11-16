@@ -1,7 +1,6 @@
 package user
 
 import (
-    "encoding/json"
     "errors"
     nethttp "net/http"
     "strings"
@@ -23,7 +22,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
         }
 
         var dto adminUserCreateRequest
-        decodeErr := json.NewDecoder(request.HttpRequest().Body).Decode(&dto)
+        decodeErr := decodeOneDocument(request.HttpRequest().Body, &dto)
         if nil != decodeErr {
             return presenter.ApiRefusalOfDecodedBody(runtimeInstance, request, decodeErr), nil
         }

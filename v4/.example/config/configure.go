@@ -20,7 +20,7 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
-/* Configure wires the application. The context is the signal context main hands the application, because the module binds the database registry's lazy opens to it; the version is the one the build stamped, which the health route reports. */
+/* Configure wires the application. The context is the signal context main hands the application, because the module binds the database registry's lazy opens to it; the version is the one the build stamped, which the health route and the otlp exporter report. */
 func Configure(ctx context.Context, app *melodyapplication.Application, applicationVersion string) {
     moduleInstance := NewExampleModule(ctx, app.Configuration())
     moduleInstance.applicationVersion = applicationVersion
@@ -42,7 +42,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
                 Endpoint:       otelEndpoint,
                 Protocol:       melodyotlp.ProtocolGrpc,
                 ServiceName:    "melody.example",
-                ServiceVersion: "1.0.0",
+                ServiceVersion: moduleInstance.applicationVersion,
                 Insecure:       true,
             },
         }))

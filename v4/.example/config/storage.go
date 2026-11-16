@@ -1,7 +1,6 @@
 package config
 
 import (
-    "context"
 
     melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
     "github.com/precision-soft/melody/v4/exception"
@@ -29,7 +28,7 @@ func (instance *Module) buildStorage() {
         exception.Panic(exception.FromError(clientErr))
     }
 
-    if ensureErr := melodyawss3.EnsureBucket(context.Background(), client, bucket, melodyawss3.EnsureBucketConfig{Region: instance.environmentValue(environmentKeyS3Region)}); nil != ensureErr {
+    if ensureErr := melodyawss3.EnsureBucket(instance.processContext, client, bucket, melodyawss3.EnsureBucketConfig{Region: instance.environmentValue(environmentKeyS3Region)}); nil != ensureErr {
         exception.Panic(exception.FromError(ensureErr))
     }
 
