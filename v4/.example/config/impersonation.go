@@ -1,34 +1,55 @@
 package config
 
 import (
+    "unicode/utf8"
+
+    "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/repository"
+    "github.com/precision-soft/melody/v4/.example/security"
+    "github.com/precision-soft/melody/v4/.example/service"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* the impersonation wiring lets an admin holding the switch role act as another user by sending an X-Switch-User header on the token-protected /secure api. The resolver below is the application-supplied piece that maps a target identifier to that user's token (a real app queries its user store); an unknown identifier denies the switch. */
+/* the impersonation wiring lets a caller holding the switch role act as another account on the token-protected /secure api by sending an X-Switch-User header naming the account id, the identifier every token of the example carries; the resolver reads that account from the user directory the sign-in reads */
 func (instance *Module) buildImpersonation() {
-    instance.impersonatedUsers = &staticImpersonatedUserResolver{
-        rolesByIdentifier: map[string][]string{
-            "bob":   {"ROLE_USER"},
-            "carol": {"ROLE_EDITOR", "ROLE_USER"},
-        },
-    }
+    instance.impersonatedUsers = &directoryImpersonatedUserResolver{roleHierarchy: security.NewRoleHierarchy()}
 }
 
-type staticImpersonatedUserResolver struct {
-    rolesByIdentifier map[string][]string
+type directoryImpersonatedUserResolver struct {
+    roleHierarchy *melodysecurity.RoleHierarchy
 }
 
-func (instance *staticImpersonatedUserResolver) ResolveImpersonatedUser(
-    _ melodyruntimecontract.Runtime,
+/* ResolveImpersonatedUser denies, with a nil token, an identifier the sign-in would refuse, an id the directory does not hold, an account its own session would not honour (no password, no role) and an account that could itself administer or switch, read through the role hierarchy: the switch role reaches every identity this resolver answers, so taking on such an account would carry its rights. A directory that cannot answer fails closed as an outage. */
+func (instance *directoryImpersonatedUserResolver) ResolveImpersonatedUser(
+    runtimeInstance melodyruntimecontract.Runtime,
     identifier string,
 ) (melodysecuritycontract.Token, error) {
-    roles, known := instance.rolesByIdentifier[identifier]
-    if false == known {
-        /* an unknown target denies the switch; the source fails closed to an anonymous token */
+    if false == service.CacheSafeIdentifier(identifier) || false == utf8.ValidString(identifier) {
         return nil, nil
     }
 
-    return melodysecurity.NewAuthenticatedToken(identifier, roles, nil), nil
+    userRepository, resolveErr := melodycontainer.FromResolver[repository.UserRepository](runtimeInstance.Context(), runtimeInstance.Container(), repository.ServiceUserRepository)
+    if nil != resolveErr {
+        return nil, melodyexception.MarkInfrastructureFailure(resolveErr)
+    }
+
+    account, found, findErr := userRepository.FindById(runtimeInstance.Context(), identifier)
+    if nil != findErr {
+        return nil, melodyexception.MarkInfrastructureFailure(findErr)
+    }
+
+    if false == found || nil == account || "" == account.Password || 0 == len(account.Roles) {
+        return nil, nil
+    }
+
+    expanded := instance.roleHierarchy.ExpandRoles(account.Roles)
+    if true == security.HoldsRole(expanded, melodysecuritycontract.RoleAllowedToSwitch) || true == security.HoldsRole(expanded, entity.RoleAdmin) {
+        return nil, nil
+    }
+
+    return melodysecurity.NewAuthenticatedToken(account.Id, append([]string{}, account.Roles...), nil), nil
 }
