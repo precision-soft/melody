@@ -8,6 +8,7 @@ import (
     "os"
     "os/user"
     "path/filepath"
+    "slices"
     "sort"
     "strconv"
     "strings"
@@ -312,15 +313,6 @@ func (instance *GenerateCommand) resolveRunOptions(
             )
         }
         logsDirectory = absoluteLogsDirectory
-
-        /* the logs directory is created before anything is rendered, because under system cron a shell whose redirection cannot create its file aborts the command; creating it is idempotent, so a run that fails later leaves it behind */
-        if mkdirErr := os.MkdirAll(logsDirectory, 0o755); nil != mkdirErr {
-            return nil, exception.NewError(
-                "cron: could not create the logs directory",
-                exceptioncontract.Context{"directory": logsDirectory},
-                mkdirErr,
-            )
-        }
     }
     options.logsDirectory = logsDirectory
 
@@ -380,7 +372,14 @@ func (instance *GenerateCommand) resolveRunOptions(
 func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([]Entry, error) {
     options.logDirectoryOwnership = &logDirectoryOwnership{rendersUserColumn: templateRendersUserColumn(options.template)}
 
+    /* only the crontab template redirects output to a log file; the k8s template logs to stdout, so it does not inherit the logs-directory requirement */
+    requiresLogPath := false == options.rendersK8s()
+
     scheduledCommands := instance.configuration.Entries()
+    if rootErr := createTheLogsRoot(scheduledCommands, options, requiresLogPath); nil != rootErr {
+        return nil, rootErr
+    }
+
     if 0 == len(scheduledCommands) {
         return []Entry{}, nil
     }
@@ -403,9 +402,6 @@ func (instance *GenerateCommand) collectScheduledEntries(options *runOptions) ([
         binary = resolvedBinary
     }
     options.binary = binary
-
-    /* only the crontab template redirects output to a log file; the k8s template logs to stdout, so it does not inherit the logs-directory requirement */
-    requiresLogPath := false == options.rendersK8s()
 
     entries := make([]Entry, 0, len(scheduledCommands))
     for _, scheduled := range scheduledCommands {
@@ -1136,17 +1132,55 @@ func resolveEntryLogPath(
     requiresLogPath bool,
     logDirectoryOwner string,
 ) (logPath string, unownedDirectory string, err error) {
+    joined, joinErr := entryLogPath(commandName, config, logsDirectory, instances, index, requiresLogPath)
+    if nil != joinErr || "" == joined {
+        return "", "", joinErr
+    }
+
+    cleanedLogsDirectory := filepath.Clean(logsDirectory)
+
+    /* a LogFileName with a subdirectory stays within the logs directory but nothing else creates that subdirectory, and under system cron the shell aborts the command when the >> redirection cannot create its file */
+    missingDirectories := missingDirectoriesBelow(filepath.Dir(joined), cleanedLogsDirectory)
+
+    if mkdirErr := os.MkdirAll(filepath.Dir(joined), 0o755); nil != mkdirErr {
+        return "", "", exception.NewError(
+            "cron: could not create the log file directory",
+            exceptioncontract.Context{
+                "command":   commandName,
+                "directory": filepath.Dir(joined),
+            },
+            mkdirErr,
+        )
+    }
+
+    unownedDirectory, chownErr := chownCreatedLogDirectories(commandName, missingDirectories, logDirectoryOwner)
+    if nil != chownErr {
+        return "", "", chownErr
+    }
+
+    return joined, unownedDirectory, nil
+}
+
+/* entryLogPath answers the log file an entry instance writes, creating nothing; "" for an entry that writes none */
+func entryLogPath(
+    commandName string,
+    config *EntryConfig,
+    logsDirectory string,
+    instances int,
+    index int,
+    requiresLogPath bool,
+) (string, error) {
     if true == config.LogDisabled {
-        return "", "", nil
+        return "", nil
     }
 
     /* the active template does not redirect output to a log file (k8s), so there is no log path to resolve and no logs-directory to demand */
     if false == requiresLogPath {
-        return "", "", nil
+        return "", nil
     }
 
     if "" == logsDirectory {
-        return "", "", exception.NewError(
+        return "", exception.NewError(
             "cron: command wants log redirection but no logs directory is configured; set --logs-directory, set the MELODY_CRON_LOGS_DIRECTORY key, or set EntryConfig.LogDisabled=true",
             exceptioncontract.Context{
                 "command":   commandName,
@@ -1176,7 +1210,7 @@ func resolveEntryLogPath(
     cleanedLogsDirectory := filepath.Clean(logsDirectory)
 
     if false == isWithinDirectory(joined, cleanedLogsDirectory) {
-        return "", "", exception.NewError(
+        return "", exception.NewError(
             "cron: EntryConfig.LogFileName resolves to a path that escapes the logs directory; use a file name that stays within the logs directory",
             exceptioncontract.Context{
                 "command":       commandName,
@@ -1188,26 +1222,7 @@ func resolveEntryLogPath(
         )
     }
 
-    /* a LogFileName with a subdirectory stays within the logs directory but nothing else creates that subdirectory, and under system cron the shell aborts the command when the >> redirection cannot create its file */
-    missingDirectories := missingDirectoriesBelow(filepath.Dir(joined), cleanedLogsDirectory)
-
-    if mkdirErr := os.MkdirAll(filepath.Dir(joined), 0o755); nil != mkdirErr {
-        return "", "", exception.NewError(
-            "cron: could not create the log file directory",
-            exceptioncontract.Context{
-                "command":   commandName,
-                "directory": filepath.Dir(joined),
-            },
-            mkdirErr,
-        )
-    }
-
-    unownedDirectory, chownErr := chownCreatedLogDirectories(commandName, missingDirectories, logDirectoryOwner)
-    if nil != chownErr {
-        return "", "", chownErr
-    }
-
-    return joined, unownedDirectory, nil
+    return joined, nil
 }
 
 /* logDirectoryOwnership is what a run knows of the owners of the log directories it creates: whether its template runs every entry as a user, and the directories it left root's for a user the host does not know */
@@ -1465,3 +1480,238 @@ func errorCauseOf(runErr error) *output.ErrorCause {
 
     return output.NewErrorCause(causeChain[0], map[string]any{"chain": causeChain})
 }
+
+/* createTheLogsRoot creates the logs directory before anything is rendered, since under system cron a shell whose redirection cannot create its file aborts the command, once the entries are known: a generator running as root refuses, before creating anything, a root its entries' users could not use, since the root it would create is root's and nothing hands it over. Only a template that runs every entry as a user is judged. */
+func createTheLogsRoot(scheduledCommands []*ScheduledCommand, options *runOptions, requiresLogPath bool) error {
+    root := options.logsDirectory
+    if "" == root {
+        return nil
+    }
+
+    if 0 == logDirectoryEffectiveUserId() && true == requiresLogPath && true == options.logDirectoryOwnership.rendersUserColumn {
+        if refusalErr := judgeTheLogsRoot(root, logsRootWriters(root, scheduledCommands, options, requiresLogPath)); nil != refusalErr {
+            return refusalErr
+        }
+    }
+
+    /* creating it is idempotent, so a run that fails later leaves it behind */
+    if mkdirErr := os.MkdirAll(root, 0o755); nil != mkdirErr {
+        return exception.NewError(
+            "cron: could not create the logs directory",
+            exceptioncontract.Context{"directory": root},
+            mkdirErr,
+        )
+    }
+
+    return nil
+}
+
+/* logsRootWriter is one user's use of the logs root: the files it writes directly in it, whether one of its entries logs in a subdirectory, which needs search on the root, and the commands behind both */
+type logsRootWriter struct {
+    user          string
+    directFiles   []string
+    throughRoot   bool
+    commands      []string
+}
+
+/* logsRootWriters answers, sorted by user, the users other than root an entry runs as and what they need of the root; the heartbeat, a file the default user touches, counts as a direct writer when it sits in the root; an entry the expansion will refuse is left to that refusal */
+func logsRootWriters(root string, scheduledCommands []*ScheduledCommand, options *runOptions, requiresLogPath bool) []logsRootWriter {
+    cleanedRoot := filepath.Clean(root)
+    byUser := map[string]*logsRootWriter{}
+
+    record := func(entryUser string, commandName string, path string) {
+        if "" == entryUser || "root" == entryUser || false == isWithinDirectory(path, cleanedRoot) {
+            return
+        }
+
+        writer, known := byUser[entryUser]
+        if false == known {
+            writer = &logsRootWriter{user: entryUser}
+            byUser[entryUser] = writer
+        }
+
+        if cleanedRoot == filepath.Dir(path) {
+            writer.directFiles = append(writer.directFiles, path)
+        } else {
+            writer.throughRoot = true
+        }
+
+        if false == slices.Contains(writer.commands, commandName) {
+            writer.commands = append(writer.commands, commandName)
+        }
+    }
+
+    for _, scheduled := range scheduledCommands {
+        config := scheduled.Config
+
+        entryUser := config.User
+        if "" == entryUser {
+            entryUser = options.defaultUserName
+        }
+
+        instances, instancesErr := resolveEntryInstances(scheduled.CommandName, config.Instances)
+        if nil != instancesErr {
+            continue
+        }
+
+        for index := 1; index <= instances; index++ {
+            logPath, logPathErr := entryLogPath(scheduled.CommandName, &config, root, instances, index, requiresLogPath)
+            if nil == logPathErr && "" != logPath {
+                record(entryUser, scheduled.CommandName, logPath)
+            }
+        }
+    }
+
+    if true == options.heartbeatEnabled && "" != options.heartbeatPath {
+        record(options.defaultUserName, "heartbeat", options.heartbeatPath)
+    }
+
+    writers := make([]logsRootWriter, 0, len(byUser))
+    for _, writer := range byUser {
+        sort.Strings(writer.commands)
+        writers = append(writers, *writer)
+    }
+    sort.Slice(writers, func(left int, right int) bool { return writers[left].user < writers[right].user })
+
+    return writers
+}
+
+/* the doors judgeTheLogsRoot reads the directory, a user's groups and an access control list through, so a pin drives it without running as root */
+var (
+    logDirectoryStat                 = os.Stat
+    logDirectoryGroupIds             = func(account *user.User) ([]string, error) { return account.GroupIds() }
+    logDirectoryHasAccessControlList = hasAccessControlList
+)
+
+const (
+    accessWrite  = 0o2
+    accessSearch = 0o1
+)
+
+/* judgeTheLogsRoot refuses a root a user an entry runs as could not use: a missing one, which root would create as its own, for a user that writes a file directly in it; an existing one that user cannot write and enter, or, for a user logging in a subdirectory, cannot enter. A user the host does not know, uid 0 under any name, a user whose groups cannot be read and a directory carrying an access control list are not judged, since its mode bits do not tell; a direct writer whose log file exists already is judged on that file. */
+func judgeTheLogsRoot(root string, writers []logsRootWriter) error {
+    known := make([]logsRootWriter, 0, len(writers))
+    accounts := map[string]*user.User{}
+    for _, writer := range writers {
+        account, lookupErr := logDirectoryLookupUser(writer.user)
+        if nil != lookupErr || "0" == account.Uid {
+            continue
+        }
+
+        accounts[writer.user] = account
+        known = append(known, writer)
+    }
+
+    if 0 == len(known) {
+        return nil
+    }
+
+    information, statErr := logDirectoryStat(root)
+    if nil != statErr {
+        if false == errors.Is(statErr, os.ErrNotExist) {
+            return exception.NewError("cron: could not read the logs directory "+root, exceptioncontract.Context{"directory": root}, statErr)
+        }
+
+        missingUsers, missingCommands := make([]string, 0), make([]string, 0)
+        for _, writer := range known {
+            if 0 < len(writer.directFiles) {
+                missingUsers = append(missingUsers, writer.user)
+                missingCommands = append(missingCommands, writer.commands...)
+            }
+        }
+
+        if 0 == len(missingUsers) {
+            return nil
+        }
+
+        return logsRootRefusal("cron: the logs directory "+root+" does not exist, and created by a generator running as root it would be root's, where "+strings.Join(missingUsers, ", ")+" write their log files directly; create it beforehand with an owner or a mode they can write, or give those entries log file names in directories of their own", root, missingUsers, missingCommands, "")
+    }
+
+    if false == information.IsDir() {
+        return exception.NewError("cron: the logs directory "+root+" is not a directory", exceptioncontract.Context{"directory": root}, ErrLogsDirectoryNotWritable)
+    }
+
+    ownerUserId, ownerGroupId, ownerKnown := directoryOwner(information)
+    if false == ownerKnown || true == logDirectoryHasAccessControlList(root) {
+        return nil
+    }
+
+    blockedUsers, blockedCommands := make([]string, 0), make([]string, 0)
+    for _, writer := range known {
+        groups, groupsKnown := accountGroups(accounts[writer.user])
+        if false == groupsKnown {
+            continue
+        }
+
+        needed := os.FileMode(0)
+        if 0 < len(writer.directFiles) && false == directFilesWritable(writer.directFiles, accounts[writer.user], groups) {
+            needed = accessWrite | accessSearch
+        }
+
+        if 0 == needed && true == writer.throughRoot {
+            needed = accessSearch
+        }
+
+        if 0 != needed && false == holdsAccess(information.Mode().Perm(), ownerUserId, ownerGroupId, accounts[writer.user], groups, needed) {
+            blockedUsers = append(blockedUsers, writer.user)
+            blockedCommands = append(blockedCommands, writer.commands...)
+        }
+    }
+
+    if 0 == len(blockedUsers) {
+        return nil
+    }
+
+    return logsRootRefusal("cron: the logs directory "+root+" ("+information.Mode().Perm().String()+") cannot be used by "+strings.Join(blockedUsers, ", ")+", who write their log files in it; give it an owner or a mode they can write and enter, or give those entries log file names in directories of their own", root, blockedUsers, blockedCommands, information.Mode().Perm().String())
+}
+
+func logsRootRefusal(message string, root string, users []string, commands []string, mode string) error {
+    sort.Strings(commands)
+    context := exceptioncontract.Context{"directory": root, "users": users, "commands": slices.Compact(commands)}
+    if "" != mode {
+        context["mode"] = mode
+    }
+
+    return exception.NewError(message, context, ErrLogsDirectoryNotWritable)
+}
+
+/* accountGroups answers the account's primary group and its supplementary ones, false when they cannot be read */
+func accountGroups(account *user.User) ([]string, bool) {
+    extraGroups, groupsErr := logDirectoryGroupIds(account)
+    if nil != groupsErr {
+        return nil, false
+    }
+
+    return append([]string{account.Gid}, extraGroups...), true
+}
+
+/* directFilesWritable answers whether every log file the user writes directly in the root exists already and can be appended to by it: the redirection then needs only search on the directory */
+func directFilesWritable(paths []string, account *user.User, groups []string) bool {
+    for _, path := range paths {
+        information, statErr := logDirectoryStat(path)
+        if nil != statErr || false == information.Mode().IsRegular() {
+            return false
+        }
+
+        ownerUserId, ownerGroupId, ownerKnown := directoryOwner(information)
+        if false == ownerKnown || false == holdsAccess(information.Mode().Perm(), ownerUserId, ownerGroupId, account, groups, accessWrite) {
+            return false
+        }
+    }
+
+    return true
+}
+
+/* holdsAccess answers whether the account holds the access bits on a file of the mode and owner, read from the one class it falls in: the owner's, else the owning group's among its groups, else the others' */
+func holdsAccess(mode os.FileMode, ownerUserId string, ownerGroupId string, account *user.User, groups []string, needed os.FileMode) bool {
+    if account.Uid == ownerUserId {
+        return needed == (mode>>6)&needed
+    }
+
+    if true == slices.Contains(groups, ownerGroupId) {
+        return needed == (mode>>3)&needed
+    }
+
+    return needed == mode&needed
+}
+

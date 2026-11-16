@@ -4543,3 +4543,228 @@ func TestErrorDetailsOf_ReturnsOnACyclicChain(t *testing.T) {
         }
     })
 }
+
+func logsRootOptions(root string) *runOptions {
+    return &runOptions{logsDirectory: root, defaultUserName: "deploy", logDirectoryOwnership: &logDirectoryOwnership{rendersUserColumn: true}}
+}
+
+func scheduledLogging(commandName string, entryUser string, logFileName string) *ScheduledCommand {
+    return &ScheduledCommand{CommandName: commandName, Config: EntryConfig{User: entryUser, LogFileName: logFileName, Schedule: &Schedule{Minute: "0"}}}
+}
+
+func knownAccount(name string) (*user.User, error) {
+    if "nobody-here" == name {
+        return nil, user.UnknownUserError(name)
+    }
+
+    if "toor" == name {
+        return &user.User{Username: name, Uid: "0", Gid: "0"}, nil
+    }
+
+    return &user.User{Username: name, Uid: "1234", Gid: "5678"}, nil
+}
+
+/* fakeDirectory is a stat answer of a fixed mode and owner, so a pin reads the same verdict whoever runs the suite */
+type fakeDirectory struct {
+    mode  os.FileMode
+    owner syscall.Stat_t
+}
+
+func (instance fakeDirectory) Name() string       { return "logs" }
+func (instance fakeDirectory) Size() int64        { return 0 }
+func (instance fakeDirectory) Mode() os.FileMode  { return instance.mode }
+func (instance fakeDirectory) ModTime() time.Time { return time.Time{} }
+func (instance fakeDirectory) IsDir() bool        { return instance.mode.IsDir() }
+func (instance fakeDirectory) Sys() any           { return &instance.owner }
+
+func withFakeLogsRoot(t *testing.T, entries map[string]fakeDirectory, groups []string, acl bool) {
+    t.Helper()
+
+    previousStat, previousGroups, previousAcl := logDirectoryStat, logDirectoryGroupIds, logDirectoryHasAccessControlList
+    t.Cleanup(func() {
+        logDirectoryStat, logDirectoryGroupIds, logDirectoryHasAccessControlList = previousStat, previousGroups, previousAcl
+    })
+
+    logDirectoryStat = func(path string) (os.FileInfo, error) {
+        if entry, known := entries[path]; true == known {
+            return entry, nil
+        }
+
+        return nil, os.ErrNotExist
+    }
+    logDirectoryGroupIds = func(*user.User) ([]string, error) {
+        if nil == groups {
+            return nil, errors.New("groups unreadable")
+        }
+
+        return groups, nil
+    }
+    logDirectoryHasAccessControlList = func(string) bool { return acl }
+}
+
+func rootOwnedDirectory(mode os.FileMode) fakeDirectory {
+    return fakeDirectory{mode: os.ModeDir | mode, owner: syscall.Stat_t{Uid: 0, Gid: 0}}
+}
+
+func refusalUsers(t *testing.T, err error) []string {
+    t.Helper()
+
+    var melodyErr *exception.Error
+    if false == errors.As(err, &melodyErr) || false == errors.Is(err, ErrLogsDirectoryNotWritable) {
+        t.Fatalf("expected the logs directory refusal, got %v", err)
+    }
+
+    users, _ := melodyErr.Context()["users"].([]string)
+
+    return users
+}
+
+func TestCreateTheLogsRoot_ARootGeneratorRefusesAMissingRootItsDirectWritersNeed(t *testing.T) {
+    root := filepath.Join(t.TempDir(), "logs")
+    withLogDirectoryOwnership(t, 0, knownAccount)
+
+    scheduled := make([]*ScheduledCommand, 0)
+    for _, name := range []string{"zed", "yan", "xia", "wim", "val", "uma"} {
+        scheduled = append(scheduled, scheduledLogging(name+":job", name, ""))
+    }
+
+    err := createTheLogsRoot(scheduled, logsRootOptions(root), true)
+    if fmt.Sprint([]string{"uma", "val", "wim", "xia", "yan", "zed"}) != fmt.Sprint(refusalUsers(t, err)) || false == strings.Contains(err.Error(), root) || false == strings.Contains(err.Error(), "uma, val") {
+        t.Fatalf("expected the users sorted, once each, and the directory in the message, got %v", err)
+    }
+
+    if _, statErr := os.Stat(root); false == errors.Is(statErr, os.ErrNotExist) {
+        t.Fatalf("expected the directory absent after the refusal, got %v", statErr)
+    }
+}
+
+func TestCreateTheLogsRoot_CreatesTheRootWhereNothingNeedsJudging(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        effectiveUserId int
+        scheduled       *ScheduledCommand
+        options         func(*runOptions)
+    }{
+        "the entry runs as root":                {effectiveUserId: 0, scheduled: scheduledLogging("a:job", "root", "")},
+        "the entry runs as uid 0 under a name":  {effectiveUserId: 0, scheduled: scheduledLogging("a:job", "toor", "")},
+        "the entry logs in a subdirectory":      {effectiveUserId: 0, scheduled: scheduledLogging("a:job", "deploy", "reports/a.log")},
+        "the generator is not root":             {effectiveUserId: 1000, scheduled: scheduledLogging("a:job", "deploy", "")},
+        "a user the host does not know":         {effectiveUserId: 0, scheduled: scheduledLogging("a:job", "nobody-here", "")},
+        "an entry without a log":                {effectiveUserId: 0, scheduled: &ScheduledCommand{CommandName: "a:job", Config: EntryConfig{User: "deploy", LogDisabled: true, Schedule: &Schedule{Minute: "0"}}}},
+        "a template rendering no user":          {effectiveUserId: 0, scheduled: scheduledLogging("a:job", "deploy", ""), options: func(options *runOptions) { options.logDirectoryOwnership.rendersUserColumn = false }},
+    } {
+        root := filepath.Join(t.TempDir(), "logs")
+        withLogDirectoryOwnership(t, testCase.effectiveUserId, knownAccount)
+
+        options := logsRootOptions(root)
+        if nil != testCase.options {
+            testCase.options(options)
+        }
+
+        if createErr := createTheLogsRoot([]*ScheduledCommand{testCase.scheduled}, options, true); nil != createErr {
+            t.Fatalf("%s: expected the root created, got %v", name, createErr)
+        }
+
+        if information, statErr := os.Stat(root); nil != statErr || false == information.IsDir() {
+            t.Fatalf("%s: expected the root created, got %v", name, statErr)
+        }
+    }
+}
+
+func TestCreateTheLogsRoot_TheDefaultUserAndTheHeartbeatAreJudged(t *testing.T) {
+    withLogDirectoryOwnership(t, 0, knownAccount)
+
+    root := filepath.Join(t.TempDir(), "logs")
+    if users := refusalUsers(t, createTheLogsRoot([]*ScheduledCommand{scheduledLogging("a:job", "", "")}, logsRootOptions(root), true)); fmt.Sprint([]string{"deploy"}) != fmt.Sprint(users) {
+        t.Fatalf("expected the default user judged, got %v", users)
+    }
+
+    options := logsRootOptions(root)
+    options.heartbeatEnabled = true
+    options.heartbeatPath = filepath.Join(root, "heartbeat.crontab")
+    if users := refusalUsers(t, createTheLogsRoot(nil, options, true)); fmt.Sprint([]string{"deploy"}) != fmt.Sprint(users) {
+        t.Fatalf("expected the heartbeat's user judged, got %v", users)
+    }
+}
+
+func TestJudgeTheLogsRoot_AnExistingRoot(t *testing.T) {
+    root := "/srv/logs"
+    direct := []logsRootWriter{{user: "deploy", directFiles: []string{root + "/a.log"}, commands: []string{"a:job"}}}
+    through := []logsRootWriter{{user: "deploy", throughRoot: true, commands: []string{"a:job"}}}
+    withLogDirectoryOwnership(t, 0, knownAccount)
+
+    for name, testCase := range map[string]struct {
+        entries map[string]fakeDirectory
+        writers []logsRootWriter
+        groups  []string
+        acl     bool
+        refused bool
+    }{
+        "root's 0755, a direct writer":                    {entries: map[string]fakeDirectory{root: rootOwnedDirectory(0o755)}, writers: direct, groups: []string{}, refused: true},
+        "writable by others":                              {entries: map[string]fakeDirectory{root: rootOwnedDirectory(0o777)}, writers: direct, groups: []string{}},
+        "the group writes, the user in it":                {entries: map[string]fakeDirectory{root: {mode: os.ModeDir | 0o770, owner: syscall.Stat_t{Gid: 77}}}, writers: direct, groups: []string{"77"}},
+        "groups unreadable":                               {entries: map[string]fakeDirectory{root: rootOwnedDirectory(0o755)}, writers: direct, groups: nil},
+        "an access control list":                          {entries: map[string]fakeDirectory{root: rootOwnedDirectory(0o755)}, writers: direct, groups: []string{}, acl: true},
+        "its log file exists and is the user's":           {entries: map[string]fakeDirectory{root: rootOwnedDirectory(0o755), root + "/a.log": {mode: 0o640, owner: syscall.Stat_t{Uid: 1234}}}, writers: direct, groups: []string{}},
+        "its log file exists and is root's":               {entries: map[string]fakeDirectory{root: rootOwnedDirectory(0o755), root + "/a.log": {mode: 0o644}}, writers: direct, groups: []string{}, refused: true},
+        "a subdirectory writer on a searchable root":      {entries: map[string]fakeDirectory{root: rootOwnedDirectory(0o755)}, writers: through, groups: []string{}},
+        "a subdirectory writer on a root it cannot enter": {entries: map[string]fakeDirectory{root: rootOwnedDirectory(0o700)}, writers: through, groups: []string{}, refused: true},
+    } {
+        withFakeLogsRoot(t, testCase.entries, testCase.groups, testCase.acl)
+
+        judgeErr := judgeTheLogsRoot(root, testCase.writers)
+        if testCase.refused != (nil != judgeErr) {
+            t.Fatalf("%s: expected refused %v, got %v", name, testCase.refused, judgeErr)
+        }
+    }
+
+    withFakeLogsRoot(t, map[string]fakeDirectory{root: {mode: 0o644}}, []string{}, false)
+    if judgeErr := judgeTheLogsRoot(root, direct); nil == judgeErr || false == strings.Contains(judgeErr.Error(), "is not a directory") {
+        t.Fatalf("expected a root that is a file refused as such, got %v", judgeErr)
+    }
+}
+
+func TestHoldsAccess_ReadsTheOneClassTheAccountFallsIn(t *testing.T) {
+    account := &user.User{Uid: "1234", Gid: "5678"}
+    groups := []string{"5678", "77"}
+    for _, testCase := range []struct {
+        mode     os.FileMode
+        owner    string
+        group    string
+        writable bool
+    }{
+        {mode: 0o700, owner: "1234", group: "0", writable: true},
+        {mode: 0o500, owner: "1234", group: "0", writable: false},
+        {mode: 0o577, owner: "1234", group: "0", writable: false},
+        {mode: 0o770, owner: "0", group: "5678", writable: true},
+        {mode: 0o770, owner: "0", group: "77", writable: true},
+        {mode: 0o757, owner: "0", group: "77", writable: false},
+        {mode: 0o773, owner: "0", group: "0", writable: true},
+        {mode: 0o771, owner: "0", group: "0", writable: false},
+    } {
+        if testCase.writable != holdsAccess(testCase.mode, testCase.owner, testCase.group, account, groups, accessWrite|accessSearch) {
+            t.Fatalf("expected %v for %v owned %s:%s", testCase.writable, testCase.mode, testCase.owner, testCase.group)
+        }
+    }
+}
+
+func TestRun_ARefusedLogsRootLeavesNothingBehind(t *testing.T) {
+    withLogDirectoryOwnership(t, 0, knownAccount)
+
+    tempDir := t.TempDir()
+    outputPath := filepath.Join(tempDir, "crontab")
+    logsDirectory := filepath.Join(tempDir, "logs")
+
+    commands := []clicontract.Command{newFakeCommandWithConfig("reports:daily", EntryConfig{Schedule: &Schedule{Minute: "0", Hour: "3"}})}
+    _, runErr := runGenerateCommand(t, commands, []string{"--out", outputPath, "--logs-directory", logsDirectory, "--binary", "/usr/local/bin/fakeapp", "--user", "deploy"})
+
+    if false == errors.Is(runErr, ErrLogsDirectoryNotWritable) {
+        t.Fatalf("expected the run refused on the logs directory, got %v", runErr)
+    }
+
+    for _, path := range []string{logsDirectory, outputPath} {
+        if _, statErr := os.Stat(path); false == errors.Is(statErr, os.ErrNotExist) {
+            t.Fatalf("expected %s absent after the refused run, got %v", path, statErr)
+        }
+    }
+}
+

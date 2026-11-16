@@ -4,6 +4,7 @@ import (
     "bytes"
     "context"
     "fmt"
+    "os"
     "sort"
     "testing"
 
@@ -467,3 +468,11 @@ func sortedKeys[V any](values map[string]V) []string {
 
     return keys
 }
+
+/* the suite runs as root in the dev container and as a plain user elsewhere; the logs directory's judgment and its hand-over read the effective user, so every test reads a plain user unless it sets the door itself */
+func TestMain(main *testing.M) {
+    logDirectoryEffectiveUserId = func() int { return 1000 }
+
+    os.Exit(main.Run())
+}
+

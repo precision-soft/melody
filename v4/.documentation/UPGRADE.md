@@ -128,6 +128,14 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Remedy.** Write `'#'` for a literal `#` in a plural branch and `''` for an apostrophe followed by `#`. Register each locale under one spelling; the request locale no longer needs normalizing to that spelling.
 
+### Cron: a root generator refuses a logs directory its entry users cannot write
+
+**What changed.** [`melody:cron:generate`](../../integrations/cron/v4/generate_command.go) run as root refuses a missing logs directory, and an existing one an entry's user cannot write and enter, when that entry writes its log file directly in it.
+
+**Symptom.** A deployment whose root-run generator created the logs directory now fails naming the directory and the users.
+
+**Remedy.** Create the logs directory beforehand, owned by or writable for the entries' users, or give those entries log file names in a subdirectory, which the generator creates and hands over. A directory managed through an access control list, and log files that already exist for their users, are not judged. A script can tell the refusal by `errors.Is(err, cron.ErrLogsDirectoryNotWritable)`.
+
 ### Bunorm encrypt: the migrator judges its specification against the schema
 
 **What changed.** The [encrypt `Migrator`](../../integrations/bunorm/v4/encrypt/migrate.go) runs on one connection and, before the first row, matches every column and the key to the table letter case aside, proves the key unique and not NULL, and refuses a decrypt into a character column that is not `utf8mb4` under a non-strict `sql_mode`. A duplicate-entry or incorrect-string refusal from the server is reported without its message.

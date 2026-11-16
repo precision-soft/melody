@@ -13,6 +13,7 @@ var (
     ErrHeartbeatDestinationDefaultMissing = errors.New("cron: heartbeat destination 'default' requested but the default destination has no entries")
     ErrDestinationEscape                  = errors.New("cron: path escapes the allowed directory")
     ErrEntryEmptyUser                     = errors.New("cron: entry has empty user")
+    ErrLogsDirectoryNotWritable           = errors.New("cron: the logs directory cannot be written by an entry's user")
     ErrEntryEmptyCommand                  = errors.New("cron: entry has no command to run")
     ErrForbiddenCharacter                 = errors.New("cron: token contains forbidden character")
     ErrFieldContainsWhitespace            = errors.New("cron: field contains whitespace")
