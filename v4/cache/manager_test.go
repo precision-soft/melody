@@ -447,13 +447,13 @@ func (instance *cacheTestTypedNilErrorBackend) DeleteMultiple(ctx context.Contex
     return instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Increment(ctx context.Context, key string, delta int64) (int64, error) {
-    newValue, _ := instance.inner.Increment(ctx, key, delta)
+func (instance *cacheTestTypedNilErrorBackend) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    newValue, _ := instance.inner.Increment(ctx, key, delta, options)
     return newValue, instance.typedNilError()
 }
 
-func (instance *cacheTestTypedNilErrorBackend) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
-    newValue, _ := instance.inner.Decrement(ctx, key, delta)
+func (instance *cacheTestTypedNilErrorBackend) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    newValue, _ := instance.inner.Decrement(ctx, key, delta, options)
     return newValue, instance.typedNilError()
 }
 
@@ -487,7 +487,7 @@ func TestManager_GetCounterReadsWhatIncrementWrote(t *testing.T) {
     manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
     defer manager.CloseWithContext(context.Background())
 
-    if _, incrementErr := manager.Increment(context.Background(), "visits", 5); nil != incrementErr {
+    if _, incrementErr := manager.Increment(context.Background(), "visits", 5, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("unexpected increment error: %v", incrementErr)
     }
 
@@ -561,11 +561,11 @@ func TestManager_DecrementCountsDownAndLeavesACounterGetCounterCanRead(t *testin
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    if _, incrementErr := manager.Increment(context.Background(), "remaining", 10); nil != incrementErr {
+    if _, incrementErr := manager.Increment(context.Background(), "remaining", 10, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("unexpected increment error: %v", incrementErr)
     }
 
-    newValue, decrementErr := manager.Decrement(context.Background(), "remaining", 3)
+    newValue, decrementErr := manager.Decrement(context.Background(), "remaining", 3, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != decrementErr {
         t.Fatalf("unexpected decrement error: %v", decrementErr)
     }
@@ -584,7 +584,7 @@ func TestManager_DecrementCountsDownAndLeavesACounterGetCounterCanRead(t *testin
     }
 
     /* a counter written by Decrement crosses zero into the negatives rather than clamping: a remaining-quota counter that stopped at zero would report the same value for "exactly used up" and "overdrawn by a thousand" */
-    newValue, decrementErr = manager.Decrement(context.Background(), "remaining", 10)
+    newValue, decrementErr = manager.Decrement(context.Background(), "remaining", 10, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != decrementErr {
         t.Fatalf("unexpected decrement error: %v", decrementErr)
     }
@@ -602,7 +602,7 @@ func TestManager_DecrementOnAnAbsentKeyStartsFromZero(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    newValue, decrementErr := manager.Decrement(context.Background(), "never.written", 2)
+    newValue, decrementErr := manager.Decrement(context.Background(), "never.written", 2, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != decrementErr {
         t.Fatalf("unexpected decrement error: %v", decrementErr)
     }
@@ -792,7 +792,7 @@ func TestManager_GetCounterRefusesWhatIncrementRefuses(t *testing.T) {
             t.Fatalf("expected %q refused as no counter", payload)
         }
 
-        if _, incrementErr := manager.Increment(context.Background(), "visits", 1); nil == incrementErr {
+        if _, incrementErr := manager.Increment(context.Background(), "visits", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == incrementErr {
             t.Fatalf("expected Increment to refuse %q as well", payload)
         }
     }
@@ -816,8 +816,8 @@ func TestManager_EveryDoorHandsTheCallersContextToTheBackend(t *testing.T) {
         "Many":           func() error { _, err := manager.Many(canceledContext, []string{"key"}); return err },
         "SetMultiple":    func() error { return manager.SetMultiple(canceledContext, map[string]any{"key": "value"}, bound.Of(time.Minute)) },
         "DeleteMultiple": func() error { return manager.DeleteMultiple(canceledContext, []string{"key"}) },
-        "Increment":      func() error { _, err := manager.Increment(canceledContext, "counter", 1); return err },
-        "Decrement":      func() error { _, err := manager.Decrement(canceledContext, "counter", 1); return err },
+        "Increment":      func() error { _, err := manager.Increment(canceledContext, "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
+        "Decrement":      func() error { _, err := manager.Decrement(canceledContext, "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
         "GetCounter":     func() error { _, _, err := manager.GetCounter(canceledContext, "counter"); return err },
     }
 
@@ -852,5 +852,43 @@ func TestManager_ANilContextIsRefusedBeforeTheValueIsSerialized(t *testing.T) {
 
     if setErr := manager.SetMultiple(absentContext, map[string]any{"key": "value"}, bound.Of(time.Minute)); nil == setErr || "cache context is nil" != setErr.Error() {
         t.Fatalf("SetMultiple: expected the nil context refused first, got %v", setErr)
+    }
+}
+
+func TestManager_ACounterHandsItsOptionsToTheBackend(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+    manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
+    defer manager.CloseWithContext(context.Background())
+
+    window := cachecontract.CounterOptions{Ttl: bound.Of(time.Minute)}
+    manager.Increment(context.Background(), "up", 1, window)
+    manager.Decrement(context.Background(), "down", 1, window)
+
+    clockInstance.now = clockInstance.now.Add(61 * time.Second)
+    for _, key := range []string{"up", "down"} {
+        if _, exists, _ := manager.GetCounter(context.Background(), key); true == exists {
+            t.Fatalf("expected %s gone at the ttl the options carried", key)
+        }
+    }
+
+    if _, refusedErr := manager.Increment(context.Background(), "refused", 1, cachecontract.CounterOptions{}); nil == refusedErr {
+        t.Fatal("expected an absent ttl refused through the manager")
+    }
+}
+
+func TestManager_ASlidingCounterKeepsItsRefreshThroughTheManager(t *testing.T) {
+    clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
+    manager := NewManager(NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), NewJsonSerializer(), ManagerConfig{OwnsBackend: true})
+    defer manager.CloseWithContext(context.Background())
+
+    sliding := cachecontract.CounterOptions{Ttl: bound.Of(time.Minute), RefreshTtl: true}
+    manager.Increment(context.Background(), "hits", 1, sliding)
+
+    clockInstance.now = clockInstance.now.Add(40 * time.Second)
+    manager.Decrement(context.Background(), "hits", 1, sliding)
+
+    clockInstance.now = clockInstance.now.Add(40 * time.Second)
+    if _, exists, _ := manager.GetCounter(context.Background(), "hits"); false == exists {
+        t.Fatal("expected the sliding window kept alive through the manager")
     }
 }

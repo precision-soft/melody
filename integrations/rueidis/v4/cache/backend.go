@@ -529,7 +529,15 @@ func (instance *Backend) DeleteMultiple(ctx context.Context, keys []string) erro
     ))
 }
 
-func (instance *Backend) Increment(ctx context.Context, key string, delta int64) (int64, error) {
+/* counterScript adds ARGV[1] to the counter and writes its expiry in the same round trip: ARGV[2] milliseconds, none when 0; ARGV[3] "1" rewrites it on every call, otherwise it is written only on a key without one, the key the call created included. Reading the ttl inside the script keeps the check and the write atomic, and it needs no PEXPIRE NX, which Redis 7.0 introduced. The count is answered as the key's text: an integer reply crosses Lua as a double, which rounds a count above 2^53. */
+var counterScript = rueidis.NewLuaScript(`redis.call("incrby", KEYS[1], ARGV[1])
+local ttl = tonumber(ARGV[2])
+if ttl > 0 and (ARGV[3] == "1" or redis.call("pttl", KEYS[1]) < 0) then
+    redis.call("pexpire", KEYS[1], ttl)
+end
+return redis.call("get", KEYS[1])`)
+
+func (instance *Backend) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
     if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
         return 0, refusalErr
     }
@@ -539,22 +547,34 @@ func (instance *Backend) Increment(ctx context.Context, key string, delta int64)
         return 0, normalizeErr
     }
 
+    return instance.addToCounter(ctx, key, normalizedKey, delta, options)
+}
+
+/* addToCounter runs counterScript once the key and the delta passed their refusals, the ttl's after them, in the order Set refuses */
+func (instance *Backend) addToCounter(ctx context.Context, key string, normalizedKey string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    expiry, ttlErr := cachecontract.ResolveTtl(options.Ttl)
+    if nil != ttlErr {
+        return 0, ttlErr
+    }
+
     if doneErr := ctx.Err(); nil != doneErr {
         return 0, doneErr
+    }
+
+    refresh := "0"
+    if true == options.RefreshTtl {
+        refresh = "1"
     }
 
     commandContext, cancel := instance.commandContext(ctx)
     defer cancel()
 
-    response := instance.client.Do(
+    value, err := counterScript.Exec(
         commandContext,
-        instance.client.B().Incrby().Key(normalizedKey).Increment(delta).Build(),
-    )
-    if err := response.Error(); nil != err {
-        return 0, counterError(key, err)
-    }
-
-    value, err := response.AsInt64()
+        instance.client,
+        []string{normalizedKey},
+        []string{strconv.FormatInt(delta, 10), strconv.FormatInt(expiry.Milliseconds(), 10), refresh},
+    ).AsInt64()
     if nil != err {
         return 0, counterError(key, err)
     }
@@ -562,7 +582,7 @@ func (instance *Backend) Increment(ctx context.Context, key string, delta int64)
     return value, nil
 }
 
-func (instance *Backend) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
+func (instance *Backend) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
     if refusalErr := instance.refuseBeforeArguments(ctx); nil != refusalErr {
         return 0, refusalErr
     }
@@ -582,27 +602,7 @@ func (instance *Backend) Decrement(ctx context.Context, key string, delta int64)
         )
     }
 
-    if doneErr := ctx.Err(); nil != doneErr {
-        return 0, doneErr
-    }
-
-    commandContext, cancel := instance.commandContext(ctx)
-    defer cancel()
-
-    response := instance.client.Do(
-        commandContext,
-        instance.client.B().Decrby().Key(normalizedKey).Decrement(delta).Build(),
-    )
-    if err := response.Error(); nil != err {
-        return 0, counterError(key, err)
-    }
-
-    value, err := response.AsInt64()
-    if nil != err {
-        return 0, counterError(key, err)
-    }
-
-    return value, nil
+    return instance.addToCounter(ctx, key, normalizedKey, -delta, options)
 }
 
 /* CloseWithContext marks the backend closed and refuses every later operation, as the in-memory backend does; it waits for nothing. The shared client belongs to the composition root and is not closed here; the parent package's Connection wrapper is what the container's teardown closes. */
@@ -622,13 +622,12 @@ func counterError(key string, causeErr error) error {
     )
 }
 
-/* counterRefusalMessages maps redis's wording onto the message the in-memory backend answers for the same mistake, matched on a fragment because redis prefixes its errors by server version and by whether the command went through a script. The order is load-bearing: "decrement would overflow", a DECRBY that cannot be negated, is a substring of "increment or decrement would overflow", the int64 ceiling, so it is checked second. */
+/* counterRefusalMessages maps redis's wording onto the message the in-memory backend answers for the same mistake, matched on a fragment because redis prefixes its errors by server version and by whether the command went through a script. A delta that cannot be negated is refused before the script runs, so the counter script only ever meets the int64 ceiling. */
 var counterRefusalMessages = []struct {
     fragment string
     message  string
 }{
     {fragment: "increment or decrement would overflow", message: "cache increment overflow"},
-    {fragment: "decrement would overflow", message: "delta overflows int64 when negated"},
     {fragment: "not an integer or out of range", message: "cache value is not a valid int64"},
 }
 

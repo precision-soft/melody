@@ -162,11 +162,11 @@ func (instance *ttlRecordingCache) DeleteMultiple(ctx context.Context, keys []st
     return nil
 }
 
-func (instance *ttlRecordingCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
+func (instance *ttlRecordingCache) Increment(ctx context.Context, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 
-func (instance *ttlRecordingCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
+func (instance *ttlRecordingCache) Decrement(ctx context.Context, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 

@@ -848,12 +848,12 @@ func (instance testValueKindCache) DeleteMultiple(ctx context.Context, keys []st
     return instance.inner.DeleteMultiple(ctx, keys)
 }
 
-func (instance testValueKindCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
-    return instance.inner.Increment(ctx, key, delta)
+func (instance testValueKindCache) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.inner.Increment(ctx, key, delta, options)
 }
 
-func (instance testValueKindCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
-    return instance.inner.Decrement(ctx, key, delta)
+func (instance testValueKindCache) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.inner.Decrement(ctx, key, delta, options)
 }
 
 func (instance testValueKindCache) CloseWithContext(closeContext context.Context) error {
@@ -960,12 +960,12 @@ func (instance *testPanickingSetCache) DeleteMultiple(ctx context.Context, keys 
     return instance.inner.DeleteMultiple(ctx, keys)
 }
 
-func (instance *testPanickingSetCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
-    return instance.inner.Increment(ctx, key, delta)
+func (instance *testPanickingSetCache) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.inner.Increment(ctx, key, delta, options)
 }
 
-func (instance *testPanickingSetCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
-    return instance.inner.Decrement(ctx, key, delta)
+func (instance *testPanickingSetCache) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.inner.Decrement(ctx, key, delta, options)
 }
 
 func (instance *testPanickingSetCache) CloseWithContext(closeContext context.Context) error {
@@ -1072,11 +1072,11 @@ func (instance *testScriptedCache) SetMultiple(ctx context.Context, items map[st
 
 func (instance *testScriptedCache) DeleteMultiple(ctx context.Context, keys []string) error { return nil }
 
-func (instance *testScriptedCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
+func (instance *testScriptedCache) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 
-func (instance *testScriptedCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
+func (instance *testScriptedCache) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 

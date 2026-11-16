@@ -23,9 +23,9 @@ type Cache interface {
 
     DeleteMultiple(ctx context.Context, keys []string) error
 
-    Increment(ctx context.Context, key string, delta int64) (int64, error)
+    Increment(ctx context.Context, key string, delta int64, options CounterOptions) (int64, error)
 
-    Decrement(ctx context.Context, key string, delta int64) (int64, error)
+    Decrement(ctx context.Context, key string, delta int64, options CounterOptions) (int64, error)
 
     CloseWithContext(closeContext context.Context) error
 }

@@ -231,9 +231,9 @@ func (instance *Manager) DeleteMultiple(ctx context.Context, keys []string) erro
     return normalizeThirdPartyError(instance.backend.DeleteMultiple(ctx, keys))
 }
 
-/* Increment adds delta to a counter through the backend's native operation, so a distributed backend keeps it atomic. The count bypasses the serializer and is stored as decimal text, so a counter key is read with GetCounter and never mixed with Set. */
-func (instance *Manager) Increment(ctx context.Context, key string, delta int64) (int64, error) {
-    newValue, incrementErr := instance.backend.Increment(ctx, key, delta)
+/* Increment adds delta to a counter through the backend's native operation, so a distributed backend keeps it atomic, the counter's ttl written in the same operation as options says. The count bypasses the serializer and is stored as decimal text, so a counter key is read with GetCounter and never mixed with Set. */
+func (instance *Manager) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    newValue, incrementErr := instance.backend.Increment(ctx, key, delta, options)
 
     return newValue, normalizeThirdPartyError(incrementErr)
 }
@@ -265,8 +265,8 @@ func (instance *Manager) GetCounter(ctx context.Context, key string) (int64, boo
     return parsedValue, true, nil
 }
 
-func (instance *Manager) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
-    newValue, decrementErr := instance.backend.Decrement(ctx, key, delta)
+func (instance *Manager) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    newValue, decrementErr := instance.backend.Decrement(ctx, key, delta, options)
 
     return newValue, normalizeThirdPartyError(decrementErr)
 }

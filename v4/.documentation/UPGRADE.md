@@ -102,6 +102,14 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Build the kernel over `event.NewEventDispatcher`, or implement both capabilities on the dispatcher, forwarding to the one it wraps; register the transports through `messagebus.RegisterTransports`, which registers the closer beside them, and declare no teardown dependency from the closer to a bus.
 
+### Cache: a counter carries its ttl
+
+**What changed.** [`cachecontract.Cache`](../cache/contract/cache.go) and `Backend` take `Increment(ctx, key, delta, options)` and `Decrement(ctx, key, delta, options)`, the options a [`CounterOptions`](../cache/contract/counter.go): `Ttl`, read as a write's ttl (at least 1s, `bound.UnlimitedDuration()` for none, absent refused), and `RefreshTtl`, false for a fixed window written when the call creates the key or finds it without an expiry, true for a sliding window rewritten on every call. The in-memory and the redis backends implement both, the redis one in one script.
+
+**Symptom.** A call written for the third major does not compile; a `Backend` or `Cache` of the application's own no longer satisfies the interface; a call with an empty `CounterOptions` answers the error `the cache ttl is required`.
+
+**Remedy.** `cache.Increment(ctx, key, 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})` keeps the third major's behaviour, a counter that never expires; a rate window or a daily count passes its span, `RefreshTtl: true` for a span that restarts on every call. An implementation of the interfaces writes the expiry in the same atomic operation as the count.
+
 ### Translation: a quoted `#` in a plural branch, and locales matched in BCP 47 case
 
 **What changed.** Inside a `plural` branch `'#'` is a literal `#` and `''` an apostrophe, and [`ValidatePattern`](../translation/message_format.go) refuses a `'#` no apostrophe closes. The [`Manager`](../translation/manager.go) matches every locale in BCP 47 case (`ro-ro` finds `ro-RO`, separators kept as written) and refuses two catalogs spelling one locale differently.

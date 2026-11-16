@@ -266,11 +266,11 @@ func (instance *readingCache) DeleteMultiple(ctx context.Context, keys []string)
     return nil
 }
 
-func (instance *readingCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
+func (instance *readingCache) Increment(ctx context.Context, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 
-func (instance *readingCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
+func (instance *readingCache) Decrement(ctx context.Context, key string, delta int64, options melodycachecontract.CounterOptions) (int64, error) {
     return 0, nil
 }
 

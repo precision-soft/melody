@@ -66,12 +66,12 @@ func (instance *BackendService) DeleteMultiple(ctx context.Context, keys []strin
     return instance.backend.DeleteMultiple(ctx, keys)
 }
 
-func (instance *BackendService) Increment(ctx context.Context, key string, delta int64) (int64, error) {
-    return instance.backend.Increment(ctx, key, delta)
+func (instance *BackendService) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.backend.Increment(ctx, key, delta, options)
 }
 
-func (instance *BackendService) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
-    return instance.backend.Decrement(ctx, key, delta)
+func (instance *BackendService) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
+    return instance.backend.Decrement(ctx, key, delta, options)
 }
 
 func (instance *BackendService) CloseWithContext(closeContext context.Context) error {

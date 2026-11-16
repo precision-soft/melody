@@ -530,15 +530,15 @@ func (instance *InMemoryBackend) DeleteMultiple(ctx context.Context, keys []stri
     return nil
 }
 
-func (instance *InMemoryBackend) Increment(ctx context.Context, key string, delta int64) (int64, error) {
+func (instance *InMemoryBackend) Increment(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
     if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
         return 0, nilErr
     }
 
-    return instance.incrementValue(ctx, key, delta)
+    return instance.incrementValue(ctx, key, delta, options)
 }
 
-func (instance *InMemoryBackend) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
+func (instance *InMemoryBackend) Decrement(ctx context.Context, key string, delta int64, options cachecontract.CounterOptions) (int64, error) {
     if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
         return 0, nilErr
     }
@@ -558,7 +558,7 @@ func (instance *InMemoryBackend) Decrement(ctx context.Context, key string, delt
         )
     }
 
-    return instance.incrementValue(ctx, key, -delta)
+    return instance.incrementValue(ctx, key, -delta, options)
 }
 
 /* refuseClosedOrInvalidKey answers the two refusals incrementValue makes under its own lock, in the same order. The flag is read under the lock every writer takes, and a CloseWithContext landing after the read is caught by incrementValue itself. */
@@ -614,11 +614,13 @@ func (instance *InMemoryBackend) incrementValue(
     ctx context.Context,
     key string,
     delta int64,
+    options cachecontract.CounterOptions,
 ) (int64, error) {
-    now := instance.clock.Now()
-
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    /* read under the lock, since the instant both judges the entry's expiry and starts the window the call writes */
+    now := instance.clock.Now()
 
     if true == instance.closed {
         return 0, closedBackendError()
@@ -626,6 +628,11 @@ func (instance *InMemoryBackend) incrementValue(
 
     if keyErr := validateKey(key); nil != keyErr {
         return 0, keyErr
+    }
+
+    expiry, ttlErr := cachecontract.ResolveTtl(options.Ttl)
+    if nil != ttlErr {
+        return 0, ttlErr
     }
 
     if doneErr := ctx.Err(); nil != doneErr {
@@ -668,16 +675,21 @@ func (instance *InMemoryBackend) incrementValue(
         )
     }
 
-    var preservedExpiresAt *time.Time
+    var expiresAt *time.Time
     if true == exists && nil != entry && nil != entry.item {
-        preservedExpiresAt = entry.item.ExpiresAt()
+        expiresAt = entry.item.ExpiresAt()
+    }
+
+    if 0 < expiry && (true == options.RefreshTtl || nil == expiresAt) {
+        counterExpiresAt := now.Add(expiry)
+        expiresAt = &counterExpiresAt
     }
 
     instance.saveItemLocked(
         key,
         []byte(strconv.FormatInt(newValue, 10)),
         now,
-        preservedExpiresAt,
+        expiresAt,
     )
 
     return newValue, nil

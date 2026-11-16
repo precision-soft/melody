@@ -9,6 +9,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
+    cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/runtime"
@@ -100,12 +101,12 @@ func TestBackendService_DelegatesEveryOperationToItsBackend(t *testing.T) {
         t.Fatalf("ClearByPrefix must remove only its subtree, got %v, %v", values, manyErr)
     }
 
-    counter, incrementErr := service.Increment(context.Background(), "counter", 4)
+    counter, incrementErr := service.Increment(context.Background(), "counter", 4, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != incrementErr || 4 != counter {
         t.Fatalf("Increment = %d, %v", counter, incrementErr)
     }
 
-    counter, decrementErr := service.Decrement(context.Background(), "counter", 1)
+    counter, decrementErr := service.Decrement(context.Background(), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != decrementErr || 3 != counter {
         t.Fatalf("Decrement = %d, %v", counter, decrementErr)
     }
@@ -197,13 +198,33 @@ func TestBackendService_EveryDoorHandsTheCallersContextToTheBackend(t *testing.T
         "Many":           func() error { _, err := service.Many(canceledContext, []string{"key"}); return err },
         "SetMultiple":    func() error { return service.SetMultiple(canceledContext, map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute)) },
         "DeleteMultiple": func() error { return service.DeleteMultiple(canceledContext, []string{"key"}) },
-        "Increment":      func() error { _, err := service.Increment(canceledContext, "counter", 1); return err },
-        "Decrement":      func() error { _, err := service.Decrement(canceledContext, "counter", 1); return err },
+        "Increment":      func() error { _, err := service.Increment(canceledContext, "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
+        "Decrement":      func() error { _, err := service.Decrement(canceledContext, "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
     }
 
     for door, call := range doors {
         if doorErr := call(); false == errors.Is(doorErr, context.Canceled) {
             t.Fatalf("%s: expected the caller's done context to reach the backend, got %v", door, doorErr)
+        }
+    }
+}
+
+func TestBackendService_ACounterHandsItsOptionsToTheBackend(t *testing.T) {
+    backend, client := liveBackend(t)
+    service := &BackendService{backend: backend}
+    ctx := context.Background()
+    prefix := "melody:test:" + t.Name() + ":"
+
+    if _, incrementErr := service.Increment(ctx, "up", 1, cachecontract.CounterOptions{Ttl: bound.Of(time.Hour)}); nil != incrementErr {
+        t.Fatal(incrementErr)
+    }
+    if _, decrementErr := service.Decrement(ctx, "down", 1, cachecontract.CounterOptions{Ttl: bound.Of(time.Hour)}); nil != decrementErr {
+        t.Fatal(decrementErr)
+    }
+
+    for _, key := range []string{"up", "down"} {
+        if remaining := rawTtl(t, client, prefix+key); remaining <= 0 {
+            t.Fatalf("expected %s to carry the ttl its options asked, got %d", key, remaining)
         }
     }
 }

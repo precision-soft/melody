@@ -6,6 +6,8 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/service"
+    "github.com/precision-soft/melody/v4/bound"
+    cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyruntime "github.com/precision-soft/melody/v4/runtime"
@@ -14,10 +16,10 @@ import (
 func TestProductEventSubscriber_DropsTheViewCounterOnDelete(t *testing.T) {
     cacheInstance, runtimeInstance := userUpdateUnderTest(t)
 
-    if _, incrementErr := cacheInstance.Increment(context.Background(), service.CacheKeyProductViews("prod-7"), 3); nil != incrementErr {
+    if _, incrementErr := cacheInstance.Increment(context.Background(), service.CacheKeyProductViews("prod-7"), 3, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("prime the counter: %v", incrementErr)
     }
-    if _, incrementErr := cacheInstance.Increment(context.Background(), service.CacheKeyProductViews("prod-8"), 1); nil != incrementErr {
+    if _, incrementErr := cacheInstance.Increment(context.Background(), service.CacheKeyProductViews("prod-8"), 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("prime the neighbour's counter: %v", incrementErr)
     }
 
@@ -35,7 +37,7 @@ func TestProductEventSubscriber_DropsTheViewCounterOnDelete(t *testing.T) {
 func TestProductEventSubscriber_DropsTheEntriesUnderARequestContextAlreadyDone(t *testing.T) {
     cacheInstance, runtimeInstance := userUpdateUnderTest(t)
 
-    if _, incrementErr := cacheInstance.Increment(context.Background(), service.CacheKeyProductViews("prod-7"), 3); nil != incrementErr {
+    if _, incrementErr := cacheInstance.Increment(context.Background(), service.CacheKeyProductViews("prod-7"), 3, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("prime the counter: %v", incrementErr)
     }
 

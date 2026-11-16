@@ -13,6 +13,7 @@ import (
     "unicode/utf8"
 
     "github.com/precision-soft/melody/v4/bound"
+    cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -207,11 +208,11 @@ func TestInMemoryBackend_RefusesEmptyKey(t *testing.T) {
         t.Fatalf("expected DeleteMultiple to refuse the empty key")
     }
 
-    if _, incrementErr := backend.Increment(context.Background(), "", 1); nil == incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == incrementErr {
         t.Fatalf("expected Increment to refuse the empty key")
     }
 
-    if _, decrementErr := backend.Decrement(context.Background(), "", 1); nil == decrementErr {
+    if _, decrementErr := backend.Decrement(context.Background(), "", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == decrementErr {
         t.Fatalf("expected Decrement to refuse the empty key")
     }
 
@@ -265,11 +266,11 @@ func TestInMemoryBackend_RefusesOperationsAfterClose(t *testing.T) {
         t.Fatalf("expected DeleteMultiple to refuse a closed backend")
     }
 
-    if _, incrementErr := backend.Increment(context.Background(), "n", 1); nil == incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "n", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == incrementErr {
         t.Fatalf("expected Increment to refuse a closed backend")
     }
 
-    if _, decrementErr := backend.Decrement(context.Background(), "n", 1); nil == decrementErr {
+    if _, decrementErr := backend.Decrement(context.Background(), "n", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == decrementErr {
         t.Fatalf("expected Decrement to refuse a closed backend")
     }
 
@@ -315,7 +316,7 @@ func TestInMemoryBackend_IncrementRefusesEmptyPayload(t *testing.T) {
         t.Fatalf("set error: %v", setErr)
     }
 
-    if _, incrementErr := backend.Increment(context.Background(), "marker", 1); nil == incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "marker", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == incrementErr {
         t.Fatalf("expected Increment to refuse an empty payload")
     }
 
@@ -323,7 +324,7 @@ func TestInMemoryBackend_IncrementRefusesEmptyPayload(t *testing.T) {
         t.Fatalf("set error: %v", setErr)
     }
 
-    if _, incrementErr := backend.Increment(context.Background(), "blank", 1); nil == incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "blank", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == incrementErr {
         t.Fatalf("expected Increment to refuse a blank payload")
     }
 
@@ -466,7 +467,7 @@ func TestInMemoryBackend_IncrementDecrement_HappyPath(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    value, err := backend.Increment(context.Background(), "n", 1)
+    value, err := backend.Increment(context.Background(), "n", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != err {
         t.Fatalf("increment error: %v", err)
     }
@@ -474,7 +475,7 @@ func TestInMemoryBackend_IncrementDecrement_HappyPath(t *testing.T) {
         t.Fatalf("expected 1")
     }
 
-    value, err = backend.Increment(context.Background(), "n", 2)
+    value, err = backend.Increment(context.Background(), "n", 2, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != err {
         t.Fatalf("increment error: %v", err)
     }
@@ -482,7 +483,7 @@ func TestInMemoryBackend_IncrementDecrement_HappyPath(t *testing.T) {
         t.Fatalf("expected 3")
     }
 
-    value, err = backend.Decrement(context.Background(), "n", 1)
+    value, err = backend.Decrement(context.Background(), "n", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != err {
         t.Fatalf("decrement error: %v", err)
     }
@@ -499,7 +500,7 @@ func TestInMemoryBackend_Increment_AcceptsExactlyTheRedisIntegerGrammar(t *testi
 
     _ = backend.Set(context.Background(), "n", []byte("10"), bound.UnlimitedDuration())
 
-    value, err := backend.Increment(context.Background(), "n", 5)
+    value, err := backend.Increment(context.Background(), "n", 5, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != err {
         t.Fatalf("increment error: %v", err)
     }
@@ -509,7 +510,7 @@ func TestInMemoryBackend_Increment_AcceptsExactlyTheRedisIntegerGrammar(t *testi
 
     _ = backend.Set(context.Background(), "negative", []byte("-3"), bound.UnlimitedDuration())
 
-    value, err = backend.Increment(context.Background(), "negative", 1)
+    value, err = backend.Increment(context.Background(), "negative", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != err {
         t.Fatalf("increment error: %v", err)
     }
@@ -520,7 +521,7 @@ func TestInMemoryBackend_Increment_AcceptsExactlyTheRedisIntegerGrammar(t *testi
     for _, payload := range []string{"not-a-number", " 10 ", "+10", "007", "-0", ""} {
         _ = backend.Set(context.Background(), "bad", []byte(payload), bound.UnlimitedDuration())
 
-        if _, err = backend.Increment(context.Background(), "bad", 1); nil == err {
+        if _, err = backend.Increment(context.Background(), "bad", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == err {
             t.Fatalf("expected the payload %q to be refused the way redis refuses it", payload)
         }
     }
@@ -534,7 +535,7 @@ func TestInMemoryBackend_IncrementOverflow_ReturnsError(t *testing.T) {
 
     _ = backend.Set(context.Background(), "n", []byte("9223372036854775807"), bound.UnlimitedDuration())
 
-    _, err := backend.Increment(context.Background(), "n", 1)
+    _, err := backend.Increment(context.Background(), "n", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -546,7 +547,7 @@ func TestInMemoryBackend_Decrement_MinInt64Delta_ReturnsError(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    _, err := backend.Decrement(context.Background(), "n", math.MinInt64)
+    _, err := backend.Decrement(context.Background(), "n", math.MinInt64, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -562,7 +563,7 @@ func TestInMemoryBackend_IncrementPreservesExistingTtl(t *testing.T) {
         t.Fatalf("Set returned an error: %v", setErr)
     }
 
-    if _, incrementErr := backend.Increment(context.Background(), "counter", 1); nil != incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("Increment returned an error: %v", incrementErr)
     }
 
@@ -584,7 +585,7 @@ func TestInMemoryBackend_IncrementOnFreshKeyHasNoExpiry(t *testing.T) {
 
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
 
-    if _, incrementErr := backend.Increment(context.Background(), "fresh", 1); nil != incrementErr {
+    if _, incrementErr := backend.Increment(context.Background(), "fresh", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != incrementErr {
         t.Fatalf("Increment returned an error: %v", incrementErr)
     }
 
@@ -922,11 +923,11 @@ func TestInMemoryBackend_DecrementIsRefusedRatherThanWrappingPastTheSmallestInt6
         t.Fatalf("unexpected set error: %v", err)
     }
 
-    if _, decrementErr := backend.Decrement(context.Background(), "counter", 1); nil != decrementErr {
+    if _, decrementErr := backend.Decrement(context.Background(), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != decrementErr {
         t.Fatalf("expected the decrement that exactly reaches the bound to succeed, got %v", decrementErr)
     }
 
-    newValue, decrementErr := backend.Decrement(context.Background(), "counter", 1)
+    newValue, decrementErr := backend.Decrement(context.Background(), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil == decrementErr {
         t.Fatalf("expected the decrement past the smallest int64 to be refused, got %d", newValue)
     }
@@ -951,7 +952,7 @@ func TestInMemoryBackend_IncrementStartsOverOnceTheCounterHasLapsed(t *testing.T
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    if _, err := backend.Increment(context.Background(), "window", 5); nil != err {
+    if _, err := backend.Increment(context.Background(), "window", 5, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil != err {
         t.Fatalf("unexpected increment error: %v", err)
     }
 
@@ -961,7 +962,7 @@ func TestInMemoryBackend_IncrementStartsOverOnceTheCounterHasLapsed(t *testing.T
 
     clockInstance.now = time.Unix(20, 0)
 
-    newValue, incrementErr := backend.Increment(context.Background(), "window", 1)
+    newValue, incrementErr := backend.Increment(context.Background(), "window", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil != incrementErr {
         t.Fatalf("unexpected increment error: %v", incrementErr)
     }
@@ -1268,7 +1269,7 @@ func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
             t.Fatalf("expected the %s key to be refused by Get", name)
         }
 
-        if _, incrementErr := backend.Increment(context.Background(), key, 1); nil == incrementErr {
+        if _, incrementErr := backend.Increment(context.Background(), key, 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == incrementErr {
             t.Fatalf("expected the %s key to be refused by Increment", name)
         }
     }
@@ -1369,7 +1370,7 @@ func TestInMemoryBackend_DecrementRefusesTheClosedBackendBeforeTheDeltaMagnitude
         t.Fatalf("Close returned an error: %v", closeErr)
     }
 
-    _, decrementErr := backend.Decrement(context.Background(), "counter", math.MinInt64)
+    _, decrementErr := backend.Decrement(context.Background(), "counter", math.MinInt64, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil == decrementErr {
         t.Fatalf("expected a refusal from a closed backend")
     }
@@ -1385,7 +1386,7 @@ func TestInMemoryBackend_DecrementRefusesTheMalformedKeyBeforeTheDeltaMagnitude(
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance})
     defer backend.CloseWithContext(context.Background())
 
-    _, decrementErr := backend.Decrement(context.Background(), "bad key", math.MinInt64)
+    _, decrementErr := backend.Decrement(context.Background(), "bad key", math.MinInt64, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil == decrementErr {
         t.Fatalf("expected a refusal for the malformed key")
     }
@@ -1440,8 +1441,8 @@ func TestInMemoryBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
             return backend.SetMultiple(context.Background(), map[string][]byte{"key": []byte("value")}, bound.Of(time.Minute))
         },
         "DeleteMultiple": func() error { return backend.DeleteMultiple(context.Background(), []string{"key"}) },
-        "Increment":      func() error { _, err := backend.Increment(context.Background(), "counter", 1); return err },
-        "Decrement":      func() error { _, err := backend.Decrement(context.Background(), "counter", 1); return err },
+        "Increment":      func() error { _, err := backend.Increment(context.Background(), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
+        "Decrement":      func() error { _, err := backend.Decrement(context.Background(), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
     } {
         if closedErr := call(); nil == closedErr || false == strings.Contains(closedErr.Error(), "cache backend is closed") {
             t.Fatalf("expected %s refused after Close, got %v", door, closedErr)
@@ -1463,7 +1464,7 @@ func TestInMemoryBackend_IncrementOnAnOutOfRangePayloadKeepsThePayloadOutOfTheCh
         t.Fatalf("set error: %v", setErr)
     }
 
-    _, incrementErr := backend.Increment(context.Background(), "counter", 1)
+    _, incrementErr := backend.Increment(context.Background(), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     if nil == incrementErr {
         t.Fatalf("expected the out-of-range payload to be refused")
     }
@@ -1486,7 +1487,7 @@ func TestInMemoryBackend_IncrementOnATextPayloadKeepsThePayloadOutOfTheRefusal(t
         t.Fatalf("set error: %v", setErr)
     }
 
-    _, incrementErr := backend.Increment(context.Background(), "counter", 1)
+    _, incrementErr := backend.Increment(context.Background(), "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
     melodyErr, isMelodyErr := incrementErr.(*exception.Error)
     if false == isMelodyErr || "cache value is not a valid int64" != melodyErr.Message() {
         t.Fatalf("expected the textual payload to be refused, got %v", incrementErr)
@@ -1606,11 +1607,11 @@ func inMemoryContextOperations(backend *InMemoryBackend) map[string]func(ctx con
             return backend.DeleteMultiple(ctx, []string{key})
         },
         "Increment": func(ctx context.Context, key string) error {
-            _, err := backend.Increment(ctx, key, 1)
+            _, err := backend.Increment(ctx, key, 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
             return err
         },
         "Decrement": func(ctx context.Context, key string) error {
-            _, err := backend.Decrement(ctx, key, 1)
+            _, err := backend.Decrement(ctx, key, 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
             return err
         },
     }
@@ -1707,7 +1708,120 @@ func TestInMemoryBackend_UnderADoneContextTheTtlAndTheDeltaAreJudgedFirst(t *tes
         t.Fatalf("SetMultiple: expected the absent ttl refused before the done context, got %v", setErr)
     }
 
-    if _, decrementErr := backend.Decrement(canceledContext, "key", math.MinInt64); nil == decrementErr || true == errors.Is(decrementErr, context.Canceled) {
+    if _, decrementErr := backend.Decrement(canceledContext, "key", math.MinInt64, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == decrementErr || true == errors.Is(decrementErr, context.Canceled) {
         t.Fatalf("Decrement: expected the delta refused before the done context, got %v", decrementErr)
+    }
+}
+
+func counterTestBackend() (*InMemoryBackend, *cacheTestClock) {
+    clockInstance := &cacheTestClock{now: time.Unix(1000, 0)}
+
+    return NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: clockInstance}), clockInstance
+}
+
+func TestInMemoryBackend_AFixedWindowCounterExpiresAtTheTtlFromItsFirstIncrement(t *testing.T) {
+    backend, clockInstance := counterTestBackend()
+    defer backend.CloseWithContext(context.Background())
+
+    options := cachecontract.CounterOptions{Ttl: bound.Of(time.Minute)}
+    if _, incrementErr := backend.Increment(context.Background(), "hits", 1, options); nil != incrementErr {
+        t.Fatal(incrementErr)
+    }
+
+    clockInstance.now = clockInstance.now.Add(40 * time.Second)
+    if value, _ := backend.Increment(context.Background(), "hits", 1, options); 2 != value {
+        t.Fatalf("expected 2, got %d", value)
+    }
+
+    clockInstance.now = clockInstance.now.Add(21 * time.Second)
+    if _, exists, _ := backend.Get(context.Background(), "hits"); true == exists {
+        t.Fatal("expected the fixed window gone at the ttl from the first increment")
+    }
+
+    if value, _ := backend.Increment(context.Background(), "hits", 5, options); 5 != value {
+        t.Fatalf("expected an expired counter to start from its delta, got %d", value)
+    }
+}
+
+func TestInMemoryBackend_ASlidingCounterMovesItsExpiryOnEveryCall(t *testing.T) {
+    backend, clockInstance := counterTestBackend()
+    defer backend.CloseWithContext(context.Background())
+
+    options := cachecontract.CounterOptions{Ttl: bound.Of(time.Minute), RefreshTtl: true}
+    backend.Increment(context.Background(), "hits", 1, options)
+
+    clockInstance.now = clockInstance.now.Add(40 * time.Second)
+    backend.Decrement(context.Background(), "hits", 3, options)
+
+    clockInstance.now = clockInstance.now.Add(40 * time.Second)
+    if value, exists, _ := backend.Get(context.Background(), "hits"); false == exists || "-2" != string(value) {
+        t.Fatalf("expected the sliding counter alive at -2, got %q %v", value, exists)
+    }
+}
+
+func TestInMemoryBackend_AnUnlimitedCounterKeepsAnExpiryTheKeyCarries(t *testing.T) {
+    backend, clockInstance := counterTestBackend()
+    defer backend.CloseWithContext(context.Background())
+
+    backend.Increment(context.Background(), "hits", 1, cachecontract.CounterOptions{Ttl: bound.Of(time.Minute)})
+    backend.Increment(context.Background(), "hits", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration(), RefreshTtl: true})
+
+    clockInstance.now = clockInstance.now.Add(61 * time.Second)
+    if _, exists, _ := backend.Get(context.Background(), "hits"); true == exists {
+        t.Fatal("expected an unlimited call to leave the minute expiry in place")
+    }
+
+    backend.Increment(context.Background(), "forever", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
+    clockInstance.now = clockInstance.now.Add(1000 * time.Hour)
+    if _, exists, _ := backend.Get(context.Background(), "forever"); false == exists {
+        t.Fatal("expected an unlimited counter kept")
+    }
+}
+
+func TestInMemoryBackend_AFixedWindowWritesItsTtlOnAKeyWithoutExpiry(t *testing.T) {
+    backend, clockInstance := counterTestBackend()
+    defer backend.CloseWithContext(context.Background())
+
+    backend.Set(context.Background(), "hits", []byte("4"), bound.UnlimitedDuration())
+    if value, _ := backend.Increment(context.Background(), "hits", 1, cachecontract.CounterOptions{Ttl: bound.Of(time.Minute)}); 5 != value {
+        t.Fatalf("expected 5, got %d", value)
+    }
+
+    clockInstance.now = clockInstance.now.Add(61 * time.Second)
+    if _, exists, _ := backend.Get(context.Background(), "hits"); true == exists {
+        t.Fatal("expected the fixed window written on a key found without an expiry")
+    }
+}
+
+func TestInMemoryBackend_ACounterWithoutATtlIsRefusedAfterTheKeyAndTheDelta(t *testing.T) {
+    backend, _ := counterTestBackend()
+    defer backend.CloseWithContext(context.Background())
+
+    if _, incrementErr := backend.Increment(context.Background(), "hits", 1, cachecontract.CounterOptions{}); nil == incrementErr || false == strings.Contains(incrementErr.Error(), "ttl is required") {
+        t.Fatalf("expected the absent ttl refused, got %v", incrementErr)
+    }
+
+    if _, decrementErr := backend.Decrement(context.Background(), "hits", math.MinInt64, cachecontract.CounterOptions{}); nil == decrementErr || false == strings.Contains(decrementErr.Error(), "overflows") {
+        t.Fatalf("expected the delta refused before the ttl, got %v", decrementErr)
+    }
+
+    if _, keyErr := backend.Increment(context.Background(), "", 1, cachecontract.CounterOptions{}); nil == keyErr || true == strings.Contains(keyErr.Error(), "ttl is required") {
+        t.Fatalf("expected the key refused before the ttl, got %v", keyErr)
+    }
+
+    if _, exists, _ := backend.Get(context.Background(), "hits"); true == exists {
+        t.Fatal("expected a refused increment to write nothing")
+    }
+}
+
+func TestInMemoryBackend_ACounterRefusesAnAbsentTtlBeforeACancelledContext(t *testing.T) {
+    backend, _ := counterTestBackend()
+    defer backend.CloseWithContext(context.Background())
+
+    cancelled, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, ttlErr := backend.Increment(cancelled, "hits", 1, cachecontract.CounterOptions{}); nil == ttlErr || false == strings.Contains(ttlErr.Error(), "ttl is required") {
+        t.Fatalf("expected the absent ttl refused before the cancelled context, got %v", ttlErr)
     }
 }

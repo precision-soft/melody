@@ -245,7 +245,7 @@ func loadUserProfile(
   is the flight's, not the caller's — except on the uncoalesced path (`StampedeProtectionDisabled`, or a value-kind `Cache`), where there is no flight and the callback runs under the caller's context.
 - Every operation of a `Cache` and a `Backend` takes the caller's context first. A nil or typed-nil context is refused with `cache context is nil` before anything else is judged, the closed backend included; a context already done answers its own error once the arguments are judged, before the store is touched, so a refused key still answers the key's refusal. The `rueidis` backend bounds each round trip by the earlier of the context's deadline and its `BackendConfig.CommandTimeout`, and a `Clear` walk by the context as a whole.
 - `Remember` reads the cache and stores a computed value without the cancellation of the context each runs under, the caller's or the flight's, its values kept: a done context still answers a hit, and a value already computed is stored whoever left.
-- `Manager.Increment` and `Manager.Decrement` are backend-native, so a distributed backend keeps them atomic and the count is stored as decimal text rather than through the serializer. Read such a key with [`Manager.GetCounter`](../../cache/manager.go), never with `Get`, and do not mix `Set` onto the same key. See [`cache/manager.go`](../../cache/manager.go).
+- `Manager.Increment` and `Manager.Decrement` are backend-native, so a distributed backend keeps them atomic and the count is stored as decimal text rather than through the serializer. Each takes a [`CounterOptions`](../../cache/contract/counter.go): `Ttl` is the counter's lifetime, read as a write's (at least 1s, `bound.UnlimitedDuration()` for none, absent refused); `RefreshTtl` false writes it only when the call creates the key or finds it without an expiry, a fixed window, and true rewrites it on every call, a sliding window; an unlimited ttl writes no expiry and leaves one the key carries in place. The redis backend writes the count and its expiry in one script, atomic under concurrent increments, with no `PEXPIRE … NX`, so it needs no Redis 7, but it needs scripting (`EVALSHA`/`EVAL`) allowed for the cache's redis user; after a script cache flush the first call makes two round trips under one `CommandTimeout`. A counter that expired reads as absent and the next increment starts from its delta. Read such a key with [`Manager.GetCounter`](../../cache/manager.go), never with `Get`, and do not mix `Set` onto the same key. See [`cache/manager.go`](../../cache/manager.go).
 - `Remember` uses a single-flight mechanism when stampede protection is enabled (default). See [`cache/remember.go`](../../cache/remember.go).
 - `Remember` groups in-flight calls by cache instance, key, and cancelability (cancelable callers are isolated from non-cancelable callers). See [`cache/remember.go`](../../cache/remember.go).
 - A cancelable in-flight call whose waiters have all timed out is abandoned: a caller that joins afterwards does not inherit the cancellation error — it starts a fresh computation. See [`cache/remember.go`](../../cache/remember.go).
@@ -273,8 +273,8 @@ type Cache interface {
     SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error
     DeleteMultiple(ctx context.Context, keys []string) error
 
-    Increment(ctx context.Context, key string, delta int64) (int64, error)
-    Decrement(ctx context.Context, key string, delta int64) (int64, error)
+    Increment(ctx context.Context, key string, delta int64, options CounterOptions) (int64, error)
+    Decrement(ctx context.Context, key string, delta int64, options CounterOptions) (int64, error)
 
     CloseWithContext(closeContext context.Context) error
 }

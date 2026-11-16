@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** — `cache/backend.go`, `cache/backend_service.go`: `Increment` and `Decrement` take a `cachecontract.CounterOptions` and write the count and its expiry in one Lua script, `INCRBY` then, for a ttl that is not unlimited, `PEXPIRE` when the call creates the key, finds it without an expiry or `RefreshTtl` is set, the count answered as the key's text so a count above 2^53 is exact, an absent ttl refused after the key and the delta; the cache's redis user needs `EVALSHA` and `EVAL` (`+@scripting`), where `INCRBY`/`DECRBY` wrote no expiry.
 - `rate_limit.go`: **Breaking**: a store failure is returned marked with `exception.MarkInfrastructureFailure` under both failure modes, so under the closed mode the fourth major's rate-limit middleware and `RateLimitGate` answer the denial `503 service unavailable` with the kernel's `Retry-After`, where they answered `429` through `OnLimitExceeded`; the caller's own cancellation or deadline is not marked and keeps its answer, and the open mode serves the request as before.
 - `cache/module.go`: **Behavioural change**: `RegisterServices` refuses a `Backend` configuration with no client, naming `ModuleConfig.Backend`, where it registered nothing; an empty `ModuleConfig{}` still registers nothing.
 - `module.go`: **Behavioural change**: `RegisterServices` refuses `AsLocker` or `AsTokenStore` with no client, and `Locker` or `TokenStore` set with its flag off, naming the field, where it registered nothing.
