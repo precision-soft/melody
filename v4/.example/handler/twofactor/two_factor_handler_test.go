@@ -1,6 +1,8 @@
 package twofactor
 
 import (
+    "regexp"
+    "context"
     "encoding/json"
     "errors"
     "io"
@@ -439,5 +441,265 @@ func TestTheSecondFactorDoorsSpendTheAccountsBudgetOnEveryPresentedFactor(t *tes
         if 0 != budget.releases {
             t.Fatalf("%s: expected a refused factor to give nothing back, got %d releases", name, budget.releases)
         }
+    }
+}
+
+func pendingFixture(t *testing.T) (*store2fa.Store, *enrollmentConnector, string) {
+    t.Helper()
+
+    secret, secretErr := totp.GenerateSecret()
+    if nil != secretErr {
+        t.Fatalf("generating the fixture secret failed: %v", secretErr)
+    }
+
+    store, connector := enrolledStore(t, "", "")
+    withPending(t, connector, "alice", secret)
+
+    return store, connector, secret
+}
+
+func confirmWith(t *testing.T, handler melodyhttpcontract.Handler, headers map[string]string) melodyhttpcontract.Response {
+    t.Helper()
+
+    request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll/confirm", "alice", headers)
+    response, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response {
+        t.Fatalf("confirm: %v, %v", response, handlerErr)
+    }
+
+    return response
+}
+
+/* the enrollment door writes the pending table alone: a secret nobody proved the authenticator holds is no factor */
+func TestEnrollHandlerWritesThePendingEnrollmentOnly(t *testing.T) {
+    store, connector := enrolledStore(t, "", "")
+
+    request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", nil)
+    response, handlerErr := EnrollHandler(fixedStore(store), nil, nil)(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("enroll: %v, %v", response, handlerErr)
+    }
+
+    inserts := insertStatements(connector.recorded())
+    if 1 != len(inserts) || false == strings.HasPrefix(inserts[0], "INSERT INTO `melody_example_v4_two_factor_pending`") {
+        t.Fatalf("expected one write, to the pending table, got %q", inserts)
+    }
+}
+
+/* a code of the pending secret moves the pending enrollment into the active table and empties the pending one */
+func TestConfirmHandlerMovesThePendingEnrollmentOnItsCode(t *testing.T) {
+    store, connector, secret := pendingFixture(t)
+
+    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    if nil != codeErr {
+        t.Fatalf("code: %v", codeErr)
+    }
+
+    response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, nil), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code})
+    if nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected 200, got %d", response.StatusCode())
+    }
+
+    lockIndex, insertIndex, deleteIndex := -1, -1, -1
+    for index, statement := range connector.recorded() {
+        switch {
+        case strings.Contains(statement, "melody_example_v4_two_factor_pending") && strings.Contains(statement, "FOR UPDATE") && -1 == lockIndex:
+            lockIndex = index
+        case strings.HasPrefix(statement, "INSERT INTO `melody_example_v4_two_factor` ") && strings.Contains(statement, "pending-one") == false:
+            insertIndex = index
+        case strings.HasPrefix(statement, "DELETE FROM `melody_example_v4_two_factor_pending`"):
+            deleteIndex = index
+        }
+    }
+
+    if -1 == lockIndex || lockIndex > insertIndex || insertIndex > deleteIndex {
+        t.Fatalf("expected the pending row locked, then moved, then deleted, got %q", connector.recorded())
+    }
+}
+
+/* a wrong code leaves the pending enrollment where it is and writes nothing */
+func TestConfirmHandlerRefusesAWrongCodeWritingNothing(t *testing.T) {
+    store, connector, _ := pendingFixture(t)
+
+    response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, nil), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: "000000"})
+    if nethttp.StatusUnauthorized != response.StatusCode() {
+        t.Fatalf("expected 401, got %d", response.StatusCode())
+    }
+
+    for _, statement := range connector.recorded() {
+        if true == strings.HasPrefix(statement, "INSERT") || true == strings.HasPrefix(statement, "DELETE") {
+            t.Fatalf("expected nothing written, got %q", statement)
+        }
+    }
+}
+
+/* a code is spent once: the same code presented twice is refused the second time, as at the sign-in */
+func TestConfirmHandlerRefusesAReplayedCode(t *testing.T) {
+    store, _, secret := pendingFixture(t)
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    guard := melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{})
+    handler := ConfirmHandler(fixedStore(store), guard, nil)
+
+    if first := confirmWith(t, handler, map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code}); nethttp.StatusOK != first.StatusCode() {
+        t.Fatalf("expected the first confirmation accepted, got %d", first.StatusCode())
+    }
+
+    if second := confirmWith(t, handler, map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code}); nethttp.StatusUnauthorized != second.StatusCode() {
+        t.Fatalf("expected the replay refused, got %d", second.StatusCode())
+    }
+}
+
+func TestConfirmHandlerAnswersConflictWhenNothingIsPending(t *testing.T) {
+    store, _ := enrolledStore(t, "", "")
+
+    if response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, nil), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: "123456"}); nethttp.StatusConflict != response.StatusCode() {
+        t.Fatalf("expected 409, got %d", response.StatusCode())
+    }
+}
+
+func TestConfirmHandlerAsksForACode(t *testing.T) {
+    store, _, _ := pendingFixture(t)
+
+    if response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, nil), nil); nethttp.StatusBadRequest != response.StatusCode() {
+        t.Fatalf("expected 400, got %d", response.StatusCode())
+    }
+}
+
+/* the confirmation spends the account's budget like the sign-in, so a session cannot walk the codes of a secret it holds; an account past it is refused before its code is read */
+func TestConfirmHandlerSpendsTheFactorBudget(t *testing.T) {
+    store, _, _ := pendingFixture(t)
+    budget := &countingFactorBudget{allowance: 0}
+
+    if response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, budget), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: "123456"}); nethttp.StatusTooManyRequests != response.StatusCode() || 1 != budget.spent {
+        t.Fatalf("expected 429 after one spend, got %d and %d spends", response.StatusCode(), budget.spent)
+    }
+}
+
+func TestStatusHandlerAnswersBothStates(t *testing.T) {
+    store, _, _ := pendingFixture(t)
+
+    request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/status", "alice", nil)
+    response, handlerErr := StatusHandler(fixedStore(store))(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr || nil == response || nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("status: %v, %v", response, handlerErr)
+    }
+
+    bodyBytes, _ := io.ReadAll(response.BodyReader())
+    body := string(bodyBytes)
+    if false == strings.Contains(body, `"enrolled":false`) || false == strings.Contains(body, `"pending":true`) {
+        t.Fatalf("expected not enrolled and pending, got %s", body)
+    }
+}
+
+
+/* a second enroll between the confirmation's read and its move replaces the pending secret: the move holds the row and refuses a secret other than the one the code was verified against, writing nothing */
+func TestConfirmEnrollmentRefusesAPendingSecretReplacedSinceTheCodeWasVerified(t *testing.T) {
+    store, connector, _ := pendingFixture(t)
+
+    outcome, confirmErr := store.ConfirmEnrollment(context.Background(), "alice", "ANOTHERSECRETTHANTHEPENDINGONE22")
+    if nil != confirmErr || store2fa.ConfirmReplaced != outcome {
+        t.Fatalf("expected the move refused as replaced, got %v, %v", outcome, confirmErr)
+    }
+
+    for _, statement := range connector.recorded() {
+        if true == strings.HasPrefix(statement, "INSERT") || true == strings.HasPrefix(statement, "DELETE") {
+            t.Fatalf("expected nothing written, got %q", statement)
+        }
+    }
+}
+
+/* a set-up started on the session alone replaces no factor: one that became active since is kept, and nothing is written */
+func TestConfirmHandlerKeepsAFactorThatBecameActiveSinceAnUngrantedSetUp(t *testing.T) {
+    store, connector, secret := pendingFixture(t)
+    connector.enrolledIdentifier = "alice"
+    connector.sealedSecret = connector.pendingSealedSecret
+
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, nil), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code})
+    if nethttp.StatusConflict != response.StatusCode() {
+        t.Fatalf("expected 409, got %d", response.StatusCode())
+    }
+
+    for _, statement := range connector.recorded() {
+        if true == strings.HasPrefix(statement, "INSERT") || true == strings.HasPrefix(statement, "DELETE") {
+            t.Fatalf("expected nothing written, got %q", statement)
+        }
+    }
+}
+
+/* a set-up that presented the active factor replaces it */
+func TestConfirmHandlerReplacesTheFactorAGrantedSetUpPresented(t *testing.T) {
+    store, connector, secret := pendingFixture(t)
+    connector.enrolledIdentifier = "alice"
+    connector.pendingReplaces = true
+
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    if response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, nil), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code}); nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected 200, got %d", response.StatusCode())
+    }
+}
+
+/* the confirmation names its set-up: a later enroll in its place is answered 409, not 401 against a secret the sender never saw */
+func TestConfirmHandlerAnswersConflictForASetUpReplacedSince(t *testing.T) {
+    store, _, secret := pendingFixture(t)
+
+    code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, nil), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code, PendingHeaderName: "0000000000000000"})
+    if nethttp.StatusConflict != response.StatusCode() {
+        t.Fatalf("expected 409, got %d", response.StatusCode())
+    }
+
+    if response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, nil), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: code, PendingHeaderName: pendingIdentifierOf(secret)}); nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the set-up it names confirmed, got %d", response.StatusCode())
+    }
+}
+
+/* the enrollment records whether the caller presented the active factor, the grant the confirmation reads */
+func TestEnrollHandlerRecordsTheReplacementGrant(t *testing.T) {
+    store, connector := enrolledStore(t, "", "")
+
+    request, runtimeInstance := authenticatedTwoFactorRequest(t, "/twofactor/enroll", "alice", nil)
+    if _, handlerErr := EnrollHandler(fixedStore(store), nil, nil)(runtimeInstance, httptest.NewRecorder(), request); nil != handlerErr {
+        t.Fatalf("enroll: %v", handlerErr)
+    }
+
+    inserts := insertStatements(connector.recorded())
+    if 1 != len(inserts) || false == strings.Contains(inserts[0], "replaces_factor = VALUES(replaces_factor)") || false == strings.Contains(inserts[0], ", FALSE, ") {
+        t.Fatalf("expected a pending row without the grant, got %q", inserts)
+    }
+}
+
+
+/* a pending enrollment is confirmable for its lifetime alone: every read of the pending table, the confirmation's lock and the state included, asks for a row younger than PendingEnrollmentLifetime */
+func TestPendingReadsAskForARowWithinItsLifetime(t *testing.T) {
+    store, connector, secret := pendingFixture(t)
+
+    _, _, _ = store.FindPendingSecret(context.Background(), "alice")
+    _, _ = store.ConfirmEnrollment(context.Background(), "alice", secret)
+    _, _, _ = store.EnrollmentState(context.Background(), "alice")
+
+    cutoffPattern := regexp.MustCompile(`created_at > '([0-9-]+ [0-9:.]+)'`)
+    expected := time.Now().UTC().Add(-store2fa.PendingEnrollmentLifetime)
+    reads := 0
+    for _, statement := range connector.recorded() {
+        if false == strings.Contains(statement, "melody_example_v4_two_factor_pending") || true == strings.HasPrefix(statement, "INSERT") || true == strings.HasPrefix(statement, "DELETE") {
+            continue
+        }
+
+        match := cutoffPattern.FindStringSubmatch(statement)
+        if nil == match {
+            t.Fatalf("expected the read bounded by the lifetime, got %q", statement)
+        }
+
+        cutoff, parseErr := time.Parse("2006-01-02 15:04:05.999999", match[1])
+        if nil != parseErr || time.Minute < cutoff.Sub(expected).Abs() {
+            t.Fatalf("expected the cutoff near %v, got %q (%v)", expected, match[1], parseErr)
+        }
+
+        reads++
+    }
+
+    if 3 != reads {
+        t.Fatalf("expected the three pending reads bounded, got %d in %q", reads, connector.recorded())
     }
 }

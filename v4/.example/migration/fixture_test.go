@@ -154,7 +154,7 @@ func isJournalCreateTable(query string) bool {
 }
 
 func isTwoFactorCreateTable(query string) bool {
-    return strings.HasPrefix(query, "CREATE TABLE") && strings.Contains(query, "melody_example_v4_two_factor")
+    return strings.HasPrefix(query, "CREATE TABLE") && strings.Contains(query, "melody_example_v4_two_factor`")
 }
 
 func isCatalogueCountSelect(query string) bool {

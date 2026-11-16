@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1" name="viewport"/>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet"/>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet"/>
+    <link href="/assets/app.css" rel="stylesheet"/>
+    <title>Second factor</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg"/>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico"/>
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png"/>
+</head>
+<body class="bg-light" data-page="two_factor">
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1 class="h3 mb-0"><i class="fa-solid fa-shield-halved me-2"></i>Second factor</h1>
+            <div class="text-muted small">An authenticator app code asked at every sign-in, after the password</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-outline-secondary btn-sm" data-route="example.catalogue.page" href="#">
+                <i class="fa-solid fa-arrow-left me-1"></i>Catalogue
+            </a>
+            <form class="d-inline" method="post" action="/logout/" data-route="example.logout">
+                <button class="btn btn-outline-secondary btn-sm" type="submit"><i class="fa-solid fa-right-from-bracket me-1"></i>Logout</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="alert alert-info py-2" id="status" role="status">Loading...</div>
+
+    <div class="row g-3">
+        <div class="col-lg-5">
+            <div class="card shadow-sm">
+                <div class="card-header"><i class="fa-solid fa-circle-info me-2"></i>State</div>
+                <div class="card-body">
+                    <p class="mb-2"><span class="badge text-bg-secondary" id="stateBadge">Unknown</span></p>
+                    <p class="mb-3 text-muted small" id="stateText"></p>
+
+                    <div class="d-none mb-3" id="currentFactorGroup">
+                        <label class="form-label" for="currentCode">Code from your current authenticator</label>
+                        <input autocomplete="one-time-code" class="form-control" id="currentCode" inputmode="numeric" maxlength="8" placeholder="123456" type="text"/>
+                        <div class="form-text">Replacing the factor asks for the one you have now. <a href="#" id="useRecoveryLink">Use a recovery code instead</a></div>
+                        <div class="d-none mt-2" id="currentRecoveryGroup">
+                            <label class="form-label" for="currentRecovery">Recovery code</label>
+                            <input autocomplete="off" class="form-control" id="currentRecovery" type="text"/>
+                        </div>
+                        <div class="invalid-feedback d-block d-none" id="currentFactorError"></div>
+                    </div>
+
+                    <button class="btn btn-primary" id="enrollButton" type="button">
+                        <i class="fa-solid fa-qrcode me-1"></i><span id="enrollLabel">Set up an authenticator</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-7">
+            <div class="card shadow-sm d-none" id="setupCard">
+                <div class="card-header"><i class="fa-solid fa-mobile-screen me-2"></i><span id="setupTitle">Set up your authenticator</span></div>
+                <div class="card-body">
+                    <div id="scanStep">
+                    <h2 class="h6">1. Scan the code</h2>
+                    <div class="d-flex flex-wrap gap-3 align-items-start mb-3">
+                        <canvas aria-label="QR code of the authenticator key" class="border rounded" id="qrCanvas" role="img"></canvas>
+                        <div class="flex-grow-1" style="min-width: 12rem">
+                            <div class="form-label" id="secretLabel">Or type this key</div>
+                            <div class="d-flex gap-2 align-items-start">
+                                <code aria-labelledby="secretLabel" class="d-block flex-grow-1 border rounded bg-body px-2 py-1 fs-6 text-body text-break" id="secretText"></code>
+                                <button aria-label="Copy the key" class="btn btn-outline-secondary" id="copySecretButton" title="Copy the key" type="button"><i class="fa-regular fa-copy"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    </div>
+
+                    <h2 class="h6" id="recoveryHeading">2. Save the recovery codes</h2>
+                    <p class="small text-muted mb-2" id="recoveryNote">Each one signs you in once if you lose the authenticator, and only once this set-up is confirmed. They are shown only on this page.</p>
+                    <ul class="list-unstyled font-monospace row row-cols-2 g-1 mb-2" id="recoveryList"></ul>
+                    <button class="btn btn-outline-secondary btn-sm mb-3" id="copyCodesButton" type="button"><i class="fa-regular fa-copy me-1"></i>Copy the codes</button>
+
+                    <div id="confirmStep">
+                    <h2 class="h6">3. Enter the code the app shows</h2>
+                    <div class="d-flex flex-wrap gap-2 align-items-start">
+                        <div style="max-width: 12rem">
+                            <label class="visually-hidden" for="confirmCode">Code from the authenticator</label>
+                            <input autocomplete="one-time-code" class="form-control" id="confirmCode" inputmode="numeric" maxlength="8" placeholder="123456" type="text"/>
+                        </div>
+                        <button class="btn btn-primary" id="confirmButton" type="button"><i class="fa-solid fa-check me-1"></i>Confirm</button>
+                    </div>
+                    <div class="invalid-feedback d-block d-none" id="confirmError"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js" type="text/javascript"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" type="text/javascript"></script>
+<script type="text/javascript">window.melodyRoutes = JSON.parse('{{routes_json}}');</script>
+<script type="text/javascript">window.melodyViewer = JSON.parse('{{viewer_json}}');</script>
+<script src="/assets/app.js" type="text/javascript"></script>
+<script type="text/javascript">
+    $(document).ready(() => {
+        const example = window.melodyExample;
+        const stateBadge = $('#stateBadge');
+        const stateText = $('#stateText');
+        const currentFactorGroup = $('#currentFactorGroup');
+        const currentCode = $('#currentCode');
+        const currentRecoveryGroup = $('#currentRecoveryGroup');
+        const currentRecovery = $('#currentRecovery');
+        const currentFactorError = $('#currentFactorError');
+        const enrollButton = $('#enrollButton');
+        const enrollLabel = $('#enrollLabel');
+        const setupCard = $('#setupCard');
+        const secretText = $('#secretText');
+        const recoveryList = $('#recoveryList');
+        const confirmCode = $('#confirmCode');
+        const confirmButton = $('#confirmButton');
+        const confirmError = $('#confirmError');
+
+        let enrolled = false;
+        let recoveryCodes = [];
+        let pendingId = '';
+        const scanStep = $('#scanStep');
+        const confirmStep = $('#confirmStep');
+        const recoveryHeading = $('#recoveryHeading');
+
+        const copyText = async (text, what) => {
+            try {
+                if (undefined === navigator.clipboard) {
+                    throw new Error('no clipboard');
+                }
+                await navigator.clipboard.writeText(text);
+                example.ui.setStatus(what + ' copied.', 'info');
+            } catch (err) {
+                example.ui.setStatus('Could not copy here: select the text and copy it by hand.', 'warning');
+            }
+        };
+
+        const clearQrCode = () => {
+            const canvas = document.getElementById('qrCanvas');
+            canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+            canvas.width = 0;
+        };
+
+        const toLogin = () => {
+            window.location.assign(example.routing.route('example.login.page'));
+        };
+
+        const showError = (node, text) => {
+            node.text(String(text ?? '')).toggleClass('d-none', '' === String(text ?? ''));
+        };
+
+        const renderState = (state) => {
+            enrolled = true === state.enrolled;
+            stateBadge.removeClass('text-bg-secondary text-bg-success text-bg-warning text-bg-info');
+
+            if (true === state.inSetup) {
+                stateBadge.addClass('text-bg-info').text('Waiting for your code');
+                stateText.text(true === enrolled
+                    ? 'Your current authenticator signs you in until you confirm the new one.'
+                    : 'Finish the set-up beside: scan, save the codes, enter the code.');
+                enrollLabel.text('Start again with a new key');
+            } else if (true === enrolled) {
+                stateBadge.addClass('text-bg-success').text('Active');
+                stateText.text(true === state.pending
+                    ? 'A replacement was started and not confirmed; the current authenticator still signs you in.'
+                    : 'Your sign-in asks for a code from your authenticator.');
+                enrollLabel.text('Replace the authenticator');
+            } else if (true === state.pending) {
+                stateBadge.addClass('text-bg-warning').text('Not confirmed');
+                stateText.text('A set-up was started and not confirmed; its key is not shown again. Start again to get a new key.');
+                enrollLabel.text('Start again');
+            } else {
+                stateBadge.addClass('text-bg-secondary').text('Not set up');
+                stateText.text('Your sign-in asks for the password only.');
+                enrollLabel.text('Set up an authenticator');
+            }
+
+            currentFactorGroup.toggleClass('d-none', false === enrolled);
+        };
+
+        const loadState = async () => {
+            try {
+                renderState((await example.http.getJson(example.routing.route('example.twofactor.status'))).payload ?? {});
+                example.ui.setStatus('');
+            } catch (err) {
+                if (401 === Number(err?.statusCode ?? 0)) {
+                    toLogin();
+                    return;
+                }
+                example.ui.setStatus('Could not read the second factor: ' + String(err?.message ?? err), 'danger');
+            }
+        };
+
+        $('#useRecoveryLink').on('click', (event) => {
+            event.preventDefault();
+            currentRecoveryGroup.toggleClass('d-none');
+        });
+
+        enrollButton.on('click', async () => {
+            showError(currentFactorError, '');
+            const headers = {};
+            if (true === enrolled) {
+                const recovery = String(currentRecovery.val() ?? '').trim();
+                const code = String(currentCode.val() ?? '').trim();
+                if ('' !== recovery) {
+                    headers['X-2FA-Recovery-Code'] = recovery;
+                } else if ('' !== code) {
+                    headers['X-2FA-Code'] = code;
+                } else {
+                    showError(currentFactorError, 'Enter a code from your current authenticator, or a recovery code.');
+                    currentCode.trigger('focus');
+                    return;
+                }
+            }
+
+            enrollButton.prop('disabled', true);
+            try {
+                const payload = (await example.http.requestJson('POST', example.routing.route('example.twofactor.enroll'), {}, headers)).payload ?? {};
+                currentCode.val('');
+                currentRecovery.val('');
+                pendingId = String(payload.pendingId ?? '');
+                scanStep.removeClass('d-none');
+                confirmStep.removeClass('d-none');
+                recoveryHeading.text('2. Save the recovery codes');
+                $('#setupTitle').text('Set up your authenticator');
+                $('#recoveryNote').text('Each one signs you in once if you lose the authenticator, and only once this set-up is confirmed. They are shown only on this page.');
+                secretText.text(String(payload.secret ?? '').replace(/(.{4})/g, '$1 ').trim());
+                example.ui.drawQrCode(document.getElementById('qrCanvas'), String(payload.otpauthUri ?? ''), 232);
+                recoveryCodes = Array.isArray(payload.recoveryCodes) ? payload.recoveryCodes : [];
+                recoveryList.empty();
+                for (const code of recoveryCodes) {
+                    recoveryList.append($('<li class="col"></li>').text(String(code)));
+                }
+                setupCard.removeClass('d-none');
+                enrollButton.removeClass('btn-primary').addClass('btn-outline-secondary');
+                renderState({enrolled: enrolled, pending: true, inSetup: true});
+                example.ui.setStatus('Scan the code, save the recovery codes, then enter the code the app shows.', 'info');
+                confirmCode.val('').trigger('focus');
+            } catch (err) {
+                const statusCode = Number(err?.statusCode ?? 0);
+                const serverMessage = String(err?.serverMessage ?? '');
+                if (401 === statusCode && 'unauthorized' === serverMessage) {
+                    toLogin();
+                } else if (401 === statusCode && 'second factor required' === serverMessage) {
+                    renderState({enrolled: true, pending: false});
+                    showError(currentFactorError, 'A factor is active on this account: enter a code from it, or a recovery code.');
+                    currentCode.trigger('focus');
+                } else if (401 === statusCode && 'code already used' === serverMessage) {
+                    showError(currentFactorError, 'That code was just used. Wait for the next one.');
+                } else if (401 === statusCode) {
+                    showError(currentFactorError, 'That code was not accepted. Enter a fresh code from your current authenticator.');
+                } else if (429 === statusCode) {
+                    showError(currentFactorError, 'Too many attempts. Wait fifteen minutes and try again.');
+                } else {
+                    example.ui.setStatus('Could not start the set-up: ' + String(err?.message ?? err), 'danger');
+                }
+            } finally {
+                enrollButton.prop('disabled', false);
+            }
+        });
+
+        $('#copySecretButton').on('click', () => void copyText(String(secretText.text() ?? '').replace(/\s+/g, ''), 'Key'));
+
+        $('#copyCodesButton').on('click', () => void copyText(recoveryCodes.join('\n'), 'Recovery codes'));
+
+        const confirm = async () => {
+            if (true === confirmButton.prop('disabled')) {
+                return;
+            }
+            showError(confirmError, '');
+            const code = String(confirmCode.val() ?? '').trim();
+            if ('' === code) {
+                showError(confirmError, 'Enter the code the authenticator shows.');
+                confirmCode.trigger('focus');
+                return;
+            }
+
+            confirmButton.prop('disabled', true);
+            try {
+                await example.http.requestJson('POST', example.routing.route('example.twofactor.confirm'), {}, {'X-2FA-Code': code, 'X-2FA-Pending': pendingId});
+                scanStep.addClass('d-none');
+                confirmStep.addClass('d-none');
+                recoveryHeading.text('Keep your recovery codes');
+                $('#setupTitle').text('Recovery codes');
+                $('#recoveryNote').text('Each one signs you in once if you lose the authenticator. Store them now: leaving this page hides them for good.');
+                enrollButton.removeClass('btn-outline-secondary').addClass('btn-primary');
+                secretText.text('');
+                clearQrCode();
+                confirmCode.val('');
+                renderState({enrolled: true, pending: false});
+                example.ui.setStatus('The authenticator is active. The code you just entered is spent: sign in with the next one.', 'success');
+            } catch (err) {
+                const statusCode = Number(err?.statusCode ?? 0);
+                const serverMessage = String(err?.serverMessage ?? '');
+                if (401 === statusCode && 'unauthorized' === serverMessage) {
+                    toLogin();
+                } else if (401 === statusCode && 'code already used' === serverMessage) {
+                    showError(confirmError, 'That code was just used. Wait for the next one.');
+                } else if (401 === statusCode) {
+                    showError(confirmError, 'That code was not accepted. Check the time on your phone and enter the next code.');
+                } else if (409 === statusCode && 'no enrollment is pending' === serverMessage) {
+                    showError(confirmError, 'Nothing is waiting for confirmation: a set-up lasts fifteen minutes. Start again.');
+                } else if (409 === statusCode && serverMessage.startsWith('a factor became active')) {
+                    showError(confirmError, 'A factor became active meanwhile. Reload the page.');
+                } else if (409 === statusCode) {
+                    showError(confirmError, 'A later set-up replaced this one, in another tab perhaps. Start again.');
+                } else if (429 === statusCode) {
+                    showError(confirmError, 'Too many attempts. Wait fifteen minutes and try again.');
+                } else {
+                    showError(confirmError, 'Could not confirm: ' + String(err?.message ?? err));
+                }
+            } finally {
+                confirmButton.prop('disabled', false);
+            }
+        };
+
+        confirmButton.on('click', () => void confirm());
+        confirmCode.on('keydown', (event) => {
+            if ('Enter' === event.key) {
+                void confirm();
+            }
+        });
+
+        void loadState();
+    });
+</script>
+</body>
+</html>

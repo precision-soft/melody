@@ -145,6 +145,16 @@ const createTwoFactorTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v4_t
     "PRIMARY KEY (`user_identifier`), " +
     "CONSTRAINT `melody_example_v4_two_factor_user` FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v4_user` (`id`) ON DELETE CASCADE)"
 
+/* a pending enrollment waits beside the active one until its owner confirms a code read off the authenticator; replaces_factor records that its start presented the active factor; it goes with its account like the active row */
+const createTwoFactorPendingTableSql = "CREATE TABLE IF NOT EXISTS `melody_example_v4_two_factor_pending` (" +
+    "`user_identifier` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL, " +
+    "`secret` VARBINARY(512) NOT NULL, " +
+    "`recovery_codes` VARBINARY(2048) NOT NULL, " +
+    "`replaces_factor` TINYINT(1) NOT NULL, " +
+    "`created_at` DATETIME NOT NULL, " +
+    "PRIMARY KEY (`user_identifier`), " +
+    "CONSTRAINT `melody_example_v4_two_factor_pending_user` FOREIGN KEY (`user_identifier`) REFERENCES `melody_example_v4_user` (`id`) ON DELETE CASCADE)"
+
 var schemaUpStatementList = []string{
     createCategoryTableSql,
     createCurrencyTableSql,
@@ -154,6 +164,7 @@ var schemaUpStatementList = []string{
     createIdentifierSequenceTableSql,
     createCatalogJournalTableSql,
     createTwoFactorTableSql,
+    createTwoFactorPendingTableSql,
     createSchemaFingerprintTableSql,
 }
 
@@ -163,6 +174,7 @@ var schemaUpStatementList = []string{
    operator rather than a second copy of it. */
 var schemaTableNameList = []string{
     SchemaFingerprintTableName,
+    "melody_example_v4_two_factor_pending",
     "melody_example_v4_two_factor",
     "melody_example_v4_catalog_journal",
     IdentifierSequenceTableName,

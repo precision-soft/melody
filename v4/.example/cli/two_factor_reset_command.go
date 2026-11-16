@@ -68,7 +68,7 @@ func (instance *TwoFactorResetCommand) Run(runtimeInstance melodyruntimecontract
     }
 
     if false == removed {
-        _, _ = fmt.Fprintf(writer, "user %q holds no second factor; nothing to do\n", username)
+        _, _ = fmt.Fprintf(writer, "user %q holds no second factor and no pending set-up; nothing to do\n", username)
 
         return nil
     }

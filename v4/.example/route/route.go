@@ -18,6 +18,18 @@ const (
     CataloguePageName    = "example.catalogue.page"
     CataloguePagePattern = "/catalogue/"
 
+    /* the caller's own second factor: the page and its three doors share the /twofactor prefix and its access rule */
+    TwoFactorPageName      = "example.twofactor.page"
+    TwoFactorPagePattern   = "/twofactor/"
+    TwoFactorEnrollName    = "example.twofactor.enroll"
+    TwoFactorEnrollPattern = "/twofactor/enroll"
+    TwoFactorConfirmName    = "example.twofactor.confirm"
+    TwoFactorConfirmPattern = "/twofactor/enroll/confirm"
+    TwoFactorStatusName    = "example.twofactor.status"
+    TwoFactorStatusPattern = "/twofactor/status"
+    TwoFactorVerifyName    = "example.twofactor.verify"
+    TwoFactorVerifyPattern = "/twofactor/verify"
+
     ProductsPrefix = "/products"
 
     ProductsListPageName    = "example.products.list.page"

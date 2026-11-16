@@ -59,8 +59,19 @@ func (instance *recordingConnection) Close() error {
     return nil
 }
 
+/* a transaction is accepted and records nothing of its own: the enrollment release runs its two deletes inside one, and what it wrote is still the recorded sequence */
 func (instance *recordingConnection) Begin() (driver.Tx, error) {
-    return nil, errors.New("transactions are not supported by the recording driver")
+    return recordingTransaction{}, nil
+}
+
+type recordingTransaction struct{}
+
+func (instance recordingTransaction) Commit() error {
+    return nil
+}
+
+func (instance recordingTransaction) Rollback() error {
+    return nil
 }
 
 func (instance *recordingConnection) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {

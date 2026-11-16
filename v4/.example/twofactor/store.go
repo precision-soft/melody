@@ -36,11 +36,31 @@ func (instance RecoveryCodesColumn) SealBinding() string {
     return "melody_example_v4_two_factor.recovery_codes"
 }
 
-/* SealBindings declares the two bound columns to the encrypt module. Both refuse an unbound value, which holds for a database whose every enrollment was written through the bound types; an enrollment written before the columns were bound is refused and is cleared with example:twofactor:reset or example:db:reset --force. */
+/* PendingSecretColumn binds a pending enrollment's secret to its own column, so a pending seal does not open as an active one. */
+type PendingSecretColumn struct {
+    melodyencrypt.DefaultCipherReference
+}
+
+func (instance PendingSecretColumn) SealBinding() string {
+    return "melody_example_v4_two_factor_pending.secret"
+}
+
+/* PendingRecoveryCodesColumn binds a pending enrollment's recovery codes to their own column. */
+type PendingRecoveryCodesColumn struct {
+    melodyencrypt.DefaultCipherReference
+}
+
+func (instance PendingRecoveryCodesColumn) SealBinding() string {
+    return "melody_example_v4_two_factor_pending.recovery_codes"
+}
+
+/* SealBindings declares the four bound columns to the encrypt module. Both refuse an unbound value, which holds for a database whose every enrollment was written through the bound types; an enrollment written before the columns were bound is refused and is cleared with example:twofactor:reset or example:db:reset --force. */
 func SealBindings() []melodyencrypt.SealBindingConfig {
     return []melodyencrypt.SealBindingConfig{
         {Reference: SecretColumn{}, RefuseUnbound: true},
         {Reference: RecoveryCodesColumn{}, RefuseUnbound: true},
+        {Reference: PendingSecretColumn{}, RefuseUnbound: true},
+        {Reference: PendingRecoveryCodesColumn{}, RefuseUnbound: true},
     }
 }
 
@@ -53,6 +73,20 @@ type Enrollment struct {
     RecoveryCodes  melodyencrypt.EncryptedStringFor[RecoveryCodesColumn] `bun:"recovery_codes,type:varbinary(2048),notnull"`
     CreatedAt      time.Time                                             `bun:"created_at,notnull"`
 }
+
+/* PendingEnrollment is a secret and its recovery codes minted and not yet confirmed: no factor until a code its owner reads off the authenticator moves it into the active table. */
+type PendingEnrollment struct {
+    bun.BaseModel `bun:"table:melody_example_v4_two_factor_pending"`
+
+    UserIdentifier string                                                       `bun:"user_identifier,pk"`
+    Secret         melodyencrypt.EncryptedStringFor[PendingSecretColumn]        `bun:"secret,type:varbinary(512),notnull"`
+    RecoveryCodes  melodyencrypt.EncryptedStringFor[PendingRecoveryCodesColumn] `bun:"recovery_codes,type:varbinary(2048),notnull"`
+    ReplacesFactor bool                                                         `bun:"replaces_factor,notnull"`
+    CreatedAt      time.Time                                                    `bun:"created_at,notnull"`
+}
+
+/* PendingEnrollmentLifetime is how long a pending enrollment stays confirmable: a set-up abandoned, its key photographed or copied, does not stay a factor in waiting for the life of the account */
+const PendingEnrollmentLifetime = 15 * time.Minute
 
 func NewStore(database *bun.DB) *Store {
     return &Store{database: database}
@@ -82,11 +116,12 @@ type Store struct {
     database *bun.DB
 }
 
-/* Enroll generates a fresh secret and recovery codes for a user, persists them encrypted, and answers the secret, the otpauth URI to render as a QR code and the plaintext recovery codes to show once. It replaces an existing enrollment, since a lost authenticator is the ordinary reason to enroll again; that is safe because the handler takes the identifier from the authenticated token, so the row replaced is the caller's own, and the previous secret and unused codes stop verifying at once. */
+/* Enroll generates a fresh secret and recovery codes for a user, persists them encrypted as a PENDING enrollment, and answers the secret, the otpauth URI to render as a QR code and the plaintext recovery codes to show once. A pending enrollment is no factor: the active one, if any, keeps verifying until ConfirmEnrollment moves this one in. Enrolling again while one is pending replaces the pending one, the case of a response its owner never received. replacesFactor records that the caller presented the active factor, the only grant under which the confirmation may replace one. */
 func (instance *Store) Enroll(
     ctx context.Context,
     userIdentifier string,
     issuer string,
+    replacesFactor bool,
 ) (string, string, []string, error) {
     secret, secretErr := totp.GenerateSecret()
     if nil != secretErr {
@@ -108,51 +143,181 @@ func (instance *Store) Enroll(
         return "", "", nil, marshalErr
     }
 
-    enrollment := &Enrollment{
+    pending := &PendingEnrollment{
         UserIdentifier: userIdentifier,
-        Secret:         melodyencrypt.EncryptedStringFor[SecretColumn](secret),
-        RecoveryCodes:  melodyencrypt.EncryptedStringFor[RecoveryCodesColumn](encodedCodes),
+        Secret:         melodyencrypt.EncryptedStringFor[PendingSecretColumn](secret),
+        RecoveryCodes:  melodyencrypt.EncryptedStringFor[PendingRecoveryCodesColumn](encodedCodes),
+        ReplacesFactor: replacesFactor,
         CreatedAt:      time.Now(),
     }
 
-    if _, insertErr := instance.enrollmentUpsert(enrollment).Exec(ctx); nil != insertErr {
+    if _, insertErr := enrollmentUpsert(instance.database, pending).Set("replaces_factor = VALUES(replaces_factor)").Exec(ctx); nil != insertErr {
         return "", "", nil, insertErr
     }
 
     return secret, uri, recoveryCodes, nil
 }
 
-/* enrollmentUpsert is the write kept as a query, so the clause that makes a second enrollment a replacement is readable on its own. All three columns are written: the recovery codes belong to the secret they were minted beside. */
-func (instance *Store) enrollmentUpsert(enrollment *Enrollment) *bun.InsertQuery {
-    return instance.database.
+/* FindPendingSecret answers the secret of the user's pending enrollment still within its lifetime, for the confirmation to verify a code against */
+func (instance *Store) FindPendingSecret(ctx context.Context, userIdentifier string) (string, bool, error) {
+    pending := &PendingEnrollment{}
+
+    selectErr := instance.database.NewSelect().Model(pending).Where("user_identifier = ?", userIdentifier).Where("created_at > ?", pendingCutoff()).Limit(1).Scan(ctx)
+    if nil != selectErr {
+        if true == errors.Is(selectErr, sql.ErrNoRows) {
+            return "", false, nil
+        }
+
+        return "", false, selectErr
+    }
+
+    return string(pending.Secret), true, nil
+}
+
+/* ConfirmOutcome is what a confirmation did */
+type ConfirmOutcome int
+
+const (
+    /* ConfirmMoved: the pending enrollment is the account's factor */
+    ConfirmMoved ConfirmOutcome = iota
+    /* ConfirmNothingPending: no pending enrollment within its lifetime */
+    ConfirmNothingPending
+    /* ConfirmReplaced: the pending secret is not the one the code was verified against, a second enroll in between */
+    ConfirmReplaced
+    /* ConfirmFactorBecameActive: a factor became active after a set-up started without one, and replacing it asks for it */
+    ConfirmFactorBecameActive
+)
+
+/* ConfirmEnrollment moves the user's pending enrollment into the active table in one transaction holding the pending row and the active one; the caller verified a code against the pending secret first. A pending enrollment started without presenting a factor replaces none: when a factor became active since, the move is refused, so a session alone never displaces a factor it did not present. */
+func (instance *Store) ConfirmEnrollment(ctx context.Context, userIdentifier string, verifiedSecret string) (ConfirmOutcome, error) {
+    outcome := ConfirmNothingPending
+
+    txErr := instance.database.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+        pending := &PendingEnrollment{}
+
+        selectErr := tx.NewSelect().Model(pending).Where("user_identifier = ?", userIdentifier).Where("created_at > ?", pendingCutoff()).For("UPDATE").Limit(1).Scan(ctx)
+        if nil != selectErr {
+            if true == errors.Is(selectErr, sql.ErrNoRows) {
+                return nil
+            }
+
+            return selectErr
+        }
+
+        if 1 != subtle.ConstantTimeCompare([]byte(pending.Secret), []byte(verifiedSecret)) {
+            outcome = ConfirmReplaced
+
+            return nil
+        }
+
+        if false == pending.ReplacesFactor {
+            var activeIdentifier string
+            activeErr := tx.NewSelect().Table("melody_example_v4_two_factor").Column("user_identifier").Where("user_identifier = ?", userIdentifier).For("UPDATE").Limit(1).Scan(ctx, &activeIdentifier)
+            if nil == activeErr {
+                outcome = ConfirmFactorBecameActive
+
+                return nil
+            }
+
+            if false == errors.Is(activeErr, sql.ErrNoRows) {
+                return activeErr
+            }
+        }
+
+        enrollment := &Enrollment{
+            UserIdentifier: userIdentifier,
+            Secret:         melodyencrypt.EncryptedStringFor[SecretColumn](string(pending.Secret)),
+            RecoveryCodes:  melodyencrypt.EncryptedStringFor[RecoveryCodesColumn](string(pending.RecoveryCodes)),
+            CreatedAt:      time.Now(),
+        }
+
+        if _, upsertErr := enrollmentUpsert(tx, enrollment).Exec(ctx); nil != upsertErr {
+            return upsertErr
+        }
+
+        if _, deleteErr := tx.NewDelete().Model((*PendingEnrollment)(nil)).Where("user_identifier = ?", userIdentifier).Exec(ctx); nil != deleteErr {
+            return deleteErr
+        }
+
+        outcome = ConfirmMoved
+
+        return nil
+    })
+    if nil != txErr {
+        return ConfirmNothingPending, txErr
+    }
+
+    return outcome, nil
+}
+
+/* EnrollmentState answers whether the user has an active factor and a pending enrollment within its lifetime, reading no sealed column */
+func (instance *Store) EnrollmentState(ctx context.Context, userIdentifier string) (bool, bool, error) {
+    enrolled, enrolledErr := instance.database.NewSelect().Table("melody_example_v4_two_factor").Where("user_identifier = ?", userIdentifier).Exists(ctx)
+    if nil != enrolledErr {
+        return false, false, enrolledErr
+    }
+
+    pending, pendingErr := instance.database.NewSelect().Table("melody_example_v4_two_factor_pending").Where("user_identifier = ?", userIdentifier).Where("created_at > ?", pendingCutoff()).Exists(ctx)
+    if nil != pendingErr {
+        return false, false, pendingErr
+    }
+
+    return enrolled, pending, nil
+}
+
+func pendingCutoff() time.Time {
+    return time.Now().UTC().Add(-PendingEnrollmentLifetime)
+}
+
+/* enrollmentUpsert is the write of an active or a pending enrollment kept as a query, so the clause that makes a second one a replacement is readable on its own. All three columns are written: the recovery codes belong to the secret they were minted beside. */
+func enrollmentUpsert(database bun.IDB, model any) *bun.InsertQuery {
+    return database.
         NewInsert().
-        Model(enrollment).
+        Model(model).
         On("DUPLICATE KEY UPDATE").
         Set("secret = VALUES(secret)").
         Set("recovery_codes = VALUES(recovery_codes)").
         Set("created_at = VALUES(created_at)")
 }
 
-/* DeleteEnrollment removes an account's second factor, secret and recovery codes together. A deleted account's identifier is not minted again, but example:db:reset hands identifiers out anew, and an account must not start enrolled. Deleting nothing is not a failure. */
+/* DeleteEnrollment removes an account's second factor, secret and recovery codes together, and an enrollment it has pending, in one transaction; it answers whether either was there. A deleted account's identifier is not minted again, but example:db:reset hands identifiers out anew, and an account must not start enrolled. Deleting nothing is not a failure. */
 func (instance *Store) DeleteEnrollment(
     runtimeInstance melodyruntimecontract.Runtime,
     userIdentifier string,
 ) (bool, error) {
-    result, deleteErr := instance.enrollmentDelete(userIdentifier).Exec(runtimeInstance.Context())
-    if nil != deleteErr {
-        return false, deleteErr
+    removed := false
+
+    txErr := instance.database.RunInTx(runtimeInstance.Context(), nil, func(ctx context.Context, tx bun.Tx) error {
+        pendingResult, pendingErr := tx.NewDelete().Model((*PendingEnrollment)(nil)).Where("user_identifier = ?", userIdentifier).Exec(ctx)
+        if nil != pendingErr {
+            return pendingErr
+        }
+
+        activeResult, deleteErr := enrollmentDelete(tx, userIdentifier).Exec(ctx)
+        if nil != deleteErr {
+            return deleteErr
+        }
+
+        for _, result := range []sql.Result{pendingResult, activeResult} {
+            affected, affectedErr := result.RowsAffected()
+            if nil != affectedErr {
+                return affectedErr
+            }
+
+            removed = removed || 0 < affected
+        }
+
+        return nil
+    })
+    if nil != txErr {
+        return false, txErr
     }
 
-    affected, affectedErr := result.RowsAffected()
-    if nil != affectedErr {
-        return false, affectedErr
-    }
-
-    return 0 < affected, nil
+    return removed, nil
 }
 
-func (instance *Store) enrollmentDelete(userIdentifier string) *bun.DeleteQuery {
-    return instance.database.
+func enrollmentDelete(database bun.IDB, userIdentifier string) *bun.DeleteQuery {
+    return database.
         NewDelete().
         Model((*Enrollment)(nil)).
         Where("user_identifier = ?", userIdentifier)

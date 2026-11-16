@@ -12,8 +12,8 @@ import (
    taken for a column, and no table for the statement that only adds the username key */
 func TestExpectedSchemaOf_ReadsTheColumnsTheSetCreates(t *testing.T) {
     catalogue := expectedSchemaOf(schemaUpStatementList)
-    if 9 != len(catalogue) {
-        t.Fatalf("expected the eight tables of the catalogue and its fingerprint table, got %d: %v", len(catalogue), catalogue)
+    if 10 != len(catalogue) {
+        t.Fatalf("expected the nine tables of the catalogue and its fingerprint table, got %d: %v", len(catalogue), catalogue)
     }
 
     columnListByTable := map[string][]string{}
@@ -24,6 +24,7 @@ func TestExpectedSchemaOf_ReadsTheColumnsTheSetCreates(t *testing.T) {
     wanted := map[string][]string{
         "melody_example_v4_currency":   {"id", "code", "name", "rate", "rate_as_of", "provider_rate_as_of"},
         "melody_example_v4_two_factor": {"user_identifier", "secret", "recovery_codes", "created_at"},
+        "melody_example_v4_two_factor_pending": {"user_identifier", "secret", "recovery_codes", "replaces_factor", "created_at"},
         "melody_example_v4_category":   {"id", "name"},
         SchemaFingerprintTableName:     {"set_name", "fingerprint", "state"},
     }

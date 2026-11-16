@@ -19,12 +19,21 @@ func renderedEnrollmentUpsert(t *testing.T) string {
 
     store := &Store{database: newRenderingDatabase()}
 
-    return store.enrollmentUpsert(&Enrollment{
+    return enrollmentUpsert(store.database, &Enrollment{
         UserIdentifier: "user-2",
         Secret:         melodyencrypt.EncryptedStringFor[SecretColumn]("zz-secret"),
         RecoveryCodes:  melodyencrypt.EncryptedStringFor[RecoveryCodesColumn](`["zz-one"]`),
         CreatedAt:      time.Unix(1, 0),
     }).String()
+}
+
+/* a pending enrollment is written through the same replacement: a second enroll before the confirmation, the response of the first lost, replaces the pending secret */
+func TestPendingEnrollmentUpsertReplacesThePendingOne(t *testing.T) {
+    rendered := enrollmentUpsert(newRenderingDatabase(), &PendingEnrollment{UserIdentifier: "user-2", CreatedAt: time.Unix(1, 0)}).String()
+
+    if false == strings.Contains(rendered, "melody_example_v4_two_factor_pending") || false == strings.Contains(rendered, " ON DUPLICATE KEY UPDATE secret = VALUES(secret)") {
+        t.Fatalf("expected the pending table replaced in place, got %q", rendered)
+    }
 }
 
 func TestEnrollmentUpsertReplacesAnEnrollmentThatIsAlreadyThere(t *testing.T) {
@@ -56,7 +65,7 @@ func TestEnrollmentUpsertReplacesTheRecoveryCodesWithTheSecret(t *testing.T) {
 
 /* the deletion is keyed on the account identifier and on nothing wider: a statement without the predicate would release every account's factor when one account is deleted. */
 func TestEnrollmentDeleteIsKeyedOnTheAccountIdentifierAlone(t *testing.T) {
-    rendered := NewStore(newRenderingDatabase()).enrollmentDelete("user-4").String()
+    rendered := enrollmentDelete(newRenderingDatabase(), "user-4").String()
 
     if false == strings.HasPrefix(rendered, "DELETE FROM `melody_example_v4_two_factor`") || false == strings.Contains(rendered, "WHERE (user_identifier = 'user-4')") {
         t.Fatalf("expected the enrollment of user-4 alone to be deleted, got %q", rendered)

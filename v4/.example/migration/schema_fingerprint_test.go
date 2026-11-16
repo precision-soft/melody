@@ -170,8 +170,8 @@ func TestUpSchemaFinishesARunItBeganAndDidNotFinish(t *testing.T) {
     if 0 != countRecorded(recordedList, "INSERT INTO `"+SchemaFingerprintTableName+"`") {
         t.Fatalf("expected the row already building not to be written again, got %q", recordedList)
     }
-    if 8 != countRecorded(recordedList, "CREATE TABLE IF NOT EXISTS `melody_example_v4_") {
-        t.Fatalf("expected the eight tables of the set created again, tolerantly, got %q", recordedList)
+    if 9 != countRecorded(recordedList, "CREATE TABLE IF NOT EXISTS `melody_example_v4_") {
+        t.Fatalf("expected the nine tables of the set created again, tolerantly, got %q", recordedList)
     }
     if "UPDATE `"+SchemaFingerprintTableName+"` SET `state` = 'built' WHERE `set_name` = 'catalogue'" != recordedList[len(recordedList)-1] {
         t.Fatalf("expected the run to end by sealing the row, got %q", recordedList)

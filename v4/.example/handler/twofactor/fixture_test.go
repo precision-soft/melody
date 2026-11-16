@@ -54,6 +54,11 @@ type enrollmentConnector struct {
     enrolledIdentifier string
     sealedSecret       string
     sealedCodes        string
+
+    pendingIdentifier    string
+    pendingSealedSecret  string
+    pendingSealedCodes   string
+    pendingReplaces      bool
 }
 
 func (instance *enrollmentConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -118,6 +123,44 @@ func (instance *enrollmentConnection) QueryContext(ctx context.Context, query st
     }
 
     instance.connector.record(query)
+
+    /* an existence read answers one boolean, for the table and the account it names */
+    if true == strings.HasPrefix(query, "SELECT EXISTS") {
+        found := false
+        if true == strings.Contains(query, "melody_example_v4_two_factor_pending") {
+            found = "" != instance.connector.pendingIdentifier && true == strings.Contains(query, "'"+instance.connector.pendingIdentifier+"'")
+        } else {
+            found = "" != instance.connector.enrolledIdentifier && true == strings.Contains(query, "'"+instance.connector.enrolledIdentifier+"'")
+        }
+
+        return &enrollmentRows{columns: []string{"exists"}, rows: [][]driver.Value{{found}}}, nil
+    }
+
+    /* the confirmation's lock on the active row reads its identifier alone */
+    if true == strings.HasPrefix(query, "SELECT `user_identifier` FROM `melody_example_v4_two_factor` ") {
+        lockedRow := &enrollmentRows{columns: []string{"user_identifier"}}
+        if "" != instance.connector.enrolledIdentifier && true == strings.Contains(query, "'"+instance.connector.enrolledIdentifier+"'") {
+            lockedRow.rows = [][]driver.Value{{instance.connector.enrolledIdentifier}}
+        }
+
+        return lockedRow, nil
+    }
+
+    /* the pending table is answered on its own, its seals bound to its own columns */
+    if true == strings.Contains(query, "melody_example_v4_two_factor_pending") {
+        pendingRow := &enrollmentRows{columns: []string{"user_identifier", "secret", "recovery_codes", "replaces_factor", "created_at"}}
+        if "" != instance.connector.pendingIdentifier && true == strings.Contains(query, "'"+instance.connector.pendingIdentifier+"'") {
+            pendingRow.rows = [][]driver.Value{{
+                instance.connector.pendingIdentifier,
+                []byte(instance.connector.pendingSealedSecret),
+                []byte(instance.connector.pendingSealedCodes),
+                instance.connector.pendingReplaces,
+                time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC),
+            }}
+        }
+
+        return pendingRow, nil
+    }
 
     enrolledRow := &enrollmentRows{columns: []string{"user_identifier", "secret", "recovery_codes", "created_at"}}
     if "" != instance.connector.enrolledIdentifier && true == strings.Contains(query, "'"+instance.connector.enrolledIdentifier+"'") {
@@ -186,6 +229,25 @@ func enrolledStore(t *testing.T, enrolledIdentifier string, secret string) (*sto
     })
 
     return store2fa.NewStore(database), connector
+}
+
+/* withPending gives the connector a pending enrollment for the account, sealed through the pending column types */
+func withPending(t *testing.T, connector *enrollmentConnector, pendingIdentifier string, secret string) {
+    t.Helper()
+
+    sealedSecret, secretErr := melodyencrypt.EncryptedStringFor[store2fa.PendingSecretColumn](secret).Value()
+    if nil != secretErr {
+        t.Fatalf("sealing the pending secret failed: %v", secretErr)
+    }
+
+    sealedCodes, codesErr := melodyencrypt.EncryptedStringFor[store2fa.PendingRecoveryCodesColumn](`["pending-one"]`).Value()
+    if nil != codesErr {
+        t.Fatalf("sealing the pending recovery codes failed: %v", codesErr)
+    }
+
+    connector.pendingIdentifier = pendingIdentifier
+    connector.pendingSealedSecret = string(sealedSecret.([]byte))
+    connector.pendingSealedCodes = string(sealedCodes.([]byte))
 }
 
 /* authenticatedTwoFactorRequest builds a request whose runtime carries a token for the given account, the way the firewall leaves it for a caller on the authenticated route. */

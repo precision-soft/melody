@@ -7,6 +7,8 @@
  * hardcoded path — the same manifest the melody:routes:manifest command exports.
  */
 
+import qrcode from "qrcode-generator";
+
 import {RouteGenerator, RouteManifest, RouteParams} from "./melody-routes";
 
 /* jQuery is loaded separately by the pages and is not bundled here. */
@@ -49,8 +51,9 @@ const toNormalizedAjaxError = (ajaxErr: any): Error => {
     const fallbackMessage = String(ajaxErr?.statusText ?? "request failed").trim();
     const message = "" === firstError ? fallbackMessage : firstError;
 
-    const normalized = new Error(message) as Error & { statusCode?: number };
+    const normalized = new Error(message) as Error & { statusCode?: number; serverMessage?: string };
     normalized.statusCode = statusCode;
+    normalized.serverMessage = firstError;
 
     return normalized;
 };
@@ -64,7 +67,7 @@ const normalizeSuccessBodyOrThrow = (body: any): any => {
     return body;
 };
 
-const requestJson = (method: string, url: string, data?: unknown): any => {
+const requestJson = (method: string, url: string, data?: unknown, extraHeaders?: Record<string, string>): any => {
     requireJquery();
 
     const safeMethod = String(method ?? "").trim().toUpperCase();
@@ -73,6 +76,7 @@ const requestJson = (method: string, url: string, data?: unknown): any => {
     }
 
     const headers: Record<string, string> = {
+        ...(extraHeaders ?? {}),
         Accept: "application/json",
     };
 
@@ -243,9 +247,45 @@ const submitLogout = (): void => {
     form.submit();
 };
 
+/* drawQrCode paints the text as a QR code on the canvas from the module matrix, so no markup is generated from the text; the quiet zone is the four modules the standard asks for */
+const drawQrCode = (canvas: HTMLCanvasElement, text: string, pixelSize?: number): void => {
+    const code = qrcode(0, "M");
+    code.addData(String(text ?? ""));
+    code.make();
+
+    const quietZone = 4;
+    const moduleCount = code.getModuleCount();
+    const side = moduleCount + 2 * quietZone;
+    const target = Math.max(side, Number(pixelSize ?? 232));
+    const cell = Math.max(1, Math.floor(target / side));
+
+    canvas.width = side * cell;
+    canvas.height = side * cell;
+    canvas.style.width = `${canvas.width}px`;
+    canvas.style.height = `${canvas.height}px`;
+    canvas.style.imageRendering = "pixelated";
+
+    const context = canvas.getContext("2d");
+    if (null === context) {
+        throw new Error("canvas is not supported");
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#000000";
+
+    for (let row = 0; row < moduleCount; row++) {
+        for (let column = 0; column < moduleCount; column++) {
+            if (true === code.isDark(row, column)) {
+                context.fillRect((column + quietZone) * cell, (row + quietZone) * cell, cell, cell);
+            }
+        }
+    }
+};
+
 window.melodyExample = window.melodyExample ?? {};
 window.melodyExample.http = {getJson, postJson, putJson, deleteJson, requestJson};
-window.melodyExample.ui = {setStatus};
+window.melodyExample.ui = {setStatus, drawQrCode};
 window.melodyExample.routing = {route, resolveDataRoutes};
 window.melodyExample.viewer = {holdsRole: viewerHoldsRole, applyRoleVisibility};
 window.melodyExample.auth = {initAuthHeader};

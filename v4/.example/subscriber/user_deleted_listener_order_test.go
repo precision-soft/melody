@@ -105,7 +105,7 @@ func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *tes
         t.Fatalf("expected the two releases to succeed together, got %v", controlErr)
     }
 
-    if _, found, _ := controlStore.Lookup(controlRuntime, "token-user-4"); true == found || 1 != len(recorder.recordedQueries()) {
+    if _, found, _ := controlStore.Lookup(controlRuntime, "token-user-4"); true == found || 2 != len(recorder.recordedQueries()) {
         t.Fatalf("expected the control to release the token and the enrollment, found=%v statements %v", found, recorder.recordedQueries())
     }
 }

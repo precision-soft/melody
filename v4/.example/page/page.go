@@ -24,6 +24,7 @@ const ProductsListHtml = "product_list.html"
 const ProductsDetailsHtml = "product_detail.html"
 const ProfileHtml = "profile.html"
 const UsersHtml = "users.html"
+const TwoFactorHtml = "two_factor.html"
 
 var ErrPageNotFound = errors.New("page not found")
 

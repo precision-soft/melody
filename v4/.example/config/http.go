@@ -97,10 +97,13 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleWithOptions(route.InternalWhoamiPattern, handlerinternalauth.WhoamiHandler(), melodyhttp.RouteOptions{Name: route.InternalWhoamiName, Methods: []string{"POST"}})
 
-    /* the two doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts. The verification door, and the enrollment door when it replaces an enrollment, burn an accepted code in the memory the sign-in reads, so a code is spent once across all three, and count every presented factor against the account's budget the sign-in spends. */
+    /* the doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts. The verification door, and the enrollment door when it replaces an enrollment, burn an accepted code in the memory the sign-in reads, as does the confirmation door, so a code is spent once across all of them, and count every presented factor against the account's budget the sign-in spends. */
     if true == instance.catalogueWired {
-        router.HandleWithOptions("/twofactor/enroll", handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), melodyhttp.RouteOptions{Name: "example.twofactor.enroll", Methods: []string{"POST"}})
-        router.HandleWithOptions("/twofactor/verify", handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), melodyhttp.RouteOptions{Name: "example.twofactor.verify", Methods: []string{"POST"}})
+        router.HandleWithOptions(route.TwoFactorPagePattern, handlertwofactor.PageHandler(), frontendRoute(route.TwoFactorPageName, "GET"))
+        router.HandleWithOptions(route.TwoFactorEnrollPattern, handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), frontendRoute(route.TwoFactorEnrollName, "POST"))
+        router.HandleWithOptions(route.TwoFactorConfirmPattern, handlertwofactor.ConfirmHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), frontendRoute(route.TwoFactorConfirmName, "POST"))
+        router.HandleWithOptions(route.TwoFactorStatusPattern, handlertwofactor.StatusHandler(twofactor.StoreFromRuntime), frontendRoute(route.TwoFactorStatusName, "GET"))
+        router.HandleWithOptions(route.TwoFactorVerifyPattern, handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), melodyhttp.RouteOptions{Name: route.TwoFactorVerifyName, Methods: []string{"POST"}})
     }
 
     /* the outbox handlers hold container.Lazy handles built at route-registration time: the store and relay services (provided by the outbox module's factories, see configure.go) are resolved at the first request, so registering the routes never touches the outbox schema or the transport. */

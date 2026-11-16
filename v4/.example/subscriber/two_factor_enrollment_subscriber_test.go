@@ -48,11 +48,11 @@ func deleteEnrollmentStatementsAfter(t *testing.T, eventName string, payload any
 func TestTwoFactorEnrollmentSubscriber_ADeletedAccountReleasesItsEnrollment(t *testing.T) {
     statements := deleteEnrollmentStatementsAfter(t, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
 
-    if 1 != len(statements) {
-        t.Fatalf("expected one statement for the deleted account, got %d: %v", len(statements), statements)
+    if 2 != len(statements) || "DELETE FROM `melody_example_v4_two_factor_pending` WHERE (user_identifier = 'user-4')" != statements[0] {
+        t.Fatalf("expected the pending enrollment, then the active one, deleted for the account, got %d: %v", len(statements), statements)
     }
 
-    statement := statements[0]
+    statement := statements[1]
     if false == strings.HasPrefix(statement, "DELETE FROM `melody_example_v4_two_factor`") || false == strings.Contains(statement, "WHERE (user_identifier = 'user-4')") {
         t.Fatalf("expected the enrollment of user-4 alone to be deleted, got %q", statement)
     }

@@ -42,8 +42,8 @@ func TestTwoFactorResetCommand_DeletesTheEnrollmentOfTheNamedAccount(t *testing.
         }
     }
 
-    if 1 != len(deleteList) || false == strings.Contains(deleteList[0], "'"+account.Id+"'") {
-        t.Fatalf("expected one delete of the editor's enrollment (%s), got %q", account.Id, connector.recorded())
+    if 2 != len(deleteList) || false == strings.Contains(deleteList[0], "melody_example_v4_two_factor_pending` WHERE (user_identifier = '"+account.Id+"')") || false == strings.Contains(deleteList[1], "melody_example_v4_two_factor` WHERE (user_identifier = '"+account.Id+"')") {
+        t.Fatalf("expected the editor's pending and active enrollments deleted (%s), got %q", account.Id, connector.recorded())
     }
 
     if false == strings.Contains(output.String(), "removed the second factor") {

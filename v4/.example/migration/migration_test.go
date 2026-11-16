@@ -29,7 +29,7 @@ func TestUpSchemaCreatesEveryTableTolerantly(t *testing.T) {
     }
 
     assertQueryOrder(t, recorder.recordedQueries(), []string{
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('melody_example_v4_schema_fingerprint', 'melody_example_v4_two_factor', 'melody_example_v4_catalog_journal', 'melody_example_v4_identifier_sequence', 'melody_example_v4_user_session', 'melody_example_v4_user', 'melody_example_v4_product', 'melody_example_v4_currency', 'melody_example_v4_category')",
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('melody_example_v4_schema_fingerprint', 'melody_example_v4_two_factor_pending', 'melody_example_v4_two_factor', 'melody_example_v4_catalog_journal', 'melody_example_v4_identifier_sequence', 'melody_example_v4_user_session', 'melody_example_v4_user', 'melody_example_v4_product', 'melody_example_v4_currency', 'melody_example_v4_category')",
         "CREATE TABLE IF NOT EXISTS `melody_example_v4_schema_fingerprint`",
         "INSERT INTO `melody_example_v4_schema_fingerprint` (`set_name`, `fingerprint`, `state`) VALUES ('catalogue', '" + catalogueSchemaFingerprint + "', 'building')",
         "CREATE TABLE IF NOT EXISTS `melody_example_v4_category`",
@@ -40,6 +40,7 @@ func TestUpSchemaCreatesEveryTableTolerantly(t *testing.T) {
         "CREATE TABLE IF NOT EXISTS `melody_example_v4_identifier_sequence`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v4_catalog_journal`",
         "CREATE TABLE IF NOT EXISTS `melody_example_v4_two_factor`",
+        "CREATE TABLE IF NOT EXISTS `melody_example_v4_two_factor_pending`",
         "UPDATE `melody_example_v4_schema_fingerprint` SET `state` = 'built' WHERE `set_name` = 'catalogue'",
     })
 }
@@ -107,6 +108,7 @@ func TestDownSchemaDropsTheTablesInReverse(t *testing.T) {
 
     assertQueryOrder(t, recorder.recordedQueries(), []string{
         "DROP TABLE IF EXISTS `melody_example_v4_schema_fingerprint`",
+        "DROP TABLE IF EXISTS `melody_example_v4_two_factor_pending`",
         "DROP TABLE IF EXISTS `melody_example_v4_two_factor`",
         "DROP TABLE IF EXISTS `melody_example_v4_catalog_journal`",
         "DROP TABLE IF EXISTS `melody_example_v4_identifier_sequence`",
@@ -138,7 +140,7 @@ func TestUpSchemaComparesEveryIdentifierColumnByteForByte(t *testing.T) {
         }
     }
 
-    if 8 != collated {
-        t.Errorf("%d identifier columns are compared under utf8mb4_bin, wanted 8", collated)
+    if 9 != collated {
+        t.Errorf("%d identifier columns are compared under utf8mb4_bin, wanted 9", collated)
     }
 }
