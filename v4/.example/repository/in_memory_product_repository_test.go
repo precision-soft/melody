@@ -184,3 +184,21 @@ func TestInMemoryProductRepositoryCreate_RefusesASuppliedIdentifierAtTheCeiling(
         t.Fatalf("expected the refused identifier not to have raised the floor, minted %q", minted.Id)
     }
 }
+
+/* a supplied identifier the margin admits still leaves the mints after it room to land */
+func TestInMemoryProductRepositoryCreate_TheMintsAfterTheHighestAdmittedIdentifierStillLand(t *testing.T) {
+    ctx := context.Background()
+    repositoryInstance := newInMemoryProductRepository()
+
+    now := time.Now()
+    if createErr := repositoryInstance.Create(ctx, entity.NewProduct("prod-9223372032559808510", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now)); nil != createErr {
+        t.Fatalf("expected the identifier the margin admits stored, got %v", createErr)
+    }
+
+    for mint := 0; mint < 3; mint++ {
+        if mintErr := repositoryInstance.Create(ctx, entity.NewProduct("", "Probe", "black", "cat-1", 1, "cur-eur", 1, now, now)); nil != mintErr {
+            t.Fatalf("mint %d: expected it to land, got %v", mint, mintErr)
+        }
+    }
+}
+

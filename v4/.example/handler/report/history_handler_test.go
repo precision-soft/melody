@@ -46,19 +46,19 @@ func TestHistoryLimitOf_AnswersTheDefaultWhenTheCallerAskedForNoLimit(t *testing
         "/reports/api/history/?limit=",
         "/reports/api/history/?other=5",
     } {
-        limit, limitErr := historyLimitOf(historyRequest(t, target))
+        limit, limitErr := historyLimitOf(historyRequest(t, target), 25)
         if nil != limitErr {
             t.Fatalf("%s: %v", target, limitErr)
         }
 
-        if historyDefaultLimit != limit {
-            t.Fatalf("%s: expected the default %d, got %d", target, historyDefaultLimit, limit)
+        if 25 != limit {
+            t.Fatalf("%s: expected the page size 25, got %d", target, limit)
         }
     }
 }
 
 func TestHistoryLimitOf_ReadsTheCallersLimit(t *testing.T) {
-    limit, limitErr := historyLimitOf(historyRequest(t, "/reports/api/history/?limit=3"))
+    limit, limitErr := historyLimitOf(historyRequest(t, "/reports/api/history/?limit=3"), 25)
     if nil != limitErr {
         t.Fatalf("limit: %v", limitErr)
     }
@@ -76,7 +76,7 @@ func TestHistoryLimitOf_RefusesALimitItCannotServe(t *testing.T) {
         "/reports/api/history/?limit=-3",
         "/reports/api/history/?limit=1.5",
     } {
-        _, limitErr := historyLimitOf(historyRequest(t, target))
+        _, limitErr := historyLimitOf(historyRequest(t, target), 25)
         if nil == limitErr {
             t.Fatalf("%s: expected a refusal", target)
         }
@@ -89,7 +89,7 @@ func TestHistoryLimitOf_RefusesALimitItCannotServe(t *testing.T) {
 
 /* the ceiling is the door's own: the archive grows for the life of a volume, so a limit taken from the request without a cap is any signed-in caller choosing how much of it this process loads at once. */
 func TestHistoryLimitOf_CapsWhatACallerCanAskFor(t *testing.T) {
-    limit, limitErr := historyLimitOf(historyRequest(t, "/reports/api/history/?limit=9999"))
+    limit, limitErr := historyLimitOf(historyRequest(t, "/reports/api/history/?limit=9999"), 500)
     if nil != limitErr {
         t.Fatalf("limit: %v", limitErr)
     }
@@ -101,7 +101,7 @@ func TestHistoryLimitOf_CapsWhatACallerCanAskFor(t *testing.T) {
 
 /* the shape of a query parameter is chosen by the client, so a repeated key at this door is answered rather than refused: the limit is the first value, as for a single key. */
 func TestHistoryLimitOf_TakesTheFirstValueOfARepeatedKey(t *testing.T) {
-    limit, limitErr := historyLimitOf(historyRequest(t, "/reports/api/history/?limit=2&limit=3"))
+    limit, limitErr := historyLimitOf(historyRequest(t, "/reports/api/history/?limit=2&limit=3"), 25)
     if nil != limitErr {
         t.Fatalf("limit: %v", limitErr)
     }
@@ -240,3 +240,20 @@ func TestApiHistoryHandler_TakesTheCurrentReadingOnAColdCache(t *testing.T) {
         t.Fatalf("expected the reading taken on the cold cache left there for the next caller")
     }
 }
+
+func TestHistoryLimitOf_ThePageSizeIsBoundedByTheDoorsCap(t *testing.T) {
+    if limit, _ := historyLimitOf(historyRequest(t, "/reports/api/history/"), 500); historyMaximumLimit != limit {
+        t.Fatalf("expected a page size above the cap answered as the cap, got %d", limit)
+    }
+}
+
+func TestHistoryLimitOf_ThePageSizeCapsWhatACallerAsksFor(t *testing.T) {
+    if limit, _ := historyLimitOf(historyRequest(t, "/reports/api/history/?limit=40"), 25); 25 != limit {
+        t.Fatalf("expected a request above the page size capped at it, got %d", limit)
+    }
+
+    if limit, _ := historyLimitOf(historyRequest(t, "/reports/api/history/?limit=7"), 25); 7 != limit {
+        t.Fatalf("expected a request under the page size kept, got %d", limit)
+    }
+}
+

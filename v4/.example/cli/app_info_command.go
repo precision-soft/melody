@@ -51,7 +51,8 @@ func (instance *ApplicationInformationCommand) Run(runtimeInstance melodyruntime
 
     /* resolving the catalog report proves the generated wiring end to end: the service is registered only by melody:wiring:generate, and its provider pulls a collaborator from the container by type while reading three scalars from the parameters they are bound to. */
     catalogReport := melodycontainer.MustFromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), container)
-    fmt.Fprintln(writer, "catalog_report:", catalogReport.Headline())
+    fmt.Fprintln(writer, "catalog_report:", catalogReport.Title())
+    fmt.Fprintln(writer, "catalog_report_page_size:", catalogReport.PageSize())
     fmt.Fprintln(writer, "catalog_report_refresh_interval:", catalogReport.RefreshInterval())
 
     return nil

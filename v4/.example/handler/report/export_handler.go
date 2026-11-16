@@ -28,7 +28,7 @@ func ApiExportHandler() melodyhttpcontract.Handler {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", resolveErr), nil
         }
 
-        limit, limitErr := historyLimitOf(request)
+        limit, limitErr := historyLimitOf(request, reportService.PageSize())
         if nil != limitErr {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, limitErr.Error()), nil
         }

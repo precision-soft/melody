@@ -2,12 +2,14 @@ package storage
 
 import (
     "bytes"
+    "encoding/base64"
     "errors"
     "io"
     nethttp "net/http"
     "strconv"
     "strings"
     "time"
+    "unicode/utf8"
 
     melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
     "github.com/precision-soft/melody/v4/.example/presenter"
@@ -82,14 +84,27 @@ func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
         }
         defer reader.Close()
 
-        content, readErr := io.ReadAll(reader)
+        /* the door answers the object inline, so it reads one byte past its bound to tell an object it cannot hold */
+        content, readErr := io.ReadAll(io.LimitReader(reader, objectInlineMaximumBytes+1))
         if nil != readErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the object", readErr), nil
         }
 
-        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"key": key, "content": string(content)}), nil
+        if objectInlineMaximumBytes < len(content) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnprocessableEntity, "the object is larger than this door answers inline ("+strconv.Itoa(objectInlineMaximumBytes)+" bytes)"), nil
+        }
+
+        /* a json string carries text: bytes that are not utf-8 would be replaced in the encoding, so such an object is answered in base64 and the encoding names which */
+        if true == utf8.Valid(content) {
+            return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"key": key, "encoding": "utf-8", "content": string(content)}), nil
+        }
+
+        return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"key": key, "encoding": "base64", "content": base64.StdEncoding.EncodeToString(content)}), nil
     }
 }
+
+/* objectInlineMaximumBytes bounds the object the get door reads into memory to answer inline */
+const objectInlineMaximumBytes = 8 << 20
 
 const (
     /* linkDefaultTtl is how long a link lives when the caller asked for nothing */

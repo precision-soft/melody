@@ -74,13 +74,13 @@ func TestSeededFloor_IsTheHighestSeededIdentifier(t *testing.T) {
 }
 
 func TestRefuseIdentifierAtCeiling(t *testing.T) {
-    for _, identifier := range []string{"prod-9223372036854775806", " prod-9223372036854775807 "} {
+    for _, identifier := range []string{"prod-9223372036854775806", " prod-9223372036854775807 ", "prod-9223372036854775805", "prod-9223372032559808511"} {
         if false == errors.Is(refuseIdentifierAtCeiling(identifier, "prod-"), ErrIdentifierAtCeiling) {
             t.Fatalf("%q: expected the ceiling refused", identifier)
         }
     }
 
-    for _, identifier := range []string{"", "prod-9223372036854775805", "prod-99999999999999999999", "prod-x", "cat-9223372036854775807"} {
+    for _, identifier := range []string{"", "prod-9223372032559808510", "prod-99999999999999999999", "prod-x", "cat-9223372036854775807"} {
         if nil != refuseIdentifierAtCeiling(identifier, "prod-") {
             t.Fatalf("%q: expected no refusal", identifier)
         }

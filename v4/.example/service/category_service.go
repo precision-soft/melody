@@ -48,7 +48,7 @@ func (instance *CategoryService) List(ctx context.Context) ([]*entity.Category, 
         instance.cache,
         CacheKeyCategoryList,
         melodycache.RememberConfig{
-            Ttl: melodybound.UnlimitedDuration(),
+            Ttl: melodybound.Of(entityCacheTtl),
         },
         func(ctx context.Context) (any, error) {
             return instance.categoryRepository.All(ctx)

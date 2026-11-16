@@ -56,7 +56,7 @@ func (instance *ProductService) List(ctx context.Context) ([]*entity.Product, er
         instance.cache,
         CacheKeyProductList,
         cache.RememberConfig{
-            Ttl: bound.UnlimitedDuration(),
+            Ttl: bound.Of(entityCacheTtl),
         },
         func(ctx context.Context) (any, error) {
             return instance.productRepository.All(ctx)

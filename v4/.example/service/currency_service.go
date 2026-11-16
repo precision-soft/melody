@@ -105,7 +105,7 @@ func (instance *CurrencyService) List(ctx context.Context) ([]*entity.Currency, 
         instance.cache,
         CacheKeyCurrencyList,
         melodycache.RememberConfig{
-            Ttl: melodybound.UnlimitedDuration(),
+            Ttl: melodybound.Of(entityCacheTtl),
         },
         func(ctx context.Context) (any, error) {
             return instance.currencyRepository.All(ctx)

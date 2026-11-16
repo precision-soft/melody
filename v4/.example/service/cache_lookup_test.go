@@ -8,8 +8,10 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/.example/entity"
+    "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodyclock "github.com/precision-soft/melody/v4/clock"
 )
 
 type countingUserRepository struct {
@@ -283,5 +285,41 @@ func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *
 
     if 1 != entityWrites {
         t.Fatalf("expected the found value to be written under the entity bound exactly once, by the reader that loaded it, got %d such writes among %d", entityWrites, len(writes))
+    }
+}
+
+/* a list is remembered under the entities' bound, so a load racing a write and its invalidation serves the stale list for at most that long */
+func TestTheCatalogueListsAreRememberedUnderTheEntityBound(t *testing.T) {
+    storage := persistence.NewCatalogStorage(nil)
+    productRepository, _ := repository.NewProductRepository(storage)
+    categoryRepository, _ := repository.NewCategoryRepository(storage)
+    currencyRepository, _ := repository.NewCurrencyRepository(storage)
+    cacheInstance := newTtlRecordingCache()
+    ctx := context.Background()
+
+    categoryService := NewCategoryService(categoryRepository, productRepository, cacheInstance, nil)
+    currencyService := NewCurrencyService(currencyRepository, productRepository, cacheInstance, nil, melodyclock.NewSystemClock())
+    productService := NewProductService(productRepository, categoryService, currencyService, cacheInstance, nil, melodyclock.NewSystemClock())
+    userRepository, _ := repository.NewUserRepository(storage)
+    userService := NewUserService(userRepository, cacheInstance, nil)
+
+    if _, listErr := productService.List(ctx); nil != listErr {
+        t.Fatalf("products: %v", listErr)
+    }
+    if _, listErr := categoryService.List(ctx); nil != listErr {
+        t.Fatalf("categories: %v", listErr)
+    }
+    if _, listErr := currencyService.List(ctx); nil != listErr {
+        t.Fatalf("currencies: %v", listErr)
+    }
+    if _, listErr := userService.List(ctx); nil != listErr {
+        t.Fatalf("users: %v", listErr)
+    }
+
+    for _, key := range []string{CacheKeyProductList, CacheKeyCategoryList, CacheKeyCurrencyList, CacheKeyUserList} {
+        writes := cacheInstance.writesFor(key)
+        if 0 == len(writes) || melodybound.Of(entityCacheTtl) != writes[0].ttl {
+            t.Fatalf("expected %s remembered under %s, got %+v", key, entityCacheTtl, writes)
+        }
     }
 }

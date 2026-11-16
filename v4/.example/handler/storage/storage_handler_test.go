@@ -3,10 +3,13 @@ package storage
 import (
     "bytes"
     "context"
+    "encoding/base64"
     "errors"
+    "io"
     nethttp "net/http"
     "net/http/httptest"
     "net/url"
+    "strconv"
     "strings"
     "sync"
     "testing"
@@ -141,6 +144,12 @@ func TestHandlers_AnswerAKeyWithAParentSegmentWith400BeforeTheStore(t *testing.T
 func objectServer(t *testing.T, headStatuses []int, getStatus int) *melodyawss3.Storage {
     t.Helper()
 
+    return objectServerServing(t, headStatuses, getStatus, []byte("stored"))
+}
+
+func objectServerServing(t *testing.T, headStatuses []int, getStatus int, body []byte) *melodyawss3.Storage {
+    t.Helper()
+
     var mutex sync.Mutex
     heads := 0
 
@@ -155,10 +164,10 @@ func objectServer(t *testing.T, headStatuses []int, getStatus int) *melodyawss3.
 
         writer.Header().Set("ETag", "\"9a0364b9e99bb480dd25e1f0284c8555\"")
         writer.Header().Set("Last-Modified", "Mon, 05 Oct 2026 10:00:00 GMT")
-        writer.Header().Set("Content-Length", "6")
+        writer.Header().Set("Content-Length", strconv.Itoa(len(body)))
         writer.WriteHeader(status)
         if nethttp.MethodGet == httpRequest.Method && nethttp.StatusOK == status {
-            _, _ = writer.Write([]byte("stored"))
+            _, _ = writer.Write(body)
         }
     }))
     t.Cleanup(server.Close)
@@ -214,8 +223,16 @@ func getObject(t *testing.T, storage *melodyawss3.Storage) (int, []string) {
         t.Fatalf("expected a response, got %v", handlerErr)
     }
 
+    lastGetBody = nil
+    if reader := response.BodyReader(); nil != reader {
+        lastGetBody, _ = io.ReadAll(reader)
+    }
+
     return response.StatusCode(), logger.recorded()
 }
+
+/* lastGetBody is the body the last getObject answered */
+var lastGetBody []byte
 
 func TestGetHandler_AnswersAStoreRefusalWith500AndJournalsIt(t *testing.T) {
     status, records := getObject(t, objectServer(t, []int{nethttp.StatusForbidden}, nethttp.StatusOK))
@@ -250,3 +267,40 @@ func TestGetHandler_AnswersAMissingObject404(t *testing.T) {
         t.Fatalf("expected the stored object served, got %d and %v", status, records)
     }
 }
+
+func TestGetHandler_AnswersAnObjectByteForByte(t *testing.T) {
+    binary := []byte{0x00, 0xff, 0xfe, 'a', 0x80}
+
+    for name, testCase := range map[string]struct {
+        body     []byte
+        encoding string
+        content  string
+    }{
+        "binary": {body: binary, encoding: "base64", content: base64.StdEncoding.EncodeToString(binary)},
+        "text":   {body: []byte("café"), encoding: "utf-8", content: "café"},
+    } {
+        status, _ := getObject(t, objectServerServing(t, []int{nethttp.StatusOK}, nethttp.StatusOK, testCase.body))
+        if nethttp.StatusOK != status {
+            t.Fatalf("%s: expected 200, got %d", name, status)
+        }
+
+        if false == bytes.Contains(lastGetBody, []byte(`"encoding":"`+testCase.encoding+`"`)) || false == bytes.Contains(lastGetBody, []byte(testCase.content)) {
+            t.Fatalf("%s: expected the content in %s, got %s", name, testCase.encoding, lastGetBody)
+        }
+    }
+}
+
+func TestGetHandler_RefusesAnObjectPastTheInlineBound(t *testing.T) {
+    status, _ := getObject(t, objectServerServing(t, []int{nethttp.StatusOK}, nethttp.StatusOK, bytes.Repeat([]byte("a"), objectInlineMaximumBytes+1)))
+    if nethttp.StatusUnprocessableEntity != status {
+        t.Fatalf("expected an object past the bound refused, got %d", status)
+    }
+}
+
+func TestGetHandler_AnswersAnObjectOfExactlyTheInlineBound(t *testing.T) {
+    status, _ := getObject(t, objectServerServing(t, []int{nethttp.StatusOK}, nethttp.StatusOK, bytes.Repeat([]byte("a"), objectInlineMaximumBytes)))
+    if nethttp.StatusOK != status {
+        t.Fatalf("expected an object of exactly the bound answered, got %d", status)
+    }
+}
+

@@ -20,8 +20,6 @@ var errInvalidLimit = errors.New("limit must be a positive whole number")
 const (
     historyLimitParameter = "limit"
 
-    /* historyDefaultLimit is what a caller who asked for nothing gets: the recent readings. */
-    historyDefaultLimit = 10
 
     /* historyMaximumLimit is the door's own cap: the archive grows for the life of a volume, and a limit without a ceiling would let any signed-in caller choose how much of it this process loads at once. */
     historyMaximumLimit = 100
@@ -35,7 +33,7 @@ func ApiHistoryHandler() melodyhttpcontract.Handler {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", resolveErr), nil
         }
 
-        limit, limitErr := historyLimitOf(request)
+        limit, limitErr := historyLimitOf(request, reportService.PageSize())
         if nil != limitErr {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, limitErr.Error()), nil
         }
@@ -75,15 +73,15 @@ func ApiHistoryHandler() melodyhttpcontract.Handler {
     }
 }
 
-/* historyLimitOf reads the caller's limit, or answers the default when they gave none. It reads the first value with StringAt, so a repeated key at this door answers like a single one. */
-func historyLimitOf(request melodyhttpcontract.Request) (int, error) {
+/* historyLimitOf reads the caller's limit, capped by the report's page size and the door's own cap, and answers that cap when they gave none. It reads the first value with StringAt, so a repeated key at this door answers like a single one. */
+func historyLimitOf(request melodyhttpcontract.Request, pageSize int) (int, error) {
     raw, present, indexErr := melodybag.StringAt(request.Query(), historyLimitParameter, 0)
     if nil != indexErr {
         return 0, errInvalidLimit
     }
 
     if false == present || "" == raw {
-        return historyDefaultLimit, nil
+        return min(pageSize, historyMaximumLimit), nil
     }
 
     limit, parseErr := strconv.Atoi(raw)
@@ -95,8 +93,8 @@ func historyLimitOf(request melodyhttpcontract.Request) (int, error) {
         return 0, errInvalidLimit
     }
 
-    if historyMaximumLimit < limit {
-        return historyMaximumLimit, nil
+    if ceiling := min(pageSize, historyMaximumLimit); ceiling < limit {
+        return ceiling, nil
     }
 
     return limit, nil

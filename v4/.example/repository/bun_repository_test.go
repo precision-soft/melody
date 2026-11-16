@@ -543,7 +543,7 @@ func TestInsertWithMintedIdentifier_GivesUpAfterThreeCollisions(t *testing.T) {
 }
 
 func TestBunRepositories_RefuseASuppliedIdentifierAtTheCeiling(t *testing.T) {
-    for _, identifier := range []string{"cat-9223372036854775806", "cat-9223372036854775807"} {
+    for _, identifier := range []string{"cat-9223372036854775806", "cat-9223372036854775807", "cat-9223372036854775805", "cat-9223372032559808511"} {
         database, recorder := newFakeBunDatabase()
         recorder.queryHook = identifierMintLockAnswering(1)
 
@@ -559,8 +559,8 @@ func TestBunRepositories_RefuseASuppliedIdentifierAtTheCeiling(t *testing.T) {
 
     database, recorder := newFakeBunDatabase()
     recorder.queryHook = identifierMintLockAnswering(1)
-    if createErr := (&bunCategoryRepository{database: database}).Create(context.Background(), entity.NewCategory("cat-9223372036854775805", "Probe")); nil != createErr {
-        t.Fatalf("expected the identifier below the ceiling stored, got %v", createErr)
+    if createErr := (&bunCategoryRepository{database: database}).Create(context.Background(), entity.NewCategory("cat-9223372032559808510", "Probe")); nil != createErr {
+        t.Fatalf("expected the identifier the margin admits stored, got %v", createErr)
     }
 }
 

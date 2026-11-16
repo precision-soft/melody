@@ -1,6 +1,7 @@
 package reporting
 
 import (
+    "errors"
     "context"
     "fmt"
     "strconv"
@@ -67,6 +68,11 @@ func NewCatalogReportService(
     maxItemsPerPage int,
     refreshInterval time.Duration,
 ) (*CatalogReportService, error) {
+    /* the page size caps every listing of the archive, so one below a single reading would answer every listing empty */
+    if 1 > maxItemsPerPage {
+        return nil, errors.New("app.max_items_per_page must be at least 1, got " + strconv.Itoa(maxItemsPerPage))
+    }
+
     return &CatalogReportService{
         formatter:         formatter,
         productService:    productService,
@@ -111,10 +117,11 @@ func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogRead
         if true == ok {
             /* the stamp comes out of the payload, not off the clock, so RecordedAt is the age of the reading; a payload whose stamp cannot be read back falls through to Refresh */
             recordedAt, readable := recordedAtOf(payload)
-            if true == readable {
+            productCount, counted := payloadCountOf(payload, catalogReadingProductCountField)
+            if true == readable && true == counted {
                 return &CatalogReading{
                     RecordedAt: recordedAt,
-                    Headline:   instance.Headline(),
+                    Headline:   instance.Headline(productCount),
                     Payload:    payload,
                     FromCache:  true,
                 }, nil
@@ -150,7 +157,7 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
 
     return &CatalogReading{
         RecordedAt: recordedAt,
-        Headline:   instance.Headline(),
+        Headline:   instance.Headline(len(products)),
         Payload:    payload,
         FromCache:  false,
     }, nil
@@ -262,9 +269,21 @@ func recordedAtOf(payload string) (time.Time, bool) {
     return recordedAt, true
 }
 
-func (instance *CatalogReportService) Headline() string {
-    return instance.formatter.Format(instance.catalogTitle, instance.maxItemsPerPage)
+/* Title is the catalogue's title, the app.catalog_title parameter */
+func (instance *CatalogReportService) Title() string {
+    return instance.catalogTitle
 }
+
+/* Headline is the reading's sentence: the catalogue's title and the products the reading counted */
+func (instance *CatalogReportService) Headline(productCount int) string {
+    return instance.formatter.Format(instance.catalogTitle, productCount)
+}
+
+/* PageSize is the most readings a listing of the archive answers, and what it answers when its caller asks for no count: the app.max_items_per_page parameter */
+func (instance *CatalogReportService) PageSize() int {
+    return instance.maxItemsPerPage
+}
+
 
 func (instance *CatalogReportService) RefreshInterval() time.Duration {
     return instance.refreshInterval

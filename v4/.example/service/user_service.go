@@ -48,7 +48,7 @@ func (instance *UserService) List(ctx context.Context) ([]*entity.User, error) {
         instance.cache,
         CacheKeyUserList,
         melodycache.RememberConfig{
-            Ttl: melodybound.UnlimitedDuration(),
+            Ttl: melodybound.Of(entityCacheTtl),
         },
         func(ctx context.Context) (any, error) {
             return instance.userRepository.All(ctx)

@@ -797,3 +797,64 @@ func TestCatalogReportServiceRefresh_ListsTheProductsThroughItsContext(t *testin
         t.Fatalf("expected the reading to end on its caller's context, got %v", refreshErr)
     }
 }
+
+/* the headline counts what the reading counted, fresh and served from the cache alike, never the page size the service is configured with */
+func TestCatalogReadingHeadlineCountsTheProductsTheReadingCounted(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
+    cacheInstance := &readingCache{values: map[string]any{}}
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    fresh, refreshErr := reportService.Refresh(context.Background())
+    if nil != refreshErr || "catalog: 0 entries" != fresh.Headline {
+        t.Fatalf("expected the fresh reading to count its products, got %v %v", fresh, refreshErr)
+    }
+
+    cached, readErr := reportService.Reading(context.Background())
+    if nil != readErr || false == cached.FromCache || "catalog: 0 entries" != cached.Headline {
+        t.Fatalf("expected the cached reading to keep the count it was taken with, got %+v %v", cached, readErr)
+    }
+
+    if 10 != reportService.PageSize() {
+        t.Fatalf("expected the page size the service was built with, got %d", reportService.PageSize())
+    }
+}
+
+type countedProductRepository struct {
+    emptyProductRepository
+    count int
+}
+
+func (instance *countedProductRepository) All(ctx context.Context) ([]*entity.Product, error) {
+    products := make([]*entity.Product, 0, instance.count)
+    for index := 0; index < instance.count; index++ {
+        products = append(products, &entity.Product{})
+    }
+
+    return products, nil
+}
+
+/* the headline counts the products, read back from the cached payload's products field, never the journal's count */
+func TestCatalogReadingHeadlineCountsTheProductsNotTheJournal(t *testing.T) {
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC))
+    cacheInstance := &readingCache{values: map[string]any{}}
+
+    reportService, buildErr := NewCatalogReportService(NewReportFormatter(), service.NewProductService(&countedProductRepository{count: 3}, nil, nil, cacheInstance, nil, clockInstance), &stubJournalRepository{}, cacheInstance, clockInstance, "catalog", 10, time.Minute)
+    if nil != buildErr {
+        t.Fatalf("new report service: %v", buildErr)
+    }
+
+    fresh, _ := reportService.Refresh(context.Background())
+    cached, _ := reportService.Reading(context.Background())
+    if "catalog: 3 entries" != fresh.Headline || "catalog: 3 entries" != cached.Headline || false == cached.FromCache {
+        t.Fatalf("expected both readings to count three products, got %q and %q", fresh.Headline, cached.Headline)
+    }
+}
+
+func TestNewCatalogReportService_RefusesAPageSizeBelowOne(t *testing.T) {
+    for _, pageSize := range []int{0, -5} {
+        if _, buildErr := NewCatalogReportService(NewReportFormatter(), nil, nil, nil, nil, "catalog", pageSize, time.Minute); nil == buildErr {
+            t.Fatalf("%d: expected the page size refused", pageSize)
+        }
+    }
+}
+
