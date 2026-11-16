@@ -102,6 +102,16 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Build the kernel over `event.NewEventDispatcher`, or implement both capabilities on the dispatcher, forwarding to the one it wraps; register the transports through `messagebus.RegisterTransports`, which registers the closer beside them, and declare no teardown dependency from the closer to a bus.
 
+### Lock: a stopped process keeps its lock until its work returns
+
+**What changed.** After a stop, [`RunExclusive`](../lock/run_exclusive.go) and the [`LeaderGate`](../lock/leader_gate.go) keep renewing the lease while the callback or a blocking `OnElected` winds down, up to `StopRenewalLimit` (30s by default), where the stop ended the renewal at once.
+
+**Symptom.** A deployment that relied on a peer taking the lock over at the stop now waits for the stopping instance's work to return, or for the limit. A callback that ignores its context past the limit makes the run answer `exclusive run lost the lock lease while running`.
+
+A lock store closed by the teardown while the work still winds down now reads as a lost lease (`OnLost`, the run's error), where the stop swallowed it.
+
+**Remedy.** Keep the wind-down short, set `StopRenewalLimit` (also on `ExclusiveCommandConfig`) to the application's teardown timeout and below the orchestrator's grace period, or `bound.UnlimitedDuration()` to renew until the work returns; keep the locker's client open until the work has returned.
+
 ### Cache: a counter carries its ttl
 
 **What changed.** [`cachecontract.Cache`](../cache/contract/cache.go) and `Backend` take `Increment(ctx, key, delta, options)` and `Decrement(ctx, key, delta, options)`, the options a [`CounterOptions`](../cache/contract/counter.go): `Ttl`, read as a write's ttl (at least 1s, `bound.UnlimitedDuration()` for none, absent refused), and `RefreshTtl`, false for a fixed window written when the call creates the key or finds it without an expiry, true for a sliding window rewritten on every call. The in-memory and the redis backends implement both, the redis one in one script.

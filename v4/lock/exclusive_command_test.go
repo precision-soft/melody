@@ -2,6 +2,8 @@ package lock
 
 import (
     "context"
+    "fmt"
+    "strings"
     "testing"
     "time"
 
@@ -244,5 +246,24 @@ func TestExclusiveCommand_HandsItsReleaseTimeoutToTheRelease(t *testing.T) {
 
     if remaining := <-locker.remaining; remaining > 2*time.Second || remaining <= time.Second {
         t.Fatalf("expected the release to have just under 2s left, got %s", remaining)
+    }
+}
+
+func TestNewExclusiveCommand_RefusesAStopRenewalLimitBelowTheRefreshInterval(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        if false == strings.Contains(fmt.Sprint(recovered), "stop renewal limit") {
+            t.Fatalf("expected the limit refused at construction, got %v", recovered)
+        }
+    }()
+
+    NewExclusiveCommand(&recordingCommand{name: "job"}, NewInMemoryLocker(clock.NewSystemClock()), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute), StopRenewalLimit: bound.Of(time.Second)})
+}
+
+func TestNewExclusiveCommand_HandsItsStopRenewalLimitToTheRun(t *testing.T) {
+    command := NewExclusiveCommand(&recordingCommand{name: "job"}, NewInMemoryLocker(clock.NewSystemClock()), ExclusiveCommandConfig{Ttl: bound.Of(time.Minute), StopRenewalLimit: bound.Of(5 * time.Minute)})
+
+    if bound.Of(5*time.Minute) != command.exclusiveConfig.StopRenewalLimit {
+        t.Fatalf("expected the limit handed to the run, got %v", command.exclusiveConfig.StopRenewalLimit)
     }
 }

@@ -406,7 +406,7 @@ func waitForRefreshInFlight(childRuntime runtimecontract.Runtime, entered <-chan
     }
 }
 
-/* A Refresh already blocked on an unresponsive backend when callback returns must be interrupted: closing refreshDone alone cannot reach it, so RunExclusive would wait on the goroutine forever while holding the lock. Cancelling the child context before Wait unblocks it, and the resulting error must read as shutdown, not as a lost lease. The ttl leaves the refresh, entered at half of it, a quarter of it before the demotion instant, wide enough for callback to return on a loaded runner. */
+/* A Refresh already blocked on an unresponsive backend when callback returns must be interrupted: closing refreshDone alone cannot reach it, so RunExclusive would wait on the goroutine forever while holding the lock. Cancelling the renewal's context before Wait unblocks it, and the resulting error must read as the run's end, not as a lost lease. The ttl leaves the refresh, entered at half of it, a quarter of it before the demotion instant, wide enough for callback to return on a loaded runner. */
 func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
     entered := make(chan struct{})
     locker := &blockingRefreshLocker{entered: entered}
@@ -438,7 +438,7 @@ func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
     }
 }
 
-/* A SIGTERM cancels the runtime the refresh loop calls the backend with, so a refresh in flight fails with that cancellation. That is the shutdown itself, not a lost lease: reporting it turns every graceful stop of a long-running exclusive command into an error a cron fleet reads as a failed run. The ttl leaves the refresh, entered at half of it, a quarter of it before the demotion instant, wide enough for callback to cancel the parent on a loaded runner. */
+/* A SIGTERM does not reach the refresh loop: the refresh in flight stays blocked until callback returns and the join cancels it. That cancellation is the run's end, not a lost lease: reporting it would turn every graceful stop of a long-running exclusive command into an error a cron fleet reads as a failed run. The ttl leaves the refresh, entered at half of it, a quarter of it before the demotion instant, wide enough for callback to cancel the parent on a loaded runner. */
 func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
     parentContext, cancelParent := context.WithCancel(context.Background())
     defer cancelParent()
@@ -1403,5 +1403,166 @@ func TestRunExclusive_AReleaseTimeoutTheRuleRefusesIsRefusedBeforeTheLockIsCreat
         if true == acquired || nil == runErr || "ExclusiveConfig.ReleaseTimeout" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
             t.Fatalf("expected %s to be refused naming ExclusiveConfig.ReleaseTimeout, got %v %v", refused, acquired, runErr)
         }
+    }
+}
+
+func TestRunExclusive_RenewsTheLeaseWhileTheCallbackWindsDownAfterAStop(t *testing.T) {
+    parentContext, cancelParent := context.WithCancel(context.Background())
+    defer cancelParent()
+
+    inner := NewInMemoryLocker(clock.NewSystemClock())
+    locker := &countingRefreshLocker{inner: inner}
+
+    var atStop int64
+    ran, err := RunExclusive(testRuntimeWithContext(parentContext), locker, "job:wind-down", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond)}, func(childRuntime runtimecontract.Runtime) error {
+        cancelParent()
+        <-childRuntime.Context().Done()
+        atStop = locker.refreshes()
+
+        time.Sleep(120 * time.Millisecond)
+
+        return nil
+    })
+    if false == ran || nil != err {
+        t.Fatalf("expected a clean run, got %v %v", ran, err)
+    }
+
+    if renewed := locker.refreshes() - atStop; renewed < 2 {
+        t.Fatalf("expected the lease renewed while the callback wound down, got %d renewals after the stop", renewed)
+    }
+
+    if acquired, _ := inner.CreateLock("job:wind-down", bound.Of(time.Second)).Acquire(testRuntimeWithContext(context.Background())); false == acquired {
+        t.Fatal("expected the lock released once the callback returned")
+    }
+}
+
+func TestRunExclusive_StopsRenewingPastTheStopRenewalLimit(t *testing.T) {
+    parentContext, cancelParent := context.WithCancel(context.Background())
+    defer cancelParent()
+
+    locker := &countingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+
+    var pastLimit int64
+    _, err := RunExclusive(testRuntimeWithContext(parentContext), locker, "job:past-limit", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond), StopRenewalLimit: bound.Of(60 * time.Millisecond)}, func(childRuntime runtimecontract.Runtime) error {
+        cancelParent()
+
+        time.Sleep(100 * time.Millisecond)
+        pastLimit = locker.refreshes()
+        time.Sleep(100 * time.Millisecond)
+
+        return nil
+    })
+
+    if locker.refreshes() != pastLimit {
+        t.Fatalf("expected no renewal past the limit, got %d after it", locker.refreshes()-pastLimit)
+    }
+
+    if nil == err || false == strings.Contains(err.Error(), "lost the lock lease") || false == strings.Contains(err.Error()+errorChainText(err), "stop renewal limit") {
+        t.Fatalf("expected the run to name the stop renewal limit, got %v", err)
+    }
+}
+
+func TestRunExclusive_ALeaseLostDuringTheWindDownIsReported(t *testing.T) {
+    parentContext, cancelParent := context.WithCancel(context.Background())
+    defer cancelParent()
+
+    locker := &switchableRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+
+    _, err := RunExclusive(testRuntimeWithContext(parentContext), locker, "job:lost-in-wind-down", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond)}, func(childRuntime runtimecontract.Runtime) error {
+        locker.fail.Store(true)
+        cancelParent()
+
+        time.Sleep(150 * time.Millisecond)
+
+        return nil
+    })
+
+    if nil == err || false == strings.Contains(err.Error(), "lost the lock lease") {
+        t.Fatalf("expected the lease lost during the wind-down reported, got %v", err)
+    }
+}
+
+func TestRunExclusive_RefusesAStopRenewalLimitBelowTheRefreshInterval(t *testing.T) {
+    _, err := RunExclusive(testRuntimeWithContext(context.Background()), NewInMemoryLocker(clock.NewSystemClock()), "job:limit", ExclusiveConfig{Ttl: bound.Of(time.Second), StopRenewalLimit: bound.Of(100 * time.Millisecond)}, func(runtimecontract.Runtime) error {
+        t.Fatal("expected the callback not run")
+
+        return nil
+    })
+
+    exceptionError, isExceptionError := err.(*exception.Error)
+    if false == isExceptionError || "ExclusiveConfig.StopRenewalLimit" != exceptionError.Context()["field"] {
+        t.Fatalf("expected the limit refused naming its field, got %v", err)
+    }
+}
+
+func errorChainText(err error) string {
+    text := ""
+    for cause := errors.Unwrap(err); nil != cause; cause = errors.Unwrap(cause) {
+        text += " | " + cause.Error()
+    }
+
+    if joined, isJoined := errors.Unwrap(err).(interface{ Unwrap() []error }); true == isJoined {
+        for _, member := range joined.Unwrap() {
+            text += " | " + member.Error()
+        }
+    }
+
+    return text
+}
+
+/* the join cancels the renewal's own context, which the stop does not reach, so a refresh blocked when callback returns is interrupted at once instead of waiting out its budget with the lock held */
+func TestRunExclusive_TheJoinInterruptsARefreshBlockedAtReturn(t *testing.T) {
+    entered := make(chan struct{})
+    locker := &blockingRefreshLocker{entered: entered}
+
+    var returnedAt time.Time
+    _, runErr := RunExclusive(testRuntimeWithContext(context.Background()), locker, "blocking-join", ExclusiveConfig{Ttl: bound.Of(4 * time.Second)}, func(childRuntime runtimecontract.Runtime) error {
+        waitErr := waitForRefreshInFlight(childRuntime, entered)
+        returnedAt = time.Now()
+
+        return waitErr
+    })
+    if nil != runErr {
+        t.Fatalf("expected a clean run, got %v", runErr)
+    }
+
+    if waited := time.Since(returnedAt); waited > 500*time.Millisecond {
+        t.Fatalf("expected the join to interrupt the blocked refresh at once, waited %v", waited)
+    }
+}
+
+func TestRunExclusive_TheStopRenewalLimitRunsFromTheStopAndWarnsAtOnce(t *testing.T) {
+    parentContext, cancelParent := context.WithCancel(context.Background())
+    defer cancelParent()
+
+    runtimeInstance, logger := runtimeWithRecordingLogger(parentContext)
+    locker := &countingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+
+    var atStop, beforeLimit int64
+    warnedBeforeReturn := false
+    _, err := RunExclusive(runtimeInstance, locker, "job:limit-from-stop", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond), StopRenewalLimit: bound.Of(80 * time.Millisecond)}, func(childRuntime runtimecontract.Runtime) error {
+        time.Sleep(120 * time.Millisecond)
+        cancelParent()
+        atStop = locker.refreshes()
+
+        time.Sleep(50 * time.Millisecond)
+        beforeLimit = locker.refreshes()
+
+        time.Sleep(150 * time.Millisecond)
+        warnedBeforeReturn = logger.hasMessageContaining("stop renewal limit")
+
+        return nil
+    })
+
+    if beforeLimit <= atStop {
+        t.Fatalf("expected renewals in the limit counted from the stop, got %d at the stop and %d before the limit", atStop, beforeLimit)
+    }
+
+    if false == warnedBeforeReturn {
+        t.Fatal("expected the warning written when the limit passed, before the callback returned")
+    }
+
+    if nil == err {
+        t.Fatal("expected the run to answer the limit")
     }
 }

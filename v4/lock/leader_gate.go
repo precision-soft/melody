@@ -47,10 +47,13 @@ type LeaderGateConfig struct {
     /* ReleaseTimeout bounds the release at the end of a term, detached from the term's context: 5s by default, at least 1ms, unlimited refused. */
     ReleaseTimeout bound.Duration
 
+    /* StopRenewalLimit is how long after the stop the lease is still renewed while OnElected winds down: the stop ends the term's context, not the renewal, so no peer is elected while the hook still works. 30s by default, raised to the refresh interval when that is longer, the literal to align with the application's teardown timeout; when set, at least 1ms and not below RefreshInterval; unlimited renews until the hook returns. Past it the renewal ends and the lease lapses by itself; OnLost receives the error naming the limit. */
+    StopRenewalLimit bound.Duration
+
     /* OnElected runs on the Run goroutine right after the gate becomes leader, with the lease renewal already running. Its runtime carries a context cancelled when the lease is lost, and while it blocks the gate cannot campaign again. A panic out of it ends the term: the lock is released, OnLost receives the panic as the cause, and the gate campaigns again after RetryInterval. */
     OnElected func(runtimeInstance runtimecontract.Runtime)
 
-    /* OnLost runs on the Run goroutine right after leadership is lost — to a failed renewal, whose error is the cause, or to a panic out of OnElected, whose recovered value reaches it as the cause of a "leader gate hook panicked" error; when both happen in one term the renewal error wins and the panic is journaled beside it. It does not run on a clean shutdown. Left nil, the gate logs the lost term through the runtime's logger instead; wiring the hook replaces that record. */
+    /* OnLost runs on the Run goroutine right after leadership is lost — to a failed renewal, whose error is the cause, or to a panic out of OnElected, whose recovered value reaches it as the cause of a "leader gate hook panicked" error; when both happen in one term the renewal error wins and the panic is journaled beside it. It does not run on a clean shutdown, nor for OnElected panicking on its stopped context; it does when a stopped term ends past StopRenewalLimit or loses its lease while OnElected winds down. Left nil, the gate logs the lost term through the runtime's logger instead; wiring the hook replaces that record. */
     OnLost func(runtimeInstance runtimecontract.Runtime, cause error)
 
     /* OnCampaignError runs on the Run goroutine for every campaign that could not ask the store who leads; the gate then backs off and campaigns again. Left nil, the gate logs each failed campaign, since an outage and a misconfiguration both look like a deployment that elects no leader. Wiring the hook replaces that record. */
@@ -86,6 +89,7 @@ type leaderGateSettings struct {
     maxConsecutiveRefreshFailures int
     refreshFailuresUnlimited      bool
     maxCampaignBackoff            time.Duration
+    stopRenewalLimit              bound.Resolved[time.Duration]
     onElected                     func(runtimeInstance runtimecontract.Runtime)
     onLost                        func(runtimeInstance runtimecontract.Runtime, cause error)
     onCampaignError               func(runtimeInstance runtimecontract.Runtime, cause error)
@@ -126,6 +130,8 @@ func NewLeaderGate(locker lockcontract.Locker, name string, config LeaderGateCon
         timeAnchor: time.Now(),
     }
 }
+
+const leaderGateStopRenewalLimitField = "LeaderGateConfig.StopRenewalLimit"
 
 func resolveLeaderGateConfig(config LeaderGateConfig) (leaderGateSettings, error) {
     ttl, ttlErr := bound.Resolve(config.Ttl, leaderGateTtlRule)
@@ -195,6 +201,11 @@ func resolveLeaderGateConfig(config LeaderGateConfig) (leaderGateSettings, error
         return leaderGateSettings{}, releaseTimeoutErr
     }
 
+    stopRenewalLimit, stopRenewalLimitErr := resolveStopRenewalLimit(leaderGateStopRenewalLimitField, config.StopRenewalLimit, refreshInterval.Value)
+    if nil != stopRenewalLimitErr {
+        return leaderGateSettings{}, stopRenewalLimitErr
+    }
+
     return leaderGateSettings{
         releaseTimeout:                releaseTimeout.Value,
         ttl:                           ttl.Value,
@@ -204,6 +215,7 @@ func resolveLeaderGateConfig(config LeaderGateConfig) (leaderGateSettings, error
         maxConsecutiveRefreshFailures: maxConsecutiveRefreshFailures.Value,
         refreshFailuresUnlimited:      maxConsecutiveRefreshFailures.Unlimited,
         maxCampaignBackoff:            maxCampaignBackoff.Value,
+        stopRenewalLimit:              stopRenewalLimit,
         onElected:                     config.OnElected,
         onLost:                        config.OnLost,
         onCampaignError:               config.OnCampaignError,
@@ -323,6 +335,11 @@ func (instance *LeaderGate) Run(runtimeInstance runtimecontract.Runtime) error {
         lostCause := instance.holdTerm(runtimeInstance, lock, acquireIssuedAt)
 
         if nil != runContext.Err() {
+            /* a term the stop ended can still carry a renewal cause, the stop renewal limit passed or the lease lost while OnElected wound down, and the operator must see it; a hook panicking on its stopped context was journaled by the shield and is no lost term */
+            if _, isHookPanic := leaderGateHookPanicName(lostCause); nil != lostCause && false == isHookPanic {
+                instance.reportLostWhileStopping(runtimeInstance, lostCause)
+            }
+
             return nil
         }
 
@@ -405,6 +422,22 @@ func (instance *LeaderGate) reportLost(runtimeInstance runtimecontract.Runtime, 
     )
 }
 
+/* reportLostWhileStopping hands a stopped term's renewal cause to OnLost, or records it, without saying the gate campaigns again: Run returns next */
+func (instance *LeaderGate) reportLostWhileStopping(runtimeInstance runtimecontract.Runtime, cause error) {
+    if nil != instance.settings.onLost {
+        instance.runHookShielded(runtimeInstance, "OnLost", func() {
+            instance.settings.onLost(runtimeInstance, cause)
+        })
+
+        return
+    }
+
+    instance.gateLogger(runtimeInstance).Warning(
+        "leader gate lost its term while stopping",
+        exception.LogContext(cause, exception.LogContextConfig{Extra: exceptioncontract.Context{"name": instance.name}}),
+    )
+}
+
 /* leaderGateHookPanicName answers the hook a cause is the shield's report of, the error runHookShielded answers for a panic */
 func leaderGateHookPanicName(cause error) (string, bool) {
     hookErr, isMelodyErr := cause.(*exception.Error)
@@ -459,12 +492,18 @@ func (instance *LeaderGate) gateLogger(runtimeInstance runtimecontract.Runtime) 
     return logger
 }
 
-/* lead holds the leadership term: it starts the lease renewal, runs OnElected underneath it, and blocks until the run context ends (nil), a renewal fails, or OnElected panics (the cause), so the gate demotes and campaigns again. The renewal runs before OnElected is invoked, so a hook that outlasts the ttl never leaves the lease unrenewed; a panicking hook ends the term, so no gate renews a lease under no work. */
+/* lead holds the leadership term: it starts the lease renewal, runs OnElected underneath it, and blocks until the run context ends and OnElected has returned (nil, or the renewal cause of a term the stop ended: the stop renewal limit passed or the lease lost while the hook wound down), a renewal fails, or OnElected panics (the cause), so the gate demotes and campaigns again. The renewal runs on a context the stop does not cancel, so the lease is held while the hook winds down. The renewal runs before OnElected is invoked, so a hook that outlasts the ttl never leaves the lease unrenewed; a panicking hook ends the term, so no gate renews a lease under no work. */
 func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) error {
     termContext, cancel := context.WithCancel(runtimeInstance.Context())
     defer cancel()
 
     termRuntime := runtime.New(termContext, runtimeInstance.Scope(), runtimeInstance.Container())
+
+    /* the renewal is detached from the stop, which ends OnElected's work and not the lease the term holds; the term cancels it once the hook has returned and the term has ended */
+    renewalContext, cancelRenewal := context.WithCancel(context.WithoutCancel(runtimeInstance.Context()))
+    defer cancelRenewal()
+
+    renewalRuntime := runtime.New(renewalContext, runtimeInstance.Scope(), runtimeInstance.Container())
 
     var refreshFailure error
     var waitGroup sync.WaitGroup
@@ -487,10 +526,10 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
             }
         }()
 
-        refreshFailure = instance.refreshWhileLeading(termRuntime, lock, func() {
+        refreshFailure = instance.refreshWhileLeading(renewalRuntime, lock, func() {
             instance.leaveTerm()
             cancel()
-        })
+        }, newStopRenewalWatch(runtimeInstance.Context(), instance.settings.stopRenewalLimit, instance.settings.sessionMode))
         if nil != refreshFailure {
             /* the lease is gone, so the claim is dropped here rather than where the term unwinds, which waits for OnElected to return; ending the term then stops OnElected */
             instance.leaveTerm()
@@ -511,8 +550,9 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
 
     <-termContext.Done()
 
-    /* cancel before Wait, so a renewal blocked on an unresponsive backend is interrupted rather than wedging the campaign loop */
+    /* OnElected has returned, it runs on this goroutine; cancel before Wait, so a renewal blocked on an unresponsive backend is interrupted rather than wedging the campaign loop */
     cancel()
+    cancelRenewal()
     waitGroup.Wait()
 
     /* a lost lease is the stronger fact, and the failure the operator sees first */
@@ -523,8 +563,8 @@ func (instance *LeaderGate) lead(runtimeInstance runtimecontract.Runtime, lock l
     return hookFailure
 }
 
-/* refreshWhileLeading renews the held lease at the configured cadence until the term context ends, returning the renewal failure that ends the term. The lease clock is the demotion's: once the lease last written reaches its demotion instant, half a cadence before it lapses, with no renewal landed, the term ends — by a timer, whatever the store is doing, with every renewal bounded to that instant — so OnElected is told to stop while nobody else can yet be elected. A failed renewal is retried once, halfway to that instant; each landed renewal moves the lease, dated from the instant it was issued. */
-func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock, demote func()) error {
+/* refreshWhileLeading renews the held lease at the configured cadence until the renewal context ends, which the term cancels once OnElected has returned, or past StopRenewalLimit after the stop, returning the renewal failure that ends the term. The lease clock is the demotion's: once the lease last written reaches its demotion instant, half a cadence before it lapses, with no renewal landed, the term ends — by a timer, whatever the store is doing, with every renewal bounded to that instant — so OnElected is told to stop while nobody else can yet be elected. A failed renewal is retried once, halfway to that instant; each landed renewal moves the lease, dated from the instant it was issued. */
+func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock, demote func(), stopWatch *stopRenewalWatch) error {
     refreshTtl := instance.settings.ttl
     if true == instance.settings.sessionMode {
         /* session mode: a session locker ignores this ttl, while a lease locker rewrites the lease, so it renews for twice the probe cadence (see sessionProbeTtlFactor) */
@@ -551,6 +591,7 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
         refreshTimeout,
     )
     defer clock.stop()
+    defer stopWatch.stop()
 
     consecutiveFailureCount := 0
 
@@ -558,6 +599,16 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
         select {
         case <-runtimeInstance.Context().Done():
             return nil
+        case <-stopWatch.stopped():
+            stopWatch.arm()
+
+            continue
+        case <-stopWatch.expired():
+            if nil != runtimeInstance.Context().Err() {
+                return nil
+            }
+
+            return stopWatch.expiredError(runtimeInstance, instance.name, leaderGateStopRenewalLimitField)
         case <-clock.demotion():
             /* select picks at random among ready cases: a term the run context already ended has no lease left to lose */
             if nil != runtimeInstance.Context().Err() {
@@ -567,6 +618,14 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
             return clock.demotionError()
         case <-ticker.C:
         case <-clock.retry():
+        }
+
+        if true == stopWatch.passed() {
+            if nil != runtimeInstance.Context().Err() {
+                return nil
+            }
+
+            return stopWatch.expiredError(runtimeInstance, instance.name, leaderGateStopRenewalLimitField)
         }
 
         refreshIssuedAt := time.Now()
@@ -601,7 +660,7 @@ func (instance *LeaderGate) refreshWhileLeading(runtimeInstance runtimecontract.
             continue
         }
 
-        /* a shutdown cancels the context the backend is called with, so a renewal failing with the cancellation is the stop itself, not a lost lease */
+        /* the term's join cancels the context the backend is called with once OnElected has returned, so a renewal failing with that cancellation is the term's end, not a lost lease; a stop does not cancel it */
         if nil != runtimeInstance.Context().Err() {
             return nil
         }

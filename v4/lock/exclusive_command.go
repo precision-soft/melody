@@ -26,6 +26,9 @@ type ExclusiveCommandConfig struct {
 
     /* ReleaseTimeout bounds the release after the command returns, as ExclusiveConfig.ReleaseTimeout reads it: 5s by default, at least 1ms, unlimited refused. */
     ReleaseTimeout bound.Duration
+
+    /* StopRenewalLimit is how long after the stop the lease is still renewed while the command winds down, as ExclusiveConfig.StopRenewalLimit reads it: 30s by default, raised to the refresh interval when that is longer; when set, at least 1ms and not below the refresh interval; unlimited renews until the command returns. A cron runner granting its commands a longer grace sets it to that grace. */
+    StopRenewalLimit bound.Duration
 }
 
 var exclusiveCommandTtlRule = bound.Rule[time.Duration]{
@@ -77,6 +80,11 @@ func NewExclusiveCommand(
         exception.Panic(exception.FromError(releaseTimeoutErr))
     }
 
+    refreshInterval, _ := resolveRefreshSchedule(ttl)
+    if _, stopRenewalLimitErr := resolveStopRenewalLimit("ExclusiveCommandConfig.StopRenewalLimit", config.StopRenewalLimit, refreshInterval); nil != stopRenewalLimitErr {
+        exception.Panic(exception.FromError(stopRenewalLimitErr))
+    }
+
     lockName := config.LockName
     if "" == lockName {
         lockName = exclusiveCommandLockNamePrefix + command.Name()
@@ -87,8 +95,9 @@ func NewExclusiveCommand(
         locker:   locker,
         lockName: lockName,
         exclusiveConfig: ExclusiveConfig{
-            Ttl:            ttl.Limit(),
-            ReleaseTimeout: releaseTimeout.Limit(),
+            Ttl:              ttl.Limit(),
+            ReleaseTimeout:   releaseTimeout.Limit(),
+            StopRenewalLimit: config.StopRenewalLimit,
         },
     }
 }

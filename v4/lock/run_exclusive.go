@@ -34,6 +34,9 @@ type ExclusiveConfig struct {
     /* Ttl is the lease handed to the locker, the crash safety and never the run cadence, since the lease is refreshed at half of it while the callback runs and released after it: 30s by default, at least 2ms, unlimited selecting a session-style lock, which holds until its connection drops and is probed every 15s instead of renewed. */
     Ttl bound.Duration
 
+    /* StopRenewalLimit is how long after the stop the lease is still renewed while callback winds down: the stop cancels callback's context, not the renewal, so no peer acquires the lock while the work still runs. 30s by default, raised to the refresh interval when that is longer, the literal to align with the application's teardown timeout; when set, at least 1ms and not below the refresh interval; unlimited renews until callback returns. Past it the renewal ends, the lease lapses by itself and the run answers the error naming the limit. */
+    StopRenewalLimit bound.Duration
+
     /* ReleaseTimeout bounds the release that runs after the callback, detached from the caller's context, since a release skipped on that cancellation would hold the lock until the ttl lapses, losing the next tick: 5s by default, at least 1ms, unlimited refused. It bounds the runtime Release is handed; the mysql and pgsql lockers end their release at the earlier of this deadline, while it is still ahead, and their own LockerConfig.ReleaseTimeout. */
     ReleaseTimeout bound.Duration
 }
@@ -48,13 +51,15 @@ var exclusiveTtlRule = bound.Rule[time.Duration]{
 /* defaultReleaseTimeout bounds a detached release where the caller declares none: the default of ExclusiveConfig.ReleaseTimeout, and the bound of the leader gate's release. */
 const defaultReleaseTimeout = 5 * time.Second
 
+const exclusiveStopRenewalLimitField = "ExclusiveConfig.StopRenewalLimit"
+
 var exclusiveReleaseTimeoutRule = bound.Rule[time.Duration]{
     Name:    "ExclusiveConfig.ReleaseTimeout",
     Default: defaultReleaseTimeout,
     Minimum: bound.TimeoutMinimum,
 }
 
-/* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. The configuration is resolved before the lock is created, and a refusal is answered as the error, naming the field. It returns (false, nil) without running callback when another holder owns the lock, so N cron-launched instances run the command exactly once per tick. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled at the lease's demotion instant, a quarter of the ttl before the lease last written lapses, when no renewal has landed by then, so the callback is told to stop before another instance can acquire the lock; a failed refresh is retried once before that instant. An unlimited ttl selects the session-lock behavior: no lease to extend, only a liveness probe at defaultSessionProbeInterval. */
+/* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. The configuration is resolved before the lock is created, and a refusal is answered as the error, naming the field. It returns (false, nil) without running callback when another holder owns the lock, so N cron-launched instances run the command exactly once per tick. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled at the lease's demotion instant, a quarter of the ttl before the lease last written lapses, when no renewal has landed by then, so the callback is told to stop before another instance can acquire the lock; a failed refresh is retried once before that instant. An unlimited ttl selects the session-lock behavior: no lease to extend, only a liveness probe at defaultSessionProbeInterval. A stop cancels callback's runtime, not the renewal: the lease is still renewed while callback winds down, up to ExclusiveConfig.StopRenewalLimit, past which the run answers the error naming the limit; a session lock's probe runs until callback returns. */
 func RunExclusive(
     runtimeInstance runtimecontract.Runtime,
     locker lockcontract.Locker,
@@ -90,6 +95,12 @@ func RunExclusive(
         return false, releaseTimeoutErr
     }
 
+    refreshInterval, _ := resolveRefreshSchedule(ttl)
+    stopRenewalLimit, stopRenewalLimitErr := resolveStopRenewalLimit(exclusiveStopRenewalLimitField, config.StopRenewalLimit, refreshInterval)
+    if nil != stopRenewalLimitErr {
+        return false, stopRenewalLimitErr
+    }
+
     lock := locker.CreateLock(name, ttl.Limit())
 
     /* the lease is dated from the instant the acquire is issued, since the store starts it somewhere inside the call, as enterTerm does on the leader gate */
@@ -117,6 +128,12 @@ func RunExclusive(
 
     childRuntime := runtime.New(childContext, runtimeInstance.Scope(), runtimeInstance.Container())
 
+    /* the renewal is detached from the stop, which ends callback's work and not the lease it holds; the join below is what cancels it */
+    renewalContext, cancelRenewal := context.WithCancel(context.WithoutCancel(runtimeInstance.Context()))
+    defer cancelRenewal()
+
+    renewalRuntime := runtime.New(renewalContext, runtimeInstance.Scope(), runtimeInstance.Container())
+
     refreshDone := make(chan struct{})
     var refreshFailure error
     var waitGroup sync.WaitGroup
@@ -125,9 +142,10 @@ func RunExclusive(
     var joinOnce sync.Once
     joinRefresh := func() {
         joinOnce.Do(func() {
-            /* close before cancel, so a refresh failing because of the cancel reads as shutdown, not a lost lease; cancel before Wait, so a refresh blocked on an unresponsive backend is interrupted while the lock is still held */
+            /* close before cancel, so a refresh failing because of the cancel reads as the run's end, not a lost lease; cancel before Wait, so a refresh blocked on an unresponsive backend is interrupted while the lock is still held */
             close(refreshDone)
             cancel()
+            cancelRenewal()
             waitGroup.Wait()
         })
     }
@@ -150,7 +168,7 @@ func RunExclusive(
             }
         }()
 
-        refreshFailure = refreshWhileHeld(childRuntime, lock, ttl, acquireIssuedAt, refreshDone, cancel)
+        refreshFailure = refreshWhileHeld(renewalRuntime, lock, ttl, acquireIssuedAt, refreshDone, cancel, newStopRenewalWatch(runtimeInstance.Context(), stopRenewalLimit, ttl.Unlimited), name)
         if nil != refreshFailure {
             /* the lease could not be extended, so callback is stopped rather than left working beside whoever may hold the lock now */
             cancel()
@@ -184,6 +202,8 @@ func refreshWhileHeld(
     acquireIssuedAt time.Time,
     done <-chan struct{},
     demote func(),
+    stopWatch *stopRenewalWatch,
+    name string,
 ) error {
     refreshInterval, refreshTtl := resolveRefreshSchedule(ttl)
     refreshTimeout := resolveRefreshTimeout(refreshInterval)
@@ -195,8 +215,9 @@ func refreshWhileHeld(
     /* a session probe has no lease clock to arm, and a failed probe is still judged on the lease it believes it wrote */
     clock := newLeaseDemotionClock(false == ttl.Unlimited, true, acquireIssuedAt.Add(refreshTtl), refreshInterval, refreshTimeout)
     defer clock.stop()
+    defer stopWatch.stop()
 
-    /* the run ended: its callback returned, or a shutdown cancelled its runtime */
+    /* the run ended: its callback returned and the join cancelled the renewal's runtime */
     settled := func() bool {
         select {
         case <-done:
@@ -212,6 +233,16 @@ func refreshWhileHeld(
             return nil
         case <-runtimeInstance.Context().Done():
             return nil
+        case <-stopWatch.stopped():
+            stopWatch.arm()
+
+            continue
+        case <-stopWatch.expired():
+            if true == settled() {
+                return nil
+            }
+
+            return stopWatch.expiredError(runtimeInstance, name, exclusiveStopRenewalLimitField)
         case <-clock.demotion():
             /* select picks at random among ready cases: a callback that returned as the instant came has no lease left to lose */
             if true == settled() {
@@ -221,6 +252,14 @@ func refreshWhileHeld(
             return clock.demotionError()
         case <-ticker.C:
         case <-clock.retry():
+        }
+
+        if true == stopWatch.passed() {
+            if true == settled() {
+                return nil
+            }
+
+            return stopWatch.expiredError(runtimeInstance, name, exclusiveStopRenewalLimitField)
         }
 
         refreshIssuedAt := time.Now()
@@ -247,7 +286,7 @@ func refreshWhileHeld(
             continue
         }
 
-        /* callback finished, or a shutdown cancelled the context the backend is called with: either way a failing refresh is the stop itself, not a lost lease */
+        /* callback finished and the join cancelled the context the backend is called with: a failing refresh then is the run's end, not a lost lease; a stop does not cancel it, so a renewal failing while the work winds down is judged by the lease clock */
         select {
         case <-done:
             return nil
@@ -494,7 +533,7 @@ func resolveRefreshTimeout(refreshInterval time.Duration) time.Duration {
     return timeout
 }
 
-/* refreshOnce renews the lease on a runtime whose context carries the renewal deadline, derived from the caller's so a shutdown still cancels the call. The caller tests its own context to tell a shutdown from a lost lease, since the deadline lives only on the child. */
+/* refreshOnce renews the lease on a runtime whose context carries the renewal deadline, derived from the renewal's own, which the stop does not cancel and the join does. The caller tests its own context to tell the run's end from a lost lease, since the deadline lives only on the child. */
 func refreshOnce(
     runtimeInstance runtimecontract.Runtime,
     lock lockcontract.Lock,

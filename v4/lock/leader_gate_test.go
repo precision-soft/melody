@@ -1849,3 +1849,137 @@ func (instance *failingAcquireLock) Release(runtimeInstance runtimecontract.Runt
 func (instance *failingAcquireLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
     return nil
 }
+
+func TestLeaderGate_RenewsTheLeaseWhileOnElectedWindsDownAfterAStop(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+
+    locker := &countingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+
+    var atStop atomic.Int64
+    config := fastGateConfig(bound.Of(40 * time.Millisecond))
+    config.RefreshInterval = bound.Of(10 * time.Millisecond)
+    config.OnElected = func(termRuntime runtimecontract.Runtime) {
+        cancel()
+        <-termRuntime.Context().Done()
+        atStop.Store(locker.refreshes())
+
+        time.Sleep(120 * time.Millisecond)
+    }
+
+    if runErr := NewLeaderGate(locker, "worker:wind-down", config).Run(testRuntimeWithContext(runContext)); nil != runErr {
+        t.Fatalf("expected a clean shutdown, got %v", runErr)
+    }
+
+    if renewed := locker.refreshes() - atStop.Load(); renewed < 2 {
+        t.Fatalf("expected the lease renewed while OnElected wound down, got %d renewals after the stop", renewed)
+    }
+}
+
+func TestLeaderGate_StopsRenewingPastTheStopRenewalLimit(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+
+    locker := &countingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+
+    var pastLimit atomic.Int64
+    var lostCause atomic.Value
+    config := fastGateConfig(bound.Of(40 * time.Millisecond))
+    config.RefreshInterval = bound.Of(10 * time.Millisecond)
+    config.StopRenewalLimit = bound.Of(60 * time.Millisecond)
+    config.OnElected = func(termRuntime runtimecontract.Runtime) {
+        cancel()
+
+        time.Sleep(100 * time.Millisecond)
+        pastLimit.Store(locker.refreshes())
+        time.Sleep(100 * time.Millisecond)
+    }
+    config.OnLost = func(_ runtimecontract.Runtime, cause error) {
+        lostCause.Store(cause)
+    }
+
+    NewLeaderGate(locker, "worker:past-limit", config).Run(testRuntimeWithContext(runContext))
+
+    if locker.refreshes() != pastLimit.Load() {
+        t.Fatalf("expected no renewal past the limit, got %d after it", locker.refreshes()-pastLimit.Load())
+    }
+
+    if cause, _ := lostCause.Load().(error); nil == cause || false == strings.Contains(cause.Error(), "stop renewal limit") {
+        t.Fatalf("expected OnLost to name the stop renewal limit, got %v", cause)
+    }
+}
+
+func TestNewLeaderGate_RefusesAStopRenewalLimitBelowTheRefreshInterval(t *testing.T) {
+    config := fastGateConfig(bound.Of(time.Second))
+    config.RefreshInterval = bound.Of(200 * time.Millisecond)
+    config.StopRenewalLimit = bound.Of(100 * time.Millisecond)
+
+    if _, err := resolveLeaderGateConfig(config); nil == err || false == strings.Contains(err.Error(), "stop renewal limit") {
+        t.Fatalf("expected the limit refused, got %v", err)
+    }
+}
+
+func TestLeaderGate_ACleanWindDownUnderRenewalCallsNoOnLost(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+
+    var lost atomic.Bool
+    config := fastGateConfig(bound.Of(40 * time.Millisecond))
+    config.RefreshInterval = bound.Of(10 * time.Millisecond)
+    config.OnElected = func(termRuntime runtimecontract.Runtime) {
+        cancel()
+        <-termRuntime.Context().Done()
+        time.Sleep(60 * time.Millisecond)
+    }
+    config.OnLost = func(runtimecontract.Runtime, error) {
+        lost.Store(true)
+    }
+
+    NewLeaderGate(NewInMemoryLocker(clock.NewSystemClock()), "worker:clean-wind-down", config).Run(testRuntimeWithContext(runContext))
+
+    if true == lost.Load() {
+        t.Fatal("expected a clean wind-down to call no OnLost")
+    }
+}
+
+func TestLeaderGate_ALeaseLostDuringTheWindDownReachesOnLost(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+
+    locker := &switchableRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
+
+    var lostCause atomic.Value
+    config := fastGateConfig(bound.Of(40 * time.Millisecond))
+    config.RefreshInterval = bound.Of(10 * time.Millisecond)
+    config.OnElected = func(termRuntime runtimecontract.Runtime) {
+        locker.fail.Store(true)
+        cancel()
+        time.Sleep(150 * time.Millisecond)
+    }
+    config.OnLost = func(_ runtimecontract.Runtime, cause error) {
+        lostCause.Store(cause)
+    }
+
+    NewLeaderGate(locker, "worker:lost-in-wind-down", config).Run(testRuntimeWithContext(runContext))
+
+    if cause, _ := lostCause.Load().(error); nil == cause {
+        t.Fatal("expected a lease lost while OnElected wound down to reach OnLost")
+    }
+}
+
+func TestLeaderGate_AHookPanickingOnItsStoppedContextCallsNoOnLost(t *testing.T) {
+    runContext, cancel := context.WithCancel(context.Background())
+
+    var lost atomic.Bool
+    config := fastGateConfig(bound.Of(time.Minute))
+    config.OnElected = func(termRuntime runtimecontract.Runtime) {
+        cancel()
+        <-termRuntime.Context().Done()
+        panic("cleanup failed")
+    }
+    config.OnLost = func(runtimecontract.Runtime, error) {
+        lost.Store(true)
+    }
+
+    NewLeaderGate(NewInMemoryLocker(clock.NewSystemClock()), "worker:panic-on-stop", config).Run(testRuntimeWithContext(runContext))
+
+    if true == lost.Load() {
+        t.Fatal("expected a hook panicking on its stopped context to call no OnLost")
+    }
+}
