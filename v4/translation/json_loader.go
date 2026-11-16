@@ -32,6 +32,7 @@ func (instance *JsonDirectoryLoader) Load() ([]translationcontract.Catalog, erro
     }
 
     catalogsByLocale := make(map[string]*MapCatalog)
+    fileByLocale := make(map[string]string)
 
     for _, entry := range entries {
         if true == entry.IsDir() {
@@ -71,10 +72,21 @@ func (instance *JsonDirectoryLoader) Load() ([]translationcontract.Catalog, erro
             )
         }
 
-        catalog, exists := catalogsByLocale[locale]
+        /* the manager matches locales in BCP 47 case, so two files spelling one locale differently are refused here, where both files can be named */
+        canonical := canonicalLocale(locale)
+        catalog, exists := catalogsByLocale[canonical]
+        if true == exists && catalog.Locale() != locale {
+            return nil, exception.NewError(
+                "translation files spell one locale two ways",
+                map[string]any{"file": name, "otherFile": fileByLocale[canonical], "directory": instance.directory},
+                nil,
+            )
+        }
+
         if false == exists {
             catalog = NewMapCatalog(locale)
-            catalogsByLocale[locale] = catalog
+            catalogsByLocale[canonical] = catalog
+            fileByLocale[canonical] = name
         }
 
         messageIds := make([]string, 0, len(messages))
@@ -98,9 +110,15 @@ func (instance *JsonDirectoryLoader) Load() ([]translationcontract.Catalog, erro
         }
     }
 
-    catalogs := make([]translationcontract.Catalog, 0, len(catalogsByLocale))
-    for _, catalog := range catalogsByLocale {
-        catalogs = append(catalogs, catalog)
+    locales := make([]string, 0, len(catalogsByLocale))
+    for canonical := range catalogsByLocale {
+        locales = append(locales, canonical)
+    }
+    sort.Strings(locales)
+
+    catalogs := make([]translationcontract.Catalog, 0, len(locales))
+    for _, canonical := range locales {
+        catalogs = append(catalogs, catalogsByLocale[canonical])
     }
 
     return catalogs, nil

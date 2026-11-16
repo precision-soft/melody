@@ -7,13 +7,14 @@ import (
     translationcontract "github.com/precision-soft/melody/v4/translation/contract"
 )
 
-/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers, since a locale is assembled from several sources; nil is a manager with no catalog, which answers raw ids. A nil catalog, or one whose Locale is empty and so could never be found, is refused; once a catalog is handed, so is a default or fallback locale that is empty or that no catalog carries, since the lookup asks them by that exact name. */
+/* NewManager keeps every catalog of a locale, in the order given, and a lookup asks them in that order until one answers, since a locale is assembled from several sources; nil is a manager with no catalog, which answers raw ids. Every locale, a catalog's, the default, a fallback and the one a lookup asks, is matched in BCP 47 case, so ro-ro finds the catalog of ro-RO; two catalogs spelling one locale differently are refused, naming both spellings. A nil catalog, or one whose Locale is empty and so could never be found, is refused; once a catalog is handed, so is a default or fallback locale that is empty or that no catalog carries. */
 func NewManager(
     catalogs []translationcontract.Catalog,
     defaultLocale string,
     fallbackLocales []string,
 ) *Manager {
     catalogsByLocale := make(map[string][]translationcontract.Catalog)
+    spellingByLocale := make(map[string]string)
     for _, catalog := range catalogs {
         /* a nil catalog is refused, since skipping it would build a translator answering raw ids for a whole locale */
         if true == internal.IsNilInterface(catalog) {
@@ -25,7 +26,25 @@ func NewManager(
             exception.Panic(exception.NewError("translation catalog carries no locale", nil, nil))
         }
 
-        catalogsByLocale[locale] = append(catalogsByLocale[locale], catalog)
+        canonical := canonicalLocale(locale)
+        if spelling, registered := spellingByLocale[canonical]; true == registered && spelling != locale {
+            exception.Panic(
+                exception.NewError(
+                    "translation catalogs spell one locale two ways",
+                    exceptioncontract.Context{"locale": spelling, "otherSpelling": locale},
+                    nil,
+                ),
+            )
+        }
+
+        spellingByLocale[canonical] = locale
+        catalogsByLocale[canonical] = append(catalogsByLocale[canonical], catalog)
+    }
+
+    canonicalDefault := canonicalLocale(defaultLocale)
+    canonicalFallbacks := make([]string, 0, len(fallbackLocales))
+    for _, fallbackLocale := range fallbackLocales {
+        canonicalFallbacks = append(canonicalFallbacks, canonicalLocale(fallbackLocale))
     }
 
     if 0 < len(catalogsByLocale) {
@@ -33,7 +52,7 @@ func NewManager(
             exception.Panic(exception.NewError("translation default locale is empty", nil, nil))
         }
 
-        if 0 == len(catalogsByLocale[defaultLocale]) {
+        if 0 == len(catalogsByLocale[canonicalDefault]) {
             exception.Panic(
                 exception.NewError(
                     "translation default locale is carried by no catalog",
@@ -48,7 +67,7 @@ func NewManager(
                 exception.Panic(exception.NewError("translation fallback locale is empty", exceptioncontract.Context{"index": index}, nil))
             }
 
-            if 0 == len(catalogsByLocale[fallbackLocale]) {
+            if 0 == len(catalogsByLocale[canonicalFallbacks[index]]) {
                 exception.Panic(
                     exception.NewError(
                         "translation fallback locale is carried by no catalog",
@@ -61,8 +80,8 @@ func NewManager(
     }
 
     return &Manager{
-        defaultLocale:    defaultLocale,
-        fallbackLocales:  append([]string{}, fallbackLocales...),
+        defaultLocale:    canonicalDefault,
+        fallbackLocales:  canonicalFallbacks,
         catalogsByLocale: catalogsByLocale,
     }
 }
@@ -127,6 +146,7 @@ func (instance *Manager) localeChain(locale string) []string {
         chain = append(chain, value)
     }
 
+    locale = canonicalLocale(locale)
     appendLocale(locale)
     appendLocale(baseLocale(locale))
 

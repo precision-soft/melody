@@ -326,3 +326,86 @@ func TestNewManager_WithNoCatalogAdmitsAnyLocale(t *testing.T) {
         t.Fatalf("expected the raw id, got %q", manager.Trans("greeting", nil, "messages", "fr"))
     }
 }
+
+func TestTrans_ALocaleIsMatchedInBcp47Case(t *testing.T) {
+    romanian := NewMapCatalog("ro-RO")
+    romanian.Add("messages", "greeting", "Salut")
+    chinese := NewMapCatalog("zh-Hant-TW")
+    chinese.Add("messages", "greeting", "你好")
+    english := NewMapCatalog("en")
+    english.Add("messages", "greeting", "Hello")
+
+    manager := NewManager([]translationcontract.Catalog{romanian, chinese, english}, "EN", []string{"RO-ro"})
+
+    for locale, expected := range map[string]string{"ro-ro": "Salut", "RO-RO": "Salut", "ZH-HANT-tw": "你好", "En": "Hello", "fr": "Salut"} {
+        if result := manager.Trans("greeting", nil, "messages", locale); expected != result {
+            t.Fatalf("expected %q for %q, got %q", expected, locale, result)
+        }
+    }
+
+    withoutFallback := NewManager([]translationcontract.Catalog{romanian, english}, "en", nil)
+    if true == withoutFallback.HasMessage("greeting", "messages", "ro_ro") && "Salut" == withoutFallback.Trans("greeting", nil, "messages", "ro_ro") {
+        t.Fatal("expected an underscore not folded to a hyphen")
+    }
+}
+
+func TestNewManager_RefusesTwoSpellingsOfOneLocale(t *testing.T) {
+    defer func() {
+        recovered := recover()
+        exceptionError, isExceptionError := recovered.(*exception.Error)
+        if false == isExceptionError {
+            t.Fatalf("expected an exception error, got %#v", recovered)
+        }
+
+        context := exceptionError.Context()
+        if "ro-RO" != context["locale"] || "ro-ro" != context["otherSpelling"] {
+            t.Fatalf("expected both spellings named, got %v", context)
+        }
+    }()
+
+    NewManager([]translationcontract.Catalog{NewMapCatalog("ro-RO"), NewMapCatalog("ro-ro")}, "ro-RO", nil)
+}
+
+func TestNewManager_AssemblesOneLocaleFromCatalogsSpellingItAlike(t *testing.T) {
+    first := NewMapCatalog("ro")
+    first.Add("messages", "a", "A")
+    second := NewMapCatalog("ro")
+    second.Add("messages", "b", "B")
+
+    manager := NewManager([]translationcontract.Catalog{first, second}, "ro", nil)
+    if "B" != manager.Trans("b", nil, "messages", "RO") {
+        t.Fatal("expected the second catalog of the locale asked")
+    }
+}
+
+func TestCanonicalLocale(t *testing.T) {
+    for input, expected := range map[string]string{"": "", "EN": "en", "en-us": "en-US", "sr-latn-rs": "sr-Latn-RS", "es-419": "es-419", "de_de": "de_DE", "en-US-POSIX": "en-US-posix", "x": "x", "en-A1B2": "en-a1b2", "en-X1": "en-x1", "de-1901": "de-1901", "en-": "en-", "-us": "-US", "en--us": "en--US", "en-u-CA-gregory": "en-u-ca-gregory", "en-x-latn": "en-x-latn", "x-ab": "x-ab", "de-de-u-co-phonebk": "de-DE-u-co-phonebk", "\u212ao": "\u212ao", "x\xff": "x\xff", "Äb-ÄB": "Äb-Äb"} {
+        if result := canonicalLocale(input); expected != result {
+            t.Fatalf("expected %q for %q, got %q", expected, input, result)
+        }
+    }
+}
+
+func expectRefusalContext(t *testing.T, key string, expected string, build func()) {
+    t.Helper()
+
+    defer func() {
+        recovered := recover()
+        exceptionError, isExceptionError := recovered.(*exception.Error)
+        if false == isExceptionError || expected != exceptionError.Context()[key] {
+            t.Fatalf("expected %s named %q as written, got %#v", key, expected, recovered)
+        }
+    }()
+
+    build()
+}
+
+func TestNewManager_TheDefaultAndFallbackRefusalsNameTheLocaleAsWritten(t *testing.T) {
+    expectRefusalContext(t, "defaultLocale", "RO_md", func() {
+        NewManager([]translationcontract.Catalog{NewMapCatalog("en")}, "RO_md", nil)
+    })
+
+    expectRefusalContext(t, "fallbackLocale", "DE-de", func() {
+        NewManager([]translationcontract.Catalog{NewMapCatalog("en")}, "en", []string{"DE-de"})
+    })
+}

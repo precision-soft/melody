@@ -34,6 +34,14 @@ func interpolate(runes []rune, parameters map[string]any, locale string, pound s
             continue
         }
 
+        if '\'' == current && true == inPlural {
+            if quoted, width := pluralQuote(runes, index); 0 < width {
+                builder.WriteString(quoted)
+                index += width
+                continue
+            }
+        }
+
         if '{' != current {
             builder.WriteRune(current)
             index++
@@ -52,6 +60,19 @@ func interpolate(runes []rune, parameters map[string]any, locale string, pound s
     }
 
     return builder.String()
+}
+
+/* pluralQuote reads the apostrophe quoting of a plural branch at index: '#' is a literal #, '' a literal apostrophe; any other apostrophe is text. It answers the text and the runes it spans, a width of zero when nothing is quoted there. */
+func pluralQuote(runes []rune, index int) (string, int) {
+    if index+1 < len(runes) && '\'' == runes[index+1] {
+        return "'", 2
+    }
+
+    if index+2 < len(runes) && '#' == runes[index+1] && '\'' == runes[index+2] {
+        return "#", 3
+    }
+
+    return "", 0
 }
 
 func matchingBrace(runes []rune, openIndex int) int {
@@ -208,7 +229,7 @@ func parseSelectors(style []rune) map[string][]rune {
     return selectors
 }
 
-/* ValidatePattern reports the first select or plural of a message pattern whose style is not keyword-and-block pairs ending with an other block, with its rune offset and the reason; nil when every select and plural is keyword-and-block pairs with an other block. A select or plural nested deeper than the 32 levels Trans renders, the level whose blocks it would write as raw text, is reported at its own offset. A lone brace in plain text and an unknown argument type are not refused: they render visibly. */
+/* ValidatePattern reports the first select or plural of a message pattern whose style is not keyword-and-block pairs ending with an other block, with its rune offset and the reason; nil when every select and plural is keyword-and-block pairs with an other block and every apostrophe before # in a plural block is '#' or ''#. A select or plural nested deeper than the 32 levels Trans renders, the level whose blocks it would write as raw text, is reported at its own offset. Inside a plural block an apostrophe followed by # that no apostrophe closes is reported at its offset, since '#' is the quoted literal there. A lone brace in plain text and an unknown argument type are not refused: they render visibly. */
 func ValidatePattern(pattern string) error {
     defect := findPatternDefect([]rune(pattern), 0)
     if nil == defect {
@@ -227,6 +248,7 @@ const (
     patternDefectBlockWithoutKeyword = "a selector block has no keyword"
     patternDefectWithoutOther        = "a select or plural has no other block"
     patternDefectNestedTooDeep       = "a select or plural is nested deeper than 32 levels"
+    patternDefectUnclosedQuote       = "an apostrophe before # in a plural block must be '#' or ''#"
 )
 
 type patternDefect struct {
@@ -236,13 +258,24 @@ type patternDefect struct {
 
 /* findPatternDefect walks the arguments the way interpolate does, so an unmatched brace is plain text here too; base is the rune offset of runes within the whole pattern. */
 func findPatternDefect(runes []rune, base int) *patternDefect {
-    return findPatternDefectAtDepth(runes, base, 0)
+    return findPatternDefectAtDepth(runes, base, 0, false)
 }
 
-/* depth is the one interpolate renders runes at, so a selector whose blocks it would render past maxInterpolationDepth is refused */
-func findPatternDefectAtDepth(runes []rune, base int, depth int) *patternDefect {
+/* depth is the one interpolate renders runes at, so a selector whose blocks it would render past maxInterpolationDepth is refused; inPlural is whether interpolate reads the quoting there */
+func findPatternDefectAtDepth(runes []rune, base int, depth int, inPlural bool) *patternDefect {
     index := 0
     for index < len(runes) {
+        if '\'' == runes[index] && true == inPlural {
+            if _, width := pluralQuote(runes, index); 0 < width {
+                index += width
+                continue
+            }
+
+            if index+1 < len(runes) && '#' == runes[index+1] {
+                return &patternDefect{offset: base + index, reason: patternDefectUnclosedQuote}
+            }
+        }
+
         if '{' != runes[index] {
             index++
             continue
@@ -254,7 +287,7 @@ func findPatternDefectAtDepth(runes []rune, base int, depth int) *patternDefect 
             continue
         }
 
-        if defect := findArgumentDefect(runes[index+1:closeIndex], base+index, depth); nil != defect {
+        if defect := findArgumentDefect(runes[index+1:closeIndex], base+index, depth, inPlural); nil != defect {
             return defect
         }
 
@@ -264,7 +297,7 @@ func findPatternDefectAtDepth(runes []rune, base int, depth int) *patternDefect 
     return nil
 }
 
-func findArgumentDefect(inner []rune, openOffset int, depth int) *patternDefect {
+func findArgumentDefect(inner []rune, openOffset int, depth int, inPlural bool) *patternDefect {
     name, remainder, hasType := splitFirstComma(inner)
     if false == hasType {
         return nil
@@ -275,16 +308,19 @@ func findArgumentDefect(inner []rune, openOffset int, depth int) *patternDefect 
         return nil
     }
 
+    styleOffset := openOffset + 1 + len(name) + 1 + len(argType) + 1
+
     switch strings.TrimSpace(string(argType)) {
-    case "plural", "select":
-        styleOffset := openOffset + 1 + len(name) + 1 + len(argType) + 1
-        return findSelectorDefect(style, styleOffset, openOffset, depth)
+    case "plural":
+        return findSelectorDefect(style, styleOffset, openOffset, depth, true)
+    case "select":
+        return findSelectorDefect(style, styleOffset, openOffset, depth, inPlural)
     default:
         return nil
     }
 }
 
-func findSelectorDefect(style []rune, base int, argumentOffset int, depth int) *patternDefect {
+func findSelectorDefect(style []rune, base int, argumentOffset int, depth int, inPlural bool) *patternDefect {
     if depth+1 > maxInterpolationDepth {
         return &patternDefect{offset: argumentOffset, reason: patternDefectNestedTooDeep}
     }
@@ -329,7 +365,7 @@ func findSelectorDefect(style []rune, base int, argumentOffset int, depth int) *
             hasOther = true
         }
 
-        if defect := findPatternDefectAtDepth(style[index+1:closeIndex], base+index+1, depth+1); nil != defect {
+        if defect := findPatternDefectAtDepth(style[index+1:closeIndex], base+index+1, depth+1, inPlural); nil != defect {
             return defect
         }
 

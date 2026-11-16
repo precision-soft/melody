@@ -102,6 +102,14 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Build the kernel over `event.NewEventDispatcher`, or implement both capabilities on the dispatcher, forwarding to the one it wraps; register the transports through `messagebus.RegisterTransports`, which registers the closer beside them, and declare no teardown dependency from the closer to a bus.
 
+### Translation: a quoted `#` in a plural branch, and locales matched in BCP 47 case
+
+**What changed.** Inside a `plural` branch `'#'` is a literal `#` and `''` an apostrophe, and [`ValidatePattern`](../translation/message_format.go) refuses a `'#` no apostrophe closes. The [`Manager`](../translation/manager.go) matches every locale in BCP 47 case (`ro-ro` finds `ro-RO`, separators kept as written) and refuses two catalogs spelling one locale differently.
+
+**Symptom.** A plural branch holding `'#'` renders `#` where it rendered `'5'`, one holding `''` renders a single apostrophe, and a catalog holding a lone `'#` in a branch fails the boot. A request locale in another case now finds its catalog where it fell through to the fallbacks. A boot registering `ro-RO` and `ro-ro` panics naming both, and a translations directory holding `messages.ro-RO.json` beside `validation.ro-ro.json` fails the load naming both files.
+
+**Remedy.** Write `'#'` for a literal `#` in a plural branch and `''` for an apostrophe followed by `#`. Register each locale under one spelling; the request locale no longer needs normalizing to that spelling.
+
 ### Exception: an http exception answers 400 to 599
 
 **What changed.** [`NewHttpException`](../exception/http_exception_new.go) and `NewHttpError` panic on a status outside `[400, 599]`, where they admitted `[200, 599]`; the refusal names the status, the minimum and the maximum. An exception answers a client or a server error: a success or a redirect raised as one served the error body as a success.

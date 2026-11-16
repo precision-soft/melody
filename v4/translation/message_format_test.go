@@ -275,3 +275,81 @@ func TestValidatePattern_AgreesWithTheRenderersParseOfTheStyle(t *testing.T) {
         t.Fatalf("expected the generator to produce admitted patterns")
     }
 }
+
+func TestInterpolate_AQuotedPoundInAPluralBranchIsALiteralPound(t *testing.T) {
+    pattern := "{n, plural, other {Order '#'{id}, # items, it''s ''#'' ok}}"
+
+    result := formatMessage(pattern, map[string]any{"n": 5, "id": "A1"}, "en")
+    if "Order #A1, 5 items, it's '5' ok" != result {
+        t.Fatalf("expected '#' a literal # and '' an apostrophe in the plural branch, got %q", result)
+    }
+}
+
+func TestInterpolate_AnApostropheOutsideAPluralBranchIsText(t *testing.T) {
+    result := formatMessage("it''s '#' {name}", map[string]any{"name": "x"}, "en")
+    if "it''s '#' x" != result {
+        t.Fatalf("expected no quoting outside a plural branch, got %q", result)
+    }
+}
+
+func TestInterpolate_AQuotedPoundInASelectInsideAPluralIsALiteralPound(t *testing.T) {
+    pattern := "{n, plural, other {{kind, select, other {'#'#}}}}"
+
+    result := formatMessage(pattern, map[string]any{"n": 3, "kind": "x"}, "en")
+    if "#3" != result {
+        t.Fatalf("expected the quote read in a select nested in a plural, got %q", result)
+    }
+}
+
+func TestValidatePattern_RefusesAnUnclosedQuotedPoundInAPluralBlock(t *testing.T) {
+    if nestedErr := ValidatePattern("{n, plural, other {{k, select, other {'#}}}}"); nil == nestedErr {
+        t.Fatal("expected an unclosed quoted # refused in a select nested in a plural")
+    }
+
+    err := ValidatePattern("{n, plural, other {Order '#{id}}}")
+    if nil == err {
+        t.Fatal("expected an unclosed quoted # refused")
+    }
+
+    exceptionError, isExceptionError := err.(*exception.Error)
+    if false == isExceptionError || patternDefectUnclosedQuote != exceptionError.Context()["reason"] || 25 != exceptionError.Context()["offset"] {
+        t.Fatalf("expected the unclosed quote named at offset 25, got %v", err)
+    }
+}
+
+func TestValidatePattern_AdmitsTheQuotesAndAnApostropheOutsideAPlural(t *testing.T) {
+    for _, pattern := range []string{
+        "{n, plural, other {Order '#'{id} it''s}}",
+        "it's '#",
+        "{g, select, other {it's '#}}",
+    } {
+        if err := ValidatePattern(pattern); nil != err {
+            t.Fatalf("expected %q admitted, got %v", pattern, err)
+        }
+    }
+}
+
+func TestInterpolate_TheQuoteEdgeCases(t *testing.T) {
+    for pattern, expected := range map[string]string{
+        "{n, plural, other {''" + "'#'}}":                  "'#",
+        "{n, plural, other {{m, plural, other {'#'#}}}}":    "#2",
+        "{g, select, other {{n, plural, other {'#'#}}}}":    "#5",
+        "{n, plural, other {it's #}}":                       "it's 5",
+    } {
+        if result := formatMessage(pattern, map[string]any{"n": 5, "m": 2, "g": "x"}, "en"); expected != result {
+            t.Fatalf("expected %q for %q, got %q", expected, pattern, result)
+        }
+    }
+
+    if result := formatMessage("{n, plural, other {'#'#}}", map[string]any{"n": "x"}, "en"); "#" != result {
+        t.Fatalf("expected the quoted # kept beside the empty # of a non-numeric plural, got %q", result)
+    }
+}
+
+func TestValidatePattern_NamesTheOffsetOfANestedQuote(t *testing.T) {
+    err := ValidatePattern("{n, plural, other {{k, select, other {x'#}}}}")
+    exceptionError, isExceptionError := err.(*exception.Error)
+    if false == isExceptionError || 39 != exceptionError.Context()["offset"] {
+        t.Fatalf("expected the nested quote named at offset 39, got %v", err)
+    }
+}

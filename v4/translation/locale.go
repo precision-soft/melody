@@ -5,6 +5,78 @@ import (
     "strings"
 )
 
+/* canonicalLocale writes a locale in BCP 47 case, RFC 5646 2.1.1: the language lower, a four-letter script title, a two-letter region upper, every other subtag lower, and every subtag after a singleton (an extension or x- private use) lower, so two spellings of one tag find one catalog. Only ASCII letters are folded, every other byte kept as written; the separators are kept too, an underscore not folded to a hyphen. */
+func canonicalLocale(locale string) string {
+    var builder strings.Builder
+    builder.Grow(len(locale))
+
+    subtagIndex := 0
+    afterSingleton := false
+    start := 0
+    for index := 0; index <= len(locale); index++ {
+        if index < len(locale) && '_' != locale[index] && '-' != locale[index] {
+            continue
+        }
+
+        subtag := locale[start:index]
+        writeCanonicalSubtag(&builder, subtag, 0 == subtagIndex || true == afterSingleton)
+        if 1 == len(subtag) {
+            afterSingleton = true
+        }
+
+        if index < len(locale) {
+            builder.WriteByte(locale[index])
+        }
+
+        subtagIndex++
+        start = index + 1
+    }
+
+    return builder.String()
+}
+
+func writeCanonicalSubtag(builder *strings.Builder, subtag string, lower bool) {
+    titled := false == lower && 4 == len(subtag) && true == isAsciiLetters(subtag)
+    upper := false == lower && 2 == len(subtag) && true == isAsciiLetters(subtag)
+
+    for index := 0; index < len(subtag); index++ {
+        character := subtag[index]
+        if true == upper || (true == titled && 0 == index) {
+            builder.WriteByte(asciiUpper(character))
+            continue
+        }
+
+        builder.WriteByte(asciiLower(character))
+    }
+}
+
+func asciiLower(character byte) byte {
+    if character >= 'A' && character <= 'Z' {
+        return character + ('a' - 'A')
+    }
+
+    return character
+}
+
+func asciiUpper(character byte) byte {
+    if character >= 'a' && character <= 'z' {
+        return character - ('a' - 'A')
+    }
+
+    return character
+}
+
+func isAsciiLetters(value string) bool {
+    for index := 0; index < len(value); index++ {
+        character := value[index] | 0x20
+        if character < 'a' || character > 'z' {
+            return false
+        }
+    }
+
+    return true
+}
+
 func baseLocale(locale string) string {
     for index := 0; index < len(locale); index++ {
         if '_' == locale[index] || '-' == locale[index] {

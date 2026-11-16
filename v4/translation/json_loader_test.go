@@ -152,3 +152,35 @@ func TestJsonDirectoryLoader_NamesTheFileTheMessageAndTheOffset(t *testing.T) {
         }
     }
 }
+
+func TestJsonDirectoryLoader_RefusesTwoFilesSpellingOneLocaleTwoWays(t *testing.T) {
+    directory := t.TempDir()
+    if writeErr := os.WriteFile(filepath.Join(directory, "messages.ro-RO.json"), []byte(`{"a": "A"}`), 0o600); nil != writeErr {
+        t.Fatal(writeErr)
+    }
+    if writeErr := os.WriteFile(filepath.Join(directory, "validation.ro-ro.json"), []byte(`{"b": "B"}`), 0o600); nil != writeErr {
+        t.Fatal(writeErr)
+    }
+
+    _, loadErr := NewJsonDirectoryLoader(directory).Load()
+    exceptionError, isExceptionError := loadErr.(*exception.Error)
+    if false == isExceptionError || "validation.ro-ro.json" != exceptionError.Context()["file"] || "messages.ro-RO.json" != exceptionError.Context()["otherFile"] {
+        t.Fatalf("expected both files named, got %v", loadErr)
+    }
+}
+
+func TestJsonDirectoryLoader_AnswersItsCatalogsInAStableOrder(t *testing.T) {
+    directory := t.TempDir()
+    for _, name := range []string{"messages.ro.json", "messages.en.json", "messages.de.json"} {
+        if writeErr := os.WriteFile(filepath.Join(directory, name), []byte(`{"a": "A"}`), 0o600); nil != writeErr {
+            t.Fatal(writeErr)
+        }
+    }
+
+    for attempt := 0; attempt < 20; attempt++ {
+        catalogs, loadErr := NewJsonDirectoryLoader(directory).Load()
+        if nil != loadErr || 3 != len(catalogs) || "de" != catalogs[0].Locale() || "en" != catalogs[1].Locale() || "ro" != catalogs[2].Locale() {
+            t.Fatalf("expected de, en, ro, got %v (%v)", catalogs, loadErr)
+        }
+    }
+}

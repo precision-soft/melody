@@ -75,6 +75,8 @@ the session apart, `session.NewUnavailableSession` builds one.
 
 ### Changed
 
+- translation: **Behavioural change**: inside a `plural` branch `'#'` renders a literal `#` and `''` an apostrophe, and `ValidatePattern` refuses a `'#` no apostrophe closes, where the format had no quoting and `'#'` rendered the number between apostrophes.
+- translation: **Behavioural change**: `Manager` matches every locale in BCP 47 case, a catalog's, the default, a fallback and the one a lookup asks, so `ro-ro` finds the catalog of `ro-RO`, the separators kept as written; `NewManager` refuses two catalogs spelling one locale differently, naming both spellings, and `JsonDirectoryLoader.Load` two files doing so, naming both files and the directory, its catalogs in a stable order, where a locale was matched byte for byte.
 - application: **Behavioural change**: a second `Application.Run` panics with `application run called twice` before anything is booted or marked serving, where it ran a second command over the closed container and its closed logger, or bound the http address again.
 - logging, cli: **Behavioural change**: the exit line echoed to stderr before a non-zero exit and a failed command's `[error]` line carry the error's cause chain after the message, `: cause 1: …: cause 2: …`, up to the logger's `CauseChainDepth` causes on the exit line, a depth below 1 or a panicking one reading as one link and 8, and up to 8 on the command's, each escaped to one line and then cut at 512 bytes, a link the text before it ends with left out and not counted, where they carried the top message alone.
 - cli: **Breaking**: `cli.DispatchCommand` takes a `DispatchConfig` last, the version the dispatched command reads; `DispatchConfig{}` dispatches as before.
