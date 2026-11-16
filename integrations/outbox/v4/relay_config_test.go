@@ -16,17 +16,19 @@ func TestResolveRelayConfig_AnEmptyConfigIsEveryRuleDefault(t *testing.T) {
     }
 
     expected := resolvedRelay{
-        LockName:            "melody:outbox:relay",
-        LockTtl:             30 * time.Second,
-        VisibilityTimeout:   5 * time.Minute,
-        BatchSize:           100,
-        MaxAttempts:         12,
-        MaxDeliveryAttempts: 24,
-        InitialBackoff:      15 * time.Second,
-        MaxBackoff:          10 * time.Minute,
-        BackoffFactor:       2,
-        LockReleaseTimeout:  5 * time.Second,
-        ResolutionTimeout:   5 * time.Second,
+        LockName:              "melody:outbox:relay",
+        LockTtl:               30 * time.Second,
+        VisibilityTimeout:     5 * time.Minute,
+        BatchSize:             100,
+        MaxAttempts:           12,
+        MaxDeliveryAttempts:   24,
+        InitialBackoff:        15 * time.Second,
+        MaxBackoff:            10 * time.Minute,
+        BackoffFactor:         2,
+        LockReleaseTimeout:    5 * time.Second,
+        ResolutionTimeout:     5 * time.Second,
+        UnavailableBackoff:    15 * time.Second,
+        UnavailableBackoffMax: time.Minute,
     }
 
     if expected != resolved {
@@ -109,6 +111,15 @@ func TestResolveRelayConfig_AnInitialBackoffAboveTheCapIsRefusedNamingBoth(t *te
 
     if _, equalErr := resolveRelayConfig(RelayConfig{InitialBackoff: bound.Of(time.Second), MaxBackoff: bound.Of(time.Second)}); nil != equalErr {
         t.Fatalf("expected an initial backoff equal to the cap admitted, got %v", equalErr)
+    }
+}
+
+func TestResolveRelayConfig_AnUnavailableBackoffAboveItsMaximumIsRefusedNamingBoth(t *testing.T) {
+    _, resolveErr := resolveRelayConfig(RelayConfig{UnavailableBackoff: bound.Of(time.Minute), UnavailableBackoffMax: bound.Of(time.Second)})
+    expectErrorNamingField(t, resolveErr, "RelayConfig.UnavailableBackoff")
+
+    if "RelayConfig.UnavailableBackoffMax" != exception.LogContext(resolveErr, exception.LogContextConfig{})["cappedBy"] {
+        t.Fatalf("expected the refusal to name the cap, got %v", exception.LogContext(resolveErr, exception.LogContextConfig{}))
     }
 }
 

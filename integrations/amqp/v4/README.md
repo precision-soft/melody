@@ -193,6 +193,8 @@ returns, by your hand or never, and `CloseWithContext` reports the write it coul
 
 The publish channel runs in **publisher-confirm mode**: `Send` (and the retry re-publish) reports success only after the broker acknowledged the message, and a mandatory publish that comes back as unroutable (for example the queue was deleted) or is nacked by the broker (for example a `max-length` policy with `reject-publish`) surfaces as an error instead of being silently discarded. This also protects the retry path — a re-published message is confirmed before the original delivery is acked, so a broker-side discard can never drop a message between requeues.
 
+A failed `Send` is marked with `exception.MarkInfrastructureFailure` — an outage, answered 503 with Retry-After by the http kernel and handed back uncharged by the outbox relay — unless it is the broker's verdict on the message (an unroutable return, a nack, a channel the broker closed over a live connection), a failure the caller's own context explains, or a send on a transport that is closing.
+
 ## Dead-lettering and retries
 
 When `DeadLetter` is `true`, the transport declares a dead-letter exchange (`<queue>.dlx`) and queue (`<queue>.dlq`), and points the main queue at it via `x-dead-letter-exchange`.

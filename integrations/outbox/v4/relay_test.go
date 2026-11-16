@@ -152,6 +152,18 @@ func (instance *fakeRepository) Reschedule(_ context.Context, id int64, attempts
     return instance.rescheduleErr
 }
 
+func (instance *fakeRepository) RescheduleUncharged(_ context.Context, id int64, availableAt time.Time, lastError string, _ string) error {
+    instance.calls = append(instance.calls, repoCall{kind: "uncharged", id: id, lastError: lastError, availableAt: availableAt})
+
+    for index := range instance.due {
+        if id == instance.due[index].Id {
+            instance.due[index].DeliveryAttempts--
+        }
+    }
+
+    return instance.rescheduleErr
+}
+
 func (instance *fakeRepository) MarkDead(_ context.Context, id int64, attempts int, lastError string, _ string) error {
     instance.calls = append(instance.calls, repoCall{kind: "dead", id: id, attempts: attempts, lastError: lastError})
 
@@ -159,12 +171,24 @@ func (instance *fakeRepository) MarkDead(_ context.Context, id int64, attempts i
 }
 
 type fakeTransport struct {
-    sent      []any
-    envelopes []messagebuscontract.Envelope
-    fail      bool
+    sent        []any
+    envelopes   []messagebuscontract.Envelope
+    fail        bool
+    unavailable bool
+    /* unavailableFor marks the failure of these messages alone, a broker that refuses one message on its channel while it answers the others */
+    unavailableFor map[any]bool
+    panicMarked    bool
 }
 
 func (instance *fakeTransport) Send(_ runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    if true == instance.panicMarked {
+        panic(exception.MarkInfrastructureFailure(errors.New("send panicked")))
+    }
+
+    if true == instance.unavailable || true == instance.unavailableFor[envelope.Message()] {
+        return exception.MarkInfrastructureFailure(errors.New("broker unreachable"))
+    }
+
     if true == instance.fail {
         return errors.New("send failed")
     }
@@ -1462,15 +1486,28 @@ func TestRelay_AHoldWriteRunsOnABoundedContextOfItsOwn(t *testing.T) {
 type cancellingRefusingTransport struct {
     fakeTransport
     cancel context.CancelFunc
+    marked bool
+    /* afterSends lets that many sends fail marked before the next one cancels the run */
+    afterSends int
 }
 
 func (instance *cancellingRefusingTransport) Send(_ runtimecontract.Runtime, _ messagebuscontract.Envelope) error {
+    if 0 < instance.afterSends {
+        instance.afterSends--
+
+        return exception.MarkInfrastructureFailure(errors.New("broker unreachable"))
+    }
+
     instance.cancel()
+
+    if true == instance.marked {
+        return exception.MarkInfrastructureFailure(errors.New("broker unreachable"))
+    }
 
     return errors.New("broker unreachable")
 }
 
-/* a run cancelled by the time its failed send is resolved hands no row back, so a signal does not wait out one write per remaining row; the cancellation is reported for the command to exit clean, and the rows stay claimed for the visibility timeout */
+/* a send cut by the run's cancellation hands its row back due at once, attempts unchanged, and no other row, so a signal does not wait out one write per remaining row; the cancellation is reported for the command to exit clean, and the unreached rows stay claimed for the visibility timeout */
 func TestRelay_ACancelledRunStopsHandingRowsBack(t *testing.T) {
     repository := &fakeRepository{due: []Pending{
         {Id: 1, TypeName: "string", Payload: []byte("a")},
@@ -1491,8 +1528,101 @@ func TestRelay_ACancelledRunStopsHandingRowsBack(t *testing.T) {
         t.Fatalf("expected the cancellation reported, got %v", runErr)
     }
 
-    if 1 != len(repository.calls) || 1 != repository.calls[0].id {
-        t.Fatalf("expected the failed row resolved and no row handed back, got %+v", repository.calls)
+    if 1 != len(repository.calls) || 1 != repository.calls[0].id || "reschedule" != repository.calls[0].kind || 0 != repository.calls[0].attempts {
+        t.Fatalf("expected the cut row handed back with its attempts unchanged and no row held, got %+v", repository.calls)
+    }
+}
+
+func TestRelay_AMarkedSendCutByTheRunIsDueAtOnceAndCountsNoOutage(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        due []Pending
+    }{
+        "alone in its batch": {due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 2}}},
+        "with a row behind":  {due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 2}, {Id: 2, TypeName: "string", Payload: []byte("b")}}},
+    } {
+        t.Run(name, func(t *testing.T) {
+            repository := &fakeRepository{due: testCase.due}
+            logger := &recordingLogger{}
+
+            runContext, cancel := context.WithCancel(context.Background())
+            defer cancel()
+
+            serviceContainer := container.NewContainer(container.ContainerConfig{})
+            container.MustRegister[loggingcontract.Logger](serviceContainer, logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+                return logger, nil
+            }, container.RegisterOptions{})
+            runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+
+            relay := NewRelay(RelayConfig{Repository: repository, Transport: &cancellingRefusingTransport{cancel: cancel, marked: true}, Codec: &stringCodec{}})
+
+            before := time.Now()
+            _, runErr := relay.RunOnce(runtimeInstance)
+            if false == errors.Is(runErr, context.Canceled) {
+                t.Fatalf("expected the cut reported as the run's error, got %v", runErr)
+            }
+
+            if 1 != len(repository.calls) || "reschedule" != repository.calls[0].kind || 2 != repository.calls[0].attempts || time.Second < repository.calls[0].availableAt.Sub(before) {
+                t.Fatalf("expected the cut row due at once with its attempts unchanged, got %+v", repository.calls)
+            }
+
+            if 1 != repository.due[0].DeliveryAttempts {
+                t.Fatalf("expected the cut row's delivery attempt kept, got %d", repository.due[0].DeliveryAttempts)
+            }
+
+            if 0 != relay.outagePasses.Load() || 0 != len(logger.errorRecords()) {
+                t.Fatalf("expected no outage counted or recorded, got %d passes and %+v", relay.outagePasses.Load(), logger.errorRecords())
+            }
+        })
+    }
+}
+
+func TestRelay_AProbeCutByTheRunHandsTheMarkedRowBackDueAtOnce(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a"), Attempts: 1},
+        {Id: 2, TypeName: "string", Payload: []byte("b")},
+    }}
+    logger := &recordingLogger{}
+
+    runContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    container.MustRegister[loggingcontract.Logger](serviceContainer, logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+        return logger, nil
+    }, container.RegisterOptions{})
+    runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &cancellingRefusingTransport{cancel: cancel, afterSends: 1}, Codec: &stringCodec{}})
+
+    before := time.Now()
+    _, runErr := relay.RunOnce(runtimeInstance)
+    if false == errors.Is(runErr, context.Canceled) {
+        t.Fatalf("expected the cut reported, got %v", runErr)
+    }
+
+    if 2 != len(repository.calls) || 2 != repository.calls[0].id || 1 != repository.calls[1].id || "reschedule" != repository.calls[1].kind || 1 != repository.calls[1].attempts || time.Second < repository.calls[1].availableAt.Sub(before) {
+        t.Fatalf("expected the probe and the marked row both handed back due at once, attempts unchanged, got %+v", repository.calls)
+    }
+
+    if 0 != relay.outagePasses.Load() || 0 != len(logger.errorRecords()) {
+        t.Fatalf("expected no outage counted or recorded on a cut probe, got %d passes and %+v", relay.outagePasses.Load(), logger.errorRecords())
+    }
+}
+
+func TestRelay_APanickingSendUnderACancelledRunIsCharged(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}}
+
+    runContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &panickingTransport{value: errors.New("boom")}, Codec: &stringCodec{}})
+    relay.RunOnce(runtimeInstance)
+
+    if 1 != len(repository.calls) || "reschedule" != repository.calls[0].kind || 1 != repository.calls[0].attempts {
+        t.Fatalf("expected a send panic charged an attempt even under a cancelled run, got %+v", repository.calls)
     }
 }
 
@@ -1576,5 +1706,187 @@ func TestRelay_HandsTheLockerItsLockTtl(t *testing.T) {
                 t.Fatalf("expected the locker to be handed %s, got %s", testCase.wanted, locker.ttls[0])
             }
         })
+    }
+}
+
+func TestRelay_AnUnreachableTransportHandsBackTheRowAndItsProbeUncharged(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{
+        {Id: 7, TypeName: "string", Payload: []byte("x"), Attempts: 3},
+        {Id: 8, TypeName: "string", Payload: []byte("y"), Attempts: 0},
+        {Id: 9, TypeName: "string", Payload: []byte("z"), Attempts: 1},
+    }}
+    transport := &fakeTransport{unavailable: true}
+    logger := &recordingLogger{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: bound.Of(4)})
+
+    before := time.Now()
+    published, _ := relay.RunOnce(relayTestRuntimeWithLogger(logger))
+    if 0 != published {
+        t.Fatalf("expected nothing published, got %d", published)
+    }
+
+    if 3 != len(repository.calls) || "uncharged" != repository.calls[0].kind || 7 != repository.calls[0].id || "uncharged" != repository.calls[1].kind || 8 != repository.calls[1].id {
+        t.Fatalf("expected the failed row and its probe handed back uncharged, got %+v", repository.calls)
+    }
+
+    if "reschedule" != repository.calls[2].kind || 9 != repository.calls[2].id || 1 != repository.calls[2].attempts {
+        t.Fatalf("expected the unreached row held with its attempts unchanged, got %+v", repository.calls[2])
+    }
+
+    if 0 != repository.due[0].DeliveryAttempts || 0 != repository.due[1].DeliveryAttempts {
+        t.Fatalf("expected the claims' delivery attempts taken back, got %d and %d", repository.due[0].DeliveryAttempts, repository.due[1].DeliveryAttempts)
+    }
+
+    for _, call := range repository.calls {
+        if waited := call.availableAt.Sub(before); 14*time.Second > waited || 16*time.Second < waited {
+            t.Fatalf("expected every row due after the default 15s, got %v for %d", waited, call.id)
+        }
+    }
+
+    if records := logger.errorRecords(); 1 != len(records) || true != records[0].logContext["transportUnavailable"] {
+        t.Fatalf("expected one ERROR record for the outage, got %+v", records)
+    }
+}
+
+func TestRelay_AMessageTheBrokerRefusesWhileItAnswersTheNextIsCharged(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{
+        {Id: 7, TypeName: "string", Payload: []byte("oversize"), Attempts: 3},
+        {Id: 8, TypeName: "string", Payload: []byte("y"), Attempts: 0},
+        {Id: 9, TypeName: "string", Payload: []byte("z"), Attempts: 0},
+    }}
+    transport := &fakeTransport{unavailableFor: map[any]bool{"oversize": true}}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: bound.Of(4)})
+
+    published, runErr := relay.RunOnce(relayTestRuntime())
+    if nil != runErr || 2 != published {
+        t.Fatalf("expected the probe and the row after it delivered, got %d, %v", published, runErr)
+    }
+
+    if "sent" != repository.calls[0].kind || 8 != repository.calls[0].id || "dead" != repository.calls[1].kind || 7 != repository.calls[1].id || 4 != repository.calls[1].attempts || "sent" != repository.calls[2].kind || 9 != repository.calls[2].id {
+        t.Fatalf("expected the probe sent, the refused row charged to its cap, the batch drained, got %+v", repository.calls)
+    }
+}
+
+func TestRelay_AnOutageNeverReachesTheAttemptCapsAndItsBackoffGrowsToItsMaximum(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 7, TypeName: "string", Payload: []byte("x"), Attempts: 0}}}
+    transport := &fakeTransport{unavailable: true}
+    logger := &recordingLogger{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: bound.Of(1), UnavailableBackoff: bound.Of(time.Second), UnavailableBackoffMax: bound.Of(5 * time.Second)})
+
+    for pass := 0; pass < 10; pass++ {
+        before := time.Now()
+        relay.RunOnce(relayTestRuntimeWithLogger(logger))
+
+        last := repository.calls[len(repository.calls)-1]
+        if "uncharged" != last.kind {
+            t.Fatalf("pass %d: expected the row handed back uncharged, got %+v", pass, last)
+        }
+
+        expected := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 5 * time.Second}[min(pass, 3)]
+        if waited := last.availableAt.Sub(before); expected-time.Second/2 > waited || expected+time.Second/2 < waited {
+            t.Fatalf("pass %d: expected a backoff of %v, got %v", pass, expected, waited)
+        }
+    }
+
+    if 1 != len(logger.errorRecords()) {
+        t.Fatalf("expected one ERROR record for the whole outage, got %d", len(logger.errorRecords()))
+    }
+
+    transport.unavailable = false
+    if published, _ := relay.RunOnce(relayTestRuntimeWithLogger(logger)); 1 != published {
+        t.Fatalf("expected the row delivered once the transport answers, got %d", published)
+    }
+
+    if 0 != relay.outagePasses.Load() {
+        t.Fatalf("expected a delivered row to end the outage, got %d passes", relay.outagePasses.Load())
+    }
+
+    recovered := false
+    for _, record := range logger.records {
+        if loggingcontract.LevelInfo == record.level && "outbox relay transport answers again" == record.message {
+            recovered = true
+        }
+    }
+
+    if false == recovered {
+        t.Fatal("expected one INFO record when the transport answers again")
+    }
+}
+
+func TestRelay_ABrokerVerdictEndsARunningOutage(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 7, TypeName: "string", Payload: []byte("x"), Attempts: 0}}}
+    transport := &fakeTransport{unavailable: true}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}, MaxAttempts: bound.Of(9)})
+
+    relay.RunOnce(relayTestRuntime())
+    relay.RunOnce(relayTestRuntime())
+
+    transport.unavailable = false
+    transport.fail = true
+    relay.RunOnce(relayTestRuntime())
+
+    if 0 != relay.outagePasses.Load() {
+        t.Fatalf("expected a failure the broker answered to end the outage, got %d passes", relay.outagePasses.Load())
+    }
+}
+
+func TestRelay_AMarkedPanicIsChargedAsADeliveryFailure(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 7, TypeName: "string", Payload: []byte("x"), Attempts: 0}}}
+    transport := &fakeTransport{panicMarked: true}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}})
+
+    relay.RunOnce(relayTestRuntime())
+
+    if 1 != len(repository.calls) || "reschedule" != repository.calls[0].kind || 1 != repository.calls[0].attempts {
+        t.Fatalf("expected a panicking send charged an attempt even when its value is marked, got %+v", repository.calls)
+    }
+}
+
+func TestRelay_AnOutageWhoseFirstHandBackWriteFailedIsRecordedByTheNextPass(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 7, TypeName: "string", Payload: []byte("x"), Attempts: 0}}, rescheduleErr: errors.New("database hiccup")}
+    transport := &fakeTransport{unavailable: true}
+    logger := &recordingLogger{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}})
+
+    relay.RunOnce(relayTestRuntimeWithLogger(logger))
+
+    if 0 != len(logger.errorRecords()) {
+        t.Fatalf("expected no outage record while the hand-back write fails, got %+v", logger.errorRecords())
+    }
+
+    repository.rescheduleErr = nil
+    relay.RunOnce(relayTestRuntimeWithLogger(logger))
+    relay.RunOnce(relayTestRuntimeWithLogger(logger))
+
+    if records := logger.errorRecords(); 1 != len(records) || true != records[0].logContext["transportUnavailable"] {
+        t.Fatalf("expected one outage record once a hand-back is written, got %+v", records)
+    }
+}
+
+
+func TestRelay_AnOutageAfterARecoveryWritesARecordOfItsOwn(t *testing.T) {
+    repository := &fakeRepository{due: []Pending{{Id: 7, TypeName: "string", Payload: []byte("x"), Attempts: 0}}}
+    transport := &fakeTransport{unavailable: true}
+    logger := &recordingLogger{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: transport, Codec: &stringCodec{}})
+
+    relay.RunOnce(relayTestRuntimeWithLogger(logger))
+    relay.RunOnce(relayTestRuntimeWithLogger(logger))
+
+    transport.unavailable = false
+    relay.RunOnce(relayTestRuntimeWithLogger(logger))
+
+    transport.unavailable = true
+    relay.RunOnce(relayTestRuntimeWithLogger(logger))
+
+    if records := logger.errorRecords(); 2 != len(records) {
+        t.Fatalf("expected one outage record per outage, got %d", len(records))
     }
 }

@@ -7,6 +7,7 @@ import (
 )
 
 type Transport interface {
+    /* Send publishes the envelope. A failure marked with exception.MarkInfrastructureFailure says the transport could not be reached: the outbox relay then charges the row no attempt, unless the next row of the batch is delivered, and tries it again after its outage backoff, so the mark belongs to an outage alone, never to a refusal of the message. */
     Send(runtimeInstance runtimecontract.Runtime, envelope Envelope) error
 
     Receive(runtimeInstance runtimecontract.Runtime) (<-chan Envelope, error)

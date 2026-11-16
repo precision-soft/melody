@@ -75,6 +75,15 @@ func (instance *lazyRepository) Reschedule(ctx context.Context, id int64, attemp
     return store.Reschedule(ctx, id, attempts, availableAt, lastError, claimToken)
 }
 
+func (instance *lazyRepository) RescheduleUncharged(ctx context.Context, id int64, availableAt time.Time, lastError string, claimToken string) error {
+    store, resolveErr := instance.resolveStore(ctx)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return store.RescheduleUncharged(ctx, id, availableAt, lastError, claimToken)
+}
+
 func (instance *lazyRepository) MarkDead(ctx context.Context, id int64, attempts int, lastError string, claimToken string) error {
     store, resolveErr := instance.resolveStore(ctx)
     if nil != resolveErr {

@@ -70,6 +70,18 @@ var relayLockReleaseTimeoutRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
+var relayUnavailableBackoffRule = bound.Rule[time.Duration]{
+    Name:    "RelayConfig.UnavailableBackoff",
+    Default: 15 * time.Second,
+    Minimum: bound.TimeoutMinimum,
+}
+
+var relayUnavailableBackoffMaxRule = bound.Rule[time.Duration]{
+    Name:    "RelayConfig.UnavailableBackoffMax",
+    Default: time.Minute,
+    Minimum: bound.TimeoutMinimum,
+}
+
 var relayResolutionTimeoutRule = bound.Rule[time.Duration]{
     Name:    "RelayConfig.ResolutionTimeout",
     Default: 5 * time.Second,
@@ -77,21 +89,23 @@ var relayResolutionTimeoutRule = bound.Rule[time.Duration]{
 }
 
 type resolvedRelay struct {
-    Repository          Repository
-    Transport           messagebuscontract.Transport
-    Codec               MessageCodec
-    Locker              lockcontract.Locker
-    LockName            string
-    LockTtl             time.Duration
-    VisibilityTimeout   time.Duration
-    BatchSize           int
-    MaxAttempts         int
-    MaxDeliveryAttempts int
-    InitialBackoff      time.Duration
-    MaxBackoff          time.Duration
-    BackoffFactor       float64
-    LockReleaseTimeout  time.Duration
-    ResolutionTimeout   time.Duration
+    Repository            Repository
+    Transport             messagebuscontract.Transport
+    Codec                 MessageCodec
+    Locker                lockcontract.Locker
+    LockName              string
+    LockTtl               time.Duration
+    VisibilityTimeout     time.Duration
+    BatchSize             int
+    MaxAttempts           int
+    MaxDeliveryAttempts   int
+    InitialBackoff        time.Duration
+    MaxBackoff            time.Duration
+    BackoffFactor         float64
+    LockReleaseTimeout    time.Duration
+    ResolutionTimeout     time.Duration
+    UnavailableBackoff    time.Duration
+    UnavailableBackoffMax time.Duration
 }
 
 func resolveRelayConfig(config RelayConfig) (resolvedRelay, error) {
@@ -118,6 +132,8 @@ func resolveRelayConfig(config RelayConfig) (resolvedRelay, error) {
         {limit: config.MaxBackoff, rule: relayMaxBackoffRule, target: &resolved.MaxBackoff},
         {limit: config.LockReleaseTimeout, rule: relayLockReleaseTimeoutRule, target: &resolved.LockReleaseTimeout},
         {limit: config.ResolutionTimeout, rule: relayResolutionTimeoutRule, target: &resolved.ResolutionTimeout},
+        {limit: config.UnavailableBackoff, rule: relayUnavailableBackoffRule, target: &resolved.UnavailableBackoff},
+        {limit: config.UnavailableBackoffMax, rule: relayUnavailableBackoffMaxRule, target: &resolved.UnavailableBackoffMax},
     }
 
     for _, duration := range durations {
@@ -158,6 +174,19 @@ func resolveRelayConfig(config RelayConfig) (resolvedRelay, error) {
                 "value":    resolved.InitialBackoff.String(),
                 "maximum":  resolved.MaxBackoff.String(),
                 "cappedBy": "RelayConfig.MaxBackoff",
+            },
+            nil,
+        )
+    }
+
+    if resolved.UnavailableBackoffMax < resolved.UnavailableBackoff {
+        return resolvedRelay{}, exception.NewError(
+            "the unavailable backoff exceeds its maximum",
+            exceptioncontract.Context{
+                "field":    "RelayConfig.UnavailableBackoff",
+                "value":    resolved.UnavailableBackoff.String(),
+                "maximum":  resolved.UnavailableBackoffMax.String(),
+                "cappedBy": "RelayConfig.UnavailableBackoffMax",
             },
             nil,
         )

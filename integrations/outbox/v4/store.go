@@ -263,6 +263,24 @@ func (instance *Store) Reschedule(
     return nil
 }
 
+func (instance *Store) RescheduleUncharged(ctx context.Context, id int64, availableAt time.Time, lastError string, claimToken string) error {
+    _, updateErr := instance.database.NewUpdate().
+        Model((*Message)(nil)).
+        Set("status = ?", StatusPending).
+        Set("delivery_attempts = CASE WHEN delivery_attempts > 0 THEN delivery_attempts - 1 ELSE 0 END").
+        Set("available_at = ?", availableAt).
+        Set("last_error = ?", lastError).
+        Where("id = ?", id).
+        Where("status = ?", StatusInFlight).
+        Where("claim_token = ?", claimToken).
+        Exec(ctx)
+    if nil != updateErr {
+        return exception.NewError("could not hand back outbox message uncharged", map[string]any{"id": id}, updateErr)
+    }
+
+    return nil
+}
+
 func (instance *Store) MarkDead(ctx context.Context, id int64, attempts int, lastError string, claimToken string) error {
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).

@@ -74,6 +74,9 @@ var errReconnectInProgress = errors.New("amqp reconnect already in progress")
 /* errPublishTimedOut is matched with exception.ChainIs when a publish write did not return inside the publish timeout; plain and wrapped fresh at the return site, for the reason above. */
 var errPublishTimedOut = errors.New("amqp publish did not return within the publish timeout")
 
+/* errBrokerVerdict is the cause of a publish the broker answered about the message itself, an unroutable return, a nack or a channel it closed over a live connection: no outage, whether a later attempt could succeed or not */
+var errBrokerVerdict = errors.New("the broker refused the message")
+
 func NewTransport(config TransportConfig) *Transport {
     return newTransport(config, defaultComponentParent)
 }
@@ -671,7 +674,16 @@ func (instance *Transport) publish(
 ) error {
     _, publishErr := instance.publishRecoverable(ctx, exchange, routingKey, publishing)
 
-    return publishErr
+    return instance.markTransportUnavailable(ctx, publishErr)
+}
+
+/* markTransportUnavailable marks a failed send as the broker being unreachable, exception.MarkInfrastructureFailure, so a caller that keeps a message, the outbox relay, does not charge it an attempt: every failure is marked but the broker's verdict on the message, the caller's own context and a transport that is closing */
+func (instance *Transport) markTransportUnavailable(ctx context.Context, publishErr error) error {
+    if nil == publishErr || nil != ctx.Err() || true == instance.isClosing() || true == exception.ChainIs(publishErr, errBrokerVerdict) {
+        return publishErr
+    }
+
+    return exception.MarkInfrastructureFailure(publishErr)
 }
 
 /* publishDisposition says what a failed publish attempt allows, as two answers because two sites ask different questions. channelFaulted says the channel failed, so the cached channel is torn down and one immediate attempt is made on a fresh one; a broker verdict, an unroutable return or a nack, never takes that path, or the retry would silently re-drop the message. furtherAttemptMayRecover says a caller that keeps trying, publishRequeue, has something to gain: a publish that ran out of budget waiting for its turn never touched the socket, so no channel is faulted, yet the queue that stopped it is what a later attempt can find gone. */
@@ -782,14 +794,14 @@ func (instance *Transport) publishOnce(
                     "replyCode":  returned.ReplyCode,
                     "replyText":  returned.ReplyText,
                 },
-                nil,
+                errBrokerVerdict,
             )}
 
             return
         }
 
         if false == acked {
-            outcome <- unackedPublishOutcome(true == channel.IsClosed(), instance.queue)
+            outcome <- unackedPublishOutcome(true == channel.IsClosed(), nil != channelConnection && false == channelConnection.IsClosed(), instance.queue)
 
             return
         }
@@ -817,16 +829,21 @@ func (instance *Transport) publishOnce(
     return channel, disposition, expiredErr
 }
 
-/* unackedPublishOutcome tells a nack from a confirmation the channel's death ended, which the client answers alike, with false and no error: a nack is the broker's verdict and is never retried, while a channel that closed before the confirmation leaves the message's fate unknown — the broker may hold it — so it is not retried in line, which could publish it twice, but a further attempt may recover. */
-func unackedPublishOutcome(channelClosed bool, queue string) publishOutcome {
+/* unackedPublishOutcome tells a nack from a confirmation the channel's death ended, which the client answers alike, with false and no error: a nack is the broker's verdict and is never retried, while a channel that closed before the confirmation leaves the message's fate unknown — the broker may hold it — so it is not retried in line, which could publish it twice, but a further attempt may recover. A channel the broker closed while the connection stays open is the broker refusing this message on its channel, an oversize body or a missing exchange, so it carries the verdict too and is not taken for an outage. */
+func unackedPublishOutcome(channelClosed bool, connectionOpen bool, queue string) publishOutcome {
     if true == channelClosed {
+        var verdict error
+        if true == connectionOpen {
+            verdict = errBrokerVerdict
+        }
+
         return publishOutcome{
             disposition: publishDisposition{furtherAttemptMayRecover: true},
-            err:         exception.NewError("amqp publish channel closed before the confirmation; the broker may hold the message, not retried in line", map[string]any{"queue": queue}, nil),
+            err:         exception.NewError("amqp publish channel closed before the confirmation; the broker may hold the message, not retried in line", map[string]any{"queue": queue, "connectionOpen": connectionOpen}, verdict),
         }
     }
 
-    return publishOutcome{err: exception.NewError("amqp publish was nacked by the broker", map[string]any{"queue": queue}, nil)}
+    return publishOutcome{err: exception.NewError("amqp publish was nacked by the broker", map[string]any{"queue": queue}, errBrokerVerdict)}
 }
 
 /* resolveExpiredWrite is the branch the write budget expiring leads to; it first asks whether the write already returned, as writeReturned explains, and is a door so its test can hand it a write that has already returned. */

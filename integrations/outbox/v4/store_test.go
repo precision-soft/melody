@@ -368,3 +368,70 @@ func TestStore_AnOversizedClaimLimitIsRefusedBeforeAnyQuery(t *testing.T) {
 
     t.Fatalf("expected the claim at the maximum composed with LIMIT 100000, got %v", hook.queries)
 }
+
+func TestStore_RescheduleUnchargedHandsTheRowBackAsNeverTried(t *testing.T) {
+    store := outboxTestStore(t)
+    ctx := context.Background()
+
+    enqueueOutboxRows(t, store, 1)
+
+    claimed, claimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    if nil != claimErr || 1 != len(claimed) {
+        t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
+    }
+
+    if _, _, recordErr := store.RecordDeliveryAttempt(ctx, claimed[0].Id, claimed[0].ClaimToken); nil != recordErr {
+        t.Fatalf("record delivery attempt: %v", recordErr)
+    }
+
+    if handBackErr := store.RescheduleUncharged(ctx, claimed[0].Id, time.Now().Add(-time.Second), "broker unreachable", claimed[0].ClaimToken); nil != handBackErr {
+        t.Fatalf("hand back: %v", handBackErr)
+    }
+
+    reclaimed, reclaimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    if nil != reclaimErr || 1 != len(reclaimed) {
+        t.Fatalf("expected the row pending and due again: %v (got %d)", reclaimErr, len(reclaimed))
+    }
+
+    if 0 != reclaimed[0].Attempts || 0 != reclaimed[0].DeliveryAttempts {
+        t.Fatalf("expected neither counter charged, got attempts %d delivery attempts %d", reclaimed[0].Attempts, reclaimed[0].DeliveryAttempts)
+    }
+
+    if _, _, recordErr := store.RecordDeliveryAttempt(ctx, reclaimed[0].Id, reclaimed[0].ClaimToken); nil != recordErr {
+        t.Fatalf("record the re-claim's delivery attempt: %v", recordErr)
+    }
+
+    if staleErr := store.RescheduleUncharged(ctx, reclaimed[0].Id, time.Now(), "stale", claimed[0].ClaimToken); nil != staleErr {
+        t.Fatalf("a stale hand back answers no error: %v", staleErr)
+    }
+
+    again, _ := store.ClaimDueMessages(ctx, 10, time.Minute)
+    if 0 != len(again) {
+        t.Fatalf("expected the stale claim token to leave the re-claimed row in flight, got %d due", len(again))
+    }
+}
+
+func TestStore_RescheduleUnchargedHandsBackARowWhoseDeliveryCountIsZero(t *testing.T) {
+    store := outboxTestStore(t)
+    ctx := context.Background()
+
+    enqueueOutboxRows(t, store, 1)
+
+    claimed, claimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    if nil != claimErr || 1 != len(claimed) {
+        t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
+    }
+
+    if handBackErr := store.RescheduleUncharged(ctx, claimed[0].Id, time.Now().Add(-time.Second), "broker unreachable", claimed[0].ClaimToken); nil != handBackErr {
+        t.Fatalf("hand back: %v", handBackErr)
+    }
+
+    reclaimed, reclaimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    if nil != reclaimErr || 1 != len(reclaimed) {
+        t.Fatalf("expected the row pending and due again with its count left at zero: %v (got %d)", reclaimErr, len(reclaimed))
+    }
+
+    if 0 != reclaimed[0].DeliveryAttempts {
+        t.Fatalf("expected the delivery count floored at zero, got %d", reclaimed[0].DeliveryAttempts)
+    }
+}

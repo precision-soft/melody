@@ -16,5 +16,8 @@ type Repository interface {
 
     Reschedule(ctx context.Context, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error
 
+    /* RescheduleUncharged hands a row back as never tried, for a send that met an unreachable transport: pending again at availableAt, its attempts unchanged and the delivery attempt this claim recorded taken back, so an outage reaches neither MaxAttempts nor MaxDeliveryAttempts; the delivery count never goes below zero, and a row at zero is handed back all the same. The claimToken fences the write as Reschedule's does. */
+    RescheduleUncharged(ctx context.Context, id int64, availableAt time.Time, lastError string, claimToken string) error
+
     MarkDead(ctx context.Context, id int64, attempts int, lastError string, claimToken string) error
 }

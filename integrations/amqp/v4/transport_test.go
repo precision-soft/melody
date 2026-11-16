@@ -1441,6 +1441,10 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
     if nil == secondErr {
         t.Fatalf("expected Send to fail after the queue was deleted; the broker silently discarded the message")
     }
+
+    if true == exception.IsInfrastructureFailure(secondErr) {
+        t.Fatalf("expected the broker's verdict on the message left unmarked, got %v", secondErr)
+    }
 }
 
 func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
@@ -3404,12 +3408,12 @@ func TestIntFromHeader_ReadsTheTextBytesAndDecimalFormsAndAnUnreadableValueDeadL
 }
 
 func TestUnackedPublishOutcome_AChannelThatClosedBeforeTheConfirmationIsNotReportedAsANack(t *testing.T) {
-    closed := unackedPublishOutcome(true, "orders")
+    closed := unackedPublishOutcome(true, false, "orders")
     if true == closed.disposition.channelFaulted || false == closed.disposition.furtherAttemptMayRecover || false == strings.Contains(closed.err.Error(), "closed before the confirmation") {
         t.Fatalf("expected a closed channel reported as an unknown fate a further attempt may recover, got %+v %v", closed.disposition, closed.err)
     }
 
-    nacked := unackedPublishOutcome(false, "orders")
+    nacked := unackedPublishOutcome(false, true, "orders")
     if true == nacked.disposition.channelFaulted || true == nacked.disposition.furtherAttemptMayRecover || false == strings.Contains(nacked.err.Error(), "nacked by the broker") {
         t.Fatalf("expected a nack reported as the broker's verdict, never retried, got %+v %v", nacked.disposition, nacked.err)
     }
@@ -3714,4 +3718,80 @@ func TestIgnoringAlreadyClosed_ReturnsOnACyclicChain(t *testing.T) {
             t.Errorf("expected the already closed connection ignored, got: %v", closeErr)
         }
     })
+}
+
+func TestTransport_MarksASendFailureUnavailableButTheBrokersVerdict(t *testing.T) {
+    transport := &Transport{}
+    transportFailure := exception.NewError("amqp channel open failed", nil, errors.New("connection refused"))
+    verdict := exception.NewError("amqp publish was nacked by the broker", nil, errBrokerVerdict)
+
+    if nil != transport.markTransportUnavailable(context.Background(), nil) {
+        t.Fatal("expected no error left as none")
+    }
+
+    if false == exception.IsInfrastructureFailure(transport.markTransportUnavailable(context.Background(), transportFailure)) {
+        t.Fatal("expected a transport failure marked unavailable")
+    }
+
+    if true == exception.IsInfrastructureFailure(transport.markTransportUnavailable(context.Background(), verdict)) {
+        t.Fatal("expected the broker's verdict left unmarked")
+    }
+
+    canceledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    if true == exception.IsInfrastructureFailure(transport.markTransportUnavailable(canceledContext, transportFailure)) {
+        t.Fatal("expected a failure the caller's own context explains left unmarked")
+    }
+
+    transport.closing = true
+    if true == exception.IsInfrastructureFailure(transport.markTransportUnavailable(context.Background(), transportFailure)) {
+        t.Fatal("expected a failure of a closing transport left unmarked")
+    }
+}
+
+func TestUnackedPublishOutcome_ANackCarriesTheBrokersVerdict(t *testing.T) {
+    if false == exception.ChainIs(unackedPublishOutcome(false, true, "orders").err, errBrokerVerdict) {
+        t.Fatal("expected a nack to carry the broker's verdict")
+    }
+
+    if false == exception.ChainIs(unackedPublishOutcome(true, true, "orders").err, errBrokerVerdict) {
+        t.Fatal("expected a channel the broker closed over a live connection to carry the verdict")
+    }
+
+    if true == exception.ChainIs(unackedPublishOutcome(true, false, "orders").err, errBrokerVerdict) {
+        t.Fatal("expected a channel that died with its connection to carry no verdict")
+    }
+}
+
+func TestTransport_SendOverAConnectionThatIsGoneIsMarkedUnavailable(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.unavailable.message")
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      "melody.amqp.unavailable-mark",
+        Registry:   registry,
+    })
+    defer transport.CloseWithContext(context.Background())
+
+    provider.Close(connection)
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+
+    sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "gone"}, nil))
+    if nil == sendErr || false == exception.IsInfrastructureFailure(sendErr) {
+        t.Fatalf("expected a send over a connection that is gone marked unavailable, got %v", sendErr)
+    }
 }
