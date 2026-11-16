@@ -594,3 +594,51 @@ func TestEncryptDatabaseCommand_TheErrorStreamOfARefusedDecryptWriteHoldsTheNumb
         t.Fatalf("expected the error stream to hold the number and not the value, got %q", errorOutput.String())
     }
 }
+
+/* the closing record keys a bound column as the run resolved it against the schema, not the operator's spelling, in each of the three modes */
+func TestEncryptDatabaseCommand_LogsTheStoredSpelling(t *testing.T) {
+    cipherInstance := newRotationCipher(t)
+    sealed, _ := cipherInstance.Encrypt("sealed")
+
+    for mode, testCase := range map[string]struct {
+        rows      [][]driver.Value
+        arguments []string
+    }{
+        "encrypt":   {rows: [][]driver.Value{{"1", "plain"}}, arguments: []string{"--mode", "encrypt"}},
+        "reencrypt": {rows: [][]driver.Value{{"1", sealed}}, arguments: []string{"--mode", "reencrypt", "--target-key", "v2"}},
+        "decrypt":   {rows: [][]driver.Value{{"1", sealed}}, arguments: []string{"--mode", "decrypt"}},
+    } {
+        t.Run(mode, func(t *testing.T) {
+            command, _ := newScriptedNotesCommand(t, cipherInstance, testCase.rows, SealBindingConfig{Reference: capitalisedNotesBinding{}})
+
+            logger := &recordingLogger{}
+            if runErr := runCommandLine(t, command, logger, append([]string{"--table", "Accounts", "--column", "Notes"}, testCase.arguments...)...); nil != runErr {
+                t.Fatalf("unexpected run error: %v", runErr)
+            }
+
+            for _, record := range logger.records {
+                if "encrypt database migration finished" != record.message {
+                    continue
+                }
+
+                if "map[notes:Accounts.Notes]" != fmt.Sprint(record.context["sealBindings"]) {
+                    t.Fatalf("expected the bound column in its stored spelling on the record, got %v", record.context["sealBindings"])
+                }
+
+                return
+            }
+
+            t.Fatalf("expected the closing record, got %v", logger.records)
+        })
+    }
+}
+
+/* capitalisedNotesBinding declares the notes column's label in a spelling unlike the stored one, as an application whose model names its columns so may */
+type capitalisedNotesBinding struct {
+    DefaultCipherReference
+}
+
+func (instance capitalisedNotesBinding) SealBinding() string {
+    return "Accounts.Notes"
+}
+

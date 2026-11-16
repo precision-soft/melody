@@ -123,7 +123,8 @@ func TestCommandOutput_PrintDatabaseBlockWithNullDatabase(t *testing.T) {
     }
 }
 
-func TestCommandOutput_PrintDatabaseBlockTruncatesLongValues(t *testing.T) {
+/* a value is printed whole: the column follows the longest value, so two long hostnames that share a prefix do not print alike */
+func TestCommandOutput_PrintDatabaseBlockPrintsLongValuesWhole(t *testing.T) {
     instance, buffer := newBufferedOutput(true)
 
     databaseName := "a_very_long_database_name_beyond_column"
@@ -137,12 +138,12 @@ func TestCommandOutput_PrintDatabaseBlockTruncatesLongValues(t *testing.T) {
 
     rendered := buffer.String()
 
-    if false == strings.Contains(rendered, "| database | a_very_long_dat... |") {
-        t.Fatalf("long database name not truncated to 18 characters in %q", rendered)
+    if false == strings.Contains(rendered, "| database | a_very_long_database_name_beyond_column |") {
+        t.Fatalf("long database name not printed whole in %q", rendered)
     }
 
-    if false == strings.Contains(rendered, "| host     | an-extremely-lo... |") {
-        t.Fatalf("long hostname not truncated to 18 characters in %q", rendered)
+    if false == strings.Contains(rendered, "| host     | an-extremely-long-hostname.example.com  |") {
+        t.Fatalf("long hostname not printed whole in %q", rendered)
     }
 }
 
@@ -265,58 +266,6 @@ func TestCommandOutput_Newline(t *testing.T) {
 
     if "\n" != buffer.String() {
         t.Fatalf("newline wrote %q, want %q", buffer.String(), "\n")
-    }
-}
-
-func TestTruncateString(t *testing.T) {
-    if "short" != truncateString("short", 18) {
-        t.Fatalf("short string was modified: %q", truncateString("short", 18))
-    }
-
-    exact := strings.Repeat("x", 18)
-    if exact != truncateString(exact, 18) {
-        t.Fatalf("string of exactly max length was modified: %q", truncateString(exact, 18))
-    }
-
-    truncated := truncateString(strings.Repeat("x", 30), 18)
-    if strings.Repeat("x", 15)+"..." != truncated {
-        t.Fatalf("truncated string = %q, want 15 characters plus ellipsis", truncated)
-    }
-
-    if 18 != len(truncated) {
-        t.Fatalf("truncated string length = %d, want 18", len(truncated))
-    }
-}
-
-/* the format widths pad by rune count, so the budget is runes too: a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune and rendering as a replacement character */
-func TestTruncateString_CountsRunesNotBytes(t *testing.T) {
-    seventeenRunes := strings.Repeat("愛", 17)
-    if seventeenRunes != truncateString(seventeenRunes, 18) {
-        t.Fatalf("a value that fits the column in runes was truncated: %q", truncateString(seventeenRunes, 18))
-    }
-
-    truncated := truncateString(strings.Repeat("愛", 30), 18)
-    if strings.Repeat("愛", 15)+"..." != truncated {
-        t.Fatalf("truncated string = %q, want 15 runes plus ellipsis", truncated)
-    }
-
-    if false == utf8.ValidString(truncated) {
-        t.Fatalf("truncation split a rune: %q", truncated)
-    }
-}
-
-/* a budget with no room for the ellipsis answers the clipped runes alone instead of slicing negative */
-func TestTruncateString_SurvivesABudgetSmallerThanTheEllipsis(t *testing.T) {
-    if "ab" != truncateString("abcdef", 2) {
-        t.Fatalf("expected the clipped runes alone, got %q", truncateString("abcdef", 2))
-    }
-
-    if "" != truncateString("abcdef", 0) {
-        t.Fatalf("expected nothing for a zero budget, got %q", truncateString("abcdef", 0))
-    }
-
-    if "" != truncateString("abcdef", -1) {
-        t.Fatalf("expected nothing for a negative budget, got %q", truncateString("abcdef", -1))
     }
 }
 
@@ -591,7 +540,7 @@ func TestCommandOutput_PrintDatabaseBlockEscapesBeforeMeasuringTheCell(t *testin
 
     rendered := plainBuffer.String()
 
-    expectedVersionRow := `| version  | 8.4\x1b[2J         |`
+    expectedVersionRow := `| version  | 8.4\x1b[2J |`
     if false == strings.Contains(rendered, expectedVersionRow) {
         t.Fatalf("expected the version cell padded over its escaped spelling, got:\n%s", rendered)
     }
@@ -934,3 +883,58 @@ func TestErrorDetailsOf_ReturnsOnACyclicChain(t *testing.T) {
         errorDetailsOf(newCyclicChainError())
     })
 }
+
+/* the details block follows the migrations block's rule: the value column fits the longest value and wraps past the table's maximum width onto rows under an empty key, so the name is printed whole */
+func TestCommandOutput_PrintDetailsBlockWrapsALongNameUnderTheTableWidth(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.option.TableMaxWidth = bound.Of(30)
+
+    instance.printDetailsBlock(map[string]string{"name": "20260907000001_create_a_very_long_table"})
+
+    rendered := buffer.String()
+    for _, line := range strings.Split(strings.TrimSpace(rendered), "\n")[1:] {
+        if 30 < utf8.RuneCountInString(line) {
+            t.Fatalf("expected every row within 30 runes, got %q", line)
+        }
+    }
+
+    for _, row := range []string{
+        "| name | 20260907000001_crea |\n",
+        "|      | te_a_very_long_tabl |\n",
+        "|      | e                   |\n",
+    } {
+        if false == strings.Contains(rendered, row) {
+            t.Fatalf("expected the row %q in:\n%s", row, rendered)
+        }
+    }
+}
+
+/* a maximum narrower than the key and its borders keeps the value column at its header's width, every value printed whole */
+func TestCommandOutput_PrintDatabaseBlockKeepsTheHeaderWidthUnderATinyMaximum(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+    instance.option.TableMaxWidth = bound.Of(1)
+
+    databaseName := "shop"
+    instance.printDatabaseBlock(&databaseIdentity{CurrentDatabase: &databaseName, Hostname: "db", Port: 3306, CurrentUser: "app", Version: "8.4"})
+
+    rendered := buffer.String()
+    for _, row := range []string{"| key      | value |\n", "| database | shop  |\n", "| port     | 3306  |\n"} {
+        if false == strings.Contains(rendered, row) {
+            t.Fatalf("expected the row %q in:\n%s", row, rendered)
+        }
+    }
+}
+
+/* a value the server answers empty keeps its row */
+func TestCommandOutput_PrintDatabaseBlockKeepsTheRowOfAnEmptyValue(t *testing.T) {
+    instance, buffer := newBufferedOutput(true)
+
+    instance.printDatabaseBlock(&databaseIdentity{Hostname: "h", Port: 3306})
+
+    for _, key := range []string{"| user     |", "| version  |"} {
+        if false == strings.Contains(buffer.String(), key) {
+            t.Fatalf("expected the row %q in:\n%s", key, buffer.String())
+        }
+    }
+}
+

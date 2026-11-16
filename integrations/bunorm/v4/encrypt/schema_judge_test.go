@@ -93,6 +93,25 @@ func TestMigrate_ResolvesAColumnToTheSpellingTheTableStores(t *testing.T) {
     }
 }
 
+/* two binding keys naming one stored column are refused, as two columns are: kept, the binding map iteration picks would differ from one run to the next */
+func TestMigrate_RefusesAColumnBoundTwiceBeforeReadingTheTable(t *testing.T) {
+    migrator, stub := newScriptedMigrator(t, judgeTable(accountsColumns, accountsPrimary, nil, "STRICT_TRANS_TABLES"))
+
+    _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpecification{
+        Table:        "accounts",
+        PrimaryKey:   "id",
+        Columns:      []string{"notes"},
+        SealBindings: map[string]ColumnSealBinding{"notes": {Label: "accounts.notes"}, "NOTES": {Label: "accounts.notes"}},
+    })
+    if nil == runErr || true == readTheTable(stub) {
+        t.Fatalf("expected a refusal before the table is read, got %v", runErr)
+    }
+
+    if "TableSpecification.SealBindings" != refusalContext(t, runErr)["field"] {
+        t.Fatalf("expected the field named, got %v", runErr)
+    }
+}
+
 func TestMigrate_RefusesAnUnknownColumnAndOneNamedTwiceBeforeReadingTheTable(t *testing.T) {
     for name, columns := range map[string][]string{"unknown": {"missing"}, "named twice": {"notes", "NOTES"}} {
         migrator, stub := newScriptedMigrator(t, judgeTable(accountsColumns, accountsPrimary, nil, "STRICT_TRANS_TABLES"))

@@ -352,15 +352,14 @@ func (instance *commandOutput) printDatabaseBlock(identity *databaseIdentity) {
         currentDatabaseString = *identity.CurrentDatabase
     }
 
-    /* every value here is the server's own answer, so control characters are escaped BEFORE the cell is truncated and padded — the alignment must count the escaped spelling, not the raw bytes it replaces */
-    _, _ = fmt.Fprintln(instance.writer, "DATABASE")
-    _, _ = fmt.Fprintln(instance.writer, "| key      | value              |")
-    _, _ = fmt.Fprintln(instance.writer, "| -------- | ------------------ |")
-    _, _ = fmt.Fprintf(instance.writer, "| database | %-18s |\n", truncateString(escapeControlCharacters(currentDatabaseString, false), 18))
-    _, _ = fmt.Fprintf(instance.writer, "| host     | %-18s |\n", truncateString(escapeControlCharacters(identity.Hostname, false), 18))
-    _, _ = fmt.Fprintf(instance.writer, "| port     | %-18s |\n", strconv.FormatUint(uint64(identity.Port), 10))
-    _, _ = fmt.Fprintf(instance.writer, "| user     | %-18s |\n", truncateString(escapeControlCharacters(identity.CurrentUser, false), 18))
-    _, _ = fmt.Fprintf(instance.writer, "| version  | %-18s |\n", truncateString(escapeControlCharacters(identity.Version, false), 18))
+    /* every value here is the server's own answer, so control characters are escaped before the cell is sized and padded: the alignment counts the escaped spelling, not the raw bytes it replaces */
+    instance.printKeyValueBlock("DATABASE", [][2]string{
+        {"database", escapeControlCharacters(currentDatabaseString, false)},
+        {"host", escapeControlCharacters(identity.Hostname, false)},
+        {"port", strconv.FormatUint(uint64(identity.Port), 10)},
+        {"user", escapeControlCharacters(identity.CurrentUser, false)},
+        {"version", escapeControlCharacters(identity.Version, false)},
+    })
 }
 
 func (instance *commandOutput) printDetailsBlock(fields map[string]string) {
@@ -370,14 +369,40 @@ func (instance *commandOutput) printDetailsBlock(fields map[string]string) {
         return
     }
 
-    _, _ = fmt.Fprintln(instance.writer, "DETAILS")
-    _, _ = fmt.Fprintln(instance.writer, "| key     | value                                             |")
-    _, _ = fmt.Fprintln(instance.writer, "| ------- | ------------------------------------------------- |")
-
-    keys := []string{"manager", "group", "applied", "status", "name"}
-    for _, key := range keys {
+    rows := make([][2]string, 0, 5)
+    for _, key := range []string{"manager", "group", "applied", "status", "name"} {
         if value, exists := fields[key]; true == exists {
-            _, _ = fmt.Fprintf(instance.writer, "| %-7s | %-49s |\n", key, truncateString(escapeControlCharacters(value, false), 49))
+            rows = append(rows, [2]string{key, escapeControlCharacters(value, false)})
+        }
+    }
+
+    instance.printKeyValueBlock("DETAILS", rows)
+}
+
+/* printKeyValueBlock prints a two-column block whose value column follows the longest value, in runes, bounded by Option.TableMaxWidth with the borders, the padding and the key column counted, and never narrower than its header; a longer value wraps onto continuation rows under an empty key, so a value is printed whole as the MIGRATIONS block prints a name, and an empty value keeps its row */
+func (instance *commandOutput) printKeyValueBlock(title string, rows [][2]string) {
+    keyWidth := len("key")
+    valueWidth := len("value")
+    for _, row := range rows {
+        keyWidth = max(keyWidth, utf8.RuneCountInString(row[0]))
+        valueWidth = max(valueWidth, utf8.RuneCountInString(row[1]))
+    }
+
+    if maximum := instance.tableMaxWidth(); 0 < maximum {
+        valueWidth = min(valueWidth, max(maximum-keyWidth-7, len("value")))
+    }
+
+    _, _ = fmt.Fprintln(instance.writer, title)
+    _, _ = fmt.Fprintf(instance.writer, "| %s | %s |\n", padRight("key", keyWidth), padRight("value", valueWidth))
+    _, _ = fmt.Fprintf(instance.writer, "| %s | %s |\n", strings.Repeat("-", keyWidth), strings.Repeat("-", valueWidth))
+    for _, row := range rows {
+        key := row[0]
+        runes := []rune(row[1])
+        for first := true; true == first || 0 < len(runes); first = false {
+            chunk := runes[:min(valueWidth, len(runes))]
+            runes = runes[len(chunk):]
+            _, _ = fmt.Fprintf(instance.writer, "| %s | %s |\n", padRight(key, keyWidth), padRight(string(chunk), valueWidth))
+            key = ""
         }
     }
 }
@@ -465,22 +490,4 @@ func (instance *commandOutput) newline() {
     }
 
     _, _ = fmt.Fprintln(instance.writer)
-}
-
-/* truncateString bounds the cell to maxLength runes, not bytes: the format widths in the blocks above pad by rune count, so a byte-sliced multi-byte value would be truncated even when it fits the column, with the cut landing mid-rune. A budget with no room for the ellipsis answers the clipped runes alone rather than slicing negative. */
-func truncateString(value string, maxLength int) string {
-    if 0 >= maxLength {
-        return ""
-    }
-
-    runes := []rune(value)
-    if len(runes) <= maxLength {
-        return value
-    }
-
-    if 3 >= maxLength {
-        return string(runes[:maxLength])
-    }
-
-    return string(runes[:maxLength-3]) + "..."
 }

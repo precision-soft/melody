@@ -100,12 +100,19 @@ func (instance *Migrator) judgeSpecificationAgainstTheSchema(ctx context.Context
 
     if 0 < len(specification.SealBindings) {
         resolved.SealBindings = make(map[string]ColumnSealBinding, len(specification.SealBindings))
+        boundAs := make(map[string]string, len(specification.SealBindings))
         for column, binding := range specification.SealBindings {
             stored, bindingErr := resolve(column, "TableSpecification.SealBindings")
             if nil != bindingErr {
                 return specification, bindingErr
             }
 
+            /* two keys naming one stored column would keep the binding map iteration picks, a different one on another run */
+            if first, duplicate := boundAs[stored]; true == duplicate {
+                return specification, exception.NewError("migrate binds the column "+stored+" twice", map[string]any{"table": specification.Table, "column": stored, "spelledAs": []string{first, column}, "field": "TableSpecification.SealBindings"}, nil)
+            }
+
+            boundAs[stored] = column
             resolved.SealBindings[stored] = binding
         }
     }

@@ -2381,7 +2381,7 @@ func TestMigrator_CountsWhatItBoundAndWhatItSealed(t *testing.T) {
         t.Fatalf("unexpected run error: %v", runErr)
     }
 
-    if (migrateStats{rows: 4, boundFromUnbound: 1, sealedFromPlaintext: 2}) != stats {
+    if 4 != stats.rows || 1 != stats.boundFromUnbound || 2 != stats.sealedFromPlaintext {
         t.Fatalf("expected 4 rows, 1 bound from unbound, 2 sealed from plaintext, got %+v", stats)
     }
 }
@@ -2403,7 +2403,7 @@ func TestMigrator_CountsNoBindingOnAnUnboundColumn(t *testing.T) {
         t.Fatal("expected the random seal converted")
     }
 
-    if (migrateStats{rows: 1}) != stats {
+    if 1 != stats.rows || 0 != stats.boundFromUnbound || 0 != stats.sealedFromPlaintext {
         t.Fatalf("expected one row and nothing bound or sealed, got %+v", stats)
     }
 }

@@ -49,6 +49,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- `encrypt/encrypt_database_command.go`, `encrypt/migrate.go`: the command's closing record keys a bound column in the spelling the run resolved against the schema, where it carried the `--column` spelling; two `SealBindings` keys naming one column, letter case aside, are refused.
 - `encrypt/migrate.go`: a write the server refuses is reported with its number and SQLSTATE in the message, the table, the columns and the row's key in the context and a `*mysql.MySQLError` of that number in the chain, the server's message, which can quote the plaintext a decrypt writes or an encrypt guards, withheld from the journal and from stderr; `EnsureColumnCapacity` and `EnsureColumnCapacityForReencrypt` read the columns in the table's spelling.
 - `audit/change.go`: `ChangeSet` leaves out a field whose `bun` tag carries `scanonly`, bare, after a column name or beside another option, and a relation named before its `rel` or `m2m` option, a comma inside a parenthesised or quoted option value not splitting the tag, where the before image never loaded a scan-only field and every update recorded it as changed.
 - `manager_registry.go`: the database that loses the migration open race and a database opened into a registry closed meanwhile are closed after the registry lock is released, before the open's waiters are, where a close the driver parked held every other registry call.

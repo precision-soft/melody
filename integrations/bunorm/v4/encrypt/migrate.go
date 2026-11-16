@@ -181,7 +181,10 @@ func (instance *Migrator) migrateEncrypt(ctx context.Context, specification Tabl
         return migrateStats{}, pinned.classifyRunError(resolved, 0, "", capacityErr)
     }
 
-    return pinned.run(ctx, resolved, batchSize, columnTransform(bindings, pinned.encryptTransform(resolved), pinned.encryptBoundTransform(resolved)))
+    stats, runErr := pinned.run(ctx, resolved, batchSize, columnTransform(bindings, pinned.encryptTransform(resolved), pinned.encryptBoundTransform(resolved)))
+    stats.specification = resolved
+
+    return stats, runErr
 }
 
 /* MigrateReencrypt runs its own EnsureColumnCapacityForReencrypt first, for the reason on MigrateEncrypt. Over a bound column every value it writes is sealed under the binding, and a stored seal is already the target only when it is bound and under the target key. */
@@ -220,7 +223,10 @@ func (instance *Migrator) migrateReencrypt(ctx context.Context, specification Ta
         return migrateStats{}, pinned.classifyRunError(resolved, 0, "", capacityErr)
     }
 
-    return pinned.run(ctx, resolved, batchSize, columnTransform(bindings, pinned.reencryptTransform(resolved, targetKeyId), pinned.reencryptBoundTransform(resolved, targetKeyId)))
+    stats, runErr := pinned.run(ctx, resolved, batchSize, columnTransform(bindings, pinned.reencryptTransform(resolved, targetKeyId), pinned.reencryptBoundTransform(resolved, targetKeyId)))
+    stats.specification = resolved
+
+    return stats, runErr
 }
 
 /* MigrateDecrypt stops the run on a row whose stored value is of a seal format this build does not read, whatever the cipher's Decrypt answers for it, and on a row whose decrypted value is itself marker-shaped: written bare, such a value would be read as a seal by a column type that still decrypts. A bound column is opened under its binding. */
@@ -263,7 +269,10 @@ func (instance *Migrator) migrateDecrypt(ctx context.Context, specification Tabl
         return migrateStats{}, resolvedBindingsErr
     }
 
-    return pinned.run(ctx, resolved, batchSize, columnTransform(resolvedBindings, pinned.decryptTransform(), pinned.decryptBoundTransform()))
+    stats, runErr := pinned.run(ctx, resolved, batchSize, columnTransform(resolvedBindings, pinned.decryptTransform(), pinned.decryptBoundTransform()))
+    stats.specification = resolved
+
+    return stats, runErr
 }
 
 func (instance *Migrator) decryptTransform() func(string) (string, error) {
@@ -787,6 +796,8 @@ type migrateStats struct {
     rows                int
     boundFromUnbound    int
     sealedFromPlaintext int
+    /* specification is the one the run used, its columns in their stored spelling, so a closing record names the stored columns and not the operator's spelling of them */
+    specification TableSpecification
 }
 
 func (instance *Migrator) run(ctx context.Context, specification TableSpecification, batchSize int, transform func(string, string) (string, error)) (migrateStats, error) {

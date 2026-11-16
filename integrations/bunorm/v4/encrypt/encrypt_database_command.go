@@ -225,16 +225,19 @@ func (instance *EncryptDatabaseCommand) Run(
         )
     }
 
+    /* the record keys the bound columns as the run resolved them against the schema, the spelling the run's errors after the judge use; the table is the operator's, which the judge does not respell */
+    recorded := stats.specification
+
     if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
         logger.Info(
             "encrypt database migration finished",
             map[string]any{
-                "table":               specification.Table,
+                "table":               recorded.Table,
                 "mode":                mode,
                 "rows":                processed,
                 "boundFromUnbound":    stats.boundFromUnbound,
                 "sealedFromPlaintext": stats.sealedFromPlaintext,
-                "sealBindings":        boundLabels(specification.SealBindings),
+                "sealBindings":        boundLabels(recorded.SealBindings),
             },
         )
     }
