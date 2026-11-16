@@ -78,3 +78,28 @@ func TestTwoFactorResetCommandReadsThroughItsContext(t *testing.T) {
         t.Fatalf("expected the interrupted reset to end on its context, got %v", runErr)
     }
 }
+
+/* the reset reads the directory past the cache: an account deleted behind a cached entry is answered as unknown, never reset under an identifier the directory does not hold */
+func TestTwoFactorResetCommand_ReadsTheDirectoryPastTheCache(t *testing.T) {
+    fixture := newCommandFixture(t)
+    connector := &recordingResetConnector{}
+    store := twofactor.NewStore(bun.NewDB(sql.OpenDB(connector), mysqldialect.New()))
+
+    account, known, findErr := fixture.userService.FindByUsername(context.Background(), "editor")
+    if nil != findErr || false == known {
+        t.Fatalf("expected the seeded editor cached, got %v %v", known, findErr)
+    }
+
+    if _, deleteErr := fixture.userRepository.DeleteById(context.Background(), account.Id, nil); nil != deleteErr {
+        t.Fatalf("delete behind the cache: %v", deleteErr)
+    }
+
+    command := NewTwoFactorResetCommand(fixture.lazyUserService(), func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+        return store, nil
+    })
+
+    runErr := command.Run(fixture.runtime, parsedContextValues{ArgumentValues: []string{"editor"}, WriterValue: &bytes.Buffer{}}.parse())
+    if nil == runErr || false == strings.Contains(runErr.Error(), "does not exist") {
+        t.Fatalf("expected the deleted account answered unknown, got %v", runErr)
+    }
+}

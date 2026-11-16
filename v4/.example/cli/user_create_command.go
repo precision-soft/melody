@@ -112,6 +112,10 @@ func (instance *UserCreateCommand) Run(runtimeInstance melodyruntimecontract.Run
 
     _, _ = fmt.Fprintf(writer, "created user %q (%s) holding role %q\n", user.Username, user.Id, role)
 
+    if true == cacheIsProcessLocal(runtimeInstance) {
+        _, _ = fmt.Fprintln(writer, processLocalCacheNotice)
+    }
+
     return nil
 }
 

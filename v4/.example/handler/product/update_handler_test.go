@@ -24,3 +24,12 @@ func TestApiUpdateDoor_RefusesAPriceAtTheBound(t *testing.T) {
         t.Fatalf("expected a price below the bound updated, got %d %q", status, body)
     }
 }
+
+/* the update door trims the path identifier as the delete door does */
+func TestApiUpdateDoor_UpdatesTheProductUnderAPaddedIdentifier(t *testing.T) {
+    fixture := newProductDoorFixture(t)
+
+    if status, body := fixture.call(t, ApiUpdateHandler(), nethttp.MethodPost, productBody("", "10.00"), map[string]string{"id": " prod-1 "}); nethttp.StatusOK != status {
+        t.Fatalf("expected the padded identifier updated, got %d %s", status, body)
+    }
+}

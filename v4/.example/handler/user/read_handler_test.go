@@ -100,3 +100,13 @@ func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
         t.Fatalf("the read answered %d for a request that had ended: %s", statusCode, body)
     }
 }
+
+/* the user read door trims the path identifier as the update and delete doors do */
+func TestApiReadDoor_FindsTheAccountUnderAPaddedIdentifier(t *testing.T) {
+    userRepository := newRecordingUserRepository(administrator("admin-1"))
+    runtimeInstance := adminRuntime(t, userRepository, "admin-1", []string{entity.RoleAdmin})
+
+    if statusCode, body := callDoor(t, runtimeInstance, ApiReadHandler(), nethttp.MethodGet, "/users/api/%20admin-1%20", map[string]string{"id": " admin-1 "}, ""); nethttp.StatusOK != statusCode {
+        t.Fatalf("expected the padded identifier found, got %d %s", statusCode, body)
+    }
+}

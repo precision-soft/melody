@@ -87,3 +87,18 @@ func TestUserCreateCommand_RefusesWithoutTheCatalogueDatabase(t *testing.T) {
         t.Fatalf("a refused create wrote the account")
     }
 }
+
+/* the create's listeners clear the cache of this process alone on the in-process fallback, so the command says a running server will not list the account until it restarts, as the other writing commands do */
+func TestUserCreateCommand_SaysTheCacheIsItsOwnOnTheInProcessFallback(t *testing.T) {
+    fixture := newCommandFixture(t)
+    command := NewUserCreateCommand(fixture.lazyUserService(), strings.NewReader("a-first-admin-password\n"))
+    captured := &strings.Builder{}
+
+    if runErr := command.Run(fixture.runtime, newFlagContextWithWriter(entity.RoleAdmin, "operator", captured)); nil != runErr {
+        t.Fatalf("expected the account created, got %v", runErr)
+    }
+
+    if false == strings.Contains(captured.String(), processLocalCacheNotice) {
+        t.Fatalf("expected the notice, got %q", captured.String())
+    }
+}

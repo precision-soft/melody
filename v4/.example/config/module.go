@@ -164,6 +164,8 @@ const (
 
     environmentKeySmtpAddress = "SMTP_ADDRESS"
 
+    environmentKeyLocalStorageDirectory = "APP_LOCAL_STORAGE_DIRECTORY"
+
     environmentKeyOtelExporterEndpoint = "OTEL_EXPORTER_OTLP_ENDPOINT"
 
     environmentKeyCorsAllowOrigins     = "APP_CORS_ALLOW_ORIGINS"

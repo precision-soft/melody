@@ -350,3 +350,12 @@ func TestApiReadDoorsEndWithTheRequest(t *testing.T) {
         }
     })
 }
+
+/* the read door trims the path identifier as the delete door does, so one spelling names one product at every door */
+func TestApiReadDoor_FindsTheProductUnderAPaddedIdentifierAsTheDeleteDoorDoes(t *testing.T) {
+    fixture := newProductDoorFixture(t)
+
+    if status, body := fixture.callAt(t, ApiReadHandler(), nethttp.MethodGet, "/products/api/read/%20prod-1%20/", "", map[string]string{"id": " prod-1 "}); nethttp.StatusOK != status {
+        t.Fatalf("expected the padded identifier found, got %d %s", status, body)
+    }
+}

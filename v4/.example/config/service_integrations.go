@@ -3,6 +3,7 @@ package config
 import (
     "os"
     "path/filepath"
+    "strings"
 
     melodymysql "github.com/precision-soft/melody/integrations/bunorm/mysql/v4"
     melodypgsql "github.com/precision-soft/melody/integrations/bunorm/pgsql/v4"
@@ -10,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/persistence"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodylock "github.com/precision-soft/melody/v4/lock"
@@ -28,10 +30,23 @@ func (instance *Module) registerStorageService(registrar melodyapplicationcontra
     registrar.RegisterService(
         melodystorage.ServiceStorage,
         func(resolver melodycontainercontract.Resolver) (melodystoragecontract.Storage, error) {
-            return melodystorage.NewLocalStorage(filepath.Join(os.TempDir(), "melody-example-storage"), melodystorage.LocalStorageConfig{}), nil
+            return melodystorage.NewLocalStorage(instance.localStorageDirectory(), melodystorage.LocalStorageConfig{}), nil
         },
         melodycontainer.RegisterOptions{},
     )
+}
+
+/* localStorageDirectory is APP_LOCAL_STORAGE_DIRECTORY, a relative value anchored to the project directory as APP_SESSION_FILE is, so a console run and the http process write one directory; the system's temporary directory under melody-example-storage when the key is empty */
+func (instance *Module) localStorageDirectory() string {
+    if directory := strings.TrimSpace(instance.environmentValue(environmentKeyLocalStorageDirectory)); "" != directory {
+        if false == filepath.IsAbs(directory) {
+            return filepath.Join(instance.configuration.Kernel().ProjectDirectory(), directory)
+        }
+
+        return directory
+    }
+
+    return filepath.Join(os.TempDir(), "melody-example-storage")
 }
 
 func (instance *Module) registerLockerService(registrar melodyapplicationcontract.ServiceRegistrar) {
@@ -62,7 +77,12 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
     registrar.RegisterService(
         melodylock.ServiceLocker,
         func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
-            return melodylock.NewInMemoryLocker(melodyclock.NewSystemClock()), nil
+            clockInstance, clockErr := melodycontainer.FromResolver[melodyclockcontract.Clock](melodycontainer.ContextOf(resolver), resolver, melodyclock.ServiceClock)
+            if nil != clockErr {
+                return nil, clockErr
+            }
+
+            return melodylock.NewInMemoryLocker(clockInstance), nil
         },
         melodycontainer.RegisterOptions{},
     )
@@ -74,7 +94,12 @@ func (instance *Module) registerArchiveLockerService(registrar melodyapplication
         persistence.ServiceArchiveLocker,
         func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
             if false == instance.archiveWired {
-                return melodylock.NewInMemoryLocker(melodyclock.NewSystemClock()), nil
+                clockInstance, clockErr := melodycontainer.FromResolver[melodyclockcontract.Clock](melodycontainer.ContextOf(resolver), resolver, melodyclock.ServiceClock)
+                if nil != clockErr {
+                    return nil, clockErr
+                }
+
+                return melodylock.NewInMemoryLocker(clockInstance), nil
             }
 
             database, resolveErr := melodycontainer.FromResolver[*bun.DB](melodycontainer.ContextOf(resolver), resolver, serviceArchiveDatabase)

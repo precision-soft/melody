@@ -302,6 +302,16 @@ func (instance *UserService) DeleteById(
     return true, nil
 }
 
+/* FindByUsernameInDirectory reads the account through the repository, past the cache, for a caller that acts on the account as it is now: an operator's reset must not act on an account the cache still holds after a deletion or a rename */
+func (instance *UserService) FindByUsernameInDirectory(ctx context.Context, username string) (*entity.User, bool, error) {
+    normalizedUsername := strings.TrimSpace(username)
+    if "" == normalizedUsername {
+        return nil, false, nil
+    }
+
+    return instance.findByUsernameUncached(ctx, normalizedUsername)
+}
+
 /* AuthenticateByUsernameAndPassword reads the account through the repository rather than the cache, so a password change or a deletion the cache has not dropped yet cannot authenticate the replaced credential. The name is still refused as FindByUsername refuses it before any backend is asked. */
 func (instance *UserService) AuthenticateByUsernameAndPassword(
     ctx context.Context,

@@ -55,7 +55,8 @@ func ApiReadHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
         }
 
-        if "" == strings.TrimSpace(id) {
+        id = strings.TrimSpace(id)
+        if "" == id {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
         }
 
