@@ -4,6 +4,7 @@ import (
     "context"
     "errors"
     "fmt"
+    "math"
     "reflect"
     "strconv"
     "strings"
@@ -1457,5 +1458,28 @@ func TestBackend_ADoneContextSendsNoCommandToTheClient(t *testing.T) {
         if 0 != countingClient.commands.Load() {
             t.Fatalf("%s: expected no command handed to the client under a done context, got %d", name, countingClient.commands.Load())
         }
+    }
+}
+
+func TestBackend_UnderADoneContextTheTtlAndTheDeltaAreJudgedFirst(t *testing.T) {
+    backend, backendErr := NewBackend(&closeTrackingClient{}, BackendConfig{})
+    if nil != backendErr {
+        t.Fatalf("NewBackend: %v", backendErr)
+    }
+
+    canceledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if setErr := backend.Set(canceledContext, "key", []byte("value"), bound.Duration{}); nil == setErr || true == errors.Is(setErr, context.Canceled) {
+        t.Fatalf("Set: expected the absent ttl refused before the done context, got %v", setErr)
+    }
+
+    if setErr := backend.SetMultiple(canceledContext, map[string][]byte{"key": []byte("value")}, bound.Duration{}); nil == setErr || true == errors.Is(setErr, context.Canceled) {
+        t.Fatalf("SetMultiple: expected the absent ttl refused before the done context, got %v", setErr)
+    }
+
+    _, decrementErr := backend.Decrement(canceledContext, "key", math.MinInt64)
+    if nil == decrementErr || "delta overflows int64 when negated" != decrementErr.Error() {
+        t.Fatalf("Decrement: expected the in-memory backend's delta refusal before the done context, got %v", decrementErr)
     }
 }

@@ -5,15 +5,22 @@ import (
     "strings"
 )
 
-/* AppendCauseChain appends each link of a cause chain to a one-line message as ": cause N: <link>", every link bounded and escaped to one line; a link the line already carries, the text a %w wrapper repeats, is left out. */
-func AppendCauseChain(line string, causeChain []string) string {
+/* AppendCauseChain appends at most maximumLinks links of a cause chain to a one-line message as ": cause N: <link>", every link escaped to one line and then cut at 512 bytes; a link the text before it ends with, the shape a %w wrapper repeats, is left out and not counted. */
+func AppendCauseChain(line string, causeChain []string, maximumLinks int) string {
     var builder strings.Builder
     builder.WriteString(line)
 
+    previous := line
     written := 0
     for _, link := range causeChain {
-        rendered := EscapeControlCharacters(BoundDiagnosticText(link))
-        if "" == rendered || true == strings.Contains(builder.String(), rendered) {
+        if written >= maximumLinks {
+            break
+        }
+
+        rendered := BoundDiagnosticText(EscapeControlCharacters(link))
+        repeated := "" == rendered || previous == rendered || true == strings.HasSuffix(previous, ": "+rendered)
+        previous = rendered
+        if true == repeated {
             continue
         }
 

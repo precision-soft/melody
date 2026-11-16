@@ -2,6 +2,7 @@ package cache
 
 import (
     "context"
+    "math"
     "sort"
     "strconv"
     "strings"
@@ -569,6 +570,16 @@ func (instance *Backend) Decrement(ctx context.Context, key string, delta int64)
     normalizedKey, normalizeErr := instance.normalizeKey(key)
     if nil != normalizeErr {
         return 0, normalizeErr
+    }
+
+    if math.MinInt64 == delta {
+        return 0, exception.NewError(
+            "delta overflows int64 when negated",
+            exceptioncontract.Context{
+                "key": key,
+            },
+            nil,
+        )
     }
 
     if doneErr := ctx.Err(); nil != doneErr {

@@ -37,7 +37,7 @@ var rememberWaitTimeoutRule = bound.Rule[time.Duration]{
     UnlimitedAdmitted: true,
 }
 
-/* Remember answers the cached value, computing it through the callback on a miss and storing it under the ttl. The context governs this caller's wait and nothing else under a flight: the computation belongs to the flight, and only the last waiter leaving a cancelable flight cancels it. A flight already finished is answered whatever the context says; otherwise the context's cancellation, the wait timeout and the leader's answer race, the first to arrive ending the wait. The callback receives the flight's context; with no flight, the stampede protection disabled or a cache the flight cannot tell apart by its pointer, it runs under the caller's context, which then governs the computation and its store too, a caller gone before the store answered the context's error with nothing stored. The cache is read under the caller's context, and a flight reads and stores under its own. A refused configuration is answered as the error, naming the field, before the cache is read. On a cache exposing its stored shape, a StoredValueNormalizer, the computed value goes through it before it is returned, so the miss answers what every hit answers, while another cache answers the computed value as is; with the JSON serializer an integer beyond 2^53 therefore comes back changed on the computing call too. */
+/* Remember answers the cached value, computing it through the callback on a miss and storing it under the ttl. The context governs this caller's wait and nothing else under a flight: the computation belongs to the flight, and only the last waiter leaving a cancelable flight cancels it. A flight already finished is answered whatever the context says; otherwise the context's cancellation, the wait timeout and the leader's answer race, the first to arrive ending the wait. The callback receives the flight's context; with no flight, the stampede protection disabled or a cache the flight cannot tell apart by its pointer, it runs under the caller's context, which then governs the computation too. The cache is read and a computed value stored without the cancellation of the context they run under, its values kept, so a done context never refuses a hit and never loses a value already computed. A refused configuration is answered as the error, naming the field, before the cache is read. On a cache exposing its stored shape, a StoredValueNormalizer, the computed value goes through it before it is returned, so the miss answers what every hit answers, while another cache answers the computed value as is; with the JSON serializer an integer beyond 2^53 therefore comes back changed on the computing call too. */
 func Remember(
     ctx context.Context,
     cacheInstance cachecontract.Cache,
@@ -72,7 +72,7 @@ func Remember(
 
     isCancelable := false == config.Detached
 
-    value, exists, getErr := cacheInstance.Get(ctx, key)
+    value, exists, getErr := cacheInstance.Get(context.WithoutCancel(ctx), key)
     getErr = normalizeThirdPartyError(getErr)
     if nil != getErr {
         /* a payload the serializer cannot decode is a miss: the callback recomputes and its Set overwrites the corrupt payload, so the key heals; every other error means the cache failed */
@@ -298,7 +298,7 @@ func executeRememberInFlightLeader(
         return
     }
 
-    setErr := normalizeThirdPartyError(cacheInstance.Set(call.Context(), key, computedValue, ttl))
+    setErr := normalizeThirdPartyError(cacheInstance.Set(context.WithoutCancel(call.Context()), key, computedValue, ttl))
     if nil != setErr {
         call.Complete(nil, setErr)
         return
@@ -336,7 +336,7 @@ func rememberWithoutStampedeProtection(
         return nil, normalizeErr
     }
 
-    setErr := normalizeThirdPartyError(cacheInstance.Set(callerContext, key, value, ttl))
+    setErr := normalizeThirdPartyError(cacheInstance.Set(context.WithoutCancel(callerContext), key, value, ttl))
     if nil != setErr {
         return nil, setErr
     }

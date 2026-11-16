@@ -1,6 +1,7 @@
 package subscriber
 
 import (
+    "context"
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
@@ -52,20 +53,20 @@ func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventLi
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyUserById(payloadInstance.User().Id))
+        byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserById(payloadInstance.User().Id))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
         usernameCacheKey := userUsernameCacheKey(payloadInstance.User().Username)
         if "" != usernameCacheKey {
-            byUsernameDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), usernameCacheKey)
+            byUsernameDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), usernameCacheKey)
             if nil != byUsernameDeleteErr {
                 return byUsernameDeleteErr
             }
         }
 
-        listDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyUserList)
+        listDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserList)
         if nil != listDeleteErr {
             return listDeleteErr
         }
@@ -92,14 +93,14 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyUserById(payloadInstance.User().Id))
+        byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserById(payloadInstance.User().Id))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
         usernameCacheKey := userUsernameCacheKey(payloadInstance.User().Username)
         if "" != usernameCacheKey {
-            byUsernameDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), usernameCacheKey)
+            byUsernameDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), usernameCacheKey)
             if nil != byUsernameDeleteErr {
                 return byUsernameDeleteErr
             }
@@ -108,13 +109,13 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
         /* a rename leaves the by-username entry keyed on the spelling before the rename, so it is cleared under that name too: otherwise the pre-rename credentials would keep authenticating and that name could not be registered again */
         previousUsernameCacheKey := userUsernameCacheKey(payloadInstance.PreviousUsername())
         if "" != previousUsernameCacheKey && previousUsernameCacheKey != usernameCacheKey {
-            previousUsernameDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), previousUsernameCacheKey)
+            previousUsernameDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), previousUsernameCacheKey)
             if nil != previousUsernameDeleteErr {
                 return previousUsernameDeleteErr
             }
         }
 
-        listDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyUserList)
+        listDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserList)
         if nil != listDeleteErr {
             return listDeleteErr
         }
@@ -141,20 +142,20 @@ func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventLi
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyUserById(payloadInstance.UserId()))
+        byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserById(payloadInstance.UserId()))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
         usernameCacheKey := userUsernameCacheKey(payloadInstance.Username())
         if "" != usernameCacheKey {
-            byUsernameDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), usernameCacheKey)
+            byUsernameDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), usernameCacheKey)
             if nil != byUsernameDeleteErr {
                 return byUsernameDeleteErr
             }
         }
 
-        listDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyUserList)
+        listDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserList)
         if nil != listDeleteErr {
             return listDeleteErr
         }

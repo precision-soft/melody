@@ -333,7 +333,7 @@ func (instance *clearCountingCache) Clear(ctx context.Context) error {
         return refusal
     }
 
-    return instance.Cache.Clear(context.Background())
+    return instance.Cache.Clear(ctx)
 }
 
 func (instance *clearCountingCache) clears() int {

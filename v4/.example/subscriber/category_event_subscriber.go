@@ -1,6 +1,7 @@
 package subscriber
 
 import (
+    "context"
     "github.com/precision-soft/melody/v4/.example/event"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
@@ -43,12 +44,12 @@ func (instance *CategoryEventSubscriber) onCategoryCreated() melodyeventcontract
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryById(payloadInstance.Category().Id))
+        byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyCategoryById(payloadInstance.Category().Id))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
-        listDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryList)
+        listDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyCategoryList)
         if nil != listDeleteErr {
             return listDeleteErr
         }
@@ -75,12 +76,12 @@ func (instance *CategoryEventSubscriber) onCategoryUpdated() melodyeventcontract
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryById(payloadInstance.Category().Id))
+        byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyCategoryById(payloadInstance.Category().Id))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
-        listDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryList)
+        listDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyCategoryList)
         if nil != listDeleteErr {
             return listDeleteErr
         }
@@ -107,12 +108,12 @@ func (instance *CategoryEventSubscriber) onCategoryDeleted() melodyeventcontract
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        byIdDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryById(payloadInstance.CategoryId()))
+        byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyCategoryById(payloadInstance.CategoryId()))
         if nil != byIdDeleteErr {
             return byIdDeleteErr
         }
 
-        listDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyCategoryList)
+        listDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyCategoryList)
         if nil != listDeleteErr {
             return listDeleteErr
         }

@@ -827,3 +827,30 @@ func TestManager_EveryDoorHandsTheCallersContextToTheBackend(t *testing.T) {
         }
     }
 }
+
+type refusingSerializer struct{}
+
+func (instance refusingSerializer) Serialize(value any) ([]byte, error) {
+    return nil, errors.New("serialization refused")
+}
+
+func (instance refusingSerializer) Deserialize(payload []byte) (any, error) {
+    return nil, errors.New("deserialization refused")
+}
+
+func TestManager_ANilContextIsRefusedBeforeTheValueIsSerialized(t *testing.T) {
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)})
+    defer backend.CloseWithContext(context.Background())
+
+    manager := NewManager(backend, refusingSerializer{}, ManagerConfig{})
+
+    var absentContext context.Context
+
+    if setErr := manager.Set(absentContext, "key", "value", bound.Of(time.Minute)); nil == setErr || "cache context is nil" != setErr.Error() {
+        t.Fatalf("Set: expected the nil context refused first, got %v", setErr)
+    }
+
+    if setErr := manager.SetMultiple(absentContext, map[string]any{"key": "value"}, bound.Of(time.Minute)); nil == setErr || "cache context is nil" != setErr.Error() {
+        t.Fatalf("SetMultiple: expected the nil context refused first, got %v", setErr)
+    }
+}

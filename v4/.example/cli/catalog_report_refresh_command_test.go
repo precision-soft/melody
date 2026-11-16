@@ -132,7 +132,7 @@ func (instance *sequenceCache) Set(ctx context.Context, key string, value any, t
         instance.sequence.record("refresh")
     }
 
-    return instance.Cache.Set(context.Background(), key, value, ttl)
+    return instance.Cache.Set(ctx, key, value, ttl)
 }
 
 /* sequenceArchive is the archive as the command reaches it: one row per instant, refused as the real ones refuse it, every append on the ledger */

@@ -34,7 +34,7 @@ The application boot is split around configuration resolve:
 This allows HTTP/CLI module code to read resolved configuration values during registration, e.g.
 `kernelInstance.Config().MustGet("my.param").String()`.
 
-`Run` is called once per process. It closes the application when it returns, and a second call panics with `application run called twice` before anything is booted or marked serving. `Boot` and `Close` may be called again and do nothing the second time; `Run` may not, so return from `main` after it.
+`Run` is called once per process. It closes the application when it returns, and a second call panics with `application run called twice` before anything is booted or marked serving, a plain Go panic raised before `Run`'s exit handler, so it carries a stack trace and no exit record. `Boot` and `Close` may be called again and do nothing the second time; `Run` may not, so return from `main` after it.
 
 ## Runtime mode
 

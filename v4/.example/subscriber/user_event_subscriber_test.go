@@ -33,7 +33,7 @@ func (instance *deleteCountingCache) Delete(ctx context.Context, key string) err
     instance.deletes[key]++
     instance.mutex.Unlock()
 
-    return instance.Cache.Delete(context.Background(), key)
+    return instance.Cache.Delete(ctx, key)
 }
 
 /* userUpdateUnderTest answers a runtime holding only the cache: the listener drops its entries before it notifies, so the notification hub it cannot resolve ends the call after the drops under test */

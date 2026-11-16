@@ -1,6 +1,7 @@
 package service
 
 import (
+    "context"
     "errors"
 
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
@@ -29,7 +30,7 @@ func dispatchCommitted(
 
     failureErr := dispatchErr
     for _, cacheKey := range cacheKeyList {
-        if deleteErr := cacheInstance.Delete(runtimeInstance.Context(), cacheKey); nil != deleteErr {
+        if deleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), cacheKey); nil != deleteErr {
             failureErr = errors.Join(failureErr, deleteErr)
         }
     }

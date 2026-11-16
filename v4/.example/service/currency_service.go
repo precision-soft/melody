@@ -288,7 +288,7 @@ func (instance *CurrencyService) UpdateRate(
     }
 
     if true == quote.NamesTheSameReadingAs(currency.Quote()) {
-        if dropErr := instance.healCachedCurrency(ctx, currency); nil != dropErr {
+        if dropErr := instance.healCachedCurrency(context.WithoutCancel(ctx), currency); nil != dropErr {
             return nil, RateUpdateUnchanged, dropErr
         }
 
@@ -319,7 +319,7 @@ func (instance *CurrencyService) UpdateRate(
             return current, RateUpdateStale, nil
         }
 
-        if dropErr := instance.healCachedCurrency(ctx, current); nil != dropErr {
+        if dropErr := instance.healCachedCurrency(context.WithoutCancel(ctx), current); nil != dropErr {
             return nil, RateUpdateUnchanged, dropErr
         }
 

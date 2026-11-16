@@ -1,6 +1,7 @@
 package subscriber
 
 import (
+    "context"
     "time"
 
     "github.com/precision-soft/melody/v4/.example/event"
@@ -47,14 +48,14 @@ func (instance *ProductEventSubscriber) onProductCreated() melodyeventcontract.E
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        productByIdCacheDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), 
+        productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
             service.CacheKeyProductById(payloadInstance.Product().Id),
         )
         if nil != productByIdCacheDeleteErr {
             return productByIdCacheDeleteErr
         }
 
-        productListCacheDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyProductList)
+        productListCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyProductList)
         if nil != productListCacheDeleteErr {
             return productListCacheDeleteErr
         }
@@ -82,14 +83,14 @@ func (instance *ProductEventSubscriber) onProductUpdated() melodyeventcontract.E
         logger := melodylogging.LoggerMustFromRuntime(runtimeInstance)
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        productByIdCacheDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), 
+        productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
             service.CacheKeyProductById(payloadInstance.Product().Id),
         )
         if nil != productByIdCacheDeleteErr {
             return productByIdCacheDeleteErr
         }
 
-        productListCacheDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyProductList)
+        productListCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyProductList)
         if nil != productListCacheDeleteErr {
             return productListCacheDeleteErr
         }
@@ -130,19 +131,19 @@ func (instance *ProductEventSubscriber) onProductDeleted() melodyeventcontract.E
 
         cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
 
-        productByIdCacheDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), 
+        productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
             service.CacheKeyProductById(payloadInstance.ProductId()),
         )
         if nil != productByIdCacheDeleteErr {
             return productByIdCacheDeleteErr
         }
 
-        productListCacheDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyProductList)
+        productListCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyProductList)
         if nil != productListCacheDeleteErr {
             return productListCacheDeleteErr
         }
 
-        productViewsCacheDeleteErr := cacheInstance.Delete(runtimeInstance.Context(), service.CacheKeyProductViews(payloadInstance.ProductId()))
+        productViewsCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyProductViews(payloadInstance.ProductId()))
         if nil != productViewsCacheDeleteErr {
             return productViewsCacheDeleteErr
         }

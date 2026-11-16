@@ -95,6 +95,10 @@ func (instance *Manager) Get(ctx context.Context, key string) (any, bool, error)
 }
 
 func (instance *Manager) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return nilErr
+    }
+
     payload, serializeErr := instance.serializer.Serialize(value)
     serializeErr = normalizeThirdPartyError(serializeErr)
     if nil != serializeErr {
@@ -183,6 +187,10 @@ func serializationErrorText(err error) (text string) {
 
 /* SetMultiple serializes every entry before the backend sees any, so a refusal writes nothing. The refusal names every refused key under "keys", sorted, with "key" the first of them, and each key's own reason under "causeByKey"; every entry is serialized even after the first refusal, so the list is whole. */
 func (instance *Manager) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return nilErr
+    }
+
     payloads := make(map[string][]byte, len(items))
     var refusedKeys []string
     var refusalByKey map[string]error

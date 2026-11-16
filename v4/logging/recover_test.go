@@ -4,6 +4,7 @@ import (
     "bytes"
     "context"
     "errors"
+    "fmt"
     "io"
     "os"
     "os/exec"
@@ -1720,5 +1721,33 @@ func TestLogOnRecoverAndExit_TheExitLineFollowsTheLoggersCauseChainDepth(t *test
 
     if false == strings.Contains(string(output), "boom: cause 1: first cause") || true == strings.Contains(string(output), "second cause") {
         t.Fatalf("expected the exit line cut at the logger's depth of one link, got %q", string(output))
+    }
+}
+
+type panickingDepthCaptureLogger struct {
+    *captureLogger
+}
+
+func (instance *panickingDepthCaptureLogger) CauseChainDepth() int {
+    panic("depth unavailable")
+}
+
+func TestShieldedCauseChainDepth_AFaultyLoggerCostsTheChainNotTheLine(t *testing.T) {
+    if 1 != shieldedCauseChainDepth(&depthReportingCaptureLogger{captureLogger: &captureLogger{}, depth: -1}) {
+        t.Fatal("expected a negative depth read as one link")
+    }
+
+    if 8 != shieldedCauseChainDepth(&panickingDepthCaptureLogger{captureLogger: &captureLogger{}}) {
+        t.Fatal("expected a panicking depth read as the default")
+    }
+}
+
+func TestEchoExitToStderr_AWrappedErrorAtDepthOneStillShowsItsCause(t *testing.T) {
+    wrapped := fmt.Errorf("serving: %w", exception.NewError("listener failed", nil, errors.New("address in use")))
+
+    output := captureExitEcho(t, wrapped, 1)
+
+    if false == strings.Contains(output, "serving: listener failed: cause 1: address in use") {
+        t.Fatalf("expected the repeated link not counted against the depth, got %q", output)
     }
 }

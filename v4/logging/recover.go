@@ -201,6 +201,7 @@ func LogOnRecoverAndExit(
 
     /* the echo leaves a trace on the standard streams when the record went to a file. It runs under the package budget, not the hook's, and outside the shield, since the shield reports on stderr, the very channel this step can block on; an abandoned echo is followed by os.Exit, silently. */
     echoDone := make(chan struct{})
+    causeChainDepth := shieldedCauseChainDepth(logger)
 
     go func() {
         defer close(echoDone)
@@ -210,7 +211,7 @@ func LogOnRecoverAndExit(
             _ = recover()
         }()
 
-        echoExitToStderr(err, resolvedExitCode, CauseChainDepth(logger))
+        echoExitToStderr(err, resolvedExitCode, causeChainDepth)
     }()
 
     select {
@@ -476,6 +477,22 @@ func isAlreadyLoggedValue(recovered any) bool {
     return exception.IsAlreadyLogged(err)
 }
 
+/* shieldedCauseChainDepth asks the logger its depth under a recover, a panic reading as the default 8 and a depth below 1 as one link, so a faulty logger costs the chain, never the exit line */
+func shieldedCauseChainDepth(logger loggingcontract.Logger) (depth int) {
+    defer func() {
+        if nil != recover() {
+            depth = 8
+        }
+    }()
+
+    depth = CauseChainDepth(logger)
+    if 1 > depth {
+        depth = 1
+    }
+
+    return depth
+}
+
 /* echoExitToStderr writes one final line before a fatal exit so a non-zero exit is never completely silent on the standard streams, whatever destination the configured logger has; the cause chain follows the message, to the logger's depth. */
 func echoExitToStderr(err error, exitCode int, causeChainDepth int) {
     if 0 == exitCode {
@@ -486,7 +503,7 @@ func echoExitToStderr(err error, exitCode int, causeChainDepth int) {
     var causeChain []string
     if nil != err {
         /* a recovered value's Error() can be the dereference that made it panic, so it is rendered through LogContext, under a recover */
-        errorContext := exception.LogContext(err, exception.LogContextConfig{CauseChainDepth: causeChainDepth})
+        errorContext := exception.LogContext(err, exception.LogContextConfig{CauseChainDepth: 2 * causeChainDepth})
         rendered, isRendered := errorContext["error"].(string)
         if true == isRendered && "" != rendered {
             message = rendered
@@ -495,5 +512,5 @@ func echoExitToStderr(err error, exitCode int, causeChainDepth int) {
         causeChain, _ = errorContext["causeChain"].([]string)
     }
 
-    _, _ = fmt.Fprintf(os.Stderr, "melody: exiting with code %d after unrecovered error: %s\n", exitCode, internal.AppendCauseChain(internal.EscapeControlCharacters(message), causeChain))
+    _, _ = fmt.Fprintf(os.Stderr, "melody: exiting with code %d after unrecovered error: %s\n", exitCode, internal.AppendCauseChain(internal.EscapeControlCharacters(message), causeChain, causeChainDepth))
 }

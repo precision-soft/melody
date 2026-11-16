@@ -817,43 +817,43 @@ type testValueKindCache struct {
 }
 
 func (instance testValueKindCache) Get(ctx context.Context, key string) (any, bool, error) {
-    return instance.inner.Get(context.Background(), key)
+    return instance.inner.Get(ctx, key)
 }
 
 func (instance testValueKindCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
-    return instance.inner.Set(context.Background(), key, value, ttl)
+    return instance.inner.Set(ctx, key, value, ttl)
 }
 
 func (instance testValueKindCache) Delete(ctx context.Context, key string) error {
-    return instance.inner.Delete(context.Background(), key)
+    return instance.inner.Delete(ctx, key)
 }
 
 func (instance testValueKindCache) Has(ctx context.Context, key string) (bool, error) {
-    return instance.inner.Has(context.Background(), key)
+    return instance.inner.Has(ctx, key)
 }
 
 func (instance testValueKindCache) Clear(ctx context.Context) error {
-    return instance.inner.Clear(context.Background())
+    return instance.inner.Clear(ctx)
 }
 
 func (instance testValueKindCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
-    return instance.inner.Many(context.Background(), keys)
+    return instance.inner.Many(ctx, keys)
 }
 
 func (instance testValueKindCache) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
-    return instance.inner.SetMultiple(context.Background(), items, ttl)
+    return instance.inner.SetMultiple(ctx, items, ttl)
 }
 
 func (instance testValueKindCache) DeleteMultiple(ctx context.Context, keys []string) error {
-    return instance.inner.DeleteMultiple(context.Background(), keys)
+    return instance.inner.DeleteMultiple(ctx, keys)
 }
 
 func (instance testValueKindCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
-    return instance.inner.Increment(context.Background(), key, delta)
+    return instance.inner.Increment(ctx, key, delta)
 }
 
 func (instance testValueKindCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
-    return instance.inner.Decrement(context.Background(), key, delta)
+    return instance.inner.Decrement(ctx, key, delta)
 }
 
 func (instance testValueKindCache) CloseWithContext(closeContext context.Context) error {
@@ -929,7 +929,7 @@ type testPanickingSetCache struct {
 }
 
 func (instance *testPanickingSetCache) Get(ctx context.Context, key string) (any, bool, error) {
-    return instance.inner.Get(context.Background(), key)
+    return instance.inner.Get(ctx, key)
 }
 
 func (instance *testPanickingSetCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
@@ -937,35 +937,35 @@ func (instance *testPanickingSetCache) Set(ctx context.Context, key string, valu
 }
 
 func (instance *testPanickingSetCache) Delete(ctx context.Context, key string) error {
-    return instance.inner.Delete(context.Background(), key)
+    return instance.inner.Delete(ctx, key)
 }
 
 func (instance *testPanickingSetCache) Has(ctx context.Context, key string) (bool, error) {
-    return instance.inner.Has(context.Background(), key)
+    return instance.inner.Has(ctx, key)
 }
 
 func (instance *testPanickingSetCache) Clear(ctx context.Context) error {
-    return instance.inner.Clear(context.Background())
+    return instance.inner.Clear(ctx)
 }
 
 func (instance *testPanickingSetCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
-    return instance.inner.Many(context.Background(), keys)
+    return instance.inner.Many(ctx, keys)
 }
 
 func (instance *testPanickingSetCache) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
-    return instance.inner.SetMultiple(context.Background(), items, ttl)
+    return instance.inner.SetMultiple(ctx, items, ttl)
 }
 
 func (instance *testPanickingSetCache) DeleteMultiple(ctx context.Context, keys []string) error {
-    return instance.inner.DeleteMultiple(context.Background(), keys)
+    return instance.inner.DeleteMultiple(ctx, keys)
 }
 
 func (instance *testPanickingSetCache) Increment(ctx context.Context, key string, delta int64) (int64, error) {
-    return instance.inner.Increment(context.Background(), key, delta)
+    return instance.inner.Increment(ctx, key, delta)
 }
 
 func (instance *testPanickingSetCache) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
-    return instance.inner.Decrement(context.Background(), key, delta)
+    return instance.inner.Decrement(ctx, key, delta)
 }
 
 func (instance *testPanickingSetCache) CloseWithContext(closeContext context.Context) error {
@@ -1651,12 +1651,12 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
         t.Fatalf("expected the uncoalesced callback to run under the caller context, saw %v", observedContextError)
     }
 
-    if false == errors.Is(rememberErr, context.Canceled) {
-        t.Fatalf("expected the store under the canceled caller context to answer its error, got %v", rememberErr)
+    if nil != rememberErr {
+        t.Fatalf("expected the computed value answered, got %v", rememberErr)
     }
 
-    if _, exists, getErr := cacheManager.Get(context.Background(), "report.uncoalesced"); nil != getErr || true == exists {
-        t.Fatalf("expected nothing stored under the canceled caller context, got %v, %v", exists, getErr)
+    if _, exists, getErr := cacheManager.Get(context.Background(), "report.uncoalesced"); nil != getErr || false == exists {
+        t.Fatalf("expected the computed value stored though the caller left, got %v, %v", exists, getErr)
     }
 }
 
@@ -2261,16 +2261,20 @@ func TestRemember_TheCallerReadsUnderItsContextAndTheFlightReadsAndStoresUnderIt
         t.Fatalf("expected two reads and one store, got %d and %d", len(scriptedCache.getContexts), len(scriptedCache.setContexts))
     }
 
-    if callerContext != scriptedCache.getContexts[0] {
-        t.Fatal("expected the first read under the caller's context")
+    if "caller" != scriptedCache.getContexts[0].Value(rememberContextKey{}) {
+        t.Fatal("expected the first read to carry the caller's context values")
     }
 
     if nil == flightContext || callerContext == flightContext {
         t.Fatal("expected the callback to run under a flight context of its own")
     }
 
-    if flightContext != scriptedCache.getContexts[1] || flightContext != scriptedCache.setContexts[0] {
-        t.Fatal("expected the leader to read and store under the flight's context")
+    if flightContext != scriptedCache.getContexts[1] {
+        t.Fatal("expected the leader to read under the flight's context")
+    }
+
+    if nil != scriptedCache.setContexts[0].Done() || flightContext.Value(rememberContextKey{}) != scriptedCache.setContexts[0].Value(rememberContextKey{}) {
+        t.Fatal("expected the leader to store without the flight's cancellation")
     }
 }
 
@@ -2288,4 +2292,50 @@ func TestReadOwnStoredValue_ReadsUnderTheFlightContext(t *testing.T) {
     if 1 != len(scriptedCache.getContexts) || flightContext != scriptedCache.getContexts[0] {
         t.Fatal("expected the own read under the flight's context")
     }
+}
+
+func TestRemember_ADoneCallerContextStillAnswersAHit(t *testing.T) {
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)})
+    defer backend.CloseWithContext(context.Background())
+
+    cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
+    if setErr := cacheManager.Set(context.Background(), "report.hit", "stored", bound.Of(time.Minute)); nil != setErr {
+        t.Fatalf("planting: %v", setErr)
+    }
+
+    canceledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    value, rememberErr := Remember(canceledContext, cacheManager, "report.hit", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context) (any, error) {
+        return "computed", nil
+    })
+    if nil != rememberErr || "stored" != value {
+        t.Fatalf("expected the hit answered under a done context, got %v, %v", value, rememberErr)
+    }
+}
+
+func TestRemember_ALeaderWhoseWaitersLeftStillStoresWhatItComputed(t *testing.T) {
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)})
+    defer backend.CloseWithContext(context.Background())
+
+    cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
+
+    _, rememberErr := Remember(context.Background(), cacheManager, "report.slow", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(20 * time.Millisecond)}, func(ctx context.Context) (any, error) {
+        time.Sleep(200 * time.Millisecond)
+        return "computed", nil
+    })
+    if nil == rememberErr {
+        t.Fatal("expected the short wait to answer before the callback")
+    }
+
+    deadline := time.Now().Add(5 * time.Second)
+    for time.Now().Before(deadline) {
+        if _, exists, _ := cacheManager.Get(context.Background(), "report.slow"); true == exists {
+            return
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    t.Fatal("expected the value a callback ignoring the cancellation computed to be stored")
 }

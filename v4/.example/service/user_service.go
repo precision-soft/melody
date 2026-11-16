@@ -200,7 +200,7 @@ func (instance *UserService) GrantRole(
     }
 
     if repository.GrantRoleAlreadyHeld == outcome {
-        if dropErr := instance.dropCachedUser(ctx, account); nil != dropErr {
+        if dropErr := instance.dropCachedUser(context.WithoutCancel(ctx), account); nil != dropErr {
             return nil, outcome, dropErr
         }
 

@@ -1691,3 +1691,23 @@ func TestInMemoryBackend_AnEmptyBatchUnderADoneContextAnswersItsError(t *testing
         t.Fatalf("DeleteMultiple: expected the done context's error, got %v", deleteErr)
     }
 }
+
+func TestInMemoryBackend_UnderADoneContextTheTtlAndTheDeltaAreJudgedFirst(t *testing.T) {
+    backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour)})
+    defer backend.CloseWithContext(context.Background())
+
+    canceledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if setErr := backend.Set(canceledContext, "key", []byte("value"), bound.Duration{}); nil == setErr || true == errors.Is(setErr, context.Canceled) {
+        t.Fatalf("Set: expected the absent ttl refused before the done context, got %v", setErr)
+    }
+
+    if setErr := backend.SetMultiple(canceledContext, map[string][]byte{"key": []byte("value")}, bound.Duration{}); nil == setErr || true == errors.Is(setErr, context.Canceled) {
+        t.Fatalf("SetMultiple: expected the absent ttl refused before the done context, got %v", setErr)
+    }
+
+    if _, decrementErr := backend.Decrement(canceledContext, "key", math.MinInt64); nil == decrementErr || true == errors.Is(decrementErr, context.Canceled) {
+        t.Fatalf("Decrement: expected the delta refused before the done context, got %v", decrementErr)
+    }
+}
