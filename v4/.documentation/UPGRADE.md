@@ -112,6 +112,14 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Remedy.** Keep the wind-down short, set `StopRenewalLimit` (also on `ExclusiveCommandConfig`) to the application's teardown timeout and below the orchestrator's grace period, or `bound.UnlimitedDuration()` to renew until the work returns; keep the locker's client open until the work has returned.
 
+### Session: the file storage journals its writes beside the snapshot
+
+**What changed.** [`NewFileStorage`](../session/file_storage.go) over a `Path` appends one synced record per `Save` and `Delete` to `<path>.journal` and rewrites the snapshot only at a compaction: at construction, past `FileStorageConfig.JournalMaxBytes` (8 MiB by default) and at `CloseWithContext`, where every write rewrote the whole snapshot. The snapshot's format is unchanged, so a file the third major wrote opens as it is. `FileStorageConfig` gains `JournalDisabled`, `JournalMaxBytes` and `Logger`. A `File` handle writes the whole snapshot on every write, as before.
+
+**Symptom.** A second file, `<path>.journal`, appears beside the snapshot, and between two compactions the snapshot alone does not hold the latest writes. A build that does not read the journal (the third major, or an earlier build of this one) opened on the same path after a crash loses every write since the last compaction; once it has rewritten the snapshot, the journal is discarded, with a warning, when the journaling build opens the path again.
+
+**Remedy.** Nothing for a deployment that stops cleanly, since the close compacts. Before a rollback to a build without the journal, stop the process cleanly, or start once with `JournalDisabled: true`, which replays and compacts a journal left at the path and removes it; a deployment that needs the snapshot alone at every instant keeps `JournalDisabled: true`. A backup copies both files, or copies the snapshot after a clean stop.
+
 ### Cache: a counter carries its ttl
 
 **What changed.** [`cachecontract.Cache`](../cache/contract/cache.go) and `Backend` take `Increment(ctx, key, delta, options)` and `Decrement(ctx, key, delta, options)`, the options a [`CounterOptions`](../cache/contract/counter.go): `Ttl`, read as a write's ttl (at least 1s, `bound.UnlimitedDuration()` for none, absent refused), and `RefreshTtl`, false for a fixed window written when the call creates the key or finds it without an expiry, true for a sliding window rewritten on every call. The in-memory and the redis backends implement both, the redis one in one script.

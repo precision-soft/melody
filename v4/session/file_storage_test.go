@@ -207,7 +207,7 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorage(FileStorageConfig{Path: path})
+    storage, err := NewFileStorage(FileStorageConfig{Path: path, JournalDisabled: true})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -250,7 +250,7 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     }
 
     /* the file still carried the entry with its original future expiry, so a reader that sees it gone proves Load rewrote the snapshot rather than merely reporting the entry as absent */
-    storage2, err := NewFileStorage(FileStorageConfig{Path: path})
+    storage2, err := NewFileStorage(FileStorageConfig{Path: path, JournalDisabled: true})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -280,7 +280,7 @@ func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
 
-    storage, err := NewFileStorage(FileStorageConfig{Path: path})
+    storage, err := NewFileStorage(FileStorageConfig{Path: path, JournalDisabled: true})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -305,7 +305,7 @@ func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T
         t.Fatalf("expected the lapsed entry to be purged from the in-memory state")
     }
 
-    reader, err := NewFileStorage(FileStorageConfig{Path: path})
+    reader, err := NewFileStorage(FileStorageConfig{Path: path, JournalDisabled: true})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
@@ -679,7 +679,7 @@ func TestFileStorage_AtomicWrite_DoesNotLeaveTempFiles(t *testing.T) {
 
     for _, entry := range entries {
         name := entry.Name()
-        if "session.json" == name {
+        if "session.json" == name || "session.json.journal" == name {
             continue
         }
 
@@ -1321,7 +1321,7 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "sessions.json")
 
-    storage, newErr := NewFileStorage(FileStorageConfig{Path: path})
+    storage, newErr := NewFileStorage(FileStorageConfig{Path: path, JournalDisabled: true})
     if nil != newErr {
         t.Fatalf("unexpected storage error: %v", newErr)
     }
@@ -1353,7 +1353,7 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
         t.Fatalf("expected the expired session to be gone from the map")
     }
 
-    reopened, reopenErr := NewFileStorage(FileStorageConfig{Path: path})
+    reopened, reopenErr := NewFileStorage(FileStorageConfig{Path: path, JournalDisabled: true})
     if nil != reopenErr {
         t.Fatalf("unexpected reopen error: %v", reopenErr)
     }
@@ -1702,8 +1702,14 @@ func TestFileStorage_SavesUnderABasenameThatFillsTheFilesystemComponent(t *testi
     }
 
     entries, readErr := os.ReadDir(directory)
-    if nil != readErr || 1 != len(entries) || filepath.Base(path) != entries[0].Name() {
-        t.Fatalf("expected only the snapshot in the directory, got %v, %v", entries, readErr)
+    if closeErr := storage.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    entries, readErr = os.ReadDir(directory)
+    expectedNames := map[string]bool{filepath.Base(path): true, filepath.Base(sessionJournalPath(path)): true}
+    if nil != readErr || 2 != len(entries) || false == expectedNames[entries[0].Name()] || false == expectedNames[entries[1].Name()] {
+        t.Fatalf("expected only the snapshot and its journal in the directory, got %v, %v", entries, readErr)
     }
 }
 

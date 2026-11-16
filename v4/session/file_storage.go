@@ -21,16 +21,26 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
 /* FileStorageConfig names the file the storage persists to, one way or the other; exactly one of Path and File is set: both is refused naming the two, and neither is refused. */
 type FileStorageConfig struct {
-    /* Path is a file the storage owns: it creates the file with its directory and writes every snapshot through a temporary file and a rename. */
+    /* Path is a file the storage owns: it creates the file with its directory and writes every snapshot through a temporary file and a rename. Each Save and Delete appends one synced record to the journal beside it, <path>.journal, and the snapshot is rewritten only when the journal is compacted: at construction, past JournalMaxBytes and at close. */
     Path string
 
-    /* File is an open handle the caller owns and keeps owning: it is not closed here, and every write goes through it. A write cannot be atomic through a handle, but the snapshot is encoded whole first, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill mid-write can leave a torn document, which the next construction reports as a decode failure. A handle that cannot seek or that appends is refused, and so is a read-only one where the descriptor's access mode can be read; elsewhere its first Save reports it. */
+    /* File is an open handle the caller owns and keeps owning: it is not closed here, and every write goes through it. A write cannot be atomic through a handle, but the snapshot is encoded whole first, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill mid-write can leave a torn document, which the next construction reports as a decode failure. A handle that cannot seek or that appends is refused, and so is a read-only one where the descriptor's access mode can be read; elsewhere its first Save reports it. A handle never journals: every write rewrites the whole snapshot, as JournalDisabled does over a Path. */
     File *os.File
+
+    /* JournalDisabled writes the whole snapshot on every Save and Delete in Path mode, the third major's form, which a build without the journal reads in full; a journal left at the path is still replayed and compacted at construction, then removed. File mode never journals. */
+    JournalDisabled bool
+
+    /* JournalMaxBytes is the journal size past which a write compacts it into the snapshot: 8 MiB when left out, at least 64 KiB, unlimited refused. */
+    JournalMaxBytes bound.Count
+
+    /* Logger journals what the construction replayed or discarded and each threshold compaction that failed after its write landed, which the next write past the threshold retries; nil journals nothing, a typed nil is refused. */
+    Logger loggingcontract.Logger
 
     /* MaxSessions bounds the sessions held at once: 100,000 when left out, at least 1, unlimited admitted. At the ceiling, once the lapsed ones are swept, a new id is refused and a stored one is still saved; a file already holding more keeps them. */
     MaxSessions bound.Count
@@ -46,7 +56,7 @@ var fileStorageMaxSessionsRule = bound.Rule[int]{
     UnlimitedAdmitted: true,
 }
 
-/* NewFileStorage builds the storage over the path or the handle the configuration names and loads the sessions the file holds, answering an error for a MaxSessions below its minimum, a configuration naming both or neither, a path that cannot be created, a handle that cannot be written and a file that does not decode. */
+/* NewFileStorage builds the storage over the path or the handle the configuration names and loads the sessions the file holds, answering an error for a MaxSessions or a JournalMaxBytes it refuses, a typed nil Logger, a configuration naming both or neither, a path that cannot be created, a handle that cannot be written, a file that does not decode, a journal of a format it does not read and a journal it cannot open, replay or settle. */
 func NewFileStorage(config FileStorageConfig) (*FileStorage, error) {
     if "" != config.Path && nil != config.File {
         return nil, exception.NewError(
@@ -64,6 +74,21 @@ func NewFileStorage(config FileStorageConfig) (*FileStorage, error) {
         return nil, maxSessionsErr
     }
 
+    journalMaxBytes, journalMaxBytesErr := bound.Resolve(config.JournalMaxBytes, fileStorageJournalMaxBytesRule)
+    if nil != journalMaxBytesErr {
+        return nil, journalMaxBytesErr
+    }
+
+    if nil != config.Logger && true == internal.IsNilInterface(config.Logger) {
+        return nil, exception.NewError(
+            "session file storage logger is a typed nil",
+            exceptioncontract.Context{
+                "field": "FileStorageConfig.Logger",
+            },
+            nil,
+        )
+    }
+
     clockInstance := config.Clock
     if true == internal.IsNilInterface(clockInstance) {
         clockInstance = clock.NewSystemClock()
@@ -77,7 +102,7 @@ func NewFileStorage(config FileStorageConfig) (*FileStorage, error) {
     } else if "" == config.Path {
         return nil, exception.NewError("session file storage declares neither a path nor a file", nil, nil)
     } else {
-        storage, storageErr = newFileStorageFromPath(config.Path, clockInstance)
+        storage, storageErr = newFileStorageFromPath(config.Path, clockInstance, false == config.JournalDisabled, journalMaxBytes, config.Logger)
     }
 
     if nil != storageErr {
@@ -85,12 +110,13 @@ func NewFileStorage(config FileStorageConfig) (*FileStorage, error) {
     }
 
     storage.maxSessions = maxSessions
+    storage.logger = config.Logger
     storage.earliestExpiry = storage.earliestExpiryLocked()
 
     return storage, nil
 }
 
-func newFileStorageFromPath(path string, clockInstance clockcontract.Clock) (*FileStorage, error) {
+func newFileStorageFromPath(path string, clockInstance clockcontract.Clock, journalEnabled bool, journalMaxBytes bound.Resolved[int], logger loggingcontract.Logger) (*FileStorage, error) {
     trimmedPath := filepath.Clean(path)
     if "." == trimmedPath {
         return nil, exception.NewError(
@@ -122,13 +148,73 @@ func newFileStorageFromPath(path string, clockInstance clockcontract.Clock) (*Fi
     }
 
     storage := &FileStorage{
-        path:        trimmedPath,
-        ownsFile:    true,
-        sessionById: decoded,
-        clock:       clockInstance,
+        path:            trimmedPath,
+        ownsFile:        true,
+        sessionById:     decoded,
+        clock:           clockInstance,
+        journalMaxBytes: journalMaxBytes,
+    }
+
+    journalErr := storage.openJournal(journalEnabled, logger)
+    if nil != journalErr {
+        return nil, journalErr
     }
 
     return storage, nil
+}
+
+/* a journal left at the path is replayed even with the door off, so turning the journal off loses no write */
+func (instance *FileStorage) openJournal(journalEnabled bool, logger loggingcontract.Logger) error {
+    journalPath := sessionJournalPath(instance.path)
+
+    if false == journalEnabled {
+        if _, statErr := os.Stat(journalPath); true == os.IsNotExist(statErr) {
+            return nil
+        }
+    }
+
+    snapshotDigest, digestErr := sessionSnapshotDigest(instance.path)
+    if nil != digestErr {
+        return digestErr
+    }
+
+    journal, replay, openErr := openSessionJournal(instance.path, snapshotDigest, instance.sessionById)
+    if nil != openErr {
+        return openErr
+    }
+
+    instance.journal = journal
+
+    reportSessionJournalReplay(logger, instance.path, replay)
+
+    var settleErr error
+    if 0 < replay.replayed {
+        settleErr = instance.compactLocked()
+    } else {
+        settleErr = instance.resetJournalLocked(snapshotDigest)
+    }
+
+    if nil != settleErr {
+        _ = journal.Close()
+
+        return exception.NewError("failed to settle the session storage journal at construction", exceptioncontract.Context{"path": journalPath}, settleErr)
+    }
+
+    if true == journalEnabled {
+        return nil
+    }
+
+    instance.journal = nil
+
+    if closeErr := journal.Close(); nil != closeErr {
+        return exception.NewError("failed to close the session storage journal", exceptioncontract.Context{"path": journalPath}, closeErr)
+    }
+
+    if removeErr := os.Remove(journalPath); nil != removeErr {
+        return exception.NewError("failed to remove the compacted session storage journal", exceptioncontract.Context{"path": journalPath}, removeErr)
+    }
+
+    return nil
 }
 
 func newFileStorageFromFile(fileInstance *os.File, clockInstance clockcontract.Clock) (*FileStorage, error) {
@@ -151,7 +237,7 @@ func newFileStorageFromFile(fileInstance *os.File, clockInstance clockcontract.C
     return storage, nil
 }
 
-/* FileStorage is recommended for development only. Values are flushed as JSON and reloaded at construction, so after a restart an int reads back float64, a struct map[string]any and a time.Time a string, while in-process they keep the stored types. Every write re-encodes and fsyncs the whole snapshot, so its cost grows with the number of sessions. */
+/* FileStorage is recommended for development only. Values are flushed as JSON and reloaded at construction, so after a restart an int reads back float64, a struct map[string]any and a time.Time a string, while in-process they keep the stored types. In Path mode a write appends and fsyncs one journal record, and the whole snapshot is re-encoded only at compaction; with the journal off, and in File mode, every write re-encodes and fsyncs the whole snapshot, so its cost grows with the number of sessions. */
 type FileStorage struct {
     maxSessions    bound.Resolved[int]
     earliestExpiry int64
@@ -161,6 +247,14 @@ type FileStorage struct {
     ownsFile bool
     closed   bool
     clock    clockcontract.Clock
+    logger   loggingcontract.Logger
+
+    journal                *os.File
+    journalSize            int64
+    journalHeaderSize      int64
+    journalMaxBytes        bound.Resolved[int]
+    journalNeedsCompaction bool
+    journalSeam            func(point journalPoint)
 
     sessionById map[string]fileSessionEntry
 }
@@ -188,6 +282,13 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
     }
 
     if 0 != entry.ExpiresAt && instance.clock.Now().UnixNano() >= entry.ExpiresAt {
+        /* the journal needs no record: the replay drops a lapsed session by its expiry */
+        if nil != instance.journal {
+            delete(instance.sessionById, sessionId)
+
+            return nil, false, nil
+        }
+
         /* the flush drops the lapsed entry, and its failure is not returned: this load's answer is settled, and an error would refuse the request 503 where a client without a cookie is served a fresh session */
         _ = instance.flushLocked()
 
@@ -225,6 +326,12 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
         return exception.NewError("session storage is closed", nil, nil)
     }
 
+    if nil != instance.journal {
+        if pendingErr := instance.compactPendingLocked(); nil != pendingErr {
+            return pendingErr
+        }
+    }
+
     previousEntry, hadPrevious := instance.sessionById[sessionId]
 
     if false == hadPrevious {
@@ -237,6 +344,29 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
 
     if 0 != expiresAt && expiresAt < instance.earliestExpiry {
         instance.earliestExpiry = expiresAt
+    }
+
+    if nil != instance.journal {
+        appendErr := instance.appendJournalRecordLocked(sessionJournalRecord{
+            Operation: sessionJournalOperationSave,
+            Id:        sessionId,
+            ExpiresAt: expiresAt,
+            Data:      entry.Data,
+        })
+        if nil != appendErr {
+            if true == hadPrevious {
+                instance.sessionById[sessionId] = previousEntry
+            } else {
+                delete(instance.sessionById, sessionId)
+            }
+
+            return appendErr
+        }
+
+        instance.purgeLapsedInMemoryLocked()
+        instance.compactPastThresholdLocked()
+
+        return nil
     }
 
     flushErr := instance.flushLocked()
@@ -311,8 +441,31 @@ func (instance *FileStorage) Delete(sessionId string) error {
         return nil
     }
 
+    if nil != instance.journal {
+        if pendingErr := instance.compactPendingLocked(); nil != pendingErr {
+            return pendingErr
+        }
+    }
+
     previousEntry := instance.sessionById[sessionId]
     delete(instance.sessionById, sessionId)
+
+    if nil != instance.journal {
+        appendErr := instance.appendJournalRecordLocked(sessionJournalRecord{
+            Operation: sessionJournalOperationDelete,
+            Id:        sessionId,
+        })
+        if nil != appendErr {
+            instance.sessionById[sessionId] = previousEntry
+
+            return appendErr
+        }
+
+        instance.purgeLapsedInMemoryLocked()
+        instance.compactPastThresholdLocked()
+
+        return nil
+    }
 
     flushErr := instance.flushLocked()
     if nil != flushErr {
@@ -327,7 +480,7 @@ func (instance *FileStorage) Delete(sessionId string) error {
     return nil
 }
 
-/* CloseWithContext closes the file under the storage's lock, every write having flushed already; the file close takes no context. */
+/* CloseWithContext compacts the journal, so a clean stop leaves the whole state in the snapshot for a build that does not read the journal; a failed compaction keeps the journal for the next construction to replay. */
 func (instance *FileStorage) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -337,6 +490,26 @@ func (instance *FileStorage) CloseWithContext(closeContext context.Context) erro
     }
 
     instance.closed = true
+
+    if nil != instance.journal {
+        journal := instance.journal
+
+        var compactErr error
+        if instance.journalHeaderSize < instance.journalSize || true == instance.journalNeedsCompaction {
+            compactErr = instance.compactLocked()
+        }
+        instance.journal = nil
+
+        closeErr := journal.Close()
+
+        if nil != compactErr {
+            return compactErr
+        }
+
+        if nil != closeErr {
+            return exception.NewError("failed to close session storage journal", nil, closeErr)
+        }
+    }
 
     if false == instance.ownsFile {
         instance.file = nil
@@ -439,7 +612,26 @@ func readSessionFileFromHandle(fileInstance *os.File) (map[string]fileSessionEnt
     return decoded, nil
 }
 
+func encodeSessionSnapshot(snapshot map[string]fileSessionEntry) ([]byte, error) {
+    var buffer bytes.Buffer
+
+    if encodeErr := json.NewEncoder(&buffer).Encode(snapshot); nil != encodeErr {
+        return nil, exception.NewError("failed to encode session storage file", nil, encodeErr)
+    }
+
+    return buffer.Bytes(), nil
+}
+
 func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntry) error {
+    encoded, encodeErr := encodeSessionSnapshot(snapshot)
+    if nil != encodeErr {
+        return encodeErr
+    }
+
+    return writeSessionBytesAtomically(path, encoded)
+}
+
+func writeSessionBytesAtomically(path string, encoded []byte) error {
     directoryPath := filepath.Dir(path)
     err := os.MkdirAll(directoryPath, 0755)
     if nil != err {
@@ -465,14 +657,12 @@ func writeSessionFileAtomically(path string, snapshot map[string]fileSessionEntr
 
     tempPath := tempFile.Name()
 
-    encoder := json.NewEncoder(tempFile)
-
-    err = encoder.Encode(snapshot)
+    _, err = tempFile.Write(encoded)
     if nil != err {
         _ = tempFile.Close()
         _ = os.Remove(tempPath)
 
-        return exception.NewError("failed to encode session storage file", nil, err)
+        return exception.NewError("failed to write session storage temp file", nil, err)
     }
 
     err = tempFile.Sync()
