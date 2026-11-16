@@ -2550,3 +2550,22 @@ func TestWriteResponse_ACyclicChainFromTheSessionSaveIsAnsweredWithAFiveHundred(
         t.Fatalf("expected 500, got %d", writer.Result().StatusCode)
     }
 }
+
+func TestWriteResponse_AnInformationalStatusIsAnsweredAsTheRenderedInternalServerError(t *testing.T) {
+    melodyRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
+
+    body := &closeTrackingReader{}
+    response := &Response{statusCode: nethttp.StatusEarlyHints, headers: make(nethttp.Header), bodyReader: body}
+    response.Headers().Add("Set-Cookie", "leaked=1")
+
+    writer := httptest.NewRecorder()
+    written := writeResponse(nil, melodyRequest, writer, response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{})
+
+    if nethttp.StatusInternalServerError != writer.Code || nethttp.StatusInternalServerError != written.StatusCode() {
+        t.Fatalf("expected the rendered 500 written and answered, got %d and %d", writer.Code, written.StatusCode())
+    }
+
+    if "" != writer.Header().Get("Set-Cookie") || false == body.closed.Load() {
+        t.Fatalf("expected the refused response's cookie dropped and its body closed, got %v, closed %v", writer.Header(), body.closed.Load())
+    }
+}

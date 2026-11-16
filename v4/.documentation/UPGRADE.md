@@ -110,6 +110,14 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Write `'#'` for a literal `#` in a plural branch and `''` for an apostrophe followed by `#`. Register each locale under one spelling; the request locale no longer needs normalizing to that spelling.
 
+### Http: an informational status is no final answer
+
+**What changed.** A response whose status is between 100 and 199, 101 aside, is refused before anything is written and answered as the rendered 500. net/http sends a 1xx as an interim header and answers an implicit 200 after it, so the handler's body went out as a success. 101 stays admitted, the connection upgrade.
+
+**Symptom.** A handler that answered 100, 102 or 103 as its final status now answers 500.
+
+**Remedy.** Answer the final status the request ends with. An early hint (103) is sent through the underlying writer before the final response, not as the response.
+
 ### Exception: an http exception answers 400 to 599
 
 **What changed.** [`NewHttpException`](../exception/http_exception_new.go) and `NewHttpError` panic on a status outside `[400, 599]`, where they admitted `[200, 599]`; the refusal names the status, the minimum and the maximum. An exception answers a client or a server error: a success or a redirect raised as one served the error body as a success.

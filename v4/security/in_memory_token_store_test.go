@@ -677,3 +677,111 @@ func TestInMemoryTokenStore_PurgeExpiredKeepsARevokedTokenRevokedOnceItsBoundary
         }
     }
 }
+
+func TestInMemoryTokenStore_AWriteSweepsTheLapsedEntriesOnceTheIntervalPassed(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen, SweepInterval: bound.Of(time.Minute)})
+
+    store.Put("lapsing", securitycontract.Claims{UserIdentifier: "u1"}, bound.Of(time.Second))
+
+    frozen.Advance(30 * time.Second)
+    store.Put("second", securitycontract.Claims{UserIdentifier: "u2"}, bound.Of(time.Hour))
+    if _, held := store.entriesByToken["lapsing"]; false == held {
+        t.Fatal("expected no sweep before the interval passed")
+    }
+
+    frozen.Advance(31 * time.Second)
+    store.Put("third", securitycontract.Claims{UserIdentifier: "u3"}, bound.Of(time.Hour))
+    if _, held := store.entriesByToken["lapsing"]; true == held {
+        t.Fatal("expected the lapsed entry swept by the write after the interval")
+    }
+
+    if _, indexed := store.tokensByUser["u1"]; true == indexed {
+        t.Fatal("expected the lapsed entry's user index swept with it")
+    }
+}
+
+func TestInMemoryTokenStore_AnUnlimitedSweepIntervalLeavesThePurgeToTheCaller(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen, SweepInterval: bound.UnlimitedDuration()})
+
+    store.Put("lapsing", securitycontract.Claims{UserIdentifier: "u1"}, bound.Of(time.Second))
+    frozen.Advance(time.Hour)
+    store.Put("second", securitycontract.Claims{UserIdentifier: "u2"}, bound.Of(time.Hour))
+
+    if _, held := store.entriesByToken["lapsing"]; false == held {
+        t.Fatal("expected no sweep when the interval is unlimited")
+    }
+}
+
+func TestNewInMemoryTokenStore_RefusesASweepIntervalUnderAMillisecond(t *testing.T) {
+    expectPanicNamingField(t, "InMemoryTokenStoreConfig.SweepInterval", func() {
+        NewInMemoryTokenStore(InMemoryTokenStoreConfig{SweepInterval: bound.Of(time.Microsecond)})
+    })
+}
+
+func TestInMemoryTokenStore_ARevocationAloneSweepsTheLapsedTokensAndKeepsEveryBoundary(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen, SweepInterval: bound.Of(time.Minute), RevocationEpochRetention: bound.Of(time.Second)})
+
+    store.Put("lapsing", securitycontract.Claims{UserIdentifier: "u1"}, bound.Of(time.Second))
+    store.RevokeBefore("u2", "", frozen.Now())
+
+    frozen.Advance(2 * time.Minute)
+    store.RevokeBefore("u3", "", frozen.Now())
+
+    if _, held := store.entriesByToken["lapsing"]; true == held {
+        t.Fatal("expected a revocation to sweep the lapsed token")
+    }
+
+    if _, kept := store.epochsByUser["u2"]; false == kept {
+        t.Fatal("expected the sweep to keep a boundary past its retention, which only PurgeExpired drops")
+    }
+
+    store.PurgeExpired()
+    if _, kept := store.epochsByUser["u2"]; true == kept {
+        t.Fatal("expected PurgeExpired to drop the boundary past its retention")
+    }
+}
+
+func TestInMemoryTokenStore_ADeleteSweepsTheLapsedTokens(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(1000, 0))
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen, SweepInterval: bound.Of(time.Minute)})
+
+    store.Put("lapsing", securitycontract.Claims{UserIdentifier: "u1"}, bound.Of(time.Second))
+    store.Put("other", securitycontract.Claims{UserIdentifier: "u2"}, bound.Of(time.Second))
+
+    frozen.Advance(2 * time.Minute)
+    store.Delete("absent")
+    if _, held := store.entriesByToken["lapsing"]; true == held {
+        t.Fatal("expected a Delete to sweep")
+    }
+
+    store.Put("third", securitycontract.Claims{UserIdentifier: "u3"}, bound.Of(time.Second))
+    frozen.Advance(2 * time.Minute)
+    store.DeleteByUser("nobody")
+    if _, held := store.entriesByToken["third"]; true == held {
+        t.Fatal("expected a DeleteByUser to sweep")
+    }
+}
+
+func TestInMemoryTokenStore_AClockSteppedBackSweepsOnTheNextWrite(t *testing.T) {
+    frozen := clock.NewFrozenClock(time.Unix(100000, 0))
+    store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{Clock: frozen, SweepInterval: bound.Of(time.Minute)})
+
+    store.Put("first", securitycontract.Claims{UserIdentifier: "u1"}, bound.Of(time.Second))
+    store.entriesByToken["lapsed"] = tokenEntry{claims: securitycontract.Claims{UserIdentifier: "u9"}, expiresAt: time.Unix(10, 0)}
+
+    frozen.TravelTo(time.Unix(50000, 0))
+    store.Put("second", securitycontract.Claims{UserIdentifier: "u2"}, bound.Of(time.Hour))
+
+    if _, held := store.entriesByToken["lapsed"]; true == held {
+        t.Fatal("expected a write after the clock stepped back to sweep")
+    }
+}
+
+func TestNewInMemoryTokenStore_RefusesASweepIntervalUnderASecond(t *testing.T) {
+    expectPanicNamingField(t, "InMemoryTokenStoreConfig.SweepInterval", func() {
+        NewInMemoryTokenStore(InMemoryTokenStoreConfig{SweepInterval: bound.Of(500 * time.Millisecond)})
+    })
+}

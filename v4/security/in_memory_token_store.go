@@ -18,6 +18,9 @@ type InMemoryTokenStoreConfig struct {
     /* RevocationEpochRetention is how long PurgeExpired keeps a revocation boundary after its instant, so it must cover the longest lifetime of a token issued before it: 7 days by default, at least 1s, unlimited for boundaries kept until the process exits, the safe reading when token lifetimes are not bounded, since a boundary dropped early is a revocation bypass. */
     RevocationEpochRetention bound.Duration
 
+    /* SweepInterval is how often a write (Put, Delete, DeleteByUser, RevokeBefore) first drops the lapsed and the revoked stored tokens, so a store nothing purges by hand does not grow without end: 1m by default, at least 1s, since each sweep walks every stored token under the store's lock, unlimited leaving it to PurgeExpired. The sweep drops no revocation boundary: only PurgeExpired applies RevocationEpochRetention. */
+    SweepInterval bound.Duration
+
     /* Clock is where the issue stamps and the expiries are read; nil is the system clock. */
     Clock clockcontract.Clock
 }
@@ -29,11 +32,23 @@ var inMemoryTokenStoreRevocationEpochRetentionRule = bound.Rule[time.Duration]{
     UnlimitedAdmitted: true,
 }
 
+var inMemoryTokenStoreSweepIntervalRule = bound.Rule[time.Duration]{
+    Name:              "InMemoryTokenStoreConfig.SweepInterval",
+    Default:           time.Minute,
+    Minimum:           bound.TtlMinimum,
+    UnlimitedAdmitted: true,
+}
+
 /* NewInMemoryTokenStore resolves the configuration, panicking on a field below its minimum by name, and builds the store. */
 func NewInMemoryTokenStore(config InMemoryTokenStoreConfig) *InMemoryTokenStore {
     retention, retentionErr := bound.Resolve(config.RevocationEpochRetention, inMemoryTokenStoreRevocationEpochRetentionRule)
     if nil != retentionErr {
         exception.Panic(exception.FromError(retentionErr))
+    }
+
+    sweepInterval, sweepIntervalErr := bound.Resolve(config.SweepInterval, inMemoryTokenStoreSweepIntervalRule)
+    if nil != sweepIntervalErr {
+        exception.Panic(exception.FromError(sweepIntervalErr))
     }
 
     clockInstance := config.Clock
@@ -48,6 +63,8 @@ func NewInMemoryTokenStore(config InMemoryTokenStoreConfig) *InMemoryTokenStore 
         tokensByUser:             make(map[string]map[string]struct{}),
         epochsByUser:             make(map[string]map[string]time.Time),
         revocationEpochRetention: retention.Value,
+        sweepInterval:            sweepInterval.Value,
+        sweepDisabled:            sweepInterval.Unlimited,
     }
 }
 
@@ -58,6 +75,9 @@ type InMemoryTokenStore struct {
     tokensByUser             map[string]map[string]struct{}
     epochsByUser             map[string]map[string]time.Time
     revocationEpochRetention time.Duration
+    sweepInterval            time.Duration
+    sweepDisabled            bool
+    lastSweep                time.Time
 }
 
 const (
@@ -93,6 +113,8 @@ func (instance *InMemoryTokenStore) Delete(tokenString string) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    instance.sweepWhenDueLocked(instance.clock.Now())
+
     if entry, found := instance.entriesByToken[tokenString]; true == found {
         instance.unindexLocked(entry.claims.UserIdentifier, tokenString)
         delete(instance.entriesByToken, tokenString)
@@ -102,6 +124,8 @@ func (instance *InMemoryTokenStore) Delete(tokenString string) {
 func (instance *InMemoryTokenStore) DeleteByUser(userIdentifier string) int {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    instance.sweepWhenDueLocked(instance.clock.Now())
 
     tokens, exists := instance.tokensByUser[userIdentifier]
     if false == exists {
@@ -120,10 +144,32 @@ func (instance *InMemoryTokenStore) DeleteByUser(userIdentifier string) int {
 }
 
 func (instance *InMemoryTokenStore) PurgeExpired() int {
-    now := instance.clock.Now()
-
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    now := instance.clock.Now()
+    purged := instance.purgeStoredTokensLocked(now)
+    instance.purgeBoundariesLocked(now)
+
+    return purged
+}
+
+/* sweepWhenDueLocked drops the lapsed and the revoked stored tokens from a write once SweepInterval has passed since the last sweep, or the clock stepped back behind it */
+func (instance *InMemoryTokenStore) sweepWhenDueLocked(now time.Time) {
+    if true == instance.sweepDisabled {
+        return
+    }
+
+    /* a store never swept has a zero instant, so its first write sweeps, over nothing, and starts the interval: building the store reads no clock */
+    if elapsed := now.Sub(instance.lastSweep); 0 <= elapsed && elapsed < instance.sweepInterval {
+        return
+    }
+
+    instance.purgeStoredTokensLocked(now)
+}
+
+func (instance *InMemoryTokenStore) purgeStoredTokensLocked(now time.Time) int {
+    instance.lastSweep = now
 
     purged := 0
     for tokenString, entry := range instance.entriesByToken {
@@ -143,6 +189,10 @@ func (instance *InMemoryTokenStore) PurgeExpired() int {
         }
     }
 
+    return purged
+}
+
+func (instance *InMemoryTokenStore) purgeBoundariesLocked(now time.Time) {
     /* a boundary's life is bound to the retention window alone, never to the user's stored tokens: a stateless JWT is checked against it without being stored */
     if 0 < instance.revocationEpochRetention {
         horizon := now.Add(-instance.revocationEpochRetention)
@@ -158,8 +208,6 @@ func (instance *InMemoryTokenStore) PurgeExpired() int {
             }
         }
     }
-
-    return purged
 }
 
 func cloneClaims(claims securitycontract.Claims) securitycontract.Claims {
@@ -254,6 +302,8 @@ func (instance *InMemoryTokenStore) RevokeBefore(userIdentifier string, deviceId
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
+    instance.sweepWhenDueLocked(instance.clock.Now())
+
     boundaries, exists := instance.epochsByUser[userIdentifier]
     if false == exists {
         boundaries = make(map[string]time.Time)
@@ -311,6 +361,8 @@ func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontr
 
     /* the IssuedAt stamp and the expiry are read in the critical section that inserts the entry, so a RevokeBefore cannot land between the stamp and the insert and revoke a token issued after it */
     now := instance.clock.Now()
+
+    instance.sweepWhenDueLocked(now)
 
     claims.IssuedAt = now
 

@@ -345,12 +345,12 @@ func writeResponse(
         }
     }
 
-    /* a status outside net/http's [100, 999] would panic inside WriteHeader after the commit flag is raised, so it is refused here and answered as the rendered 500; zero means 200 */
-    if statusCode := response.StatusCode(); 0 != statusCode && (100 > statusCode || 999 < statusCode) {
+    /* a status that cannot end a request, outside net/http's range or informational, would panic inside WriteHeader or leave net/http to answer an implicit 200, so it is refused here and answered as the rendered 500; zero means 200 */
+    if statusCode := response.StatusCode(); 0 != statusCode && false == isFinalStatusCode(statusCode) {
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
             logger.Error(
-                "response status code is out of range; answering an internal server error",
+                "response status code is not a final status; answering an internal server error",
                 loggingcontract.Context{
                     "statusCode": statusCode,
                 },

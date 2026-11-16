@@ -10,6 +10,7 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
@@ -29,12 +30,20 @@ func WriteToHttpResponseWriter(
         statusCode = nethttp.StatusOK
     }
 
-    /* a status outside net/http's [100, 999] is refused before anything is written, the headers included, since WriteHeader would panic and a caller writing its own response after the error must not inherit this one's Set-Cookie */
-    if 100 > statusCode || 999 < statusCode {
+    /* a final status is 101 or within [200, 999]: one outside net/http's range would panic in WriteHeader, and an informational one only sends an interim header, net/http answering an implicit 200 after it; either is refused before anything is written, the headers included, so a caller writing its own response after the error does not inherit this one's Set-Cookie */
+    if false == isFinalStatusCode(statusCode) {
+        /* the refused response owns its body reader and nothing else reads it */
+        var logger loggingcontract.Logger
+        if false == internal.IsNilInterface(runtimeInstance) {
+            logger = logging.LoggerFromRuntime(runtimeInstance)
+        }
+        closeDiscardedResponseBody(response, logger)
+
         return exception.NewError(
-            "response status code is out of range",
+            "response status code is not a final status",
             map[string]any{
                 "statusCode": statusCode,
+                "admitted":   "101, 200-999",
             },
             nil,
         )
@@ -212,3 +221,12 @@ func (instance *recordingResponseWriter) Unwrap() nethttp.ResponseWriter {
 var _ headerCommitRecorder = (*recordingResponseWriter)(nil)
 var _ sessionPersistenceRecorder = (*recordingResponseWriter)(nil)
 var _ committedStatusRecorder = (*recordingResponseWriter)(nil)
+
+/* isFinalStatusCode answers whether a status can end a request: 101, which hands the connection over, or a value within [200, 999] */
+func isFinalStatusCode(statusCode int) bool {
+    if nethttp.StatusSwitchingProtocols == statusCode {
+        return true
+    }
+
+    return nethttp.StatusOK <= statusCode && 999 >= statusCode
+}

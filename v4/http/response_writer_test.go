@@ -228,7 +228,7 @@ func TestWriteToHttpResponseWriter_RefusesAStatusOutsideTheWritableRangeByName(t
         t.Fatal("expected the out-of-range status to be refused")
     }
 
-    if false == strings.Contains(writeErr.Error(), "status code is out of range") {
+    if false == strings.Contains(writeErr.Error(), "status code is not a final status") {
         t.Fatalf("expected the refusal to name the rule, got %q", writeErr.Error())
     }
 
@@ -481,4 +481,36 @@ func TestRecordingResponseWriter_FlushReturnsOnACyclicChain(t *testing.T) {
     writer := newRecordingResponseWriter(&cyclicFlushWriter{ResponseWriter: httptest.NewRecorder()})
 
     assertReturnsOnACyclicChain(t, writer.Flush)
+}
+
+func TestWriteToHttpResponseWriter_RefusesAnInformationalFinalStatus(t *testing.T) {
+    for _, statusCode := range []int{100, 102, 103, 199} {
+        recorder := httptest.NewRecorder()
+
+        body := &closeTrackingReader{}
+        response := &Response{statusCode: statusCode, headers: make(nethttp.Header), bodyReader: body}
+        response.Headers().Set("X-Trace", "1")
+        response.Headers().Add("Set-Cookie", "session=abc")
+
+        writeErr := WriteToHttpResponseWriter(nil, nil, recorder, response)
+        if nil == writeErr || false == strings.Contains(writeErr.Error(), "status code is not a final status") {
+            t.Fatalf("%d: expected the informational final status refused, got %v", statusCode, writeErr)
+        }
+
+        if 0 != recorder.Body.Len() || 0 != len(recorder.Header()) {
+            t.Fatalf("%d: expected nothing written, got %d bytes and headers %v", statusCode, recorder.Body.Len(), recorder.Header())
+        }
+
+        if false == body.closed.Load() {
+            t.Fatalf("%d: expected the refused response's body closed", statusCode)
+        }
+    }
+}
+
+func TestIsFinalStatusCode_AdmitsSwitchingProtocolsAndTheFinalRange(t *testing.T) {
+    for statusCode, expected := range map[int]bool{99: false, 100: false, 101: true, 103: false, 199: false, 200: true, 999: true, 1000: false} {
+        if expected != isFinalStatusCode(statusCode) {
+            t.Fatalf("%d: expected %v", statusCode, expected)
+        }
+    }
 }
