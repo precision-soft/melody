@@ -430,7 +430,7 @@ func (instance *container) OverrideProtectedInstance(serviceName string, value a
     /* what the installed value holds is recorded under the same node, replacing the evicted value's record */
     instance.recordHeldIdentitiesLocked(containerNameNodeKey(serviceName), value)
 
-    /* the override reaches only the types this name is registered under: a type another service owns must not learn it, and a free type is left out because a value-type service under a second node would close twice */
+    /* the override reaches only the types this name is registered under, and a free type is left out because a value-type service under a second node would close twice; a type registered relaxed under several names takes the last override among them: nothing resolves through it, since GetByType refuses a type with several names, but the teardown plan reads it, the type node collapsing onto the first name built */
     for registeredType, registeredServiceNames := range instance.typeRegistrationNamesByType {
         for _, registeredServiceName := range registeredServiceNames {
             if serviceName == registeredServiceName {

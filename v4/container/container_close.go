@@ -318,13 +318,18 @@ type teardownPlan struct {
     aliasesOf        map[string][]string
 }
 
-/* closerOfNodeGroupLocked answers the closer of a node collapsed from names holding one instance: the representative's, else the first declared by another name in sorted order, so a declared closer does not hang on how the names sort */
+/* closerOfNodeGroupLocked answers the closer of a node collapsed from names holding one instance: the first, the representative's then the other names' in sorted order, that takes the value, so a declared closer does not hang on how the names sort */
 func (instance *container) closerOfNodeGroupLocked(nodeKey string, aliases []string, value any) *declaredCloser {
-    if closer := instance.closerByNodeKey[nodeKey]; nil != closer {
+    if closer := instance.closerByNodeKey[nodeKey]; nil != closer && true == closer.takes(value) {
         return closer
     }
 
+    /* a type node's closer is the last registration of that type to declare one, possibly another name's, so only the names are asked */
     for _, alias := range aliases {
+        if true == strings.HasPrefix(alias, containerTypeNodeKeyPrefix) {
+            continue
+        }
+
         if closer := instance.closerByNodeKey[alias]; nil != closer && true == closer.takes(value) {
             return closer
         }
@@ -675,6 +680,14 @@ func (instance *container) closeInternal(closeContext context.Context) error {
 
     instance.mutex.Lock()
 
+    /* released by hand once the plan is taken, and here if computing it panics, so a panic cannot leave the container's other doors waiting on the lock; the once is spent either way, so a later Close answers what this one kept */
+    locked := true
+    defer func() {
+        if true == locked {
+            instance.mutex.Unlock()
+        }
+    }()
+
     /* marked closed under the lock, so the creation guard refuses new creations for the whole teardown */
     instance.isClosed = true
     close(instance.closedChannel)
@@ -736,8 +749,24 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         )
     }
 
+    /* a value one candidate carries a declared closer for is closed by that candidate only: the closer replaces the value's own doors, so another name holding it without a closer, or the override that evicted it, yields the claim */
+    declaredPointers := make(map[pointerIdentity]struct{})
+    declaredValues := make(map[any]struct{})
+    for _, candidate := range candidates {
+        if nil == candidate.closer || false == candidate.closer.takes(candidate.value) {
+            continue
+        }
+
+        if pointerKey, hasPointer := pointerKeyOf(candidate.value); true == hasPointer && false == isZeroSizePointerIdentity(pointerKey) {
+            declaredPointers[pointerKey] = struct{}{}
+        } else if false == isZeroSizeValue(candidate.value) && true == isComparableValue(candidate.value) {
+            declaredValues[candidate.value] = struct{}{}
+        }
+    }
+
     teardownInWaves := true == instance.teardownInWaves && nil == declarationErr
 
+    locked = false
     instance.mutex.Unlock()
 
     closedPointers := make(map[pointerIdentity]struct{})
@@ -774,13 +803,32 @@ func (instance *container) closeInternal(closeContext context.Context) error {
             }
         }
 
+        carriesDeclaredCloser := nil != candidate.closer && true == candidate.closer.takes(candidate.value)
+        if false == carriesDeclaredCloser {
+            if true == hasPointer {
+                if _, declared := declaredPointers[pointerKey]; true == declared {
+                    return nil, false
+                }
+            } else if true == comparableValue {
+                if _, declared := declaredValues[candidate.value]; true == declared {
+                    return nil, false
+                }
+            }
+        }
+
+        /* the door is asked before the claim is written: a candidate with no door must not spend a claim another candidate could close by */
+        door, hasDoor := closeDoorWithCloser(candidate.value, candidate.closer)
+        if false == hasDoor {
+            return nil, false
+        }
+
         if true == hasPointer {
             closedPointers[pointerKey] = struct{}{}
         } else if true == comparableValue {
             closedValues[candidate.value] = struct{}{}
         }
 
-        return closeDoorWithCloser(candidate.value, candidate.closer)
+        return door, true
     }
 
     closeOneCandidate := func(candidate closeCandidate) {
@@ -961,7 +1009,7 @@ func withDeclarationRefusal(resultErr error, declarationErr error, withDeadline 
     if nil == resultErr {
         declarationRefusal, isMelodyErr := declarationErr.(*exception.Error)
         if false == isMelodyErr {
-            return declarationErr
+            return exception.NewError(declarationErr.Error(), withDeadline(exceptioncontract.Context{}), declarationErr)
         }
 
         return exception.NewError(declarationRefusal.Message(), withDeadline(maps.Clone(declarationRefusal.Context())), declarationRefusal.CauseErr())

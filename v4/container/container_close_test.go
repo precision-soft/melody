@@ -5477,3 +5477,261 @@ func TestContainerResolve_AProviderLeavingThroughGoexitAnswersTheWaiterAndRunsAg
         t.Fatalf("expected a later resolve to run the provider again, got %v", getErr)
     }
 }
+
+/* a service with no close door of its own, closed only through a declared closer */
+type closerlessService struct {
+    name string
+}
+
+type otherCloserlessService struct {
+    name string
+}
+
+/* an instance an override evicted from a name with a declared closer, still held under a second name without one, is closed through that closer: the second name's candidate has no door and must not spend the claim */
+func TestClose_AnEvictedInstanceHeldUnderASecondNameIsClosedThroughItsDeclaredCloser(t *testing.T) {
+    for _, sequential := range []bool{false, true} {
+        t.Run(fmt.Sprintf("sequential=%v", sequential), func(t *testing.T) {
+            closeAnEvictedInstanceHeldUnderASecondName(t, ContainerConfig{TeardownSequential: sequential})
+        })
+    }
+}
+
+func closeAnEvictedInstanceHeldUnderASecondName(t *testing.T, config ContainerConfig) {
+    serviceContainer := NewContainer(config)
+    original := &closerlessService{name: "original"}
+
+    closed := make([]string, 0)
+    MustRegister[*closerlessService](serviceContainer, "a", func(_ containercontract.Resolver) (*closerlessService, error) {
+        return original, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value *closerlessService) error {
+        closed = append(closed, value.name)
+
+        return nil
+    })})
+    MustRegister[*closerlessService](serviceContainer, "b", func(resolver containercontract.Resolver) (*closerlessService, error) {
+        value, getErr := resolver.Get(t.Context(), "a")
+        if nil != getErr {
+            return nil, getErr
+        }
+
+        return value.(*closerlessService), nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "b"); nil != getErr {
+        t.Fatalf("build b: %v", getErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideInstance("a", &closerlessService{name: "override"}, containercontract.OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("override: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if fmt.Sprint([]string{"override", "original"}) != fmt.Sprint(closed) {
+        t.Fatalf("expected the override then the evicted instance closed once each through the declared closer, got %v", closed)
+    }
+}
+
+/* two names collapsed onto one instance close it through the closer that takes it, whichever name sorts first */
+func TestClose_ACollapsedNodeUsesTheCloserThatTakesItsValueWhateverTheNamesSort(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    shared := &otherCloserlessService{name: "c"}
+
+    closedByOther := 0
+    MustRegister[*closerlessService](serviceContainer, "z", func(_ containercontract.Resolver) (*closerlessService, error) {
+        return &closerlessService{name: "z"}, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value *closerlessService) error {
+        return nil
+    })})
+    MustRegister[*otherCloserlessService](serviceContainer, "c", func(_ containercontract.Resolver) (*otherCloserlessService, error) {
+        return shared, nil
+    }, RegisterOptions{Closer: NewCloser(func(_ context.Context, value *otherCloserlessService) error {
+        closedByOther++
+
+        return nil
+    })})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "c"); nil != getErr {
+        t.Fatalf("build c: %v", getErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideInstance("z", shared, containercontract.OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("override: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if 1 != closedByOther {
+        t.Fatalf("expected the shared instance closed once through the closer that takes it, got %d", closedByOther)
+    }
+}
+
+/* a value with a door of its own, filed under a second name without a closer, is still closed by the closer its first name declared, once, and never by its own door */
+type ownDoorService struct {
+    ownCloses int
+}
+
+func (instance *ownDoorService) CloseWithContext(context.Context) error {
+    instance.ownCloses++
+
+    return nil
+}
+
+func TestClose_ADeclaredCloserWinsOverTheDoorASecondNameReachesTheValueBy(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    original := &ownDoorService{}
+
+    declared := 0
+    MustRegister[*ownDoorService](serviceContainer, "a", func(_ containercontract.Resolver) (*ownDoorService, error) {
+        return original, nil
+    }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value *ownDoorService) error {
+        if value == original {
+            declared++
+        }
+
+        return nil
+    })})
+    MustRegister[*ownDoorService](serviceContainer, "b", func(resolver containercontract.Resolver) (*ownDoorService, error) {
+        value, getErr := resolver.Get(t.Context(), "a")
+        if nil != getErr {
+            return nil, getErr
+        }
+
+        return value.(*ownDoorService), nil
+    }, RegisterOptions{TypeRegistrationDisabled: true})
+
+    if _, getErr := serviceContainer.Get(t.Context(), "b"); nil != getErr {
+        t.Fatalf("build b: %v", getErr)
+    }
+
+    if overrideErr := serviceContainer.OverrideInstance("a", &ownDoorService{}, containercontract.OverrideOptions{}); nil != overrideErr {
+        t.Fatalf("override: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if 1 != declared || 0 != original.ownCloses {
+        t.Fatalf("expected the declared closer once and the value's own door never, got declared=%d own=%d", declared, original.ownCloses)
+    }
+}
+
+/* two names registered relaxed under one type, each with its own closer, close each value through its own name's closer, never through the type node's */
+func TestClose_EachNameOfARelaxedTypeClosesThroughItsOwnCloser(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    closedBy := map[string]string{}
+    for _, name := range []string{"first", "second"} {
+        name := name
+        MustRegister[*closerlessService](serviceContainer, name, func(_ containercontract.Resolver) (*closerlessService, error) {
+            return &closerlessService{name: name}, nil
+        }, RegisterOptions{TypeRegistrationRelaxed: true, Closer: NewCloser(func(_ context.Context, value *closerlessService) error {
+            closedBy[value.name] = name
+
+            return nil
+        })})
+    }
+
+    for _, name := range []string{"first", "second"} {
+        if _, getErr := serviceContainer.Get(t.Context(), name); nil != getErr {
+            t.Fatalf("build %s: %v", name, getErr)
+        }
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if "first" != closedBy["first"] || "second" != closedBy["second"] {
+        t.Fatalf("expected each value closed by its own name's closer, got %v", closedBy)
+    }
+}
+
+func TestClose_ACollapsedNodeUsesTheCloserThatTakesItsValueInEitherSortOrder(t *testing.T) {
+    for _, names := range [][2]string{{"z", "c"}, {"a", "y"}} {
+        serviceContainer := NewContainer(ContainerConfig{})
+        shared := &otherCloserlessService{name: names[1]}
+
+        closedByOther := 0
+        MustRegister[*closerlessService](serviceContainer, names[0], func(_ containercontract.Resolver) (*closerlessService, error) {
+            return &closerlessService{name: names[0]}, nil
+        }, RegisterOptions{TypeRegistrationDisabled: true, Closer: NewCloser(func(_ context.Context, value *closerlessService) error {
+            return nil
+        })})
+        MustRegister[*otherCloserlessService](serviceContainer, names[1], func(_ containercontract.Resolver) (*otherCloserlessService, error) {
+            return shared, nil
+        }, RegisterOptions{Closer: NewCloser(func(_ context.Context, value *otherCloserlessService) error {
+            closedByOther++
+
+            return nil
+        })})
+
+        if _, getErr := serviceContainer.Get(t.Context(), names[1]); nil != getErr {
+            t.Fatalf("%v: build: %v", names, getErr)
+        }
+
+        if overrideErr := serviceContainer.OverrideInstance(names[0], shared, containercontract.OverrideOptions{}); nil != overrideErr {
+            t.Fatalf("%v: override: %v", names, overrideErr)
+        }
+
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Fatalf("%v: close: %v", names, closeErr)
+        }
+
+        if 1 != closedByOther {
+            t.Fatalf("%v: expected the shared instance closed once through the closer that takes it, got %d", names, closedByOther)
+        }
+    }
+}
+
+func TestWithDeclarationRefusal_AForeignErrorKeepsTheDeadlineRecordAndIsReachable(t *testing.T) {
+    foreign := errors.New("declared nothing")
+
+    answered := withDeclarationRefusal(nil, foreign, func(context exceptioncontract.Context) exceptioncontract.Context {
+        context["deadline"] = "kept"
+
+        return context
+    })
+
+    var melodyErr *exception.Error
+    if false == errors.Is(answered, foreign) || false == errors.As(answered, &melodyErr) || "kept" != melodyErr.Context()["deadline"] {
+        t.Fatalf("expected the foreign declaration error reachable with the deadline record beside it, got %v", answered)
+    }
+}
+
+
+/* the type node of a relaxed type carries the last closer declared for that type, another name's; a name that declared none is not closed through it */
+func TestClose_ANameWithoutACloserIsNotClosedThroughTheTypeNodesCloser(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+
+    closedByB := make([]string, 0)
+    MustRegister[*closerlessService](serviceContainer, "a", func(_ containercontract.Resolver) (*closerlessService, error) {
+        return &closerlessService{name: "a"}, nil
+    }, RegisterOptions{TypeRegistrationRelaxed: true})
+    MustRegister[*closerlessService](serviceContainer, "b", func(_ containercontract.Resolver) (*closerlessService, error) {
+        return &closerlessService{name: "b"}, nil
+    }, RegisterOptions{TypeRegistrationRelaxed: true, Closer: NewCloser(func(_ context.Context, value *closerlessService) error {
+        closedByB = append(closedByB, value.name)
+
+        return nil
+    })})
+
+    for _, name := range []string{"a", "b"} {
+        if _, getErr := serviceContainer.Get(t.Context(), name); nil != getErr {
+            t.Fatalf("build %s: %v", name, getErr)
+        }
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if fmt.Sprint([]string{"b"}) != fmt.Sprint(closedByB) {
+        t.Fatalf("expected b's closer to close b alone, got %v", closedByB)
+    }
+}

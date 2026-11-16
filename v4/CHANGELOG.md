@@ -274,6 +274,7 @@ could not answer, at either door or through a sign-in door's `Handler` or token 
 
 ### Fixed
 
+- container: a value one candidate of the teardown carries a declared closer for is closed by that closer only, once: another name holding it without a closer, its own door included, yields the claim, where the evicted instance of a name with a closer, still held under a second name, was closed by that name's door or not at all; two names collapsed onto one instance close it through the first closer of a name, the representative's included, that takes its value, whatever the names sort, never through the closer a type node carries for another name; a panic while the teardown plan is computed releases the container's lock.
 - messagebus: a consumer reading its own `RetryPolicy.FailureTransport` nacks an exhausted message without requeue and warns, where it sent the message back to the transport it was consuming and received it exhausted again in a loop with no delay; `RegisterHandler` refuses a nil handler function where it is registered, where the first message of the type dereferenced it.
 - mailer: `SmtpTransport.Send` refuses an address that is not a bare addr-spec, as `Manager.Send` does, where a transport used without the manager wrote it into the headers and between the angle brackets of `MAIL FROM` and `RCPT TO`.
 - storage: `LocalStorage.Put` refuses a key that names a directory with `ErrKeyIsDirectory` before it reads the payload, where the payload was copied and the rename failed with a refusal carrying no cause.
