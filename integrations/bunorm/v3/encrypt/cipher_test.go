@@ -174,7 +174,6 @@ func TestCipher_EncryptPassesThroughCiphertextSealedUnderRetiredKey(t *testing.T
         t.Fatalf("seal: %v", sealErr)
     }
 
-    /* the retired key v1 stays in the set (still decryptable) until re-encryption completes; only then is it removed */
     rotatedProvider := NewStaticKeyProvider("v2", map[string][]byte{"v2": newKey(2), "v1": newKey(1)})
     rotatedCipher := NewCipher(rotatedProvider)
 
@@ -192,7 +191,6 @@ func TestCipher_EncryptSealsMarkerShapedPlaintextWithUnknownKeyId(t *testing.T) 
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
 
-    /* a client-supplied marker-shaped string naming a key id that is not in the set must not be stored verbatim, or every later Scan/Decrypt of the row fails with key-not-found */
     forged := "<ENC>\x00gcm1\x00rogue:" + base64.RawStdEncoding.EncodeToString([]byte("forged payload bytes"))
 
     if _, decryptErr := cipher.Decrypt(forged); nil == decryptErr {
@@ -322,7 +320,7 @@ func TestReencryptSkipAvoidsNonceRewrite(t *testing.T) {
     }
 }
 
-/* truncateSealed cuts a sealed value the way a column too narrow for it does under a non-strict sql_mode: the marker and the key id survive, and the base64 payload keeps only its first characters, chosen so the remainder does not decode to a whole sealed body. */
+/* cuts a seal the way a too-narrow column does under a non-strict sql_mode: marker and key id survive, the payload does not decode */
 func truncateSealed(t *testing.T, sealed string, retainedPayloadCharacters int) string {
     t.Helper()
 
@@ -345,7 +343,6 @@ func truncateSealed(t *testing.T, sealed string, retainedPayloadCharacters int) 
     return sealed[:len(markerPrefix)+separator+1] + payload[:retainedPayloadCharacters]
 }
 
-/* a value that carries the framework's marker was written by this cipher, so a payload that does not decode is damage, a column truncated under sql_mode='', and must be reported rather than returned verbatim with a nil error for the application to store on. */
 func TestCipher_DecryptReportsATruncatedCiphertextInsteadOfPassingItThrough(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -370,7 +367,6 @@ func TestCipher_DecryptReportsATruncatedCiphertextInsteadOfPassingItThrough(t *t
     }
 }
 
-/* the marker with no key id separator behind it cannot name a key, so it is damage too. */
 func TestCipher_DecryptReportsAMarkerWithNoKeyId(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -382,7 +378,6 @@ func TestCipher_DecryptReportsAMarkerWithNoKeyId(t *testing.T) {
     }
 }
 
-/* the pass-through for values carrying NO marker is what makes an incremental migration work: the rows not yet sealed keep reading while the column is converted one write at a time. */
 func TestCipher_DecryptStillPassesGenuinePlaintextThrough(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -496,7 +491,6 @@ func TestEncryptedString_AMarkerFamilyValueThroughAWrappedCipherIsRefused(t *tes
     }
 }
 
-/* keyIdOf classifies rows for the bulk migrator, so it must not report a truncated ciphertext as plaintext: doing so seals the wreckage a second time and reports the row as migrated. */
 func TestKeyIdOf_ReportsATruncatedCiphertextAsAnError(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -514,7 +508,6 @@ func TestKeyIdOf_ReportsATruncatedCiphertextAsAnError(t *testing.T) {
     }
 }
 
-/* an application still holding a marker-shaped string must not have it stored verbatim: the write side seals it, so it can never poison a later read. */
 func TestCipher_EncryptSealsAMarkerShapedPlaintextThatDoesNotDecode(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -557,7 +550,6 @@ func (instance *invalidIdKeyProvider) Key(keyId string) ([]byte, error) {
     return newKey(1), nil
 }
 
-/* the key id is part of the wire format: StaticKeyProvider enforces its grammar at construction, but KeyProvider is public and a custom provider's id reaches seal unchecked — an empty id or one carrying a colon produced a stored value decodeEncrypted could never split back apart */
 func TestCipher_SealRefusesAKeyIdTheWireFormatCannotCarry(t *testing.T) {
     for _, keyId := range []string{"", "v1:extra", "id with spaces"} {
         cipher := NewCipher(&invalidIdKeyProvider{keyId: keyId})
@@ -573,7 +565,6 @@ func TestCipher_SealRefusesAKeyIdTheWireFormatCannotCarry(t *testing.T) {
     }
 }
 
-/* the lenient decoder mapped several base64 spellings onto the same bytes, so an altered last character still authenticated while CiphertextCandidates only emits the canonical spelling — a deterministic equality lookup missed a row it held. The tamper must change ONLY the discarded bits: a 28-byte payload ends in a two-character quantum whose canonical final character is one of A/Q/g/w, and its alphabet NEIGHBOUR (B/R/h/x) shares the two encoded bits while setting a discarded one — so the lenient decoder reads the same byte and still authenticates, and only strictness can refuse. An arbitrary substitute character changes the encoded bits too, fails authentication under both decoders, and turns this mutant into a coin flip on the nonce. */
 func TestCipher_DecryptRefusesANonCanonicalBase64Spelling(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -596,7 +587,6 @@ func TestCipher_DecryptRefusesANonCanonicalBase64Spelling(t *testing.T) {
     }
 }
 
-/* a payload shorter than nonce plus tag cannot be a seal of even the empty string, so it is reported as structural damage, not as an authentication failure blamed on a key */
 func TestCipher_DecryptReportsAStructurallyShortPayloadAsDamage(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})
     cipher := NewCipher(provider)
@@ -727,9 +717,7 @@ func TestCipher_EncryptPassesThroughADeterministicSeal(t *testing.T) {
     }
 }
 
-/* rotatingKeyProvider answers different bytes under the SAME key id on demand — the shape a custom
-   KeyProvider of an application has, and the one StaticKeyProvider cannot take. It is the only value in
-   the corpus that can separate a key memo keyed on the id alone from one that re-reads the bytes. */
+/* the same key id answers different bytes on demand, which StaticKeyProvider cannot do */
 type rotatingKeyProvider struct {
     mutex sync.Mutex
     key   []byte
@@ -820,9 +808,6 @@ func TestCipher_OpensUnderTheRotatedKeyWhenTheProviderChangesTheBytesUnderOneId(
     }
 }
 
-/* the key material is memoised on the cipher, which every column type of a process shares, so the memo
-   is read and written from the goroutines of concurrent requests. A guard against a race is proved under
-   -race, repeatedly, not by a mutant — and a sequential suite would leave it green by construction. */
 func TestCipher_ConcurrentSealsAndOpensShareTheKeyMaterial(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider("v2", map[string][]byte{
         "v1": newKey(1),
@@ -984,7 +969,6 @@ func BenchmarkDeterministicNonceFrom(b *testing.B) {
     }
 }
 
-/* a column type over a wrapped cipher cannot seal a marker-shaped value as data, since the wrapper's Encrypt is the package's own and passes a seal through; the column refuses it, so another row's seal is never stored bare and read back as that row's plaintext */
 func TestEncryptedString_ASealWrittenAsDataThroughAWrappedCipherIsRefused(t *testing.T) {
     packageCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))
     UseCipher(wrappedCipher{Cipher: packageCipher})
@@ -1005,7 +989,6 @@ func TestEncryptedString_ASealWrittenAsDataThroughAWrappedCipherIsRefused(t *tes
     }
 }
 
-/* the deterministic column refuses it as well, where the wrapper's EncryptDeterministic would re-seal the victim's plaintext */
 func TestEncryptedDeterministicString_ASealWrittenAsDataThroughAWrappedCipherIsRefused(t *testing.T) {
     packageCipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))
     UseCipher(wrappedCipher{Cipher: packageCipher})
@@ -1021,7 +1004,6 @@ func TestEncryptedDeterministicString_ASealWrittenAsDataThroughAWrappedCipherIsR
     }
 }
 
-/* a column bound to a named compartment over a wrapped cipher refuses it the same way */
 func TestEncryptedStringFor_ASealWrittenAsDataThroughAWrappedNamedCipherIsRefused(t *testing.T) {
     packageCipher := NewCipher(NewStaticKeyProvider("crm-v1", map[string][]byte{"crm-v1": newKey(11)}))
     UseCipherNamed(crmCipherRef{}.CipherName(), wrappedCipher{Cipher: packageCipher})
@@ -1041,7 +1023,6 @@ func TestEncryptedStringFor_ASealWrittenAsDataThroughAWrappedNamedCipherIsRefuse
     }
 }
 
-/* an ordinary value keeps the wrapper's own doors: it is sealed through them and reads back */
 func TestEncryptedString_APlaintextThroughAWrappedCipherIsSealed(t *testing.T) {
     UseCipher(wrappedCipher{Cipher: NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))})
     t.Cleanup(func() { UseCipher(nil) })
@@ -1061,7 +1042,6 @@ func TestEncryptedString_APlaintextThroughAWrappedCipherIsSealed(t *testing.T) {
     }
 }
 
-/* countingKeyProvider answers one key and counts every lookup */
 type countingKeyProvider struct {
     KeyProvider
     calls int
@@ -1073,7 +1053,6 @@ func (instance *countingKeyProvider) Key(keyId string) ([]byte, error) {
     return instance.KeyProvider.Key(keyId)
 }
 
-/* the read side holds a stored key id to the grammar the write side seals under: an id no seal can carry is malformed, never handed to the KeyProvider and never carried whole into the error */
 func TestCipher_DecryptRefusesAKeyIdOutsideTheGrammarWithoutAskingTheProvider(t *testing.T) {
     provider := &countingKeyProvider{KeyProvider: NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)})}
     cipherInstance := NewCipher(provider)

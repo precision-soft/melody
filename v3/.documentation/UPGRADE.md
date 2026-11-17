@@ -1032,6 +1032,31 @@ package, a column's `Value` and the `Migrator`'s re-seal refuse a value of the f
 
 **Remedy.** Read and migrate such a column with the build that wrote it, or restore the damaged rows; the rows are those whose bytes begin with `<ENC>\0` and not with `<ENC>\0gcm1\0`. A value that begins with `<ENC>` without the NUL glue, as bun's formatter leaves one inlined as a `string`, is still plaintext.
 
+### Container: a closer reaches an instance a second name also holds
+
+**What changed.** An instance a name registered `WithCloser` built, which a second name registered without a closer also holds, is closed once through that closer whichever name sorts first, and so is one an override evicted from that name: at the second name's place in the dependency order, before what the instance depends on, and after the graph only when no live name holds it any more. It was closed through its own `Close`, or not at all when it carried none, when the second name sorted after the first or the instance was evicted. Shipped in `v3.14.6`.
+
+**Symptom.** None for an application without such a second name. With one, the instance's own `Close` is no longer called at the teardown, and the closer is; an evicted instance held under the second name closes before the override that replaced it.
+
+**Remedy.** Nothing to do.
+
+### Bunorm encrypt: a bulk run judges its spec against the schema
+
+**What changed.** [`MigrateEncrypt`, `MigrateReencrypt` and `MigrateDecrypt`](../../integrations/bunorm/v3/encrypt/migrate.go) read the table's columns and indexes before the capacity check and the first row. A column and the key are matched letter case aside, as MySQL matches them, and the run uses the spelling the table stores; a table the database lacks, a column the table lacks and two names for one column are refused. Over a base table the key must be the only column of the primary key or of a unique index: the run pages by `key > ?`, which skips one of two rows sharing a key. A nullable key under a unique index is admitted, as before, and a row whose key is NULL still stops the run where the rows are read, with `migrate read a NULL primary key value`. A view lists no index, so the key of a run through a view is not judged, as before; its spelling and its columns are. `EnsureColumnCapacity` and `EnsureColumnCapacityForReencrypt` read the columns in the table's spelling too. A write
+the server refuses is reported with its number and SQLSTATE, the server's message withheld, since it quotes the written or the guarded plaintext; the cause in the chain is still a `*mysql.MySQLError` of that number. The message is withheld for every number, the ones whose text names only a column or a constraint included: one rule, with no list of safe numbers that could be wrong. Shipped in `integrations/bunorm/v3` `v3.6.8`.
+
+**Symptom.** `migrate names a table the database does not have: <table>`, `migrate names a column the table <table> does not have: <column>`, `migrate names the column <column> twice` or `the paging key is not unique: <key> of <table>, <found>`, `<found>` being `no unique index` or `part of the composite unique index <name>`, before any row is read. A log reader that matched the server's text of a refused write now reads `the server's message is withheld: it may quote the value` beside the number.
+
+**Remedy.** Name a key that is the only column of the primary key or of a unique index; a base table without one gets such a column before the run. A run through a view names the view's own unique key. Name each column once and only columns the table has. Match a refused write on its number, which `errors.As` still finds as a `*mysql.MySQLError`.
+
+### Bunorm encrypt: a decrypt into a narrower character set needs a strict session
+
+**What changed.** [`MigrateDecrypt`](../../integrations/bunorm/v3/encrypt/migrate.go) reads the session's `sql_mode` and `character_set_client` before the first row, and under a mode that holds neither `STRICT_TRANS_TABLES` nor `STRICT_ALL_TABLES` refuses the run when the connection's character set is not `utf8mb4` or a column's character set cannot hold every rune (`utf8mb4`, `utf16`, `utf16le`, `utf32`, `gb18030` and binary columns can): a relaxed session stores `?` for every rune it cannot carry, over the only copy of the plaintext. Every bulk run holds one connection of the pool from the judge to its last row, so the session read is the one the writes run under. Shipped in `integrations/bunorm/v3` `v3.6.8`.
+
+**Symptom.** `migrate decrypt would write into the column <column> of character set <charset>, which is not utf8mb4, under a non-strict sql_mode (<mode>)` or `migrate decrypt would write through a connection of character set <charset>, which is not utf8mb4, under a non-strict sql_mode (<mode>)` before any row is read. A run that took a connection only per query now holds one for its whole length: a pool capped at one connection, with a `KeyProvider` or a `Cipher` that queries the same database, waits for ever on the first row.
+
+**Remedy.** Set a strict mode for the session, in the DSN (`sql_mode='STRICT_TRANS_TABLES,…'`) or on the server, whose default is strict; or connect with `charset=utf8mb4` and convert the column to `utf8mb4` before the decrypt. Give the pool at least two connections when the key provider or the cipher reads the same database.
+
 ### Bunorm audit: a change set leaves out scan-only fields, relations and the embedded fields bun drops
 
 **What changed.** [`ChangeSet`](../../integrations/bunorm/v3/audit/change.go) leaves out a field whose `bun` tag carries the `scanonly` option, a relation whose `rel` or `m2m` option follows the column name, and a field of an embedded struct bun leaves out of the row it writes: one whose column a field nearer the root holds, or one whose column another embedded field of the same level holds, unless it is the only tagged field of that column. The [`Tracker`](../../integrations/bunorm/v3/audit/track.go) reads the before image of an update, and of a delete under `CaptureDeleteBeforeImage`, into a model holding the primary key alone, where it read it into a copy of the passed model; a `BeforeSelect`, `BeforeScanRow` or `AfterScanRow` hook of the model that reads a field other than the key sees its zero value during that read. Shipped in `integrations/bunorm/v3` `v3.6.7`.

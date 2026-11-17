@@ -118,7 +118,6 @@ func TestEncryptedString_MasksPlaintextWhenFormatted(t *testing.T) {
     }
 }
 
-/* the column read path is where a truncated ciphertext actually surfaces: Scan must refuse it rather than hand the model a marker and half a base64 blob as though the application had stored them. */
 func TestEncryptedString_ScanReportsATruncatedCiphertext(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
     cipherInstance := NewCipher(provider)
@@ -173,7 +172,6 @@ func TestEncryptedColumn_ScanRefusesAnUnknownSealFormat(t *testing.T) {
     }
 }
 
-/* a column still holding unconverted rows must keep reading while it is encrypted one write at a time. */
 func TestEncryptedString_ScanStillPassesGenuinePlaintextThrough(t *testing.T) {
     provider := NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)})
     UseCipher(NewCipher(provider))
@@ -349,7 +347,6 @@ func BenchmarkEncryptedString_UnmarshalJSON(b *testing.B) {
     }
 }
 
-/* a column an attacker can write and later read back must not decrypt a seal handed to it as data: the seal of another row's secret, stored through this column, is read back as that seal and never as the secret */
 func TestEncryptedString_ASealWrittenAsDataIsSealedAndReadBackAsTheSeal(t *testing.T) {
     cipherInstance := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(7)}))
     UseCipher(cipherInstance)

@@ -8,6 +8,12 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+## [v3.14.6] - 2026-11-17 - Declared Closer of a Shared Instance
+
+### Fixed
+
+- `container`: **Behavioural change**: an instance a name registered `WithCloser` built closes through that closer when a second name registered without one also holds it, whichever name sorts first and also after an override evicted it, at the second name's place in the order, where it closed through its own `Close` or not at all. See `UPGRADE.md`.
+
 ## [v3.14.5] - 2026-11-13 - Bounded Response Writer Chain
 
 ### Changed
@@ -1212,7 +1218,9 @@ Lock-step release — no `v3/` changes this cycle. Tag SHA differs from `v3.0.0`
 - `application/application.go`, `application/application_new.go` — application context in constructor; `New(ctx context.Context, ...)` takes a caller-supplied context used for the full application lifecycle
 - `application/contract/service_module.go` — `ServiceModule` simplification; single `Register(container)` method replacing split register/configure lifecycle
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.5...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/v3.14.6...HEAD
+
+[v3.14.6]: https://github.com/precision-soft/melody/compare/v3.14.5...v3.14.6
 
 [v3.14.5]: https://github.com/precision-soft/melody/compare/v3.14.4...v3.14.5
 

@@ -8,6 +8,8 @@ import (
     "strconv"
     "strings"
 
+    "github.com/go-sql-driver/mysql"
+
     "github.com/precision-soft/melody/v3/exception"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
@@ -25,8 +27,9 @@ type TableSpec struct {
 }
 
 type Migrator struct {
-    db     *bun.DB
-    cipher Cipher
+    db      *bun.DB
+    cipher  Cipher
+    session sqlSession
 }
 
 func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
@@ -50,11 +53,17 @@ func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
 }
 
 func (instance *Migrator) MigrateEncrypt(ctx context.Context, spec TableSpec) (int, error) {
-    if capacityErr := instance.ensureColumnCapacity(ctx, spec, ""); nil != capacityErr {
-        return 0, instance.classifyRunError(spec, 0, "", capacityErr)
+    pinned, resolved, release, judgeErr := instance.judged(ctx, spec, migrateModeEncrypt)
+    if nil != judgeErr {
+        return 0, judgeErr
+    }
+    defer release()
+
+    if capacityErr := pinned.ensureColumnCapacity(ctx, resolved, ""); nil != capacityErr {
+        return 0, pinned.classifyRunError(resolved, 0, "", capacityErr)
     }
 
-    return instance.run(ctx, spec, instance.encryptTransform(spec))
+    return pinned.run(ctx, resolved, pinned.encryptTransform(resolved))
 }
 
 func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (int, error) {
@@ -62,16 +71,28 @@ func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, 
         return 0, exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": spec.Table}, nil)
     }
 
-    if capacityErr := instance.ensureColumnCapacity(ctx, spec, targetKeyId); nil != capacityErr {
-        return 0, instance.classifyRunError(spec, 0, "", capacityErr)
+    pinned, resolved, release, judgeErr := instance.judged(ctx, spec, migrateModeReencrypt)
+    if nil != judgeErr {
+        return 0, judgeErr
+    }
+    defer release()
+
+    if capacityErr := pinned.ensureColumnCapacity(ctx, resolved, targetKeyId); nil != capacityErr {
+        return 0, pinned.classifyRunError(resolved, 0, "", capacityErr)
     }
 
-    return instance.run(ctx, spec, instance.reencryptTransform(spec, targetKeyId))
+    return pinned.run(ctx, resolved, pinned.reencryptTransform(resolved, targetKeyId))
 }
 
 /* MigrateDecrypt reads the stored format before the cipher does, so a pass-through cipher cannot turn an unknown seal into plaintext, and stops on a decrypted value of the marker family, which written bare would read back as a seal. */
 func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
-    return instance.run(ctx, spec, func(value string) (string, error) {
+    pinned, resolved, release, judgeErr := instance.judged(ctx, spec, migrateModeDecrypt)
+    if nil != judgeErr {
+        return 0, judgeErr
+    }
+    defer release()
+
+    return pinned.run(ctx, resolved, func(value string) (string, error) {
         if _, _, keyIdErr := keyIdOf(value); nil != keyIdErr {
             return "", keyIdErr
         }
@@ -221,7 +242,12 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
 }
 
 func (instance *Migrator) EnsureColumnCapacity(ctx context.Context, spec TableSpec) error {
-    return instance.ensureColumnCapacity(ctx, spec, "")
+    resolved, resolveErr := instance.resolveColumnSpelling(ctx, spec)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return instance.ensureColumnCapacity(ctx, resolved, "")
 }
 
 func (instance *Migrator) EnsureColumnCapacityForReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) error {
@@ -229,7 +255,12 @@ func (instance *Migrator) EnsureColumnCapacityForReencrypt(ctx context.Context, 
         return exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": spec.Table}, nil)
     }
 
-    return instance.ensureColumnCapacity(ctx, spec, targetKeyId)
+    resolved, resolveErr := instance.resolveColumnSpelling(ctx, spec)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return instance.ensureColumnCapacity(ctx, resolved, targetKeyId)
 }
 
 func (instance *Migrator) ensureColumnCapacity(ctx context.Context, spec TableSpec, targetKeyId string) error {
@@ -317,7 +348,7 @@ func (instance *Migrator) longestUnsealedLength(ctx context.Context, table strin
 
     var longest sql.NullInt64
 
-    scanErr := instance.db.DB.QueryRowContext(ctx, probeSql, markerFamily+"%").Scan(&longest)
+    scanErr := instance.queries().QueryRowContext(ctx, probeSql, markerFamily+"%").Scan(&longest)
     if nil != scanErr {
         return 0, false, exception.NewError(
             "migrate could not measure the widest value of the target column",
@@ -344,7 +375,7 @@ func (instance *Migrator) longestSealedLengthWithoutKeyId(ctx context.Context, t
 
     var longest sql.NullInt64
 
-    scanErr := instance.db.DB.QueryRowContext(ctx, probeSql, len(markerPrefix)+1, markerPrefix+"%").Scan(&longest)
+    scanErr := instance.queries().QueryRowContext(ctx, probeSql, len(markerPrefix)+1, markerPrefix+"%").Scan(&longest)
     if nil != scanErr {
         return 0, false, exception.NewError(
             "migrate could not measure the widest encrypted value of the target column",
@@ -366,7 +397,7 @@ func (instance *Migrator) columnWidth(ctx context.Context, table string, column 
     var width sql.NullInt64
     var octetWidth sql.NullInt64
 
-    scanErr := instance.db.DB.QueryRowContext(
+    scanErr := instance.queries().QueryRowContext(
         ctx,
         "SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
         table,
@@ -487,9 +518,9 @@ func (instance *Migrator) run(ctx context.Context, spec TableSpec, transform fun
 
         /* the first page must not be keyset-filtered: WHERE pk > '' coerces to pk > 0 and would skip zero or negative keys */
         if false == hasCursor {
-            rows, queryErr = instance.db.DB.QueryContext(ctx, firstSelectSql, batchSize)
+            rows, queryErr = instance.queries().QueryContext(ctx, firstSelectSql, batchSize)
         } else {
-            rows, queryErr = instance.db.DB.QueryContext(ctx, nextSelectSql, cursor, batchSize)
+            rows, queryErr = instance.queries().QueryContext(ctx, nextSelectSql, cursor, batchSize)
         }
         if nil != queryErr {
             return processed, instance.classifyRunError(spec, processed, "migrate select failed", queryErr)
@@ -611,8 +642,13 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByC
         whereClause,
     )
 
-    result, execErr := instance.db.DB.ExecContext(ctx, updateSql, arguments...)
+    result, execErr := instance.queries().ExecContext(ctx, updateSql, arguments...)
     if nil != execErr {
+        /* the server's refusal quotes the statement's values, a plaintext under either mode */
+        if isWithheld, withheld := withholdQuotedValue(execErr); true == isWithheld {
+            return false, exception.NewError("migrate update failed", map[string]any{"table": spec.Table, "columns": spec.Columns, "id": row.primaryKey}, withheld)
+        }
+
         return false, exception.NewError("migrate update failed", map[string]any{"table": spec.Table, "id": row.primaryKey}, execErr)
     }
 
@@ -630,6 +666,20 @@ type migrateRow struct {
     /* the parsed integer on an integer column: MySQL compares a string parameter as doubles, which collapse keys above 2^53 */
     primaryKeyArgument any
     values             []sql.NullString
+}
+
+const serverMessageWithheld = "the server's message is withheld: it may quote the value"
+
+/* the replacement stays a *mysql.MySQLError so errors.As still matches the number */
+func withholdQuotedValue(execErr error) (bool, error) {
+    var serverErr *mysql.MySQLError
+    if false == errors.As(execErr, &serverErr) {
+        return false, execErr
+    }
+
+    withheld := &mysql.MySQLError{Number: serverErr.Number, SQLState: serverErr.SQLState, Message: serverMessageWithheld}
+
+    return true, exception.NewError("the server refused the write", map[string]any{"mysqlErrorNumber": serverErr.Number}, withheld)
 }
 
 func scanMigrateRows(rows *sql.Rows, columnCount int) ([]migrateRow, error) {
@@ -716,7 +766,7 @@ func columnBytes(column string, charset string) string {
 }
 
 func (instance *Migrator) columnCharsets(ctx context.Context, table string) (map[string]string, error) {
-    rows, queryErr := instance.db.DB.QueryContext(
+    rows, queryErr := instance.queries().QueryContext(
         ctx,
         "SELECT COLUMN_NAME, CHARACTER_SET_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
         table,

@@ -16,6 +16,7 @@ import (
 
     clicontract "github.com/precision-soft/melody/v3/cli/contract"
 
+    "github.com/go-sql-driver/mysql"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 
@@ -23,7 +24,6 @@ import (
     "github.com/precision-soft/melody/v3/exception"
 )
 
-/* the in-process cron runner dispatches overlapping executions of one command, so concurrent first runs must share one memoized migrator and run the database resolver exactly once — an unsynchronized memo races, and every loser opens a connection pool nothing ever closes. */
 func TestEncryptDatabaseCommand_ConcurrentRunsShareOneResolvedMigrator(t *testing.T) {
     var resolveCount atomic.Int32
 
@@ -87,7 +87,6 @@ func runEncryptDatabaseCommand(t *testing.T, command *EncryptDatabaseCommand, ex
     )
 }
 
-/* a negative batch silently became the default of 500, so the operator who believed they had throttled the run had not */
 func TestEncryptDatabaseCommand_RefusesANegativeBatch(t *testing.T) {
     command := NewEncryptDatabaseCommand(newMysqlDatabase(), NewFakeCipher())
 
@@ -101,7 +100,6 @@ func TestEncryptDatabaseCommand_RefusesANegativeBatch(t *testing.T) {
     }
 }
 
-/* a run without --table or --column, or with one of them present and empty, is refused by naming the three flags in the message itself, since a reason carried as the cause does not reach the terminal through the exit line */
 func TestEncryptDatabaseCommand_RefusesAMissingTableOrColumnByName(t *testing.T) {
     for _, arguments := range [][]string{
         {},
@@ -125,7 +123,6 @@ func TestEncryptDatabaseCommand_RefusesAMissingTableOrColumnByName(t *testing.T)
     }
 }
 
-/* a run that stops halfway leaves the column mixed; the rows already converted are the one number that says what a re-run costs */
 func TestEncryptDatabaseCommand_CarriesTheProcessedCountOnFailure(t *testing.T) {
     command := NewEncryptDatabaseCommand(newMysqlDatabase(), NewFakeCipher())
 
@@ -144,7 +141,6 @@ func TestEncryptDatabaseCommand_CarriesTheProcessedCountOnFailure(t *testing.T) 
     }
 }
 
-/* the reason of a refused run lives in its cause chain, which the exit line does not print, so the run writes the chain on the error stream, never where the command's document goes, escaped since a driver refusal echoes the values it is handed, and keeps the error's message for the journal */
 func TestEncryptDatabaseCommand_WritesTheCauseChainOfARefusedRun(t *testing.T) {
     command := NewEncryptDatabaseCommand(
         bun.NewDB(sql.OpenDB(refusingConnector{message: "connection refused\r\x1b[2Kforged"}), mysqldialect.New()),
@@ -177,7 +173,7 @@ func TestEncryptDatabaseCommand_WritesTheCauseChainOfARefusedRun(t *testing.T) {
         t.Fatalf("expected the error to keep its message, got: %v", runErr)
     }
 
-    expected := `encrypt database migration failed: migrate column charset lookup failed: connection refused\r\x1b[2Kforged` + "\n"
+    expected := `encrypt database migration failed: migrate could not take a connection for the run: connection refused\r\x1b[2Kforged` + "\n"
     if expected != errorOutput.String() {
         t.Fatalf("expected the error stream to read %q, got %q", expected, errorOutput.String())
     }
@@ -187,7 +183,6 @@ func TestEncryptDatabaseCommand_WritesTheCauseChainOfARefusedRun(t *testing.T) {
     }
 }
 
-/* a typed nil set as the error writer is a stream left unset, as the engine reads it: the run falls back to standard error and answers its refusal rather than panicking on the write */
 func TestEncryptDatabaseCommand_ATypedNilErrorWriterFallsBackToStandardError(t *testing.T) {
     var nilBuffer *bytes.Buffer
 
@@ -216,7 +211,6 @@ func (instance refusingConnector) Driver() driver.Driver {
     return fakeDriver{}
 }
 
-/* the `--batch` flag parses in base ten, as the standard integer flags do: with the engine's inferred base --batch=010 would read as eight and --batch=08 would be refused */
 func TestEncryptDatabaseCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
     for _, flagName := range []string{"batch"} {
         for spelling, expected := range map[string]int{"010": 10, "08": 8} {
@@ -242,5 +236,43 @@ func TestEncryptDatabaseCommand_IntegerFlagsParseInBaseTen(t *testing.T) {
                 t.Fatalf("expected --%s=%s to read as %d, got %d", flagName, spelling, expected, observed)
             }
         }
+    }
+}
+
+func TestEncryptDatabaseCommand_AWithheldRefusalReachesTheErrorStreamWithItsNumber(t *testing.T) {
+    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newKey(1)}))
+    sealed, sealErr := cipher.Encrypt("top-secret@example.com")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    migrator, stub := newScriptedMigrator(t, withRows(judgeTable(accountsColumns, accountsPrimary, nil), []string{"id", "notes"}, [][]driver.Value{{"7", sealed}}))
+    stub.execErr = &mysql.MySQLError{Number: 1062, SQLState: [5]byte{'2', '3', '0', '0', '0'}, Message: "Duplicate entry 'top-secret@example.com' for key 'accounts.notes'"}
+
+    command := NewEncryptDatabaseCommand(migrator.db, cipher)
+    errorOutput := &bytes.Buffer{}
+
+    var runErr error
+    engineCommand := &clicontract.CommandContext{
+        Name:      command.Name(),
+        Flags:     command.Flags(),
+        Writer:    &bytes.Buffer{},
+        ErrWriter: errorOutput,
+        ExitErrHandler: func(context.Context, *clicontract.CommandContext, error) {
+        },
+        Action: func(_ context.Context, actionCommand *clicontract.CommandContext) error {
+            runErr = command.Run(fakeRuntime{}, actionCommand)
+
+            return runErr
+        },
+    }
+    _ = engineCommand.Run(context.Background(), []string{command.Name(), "--table", "accounts", "--column", "notes", "--mode", "decrypt"})
+
+    if nil == runErr {
+        t.Fatalf("expected the refused write to fail the run")
+    }
+
+    if false == strings.Contains(errorOutput.String(), "Error 1062 (23000)") || true == strings.Contains(errorOutput.String(), "top-secret") {
+        t.Fatalf("expected the error stream to carry the number without the value, got %q", errorOutput.String())
     }
 }

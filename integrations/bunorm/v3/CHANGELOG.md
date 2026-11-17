@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [v3.6.8] - 2026-11-17 - Encrypt Migrator Judges Its Spec
+
+### Fixed
+
+- `encrypt`: **Behavioural change**: `MigrateEncrypt`, `MigrateReencrypt` and `MigrateDecrypt` judge the spec against the schema before the first row: the columns and the key are matched letter case aside and run in the table's spelling; an unknown table or column, a column named twice and a paging key that is not the only column of the primary key or of a unique index (`the paging key is not unique`) are refused. See `UPGRADE.md`.
+- `encrypt`: **Behavioural change**: a bulk run holds one pooled connection from the judge to its last row, and `MigrateDecrypt` under a `sql_mode` without `STRICT_TRANS_TABLES` or `STRICT_ALL_TABLES` is refused before the first row when a column or the connection's `character_set_client` cannot hold every rune, where `?` could replace the only plaintext. See `UPGRADE.md`.
+- `encrypt`: `EnsureColumnCapacity` and `EnsureColumnCapacityForReencrypt` measure the columns in the table's spelling, where a column spelled in another case passed the check while too narrow.
+
+### Security
+
+- `encrypt`: **Behavioural change**: a write the server refuses during a bulk run keeps its number and SQLSTATE, still a `*mysql.MySQLError` in the chain, and withholds the server's message, which quoted the plaintext. See `UPGRADE.md`.
+
 ## [v3.6.7] - 2026-11-13 - Audit Before Image Holds the Primary Key
 
 ### Fixed
@@ -259,7 +271,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dependencies pinned to `github.com/precision-soft/melody/v3` and other v3 module paths
 - README relative path links updated to reflect v3 directory structure
 
-[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.7...HEAD
+[Unreleased]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.8...HEAD
+
+[v3.6.8]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.7...integrations/bunorm/v3.6.8
 
 [v3.6.7]: https://github.com/precision-soft/melody/compare/integrations/bunorm/v3.6.6...integrations/bunorm/v3.6.7
 
