@@ -70,7 +70,7 @@ func (instance *Application) Boot() kernelcontract.Kernel {
         return instance.kernel
     }
 
-    /* refused like every registration door in the boot window: a module hook calling Boot re-entered the phase loops, without end when it called it unconditionally, and once otherwise, after which the outer boot died on a refusal that named the wrong cause */
+    /* refused like every registration door in the boot window: a module hook calling Boot would re-enter the phase loops, without end when it calls it unconditionally, and once otherwise, after which the outer boot dies on a refusal that names the wrong cause */
     if true == instance.booting {
         exception.Panic(
             exception.NewError(
@@ -90,6 +90,9 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     configuration := instance.configuration
 
     instance.bootModuleEnvironmentKeys()
+
+    /* after the declarations, which carry the modules' retired spellings, and before any hook reads a value */
+    instance.refuseRetiredEnvironmentKeys()
 
     instance.bootModulesPreConfigurationResolve()
 

@@ -1,6 +1,7 @@
 package application
 
 import (
+    "maps"
     "testing"
 
     "github.com/precision-soft/melody/v4/internal"
@@ -62,7 +63,6 @@ func TestIgnoredProcessEnvironmentBootWarnings_SuppressesMirroredValues(t *testi
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
 
-    /* a platform that mirrors the resolved .env value into the environment is harmless: same value, no drift possible */
     bootWarnings := ignoredProcessEnvironmentBootWarnings(configuration, []string{
         "MELODY_PROCESS_ROLE=all",
     })
@@ -85,5 +85,39 @@ func TestIgnoredProcessEnvironmentBootWarnings_SkipsMalformedEntries(t *testing.
 
     if 0 != len(bootWarnings) {
         t.Fatalf("expected no boot warnings, got %d", len(bootWarnings))
+    }
+}
+
+func TestIgnoredProcessEnvironmentBootWarnings_RetiredNamesCarryTheirSuccessor(t *testing.T) {
+    configuration := newCollisionTestConfiguration(t)
+
+    key := environmentKeyText()
+    key.Retired = []string{"MELODY_X_TXT"}
+    if declareErr := configuration.DeclareEnvironmentKey("x", key); nil != declareErr {
+        t.Fatalf("unexpected declaration error: %v", declareErr)
+    }
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    bootWarnings := ignoredProcessEnvironmentBootWarnings(configuration, []string{
+        "MELODY_X_TXT=secret",
+        "MELODY_PUBLIC_DIR=public",
+        "MELODY_RETIRED_BY_NOBODY=value",
+    })
+
+    expected := []map[string]any{
+        {"environmentVariable": "MELODY_PUBLIC_DIR", "successor": "MELODY_PUBLIC_DIRECTORY"},
+        {"environmentVariable": "MELODY_X_TXT", "successor": "MELODY_X_TEXT"},
+    }
+    if len(expected) != len(bootWarnings) {
+        t.Fatalf("expected one boot warning per retired name, got %+v", bootWarnings)
+    }
+
+    for index, bootWarning := range bootWarnings {
+        if internal.BootWarningNameProcessEnvironmentVariableIgnored != bootWarning.Name || false == maps.Equal(expected[index], map[string]any(bootWarning.Context)) {
+            t.Fatalf("expected %v at %d, got %+v", expected[index], index, bootWarning)
+        }
     }
 }

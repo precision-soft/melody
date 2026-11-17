@@ -8,6 +8,16 @@ type EnvironmentKey struct {
     Default   string
     Secret    bool
     Rule      EnvironmentKeyRule
+
+    /* Retired are the spellings this key replaced: a .env artifact that still sets one refuses the boot naming this key, whatever its value. A spelling outside the MELODY_ namespace, equal to Key or to Parameter, listed twice, or held or retired by the framework or another declaration refuses the declaration. */
+    Retired []string
+}
+
+/* RetiredEnvironmentKey is one retired spelling the .env artifacts still set, with the key that replaced it and the owner that retired it. */
+type RetiredEnvironmentKey struct {
+    Key       string
+    Successor string
+    Owner     string
 }
 
 /* EnvironmentKeyRule judges the resolved text of a key; an error names field. Describe is the rule in words, for the documentation of a module. */
@@ -24,4 +34,10 @@ type EnvironmentKeyDeclarer interface {
     CheckEnvironmentKeys() error
 
     UndeclaredEnvironmentKeys() []string
+
+    /* RetiredEnvironmentKeys answers, sorted by key, every retired spelling the .env artifacts set, the framework's and the declared ones. */
+    RetiredEnvironmentKeys() []RetiredEnvironmentKey
+
+    /* RetiredEnvironmentKeySuccessor answers the key that replaced a retired spelling, the framework's or a declared one, whether or not an artifact sets it. */
+    RetiredEnvironmentKeySuccessor(key string) (string, bool)
 }

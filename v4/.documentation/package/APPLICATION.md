@@ -27,7 +27,7 @@ It coordinates configuration resolution, container bootstrapping, module wiring 
 
 The application boot is split around configuration resolve:
 
-1. **Pre-resolve**: modules declare the `.env` keys they own via [`EnvironmentKeyModule`](../../application/contract/environment_key_module.go), before any other hook, then may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go), then declare their boot warning codes and add their boot warnings via [`BootWarningModule`](../../application/contract/boot_warning_module.go).
+1. **Pre-resolve**: modules declare the `.env` keys they own via [`EnvironmentKeyModule`](../../application/contract/environment_key_module.go), before any other hook, a [retired key](CONFIG.md#retired-keys) the `.env` artifacts still set then refusing the boot naming its successor, then may register module-level configurations via [`ConfigModule`](../../application/contract/config_module.go), then register parameters via [`ParameterModule`](../../application/contract/parameter_module.go), then declare their boot warning codes and add their boot warnings via [`BootWarningModule`](../../application/contract/boot_warning_module.go).
 2. **Resolve**: application configuration is resolved.
 3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then register security, event subscribers, HTTP middlewares, HTTP handler decorators, HTTP routes and, last, CLI commands.
 

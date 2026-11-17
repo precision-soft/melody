@@ -2,6 +2,7 @@ package cron
 
 import (
     "errors"
+    "fmt"
     "os"
     "path/filepath"
     "strings"
@@ -210,3 +211,40 @@ func TestEnvironmentKeys_TheGeneratorRunsOverTheDeclaredKeys(t *testing.T) {
     }
 }
 
+
+func TestEnvironmentKeys_LogsDirectoryRetiresTheShortSpelling(t *testing.T) {
+    for _, key := range EnvironmentKeys(KeyDefaults{}) {
+        retiresShortSpelling := 1 == len(key.Retired) && "MELODY_CRON_LOGS_DIR" == key.Retired[0]
+        if (KeyLogsDirectory == key.Key) != retiresShortSpelling {
+            t.Fatalf("expected the short spelling retired by the logs directory key alone, got %+v", key)
+        }
+    }
+
+    configuration := newDeclaringConfiguration(t, map[string]string{"MELODY_CRON_LOGS_DIR": "/var/log/app"}, KeyDefaults{})
+
+    retiredKeys := configuration.RetiredEnvironmentKeys()
+    expected := []configcontract.RetiredEnvironmentKey{{Key: "MELODY_CRON_LOGS_DIR", Successor: KeyLogsDirectory, Owner: "cron"}}
+    if 1 != len(retiredKeys) || expected[0] != retiredKeys[0] {
+        t.Fatalf("expected %v, got %v", expected, retiredKeys)
+    }
+}
+
+func TestRefuseRetiredParameters_LogsDirParameterSet_RefusedNamingSuccessor(t *testing.T) {
+    defer func() {
+        refusal, _ := recover().(*exception.Error)
+        if nil == refusal || "the parameter melody.cron.logs_dir is retired: rename it to melody.cron.logs_directory" != refusal.Message() {
+            t.Fatalf("expected the retired parameter refused naming its successor, got %v", refusal)
+        }
+
+        if true == strings.Contains(fmt.Sprint(refusal.Context()), "/var/log/secret") {
+            t.Fatalf("expected no value in the refusal, got %v", refusal.Context())
+        }
+    }()
+
+    refuseRetiredParameters(newStubConfiguration(map[string]string{"melody.cron.logs_dir": "/var/log/secret"}))
+}
+
+func TestRefuseRetiredParameters_SuccessorAlone_Admitted(t *testing.T) {
+    refuseRetiredParameters(newStubConfiguration(map[string]string{ParameterLogsDirectory: "/var/log/app"}))
+    refuseRetiredParameters(nil)
+}

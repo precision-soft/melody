@@ -9,6 +9,7 @@ import (
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/exception"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
 )
 
@@ -211,5 +212,35 @@ func TestModule_RegisterCliCommandsPrefersFactory(t *testing.T) {
     }
     if 1 != len(commands) {
         t.Fatalf("expected one command from the factory configuration, got %d", len(commands))
+    }
+}
+
+type configurationKernel struct {
+    kernelcontract.Kernel
+    configuration configcontract.Configuration
+}
+
+func (instance *configurationKernel) Config() configcontract.Configuration {
+    return instance.configuration
+}
+
+func TestModule_RegisterCliCommandsRefusesTheRetiredLogsDirParameter(t *testing.T) {
+    kernelInstance := &configurationKernel{configuration: newStubConfiguration(map[string]string{"melody.cron.logs_dir": "/var/log/app"})}
+
+    defer func() {
+        refusal, _ := recover().(*exception.Error)
+        if nil == refusal || false == strings.Contains(refusal.Message(), "rename it to melody.cron.logs_directory") {
+            t.Fatalf("expected the retired parameter refused, got %v", refusal)
+        }
+    }()
+
+    NewModule(ModuleConfig{}).RegisterCliCommands(kernelInstance)
+}
+
+func TestModule_RegisterCliCommandsAdmitsTheSpelledOutParameter(t *testing.T) {
+    kernelInstance := &configurationKernel{configuration: newStubConfiguration(map[string]string{ParameterLogsDirectory: "/var/log/app"})}
+
+    if commands := NewModule(ModuleConfig{Configuration: NewConfiguration()}).RegisterCliCommands(kernelInstance); 1 != len(commands) {
+        t.Fatalf("expected the generator registered, got %v", commands)
     }
 }

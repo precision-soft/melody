@@ -217,7 +217,6 @@ func TestBoot_RefusesAModuleKeyOutsideItsRule(t *testing.T) {
         }
     }
 
-    /* the source is undeclared, so it is marked before the check and the refusal withholds the value read from it */
     if true == strings.Contains(journal+text, "424242") {
         t.Fatalf("expected the value of the undeclared source nowhere, got: %s", journal)
     }
@@ -399,5 +398,169 @@ func TestBoot_AHandMappingRegisteredBeforeBootIsRefusedNamingTheKey(t *testing.T
     cause := errorChainHolds(refusal, "the parameter a module's environment key feeds is already registered")
     if nil == cause || "MELODY_X_TEXT" != cause.Context()["environmentKey"] || "melody.x.text" != cause.Context()["parameterName"] || "x" != cause.Context()["module"] {
         t.Fatalf("expected the hand mapping refused naming the key, the parameter and the module, got %v", refusal)
+    }
+}
+
+const retiredEnvironmentKeyChildVariable = "MELODY_TEST_RETIRED_ENVIRONMENT_KEY_CHILD"
+
+const retiredEnvironmentKeyHookRanMarker = "a module's parameter hook ran"
+
+type printingParameterModule struct {
+    fakeModule
+}
+
+func (instance *printingParameterModule) RegisterParameters(registrar applicationcontract.ParameterRegistrar) {
+    fmt.Println(retiredEnvironmentKeyHookRanMarker)
+}
+
+func retiringEnvironmentKeyText() configcontract.EnvironmentKey {
+    key := environmentKeyText()
+    key.Retired = []string{"MELODY_X_TXT"}
+
+    return key
+}
+
+/* Boot exits the process at the refusal, so the boot runs in a child of the test binary and the parent reads its output and its journal */
+func bootRetiredEnvironmentKeyChild(t *testing.T, values map[string]string, modules ...applicationcontract.Module) (string, string, bool) {
+    t.Helper()
+
+    return bootRetiredEnvironmentKeyChildInMode(t, config.ModeCli, values, modules...)
+}
+
+func bootRetiredEnvironmentKeyChildInMode(t *testing.T, mode string, values map[string]string, modules ...applicationcontract.Module) (string, string, bool) {
+    t.Helper()
+
+    if projectDirectory := os.Getenv(retiredEnvironmentKeyChildVariable); "" != projectDirectory {
+        applicationInstance := newEnvironmentKeyBootApplicationIn(t, values, projectDirectory)
+        applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: mode})
+        applicationInstance.modules = modules
+
+        applicationInstance.Boot()
+
+        return "", "", true
+    }
+
+    childProjectDirectory := t.TempDir()
+    command := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
+    command.Env = append(os.Environ(), retiredEnvironmentKeyChildVariable+"="+childProjectDirectory)
+
+    output, runErr := command.CombinedOutput()
+    if nil == runErr {
+        t.Fatalf("expected the child's boot refused, got: %s", output)
+    }
+
+    journal, _ := os.ReadFile(filepath.Join(childProjectDirectory, "var", "log", "dev.log"))
+
+    return string(output), string(journal), false
+}
+
+func TestBoot_RetiredPublicDirectoryKey_RefusedNamingBothSpellings(t *testing.T) {
+    output, _, isChild := bootRetiredEnvironmentKeyChild(t, map[string]string{"MELODY_PUBLIC_DIR": "web"})
+    if true == isChild {
+        return
+    }
+
+    if false == strings.Contains(output, "after unrecovered error: the environment key MELODY_PUBLIC_DIR is retired: rename it to MELODY_PUBLIC_DIRECTORY") {
+        t.Fatalf("expected the refusal naming both spellings, got: %s", output[max(0, len(output)-1500):])
+    }
+}
+
+func TestBoot_RetiredKeyBesideItsSuccessor_Refused(t *testing.T) {
+    output, _, isChild := bootRetiredEnvironmentKeyChild(t, map[string]string{"MELODY_PUBLIC_DIR": "web", config.PublicDirectoryKey: "web"})
+    if true == isChild {
+        return
+    }
+
+    if false == strings.Contains(output, "after unrecovered error: the environment key MELODY_PUBLIC_DIR is retired: rename it to MELODY_PUBLIC_DIRECTORY") {
+        t.Fatalf("expected the refusal beside the successor, got: %s", output[max(0, len(output)-1500):])
+    }
+}
+
+func TestBoot_TwoRetiredKeys_OneRefusalNamingBoth(t *testing.T) {
+    output, journal, isChild := bootRetiredEnvironmentKeyChild(
+        t,
+        map[string]string{"MELODY_PUBLIC_DIR": "web", "MELODY_X_TXT": "text"},
+        &environmentKeyTestModule{name: "x", keys: []configcontract.EnvironmentKey{retiringEnvironmentKeyText()}},
+    )
+    if true == isChild {
+        return
+    }
+
+    expected := "after unrecovered error: the environment key MELODY_PUBLIC_DIR is retired: rename it to MELODY_PUBLIC_DIRECTORY; the environment key MELODY_X_TXT is retired: rename it to MELODY_X_TEXT"
+    if false == strings.Contains(output, expected) {
+        t.Fatalf("expected one refusal naming both keys, got: %s", output[max(0, len(output)-1500):])
+    }
+
+    expectedContext := `"context":{"retiredEnvironmentKeys":[{"key":"MELODY_PUBLIC_DIR","owner":"the framework","successor":"MELODY_PUBLIC_DIRECTORY"},{"key":"MELODY_X_TXT","owner":"x","successor":"MELODY_X_TEXT"}]}`
+    if false == strings.Contains(journal, expectedContext) {
+        t.Fatalf("expected the journal context %s, got: %s", expectedContext, journal)
+    }
+}
+
+func TestBoot_RetiredKeyRefusal_CarriesNoValue(t *testing.T) {
+    output, journal, isChild := bootRetiredEnvironmentKeyChild(
+        t,
+        map[string]string{"MELODY_PUBLIC_DIR": "s3cr3t-web", "MELODY_X_TXT": "s3cr3t-text"},
+        &environmentKeyTestModule{name: "x", keys: []configcontract.EnvironmentKey{retiringEnvironmentKeyText()}},
+    )
+    if true == isChild {
+        return
+    }
+
+    if false == strings.Contains(journal, "MELODY_PUBLIC_DIR is retired") {
+        t.Fatalf("expected the refusal journaled, got: %s", journal)
+    }
+
+    if true == strings.Contains(output+journal, "s3cr3t") {
+        t.Fatalf("expected no value in the refusal, got: %s %s", output, journal)
+    }
+}
+
+func TestBoot_RetiredKey_RefusedBeforeAnyModuleHook(t *testing.T) {
+    output, _, isChild := bootRetiredEnvironmentKeyChild(t, map[string]string{"MELODY_PUBLIC_DIR": "web"}, &printingParameterModule{fakeModule: fakeModule{name: "printing"}})
+    if true == isChild {
+        return
+    }
+
+    if false == strings.Contains(output, "MELODY_PUBLIC_DIR is retired") || true == strings.Contains(output, retiredEnvironmentKeyHookRanMarker) {
+        t.Fatalf("expected the refusal before the parameter hook, got: %s", output[max(0, len(output)-1500):])
+    }
+}
+
+func TestBoot_RetiredKey_RefusedInHttpModeBeforeTheCliKeyRefusal(t *testing.T) {
+    output, _, isChild := bootRetiredEnvironmentKeyChildInMode(t, config.ModeHttp, map[string]string{"MELODY_PUBLIC_DIR": "web", config.CliBootWarningsDisabledKey: "true"})
+    if true == isChild {
+        return
+    }
+
+    if false == strings.Contains(output, "after unrecovered error: the environment key MELODY_PUBLIC_DIR is retired") || true == strings.Contains(output, "a cli boot warning key is set in an http process") {
+        t.Fatalf("expected the retired refusal in http mode, ahead of the cli key refusal, got: %s", output[max(0, len(output)-1500):])
+    }
+}
+
+func TestBoot_RetiredKeyOfAnUnregisteredModule_StaysTheUndeclaredWarning(t *testing.T) {
+    applicationInstance := newEnvironmentKeyBootApplication(t, map[string]string{"MELODY_X_TXT": "text"})
+
+    applicationInstance.Boot()
+
+    for _, bootWarning := range applicationInstance.bootWarnings {
+        if internal.BootWarningNameEnvironmentUndeclaredKey == bootWarning.Name {
+            if keys, _ := bootWarning.Context["environmentKeys"].([]string); true == slices.Equal([]string{"MELODY_X_TXT"}, keys) {
+                return
+            }
+        }
+    }
+
+    t.Fatalf("expected the undeclared-key warning naming the key, got %+v", applicationInstance.bootWarnings)
+}
+
+func TestRetiredEnvironmentKeysMessage_JoinsInTheGivenOrder(t *testing.T) {
+    message := retiredEnvironmentKeysMessage([]configcontract.RetiredEnvironmentKey{
+        {Key: "MELODY_A", Successor: "MELODY_A_NEW", Owner: "a"},
+        {Key: "MELODY_B", Successor: "MELODY_B_NEW", Owner: "b"},
+    })
+
+    if "the environment key MELODY_A is retired: rename it to MELODY_A_NEW; the environment key MELODY_B is retired: rename it to MELODY_B_NEW" != message {
+        t.Fatalf("unexpected message %q", message)
     }
 }

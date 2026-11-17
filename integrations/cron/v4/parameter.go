@@ -34,6 +34,11 @@ const (
 )
 
 const (
+    retiredKeyLogsDirectory       = "MELODY_CRON_LOGS_DIR"
+    retiredParameterLogsDirectory = "melody.cron.logs_dir"
+)
+
+const (
     defaultDestinationFile = "%kernel.project_directory%/generated_conf/cron/crontab"
     defaultLogsDirectory   = "%kernel.logs_directory%/cron"
 )
@@ -64,7 +69,7 @@ func EnvironmentKeys(defaults KeyDefaults) []configcontract.EnvironmentKey {
 
     return []configcontract.EnvironmentKey{
         {Key: KeyUser, Parameter: ParameterUser, Field: "cron.KeyDefaults.User", Default: defaults.User},
-        {Key: KeyLogsDirectory, Parameter: ParameterLogsDirectory, Field: "cron.KeyDefaults.LogsDirectory", Default: textOrDefault(defaults.LogsDirectory, defaultLogsDirectory)},
+        {Key: KeyLogsDirectory, Parameter: ParameterLogsDirectory, Field: "cron.KeyDefaults.LogsDirectory", Default: textOrDefault(defaults.LogsDirectory, defaultLogsDirectory), Retired: []string{retiredKeyLogsDirectory}},
         {Key: KeyBinary, Parameter: ParameterBinary, Field: "cron.KeyDefaults.Binary", Default: defaults.Binary},
         {Key: KeyDestinationFile, Parameter: ParameterDestinationFile, Field: "cron.KeyDefaults.DestinationFile", Default: textOrDefault(defaults.DestinationFile, defaultDestinationFile)},
         {Key: KeyHeartbeatPath, Parameter: ParameterHeartbeatPath, Field: "cron.KeyDefaults.HeartbeatPath", Default: defaults.HeartbeatPath},
@@ -74,6 +79,18 @@ func EnvironmentKeys(defaults KeyDefaults) []configcontract.EnvironmentKey {
         {Key: KeyNamespace, Parameter: ParameterNamespace, Field: "cron.KeyDefaults.Namespace", Default: defaults.Namespace, Rule: namespaceKeyRule{}},
         {Key: KeyRestartPolicy, Parameter: ParameterRestartPolicy, Field: "cron.KeyDefaults.RestartPolicy", Default: defaults.RestartPolicy, Rule: melodyconfig.ChoiceKeyRule([]string{"OnFailure", "Never"})},
     }
+}
+
+func refuseRetiredParameters(configuration configcontract.Configuration) {
+    if nil == configuration || nil == configuration.Get(retiredParameterLogsDirectory) {
+        return
+    }
+
+    exception.Panic(exception.NewError(
+        "the parameter "+retiredParameterLogsDirectory+" is retired: rename it to "+ParameterLogsDirectory,
+        exceptioncontract.Context{"retiredParameter": retiredParameterLogsDirectory, "successor": ParameterLogsDirectory},
+        nil,
+    ))
 }
 
 func textOrDefault(text string, defaultText string) string {

@@ -2,6 +2,7 @@ package application
 
 import (
     "fmt"
+    "strings"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
@@ -51,6 +52,43 @@ func (instance *moduleEnvironmentKeyRegistrar) DeclareEnvironmentKey(key configc
             declareErr,
         ))
     }
+}
+
+/* names keys only, never a value: a retired key may hold a credential; one refusal for all of them, so a deployment is corrected in one pass */
+func (instance *Application) refuseRetiredEnvironmentKeys() {
+    declarer, isDeclarer := instance.configuration.(configcontract.EnvironmentKeyDeclarer)
+    if false == isDeclarer {
+        return
+    }
+
+    retiredKeys := declarer.RetiredEnvironmentKeys()
+    if 0 == len(retiredKeys) {
+        return
+    }
+
+    exception.Panic(exception.NewError(
+        retiredEnvironmentKeysMessage(retiredKeys),
+        exceptioncontract.Context{"retiredEnvironmentKeys": retiredEnvironmentKeysContext(retiredKeys)},
+        nil,
+    ))
+}
+
+func retiredEnvironmentKeysContext(retiredKeys []configcontract.RetiredEnvironmentKey) []map[string]string {
+    entries := make([]map[string]string, 0, len(retiredKeys))
+    for _, retiredKey := range retiredKeys {
+        entries = append(entries, map[string]string{"key": retiredKey.Key, "successor": retiredKey.Successor, "owner": retiredKey.Owner})
+    }
+
+    return entries
+}
+
+func retiredEnvironmentKeysMessage(retiredKeys []configcontract.RetiredEnvironmentKey) string {
+    parts := make([]string, 0, len(retiredKeys))
+    for _, retiredKey := range retiredKeys {
+        parts = append(parts, "the environment key "+retiredKey.Key+" is retired: rename it to "+retiredKey.Successor)
+    }
+
+    return strings.Join(parts, "; ")
 }
 
 /* after the resolve, so a templated value is judged as its readers get it */

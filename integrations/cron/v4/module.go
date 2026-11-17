@@ -44,6 +44,11 @@ func (instance *Module) RegisterEnvironmentKeys(registrar applicationcontract.En
 }
 
 func (instance *Module) RegisterCliCommands(kernelInstance kernelcontract.Kernel) []clicontract.Command {
+    /* the hook runs at every boot, after every parameter hook, whatever the process shape */
+    if nil != kernelInstance {
+        refuseRetiredParameters(kernelInstance.Config())
+    }
+
     configuration := instance.config.Configuration
     if nil != instance.config.ConfigurationFactory {
         configuration = instance.config.ConfigurationFactory(kernelInstance)

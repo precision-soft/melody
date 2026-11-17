@@ -21,7 +21,7 @@ type declaredEnvironmentKey struct {
     declaration configcontract.EnvironmentKey
 }
 
-/* DeclareEnvironmentKey makes a key the owner holds one parameter under the key and under its Parameter name: the .env value when a file set the key, its Default otherwise. It is refused once the boot resolve ran, for a key outside the MELODY_ namespace or held by the framework or another declaration, for a parameter name already registered, for a secret key with a default and for a literal default its own rule refuses. */
+/* DeclareEnvironmentKey makes a key the owner holds one parameter under the key and under its Parameter name: the .env value when a file set the key, its Default otherwise. It is refused once the boot resolve ran, for a key outside the MELODY_ namespace or held or retired by the framework or another declaration, for a retired spelling outside the namespace, equal to the key or held or retired by another owner, for a parameter name already registered, for a secret key with a default and for a literal default its own rule refuses. */
 func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcontract.EnvironmentKey) error {
     context := exceptioncontract.Context{
         "module":         owner,
@@ -32,6 +32,10 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
 
     if shapeErr := refuseEnvironmentKeyShape(key, context); nil != shapeErr {
         return shapeErr
+    }
+
+    if retiredShapeErr := refuseRetiredEnvironmentKeyShape(key, context); nil != retiredShapeErr {
+        return retiredShapeErr
     }
 
     if _, isFrameworkKey := environmentKeyAliasMap[key.Key]; true == isFrameworkKey {
@@ -62,6 +66,10 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
         context["owner"] = declared.owner
 
         return exception.NewError("a module declared an environment key another owner already holds", context, nil)
+    }
+
+    if retiredCollisionErr := instance.refuseRetiredEnvironmentKeyCollisionLocked(owner, key, context); nil != retiredCollisionErr {
+        return retiredCollisionErr
     }
 
     if feedingKey, isFed := instance.declaredEnvironmentParameters[key.Parameter]; true == isFed {
@@ -104,10 +112,15 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
     if nil == instance.declaredEnvironmentKeys {
         instance.declaredEnvironmentKeys = make(map[string]declaredEnvironmentKey)
         instance.declaredEnvironmentParameters = make(map[string]string)
+        instance.declaredRetiredEnvironmentKeys = make(map[string]string)
     }
 
     instance.declaredEnvironmentKeys[key.Key] = declaredEnvironmentKey{owner: owner, declaration: key}
     instance.declaredEnvironmentParameters[key.Parameter] = key.Key
+
+    for _, retiredKey := range key.Retired {
+        instance.declaredRetiredEnvironmentKeys[retiredKey] = key.Key
+    }
 
     if true == key.Secret {
         parameter.isSecret.Store(true)

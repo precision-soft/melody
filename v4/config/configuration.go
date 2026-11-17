@@ -95,6 +95,9 @@ type Configuration struct {
 
     declaredEnvironmentKeys       map[string]declaredEnvironmentKey
     declaredEnvironmentParameters map[string]string
+
+    /* keyed by the retired spelling, holding the declared key that replaced it */
+    declaredRetiredEnvironmentKeys map[string]string
 }
 
 /* MarkServing ends the wiring phase: Resolve is refused from then on, and a parameter registered later resolves on registration. */
