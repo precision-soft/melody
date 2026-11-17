@@ -40,3 +40,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Documentation
 
 - readme: carried from the third major (unreleased): the delivery semantics state that a failed `Acquire` of the optional `Locker` ends the run before it claims a row, so an outage of the lease store stops delivery, and how a wrapped `Locker` delivers through it.
+- readme: the amqp transport's nack is an outage, so a queue full under `reject-publish` holds its rows uncharged for as long as it is full, where the verdict list named it; the probe still charges a nacked row when the same transport delivers the next one; the at-least-once bullet names the nack among the unbounded-duplicate sources, a fan-out to several queues with one of them full delivering one more copy to the others per outage pass.

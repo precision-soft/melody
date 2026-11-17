@@ -206,7 +206,6 @@ func TestHasAndDelete_ReportAndRemoveOneEntry(t *testing.T) {
     }
 }
 
-/* deleting a key that is not there is not a failure: the caller asked for its absence and gets it. */
 func TestDelete_AnAbsentKeyIsNotAFailure(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -314,7 +313,6 @@ func TestIncrementAndDecrement_MoveOneCounter(t *testing.T) {
     }
 }
 
-/* redis refuses to increment a payload that is not an integer, and that refusal must reach the caller rather than be read as a fresh counter — the in-memory backend refuses the same input for the same reason. */
 func TestIncrement_RefusesANonIntegerPayload(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -371,7 +369,6 @@ func TestClear_RemovesTheWholePrefixAndLeavesTheRestAlone(t *testing.T) {
     }
 }
 
-/* the scan pages rather than reading the keyspace in one answer, so the walk is driven past one page with a scan count of one. */
 func TestClear_WalksEveryPageOfTheScan(t *testing.T) {
     _, client := liveBackend(t)
 
@@ -434,7 +431,6 @@ func TestClearByPrefix_RemovesOnlyTheNamedSubtree(t *testing.T) {
     }
 }
 
-/* a prefix carrying a glob metacharacter is matched literally, so it neither misses the keys it names nor reaches the siblings a wildcard would. */
 func TestClearByPrefix_MatchesAGlobMetacharacterLiterally(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -468,7 +464,6 @@ func TestClear_AnEmptyPrefixSpaceIsNotAFailure(t *testing.T) {
 }
 
 func TestNormalizeKey_RefusesTheSpellingsRedisCannotCarryAndNamesTheKey(t *testing.T) {
-    /* the key bound is a FIELD on this major, not the package constant the frozen majors compare against, so a bare literal would carry a maximum of zero and refuse every key as too long. The field is set to what the constructor guarantees, which is what this test is about to exercise. */
     backend := &Backend{prefix: "melody:", maxKeyLength: backendMaxKeyLengthRule.Default}
 
     if _, emptyErr := backend.normalizeKey(""); nil == emptyErr {
@@ -512,7 +507,6 @@ func TestNormalizeKey_RefusesTheSpellingsRedisCannotCarryAndNamesTheKey(t *testi
     }
 }
 
-/* one malformed key stops the whole batch, so the refusal has to say which one it was — the caller handed in a set and cannot otherwise tell. */
 func TestMany_ABatchRefusalNamesTheOffendingKey(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -550,7 +544,7 @@ func TestDeleteKeysInBatches_DeletesEveryBatchIncludingThePartialLast(t *testing
 
     backend.deleteBatch = 3
 
-    if deleteErr := backend.deleteKeysInBatches(backend.walkRoundTrip(context.Background()), keys); nil != deleteErr {
+    if deleteErr := backend.deleteKeysInBatches(backend.walkRoundTrip(context.Background(), "Clear"), keys); nil != deleteErr {
         t.Fatalf("deleteKeysInBatches: %v", deleteErr)
     }
 
@@ -566,7 +560,7 @@ func TestDeleteKeysInBatches_DeletesEveryBatchIncludingThePartialLast(t *testing
 func TestDeleteKeysInBatches_AnEmptyKeyListIsNotAFailure(t *testing.T) {
     backend, _ := liveBackend(t)
 
-    if deleteErr := backend.deleteKeysInBatches(backend.walkRoundTrip(context.Background()), nil); nil != deleteErr {
+    if deleteErr := backend.deleteKeysInBatches(backend.walkRoundTrip(context.Background(), "Clear"), nil); nil != deleteErr {
         t.Fatalf("an empty batch must not be a failure: %v", deleteErr)
     }
 }
@@ -649,7 +643,6 @@ func TestFirstDeleteFailure_NamesOneKeyDeterministicallyAndCountsTheRest(t *test
     }
 }
 
-/* every operation reports a store that cannot be reached rather than answering as if it had. The client is the door: rueidis refuses on a closed one with an error of its own, so this backend needs no closed flag of its own — unlike the in-memory sibling, whose map would keep answering. Driving every operation through it also enters each one's store-failure branch, which no reachable store can produce. */
 func TestEveryOperation_ReportsAClosedClientInsteadOfAnsweringOverIt(t *testing.T) {
     backend, client := liveBackend(t)
 
@@ -704,7 +697,6 @@ func TestEveryOperation_ReportsAClosedClientInsteadOfAnsweringOverIt(t *testing.
     }
 }
 
-/* the batch delete names the key that stopped it, which is the whole reason the per-key answer is read rather than discarded. */
 func TestDeleteMultiple_AFailureNamesTheKeyAndTheBatchSize(t *testing.T) {
     backend, client := liveBackend(t)
 
@@ -729,7 +721,6 @@ func TestDeleteMultiple_AFailureNamesTheKeyAndTheBatchSize(t *testing.T) {
     }
 }
 
-/* the batch set names the key whose write did not land: the commands are built from a map, so without the parallel key list the caller would be told only that something in the batch failed. */
 func TestSetMultiple_AFailureNamesOneOfTheKeys(t *testing.T) {
     backend, client := liveBackend(t)
 
@@ -750,7 +741,6 @@ func TestSetMultiple_AFailureNamesOneOfTheKeys(t *testing.T) {
     }
 }
 
-/* Close ends THIS backend and leaves the shared client alone: every later operation refuses — the answer the in-memory backend behind the same contract gives, so a teardown-ordering bug reads identically whichever backend is wired — while a second backend over the same client keeps working, which is what proves the client itself was not closed. */
 func TestClose_RefusesLaterOperationsAndLeavesTheSharedClientOpen(t *testing.T) {
     backend, client := liveBackend(t)
 
@@ -780,7 +770,6 @@ func TestClose_RefusesLaterOperationsAndLeavesTheSharedClientOpen(t *testing.T) 
     }
 }
 
-/* the empty prefix is refused like the empty key everywhere else: a prefix assembled at run time that comes out empty must not select the whole namespace. */
 func TestClearByPrefix_RefusesTheEmptyPrefix(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -809,7 +798,6 @@ func TestClearByPrefix_RefusesTheEmptyPrefix(t *testing.T) {
     }
 }
 
-/* the ttl is judged before the empty early-return, the order the in-memory backend judges it in. */
 func TestSetMultiple_RefusesANegativeTtlEvenForAnEmptyBatch(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -823,7 +811,6 @@ func TestSetMultiple_RefusesANegativeTtlEvenForAnEmptyBatch(t *testing.T) {
     }
 }
 
-/* the counter refusal names the key it happened on, the way the in-memory backend's does. */
 func TestIncrement_WrapsTheStoreRefusalWithTheKey(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -848,7 +835,6 @@ func TestIncrement_WrapsTheStoreRefusalWithTheKey(t *testing.T) {
     }
 }
 
-/* the configured command timeout bounds the contract calls, which carry no context of their own. */
 func TestCommandTimeout_BoundsTheContractCalls(t *testing.T) {
     _, client := liveBackend(t)
 
@@ -857,7 +843,6 @@ func TestCommandTimeout_BoundsTheContractCalls(t *testing.T) {
         t.Fatalf("backend: %v", boundedErr)
     }
 
-    /* below the rule's 1ms floor, set past the door so the deadline fires before any store answers */
     bounded.commandTimeout = time.Nanosecond
 
     _, _, getErr := bounded.Get(context.Background(), "any")
@@ -865,7 +850,7 @@ func TestCommandTimeout_BoundsTheContractCalls(t *testing.T) {
         t.Fatal("expected the one-nanosecond bound to cut the call")
     }
 
-    if false == strings.Contains(getErr.Error(), "context deadline exceeded") {
+    if false == errors.Is(getErr, context.DeadlineExceeded) || false == errors.Is(getErr, ErrCommandTimeout) {
         t.Fatalf("expected the deadline to be the cause, got %v", getErr)
     }
 }
@@ -907,7 +892,6 @@ func TestFirstSetFailure_NamesTheSortedFirstKeyAndCountsTheRest(t *testing.T) {
     }
 }
 
-/* the validation refusal names the sorted-first malformed key, never a map-iteration choice — the nondeterminism the response reporting further down already refuses. Validation runs before anything is sent, so the batch leaves no trace. */
 func TestSetMultiple_NamesTheSortedFirstMalformedKey(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -930,7 +914,6 @@ func TestSetMultiple_NamesTheSortedFirstMalformedKey(t *testing.T) {
     }
 }
 
-/* a multi-batch wipe that fails part-way answers at the operation's extent — the batches before the failure are irreversibly gone, and the batch's own counts could not say how much of the namespace went with them. A single-batch operation keeps the batch report, whose counts already are the operation's. */
 func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *testing.T) {
     backend, _ := liveBackend(t)
 
@@ -943,7 +926,7 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    deleteErr := backend.deleteKeysInBatches(backend.walkRoundTrip(cancelledContext), keys)
+    deleteErr := backend.deleteKeysInBatches(backend.walkRoundTrip(cancelledContext, "Clear"), keys)
     if nil == deleteErr {
         t.Fatal("expected the cancelled batch walk to fail")
     }
@@ -953,7 +936,7 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
         t.Fatalf("expected the operation-level extent on the error, got %v", extent)
     }
 
-    singleBatchErr := backend.deleteKeysInBatches(backend.walkRoundTrip(cancelledContext), keys[:1])
+    singleBatchErr := backend.deleteKeysInBatches(backend.walkRoundTrip(cancelledContext, "Clear"), keys[:1])
     if nil == singleBatchErr {
         t.Fatal("expected the cancelled single batch to fail")
     }
@@ -963,7 +946,6 @@ func TestDeleteKeysInBatches_AMultiBatchFailureReportsTheOperationsExtent(t *tes
     }
 }
 
-/* the caller's own mistakes are named the way the in-memory backend names them, because the shared contract makes the grammar of a refusal part of the promise: three distinct mistakes each get their own message, distinct from a store outage, so a bug in the call is told apart from redis being down. Redis refuses all three itself; this backend names the refusal. */
 func TestBackend_CounterRefusalsAreNamedTheWayTheInMemorySiblingNamesThem(t *testing.T) {
     for _, testCase := range []struct {
         name    string
@@ -1005,7 +987,6 @@ func TestBackend_CounterRefusalsAreNamedTheWayTheInMemorySiblingNamesThem(t *tes
     }
 }
 
-/* the fragments are matched inside whatever prefix the server or a script wraps them in, and case does not decide */
 func TestBackend_CounterRefusalsAreMatchedInsideTheServersOwnWrapping(t *testing.T) {
     refusal := counterError(
         "probe-key",
@@ -1017,7 +998,6 @@ func TestBackend_CounterRefusalsAreMatchedInsideTheServersOwnWrapping(t *testing
     }
 }
 
-/* the configurable key bound is this major's own: the frozen majors compare against the package constant directly, so these two assertions have no site there. */
 func TestNewBackend_DefaultMaxKeyLength(t *testing.T) {
     client := &closeTrackingClient{}
 
@@ -1099,7 +1079,6 @@ func TestBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
     }
 }
 
-/* delayedClient holds every command for a fixed delay, or until its context ends, so a walk's cost is the pin's arithmetic and not the store's load. */
 type delayedClient struct {
     rueidis.Client
     delay time.Duration
@@ -1135,7 +1114,6 @@ func (instance *delayedClient) Nodes() map[string]rueidis.Client {
     return delayed
 }
 
-/* newDelayedNamespaceBackend fills 30 keys and walks them one per round trip, so a Clear makes at least 30 SCAN and 30 DEL round trips of the delay each. */
 func newDelayedNamespaceBackend(t *testing.T, delay time.Duration, commandTimeout time.Duration) (*Backend, []string) {
     t.Helper()
 
@@ -1180,7 +1158,6 @@ func newDelayedNamespaceBackend(t *testing.T, delay time.Duration, commandTimeou
 }
 
 func TestClear_BoundsEachRoundTripNotTheWalk(t *testing.T) {
-    /* 60 round trips of 20ms outlast the 500ms budget that each one of them fits in by far */
     backend, keys := newDelayedNamespaceBackend(t, 20*time.Millisecond, 500*time.Millisecond)
 
     if clearErr := backend.Clear(context.Background()); nil != clearErr {
@@ -1246,8 +1223,8 @@ func TestClear_AWedgedRoundTripIsCutByTheCommandTimeout(t *testing.T) {
 
     select {
     case clearErr := <-finished:
-        if false == errors.Is(clearErr, context.DeadlineExceeded) {
-            t.Fatalf("expected the deadline to cut the round trip, got %v", clearErr)
+        if false == errors.Is(clearErr, context.DeadlineExceeded) || false == errors.Is(clearErr, ErrCommandTimeout) {
+            t.Fatalf("expected the command timeout to cut the round trip, got %v", clearErr)
         }
     case <-time.After(10 * time.Second):
         t.Fatalf("expected a wedged round trip cut at the command timeout")
@@ -1357,7 +1334,7 @@ func TestBackend_ADoneContextIsAnsweredAfterTheArgumentsAndTouchesNothing(t *tes
     }
 }
 
-func TestBackend_TheCommandTimeoutBoundsARoundTripUnderACallerContextWithoutDeadline(t *testing.T) {
+func TestBackend_ARoundTripCutByTheCommandTimeoutNamesTheField(t *testing.T) {
     _, client := liveBackend(t)
 
     backend, backendErr := NewBackend(&delayedClient{Client: client, delay: time.Hour}, BackendConfig{
@@ -1376,12 +1353,230 @@ func TestBackend_TheCommandTimeoutBoundsARoundTripUnderACallerContextWithoutDead
 
         select {
         case operationErr := <-finished:
-            if false == errors.Is(operationErr, context.DeadlineExceeded) && false == strings.Contains(fmt.Sprint(operationErr), "context deadline exceeded") {
+            if false == errors.Is(operationErr, context.DeadlineExceeded) || false == errors.Is(operationErr, ErrCommandTimeout) {
                 t.Fatalf("%s: expected the command timeout to cut the round trip, got %v", name, operationErr)
+            }
+
+            var melodyErr *exception.Error
+            if false == errors.As(operationErr, &melodyErr) {
+                t.Fatalf("%s: expected a melody error, got %T", name, operationErr)
+            }
+
+            namedErr := melodyErr
+            for nil != namedErr && "BackendConfig.CommandTimeout" != namedErr.Context()["field"] {
+                var nextErr *exception.Error
+                if false == errors.As(namedErr.Unwrap(), &nextErr) {
+                    nextErr = nil
+                }
+                namedErr = nextErr
+            }
+
+            if nil == namedErr || "50ms" != namedErr.Context()["commandTimeout"] || name != namedErr.Context()["operation"] {
+                t.Fatalf("%s: expected the error to name the field, the timeout and the door, got %v", name, operationErr)
             }
         case <-time.After(10 * time.Second):
             t.Fatalf("%s: expected a wedged round trip cut at the command timeout", name)
         }
+    }
+}
+
+type deleteDelayedClient struct {
+    rueidis.Client
+}
+
+func (instance *deleteDelayedClient) DoMulti(ctx context.Context, commands ...rueidis.Completed) []rueidis.RedisResult {
+    <-ctx.Done()
+
+    return instance.Client.DoMulti(ctx, commands...)
+}
+
+func TestClear_ADeleteRoundTripCutByTheCommandTimeoutNamesTheField(t *testing.T) {
+    _, client := liveBackend(t)
+
+    for _, operation := range []string{"Clear", "ClearByPrefix"} {
+        prefix := "melody:test:" + t.Name() + ":" + operation + ":"
+
+        filler, fillerErr := NewBackend(client, BackendConfig{Prefix: prefix})
+        if nil != fillerErr {
+            t.Fatalf("NewBackend: %v", fillerErr)
+        }
+        if setErr := filler.Set(context.Background(), "key-held", []byte("payload"), bound.Of(time.Minute)); nil != setErr {
+            t.Fatalf("Set: %v", setErr)
+        }
+        t.Cleanup(func() { _ = filler.Clear(context.Background()) })
+
+        backend, backendErr := NewBackend(&deleteDelayedClient{Client: client}, BackendConfig{Prefix: prefix, CommandTimeout: bound.Of(50 * time.Millisecond)})
+        if nil != backendErr {
+            t.Fatalf("NewBackend: %v", backendErr)
+        }
+
+        var clearErr error
+        if "Clear" == operation {
+            clearErr = backend.Clear(context.Background())
+        } else {
+            clearErr = backend.ClearByPrefix(context.Background(), "key-")
+        }
+
+        if false == errors.Is(clearErr, ErrCommandTimeout) {
+            t.Fatalf("%s: expected the delete round trip cut by the command timeout named, got %v", operation, clearErr)
+        }
+    }
+}
+
+func runWedgedOperations(t *testing.T, commandTimeout time.Duration, callerContext func() (context.Context, context.CancelFunc), check func(name string, operationErr error)) {
+    t.Helper()
+
+    _, client := liveBackend(t)
+
+    backend, backendErr := NewBackend(&delayedClient{Client: client, delay: time.Hour}, BackendConfig{
+        Prefix:         "melody:test:" + t.Name() + ":",
+        CommandTimeout: bound.Of(commandTimeout),
+    })
+    if nil != backendErr {
+        t.Fatalf("NewBackend: %v", backendErr)
+    }
+
+    for name, operation := range backendContextOperations(backend) {
+        ctx, cancel := callerContext()
+        finished := make(chan error, 1)
+        go func() {
+            finished <- operation(ctx, "wedged")
+        }()
+
+        select {
+        case operationErr := <-finished:
+            check(name, operationErr)
+        case <-time.After(10 * time.Second):
+            t.Fatalf("%s: expected a wedged round trip cut by the caller", name)
+        }
+        cancel()
+    }
+}
+
+func TestBackend_ACallersOwnDeadlineIsNotNamedTheCommandTimeout(t *testing.T) {
+    runWedgedOperations(t, time.Second, func() (context.Context, context.CancelFunc) {
+        return context.WithTimeout(context.Background(), 20*time.Millisecond)
+    }, func(name string, operationErr error) {
+        if false == errors.Is(operationErr, context.DeadlineExceeded) || true == errors.Is(operationErr, ErrCommandTimeout) {
+            t.Fatalf("%s: expected the caller's deadline answered without the command timeout's name, got %v", name, operationErr)
+        }
+    })
+}
+
+func TestBackend_ACallersCancellationIsNotNamedTheCommandTimeout(t *testing.T) {
+    runWedgedOperations(t, time.Second, func() (context.Context, context.CancelFunc) {
+        ctx, cancel := context.WithCancel(context.Background())
+        time.AfterFunc(20*time.Millisecond, cancel)
+
+        return ctx, cancel
+    }, func(name string, operationErr error) {
+        if false == errors.Is(operationErr, context.Canceled) || true == errors.Is(operationErr, ErrCommandTimeout) {
+            t.Fatalf("%s: expected the caller's cancellation answered without the command timeout's name, got %v", name, operationErr)
+        }
+    })
+}
+
+func TestBackend_ACounterCutByTheCommandTimeoutIsNotAnsweredAsAStoreFailure(t *testing.T) {
+    runWedgedOperations(t, 50*time.Millisecond, func() (context.Context, context.CancelFunc) {
+        return context.WithCancel(context.Background())
+    }, func(name string, operationErr error) {
+        if "Increment" != name && "Decrement" != name {
+            return
+        }
+
+        if nil == operationErr || "cache round trip was cut by BackendConfig.CommandTimeout" != operationErr.Error() || true == strings.Contains(operationErr.Error(), counterStoreFailureMessage) {
+            t.Fatalf("%s: expected the command timeout's message, got %v", name, operationErr)
+        }
+    })
+}
+
+func TestRoundTripError_AnsweredOnlyForADeadlineTheCommandTimeoutCaused(t *testing.T) {
+    backend := &Backend{commandTimeout: 50 * time.Millisecond}
+
+    commandTimedOut, cancelCommandTimedOut := context.WithTimeoutCause(context.Background(), time.Nanosecond, ErrCommandTimeout)
+    defer cancelCommandTimedOut()
+    <-commandTimedOut.Done()
+
+    callerContext, cancelCaller := context.WithTimeout(context.Background(), time.Nanosecond)
+    defer cancelCaller()
+    <-callerContext.Done()
+    callerTimedOut, cancelCallerTimedOut := context.WithTimeoutCause(callerContext, time.Hour, ErrCommandTimeout)
+    defer cancelCallerTimedOut()
+
+    if nil != backend.roundTripError(commandTimedOut, "Get", nil) {
+        t.Fatal("expected no error answered as none")
+    }
+
+    redisErr := errors.New("ERR wrong number of arguments")
+    if redisErr != backend.roundTripError(commandTimedOut, "Get", redisErr) {
+        t.Fatal("expected an error that is no deadline answered as it came")
+    }
+
+    if namedErr := backend.roundTripError(callerTimedOut, "Get", context.DeadlineExceeded); context.DeadlineExceeded != namedErr {
+        t.Fatalf("expected the caller's deadline answered as it came, got %v", namedErr)
+    }
+
+    namedErr := backend.roundTripError(commandTimedOut, "Get", context.DeadlineExceeded)
+    if false == errors.Is(namedErr, ErrCommandTimeout) || false == errors.Is(namedErr, context.DeadlineExceeded) || false == exception.ChainIs(namedErr, ErrCommandTimeout) {
+        t.Fatalf("expected the command timeout named, got %v", namedErr)
+    }
+}
+
+type earlyDeadlineContext struct {
+    context.Context
+}
+
+func (instance earlyDeadlineContext) Deadline() (time.Time, bool) {
+    return time.Now().Add(-time.Millisecond), true
+}
+
+func TestRoundTripError_ADeadlineTheClientReadBeforeTheTimerFiredIsStillNamed(t *testing.T) {
+    backend := &Backend{commandTimeout: 30 * time.Millisecond}
+
+    commandContext, cancel := context.WithTimeoutCause(context.Background(), 30*time.Millisecond, ErrCommandTimeout)
+    defer cancel()
+
+    namedErr := backend.roundTripError(earlyDeadlineContext{Context: commandContext}, "Get", context.DeadlineExceeded)
+    if false == errors.Is(namedErr, ErrCommandTimeout) {
+        t.Fatalf("expected a deadline the client answered before the timer fired named, got %v", namedErr)
+    }
+
+    callerContext, cancelCaller := context.WithTimeout(context.Background(), 30*time.Millisecond)
+    defer cancelCaller()
+    callerBound, cancelCallerBound := context.WithTimeoutCause(callerContext, time.Hour, ErrCommandTimeout)
+    defer cancelCallerBound()
+
+    if callerErr := backend.roundTripError(earlyDeadlineContext{Context: callerBound}, "Get", context.DeadlineExceeded); true == errors.Is(callerErr, ErrCommandTimeout) {
+        t.Fatalf("expected the caller's deadline read early left unnamed, got %v", callerErr)
+    }
+}
+
+func TestRoundTripError_ADeadlineThatNeverSignalsIsAnsweredUnnamedPastTheGrace(t *testing.T) {
+    backend := &Backend{commandTimeout: time.Second}
+
+    answered := make(chan error, 1)
+    go func() {
+        answered <- backend.roundTripError(earlyDeadlineContext{Context: context.Background()}, "Get", context.DeadlineExceeded)
+    }()
+
+    select {
+    case answeredErr := <-answered:
+        if context.DeadlineExceeded != answeredErr {
+            t.Fatalf("expected the round trip's error answered as it came, got %v", answeredErr)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatal("expected a deadline that never signals answered past the grace, the naming still waits")
+    }
+}
+
+func TestErrCommandTimeout_UnwrapsToTheDeadlineAndIsATimeout(t *testing.T) {
+    if false == errors.Is(ErrCommandTimeout, context.DeadlineExceeded) {
+        t.Fatal("expected the sentinel to unwrap to the deadline")
+    }
+
+    timeoutError, isTimeoutError := ErrCommandTimeout.(interface{ Timeout() bool })
+    if false == isTimeoutError || false == timeoutError.Timeout() {
+        t.Fatal("expected the sentinel to be a timeout")
     }
 }
 
@@ -1526,6 +1721,54 @@ func TestBackend_ACounterWritesItsTtlAsItsWindowSays(t *testing.T) {
     }
 }
 
+func TestBackend_AnUnlimitedSlidingCounterPersistsTheKey(t *testing.T) {
+    backend, client := liveBackend(t)
+    ctx := context.Background()
+    prefix := "melody:test:" + t.Name() + ":"
+
+    for _, door := range []string{"Increment", "Decrement"} {
+        key := "sliding-" + door
+        backend.Increment(ctx, key, 4, cachecontract.CounterOptions{Ttl: bound.Of(time.Hour)})
+        if armed, armErr := client.Do(ctx, client.B().Pexpire().Key(prefix+key).Milliseconds(600000).Build()).AsInt64(); nil != armErr || 1 != armed {
+            t.Fatalf("%s: could not arm the expiry: %d %v", door, armed, armErr)
+        }
+
+        unlimitedSliding := cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration(), RefreshTtl: true}
+        var callErr error
+        if "Increment" == door {
+            _, callErr = backend.Increment(ctx, key, 1, unlimitedSliding)
+        } else {
+            _, callErr = backend.Decrement(ctx, key, 1, unlimitedSliding)
+        }
+        if nil != callErr {
+            t.Fatalf("%s: %v", door, callErr)
+        }
+
+        if remaining := rawTtl(t, client, prefix+key); -1 != remaining {
+            t.Fatalf("%s: expected the unlimited sliding counter persisted, got %d", door, remaining)
+        }
+    }
+}
+
+func TestBackend_AnUnlimitedFixedCounterKeepsTheKeysExpiry(t *testing.T) {
+    backend, client := liveBackend(t)
+    ctx := context.Background()
+    prefix := "melody:test:" + t.Name() + ":"
+
+    backend.Increment(ctx, "fixed", 4, cachecontract.CounterOptions{Ttl: bound.Of(time.Hour)})
+    if armed, armErr := client.Do(ctx, client.B().Pexpire().Key(prefix+"fixed").Milliseconds(600000).Build()).AsInt64(); nil != armErr || 1 != armed {
+        t.Fatalf("could not arm the expiry: %d %v", armed, armErr)
+    }
+
+    if value, _ := backend.Increment(ctx, "fixed", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); 5 != value {
+        t.Fatalf("expected 5, got %d", value)
+    }
+
+    if remaining := rawTtl(t, client, prefix+"fixed"); 0 >= remaining || remaining > 600000 {
+        t.Fatalf("expected the unlimited fixed counter to keep the expiry, got %d ms", remaining)
+    }
+}
+
 func TestBackend_ConcurrentIncrementsWithATtlStayAtomic(t *testing.T) {
     backend, client := liveBackend(t)
     prefix := "melody:test:" + t.Name() + ":"
@@ -1569,19 +1812,6 @@ func TestBackend_ACounterAboveTwoToTheFiftyThirdIsAnsweredExactly(t *testing.T) 
 
     if _, overflowErr := backend.Increment(ctx, "edge", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); nil == overflowErr || false == strings.Contains(overflowErr.Error(), "cache increment overflow") {
         t.Fatalf("expected the overflow refused, got %v", overflowErr)
-    }
-}
-
-func TestBackend_AnUnlimitedSlidingCallKeepsTheWindowAKeyCarries(t *testing.T) {
-    backend, client := liveBackend(t)
-    ctx := context.Background()
-    prefix := "melody:test:" + t.Name() + ":"
-
-    backend.Increment(ctx, "window", 1, cachecontract.CounterOptions{Ttl: bound.Of(time.Hour)})
-    backend.Increment(ctx, "window", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration(), RefreshTtl: true})
-
-    if remaining := rawTtl(t, client, prefix+"window"); remaining <= 0 || remaining > 3600000 {
-        t.Fatalf("expected the hour window kept, got %d", remaining)
     }
 }
 

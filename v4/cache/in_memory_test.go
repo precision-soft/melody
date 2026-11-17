@@ -988,7 +988,6 @@ func TestInMemoryBackend_TheTickerDrivesTheSweep(t *testing.T) {
 
     clockInstance.setNow(time.Unix(20, 0))
 
-    /* the tick is delivered on an unbuffered channel, so the send returns only once the loop has received it; the sweep it drives is still in flight, which is what the poll below waits out */
     clockInstance.tick()
 
     deadline := time.Now().Add(2 * time.Second)
@@ -1012,7 +1011,6 @@ func TestInMemoryBackend_TheTickerDrivesTheSweep(t *testing.T) {
     t.Fatalf("expected the ticker to drive the sweep that reclaims the lapsed entry")
 }
 
-/* the sweep-driving clock is separate from cacheTestClock on purpose: once ticks actually fire, the backend goroutine reads the clock while the test advances it, so the time behind this one is guarded — the shared fixture is written by its tests as a plain field and is safe only because no tick ever reaches it. */
 func newCacheTickableTestClock(now time.Time) *cacheTickableTestClock {
     return &cacheTickableTestClock{
         now:           now,
@@ -1116,7 +1114,6 @@ func TestInMemoryBackend_EvictionToleratesARecencyListThatLostAgreementWithTheMa
             t.Fatalf("unexpected set error: %v", err)
         }
 
-        /* two intruders in a row: the walk removes the first and its Prev is cleared by the removal, so the walk ends with the second still at the back */
         backend.mutex.Lock()
         backend.lruList.PushBack(1)
         backend.lruList.PushBack(2)
@@ -1245,7 +1242,6 @@ func TestInMemoryBackend_ReadsToleratePlacementChangingUnderThem(t *testing.T) {
     }
 }
 
-/* the key grammar is the contract's, enforced identically by every implementation: a caller must not be able to tell the backends apart by which keys they refuse. */
 func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{
         MaxItems:        bound.Of(10),
@@ -1292,7 +1288,6 @@ func TestInMemoryBackend_RefusesTheContractKeyGrammar(t *testing.T) {
     }
 }
 
-/* the refusal order is part of the shared contract, the redis backend's order: the closed answer wins over the key judgment, and a batch write judges the ttl before its keys, so a call that is wrong in more than one way is refused with the same answer whichever implementation it hit. */
 func TestInMemoryBackend_RefusalOrderMatchesTheRedisBackend(t *testing.T) {
     clockInstance := &cacheTestClock{now: time.Unix(10, 0)}
 
@@ -1337,7 +1332,6 @@ func TestInMemoryBackend_ANilPayloadReadsBackEmptyNonNil(t *testing.T) {
     }
 }
 
-/* the batch refusal names the sorted-first malformed key, never a map-iteration choice: the same wrong batch answers the same refusal on every call — the rule the redis backend's batch reporting follows. */
 func TestInMemoryBackend_SetMultipleNamesTheSortedFirstMalformedKey(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
     defer backend.CloseWithContext(context.Background())
@@ -1454,7 +1448,6 @@ func TestInMemoryBackend_CloseRefusesEveryLaterDoor(t *testing.T) {
     }
 }
 
-/* a counter over a payload of digits past the int64 range is refused without the payload anywhere in the refusal's chain, where strconv's own refusal quotes it whole; the range is named as the cause. */
 func TestInMemoryBackend_IncrementOnAnOutOfRangePayloadKeepsThePayloadOutOfTheChain(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
     defer backend.CloseWithContext(context.Background())
@@ -1478,7 +1471,6 @@ func TestInMemoryBackend_IncrementOnAnOutOfRangePayloadKeepsThePayloadOutOfTheCh
     }
 }
 
-/* a counter over a textual payload is refused naming the key and the payload's length, never the payload itself: a payload is unbounded and may hold what the key, bounded to 128 bytes for that reason, may not. */
 func TestInMemoryBackend_IncrementOnATextPayloadKeepsThePayloadOutOfTheRefusal(t *testing.T) {
     backend := NewInMemoryBackend(InMemoryBackendConfig{MaxItems: bound.Of(10), CleanupInterval: bound.Of(time.Hour), Clock: &cacheTestClock{now: time.Unix(10, 0)}})
     defer backend.CloseWithContext(context.Background())
@@ -1535,7 +1527,6 @@ func TestAwaitCleanupLoop_ALoopThatLeavesBeforeTheDeadlineAnswersNil(t *testing.
     }
 }
 
-/* parkingCacheClock fires its ticker on demand and parks the cleanup pass in Now until released, the stuck loop a close must not wait for past its deadline */
 type parkingCacheClock struct {
     tickerChannel chan time.Time
     parked        chan struct{}
@@ -1759,12 +1750,27 @@ func TestInMemoryBackend_ASlidingCounterMovesItsExpiryOnEveryCall(t *testing.T) 
     }
 }
 
-func TestInMemoryBackend_AnUnlimitedCounterKeepsAnExpiryTheKeyCarries(t *testing.T) {
+func TestInMemoryBackend_ASlidingCounterExpiresItsSpanAfterItsLastCall(t *testing.T) {
+    backend, clockInstance := counterTestBackend()
+    defer backend.CloseWithContext(context.Background())
+
+    options := cachecontract.CounterOptions{Ttl: bound.Of(time.Minute), RefreshTtl: true}
+    backend.Increment(context.Background(), "hits", 1, options)
+    clockInstance.now = clockInstance.now.Add(40 * time.Second)
+    backend.Increment(context.Background(), "hits", 1, options)
+
+    clockInstance.now = clockInstance.now.Add(61 * time.Second)
+    if _, exists, _ := backend.Get(context.Background(), "hits"); true == exists {
+        t.Fatal("expected the sliding counter gone a span after its last call")
+    }
+}
+
+func TestInMemoryBackend_AnUnlimitedFixedCounterKeepsAnExpiryTheKeyCarries(t *testing.T) {
     backend, clockInstance := counterTestBackend()
     defer backend.CloseWithContext(context.Background())
 
     backend.Increment(context.Background(), "hits", 1, cachecontract.CounterOptions{Ttl: bound.Of(time.Minute)})
-    backend.Increment(context.Background(), "hits", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration(), RefreshTtl: true})
+    backend.Increment(context.Background(), "hits", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})
 
     clockInstance.now = clockInstance.now.Add(61 * time.Second)
     if _, exists, _ := backend.Get(context.Background(), "hits"); true == exists {
@@ -1775,6 +1781,36 @@ func TestInMemoryBackend_AnUnlimitedCounterKeepsAnExpiryTheKeyCarries(t *testing
     clockInstance.now = clockInstance.now.Add(1000 * time.Hour)
     if _, exists, _ := backend.Get(context.Background(), "forever"); false == exists {
         t.Fatal("expected an unlimited counter kept")
+    }
+}
+
+func TestInMemoryBackend_AnUnlimitedSlidingCounterRemovesAnExpiryTheKeyCarries(t *testing.T) {
+    backend, clockInstance := counterTestBackend()
+    defer backend.CloseWithContext(context.Background())
+
+    backend.Set(context.Background(), "hits", []byte("4"), bound.Of(time.Hour))
+    if value, _ := backend.Increment(context.Background(), "hits", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration(), RefreshTtl: true}); 5 != value {
+        t.Fatalf("expected 5, got %d", value)
+    }
+
+    clockInstance.now = clockInstance.now.Add(2 * time.Hour)
+    if value, exists, _ := backend.Get(context.Background(), "hits"); false == exists || "5" != string(value) {
+        t.Fatalf("expected the unlimited sliding counter kept past the hour it carried, got %q %v", value, exists)
+    }
+}
+
+func TestInMemoryBackend_AnUnlimitedSlidingDecrementRemovesTheExpiry(t *testing.T) {
+    backend, clockInstance := counterTestBackend()
+    defer backend.CloseWithContext(context.Background())
+
+    backend.Increment(context.Background(), "hits", 4, cachecontract.CounterOptions{Ttl: bound.Of(time.Minute)})
+    if value, _ := backend.Decrement(context.Background(), "hits", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration(), RefreshTtl: true}); 3 != value {
+        t.Fatalf("expected 3, got %d", value)
+    }
+
+    clockInstance.now = clockInstance.now.Add(1000 * time.Hour)
+    if value, exists, _ := backend.Get(context.Background(), "hits"); false == exists || "3" != string(value) {
+        t.Fatalf("expected the unlimited sliding decrement to remove the minute expiry, got %q %v", value, exists)
     }
 }
 

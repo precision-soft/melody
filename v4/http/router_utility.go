@@ -31,7 +31,7 @@ import (
 
 const sessionCookieSameSiteUnset = nethttp.SameSite(0)
 
-/* ControllerHandler adapts a controller function to a Handler: the first argument takes the request, a runtimecontract.Runtime one the runtime, any other is resolved by type from the request scope, the results are a response and an error, and another shape panics. */
+/* ControllerHandler adapts a controller function, its arguments resolved by type, to a Handler; another shape panics. */
 func ControllerHandler(
     controller any,
 ) httpcontract.Handler {
@@ -208,7 +208,6 @@ func wrapWithMiddlewares(handler httpcontract.Handler, middlewares []httpcontrac
     return wrapWithMiddlewaresRecording(handler, middlewares, nil)
 }
 
-/* wrapWithMiddlewaresRecording publishes each next() response to the recorder, so the recovery can close a response in flight when an outer middleware panics */
 func wrapWithMiddlewaresRecording(
     handler httpcontract.Handler,
     middlewares []httpcontract.Middleware,
@@ -258,7 +257,7 @@ func splitRequestPath(value string) []string {
     return segments
 }
 
-/* RequestPathAsRouted answers the request path as the router reads it: each segment unescaped on its own, an encoded separator kept as "%2F". */
+/* RequestPathAsRouted is the path as the router reads it, an encoded separator kept as %2F. */
 func RequestPathAsRouted(escapedPath string) string {
     if false == strings.HasPrefix(escapedPath, "/") {
         return escapedPath
@@ -308,7 +307,7 @@ func requestPathIsCanonical(path string) bool {
         return true
     }
 
-    /* both matchers prepend "/" and the access-control matcher folds it, so "admin/../public" is judged as they read it */
+    /* judged as both matchers read it, with a "/" prepended and folded */
     if false == strings.HasPrefix(path, "/") {
         path = "/" + path
     }
@@ -346,7 +345,7 @@ func writeResponse(
         }
     }
 
-    /* a status outside net/http's range or informational would panic in WriteHeader or answer an implicit 200; zero means 200 */
+    /* outside net/http's range or informational would panic or answer an implicit 200; zero means 200 */
     if statusCode := response.StatusCode(); 0 != statusCode && false == isFinalStatusCode(statusCode) {
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
@@ -358,7 +357,6 @@ func writeResponse(
             )
         }
 
-        /* the replaced response owns its body and nothing downstream reads it */
         closeDiscardedResponseBody(response, logger)
 
         response = renderErrorResponse(runtimeInstance, request, nethttp.StatusInternalServerError, "internal server error", nil)
@@ -380,7 +378,7 @@ func writeResponse(
     if false == sessionAlreadyPersisted && false == internal.IsNilInterface(sessionManager) && false == internal.IsNilInterface(sessionInstance) {
         sessionPersistFailed := false
 
-        /* built only for a door the manager is asked through, and released by the defer too, so a panicking foreign door leaves no timer armed */
+        /* released by the defer too, so a panicking foreign door leaves no timer armed */
         releasePersistenceContext := func() {}
         defer func() { releasePersistenceContext() }()
 
@@ -445,7 +443,7 @@ func writeResponse(
 
                     setSessionCookie(response, expiringSessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy))
                 } else if nil != err {
-                    /* the handler's response assumed the write would land, so a failed save answers 503 in its place unless the headers are committed */
+                    /* the response assumed the save would land, so a failure answers 503 unless committed */
                     sessionPersistFailed = true
 
                     if false == exception.AnswersUnavailable(err) {
@@ -630,7 +628,7 @@ func expiringSessionCookie(
     return cookie
 }
 
-/* setSessionCookie marks the response private, since a shared cache replaying it would hand one client's session to another */
+/* private, since a shared cache replaying it would hand one client's session to another */
 func setSessionCookie(response httpcontract.Response, cookie *nethttp.Cookie) {
     SetCookie(response, cookie)
     markResponsePrivateForSessionCookie(response)
@@ -678,7 +676,7 @@ func resolveSessionCookieSecure(
     return "https" == detectSchemeWithForwardedHeadersPolicy(request.HttpRequest(), forwardedHeadersPolicy)
 }
 
-/* through the named level methods, the door a substituted logger overrides */
+/* through the named level methods, which a substituted logger overrides */
 func logSessionPersistenceEvent(
     runtimeInstance runtimecontract.Runtime,
     level loggingcontract.Level,
@@ -731,7 +729,7 @@ func markResponsePrivateForSessionCookie(response httpcontract.Response) {
         return
     }
 
-    /* a value ending inside a quoted string would swallow an appended "private", so the strictest answer replaces it */
+    /* a value ending inside a quoted string would swallow an appended private, so it is replaced */
     for _, existing := range existingLines {
         if true == endsInsideQuotes(existing) {
             headers.Set("Cache-Control", "no-store, private")
@@ -808,7 +806,7 @@ func sessionIdLogReference(sessionId string) string {
     return hex.EncodeToString(digest[:])[:16]
 }
 
-/* CloseDiscardedResponseBody closes the body of a response that will not be served; a failed close goes to the logger, which may be nil. */
+/* CloseDiscardedResponseBody closes an unserved response's body, logging a failure to a logger that may be nil. */
 func CloseDiscardedResponseBody(response httpcontract.Response, logger loggingcontract.Logger) {
     closeDiscardedResponseBody(response, logger)
 }
@@ -910,7 +908,7 @@ func isRequestFromTrustedProxy(request *nethttp.Request, trustedProxyList []stri
         return false
     }
 
-    /* an IPv4-mapped IPv6 peer matches an IPv4 CIDR, as in http/middleware/client_ip.go */
+    /* an IPv4-mapped IPv6 peer matches an IPv4 CIDR */
     remoteAddress = remoteAddress.Unmap()
 
     for _, trustedProxyString := range trustedProxyList {
@@ -921,7 +919,6 @@ func isRequestFromTrustedProxy(request *nethttp.Request, trustedProxyList []stri
 
         trustedPrefix, trustedPrefixErr := netip.ParsePrefix(trimmedTrustedProxyString)
         if nil == trustedPrefixErr {
-            /* unmapped so it contains the unmapped host, as in http/middleware/client_ip.go */
             if true == trustedPrefix.Addr().Is4In6() && trustedPrefix.Bits() >= 96 {
                 trustedPrefix = netip.PrefixFrom(trustedPrefix.Addr().Unmap(), trustedPrefix.Bits()-96)
             }

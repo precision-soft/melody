@@ -122,11 +122,11 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 ### Cache: a counter carries its ttl
 
-**What changed.** [`cachecontract.Cache`](../cache/contract/cache.go) and `Backend` take `Increment(ctx, key, delta, options)` and `Decrement(ctx, key, delta, options)`, the options a [`CounterOptions`](../cache/contract/counter.go): `Ttl`, read as a write's ttl (at least 1s, `bound.UnlimitedDuration()` for none, absent refused), and `RefreshTtl`, false for a fixed window written when the call creates the key or finds it without an expiry, true for a sliding window rewritten on every call. The in-memory and the redis backends implement both, the redis one in one script.
+**What changed.** [`cachecontract.Cache`](../cache/contract/cache.go) and `Backend` take `Increment(ctx, key, delta, options)` and `Decrement(ctx, key, delta, options)`, the options a [`CounterOptions`](../cache/contract/counter.go): `Ttl`, read as a write's ttl (at least 1s, `bound.UnlimitedDuration()` for none, absent refused), and `RefreshTtl`, false for a fixed window written when the call creates the key or finds it without an expiry, true for a sliding window rewritten on every call; an unlimited sliding call removes an expiry the key carries. The in-memory and the redis backends implement both, the redis one in one script.
 
 **Symptom.** A call written for the third major does not compile; a `Backend` or `Cache` of the application's own no longer satisfies the interface; a call with an empty `CounterOptions` answers the error `the cache ttl is required`.
 
-**Remedy.** `cache.Increment(ctx, key, 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})` keeps the third major's behaviour, a counter that never expires; a rate window or a daily count passes its span, `RefreshTtl: true` for a span that restarts on every call. An implementation of the interfaces writes the expiry in the same atomic operation as the count.
+**Remedy.** `cache.Increment(ctx, key, 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()})` keeps the third major's behaviour: a counter created without an expiry, and one the key already carries kept, exactly as `INCRBY` did; `RefreshTtl: true` with an unlimited ttl differs, since it removes that expiry; a rate window or a daily count passes its span, `RefreshTtl: true` for a span that restarts on every call. An implementation of the interfaces writes the expiry in the same atomic operation as the count.
 
 ### Translation: a quoted `#` in a plural branch, and locales matched in BCP 47 case
 
@@ -154,11 +154,11 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 ### Http: an informational status is no final answer
 
-**What changed.** A response whose status is between 100 and 199, 101 aside, is refused before anything is written and answered as the rendered 500. net/http sends a 1xx as an interim header and answers an implicit 200 after it, so the handler's body went out as a success. 101 stays admitted, the connection upgrade.
+**What changed.** A response whose status is between 100 and 199, 101 included, is refused before anything is written and answered as the rendered 500. net/http sends a 1xx as an interim header and answers an implicit 200 after it, so the handler's body went out as a success; a response object with 101 cannot hand the connection over, so it never upgraded anything. The refusal has no off switch, since no such response can work on either protocol.
 
-**Symptom.** A handler that answered 100, 102 or 103 as its final status now answers 500.
+**Symptom.** A handler that answered 100, 101, 102 or 103 as its final status now answers 500.
 
-**Remedy.** Answer the final status the request ends with. An early hint (103) is sent through the underlying writer before the final response, not as the response.
+**Remedy.** Answer the final status the request ends with. An early hint (103) is sent through the underlying writer before the final response, not as the response. A handler that upgrades writes the 101 on the `ResponseWriter` and hijacks the connection, which is unchanged; a handler that returned a response object with 101 never upgraded anything.
 
 ### Exception: an http exception answers 400 to 599
 
@@ -1354,7 +1354,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Symptom.** `NewBackend(client, ctx, prefix, 0, 0, WithCommandTimeout(time.Second))`, `RegisterBackendServiceWithOptions(...)` and `ModuleConfig{Prefix: ..., BackendOptions: ...}` no longer compile. A backend built or registered without a command timeout, whose reads ran unbounded, now refuses one that takes longer than a second with the context's deadline; a scan count, delete batch or key length of `bound.Of(0)`, which took the default, is refused; a nil client fails `RegisterBackendService` at the call, where it failed the first resolve; a field left at its zero value takes the default.
 
-**Remedy.** `cache.NewBackend(client, cache.BackendConfig{Prefix: prefix})`; `CommandTimeout: bound.Of(time.Second)` for `WithCommandTimeout` and `MaxKeyLength: bound.Of(n)` for `WithMaxKeyLength`; `cache.RegisterBackendService(registrar, client, cache.BackendConfig{Prefix: "app:"})`; `cache.ModuleConfig{Client: client, Backend: cache.BackendConfig{Prefix: "app:"}}`. A composition whose operations legitimately run longer than a second raises `CommandTimeout`. A `Clear` or a `ClearByPrefix` spends it on each `SCAN` and `DEL` round trip, so a large namespace needs neither.
+**Remedy.** `cache.NewBackend(client, cache.BackendConfig{Prefix: prefix})`; `CommandTimeout: bound.Of(time.Second)` for `WithCommandTimeout` and `MaxKeyLength: bound.Of(n)` for `WithMaxKeyLength`; `cache.RegisterBackendService(registrar, client, cache.BackendConfig{Prefix: "app:"})`; `cache.ModuleConfig{Client: client, Backend: cache.BackendConfig{Prefix: "app:"}}`. A composition whose operations legitimately run longer than a second raises `CommandTimeout`. A `Clear` or a `ClearByPrefix` spends it on each `SCAN` and `DEL` round trip, so a large namespace needs neither. A round trip the command timeout cut answers an error naming `BackendConfig.CommandTimeout`, with `cache.ErrCommandTimeout` in its chain: match it with `errors.Is(err, context.DeadlineExceeded)` or `errors.Is(err, cache.ErrCommandTimeout)`, never `err == context.DeadlineExceeded`.
 
 ### Amqp: the provider is built from one struct, the reconnect backoff is bound limits inherited field by field and refused where it was clamped, the transport's limits are bound limits, and the heartbeat and the close bound are configured
 

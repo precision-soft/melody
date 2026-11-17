@@ -44,7 +44,6 @@ type closeJoinMessage struct {
     Id int
 }
 
-/* blockingDeserializer parks the consume goroutine inside decode until the test releases it, holding open the window in which a Close that did not join the loop would return while the loop still runs. */
 type blockingDeserializer struct {
     inner   serializercontract.Serializer
     once    sync.Once
@@ -140,7 +139,6 @@ func (instance *recordingLogger) errorMessages() []string {
 
 var _ loggingcontract.Logger = (*recordingLogger)(nil)
 
-/* newRecordingLoggerRuntime carries a logger the transport can actually reach: newReconnectRuntime builds an empty container, so LoggerFromRuntime hands back nil there and no log is produced or observed either way. */
 func newRecordingLoggerRuntime(ctx context.Context) (runtimecontract.Runtime, *recordingLogger) {
     logger := &recordingLogger{}
 
@@ -679,7 +677,6 @@ func TestConnect_SingleFlight(t *testing.T) {
 
     <-entered
 
-    /* errors.Is instead of identity: the sentinel is wrapped in a fresh melody error per return, so one logged occurrence cannot mark them all as already logged */
     _, secondErr := instance.connect()
     if false == errors.Is(secondErr, errReconnectInProgress) {
         t.Fatalf("expected a concurrent connect to report reconnect-in-progress, got %v", secondErr)
@@ -734,7 +731,6 @@ func TestConsumeLoop_NoDialerClosesOut(t *testing.T) {
     }
 }
 
-/* a consumer that can never re-subscribe must say why it is stopping: the loop returns and closes out either way, so without the log a consumer dies silently in production and the queue simply stops being drained. */
 func TestConsumeLoop_NoDialerLogsWhyTheConsumerStops(t *testing.T) {
     runtimeInstance, logger := newRecordingLoggerRuntime(context.Background())
 
@@ -758,7 +754,6 @@ func TestConsumeLoop_NoDialerLogsWhyTheConsumerStops(t *testing.T) {
     }
 }
 
-/* the mirror of the record above: a stop the transport itself asked for is expected, so it must stay silent — otherwise every deploy floods the error dashboards from each consumer that shuts down. */
 func TestConsumeLoop_ClosingTransportStopsWithoutLogging(t *testing.T) {
     runtimeInstance, logger := newRecordingLoggerRuntime(context.Background())
 
@@ -810,7 +805,6 @@ func TestConnectionAlive_ReportsLiveAndGone(t *testing.T) {
     }
 }
 
-/* a failed publish on a live static connection (no dialer) must be retried on a fresh channel — the live connection can still carry it — while a no-dialer transport whose connection is gone, or a closing transport, must not retry. */
 func TestPublishRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T) {
     liveStatic := &Transport{queue: "orders", connection: &amqp091.Connection{}}
     if false == liveStatic.publishRetryable() {
@@ -833,7 +827,6 @@ func TestPublishRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T)
     }
 }
 
-/* a transient subscribe failure on a live static connection (no dialer) must be retried on a fresh channel — the live connection can still carry the subscription — while a no-dialer transport whose connection is gone, or a closing transport, must give up. */
 func TestSubscribeRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T) {
     liveStatic := &Transport{queue: "orders", connection: &amqp091.Connection{}}
     if false == liveStatic.subscribeRetryable() {
@@ -856,7 +849,6 @@ func TestSubscribeRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.
     }
 }
 
-/* a consumer built on a live static connection with no dialer must recover from a channel-only loss (queue deleted, broker basic.cancel, a PRECONDITION_FAILED that closes only the channel): the live connection can still open a fresh channel, so the loop must re-subscribe instead of closing out and stopping. */
 func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.T) {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
@@ -879,7 +871,6 @@ func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.
         close(done)
     }()
 
-    /* with a nil dialer on a live static connection the loop parks on the reconnect backoff rather than returning and closing out, keeping the subscription open for recovery. */
     select {
     case _, open := <-out:
         if false == open {
@@ -892,7 +883,6 @@ func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.
     case <-time.After(200 * time.Millisecond):
     }
 
-    /* clean shutdown still works: cancelling the runtime unblocks the backoff wait and closes out */
     cancel()
 
     select {
@@ -950,7 +940,6 @@ func TestTransport_RequeuePersistsDeadLetterAttemptCount(t *testing.T) {
         t.Fatalf("build publishing: %v", buildErr)
     }
 
-    /* a requeued exhausted message must carry its dead-letter attempt count across the broker round-trip; MaxDeadLetterAttempts re-reads the count on every consume, so dropping it would reset the counter to 0 on each requeue and a bound of 2 or more would never be reached */
     delivery := amqp091.Delivery{Headers: publishing.Headers, Body: publishing.Body}
     decoded, decodeErr := instance.decode(delivery, 1)
     if nil != decodeErr {
@@ -962,7 +951,6 @@ func TestTransport_RequeuePersistsDeadLetterAttemptCount(t *testing.T) {
     }
 }
 
-/* a message id stamped by a producer (for example the outbox relay) is carried as the AMQP message id so a consumer can deduplicate at-least-once redeliveries. */
 func TestTransport_BuildPublishingCarriesMessageId(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[reconnectMessage](registry, "amqp.test.messageid")
@@ -983,7 +971,6 @@ func TestTransport_BuildPublishingCarriesMessageId(t *testing.T) {
     }
 }
 
-/* the producer-assigned message id must survive a broker round-trip and an application requeue: decode reads delivery.MessageId back into a stamp so a consumer can read it and a republish (Nack-with-requeue / delayed retry) re-emits the SAME id rather than an empty one. */
 func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[reconnectMessage](registry, "amqp.test.messageid.roundtrip")
@@ -991,7 +978,6 @@ func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
     serializer := melodyserializer.NewJsonSerializer()
     instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
 
-    /* first publish carries the producer id */
     sent := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
         WithStamp(melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"})
     published, buildErr := instance.buildPublishing(sent, "")
@@ -999,7 +985,6 @@ func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
         t.Fatalf("build publishing: %v", buildErr)
     }
 
-    /* the broker delivers it back; decode must expose the id as a stamp */
     delivery := amqp091.Delivery{
         Headers:   published.Headers,
         Body:      published.Body,
@@ -1015,7 +1000,6 @@ func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
         t.Fatalf("expected decode to surface the message id, got %q present=%v", roundTripped, present)
     }
 
-    /* a requeue re-publishes the decoded envelope; the id must not be lost */
     republished, republishErr := instance.buildPublishing(decoded, "")
     if nil != republishErr {
         t.Fatalf("rebuild publishing: %v", republishErr)
@@ -1026,7 +1010,6 @@ func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
     }
 }
 
-/* negative control: without a message id stamp the publishing leaves MessageId empty rather than inventing one. */
 func TestTransport_BuildPublishingWithoutMessageIdStampLeavesItEmpty(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[reconnectMessage](registry, "amqp.test.nomessageid")
@@ -1175,7 +1158,6 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     }
 }
 
-/* Close must join the consume goroutine, not merely signal it: a loop still inside decode would hand an envelope to the application after Close returned, an envelope that can never be acked because consumeChannelForAck reports the torn-down channel as gone, and a decode failure racing the same window would nack on the channel Close already closed. */
 func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[closeJoinMessage](registry, "amqp.test.close-join")
@@ -1221,7 +1203,6 @@ func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
         close(closed)
     }()
 
-    /* shorter than closeJoinTimeout on purpose: past the bound Close is entitled to give up, and the assertion would stop proving anything */
     select {
     case <-closed:
         t.Fatalf("Close returned while the consume goroutine was still inside the deserializer")
@@ -1246,7 +1227,6 @@ func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
     }
 }
 
-/* the dial runs under the close signal, so Close returns promptly however long a caller-supplied dialer blocks, and a connection the dial yields afterwards is closed by the drain goroutine instead of leaking. */
 func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
     dialing := make(chan struct{})
     release := make(chan struct{})
@@ -1300,7 +1280,6 @@ func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
     }
 }
 
-/* the same join through the public path: Receive is what registers the goroutine, so a consumer started there must be joined too. */
 func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
@@ -1379,7 +1358,6 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
         t.Fatalf("expected the consumer to have closed its output before Close returned")
     }
 
-    /* the blocked message was never acked, so the broker returns it to the durable queue when the consume channel closes — drain it rather than leaving one behind per run */
     admin, adminErr := connection.Channel()
     if nil != adminErr {
         t.Fatalf("open admin channel: %v", adminErr)
@@ -1522,7 +1500,6 @@ func TestEnsureConsumeChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
         t.Fatalf("second ensureConsumeChannel: %v", secondErr)
     }
 
-    /* a freshly installed channel is answered with the generation minted for it, under the mutex that installed it */
     if secondGeneration != firstGeneration+1 {
         t.Fatalf("expected the fresh channel answered with the generation minted for it (%d), got %d", firstGeneration+1, secondGeneration)
     }
@@ -1548,7 +1525,6 @@ func TestDelayExpirationMilliseconds_ClampsSubMillisecondToOne(t *testing.T) {
     }
 }
 
-/* a delay whose milliseconds exceed RabbitMQ's 32-bit expiration must clamp to the cap rather than be passed through to wrap to a tiny ttl that would expire the message almost immediately. */
 func TestDelayExpirationMilliseconds_ClampsHugeDelayToCap(t *testing.T) {
     huge := time.Duration(math.MaxUint32+1000) * time.Millisecond
     if maxDelayExpirationMilliseconds != delayExpirationMilliseconds(huge) {
@@ -1561,7 +1537,6 @@ func TestDelayExpirationMilliseconds_ClampsHugeDelayToCap(t *testing.T) {
     }
 }
 
-/* drainPublishReturn must remove every queued return, not just one, so a publish is reported unroutable even when more than one return has accumulated and so no stale return is left behind to be misattributed to the next publish. */
 func TestDrainPublishReturn_DrainsEveryQueuedReturn(t *testing.T) {
     returns := make(chan amqp091.Return, 8)
     returns <- amqp091.Return{ReplyCode: 312, ReplyText: "first"}
@@ -1614,7 +1589,6 @@ func TestRedeliveryCountFromHeader(t *testing.T) {
     }
 }
 
-/* the AMQP 0-9-1 prefetch-count field is encoded as uint16 by channel.Qos, so a configured prefetch above 65535 wraps on the wire — 65536 becomes 0, which RabbitMQ treats as UNLIMITED prefetch. newTransport refuses such a value before it can reach Qos, so the flow-control cap never silently inverts into no cap at all. */
 func TestNewTransport_RefusesAPrefetchAboveTheWireMaximum(t *testing.T) {
     newInstance := func(prefetch int) *Transport {
         return newTransport(TransportConfig{
@@ -1653,8 +1627,6 @@ func TestMessageTypeName_ReportsConcreteType(t *testing.T) {
         t.Fatalf("unexpected type name: %q", messageTypeName(sample{}))
     }
 }
-
-/* delay buckets */
 
 func TestResolveDelayBuckets_DefaultsWhenEmpty(t *testing.T) {
     buckets := resolveDelayBuckets(nil)
@@ -1766,7 +1738,6 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         t.Fatalf("receive: %v", receiveErr)
     }
 
-    /* the queues are durable, so a message parked in a bucket queue by a crashed or older run dead-letters back into the main queue and would corrupt the identity assertions below — drain any leftovers before producing this run's messages */
     for draining := true; true == draining; {
         select {
         case leftover := <-queue:
@@ -1795,7 +1766,6 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         WithStamp(melodymessagebus.RedeliveryStamp{Count: 1}).
         WithStamp(melodymessagebus.DelayStamp{Delay: 2 * time.Second})
 
-    /* requeue the LONG delay first: on the single-delay-queue topology it parks at the head with the longer per-message ttl and RabbitMQ's head-of-queue-only expiry stalls the 2s message behind it for the full 8s — the bucketed topology parks them in separate uniform-ttl queues, so the short one must come back well before the long one */
     start := time.Now()
     if nackErr := transport.Nack(runtimeInstance, longDelayed, true); nil != nackErr {
         t.Fatalf("nack long: %v", nackErr)
@@ -1811,7 +1781,6 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         t.Fatalf("short delay stalled behind the long one for %s", elapsed)
     }
 
-    /* assert the IDENTITY of the redelivered message, not just its timing: a bucket-misrouting regression (short delay parked in the long bucket and vice versa) would otherwise still deliver A message within the window */
     shortMessage, isShort := redelivered.Message().(testMessage)
     if false == isShort || "short" != shortMessage.Name {
         t.Fatalf("expected the short-delayed message first, got %+v", redelivered.Message())
@@ -1821,7 +1790,6 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         t.Fatalf("ack: %v", ackErr)
     }
 
-    /* drain the long-delayed message too, so the durable bucket queue is left empty for the next run instead of leaking one parked message per run */
     longRedelivered := receiveWithin(t, queue, 12*time.Second)
 
     longMessage, isLong := longRedelivered.Message().(testMessage)
@@ -1871,7 +1839,6 @@ func TestStartConsumeLoop_RefusesOnceCloseHasBegun(t *testing.T) {
     }
 }
 
-/* the incremented RedeliveryStamp / DeadLetterAttemptStamp only ever reach the broker on the re-publish, so a requeue that abandons it and hands the original delivery back returns the message with the counts it arrived with. MaxRetries and MaxDeadLetterAttempts then compare against the same numbers on every delivery and the message never dead-letters; a transient publish failure is therefore attempted again, and only a bounded number of times so a permanent one still reaches a verdict. */
 func TestPublishRequeue_RetriesABoundedNumberOfTimesBeforeGivingUp(t *testing.T) {
     dialCount := 0
 
@@ -1896,13 +1863,11 @@ func TestPublishRequeue_RetriesABoundedNumberOfTimesBeforeGivingUp(t *testing.T)
         t.Fatalf("expected the re-publish to fail once every attempt is spent")
     }
 
-    /* every attempt is a publish, and a publish already retries once on a freshly dialed connection */
     if 2*republishAttemptCount != dialCount {
         t.Fatalf("expected %d dial attempts across %d re-publish attempts, got %d", 2*republishAttemptCount, republishAttemptCount, dialCount)
     }
 }
 
-/* a transport that is shutting down must not spend its attempts against a broker it is disconnecting from */
 func TestPublishRequeue_ClosingTransportStopsWithoutRetrying(t *testing.T) {
     dialCount := 0
 
@@ -1922,13 +1887,11 @@ func TestPublishRequeue_ClosingTransportStopsWithoutRetrying(t *testing.T) {
         t.Fatalf("expected the re-publish to fail on a closing transport")
     }
 
-    /* a closing transport refuses to hand out a publish channel at all, so the attempt never reaches the dialer and the loop must not spin on that refusal */
     if 0 != dialCount {
         t.Fatalf("expected a closing transport never to dial, got %d", dialCount)
     }
 }
 
-/* the loop the retry counters exist to break: the re-publish is the only carrier of the advanced counts, so a requeue of the ORIGINAL delivery hands the message back with x-redelivery-count unchanged, the consumer reads the same count again, requeues again, and nothing ever reaches the dead-letter queue — at full speed, because the DelayStamp is discarded with the envelope too. */
 func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
@@ -1961,7 +1924,6 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
     runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
     defer transport.CloseWithContext(context.Background())
 
-    /* the queues survive the run, so anything an earlier one parked in them would be read as this run's result */
     purgeQueue(t, connection, queueName)
     purgeQueue(t, connection, queueName+".dlq")
 
@@ -1979,7 +1941,6 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
         t.Fatalf("expected initial redelivery count 0, got %d", melodymessagebus.RedeliveryCount(delivered))
     }
 
-    /* a delay below the smallest bucket routes the re-publish through the per-message-ttl delay queue; deleting that queue makes the publish unroutable for good, which is the shape of every permanent re-publish failure */
     deleteQueue(t, connection, queueName+".delay")
 
     retried := delivered.
@@ -2015,7 +1976,6 @@ func deleteQueue(t *testing.T, connection *amqp091.Connection, queueName string)
     }
 }
 
-/* purgeQueue empties a durable test queue on its own channel, tolerating a queue that does not exist yet: a purge of an unknown queue is a channel-level error, which would take the caller's channel down with it. */
 func purgeQueue(t *testing.T, connection *amqp091.Connection, queueName string) {
     t.Helper()
 
@@ -2028,7 +1988,6 @@ func purgeQueue(t *testing.T, connection *amqp091.Connection, queueName string) 
     _, _ = channel.QueuePurge(queueName, false)
 }
 
-/* A re-publish that the broker refuses leaves the original delivery on the channel, and what happens to it is the transport's at-least-once guarantee. With a dead-letter queue bound, refusing without requeue routes it there: kept, visible, recoverable. Without one, the same refusal DESTROYS it — the broker has nowhere to route it — so the delivery goes back on the queue instead. The triggers are exactly the conditions that produce a refused re-publish: a max-length policy with overflow=reject-publish, an unroutable return, a queue that filled. A message is worth more than an accurate redelivery count. */
 func TestRequeueOnRejectedRepublish_KeepsTheMessageWhenNothingElseWould(t *testing.T) {
     if false == requeueOnRejectedRepublish(false) {
         t.Fatal("without a dead-letter queue a refusal discards the message, so it must be requeued instead: at-least-once becomes at-most-once otherwise")
@@ -2042,7 +2001,6 @@ func TestRequeueOnRejectedRepublish_KeepsTheMessageWhenNothingElseWould(t *testi
 func TestResetConsumeChannel_ANilFailedChannelIdentifiesNothingAndIsANoOp(t *testing.T) {
     instance := &Transport{queue: "orders", publishHalf: publishHalf{joinBound: closeJoinTimeout}}
 
-    /* no cached channel and a nil failed one: both halves of the identity guard answer no-op without a panic */
     instance.resetConsumeChannel(nil)
 
     if nil != instance.consumeChannel {
@@ -2192,7 +2150,6 @@ func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
     }
 }
 
-/* the generation stamped on a delivery names the channel that carried it, not the transport-wide counter. A channel the broker closed still hands its buffered deliveries out while it tears down, so this loop can be draining generation 2 long after a reconnect installed generation 3: stamped with the counter, those deliveries match what consumeChannelForAck answers, the ack guard passes, and a tag from the dead channel is acknowledged on the fresh one — where the tags restart at one. */
 func TestForwardDeliveries_StampsTheGenerationOfItsOwnChannelNotTheTransportCounter(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[reconnectMessage](registry, "amqp.test.paired-generation")
@@ -2206,7 +2163,6 @@ func TestForwardDeliveries_StampsTheGenerationOfItsOwnChannelNotTheTransportCoun
         Serializer: serializer,
     })
 
-    /* the reconnect already happened: the counter stands at 3 while this loop still holds the channel of generation 2 */
     transport.mutex.Lock()
     transport.consumeGeneration = 3
     transport.mutex.Unlock()
@@ -2267,7 +2223,6 @@ func TestForwardDeliveries_StampsTheGenerationOfItsOwnChannelNotTheTransportCoun
     }
 }
 
-/* the counter and the cached channel are written together under the mutex, so the generation answered beside a channel must be read under the same hold — a generation recovered afterwards is never OLDER than the channel's, only newer, which is the direction that defeats the ack guard */
 func TestEnsureConsumeChannel_AnswersTheCachedChannelWithItsOwnGeneration(t *testing.T) {
     transport := NewTransport(TransportConfig{
         Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("no broker in this test") },
@@ -2296,7 +2251,6 @@ func TestEnsureConsumeChannel_AnswersTheCachedChannelWithItsOwnGeneration(t *tes
     }
 }
 
-/* wedgePublishTimeout is the budget the wedge tests measure their subject against; wedgeWarmupPublishTimeout is the budget of the fixture's healthy send, which opens the channel and takes the shared broker as it comes — a confirmation the broker was slow to give says nothing about the wedge under test, and under the subject's budget it failed the fixture instead. */
 const (
     wedgePublishTimeout       = 200 * time.Millisecond
     wedgeWarmupPublishTimeout = 5 * time.Second
@@ -2367,7 +2321,6 @@ func TestTransport_ATimedOutSendOnAnOwnedConnectionRedialsAndDelivers(t *testing
     outcome := make(chan error, 1)
     go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
 
-    /* the send's one retry redials and delivers: the wedged write is a channel fault, not a broker verdict */
     if sendErr := awaitOutcome(t, "send on a wedged owned connection", outcome, 5*time.Second); nil != sendErr {
         t.Fatalf("expected the send to be retried on a fresh connection and succeed, got: %v", sendErr)
     }
@@ -2444,7 +2397,6 @@ func TestTransport_CloseReturnsAndNamesTheBlockedWriteOnAWedgedCallerOwnedConnec
     }
 }
 
-/* the window this pins — a close crossing a send whose write went out and whose confirmation has not arrived — cannot be opened from outside, since the order in which the broker answers the confirmation and the channel close is the broker's; the seam is the publish mutex the send holds across both. */
 func TestClose_WaitsForTheInFlightPublishBeforeClosingTheChannel(t *testing.T) {
     instance := &Transport{
         queue:          "orders",
@@ -2522,7 +2474,6 @@ func TestDecode_ReadsAByteArrayMessageTypeHeader(t *testing.T) {
     }
 }
 
-/* the socket wedges with nothing in flight, so no send is there to cut it: Close's own deadline is the only bound */
 func TestTransport_CloseReturnsWhenTheSocketWedgedWhileIdle(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     dialer := newGatedDialer(t, dsn)
@@ -2536,7 +2487,6 @@ func TestTransport_CloseReturnsWhenTheSocketWedgedWhileIdle(t *testing.T) {
     awaitOutcome(t, "close on a socket that wedged while idle", closeOutcome, 3*time.Second)
 }
 
-/* the confirmation is the third stretch a publish spends time in, and the caller's context bounds none of it on the paths melody publishes from: a broker that accepts the write and never acks must not park Send, and the publish mutex with it. */
 func TestTransport_SendIsBoundedWhenTheBrokerNeverConfirms(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -2560,7 +2510,6 @@ func TestTransport_SendIsBoundedWhenTheBrokerNeverConfirms(t *testing.T) {
     }
 }
 
-/* a send that ran out of time waiting for its turn never touched the socket, so it may not report a blocked write and may not mark the transport wedged, which would take every later send out of service while another send's confirmation runs. */
 func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)
@@ -2594,7 +2543,6 @@ func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testin
     }
 }
 
-/* the publish a caller was told did not go out must not go out a moment later: the goroutine takes its turn, finds the caller gone, and returns without writing. */
 func TestTransport_APublishAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)
@@ -2615,7 +2563,6 @@ func TestTransport_APublishAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
 
     releaseTransportPublish()
 
-    /* the goroutine now takes its turn: it must find the caller gone and write nothing. That it wrote nothing is proved by order rather than by waiting: once the goroutine has exited, a fence is sent and confirmed, and anything the goroutine wrote stands in the queue before the fence, so the queue grew by exactly the fence. A fixed sleep proves only that the write has not landed yet. */
     awaitNoPublishGoroutine(t, "(*Transport).publishOnce.func", 3*time.Second)
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "fence"}, nil)); nil != sendErr {
@@ -2645,7 +2592,6 @@ func publishedFrameCount(t *testing.T, connection *amqp091.Connection) int {
     return queue.Messages
 }
 
-/* every reader of instance.mutex — isClosing among them, which the consume loop asks at each blocking point — must stay answerable while a channel close is on the socket. */
 func TestTransport_IsClosingAnswersWhileAChannelCloseIsOnAWedgedSocket(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -2672,7 +2618,6 @@ func TestTransport_IsClosingAnswersWhileAChannelCloseIsOnAWedgedSocket(t *testin
     }
 }
 
-/* a refusal that names an earlier blocked write is not a channel fault: the one retry meets the same refusal, and the reset before it tears down a channel this publish never used. */
 func TestTransport_AWedgedRefusalIsNotReportedAsRetryable(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -2706,7 +2651,6 @@ func TestTransport_AWedgedRefusalIsNotReportedAsRetryable(t *testing.T) {
     }
 }
 
-/* a publish half a join could not take is BUSY, which a healthy confirmation inside its budget produces just as well as a wedged write: teardown must not read that as a blocked write, leave both channels open and name a write that does not exist. */
 func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)
@@ -2717,7 +2661,6 @@ func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
         t.Fatalf("ensurePublishChannel: %v", channelErr)
     }
 
-    /* the publish half is held with nothing on the socket, which is what a confirmation inside its own budget looks like to the join */
     releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
     defer releaseTransportPublish()
 
@@ -2732,7 +2675,6 @@ func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
     }
 }
 
-/* a send that ran out of budget waiting for its turn is worth a further attempt: it never touched the socket, so there is nothing to blame and nothing to tear down, while the queue it waited behind is the one condition a later attempt can find gone. A single answer to both questions would make publishRequeue spend its attempts and dead-letter a message nothing was wrong with. */
 func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)
@@ -2798,7 +2740,6 @@ func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t
     }
 }
 
-/* the write budget expiring and the write ending are two events with no order between them, so the timed-out branch is reached for a write that finished a moment earlier just as readily as for one that is blocked — and abandoning that publish cuts a healthy connection and reports a fault to a caller whose message the broker already has. The branch is a door precisely so it can be handed the state that instant produces. */
 func TestTransport_ResolveExpiredWriteAnswersAWriteThatAlreadyReturned(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     dialer := newGatedDialer(t, dsn)
@@ -2836,7 +2777,6 @@ func TestTransport_ResolveExpiredWriteAnswersAWriteThatAlreadyReturned(t *testin
     }
 }
 
-/* every stretch of a close asks what is LEFT of the caller's deadline rather than dividing the budget up front, so the stretches that end in microseconds do not spend a share on behalf of the one that wedges; with no deadline the package bound stands in, and with a spent one the answer is zero, which every waiter reads as "do not wait". */
 func TestTeardownStretchWithin_AnswersTheRemainderOrThePackageBound(t *testing.T) {
     if answered := teardownStretchWithin(context.Background(), closeJoinTimeout); closeJoinTimeout != answered {
         t.Fatalf("a context with no deadline answered %s, wanted the package bound %s", answered, closeJoinTimeout)
@@ -2860,7 +2800,6 @@ func TestTeardownStretchWithin_AnswersTheRemainderOrThePackageBound(t *testing.T
     }
 }
 
-/* the package bound is the ceiling of one stretch and the caller's deadline the ceiling of the total: an operator who declares an hour is asking for an hour of teardown, not an hour of the first stretch that wedges, so a generous budget never makes a stretch longer than its constant. */
 func TestTeardownStretchWithin_ClampsAGenerousDeadlineToThePackageBound(t *testing.T) {
     generousContext, cancelGenerous := context.WithTimeout(context.Background(), time.Hour)
     defer cancelGenerous()
@@ -2870,7 +2809,6 @@ func TestTeardownStretchWithin_ClampsAGenerousDeadlineToThePackageBound(t *testi
     }
 }
 
-/* a context carrying a cancellation and no deadline is read like a spent one. Nothing in the framework hands one down — every caller passes context.Background or a deadline — but CloseWithContext is reached by an application through a type assertion, and the manager registry closed beside these transports abandons on exactly this signal; two components of one teardown reading the same cancellation opposite ways is the defect. */
 func TestTeardownStretchWithin_ACancelledContextWithoutADeadlineDoesNotWait(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -2884,7 +2822,6 @@ func TestTeardownStretchWithin_ACancelledContextWithoutADeadlineDoesNotWait(t *t
     }
 }
 
-/* a mutex nobody holds is taken whatever the bound says. The bound reaches zero on every teardown whose budget an earlier component already spent, and a zero bound arms a timer ready at once, which must not answer false for a free publish half that the caller would read as a wedged write. The pair separates this from a form that always answers true. */
 func TestTransport_LockWithinTakesAFreeMutexAtAZeroBound(t *testing.T) {
     var mutex sync.Mutex
 
@@ -2895,7 +2832,6 @@ func TestTransport_LockWithinTakesAFreeMutexAtAZeroBound(t *testing.T) {
     mutex.Unlock()
 }
 
-/* the arm that has to FAIL: a mutex somebody else holds is still not taken at a zero bound, which is the measurement the teardown depends on to tell a busy publish half from a free one. */
 func TestTransport_LockWithinStillRefusesAHeldMutexAtAZeroBound(t *testing.T) {
     var mutex sync.Mutex
 
@@ -2907,7 +2843,6 @@ func TestTransport_LockWithinStillRefusesAHeldMutexAtAZeroBound(t *testing.T) {
     }
 }
 
-/* a close with nothing to close cannot fail to return. closeChannels skips a nil channel, so a transport whose channels were never opened asks for no socket work at all, and at a zero bound it must not be answered with "did not return within the bound". */
 func TestTransport_CloseChannelsWithinAnswersNothingToCloseAtAZeroBound(t *testing.T) {
     if closeErrs := closeChannelsWithin(0); 0 != len(closeErrs) {
         t.Fatalf("closing no channels at all reported %d failures: %v", len(closeErrs), closeErrs)
@@ -2918,7 +2853,6 @@ func TestTransport_CloseChannelsWithinAnswersNothingToCloseAtAZeroBound(t *testi
     }
 }
 
-/* the teardown of a connection this transport dialled itself, reached with a cancellation and no deadline at all, the state a caller produces by asserting its way to CloseWithContext while holding one. The stretch is then zero, and CloseDeadline(now) would cut the closing handshake at a deadline already behind it, answering an i/o timeout over a live connection and naming this transport for a budget somebody else spent. */
 func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
@@ -2948,7 +2882,6 @@ func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext
     }
 }
 
-/* the same door under a deadline that has already passed, which is the form a shared teardown budget produces on its own once an earlier component has spent it. */
 func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderASpentDeadline(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
@@ -2970,9 +2903,6 @@ func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderASpentDeadline(t 
     }
 }
 
-/* the arm that has to FAIL: a write the close could not join IS cut, deliberately, and whatever the client answers about that cut is still reported. Without this arm the two tests above would be indistinguishable from a close that stopped reporting the connection at all.
-
-   The transport reaches its connection through a DIALER rather than being handed one, because that is what makes it the OWNER — and the owned branch is the one under test. Handed the same connection directly it would be caller-owned, the whole owned block would be skipped, and the failure this asserts would arrive from the caller-owned arm of the switch below it instead: the test would pass while pinning nothing. */
 func TestTransport_CloseWithContextStillReportsACutWedgedWrite(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -2989,7 +2919,6 @@ func TestTransport_CloseWithContextStillReportsACutWedgedWrite(t *testing.T) {
         sending <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "wedged"}, nil))
     }()
 
-    /* the gate is the transport's OWN count of writes on the socket, not the socket's count of blocked ones: the connection carries heartbeats of its own, so a blocked write is not necessarily THIS send. What the close reads is what this waits for. */
     deadline := time.Now().Add(2 * time.Second)
     for 0 == transport.writesInFlight.Load() {
         if true == time.Now().After(deadline) {
@@ -3011,7 +2940,6 @@ func TestTransport_CloseWithContextStillReportsACutWedgedWrite(t *testing.T) {
     }
 }
 
-/* the channels of a connection the caller owns, closed under a budget an earlier component already spent: the close is left to end when the socket does, which it does a moment later, and nothing is reported, because a close given no time is not a close that failed; a zero bound arms a timer that is ready before the closing goroutine runs. */
 func TestTransport_CloseWithContextLeavesTheChannelsOfACallerOwnedConnectionToCloseUnderASpentDeadline(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, _ := dialGated(t, dsn)
@@ -3050,7 +2978,6 @@ func TestTransport_CloseWithContextLeavesTheChannelsOfACallerOwnedConnectionToCl
     }
 }
 
-/* the arm that has to FAIL: the same caller-owned channels under a bound that was POSITIVE and ran out, over a socket that stopped taking writes. That close is still reported, which is what tells the guard above apart from one that stopped reporting the channel branch altogether. */
 func TestTransport_CloseWithContextStillReportsTheChannelsOfACallerOwnedConnectionThatOutliveAPositiveBound(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -3075,7 +3002,6 @@ func TestTransport_CloseWithContextStillReportsTheChannelsOfACallerOwnedConnecti
     }
 }
 
-/* an OWNED connection whose closing handshake outlives a bound that was POSITIVE — the broker stopped taking writes, nothing of this transport's was in flight — is still reported. The two sibling tests pin a spent deadline and a cut write; this one pins the branch between them, which a guard that only ever reported the cut would leave silent. */
 func TestTransport_CloseWithContextStillReportsAnOwnedConnectionThatOutlivesAPositiveBound(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
     connection, gated := dialGated(t, dsn)
@@ -3111,7 +3037,6 @@ func TestTransport_MainTargetIsTheConfiguredExchangeAndRoutingKey(t *testing.T) 
     }
 }
 
-/* the transport declares the direct exchange and binds its queue under the routing key; a probe queue bound under the same key receives a copy of the Send only when the publish goes through the exchange under that key, which a publish straight to the queue never delivers */
 func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testing.T) {
     dsn := amqpDsnOrSkip(t)
 
@@ -3200,7 +3125,6 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
     }
 }
 
-/* a close of an owned connection under a caller's deadline returns inside it while the client's own shutdown is stalled behind a wedged publish write: the client's close joins that shutdown, which waits for the channel mutex the write holds, and a channel close cannot take that mutex either, so neither is waited for past the deadline. The publish half is held with a write counted in flight, which is what a Send whose write wedged leaves behind. */
 func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
@@ -3291,7 +3215,6 @@ func TestTransport_ACutThatDidNotFreeTheWriteIsNoChannelFaultAndASecondSendIsRef
     }
 }
 
-/* the cut is decided and the owned connection let go of, with the channels that ride it, in one critical section: the client reports the connection closed only once its shutdown completes, so a transport still holding it would hand the cut connection back to the retry's connect, whose channel open then fails, instead of redialing */
 func TestTransport_ACutOwnedConnectionIsLetGoBeforeTheAbandonReturns(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     redialed := dialFakeBroker(t)
@@ -3341,7 +3264,6 @@ func TestTransport_ACutOwnedConnectionIsLetGoBeforeTheAbandonReturns(t *testing.
     }
 }
 
-/* a cut whose write did not return lets go of the connection as well, so the close finds nothing to cut or close: it names the write left blocked on the connection already cut instead of answering a clean close */
 func TestTransport_CloseNamesTheWriteLeftBlockedOnAConnectionAnEarlierAbandonCut(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginClientShutdown(t)
@@ -3413,13 +3335,32 @@ func TestUnackedPublishOutcome_AChannelThatClosedBeforeTheConfirmationIsNotRepor
         t.Fatalf("expected a closed channel reported as an unknown fate a further attempt may recover, got %+v %v", closed.disposition, closed.err)
     }
 
+}
+
+func TestUnackedPublishOutcome_ANackIsAnOutageAFurtherAttemptMayRecover(t *testing.T) {
     nacked := unackedPublishOutcome(false, true, "orders")
-    if true == nacked.disposition.channelFaulted || true == nacked.disposition.furtherAttemptMayRecover || false == strings.Contains(nacked.err.Error(), "nacked by the broker") {
-        t.Fatalf("expected a nack reported as the broker's verdict, never retried, got %+v %v", nacked.disposition, nacked.err)
+
+    if true == nacked.disposition.channelFaulted {
+        t.Fatalf("expected a nack to fault no channel, got %+v", nacked.disposition)
+    }
+
+    if false == nacked.disposition.furtherAttemptMayRecover {
+        t.Fatalf("expected a nack to be worth a further attempt, got %+v", nacked.disposition)
+    }
+
+    if false == strings.Contains(nacked.err.Error(), "nacked by the broker") {
+        t.Fatalf("expected the nack named, got %v", nacked.err)
+    }
+
+    if false == exception.ChainIs(nacked.err, errBrokerNack) {
+        t.Fatalf("expected the nack sentinel in the chain, got %v", nacked.err)
+    }
+
+    if true == exception.ChainIs(nacked.err, errBrokerVerdict) {
+        t.Fatalf("expected a nack to carry no broker verdict, got %v", nacked.err)
     }
 }
 
-/* a close that returned at once may answer for a cut an earlier abandon began over a conn that ignores the cut's deadline, the write still wedged: the channel close is bounded as on a caller-owned connection, so the close returns inside the caller's deadline rather than when the operating system frees the write */
 func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhenAnEarlierCutHasNotFreedTheWrite(t *testing.T) {
     wedge := wedgeAPublishOnAFakeBroker(t)
     wedge.beginUnfreedCut(t, 4*time.Second)
@@ -3457,7 +3398,6 @@ func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhenAnEarlierCutHasNo
     }
 }
 
-/* a dial that lands after Close began is closed off instance.mutex: its close is an RPC to a broker that may not answer, and Close takes the same mutex */
 func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutex(t *testing.T) {
     fake := dialFakeBroker(t)
 
@@ -3504,7 +3444,6 @@ func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutex(t *testing.T) 
     }
 }
 
-/* a dial that lands after the close signal interrupted it is closed by the drain goroutine under one publish timeout from its landing: the client's plain close is an RPC that would join a write the broker never reads, so the late socket would stay open for as long as the broker stays silent */
 func TestDialInterruptibly_ADialThatLandsAfterTheCloseSignalIsClosedWithinOnePublishTimeout(t *testing.T) {
     fake := dialFakeBroker(t)
 
@@ -3548,7 +3487,6 @@ func TestDialInterruptibly_ADialThatLandsAfterTheCloseSignalIsClosedWithinOnePub
     }
 }
 
-/* a transport built with a dialer and no connection dials for the first time on its first connect: the refusal says so, where it said "reconnect" over a connection that was never held; after a connection was held the same refusal says reconnect. */
 func TestConnect_TheFirstDialIsNotAReconnect(t *testing.T) {
     instance := &Transport{
         queue: "orders",
@@ -3572,7 +3510,6 @@ func TestConnect_TheFirstDialIsNotAReconnect(t *testing.T) {
     }
 }
 
-/* the application's dialer runs on the transport's own goroutine, where a panic had no handler but the process: it is answered as the dial's failure, with the panic as its cause. */
 func TestConnect_APanickingDialerIsAnsweredAsADialFailure(t *testing.T) {
     instance := &Transport{
         queue: "orders",
@@ -3607,7 +3544,6 @@ func (instance panickingDecodeSerializer) ContentType() string {
     return "application/json"
 }
 
-/* the application's serializer runs on the consume goroutine; its panic is answered as a decode error, which the consume loop nacks without requeue — dead-lettered where a dead-letter queue is configured —, where it ended the process. */
 func TestDecode_APanickingSerializerIsAnsweredAsADecodeError(t *testing.T) {
     registry := NewMessageRegistry()
     RegisterMessage[reconnectMessage](registry, "amqp.test.panic")
@@ -3621,7 +3557,6 @@ func TestDecode_APanickingSerializerIsAnsweredAsADecodeError(t *testing.T) {
     }
 }
 
-/* the attempt word of a refusal is read under the mutex: a dial landing on the live broker writes connectedOnce there, and a connect refused as in progress read it after the unlock — a data race the race detector reported. The refusals are made while the dial lands, not before it is released, so the read and the write overlap; ten rounds give the detector the overlap. */
 func TestConnect_TheAttemptWordIsReadUnderTheMutex(t *testing.T) {
     dsn := os.Getenv("AMQP_DSN")
     if "" == dsn {
@@ -3720,10 +3655,15 @@ func TestIgnoringAlreadyClosed_ReturnsOnACyclicChain(t *testing.T) {
     })
 }
 
-func TestTransport_MarksASendFailureUnavailableButTheBrokersVerdict(t *testing.T) {
+func TestTransport_MarksANackUnavailableAndKeepsTheReturnAVerdict(t *testing.T) {
     transport := &Transport{}
     transportFailure := exception.NewError("amqp channel open failed", nil, errors.New("connection refused"))
-    verdict := exception.NewError("amqp publish was nacked by the broker", nil, errBrokerVerdict)
+    verdict := exception.NewError("amqp publish was returned as unroutable", nil, errBrokerVerdict)
+    nack := unackedPublishOutcome(false, true, "orders").err
+
+    if false == exception.IsInfrastructureFailure(transport.markTransportUnavailable(context.Background(), nack)) {
+        t.Fatal("expected a nack marked unavailable")
+    }
 
     if nil != transport.markTransportUnavailable(context.Background(), nil) {
         t.Fatal("expected no error left as none")
@@ -3749,17 +3689,105 @@ func TestTransport_MarksASendFailureUnavailableButTheBrokersVerdict(t *testing.T
     }
 }
 
-func TestUnackedPublishOutcome_ANackCarriesTheBrokersVerdict(t *testing.T) {
-    if false == exception.ChainIs(unackedPublishOutcome(false, true, "orders").err, errBrokerVerdict) {
-        t.Fatal("expected a nack to carry the broker's verdict")
+func TestUnackedPublishOutcome_AChannelTheBrokerClosedOverALiveConnectionCarriesTheVerdict(t *testing.T) {
+    closedOverLiveConnection := unackedPublishOutcome(true, true, "orders").err
+    if false == exception.ChainIs(closedOverLiveConnection, errBrokerVerdict) || true == exception.ChainIs(closedOverLiveConnection, errBrokerNack) {
+        t.Fatalf("expected a channel the broker closed over a live connection to carry the verdict alone, got %v", closedOverLiveConnection)
     }
 
-    if false == exception.ChainIs(unackedPublishOutcome(true, true, "orders").err, errBrokerVerdict) {
-        t.Fatal("expected a channel the broker closed over a live connection to carry the verdict")
+    diedWithItsConnection := unackedPublishOutcome(true, false, "orders").err
+    if true == exception.ChainIs(diedWithItsConnection, errBrokerVerdict) || true == exception.ChainIs(diedWithItsConnection, errBrokerNack) {
+        t.Fatalf("expected a channel that died with its connection to carry neither sentinel, got %v", diedWithItsConnection)
+    }
+}
+
+func TestTransport_ARequeueRepublishKeepsTryingThroughANack(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, _ := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+    transport.publishTimeout = 5 * time.Second
+
+    fullQueue := "melody.amqp.test.reject-publish"
+    declareChannel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("channel: %v", channelErr)
+    }
+    defer declareChannel.Close()
+
+    _, _ = declareChannel.QueueDelete(fullQueue, false, false, false)
+    if _, declareErr := declareChannel.QueueDeclare(fullQueue, false, true, false, false, amqp091.Table{"x-max-length": int32(1), "x-overflow": "reject-publish"}); nil != declareErr {
+        t.Fatalf("declare the full queue: %v", declareErr)
+    }
+    defer func() { _, _ = declareChannel.QueueDelete(fullQueue, false, false, false) }()
+
+    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 5, Name: "overflow"}, nil), "")
+    if nil != buildErr {
+        t.Fatalf("buildPublishing: %v", buildErr)
     }
 
-    if true == exception.ChainIs(unackedPublishOutcome(true, false, "orders").err, errBrokerVerdict) {
-        t.Fatal("expected a channel that died with its connection to carry no verdict")
+    if _, firstErr := transport.publishRecoverable(runtimeInstance.Context(), "", fullQueue, publishing); nil != firstErr {
+        t.Fatalf("expected the first publish to fill the queue, got %v", firstErr)
+    }
+
+    transport.mutex.Lock()
+    channelBefore := transport.publishChannel
+    transport.mutex.Unlock()
+
+    recoverable, nackErr := transport.publishRecoverable(runtimeInstance.Context(), "", fullQueue, publishing)
+    if nil == nackErr || false == exception.ChainIs(nackErr, errBrokerNack) {
+        t.Fatalf("expected the publish over a full reject-publish queue nacked, got %v", nackErr)
+    }
+
+    if false == recoverable {
+        t.Fatal("expected a nack answered recoverable, which is what publishRequeue reads to keep trying")
+    }
+
+    transport.mutex.Lock()
+    channelAfter := transport.publishChannel
+    transport.mutex.Unlock()
+
+    if channelBefore != channelAfter {
+        t.Fatal("expected a nack to keep the healthy publish channel")
+    }
+
+    if false == exception.IsInfrastructureFailure(transport.markTransportUnavailable(runtimeInstance.Context(), nackErr)) {
+        t.Fatal("expected a reject-publish overflow marked unavailable")
+    }
+
+    retryBackoff := 50 * time.Millisecond
+    transport.reconnect = resolvedReconnect{initialBackoff: retryBackoff, maxBackoff: retryBackoff, backoffFactor: 1}
+    loggerRuntime, logger := newRecordingLoggerRuntime(context.Background())
+
+    startedAt := time.Now()
+    requeueErr := transport.publishRequeue(loggerRuntime, "", fullQueue, publishing)
+    elapsed := time.Since(startedAt)
+
+    if nil == requeueErr || false == exception.ChainIs(requeueErr, errBrokerNack) {
+        t.Fatalf("expected the requeue re-publish to end on the nack, got %v", requeueErr)
+    }
+
+    retryCount := 0
+    for _, message := range logger.errorMessages() {
+        if "amqp requeue re-publish failed, retrying with the advanced retry counters" == message {
+            retryCount++
+        }
+    }
+
+    if republishAttemptCount-1 != retryCount {
+        t.Fatalf("expected %d publishes through the nack, %d of them retried, got %d retries", republishAttemptCount, republishAttemptCount-1, retryCount)
+    }
+
+    if time.Duration(republishAttemptCount-1)*retryBackoff > elapsed {
+        t.Fatalf("expected a backoff between the attempts, the re-publish took %s", elapsed)
+    }
+
+    inspected, inspectErr := declareChannel.QueueDeclarePassive(fullQueue, false, true, false, false, amqp091.Table{"x-max-length": int32(1), "x-overflow": "reject-publish"})
+    if nil != inspectErr {
+        t.Fatalf("inspect the full queue: %v", inspectErr)
+    }
+
+    if 1 != inspected.Messages {
+        t.Fatalf("expected the full queue to keep its one message, got %d", inspected.Messages)
     }
 }
 

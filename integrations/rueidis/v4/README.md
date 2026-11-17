@@ -176,6 +176,8 @@ defer func() {
 
 Package: [`cache`](./cache). [`cache.NewBackend(client, BackendConfig)`](./cache/backend.go) wraps a `rueidis.Client` and exposes one context-first door per operation (`Get`, `Set`, `Delete`, `Has`, `Clear`, `ClearByPrefix`, `Many`, `SetMultiple`, `DeleteMultiple`, `Increment`, `Decrement`), each round trip bounded by the earlier of the caller's deadline and `CommandTimeout`. [`cache.NewBackendService(client, BackendConfig)`](./cache/backend_service.go) is a container-friendly singleton wrapper implementing the core `cache/contract.Backend`. The `rueidis.Client` is owned by the application, not the backend: `Backend.CloseWithContext` does not close the client, so the same client can be shared with the locker, token store, and server-sent-event backplane without one component tearing it down for the others — close the client once during application shutdown.
 
+`Increment` and `Decrement` write the count and its expiry in one Lua script, as the `cachecontract.CounterOptions` say: `INCRBY`, then `PEXPIRE` when the call creates the key, finds it without an expiry or `RefreshTtl` is set, or `PERSIST` for an unlimited ttl with `RefreshTtl` set, which removes an expiry the key carries; an unlimited ttl without `RefreshTtl` leaves the key's expiry as it is. The cache's redis user needs `EVALSHA` and `EVAL`, and, since a script's commands run under the caller's permissions, the commands the script runs: `INCRBY`, `PTTL`, `PEXPIRE`, `PERSIST` and `GET`.
+
 `Backend.CloseWithContext` does end the backend: every later operation answers `cache backend is closed` rather than serving over a client whose owner already tore this backend down. A refusal of a malformed key names it by its first 128 bytes, the length beside it. `ClearByPrefix` refuses the empty prefix rather than reading it as the whole namespace: a prefix assembled at run time that comes out empty would otherwise wipe everything, which is the one outcome a prefixed delete exists to prevent — `Clear` is the door that means the whole namespace.
 
 [`BackendConfig`](./cache/backend.go), every field left out being the default, and a value outside its rule answered as the error of `NewBackend` and `NewBackendService`, naming the field:
@@ -184,7 +186,13 @@ Package: [`cache`](./cache). [`cache.NewBackend(client, BackendConfig)`](./cache
 - `ScanCount` — the `COUNT` hint of the `SCAN` walk `Clear` and `ClearByPrefix` run: 1000 when left out, at least 1, unlimited refused.
 - `DeleteBatch` — how many keys one `DEL` carries: 500 when left out, at least 1, unlimited refused.
 - `MaxKeyLength` — the key bound the refusals are measured against, on the key the caller hands in, before the prefix: 1024 when left out, at least 1, unlimited refused.
-- `CommandTimeout` — bounds every round trip on top of the caller's context, the earlier deadline winning, each `SCAN` and `DEL` round trip of a `Clear` or a `ClearByPrefix` on its own while the caller's context bounds the walk, so the size of a namespace is not capped by it: 1s when left out, at least 1ms, unlimited refused. Unbounded, a request-path read against a store that accepts connections but stops answering would be retried for as long as the context allows and hang the handler.
+- `CommandTimeout` — bounds every round trip on top of the caller's context, the earlier deadline winning, each `SCAN` and `DEL` round trip of a `Clear` or a `ClearByPrefix` on its own while the caller's context bounds the walk, so the size of a namespace is not capped by it: 1s when left out, at least 1ms, unlimited refused. Unbounded, a request-path read against a store that accepts connections but stops answering would be retried for as long as the context allows and hang the handler. A round trip the command timeout cut answers `cache round trip was cut by BackendConfig.CommandTimeout`, naming the field, the timeout and the door, with `cache.ErrCommandTimeout` in its chain; one the caller's own deadline or cancellation cut answers the context's error without it, wrapped on `Increment` and `Decrement` under `cache counter operation failed`, so `errors.Is` holds where the identity and the message do not. Both still match `context.DeadlineExceeded`:
+
+```go
+if true == errors.Is(err, cache.ErrCommandTimeout) {
+    /* the store was slow, not the caller out of time */
+}
+```
 
 ### BackendFromRuntime
 

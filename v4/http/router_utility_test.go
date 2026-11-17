@@ -2589,6 +2589,38 @@ func TestWriteResponse_AnInformationalStatusIsAnsweredAsTheRenderedInternalServe
     }
 }
 
+func TestKernel_AResponseObjectWithSwitchingProtocolsIsAnsweredAsTheRendered500(t *testing.T) {
+    melodyRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
+
+    recordingLogger := &recordsCaptureLogger{}
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    body := &closeTrackingReader{}
+    response := &Response{statusCode: nethttp.StatusSwitchingProtocols, headers: make(nethttp.Header), bodyReader: body}
+
+    writer := httptest.NewRecorder()
+    written := writeResponse(runtimeInstance, melodyRequest, writer, response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{}, 0)
+
+    if nethttp.StatusInternalServerError != writer.Code || nethttp.StatusInternalServerError != written.StatusCode() {
+        t.Fatalf("expected the rendered 500 written and answered, got %d and %d", writer.Code, written.StatusCode())
+    }
+
+    if false == body.closed.Load() {
+        t.Fatal("expected the refused response's body closed")
+    }
+
+    for _, record := range recordingLogger.failureRecords() {
+        if loggingcontract.LevelError == record.level && true == strings.Contains(record.message, "not a final status") && nethttp.StatusSwitchingProtocols == record.context["statusCode"] {
+            return
+        }
+    }
+
+    t.Fatalf("expected an error record naming status 101, got %+v", recordingLogger.failureRecords())
+}
+
 type persistencePlantedKey struct{}
 
 func writeResponseUnderRequestContext(

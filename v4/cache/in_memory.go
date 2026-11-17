@@ -30,7 +30,7 @@ type lruEntry struct {
     key         string
     item        *Item
     listElement *list.Element
-    /* lastPromotedAtNano is when this entry was last moved to the front, not when it was last read, which keeps the read path off the exclusive lock; it is atomic because Get reads it under the read lock */
+    /* the last promotion, not the last read, which keeps reads off the exclusive lock */
     lastPromotedAtNano atomic.Int64
 }
 
@@ -42,12 +42,12 @@ func (instance *lruEntry) markPromoted(now time.Time) {
     instance.lastPromotedAtNano.Store(now.UnixNano())
 }
 
-/* InMemoryBackendConfig is what the in-memory backend declares at construction; the zero value is the default. */
+/* InMemoryBackendConfig declares the in-memory backend; the zero value is the default. */
 type InMemoryBackendConfig struct {
-    /* MaxItems bounds the entry count; at the ceiling a write evicts an expired entry first and the least recently promoted one after it: 10,000 by default, at least 1, unlimited lifting the ceiling, under which an entry written with an unlimited ttl is kept until it is deleted or the process exits. */
+    /* MaxItems bounds the entry count, evicting expired then least recently promoted: 10,000 by default. */
     MaxItems bound.Count
 
-    /* CleanupInterval is how often the sweep collects lapsed entries; it is a cadence, not a lifetime: 1m by default, at least 1ms, unlimited refused, so a lapsed entry is always collected. */
+    /* CleanupInterval is the sweep cadence: 1m by default, at least 1ms, never unlimited. */
     CleanupInterval bound.Duration
 
     /* Clock is where the backend reads the time; nil is the system clock. */
@@ -67,7 +67,7 @@ var inMemoryBackendCleanupIntervalRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
-/* NewInMemoryBackend resolves the configuration, panicking on a field below its minimum by name, then builds the in-memory cache backend and starts its cleanup goroutine, which only CloseWithContext stops; there is no finalizer fallback. */
+/* NewInMemoryBackend panics on a field below its minimum and starts a cleanup goroutine only CloseWithContext stops. */
 func NewInMemoryBackend(config InMemoryBackendConfig) *InMemoryBackend {
     maxItems, maxItemsErr := bound.Resolve(config.MaxItems, inMemoryBackendMaxItemsRule)
     if nil != maxItemsErr {
@@ -84,7 +84,7 @@ func NewInMemoryBackend(config InMemoryBackendConfig) *InMemoryBackend {
         clockInstance = clock.NewSystemClock()
     }
 
-    /* 0 is the unlimited ceiling, the reading saveItemLocked gives it */
+    /* 0 is the unlimited ceiling */
     backend := &InMemoryBackend{
         entries:             make(map[string]*lruEntry),
         lruList:             list.New(),
@@ -113,7 +113,7 @@ type InMemoryBackend struct {
     clock               clockcontract.Clock
 }
 
-/* a closed backend refuses every operation, since its cleanup goroutine is stopped and an entry saved after CloseWithContext would never be reclaimed */
+/* refused: the cleanup goroutine is stopped, so a saved entry would never be reclaimed */
 func closedBackendError() error {
     return exception.NewError(
         "cache backend is closed",
@@ -124,7 +124,6 @@ func closedBackendError() error {
 
 const inMemoryBackendMaxKeyLength = 1024
 
-/* validateKey enforces the Backend key grammar with the exact refusals the redis backend answers, so the implementations cannot be told apart by which keys they refuse */
 func validateKey(key string) error {
     if "" == key {
         return emptyKeyError()
@@ -219,13 +218,12 @@ func (instance *InMemoryBackend) Get(ctx context.Context, key string) ([]byte, b
 
     payload := entry.item.Payload()
 
-    /* the access mark is atomic, so the read path refreshes it without ever leaving the read lock */
     entry.item.Touch(now)
     promotionDue := entry.isPromotionDue(now)
 
     instance.mutex.RUnlock()
 
-    /* a key promoted recently answers under the read lock alone; a lapsed entry found here is answered absent and left to the sweep, since deleting it needs the exclusive lock */
+    /* a lapsed entry is answered absent and left to the sweep, which holds the exclusive lock */
     if false == promotionDue {
         return payload, true, nil
     }
@@ -429,7 +427,6 @@ func (instance *InMemoryBackend) Many(ctx context.Context, keys []string) (map[s
     }
     instance.mutex.RUnlock()
 
-    /* only the keys whose place in the list is stale reach the exclusive lock, so a batch of hot keys costs one read lock */
     if 0 == len(hits) {
         return result, nil
     }
@@ -468,13 +465,13 @@ func (instance *InMemoryBackend) SetMultiple(ctx context.Context, items map[stri
         return closedBackendError()
     }
 
-    /* the ttl is judged before the keys, the order the redis backend judges them in */
+    /* the ttl is judged before the keys, as the redis backend does */
     expiry, ttlErr := cachecontract.ResolveTtl(ttl)
     if nil != ttlErr {
         return ttlErr
     }
 
-    /* the keys are validated in sorted order, so the same malformed batch answers the same refusal every time, as the redis backend's batch reporting does */
+    /* sorted, so a malformed batch answers the same refusal every time */
     keys := make([]string, 0, len(items))
     for key := range items {
         keys = append(keys, key)
@@ -543,7 +540,7 @@ func (instance *InMemoryBackend) Decrement(ctx context.Context, key string, delt
         return 0, nilErr
     }
 
-    /* the magnitude of the delta is judged after the closed backend and the key, the order the shared contract fixes for every implementation */
+    /* the delta is judged after the closed check and the key, the contract's order */
     if refusalErr := instance.refuseClosedOrInvalidKey(key); nil != refusalErr {
         return 0, refusalErr
     }
@@ -561,7 +558,6 @@ func (instance *InMemoryBackend) Decrement(ctx context.Context, key string, delt
     return instance.incrementValue(ctx, key, -delta, options)
 }
 
-/* refuseClosedOrInvalidKey answers the two refusals incrementValue makes under its own lock, in the same order. The flag is read under the lock every writer takes, and a CloseWithContext landing after the read is caught by incrementValue itself. */
 func (instance *InMemoryBackend) refuseClosedOrInvalidKey(key string) error {
     instance.mutex.RLock()
     closed := instance.closed
@@ -574,7 +570,7 @@ func (instance *InMemoryBackend) refuseClosedOrInvalidKey(key string) error {
     return validateKey(key)
 }
 
-/* CloseWithContext refuses every later call at once and waits for the cleanup loop to leave, up to the deadline; past it the loop is left to finish on its own and the deadline's error is answered. */
+/* CloseWithContext refuses later calls and waits for the cleanup loop up to the deadline. */
 func (instance *InMemoryBackend) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     instance.closed = true
@@ -585,7 +581,7 @@ func (instance *InMemoryBackend) CloseWithContext(closeContext context.Context) 
     return awaitCleanupLoop(closeContext, instance.cleanupDone)
 }
 
-/* awaitCleanupLoop waits for the cleanup loop to leave or the deadline to pass; a loop that left in the same instant as the deadline answers nil, since a select between two ready channels picks at random. */
+/* awaitCleanupLoop answers nil for a loop that left as the deadline passed, since select picks at random. */
 func awaitCleanupLoop(closeContext context.Context, cleanupDone <-chan struct{}) error {
     select {
     case <-cleanupDone:
@@ -619,7 +615,7 @@ func (instance *InMemoryBackend) incrementValue(
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* read under the lock, since the instant both judges the entry's expiry and starts the window the call writes */
+    /* read under the lock: the instant judges the expiry and starts the written window */
     now := instance.clock.Now()
 
     if true == instance.closed {
@@ -643,7 +639,7 @@ func (instance *InMemoryBackend) incrementValue(
 
     var currentValue int64 = 0
 
-    /* an existing payload is parsed against the redis integer grammar, not Go's lenient one, so a payload increments or errors the same way on both backends */
+    /* parsed with redis's integer grammar, not Go's, so both backends agree */
     if true == exists && nil != entry && nil != entry.item {
         payloadValue := string(entry.item.Payload())
 
@@ -685,6 +681,10 @@ func (instance *InMemoryBackend) incrementValue(
         expiresAt = &counterExpiresAt
     }
 
+    if 0 == expiry && true == options.RefreshTtl {
+        expiresAt = nil
+    }
+
     instance.saveItemLocked(
         key,
         []byte(strconv.FormatInt(newValue, 10)),
@@ -715,10 +715,10 @@ const cleanupChunkSize = 1024
 
 const evictionProbeLimit = 8
 
-/* how often one entry may cost the exclusive lock for its place in the recency list: eviction picks an expired victim first and falls back to the least recently promoted one, so the order only has to hold at this coarser grain. The access mark is still refreshed on every read. */
+/* the promotion grain: eviction prefers an expired victim, so the order needs no finer grain */
 const recencyPromotionInterval = time.Second
 
-/* the sweep snapshots the keys under the read lock and expires them in chunks, releasing the exclusive lock between chunks, so a large map does not stall every concurrent write and promotion; a key deleted meanwhile is not found */
+/* swept in chunks with the lock released between them, so a large map does not stall writers */
 func (instance *InMemoryBackend) cleanupExpired() {
     now := instance.clock.Now()
 
@@ -787,7 +787,7 @@ func (instance *InMemoryBackend) saveLocked(
     now time.Time,
     expiry time.Duration,
 ) {
-    /* a nil payload is stored as the empty payload, the contract's rule, since redis has no nil to store */
+    /* a nil payload is stored empty, since redis has no nil */
     if nil == payload {
         payload = []byte{}
     }
@@ -839,7 +839,6 @@ func (instance *InMemoryBackend) saveItemLocked(
     instance.entries[key] = freshEntry
 }
 
-/* evictOneLocked walks toward the front a bounded distance for an expired victim before falling back to the least recently promoted one, so an insert into a full cache never scans the whole list under the exclusive lock. */
 func (instance *InMemoryBackend) evictOneLocked(now time.Time) {
     probed := 0
     for element := instance.lruList.Back(); nil != element && evictionProbeLimit > probed; element = element.Prev() {
@@ -919,7 +918,7 @@ func (instance *InMemoryBackend) addInt64WithOverflowCheck(left int64, right int
     return left + right, nil
 }
 
-/* parseCanonicalCounterPayload accepts exactly what redis's integer reader (string2ll) accepts: an optional minus and a first digit of 1-9 unless the number is 0, with no whitespace, plus sign, leading zeros or minus zero. */
+/* parseCanonicalCounterPayload accepts exactly what redis's string2ll accepts. */
 func parseCanonicalCounterPayload(payload string) (int64, error) {
     digits := payload
     if "" != digits && '-' == digits[0] {
@@ -959,7 +958,7 @@ func parseCanonicalCounterPayload(payload string) (int64, error) {
     return parsedValue, nil
 }
 
-/* counterParseFailure answers strconv's refusal of a counter payload without the payload strconv quotes in it, which is unbounded and may hold what a refusal must not carry: the range verdict is named, any other one is a payload that is not an integer */
+/* counterParseFailure drops the payload strconv quotes, which a refusal must not carry. */
 func counterParseFailure(parseErr error) error {
     if true == errors.Is(parseErr, strconv.ErrRange) {
         return exception.NewError(
@@ -978,7 +977,6 @@ func counterParseFailure(parseErr error) error {
 
 var _ cachecontract.Backend = (*InMemoryBackend)(nil)
 
-/* renderedCacheKey bounds a key a refusal carries in its context to its first 128 bytes, cut on a rune boundary and closed by a marker, so a key of a megabyte does not put a megabyte into the record; the refusal of a key past the length limit carries its whole length beside it */
 func renderedCacheKey(key string) string {
     const renderedCacheKeyLimit = 128
 
