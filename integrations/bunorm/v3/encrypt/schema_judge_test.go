@@ -622,6 +622,7 @@ func TestMigrateDecrypt_RefusesANarrowCharsetUnderANonStrictSession(t *testing.T
         "utf8mb4 non-strict":       {charset: "utf8mb4", sqlMode: ""},
         "utf16 non-strict":         {charset: "utf16", sqlMode: ""},
         "utf32 non-strict":         {charset: "UTF32", sqlMode: ""},
+        "gb18030 non-strict":       {charset: "gb18030", sqlMode: ""},
         "a binary type non-strict": {charset: nil, sqlMode: ""},
     } {
         responses := append([]scriptedSqlResponse{{fragment: "sql_mode", columns: []string{"sql_mode", "character_set_client"}, rows: [][]driver.Value{{testCase.sqlMode, "utf8mb4"}}}}, judgeTable(accountsColumns, accountsPrimary, [][]driver.Value{{"notes", testCase.charset}})...)

@@ -8,6 +8,8 @@ import (
     "strconv"
     "strings"
 
+    "github.com/go-sql-driver/mysql"
+
     "github.com/precision-soft/melody/v3/exception"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
@@ -643,7 +645,7 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByC
     result, execErr := instance.queries().ExecContext(ctx, updateSql, arguments...)
     if nil != execErr {
         /* the server's refusal quotes the statement's values, a plaintext under either mode */
-        if withheld, isWithheld := withholdQuotedValue(execErr); true == isWithheld {
+        if isWithheld, withheld := withholdQuotedValue(execErr); true == isWithheld {
             return false, exception.NewError("migrate update failed", map[string]any{"table": spec.Table, "columns": spec.Columns, "id": row.primaryKey}, withheld)
         }
 
@@ -664,6 +666,20 @@ type migrateRow struct {
     /* the parsed integer on an integer column: MySQL compares a string parameter as doubles, which collapse keys above 2^53 */
     primaryKeyArgument any
     values             []sql.NullString
+}
+
+const serverMessageWithheld = "the server's message is withheld: it may quote the value"
+
+/* the replacement stays a *mysql.MySQLError so errors.As still matches the number */
+func withholdQuotedValue(execErr error) (bool, error) {
+    var serverErr *mysql.MySQLError
+    if false == errors.As(execErr, &serverErr) {
+        return false, execErr
+    }
+
+    withheld := &mysql.MySQLError{Number: serverErr.Number, SQLState: serverErr.SQLState, Message: serverMessageWithheld}
+
+    return true, exception.NewError("the server refused the write", map[string]any{"mysqlErrorNumber": serverErr.Number}, withheld)
 }
 
 func scanMigrateRows(rows *sql.Rows, columnCount int) ([]migrateRow, error) {

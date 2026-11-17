@@ -3,11 +3,8 @@ package encrypt
 import (
     "context"
     "database/sql"
-    "errors"
     "sort"
     "strings"
-
-    "github.com/go-sql-driver/mysql"
 
     "github.com/precision-soft/melody/v3/exception"
 )
@@ -62,7 +59,7 @@ func (instance *Migrator) judgeSpecAgainstTheSchema(ctx context.Context, spec Ta
 /* ucs2 holds the basic plane only */
 func holdsEveryRune(charset string) bool {
     switch charset {
-    case "", "utf8mb4", "binary", "utf16", "utf16le", "utf32":
+    case "", "utf8mb4", "binary", "utf16", "utf16le", "utf32", "gb18030":
         return true
     }
 
@@ -250,20 +247,6 @@ func (instance *Migrator) judgeTheKey(ctx context.Context, table string, key str
         map[string]any{"table": table, "primaryKey": key, "field": "TableSpec.PrimaryKey", "found": found},
         nil,
     )
-}
-
-const serverMessageWithheld = "the server's message is withheld: it may quote the value"
-
-/* the server's message quotes the statement's values; the replacement stays a *mysql.MySQLError so errors.As still matches the number */
-func withholdQuotedValue(execErr error) (error, bool) {
-    var serverErr *mysql.MySQLError
-    if false == errors.As(execErr, &serverErr) {
-        return execErr, false
-    }
-
-    withheld := &mysql.MySQLError{Number: serverErr.Number, SQLState: serverErr.SQLState, Message: serverMessageWithheld}
-
-    return exception.NewError("the server refused the write", map[string]any{"mysqlErrorNumber": serverErr.Number}, withheld), true
 }
 
 func (instance *Migrator) resolveColumnSpelling(ctx context.Context, spec TableSpec) (TableSpec, error) {
