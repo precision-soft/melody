@@ -18,7 +18,7 @@ var cachedValueList = []any{
     &entity.Product{},
     &entity.Category{},
     &entity.Currency{},
-    &entity.User{},
+    &entity.UserProfile{},
 }
 
 func NewGobSerializer() melodycachecontract.Serializer {
@@ -30,7 +30,7 @@ func NewGobSerializer() melodycachecontract.Serializer {
     return &gobSerializer{}
 }
 
-/* LayoutToken is a short hash of the layout of every cached type (its name and, field by field, each exported field's name and type, into the structs it holds), and the cache keys carry it in their prefix. gob decodes by field name and stays silent about a field the payload lacks, and the entries have no expiry, so without it a build that added a field would read the zero from every older entry; under a prefix that changes with the layout a build reads only what its own layout wrote, and older entries stand orphaned under their own token, which the reset of the current namespace does not reach. The token is computed rather than maintained, because a version bumped by hand is one someone forgets. */
+/* LayoutToken is a short hash of the layout of every cached type (its name and, field by field, each exported field's name and type, into the structs it holds), and the cache keys carry it in their prefix. gob decodes by field name and stays silent about a field the payload lacks, so without it a build that added a field would read the zero from every older entry until its ttl lapsed; under a prefix that changes with the layout a build reads only what its own layout wrote, and older entries stand orphaned under their own token, which the reset of the current namespace does not reach, until they lapse with their ttl. The token is computed rather than maintained, because a version bumped by hand is one someone forgets. */
 func LayoutToken() string {
     return layoutTokenOf(cachedValueList)
 }
@@ -58,9 +58,7 @@ func layoutDescriptionOf(valueType reflect.Type, visited map[reflect.Type]bool) 
         valueType = valueType.Elem()
     }
 
-    /* a map is looked through to its key and its element the way a slice is to its element: a struct held as
-       a map value is decoded by gob by field name exactly like one held directly, so a field added to it has
-       to move the token too. An interface stays opaque — its dynamic type is not in the layout. */
+    /* a map is looked through to its key and its element the way a slice is to its element: a struct held as a map value is decoded by gob by field name exactly like one held directly, so a field added to it has to move the token too. An interface stays opaque — its dynamic type is not in the layout. */
     if reflect.Map == valueType.Kind() {
         return "map[" + layoutDescriptionOf(valueType.Key(), visited) + "]" + layoutDescriptionOf(valueType.Elem(), visited)
     }

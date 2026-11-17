@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/repository"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
+    "github.com/precision-soft/melody/v4/.example/service"
     "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -43,15 +44,15 @@ type revokeUserRequest struct {
     UserIdentifier string `json:"userIdentifier"`
 }
 
-func IssueHandler() melodyhttpcontract.Handler {
+func IssueHandler(deviceIdentifierMaximumBytes int) melodyhttpcontract.Handler {
     return melodyhttp.JsonHandler(func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, body issueRequest) (melodyhttpcontract.Response, error) {
         principal, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
         if false == exists {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
         }
 
-        if "" == body.DeviceIdentifier {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "deviceIdentifier is required"), nil
+        if false == validDeviceIdentifier(body.DeviceIdentifier, deviceIdentifierMaximumBytes) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, deviceIdentifierRefusal(deviceIdentifierMaximumBytes)), nil
         }
         store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
@@ -86,10 +87,14 @@ func IssueHandler() melodyhttpcontract.Handler {
 
         stored, found, lookupErr := store.Lookup(runtimeInstance, tokenString)
         if nil != lookupErr {
+            store.Delete(tokenString)
+
             return nil, lookupErr
         }
 
         if false == found {
+            store.Delete(tokenString)
+
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "the minted token did not resolve"), nil
         }
 
@@ -101,6 +106,7 @@ func IssueHandler() melodyhttpcontract.Handler {
     }, melodyhttp.JsonHandlerConfig{})
 }
 
+/* the revoke-device door holds the identifier to the ceiling rather than the configured bound, so a token issued before the bound was lowered stays revocable per device */
 func RevokeDeviceHandler() melodyhttpcontract.Handler {
     return melodyhttp.JsonHandler(func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, body revokeDeviceRequest) (melodyhttpcontract.Response, error) {
         token, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
@@ -108,8 +114,8 @@ func RevokeDeviceHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
         }
 
-        if "" == body.DeviceIdentifier {
-            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "deviceIdentifier is required"), nil
+        if false == validDeviceIdentifier(body.DeviceIdentifier, DeviceIdentifierMaximumBytesCeiling) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, deviceIdentifierRefusal(DeviceIdentifierMaximumBytesCeiling)), nil
         }
 
         userIdentifier := token.UserIdentifier()
@@ -122,6 +128,10 @@ func RevokeUserHandler() melodyhttpcontract.Handler {
     return melodyhttp.JsonHandler(func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, body revokeUserRequest) (melodyhttpcontract.Response, error) {
         if "" == body.UserIdentifier {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "userIdentifier is required"), nil
+        }
+
+        if false == service.CacheSafeIdentifier(body.UserIdentifier) {
+            return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "userIdentifier names no account"), nil
         }
 
         return publishBoundary(runtimeInstance, body.UserIdentifier, "")

@@ -2,15 +2,18 @@ package cli
 
 import (
     "context"
+    "errors"
+    "io"
     "slices"
     "strings"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/persistence"
+    melodyruntime "github.com/precision-soft/melody/v4/runtime"
 )
 
-/* the account the command creates is one the directory holds and the password authenticates: a command that only printed would pass an assertion on its output */
 func TestUserCreateCommand_CreatesAnAccountThatSignsInWithThePasswordReadFromItsInput(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewUserCreateCommand(fixture.lazyUserService(), strings.NewReader("  a-first-admin-password  \nignored second line\n"))
@@ -29,7 +32,6 @@ func TestUserCreateCommand_CreatesAnAccountThatSignsInWithThePasswordReadFromIts
     }
 }
 
-/* the password is never an argument: a second argument is refused before anything is read or written */
 func TestUserCreateCommand_RefusesAPasswordOnTheCommandLine(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewUserCreateCommand(fixture.lazyUserService(), strings.NewReader("from-the-input\n"))
@@ -47,7 +49,6 @@ func TestUserCreateCommand_RefusesAPasswordOnTheCommandLine(t *testing.T) {
     }
 }
 
-/* an empty input, an unknown role and a taken name are refused, and the directory keeps what it held */
 func TestUserCreateCommand_RefusesAnEmptyPasswordAnUnknownRoleAndATakenName(t *testing.T) {
     fixture := newCommandFixture(t)
 
@@ -73,7 +74,6 @@ func TestUserCreateCommand_RefusesAnEmptyPasswordAnUnknownRoleAndATakenName(t *t
     }
 }
 
-/* without the catalogue database the account would live in the console's own memory and end with it, so the command refuses before anything is read or written */
 func TestUserCreateCommand_RefusesWithoutTheCatalogueDatabase(t *testing.T) {
     fixture := newCommandFixtureOver(t, nil, persistence.NewCatalogStorage(nil))
     command := NewUserCreateCommand(fixture.lazyUserService(), strings.NewReader("a-first-admin-password\n"))
@@ -88,7 +88,6 @@ func TestUserCreateCommand_RefusesWithoutTheCatalogueDatabase(t *testing.T) {
     }
 }
 
-/* the create's listeners clear the cache of this process alone on the in-process fallback, so the command says a running server will not list the account until it restarts, as the other writing commands do */
 func TestUserCreateCommand_SaysTheCacheIsItsOwnOnTheInProcessFallback(t *testing.T) {
     fixture := newCommandFixture(t)
     command := NewUserCreateCommand(fixture.lazyUserService(), strings.NewReader("a-first-admin-password\n"))
@@ -100,5 +99,30 @@ func TestUserCreateCommand_SaysTheCacheIsItsOwnOnTheInProcessFallback(t *testing
 
     if false == strings.Contains(captured.String(), processLocalCacheNotice) {
         t.Fatalf("expected the notice, got %q", captured.String())
+    }
+}
+
+func TestUserCreateCommand_GivesUpTheReadWhenTheRuntimeContextEnds(t *testing.T) {
+    fixture := newCommandFixture(t)
+    readEnd, writeEnd := io.Pipe()
+    t.Cleanup(func() { _ = writeEnd.Close() })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    runtimeInstance := melodyruntime.New(ctx, fixture.container.NewScope(), fixture.container)
+    resultChannel := make(chan error, 1)
+
+    go func() {
+        resultChannel <- NewUserCreateCommand(fixture.lazyUserService(), readEnd).Run(runtimeInstance, newFlagContext(entity.RoleAdmin, "operator"))
+    }()
+
+    select {
+    case runErr := <-resultChannel:
+        if false == errors.Is(runErr, context.Canceled) {
+            t.Fatalf("expected the ended context answered, got %v", runErr)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("expected the read given up once the runtime context ended")
     }
 }

@@ -20,6 +20,18 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
+func (instance *Module) otlpModuleConfig(endpoint string) melodyotlp.ModuleConfig {
+    return melodyotlp.ModuleConfig{
+        Config: melodyotlp.Config{
+            Endpoint:       endpoint,
+            Protocol:       melodyotlp.ProtocolGrpc,
+            ServiceName:    "melody.example",
+            ServiceVersion: instance.applicationVersion,
+            Insecure:       true,
+        },
+    }
+}
+
 /* Configure wires the application. The context is the signal context main hands the application, because the module binds the database registry's lazy opens to it; the version is the one the build stamped, which the health route and the otlp exporter report. */
 func Configure(ctx context.Context, app *melodyapplication.Application, applicationVersion string) {
     moduleInstance := NewExampleModule(ctx, app.Configuration())
@@ -37,15 +49,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
     app.RegisterModule(moduleInstance)
 
     if otelEndpoint := moduleInstance.environmentValue(environmentKeyOtelExporterEndpoint); "" != otelEndpoint {
-        app.RegisterModule(melodyotlp.NewModule(melodyotlp.ModuleConfig{
-            Config: melodyotlp.Config{
-                Endpoint:       otelEndpoint,
-                Protocol:       melodyotlp.ProtocolGrpc,
-                ServiceName:    "melody.example",
-                ServiceVersion: moduleInstance.applicationVersion,
-                Insecure:       true,
-            },
-        }))
+        app.RegisterModule(melodyotlp.NewModule(moduleInstance.otlpModuleConfig(otelEndpoint)))
     }
 
     /* the encrypt module installs the cipher the encrypted columns read in every process mode, and its bulk command resolves its database through the factory at its first run, after Boot, so a boot without MYSQL_HOST stays clean and the first run reports the missing service. */

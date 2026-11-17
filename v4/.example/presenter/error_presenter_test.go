@@ -12,6 +12,7 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/.example/route"
     melodyconfig "github.com/precision-soft/melody/v4/config"
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
@@ -74,9 +75,6 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }
 
-/* the presenter must reach the same decision the framework exception listener reaches, and must reach "no debug material" whenever the environment cannot be read at all */
-
-/* runtimeRefusingEveryMediaType builds a request whose Accept header refuses every type the manager can produce — the only header that reaches ErrNotAcceptable, since a type the header simply does not name is a preference rather than a refusal. */
 func runtimeRefusingEveryMediaType(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
@@ -108,7 +106,6 @@ func runtimeRefusingEveryMediaType(t *testing.T) (melodyruntimecontract.Runtime,
     return runtimeInstance, request
 }
 
-/* runtimeRefusingNothing is the ordinary case: a client that takes json, which is what makes the body assertable. */
 func runtimeRefusingNothing(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
@@ -140,7 +137,6 @@ func runtimeRefusingNothing(t *testing.T) (melodyruntimecontract.Runtime, melody
     return runtimeInstance, request
 }
 
-/* requestAcceptingLines builds a request whose Accept field is spelled over several lines, the way a client that adds the header rather than replacing it sends it. */
 func requestAcceptingLines(t *testing.T, runtimeInstance melodyruntimecontract.Runtime, acceptLineList ...string) melodyhttpcontract.Request {
     t.Helper()
 
@@ -152,7 +148,6 @@ func requestAcceptingLines(t *testing.T, runtimeInstance melodyruntimecontract.R
     return melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("test", time.Now()))
 }
 
-/* the Accept field is list-typed and a client may spell it over several lines; Header.Get answers only the first, so every line has to be read or a blanket refusal on line one hides an available type named on line two. The probe drives the success path deliberately: it is the only path where a refused negotiation still shows, because a refusal keeps the status it earned whatever the header says. The first line has to refuse rather than merely miss, because an unmatched type falls back to the default serializer, so a pair like "application/xml" then "application/json" would pass under either reading. */
 func TestBuildApiResponseReadsEveryAcceptLine(t *testing.T) {
     runtimeInstance, _ := runtimeRefusingEveryMediaType(t)
 
@@ -192,8 +187,6 @@ func responseBodyOf(t *testing.T, response melodyhttpcontract.Response) string {
 
     return string(body)
 }
-
-/* the success path and the error path answer an unreadable Accept header differently, and each direction needs a probe of its own: on a success there is nothing to say except in a representation the client rejected, while a refusal that answered 406 would hide the status it earned — the framework's own error renderer states the same asymmetry and falls back for every resolution failure alike. */
 
 func TestBuildApiResponseKeepsTheStatusOfARefusalTheClientRefusesToRead(t *testing.T) {
     runtimeInstance, request := runtimeRefusingEveryMediaType(t)
@@ -239,8 +232,6 @@ func TestBuildApiResponseAnswersNotAcceptableOnTheSuccessPath(t *testing.T) {
         t.Fatalf("expected an empty body, got %q", responseBodyOf(t, response))
     }
 }
-
-/* ApiRefusal is the door JsonHandler's responder answers through, so the two kinds of refusal it sees are pinned separately: the validator's collection is public by contract and must reach the client field by field, and everything else must keep its cause out of the errors list — the generic message is all an unauthenticated caller is owed. */
 
 func TestApiRefusalRendersOneEntryPerViolatedField(t *testing.T) {
     runtimeInstance, request := runtimeRefusingNothing(t)
@@ -293,7 +284,6 @@ func TestApiRefusalKeepsTheCauseOfANonValidationRefusalOutOfTheErrorsList(t *tes
     }
 }
 
-/* an exception that carries the key with an empty collection is not a validation failure: rendering it field by field would answer an errors list with nothing in it, where the generic message at least names the refusal. */
 func TestApiRefusalAnswersTheGenericMessageForAnEmptyCollection(t *testing.T) {
     runtimeInstance, request := runtimeRefusingNothing(t)
 
@@ -308,7 +298,6 @@ func TestApiRefusalAnswersTheGenericMessageForAnEmptyCollection(t *testing.T) {
     }
 }
 
-/* a collection handed directly as the error is read too, so a door that validates by hand renders the same way as one that binds through the framework. */
 func TestApiRefusalReadsACollectionHandedDirectly(t *testing.T) {
     runtimeInstance, request := runtimeRefusingNothing(t)
 
@@ -398,8 +387,6 @@ func TestBuildErrorTraceIsEmptyWithoutDebug(t *testing.T) {
     }
 }
 
-/* recordingLogger keeps every record a door wrote through the runtime's logger; the records are what the
-   journal would hold */
 type recordingLogger struct {
     melodyloggingcontract.Logger
     mutex   sync.Mutex
@@ -426,7 +413,6 @@ func (instance *recordingLogger) Warning(message string, context melodyloggingco
     instance.records = append(instance.records, recordedLine{level: "warning", message: message, context: context})
 }
 
-/* clientLeftLines answers the records filed for a client that left, the warning half of the journal */
 func (instance *recordingLogger) clientLeftLines() []recordedLine {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -441,8 +427,6 @@ func (instance *recordingLogger) clientLeftLines() []recordedLine {
     return lines
 }
 
-/* lines answers the records of the server-error journal alone, so a presenter record about its own
-   collaborators — a serializer it could not resolve — is not counted as the cause of a 500 */
 func (instance *recordingLogger) lines() []recordedLine {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -457,8 +441,6 @@ func (instance *recordingLogger) lines() []recordedLine {
     return serverErrorLines
 }
 
-/* runtimeWithJournal is the presenter's runtime under the PRODUCTION environment, carrying a logger that
-   records, and a request whose route is nameable */
 func runtimeWithJournal(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request, *recordingLogger) {
     t.Helper()
 
@@ -475,8 +457,6 @@ func runtimeWithJournal(t *testing.T) (melodyruntimecontract.Runtime, melodyhttp
         melodycontainer.RegisterOptions{},
     )
 
-    /* the serializer manager is registered so the envelope renders through it and the presenter's own
-       "failed to resolve the serializer" records do not stand beside the one this probe counts */
     melodycontainer.MustRegister(
         registrar,
         melodyserializer.ServiceSerializerManager,
@@ -496,7 +476,6 @@ func runtimeWithJournal(t *testing.T) (melodyruntimecontract.Runtime, melodyhttp
     return runtimeInstance, request, logger
 }
 
-/* the kernel journals a handler's failure only when it is returned, and a 500 answered as a Response reaches the terminate listener alone, so the presenter writes the one record, at error, with the cause and the route, and only for the server's own class */
 func TestApiErrorWithErrJournalsTheCauseOfAServerError(t *testing.T) {
     runtimeInstance, request, logger := runtimeWithJournal(t)
 
@@ -531,9 +510,6 @@ func TestApiErrorWithErrJournalsTheCauseOfAServerError(t *testing.T) {
         t.Fatalf("the record does not name the route as routed: %v", lines[0].context)
     }
 
-    /* a cause that CAN carry the mark — the application's own exception — leaves marked: a reader further up
-       that files marked errors once does not file it again. A plain error has nowhere for the mark to live,
-       and the presenter's journal is what stands for it there. */
     marked := melodyexception.NewError("archive refused", nil, errors.New(causeSecret))
     _ = ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "could not read the archive", marked)
     if false == melodyexception.IsAlreadyLogged(marked) {
@@ -562,7 +538,6 @@ func TestApiErrorJournalsNothingWithoutACause(t *testing.T) {
     }
 }
 
-/* the kernel installs a logger on the request's scope that stamps every record with the request identifier; the presenter resolves through the runtime, so the record lands there and is tied to the "request completed 500" line of the same request */
 func TestApiErrorWithErrJournalsThroughTheRequestsScopedLogger(t *testing.T) {
     runtimeInstance, request, rootLogger := runtimeWithJournal(t)
 
@@ -586,9 +561,6 @@ func TestApiErrorWithErrJournalsThroughTheRequestsScopedLogger(t *testing.T) {
     }
 }
 
-/* a client that left mid-request is filed at warning, the way the kernel files a returned cancellation, not as
-   an error nobody received: the cause is context.Canceled AND the request's own context has ended; a
-   context.Canceled raised while the request is still alive stays an error */
 func TestApiErrorWithErrFilesAClientThatLeftAtWarning(t *testing.T) {
     runtimeInstance, request, logger := runtimeWithJournal(t)
 
@@ -609,7 +581,6 @@ func TestApiErrorWithErrFilesAClientThatLeftAtWarning(t *testing.T) {
     }
 }
 
-/* the envelope carries the identifier the kernel minted, never the one a client claimed on its request: the response header names the minted one, and the two must agree */
 func TestBuildErrorContextCarriesTheMintedRequestIdNotTheClaimedOne(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
     httpRequest.Header.Set(melodyhttp.HeaderRequestId, "claimed-by-the-client")
@@ -623,7 +594,6 @@ func TestBuildErrorContextCarriesTheMintedRequestIdNotTheClaimedOne(t *testing.T
     }
 }
 
-/* the html error page names the identifier the kernel minted as its reference, escaped, and never the one a client claimed */
 func TestHtmlErrorNamesTheMintedRequestIdAsItsReference(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
     httpRequest.Header.Set(melodyhttp.HeaderRequestId, "claimed-by-the-client")
@@ -647,7 +617,6 @@ func TestHtmlErrorNamesTheMintedRequestIdAsItsReference(t *testing.T) {
     }
 }
 
-/* the html error page writes its message escaped, so a message carrying markup is shown as text and never parsed into the page */
 func TestHtmlErrorEscapesItsMessage(t *testing.T) {
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
 
@@ -670,7 +639,27 @@ func TestHtmlErrorEscapesItsMessage(t *testing.T) {
     }
 }
 
-/* a refusal below 500 whose cause is a failure of the server keeps its status and leaves one record at error under the name the caller gives, with the cause, the status and the route, and the cause marked logged */
+func TestHtmlErrorLinksTheLoginPagePattern(t *testing.T) {
+    httpRequest := httptest.NewRequest(nethttp.MethodGet, "/missing", nil)
+
+    request := melodyhttp.NewRequest(httpRequest, nil, nil, melodyhttp.NewRequestContext("minted-by-the-kernel", time.Now()))
+
+    response := HtmlError(nil, request, nethttp.StatusNotFound, "not found")
+
+    bodyBytes, readErr := io.ReadAll(response.BodyReader())
+    if nil != readErr {
+        t.Fatalf("read the page: %v", readErr)
+    }
+
+    if false == strings.HasSuffix(route.LoginPagePattern, "/") {
+        t.Fatalf("expected the login pattern to end in a slash, got %s", route.LoginPagePattern)
+    }
+
+    if false == strings.Contains(string(bodyBytes), `<a href="`+route.LoginPagePattern+`">Go to login</a>`) {
+        t.Fatalf("expected the page to link %s, got %s", route.LoginPagePattern, string(bodyBytes))
+    }
+}
+
 func TestJournalRefusalCauseWritesOneRecordAndMarksTheCauseLogged(t *testing.T) {
     runtimeInstance, request, logger := runtimeWithJournal(t)
 
@@ -710,7 +699,6 @@ func TestJournalRefusalCauseWritesNothingWithoutACause(t *testing.T) {
     }
 }
 
-/* allLines answers every record, whatever its message */
 func (instance *recordingLogger) allLines() []recordedLine {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -718,7 +706,6 @@ func (instance *recordingLogger) allLines() []recordedLine {
     return append([]recordedLine(nil), instance.records...)
 }
 
-/* a cause filed where it was raised carries the already-logged mark, and the door that answers it 500 or 503 files it no second time; an unmarked cause beside it is filed */
 func TestApiErrorWithErr_FilesNothingForACauseAlreadyLogged(t *testing.T) {
     runtimeInstance, request, logger := runtimeWithJournal(t)
 

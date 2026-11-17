@@ -53,8 +53,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     registerCatalogJournalSourceService(registrar)
     repository.RegisterSeeders(registrar)
 
-    /* the two outbound clients, each env-gated on the endpoint it points at: an application configured
-       with neither registers no client and opens no pool */
+    /* the two outbound clients, each env-gated on the endpoint it points at: an application configured with neither registers no client and opens no pool */
     instance.registerRatesHttpClientService(registrar)
     instance.registerReportExportHttpClientService(registrar)
 
@@ -131,7 +130,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
     registrar.RegisterService(
         melodyopenapi.ServiceOpenApiInfo,
         func(resolver melodycontainercontract.Resolver) (melodyopenapi.Info, error) {
-            return instance.openApiInfo, nil
+            return instance.openApiDocumentInfo(), nil
         },
         melodycontainer.RegisterOptions{},
     )
@@ -175,8 +174,7 @@ func (instance *Module) registerServerSentEventHubService(registrar melodyapplic
     )
 }
 
-/* registerMessageBusServices publishes the two buses: the dispatch bus, which sends a routed message to its
-   transport and handles the rest in process, and the consume bus the worker hands what it received. */
+/* registerMessageBusServices publishes the two buses: the dispatch bus, which sends a routed message to its transport and handles the rest in process, and the consume bus the worker hands what it received. */
 func (instance *Module) registerMessageBusServices(registrar melodyapplicationcontract.ServiceRegistrar) {
     registrar.RegisterService(
         melodymessagebus.ServiceBus,
@@ -278,9 +276,7 @@ func (instance *Module) registerArchiveStorageService(registrar melodyapplicatio
                 return nil, resolveErr
             }
 
-            /* the process context travels with the handle: the repository built over it applies the archive's
-               migration set at its first resolution, a wait of up to the lock window on a held migration
-               lock, and that wait ends with the process's signal the way the dial does */
+            /* the process context travels with the handle: the repository built over it applies the archive's migration set at its first resolution, a wait of up to the lock window on a held migration lock, and that wait ends with the process's signal the way the dial does */
             return persistence.NewArchiveStorageAt(database, instance.archiveLocation).WithContext(instance.processContext), nil
         },
         melodycontainer.RegisterOptions{},

@@ -40,6 +40,7 @@ func (instance *UserEventSubscriber) SubscribedEvents() map[string][]melodyevent
     }
 }
 
+/* the user service drops these keys itself before it dispatches, so a listener that fails cannot leave them standing; the deletes below are a second, free pass */
 func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventListener {
     return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()

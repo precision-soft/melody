@@ -10,6 +10,7 @@ import (
     "time"
 
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
+    "github.com/precision-soft/melody/v4/.example/route"
     melodyconfig "github.com/precision-soft/melody/v4/config"
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
@@ -334,7 +335,7 @@ func HtmlError(runtimeInstance melodyruntimecontract.Runtime, request melodyhttp
             htmlString += "<p>Reference: <code>" + html.EscapeString(requestId) + "</code></p>"
         }
     }
-    htmlString += "<p><a href=\"/login\">Go to login</a></p>"
+    htmlString += "<p><a href=\"" + html.EscapeString(route.LoginPagePattern) + "\">Go to login</a></p>"
     htmlString += "</div></body></html>"
 
     return melodyhttp.HtmlResponse(statusCode, htmlString)

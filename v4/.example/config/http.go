@@ -49,7 +49,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleWithOptions(
         "/openapi.json",
-        melodyopenapi.SpecificationHandler(instance.openApiInfo, instance.openApiRegistry),
+        melodyopenapi.SpecificationHandler(instance.openApiDocumentInfo(), instance.openApiRegistry),
         melodyhttp.RouteOptions{Name: "example.openapi", Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
     )
 
@@ -68,7 +68,8 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     router.HandleWithOptions("/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher), melodyhttp.RouteOptions{Name: "example.encrypt.roundtrip", Methods: []string{"GET"}})
 
-    router.HandleWithOptions(route.AccessTokenIssuePattern, accesstoken.IssueHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenIssueName, Methods: []string{"POST"}})
+    deviceIdentifierMaximumBytes := instance.deviceIdentifierMaximumBytes()
+    router.HandleWithOptions(route.AccessTokenIssuePattern, accesstoken.IssueHandler(deviceIdentifierMaximumBytes), melodyhttp.RouteOptions{Name: route.AccessTokenIssueName, Methods: []string{"POST"}})
     router.HandleWithOptions(route.AccessTokenRevokeDevicePattern, accesstoken.RevokeDeviceHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeDeviceName, Methods: []string{"POST"}})
     router.HandleWithOptions(route.AccessTokenRevokeUserPattern, accesstoken.RevokeUserHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeUserName, Methods: []string{"POST"}})
     router.HandleWithOptions(route.DeviceIdentityPattern, handlersecure.MeHandler(), melodyhttp.RouteOptions{Name: route.DeviceIdentityName, Methods: []string{"GET"}})
@@ -180,9 +181,7 @@ func frontendRoute(name string, method string) melodyhttpcontract.RouteOptions {
 
 var _ melodyapplicationcontract.HttpModule = (*Module)(nil)
 
-/* buildCatalogWriteThrottle prepares the shared budget the nomenclature's write endpoints sit behind.
-
-   The counter lives in redis, so several replicas enforce one limit rather than each allowing its own, and the client key is resolved trusted-proxy-aware: behind the compose load balancer the X-Forwarded-For client is used, a direct hit falls back to the peer address, and a spoofed header from an untrusted peer is ignored. With redis unreachable the limiter fails closed, so a write is refused rather than let through uncounted. */
+/* buildCatalogWriteThrottle prepares the shared budget the nomenclature's write endpoints sit behind. The counter lives in redis, so several replicas enforce one limit rather than each allowing its own, and the client key is resolved trusted-proxy-aware: behind the compose load balancer the X-Forwarded-For client is used, a direct hit falls back to the peer address, and a spoofed header from an untrusted peer is ignored. With redis unreachable the limiter fails closed, so a write is refused rather than let through uncounted. */
 func (instance *Module) buildCatalogWriteThrottle() {
     limiter := melodyrueidis.NewRateLimiter(instance.redisClient, melodyrueidis.RateLimiterConfig{
         Limit:     catalogWriteAllowance,

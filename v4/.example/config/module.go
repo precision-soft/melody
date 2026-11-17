@@ -53,7 +53,6 @@ type Module struct {
     /* eventStreamSlots is the process's one count of the streams held open on the hub, over the event stream door and the websocket route alike */
     eventStreamSlots *handlerevent.StreamSlots
 
-    openApiInfo     melodyopenapi.Info
     openApiRegistry *melodyopenapi.Registry
 
     mailer melodymailercontract.Mailer
@@ -137,9 +136,7 @@ const (
     environmentKeyMysqlPassword = "MYSQL_PASSWORD"
     environmentKeyMysqlInsecure = "MYSQL_INSECURE"
 
-    /* the archive connection is the example's SECOND database, on postgres, and it carries a switch of
-       its own: the catalogue on mysql and the reading archive on postgres are independently wired, so
-       every combination boots — both live, either one alone, or neither. */
+    /* the archive connection is the example's SECOND database, on postgres, and it carries a switch of its own: the catalogue on mysql and the reading archive on postgres are independently wired, so every combination boots — both live, either one alone, or neither. */
     environmentKeyPgsqlHost     = "PGSQL_HOST"
     environmentKeyPgsqlPort     = "PGSQL_PORT"
     environmentKeyPgsqlDatabase = "PGSQL_DATABASE"
@@ -162,7 +159,13 @@ const (
     environmentKeyS3Region    = "S3_REGION"
     environmentKeyS3Bucket    = "S3_BUCKET"
 
-    environmentKeySmtpAddress = "SMTP_ADDRESS"
+    environmentKeySmtpAddress     = "SMTP_ADDRESS"
+    environmentKeySmtpUsername    = "SMTP_USERNAME"
+    environmentKeySmtpPassword    = "SMTP_PASSWORD"
+    environmentKeySmtpRequireTls  = "SMTP_REQUIRE_TLS"
+    environmentKeySmtpImplicitTls = "SMTP_IMPLICIT_TLS"
+
+    environmentKeyDeviceIdentifierMaxBytes = "APP_DEVICE_IDENTIFIER_MAX_BYTES"
 
     environmentKeyLocalStorageDirectory = "APP_LOCAL_STORAGE_DIRECTORY"
 
@@ -184,10 +187,7 @@ const (
     parameterReportExportEndpoint = wiring.ParameterReportExportEndpoint
 )
 
-/* the base every rate of the catalogue is quoted against, which the refresh refuses a provider's document
-   for not sharing. The seed quotes against the euro, so the default is EUR and a deployment names another
-   only when it reseeds against another; it is a parameter with a defaulted key for the same reason the two
-   endpoints are — a bound constructor argument is read with MustGet. */
+/* the base every rate of the catalogue is quoted against, which the refresh refuses a provider's document for not sharing. The seed quotes against the euro, so the default is EUR and a deployment names another only when it reseeds against another; it is a parameter with a defaulted key for the same reason the two endpoints are — a bound constructor argument is read with MustGet. */
 const (
     parameterRatesBaseCurrency        = wiring.ParameterRatesBaseCurrency
     parameterRatesDefaultBaseCurrency = "app.rates.default_base_currency"

@@ -10,13 +10,16 @@ import (
     melodyopenapi "github.com/precision-soft/melody/v4/openapi"
 )
 
+/* openApiDocumentInfo is read at registration, after Configure stamped the build's version on the module */
+func (instance *Module) openApiDocumentInfo() melodyopenapi.Info {
+    return melodyopenapi.Info{
+        Title:   "Melody Example API",
+        Version: instance.applicationVersion,
+    }
+}
+
 /* the descriptors below bind the handler types themselves, never a hand-written copy of them: a copy drifts from the validation rules and the published document then documents a body the route rejects. */
 func (instance *Module) buildOpenApi() {
-    instance.openApiInfo = melodyopenapi.Info{
-        Title:   "Melody Example API",
-        Version: "1.0.0",
-    }
-
     instance.openApiRegistry = melodyopenapi.NewRegistry()
 
     melodyopenapi.DescribeTyped[handlerproduct.CreateRequest, handlerproduct.ProductResponse](

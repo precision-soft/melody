@@ -2,7 +2,9 @@ package service
 
 import (
     "context"
+    "errors"
     "fmt"
+    "slices"
     "strings"
 
     "github.com/precision-soft/melody/v4/.example/entity"
@@ -42,7 +44,7 @@ type UserService struct {
     eventDispatcher melodyeventcontract.EventDispatcher
 }
 
-func (instance *UserService) List(ctx context.Context) ([]*entity.User, error) {
+func (instance *UserService) List(ctx context.Context) ([]*entity.UserProfile, error) {
     users, rememberErr := melodycache.Remember(
         ctx,
         instance.cache,
@@ -51,14 +53,26 @@ func (instance *UserService) List(ctx context.Context) ([]*entity.User, error) {
             Ttl: melodybound.Of(entityCacheTtl),
         },
         func(ctx context.Context) (any, error) {
-            return instance.userRepository.All(ctx)
+            users, allErr := instance.userRepository.All(ctx)
+            if nil != allErr {
+                return nil, allErr
+            }
+
+            profileList := make([]*entity.UserProfile, 0, len(users))
+            for _, user := range users {
+                if nil != user {
+                    profileList = append(profileList, user.Profile())
+                }
+            }
+
+            return profileList, nil
         },
     )
     if nil != rememberErr {
         return nil, rememberErr
     }
 
-    typed, ok := users.([]*entity.User)
+    typed, ok := users.([]*entity.UserProfile)
     if false == ok {
         return nil, fmt.Errorf("invalid cache value for user list")
     }
@@ -66,7 +80,7 @@ func (instance *UserService) List(ctx context.Context) ([]*entity.User, error) {
     return typed, nil
 }
 
-func (instance *UserService) FindById(ctx context.Context, id string) (*entity.User, bool, error) {
+func (instance *UserService) FindById(ctx context.Context, id string) (*entity.UserProfile, bool, error) {
     /* an identifier no cache key can carry names no row, so it is answered as absent without asking the cache */
     if false == CacheSafeIdentifier(id) {
         return nil, false, nil
@@ -89,7 +103,7 @@ func (instance *UserService) FindById(ctx context.Context, id string) (*entity.U
                 return nil, nil
             }
 
-            return user, nil
+            return user.Profile(), nil
         },
     )
     if nil != rememberErr {
@@ -100,7 +114,7 @@ func (instance *UserService) FindById(ctx context.Context, id string) (*entity.U
         return nil, false, nil
     }
 
-    user, ok := cached.(*entity.User)
+    user, ok := cached.(*entity.UserProfile)
     if false == ok {
         return nil, false, fmt.Errorf("invalid cache value for user")
     }
@@ -117,7 +131,7 @@ func (instance *UserService) findByUsernameUncached(ctx context.Context, usernam
     return instance.userRepository.FindByUsername(ctx, normalizedUsername)
 }
 
-func (instance *UserService) FindByUsername(ctx context.Context, username string) (*entity.User, bool, error) {
+func (instance *UserService) FindByUsername(ctx context.Context, username string) (*entity.UserProfile, bool, error) {
     /* CacheSafeIdentifier also refuses the empty spelling, and a name longer than the user table holds is answered as absent on the anonymous login door */
     normalizedUsername := repository.NormalizedUsername(username)
     if false == CacheSafeIdentifier(normalizedUsername) {
@@ -140,7 +154,7 @@ func (instance *UserService) FindByUsername(ctx context.Context, username string
                 return nil, nil
             }
 
-            return user, nil
+            return user.Profile(), nil
         },
     )
     if nil != rememberErr {
@@ -151,7 +165,7 @@ func (instance *UserService) FindByUsername(ctx context.Context, username string
         return nil, false, nil
     }
 
-    user, ok := cached.(*entity.User)
+    user, ok := cached.(*entity.UserProfile)
     if false == ok {
         return nil, false, fmt.Errorf("invalid cache value for user")
     }
@@ -173,20 +187,22 @@ func (instance *UserService) Create(
         return nil, createErr
     }
 
+    dropErr := instance.dropCachedAccount(context.WithoutCancel(runtimeInstance.Context()), user.Id, user.Username)
+
     createdEvent := event.NewUserCreatedEvent(user)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserCreatedEventName,
         createdEvent,
     )
-    if nil != dispatchErr {
-        return nil, dispatchErr
+    if nil != dropErr || nil != dispatchErr {
+        return nil, errors.Join(dropErr, dispatchErr)
     }
 
     return user, nil
 }
 
-/* GrantRole adds one role to an account through the repository's atomic door, so the console grant and the admin update door serialise on the account; the event carries the account the door wrote. A role already held is answered as held without an event, and the account's cache entries are dropped anyway, which heals entries a grant whose dispatch failed left standing. A dispatch that fails after the write is answered with the account, so a caller can say the grant is in the directory. */
+/* GrantRole adds one role to an account through the repository's atomic door, so the console grant and the admin update door serialise on the account; the event carries the account the door wrote. A role already held is answered as held without an event, the account's cache entries dropped all the same. A dispatch that fails after the write is answered with the account, so a caller can say the grant is in the directory. */
 func (instance *UserService) GrantRole(
     runtimeInstance melodyruntimecontract.Runtime,
     userId string,
@@ -200,7 +216,11 @@ func (instance *UserService) GrantRole(
     }
 
     if repository.GrantRoleAlreadyHeld == outcome {
-        if dropErr := instance.dropCachedUser(context.WithoutCancel(ctx), account); nil != dropErr {
+        if nil == account {
+            return account, outcome, nil
+        }
+
+        if dropErr := instance.dropCachedAccount(context.WithoutCancel(ctx), account.Id, account.Username); nil != dropErr {
             return nil, outcome, dropErr
         }
 
@@ -211,38 +231,43 @@ func (instance *UserService) GrantRole(
         return nil, outcome, nil
     }
 
+    dropErr := instance.dropCachedAccount(context.WithoutCancel(ctx), account.Id, account.Username)
+
     updatedEvent := event.NewUserUpdatedEvent(account, account.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,
         updatedEvent,
     )
-    if nil != dispatchErr {
-        return account, outcome, dispatchErr
+    if nil != dropErr || nil != dispatchErr {
+        return account, outcome, errors.Join(dropErr, dispatchErr)
     }
 
     return account, outcome, nil
 }
 
-/* dropCachedUser drops the entries an account is served from — by id, by username and the list — the same
-   three the updated listener drops, by the keys and without the event. */
-func (instance *UserService) dropCachedUser(ctx context.Context, account *entity.User) error {
-    if nil == account {
-        return nil
-    }
+/* dropCachedAccount drops the entries an account is served from — by id, the list and by each name given — once the write committed and before its event runs, so a failing listener cannot leave them standing; every key is attempted and the failures are answered joined */
+func (instance *UserService) dropCachedAccount(ctx context.Context, id string, usernameList ...string) error {
+    keyList := []string{CacheKeyUserById(id), CacheKeyUserList}
+    for _, username := range usernameList {
+        normalizedUsername := repository.NormalizedUsername(username)
+        if false == CacheSafeIdentifier(normalizedUsername) {
+            continue
+        }
 
-    keyList := []string{CacheKeyUserById(account.Id), CacheKeyUserList}
-    if normalizedUsername := repository.NormalizedUsername(account.Username); "" != normalizedUsername && true == CacheSafeIdentifier(normalizedUsername) {
-        keyList = append(keyList, CacheKeyUserByUsername(normalizedUsername))
-    }
-
-    for _, key := range keyList {
-        if deleteErr := instance.cache.Delete(ctx, key); nil != deleteErr {
-            return deleteErr
+        if key := CacheKeyUserByUsername(normalizedUsername); false == slices.Contains(keyList, key) {
+            keyList = append(keyList, key)
         }
     }
 
-    return nil
+    dropErrList := make([]error, 0)
+    for _, key := range keyList {
+        if deleteErr := instance.cache.Delete(ctx, key); nil != deleteErr {
+            dropErrList = append(dropErrList, deleteErr)
+        }
+    }
+
+    return errors.Join(dropErrList...)
 }
 
 /* Update writes the change through the repository's locked door: the account is read from the directory, never from the cache, the guard decides on it under the lock, and a field the change leaves out is not written. The event carries the account the door wrote and the name it held before. */
@@ -261,14 +286,16 @@ func (instance *UserService) Update(
         return nil, false, nil
     }
 
+    dropErr := instance.dropCachedAccount(context.WithoutCancel(runtimeInstance.Context()), after.Id, before.Username, after.Username)
+
     updatedEvent := event.NewUserUpdatedEvent(after, before.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserUpdatedEventName,
         updatedEvent,
     )
-    if nil != dispatchErr {
-        return nil, true, dispatchErr
+    if nil != dropErr || nil != dispatchErr {
+        return nil, true, errors.Join(dropErr, dispatchErr)
     }
 
     return after, true, nil
@@ -289,14 +316,16 @@ func (instance *UserService) DeleteById(
         return false, nil
     }
 
+    dropErr := instance.dropCachedAccount(context.WithoutCancel(runtimeInstance.Context()), removed.Id, removed.Username)
+
     deletedEvent := event.NewUserDeletedEvent(removed.Id, removed.Username)
     _, dispatchErr := instance.eventDispatcher.DispatchName(
         runtimeInstance,
         event.UserDeletedEventName,
         deletedEvent,
     )
-    if nil != dispatchErr {
-        return true, dispatchErr
+    if nil != dropErr || nil != dispatchErr {
+        return true, errors.Join(dropErr, dispatchErr)
     }
 
     return true, nil

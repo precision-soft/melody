@@ -22,10 +22,7 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     registrar.RegisterParameter(parameterReportExportEndpoint, "%env(default::"+environmentKeyReportExportEndpoint+")%")
     registrar.RegisterParameter(parameterRatesBaseUrl, "%env(default::"+environmentKeyRatesBaseUrl+")%")
 
-    /* the base currency defaults to the seed's rather than to the empty string: a catalogue with no base named
-       is a catalogue quoted against the one it ships with. The default applies when the key is ABSENT; a key
-       present and empty reaches the refresh as an empty base, which the refresh refuses on every document
-       rather than folding onto — an empty base would otherwise admit exactly the document that names none */
+    /* the base currency defaults to the seed's rather than to the empty string: a catalogue with no base named is a catalogue quoted against the one it ships with. The default applies when the key is ABSENT; a key present and empty reaches the refresh as an empty base, which the refresh refuses on every document rather than folding onto — an empty base would otherwise admit exactly the document that names none */
     registrar.RegisterParameter(parameterRatesDefaultBaseCurrency, defaultRatesBaseCurrency)
     registrar.RegisterParameter(
         parameterRatesBaseCurrency,
@@ -38,7 +35,7 @@ func (instance *Module) RegisterParameters(registrar melodyapplicationcontract.P
     }
 
     /* the credentials melody registers from .env are marked here, so debug:parameters redacts them and every template that reads them; AMQP_DSN carries its credentials inline. No parameter assembles a template from the MYSQL_* or PGSQL_* keys, because those are the switches the readme says to remove. */
-    for _, environmentKey := range []string{environmentKeyMysqlPassword, environmentKeyPgsqlPassword, environmentKeyS3SecretKey, environmentKeyAmqpDsn, environmentKeyMetricsToken, environmentKeyRatesApiKey, environmentKeyEncryptKeys, environmentKeyJwtSecret, environmentKeyInternalAuthSecret} {
+    for _, environmentKey := range []string{environmentKeyMysqlPassword, environmentKeyPgsqlPassword, environmentKeyS3SecretKey, environmentKeyAmqpDsn, environmentKeyMetricsToken, environmentKeyRatesApiKey, environmentKeyEncryptKeys, environmentKeyJwtSecret, environmentKeyInternalAuthSecret, environmentKeySmtpPassword} {
         instance.markEnvironmentSecret(registrar, environmentKey, nil)
     }
 }

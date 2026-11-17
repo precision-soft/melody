@@ -32,7 +32,6 @@ func (instance *levelRecordingLogger) Warning(message string, context melodylogg
     instance.contexts = append(instance.contexts, context)
 }
 
-/* a refused sign-in is journaled as a warning, at the instant the event carries from the dispatcher's clock, not the wall clock */
 func TestSecurityAuthenticationEventSubscriber_JournalsAFailureAsAWarningAtTheEventsInstant(t *testing.T) {
     logger := &levelRecordingLogger{Logger: melodylogging.NewNopLogger()}
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -55,5 +54,31 @@ func TestSecurityAuthenticationEventSubscriber_JournalsAFailureAsAWarningAtTheEv
 
     if 1 != len(logger.levels) || "warning" != logger.levels[0] || "2026-09-06T10:00:00Z" != logger.contexts[0]["occurredAt"] {
         t.Fatalf("expected one warning at the event's instant, got %v %v", logger.levels, logger.contexts)
+    }
+}
+
+func TestSecurityAuthenticationEventSubscriber_JournalsASuccessAtInfoAtTheEventsInstant(t *testing.T) {
+    logger := &levelRecordingLogger{Logger: melodylogging.NewNopLogger()}
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.Close() })
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return logger, nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    instant := time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC)
+    listener := NewSecurityAuthenticationEventSubscriber().onLoginSuccess()
+    successEvent := melodysecurity.NewLoginSuccessEvent(nil, melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"}, nil))
+    if listenErr := listener(runtimeInstance, melodyevent.NewEventWithTimestamp(melodysecuritycontract.EventSecurityLoginSuccess, successEvent, instant)); nil != listenErr {
+        t.Fatalf("listener: %v", listenErr)
+    }
+
+    if 1 != len(logger.levels) || "info" != logger.levels[0] || "2026-09-06T10:00:00Z" != logger.contexts[0]["occurredAt"] || "user-2" != logger.contexts[0]["userIdentifier"] {
+        t.Fatalf("expected one info record at the event's instant, got %v %v", logger.levels, logger.contexts)
     }
 }

@@ -1,7 +1,7 @@
 package cli
 
 import (
-    "bufio"
+    "context"
     "errors"
     "fmt"
     "io"
@@ -86,7 +86,7 @@ func (instance *UserCreateCommand) Run(runtimeInstance melodyruntimecontract.Run
         return fmt.Errorf("role %q is not one this application knows (%s)", role, strings.Join(entity.KnownRoleList(), ", "))
     }
 
-    password, readErr := instance.readPassword()
+    password, readErr := instance.readPassword(runtimeInstance.Context())
     if nil != readErr {
         return readErr
     }
@@ -120,23 +120,22 @@ func (instance *UserCreateCommand) Run(runtimeInstance melodyruntimecontract.Run
 }
 
 /* readPassword reads the first line of the command's input, trimmed as the admin create door trims a password, and refuses an empty one or one past what bcrypt reads */
-func (instance *UserCreateCommand) readPassword() (string, error) {
+func (instance *UserCreateCommand) readPassword(ctx context.Context) (string, error) {
     if nil == instance.passwordInput {
         return "", errors.New("the password is read from standard input, and this command has none")
     }
 
-    line, readErr := bufio.NewReader(instance.passwordInput).ReadString('\n')
-    if nil != readErr && false == errors.Is(readErr, io.EOF) {
+    password, readErr := readFirstLine(ctx, instance.passwordInput, security.PasswordMaximumBytes, "password: ")
+    if true == errors.Is(readErr, errFirstLineTooLong) {
+        return "", errors.New(security.PasswordTooLongMessage)
+    }
+
+    if nil != readErr {
         return "", fmt.Errorf("reading the password from standard input: %w", readErr)
     }
 
-    password := strings.TrimSpace(line)
     if "" == password {
         return "", errors.New("the password is required, as the first line of standard input")
-    }
-
-    if security.PasswordMaximumBytes < len(password) {
-        return "", errors.New(security.PasswordTooLongMessage)
     }
 
     return password, nil

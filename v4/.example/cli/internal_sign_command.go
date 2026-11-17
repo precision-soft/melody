@@ -2,7 +2,9 @@ package cli
 
 import (
     "fmt"
+    "strings"
     "time"
+    "unicode"
 
     "github.com/precision-soft/melody/v4/bound"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
@@ -47,6 +49,16 @@ func (instance *InternalSignCommand) Flags() []melodyclicontract.Flag {
             Usage: "optional originating actor (user id) to propagate on behalf of",
         },
         &melodyclicontract.StringFlag{
+            Name:  "actor-roles",
+            Value: defaultInternalSignActorRoles,
+            Usage: "the propagated actor's roles, comma-separated, each named once; empty for none; refused without --actor",
+        },
+        &melodyclicontract.StringFlag{
+            Name:  "actor-attributes",
+            Value: defaultInternalSignActorAttributes,
+            Usage: "the propagated actor's attributes, comma-separated key=value pairs, each key named once; empty for none; refused without --actor",
+        },
+        &melodyclicontract.StringFlag{
             Name:  "ttl",
             Usage: "how long the envelope stays valid, as a go duration; defaults to the signer's 30s. It is not capped here: the firewall refuses an envelope whose expiry sits past its horizon, and an operator may mint one to see that refusal",
         },
@@ -70,12 +82,31 @@ func (instance *InternalSignCommand) Run(
     body := []byte(commandContext.String("body"))
 
     var actor melodysecuritycontract.Actor
-    if actorId := commandContext.String("actor"); "" != actorId {
+    actorId := commandContext.String("actor")
+    if "" == actorId {
+        for _, actorFlag := range []string{"actor-roles", "actor-attributes"} {
+            if true == commandContext.IsSet(actorFlag) {
+                return fmt.Errorf("internal:sign --%s is read only with --actor, which is not set", actorFlag)
+            }
+        }
+    }
+
+    if "" != actorId {
+        roleList, rolesErr := internalSignActorRoles(flagOrDefault(commandContext, "actor-roles", defaultInternalSignActorRoles))
+        if nil != rolesErr {
+            return rolesErr
+        }
+
+        attributes, attributesErr := internalSignActorAttributes(flagOrDefault(commandContext, "actor-attributes", defaultInternalSignActorAttributes))
+        if nil != attributesErr {
+            return attributesErr
+        }
+
         actor = melodysecurity.NewActor(
             actorId,
             melodysecuritycontract.ActorTypeUser,
-            []string{"ROLE_BUYER"},
-            map[string]string{"tenant": "acme"},
+            roleList,
+            attributes,
             nil,
         )
     }
@@ -106,4 +137,71 @@ func (instance *InternalSignCommand) Run(
     _, writeErr := fmt.Fprintf(writer, "%s\n", header)
 
     return writeErr
+}
+
+const (
+    defaultInternalSignActorRoles      = "ROLE_BUYER"
+    defaultInternalSignActorAttributes = "tenant=acme"
+)
+
+func flagOrDefault(commandContext *melodyclicontract.CommandContext, name string, defaultValue string) string {
+    if false == commandContext.IsSet(name) {
+        return defaultValue
+    }
+
+    return commandContext.String(name)
+}
+
+/* an explicitly empty value is an actor holding no role, distinct from the flag left out, which takes the default */
+func internalSignActorRoles(value string) ([]string, error) {
+    roleList := make([]string, 0)
+    if "" == value {
+        return roleList, nil
+    }
+
+    seen := map[string]bool{}
+    for _, role := range strings.Split(value, ",") {
+        if "" == role || -1 != strings.IndexFunc(role, unicode.IsSpace) || -1 != strings.IndexFunc(role, unicode.IsControl) {
+            return nil, fmt.Errorf("internal:sign --actor-roles %q holds an empty role or a role with whitespace or a control character", value)
+        }
+
+        if true == seen[role] {
+            return nil, fmt.Errorf("internal:sign --actor-roles %q names the role %q twice", value, role)
+        }
+
+        seen[role] = true
+        roleList = append(roleList, role)
+    }
+
+    return roleList, nil
+}
+
+/* an explicitly empty value is an actor holding no attribute, distinct from the flag left out, which takes the default; a key and its value are both trimmed */
+func internalSignActorAttributes(value string) (map[string]string, error) {
+    attributes := map[string]string{}
+    if "" == value {
+        return attributes, nil
+    }
+
+    for _, pair := range strings.Split(value, ",") {
+        key, attributeValue, hasSeparator := strings.Cut(pair, "=")
+        key = strings.TrimSpace(key)
+        attributeValue = strings.TrimSpace(attributeValue)
+
+        if false == hasSeparator || "" == key || "" == attributeValue {
+            return nil, fmt.Errorf("internal:sign --actor-attributes %q holds an element that is not key=value", value)
+        }
+
+        if -1 != strings.IndexFunc(key, unicode.IsControl) || -1 != strings.IndexFunc(attributeValue, unicode.IsControl) {
+            return nil, fmt.Errorf("internal:sign --actor-attributes %q holds a control character", value)
+        }
+
+        if _, exists := attributes[key]; true == exists {
+            return nil, fmt.Errorf("internal:sign --actor-attributes %q names the key %q twice", value, key)
+        }
+
+        attributes[key] = attributeValue
+    }
+
+    return attributes, nil
 }

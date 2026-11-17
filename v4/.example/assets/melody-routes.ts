@@ -1,8 +1,8 @@
 /*
  * melody-routes — generate URLs on the frontend from the route manifest emitted by
  * the `melody:routes:manifest` CLI command, referencing routes by name instead of
- * hardcoding paths. Framework-owned reference helper; see v3/.example/assets for a
- * usage example.
+ * hardcoding paths. Framework-owned reference helper; see
+ * v4/.example/assets/routes-usage.ts for a usage example.
  *
  * Patterns use melody's placeholder syntax, matched per path segment exactly as the
  * server-side router and Go URL generator do: required `:param`, optional `:param?`

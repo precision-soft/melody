@@ -1,48 +1,68 @@
 package cli
 
 import (
+    "errors"
     "fmt"
-    "time"
+    "io"
 
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
+    melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security/totp"
 )
 
-/* NewTotpCodeCommand prints the current TOTP code for a secret — it stands in for the authenticator app a user would hold, so the two-factor verification can be driven end-to-end. */
-func NewTotpCodeCommand() *TotpCodeCommand {
-    return &TotpCodeCommand{}
+const totpSecretMaximumBytes = 256
+
+/* NewTotpCodeCommand prints the current TOTP code for a secret read from the first line of its input — standard input in the wiring, never an argument, where the shell history and the process list would keep it; it stands in for the authenticator app a user would hold, so the two-factor verification can be driven end-to-end. */
+func NewTotpCodeCommand(secretInput io.Reader) *TotpCodeCommand {
+    return &TotpCodeCommand{secretInput: secretInput}
 }
 
-type TotpCodeCommand struct{}
+type TotpCodeCommand struct {
+    secretInput io.Reader
+}
 
 func (instance *TotpCodeCommand) Name() string {
     return "totp:code"
 }
 
 func (instance *TotpCodeCommand) Description() string {
-    return "prints the current TOTP code for a secret (stands in for an authenticator app)"
+    return "prints the current TOTP code for the base32 secret read from standard input, never from an argument (stands in for an authenticator app): printf '%s' \"$SECRET\" | ./app totp:code"
 }
 
 func (instance *TotpCodeCommand) Flags() []melodyclicontract.Flag {
-    return []melodyclicontract.Flag{
-        &melodyclicontract.StringFlag{
-            Name:  "secret",
-            Usage: "the base32 TOTP secret returned by the enrollment endpoint",
-        },
-    }
+    return []melodyclicontract.Flag{}
 }
 
 func (instance *TotpCodeCommand) Run(
     runtimeInstance melodyruntimecontract.Runtime,
     commandContext *melodyclicontract.CommandContext,
 ) error {
-    secret := commandContext.String("secret")
-    if "" == secret {
-        return fmt.Errorf("a --secret is required")
+    if nil == instance.secretInput {
+        return errors.New("the secret is read from standard input, and this command has none")
     }
 
-    code, codeErr := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
+    secret, readErr := readFirstLine(runtimeInstance.Context(), instance.secretInput, totpSecretMaximumBytes, "totp secret: ")
+    if true == errors.Is(readErr, errFirstLineTooLong) {
+        return fmt.Errorf("the secret is longer than %d bytes", totpSecretMaximumBytes)
+    }
+
+    if nil != readErr {
+        return fmt.Errorf("reading the secret from standard input: %w", readErr)
+    }
+
+    if "" == secret {
+        return errors.New("a secret is required on standard input")
+    }
+
+    clockInstance, clockErr := melodycontainer.FromResolver[melodyclockcontract.Clock](runtimeInstance.Context(), runtimeInstance.Container(), melodyclock.ServiceClock)
+    if nil != clockErr {
+        return clockErr
+    }
+
+    code, codeErr := totp.GenerateCodeAt(secret, clockInstance.Now(), totp.Config{})
     if nil != codeErr {
         return codeErr
     }
@@ -51,3 +71,5 @@ func (instance *TotpCodeCommand) Run(
 
     return writeErr
 }
+
+var _ melodyclicontract.Command = (*TotpCodeCommand)(nil)

@@ -5,9 +5,12 @@ import (
     "os"
     "path/filepath"
     "testing"
+    "time"
 
     melodypgsql "github.com/precision-soft/melody/integrations/bunorm/pgsql/v4"
     "github.com/precision-soft/melody/v4/.example/persistence"
+    melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodyconfig "github.com/precision-soft/melody/v4/config"
@@ -15,11 +18,11 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodylock "github.com/precision-soft/melody/v4/lock"
     melodylockcontract "github.com/precision-soft/melody/v4/lock/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/runtime"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
 )
 
-/* without an archive the locker under the archive's name is the in-process one, so the in-process archive has a producer; without a locker the refresh would skip the write on every run */
 func TestRegisterArchiveLockerService_HandsTheInProcessLockerWhenNoArchiveIsWired(t *testing.T) {
     moduleInstance := &Module{}
     serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -39,10 +42,6 @@ func TestRegisterArchiveLockerService_HandsTheInProcessLockerWhenNoArchiveIsWire
     }
 }
 
-/* with an archive the locker under the archive's name is the advisory lock of the archive's OWN database,
-   reached through the archive handle's service — so the exclusion lives where the archive does, and registering
-   it opens nothing. It is kept off the type index, where the application's general locker already claims the
-   contract: "the locker" is that one, and this is asked for by name. */
 func TestRegisterArchiveLockerService_HandsTheArchiveDatabasesAdvisoryLockWhenTheArchiveIsWired(t *testing.T) {
     serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
@@ -78,7 +77,6 @@ func TestRegisterArchiveLockerService_HandsTheArchiveDatabasesAdvisoryLockWhenTh
     }
 }
 
-/* the local storage directory is APP_LOCAL_STORAGE_DIRECTORY, the temporary directory when the key is empty */
 func TestLocalStorageDirectory_ReadsItsKey(t *testing.T) {
     for _, testCase := range []struct {
         value    string
@@ -102,4 +100,68 @@ func TestLocalStorageDirectory_ReadsItsKey(t *testing.T) {
             t.Fatalf("%q: expected %q, got %q", testCase.value, testCase.expected, directory)
         }
     }
+}
+
+func assertInProcessLockerExpiresOnTheContainersClock(t *testing.T, register func(*Module, melodyapplicationcontract.ServiceRegistrar), serviceName string) {
+    t.Helper()
+
+    clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.November, 16, 12, 0, 0, 0, time.UTC))
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = serviceContainer.Close() })
+    melodycontainer.MustRegister[melodyclockcontract.Clock](serviceContainer, melodyclock.ServiceClock, func(melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
+        return clockInstance, nil
+    }, melodycontainer.RegisterOptions{})
+
+    register(&Module{}, &containerRegistrar{Container: serviceContainer})
+
+    locker, resolveErr := melodycontainer.FromResolver[melodylockcontract.Locker](t.Context(), serviceContainer, serviceName)
+    if nil != resolveErr {
+        t.Fatalf("resolve %s: %v", serviceName, resolveErr)
+    }
+
+    runtimeInstance := melodyruntime.New(t.Context(), serviceContainer.NewScope(), serviceContainer)
+
+    if acquired, acquireErr := locker.CreateLock("example-lock", melodybound.Of(time.Minute)).Acquire(runtimeInstance); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the first acquire to hold the lock, got %t, %v", acquired, acquireErr)
+    }
+
+    second := locker.CreateLock("example-lock", melodybound.Of(time.Minute))
+    if acquired, acquireErr := second.Acquire(runtimeInstance); nil != acquireErr || true == acquired {
+        t.Fatalf("expected the second acquire refused while the lock is held, got %t, %v", acquired, acquireErr)
+    }
+
+    clockInstance.Advance(61 * time.Second)
+
+    if acquired, acquireErr := second.Acquire(runtimeInstance); nil != acquireErr || false == acquired {
+        t.Fatalf("expected the lock lapsed on the container's clock, got %t, %v", acquired, acquireErr)
+    }
+}
+
+func assertInProcessLockerRefusesWithoutAClock(t *testing.T, register func(*Module, melodyapplicationcontract.ServiceRegistrar), serviceName string) {
+    t.Helper()
+
+    serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = serviceContainer.Close() })
+
+    register(&Module{}, &containerRegistrar{Container: serviceContainer})
+
+    if _, resolveErr := melodycontainer.FromResolver[melodylockcontract.Locker](t.Context(), serviceContainer, serviceName); nil == resolveErr {
+        t.Fatalf("expected %s refused without a clock", serviceName)
+    }
+}
+
+func TestRegisterLockerService_InProcessLockerExpiresOnTheContainersClock(t *testing.T) {
+    assertInProcessLockerExpiresOnTheContainersClock(t, (*Module).registerLockerService, melodylock.ServiceLocker)
+}
+
+func TestRegisterArchiveLockerService_InProcessLockerExpiresOnTheContainersClock(t *testing.T) {
+    assertInProcessLockerExpiresOnTheContainersClock(t, (*Module).registerArchiveLockerService, persistence.ServiceArchiveLocker)
+}
+
+func TestRegisterLockerService_RefusesWithoutAClock(t *testing.T) {
+    assertInProcessLockerRefusesWithoutAClock(t, (*Module).registerLockerService, melodylock.ServiceLocker)
+}
+
+func TestRegisterArchiveLockerService_RefusesWithoutAClock(t *testing.T) {
+    assertInProcessLockerRefusesWithoutAClock(t, (*Module).registerArchiveLockerService, persistence.ServiceArchiveLocker)
 }

@@ -16,6 +16,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/security"
     melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
+    melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -26,7 +27,6 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* a name longer than the user table holds is a name this application does not have: it is answered as absent on the anonymous login door rather than composed into a cache key over the backends' 1024-byte ceiling, which the cache would refuse with a 500 */
 func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *testing.T) {
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
     manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
@@ -56,7 +56,6 @@ func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *tes
     }
 }
 
-/* the credential comparison is the one decision of the login door: the seeded administrator signs in with the password that produced the stored digest and with nothing else, and an absent username pays a real comparison, since a login that answered "absent" before any bcrypt work would tell an attacker, by its speed, which usernames exist. The floor is the security package's, set between a comparison bcrypt performs and one it skips. */
 func TestUserService_AuthenticateAdmitsTheRightPasswordRefusesAWrongOneAndPaysForAnAbsentUser(t *testing.T) {
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
     manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
@@ -90,7 +89,6 @@ func TestUserService_AuthenticateAdmitsTheRightPasswordRefusesAWrongOneAndPaysFo
     }
 }
 
-/* the login reads the account from the repository, so a password change or a deletion the cache has not dropped yet cannot sign in with the replaced credential */
 func TestUserService_AuthenticateReadsTheAccountPastTheCache(t *testing.T) {
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
     manager := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})
@@ -130,7 +128,6 @@ func TestUserService_AuthenticateReadsTheAccountPastTheCache(t *testing.T) {
     }
 }
 
-/* failingUsernameRepository fails every username read, so a login that reached the repository is told apart from one refused before it */
 type failingUsernameRepository struct {
     repository.UserRepository
 }
@@ -139,7 +136,6 @@ func (instance *failingUsernameRepository) FindByUsername(ctx context.Context, u
     return nil, false, errors.New("the repository was asked")
 }
 
-/* a name the user table cannot hold is answered as absent before any backend is asked, on the login door as on FindByUsername */
 func TestUserService_AuthenticateAnswersANameTheTableCannotHoldBeforeTheRepository(t *testing.T) {
     userService := NewUserService(&failingUsernameRepository{}, nil, nil)
 
@@ -149,7 +145,6 @@ func TestUserService_AuthenticateAnswersANameTheTableCannotHoldBeforeTheReposito
     }
 }
 
-/* a grant is a write of the account, and the listeners that drop the account's cache entries are subscribed to the updated event the service dispatches, so a grant that dispatched nothing would leave the earlier roles served from the cache for the life of the entry */
 func TestUserService_GrantRoleTellsTheListeners(t *testing.T) {
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
@@ -192,8 +187,6 @@ func TestUserService_GrantRoleTellsTheListeners(t *testing.T) {
     }
 }
 
-/* refusingOnceDispatcher refuses the first dispatch and lets every later one through — a listener whose
-   backend was gone for one tick */
 type refusingOnceDispatcher struct {
     melodyeventcontract.EventDispatcher
     refused bool
@@ -209,7 +202,6 @@ func (instance *refusingOnceDispatcher) DispatchName(runtimeInstance melodyrunti
     return instance.EventDispatcher.DispatchName(runtimeInstance, eventName, payload)
 }
 
-/* a grant that committed and whose dispatch then failed leaves the account's cache entries standing, with no expiry, and a re-run that finds the role held dispatches nothing: the already-held answer drops the entries, the heal the unchanged quote has, and the failed dispatch hands back the account it did not announce */
 func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T) {
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
@@ -235,7 +227,6 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
     cacheInstance := newTtlRecordingCache()
     userService := NewUserService(userRepository, cacheInstance, refusing)
 
-    /* the account is served from the cache, roles as seeded */
     cached, found, _ := userService.FindByUsername(context.Background(), "user")
     if false == found || 1 != len(cached.Roles) {
         t.Fatalf("expected the seeded account with one role, got %v", cached)
@@ -246,8 +237,8 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
         t.Fatalf("expected the committed grant handed back beside its failed dispatch, got %v, %d, %v", granted, outcome, grantErr)
     }
 
-    if stillCached, _, _ := userService.FindByUsername(context.Background(), "user"); 1 != len(stillCached.Roles) {
-        t.Fatalf("expected the failed dispatch to leave the cache as it was, got %v", stillCached.Roles)
+    if dropped, _, _ := userService.FindByUsername(context.Background(), "user"); 2 != len(dropped.Roles) {
+        t.Fatalf("expected the committed grant to drop the account's entries despite the failed dispatch, got %v", dropped.Roles)
     }
 
     if _, outcome, grantErr := userService.GrantRole(runtimeInstance, cached.Id, entity.RoleEditor); nil != grantErr || repository.GrantRoleAlreadyHeld != outcome {
@@ -260,7 +251,6 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
     }
 }
 
-/* the already-held answer drops the three entries an account is served from, by name: the heal above reads the account by id again and would be satisfied by that one key alone, while the list, served to every reader of the directory, would keep the earlier roles for the life of the cache */
 func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
@@ -303,7 +293,6 @@ func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
     }
 }
 
-/* the stored account owns its role list: a caller that goes on writing into the slice it handed Update must not change the account behind the repository */
 func TestUserService_UpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
     if nil != repositoryErr {
@@ -344,7 +333,6 @@ func TestUserService_UpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
     }
 }
 
-/* paddingUserRepository answers a lookup the way MySQL's PAD SPACE collation does: trailing spaces of the identifier asked are ignored */
 type paddingUserRepository struct {
     repository.UserRepository
 }
@@ -424,4 +412,124 @@ func TestUserService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
 
         return findErr
     })
+}
+
+func TestUserService_CreateDropsTheKeysWhenAListenerFails(t *testing.T) {
+    underTest := newUserServiceUnderTest(t, refusingEveryDispatch, nil)
+    keyList := []string{CacheKeyUserById("user-9"), CacheKeyUserByUsername("operator"), CacheKeyUserList}
+    underTest.prime(t, keyList...)
+
+    _, createErr := underTest.service.Create(underTest.runtime, "user-9", "operator", "digest", []string{entity.RoleUser})
+    if nil == createErr || false == strings.Contains(createErr.Error(), "refused") {
+        t.Fatalf("expected the listener's failure answered, got %v", createErr)
+    }
+
+    underTest.assertDropped(t, keyList...)
+}
+
+func TestUserService_UpdateDropsTheOldAndTheNewNameWhenAListenerFails(t *testing.T) {
+    underTest := newUserServiceUnderTest(t, refusingEveryDispatch, nil)
+    keyList := []string{CacheKeyUserById("user-1"), CacheKeyUserByUsername("user"), CacheKeyUserByUsername("renamed"), CacheKeyUserList}
+    underTest.prime(t, keyList...)
+
+    renamed := "renamed"
+    _, updated, updateErr := underTest.service.Update(underTest.runtime, "user-1", repository.UserChange{Username: &renamed}, nil)
+    if nil == updateErr || false == updated {
+        t.Fatalf("expected the committed rename answered with the listener's failure, got %t, %v", updated, updateErr)
+    }
+
+    underTest.assertDropped(t, keyList...)
+}
+
+func TestUserService_DeleteDropsTheKeysWhenAListenerFails(t *testing.T) {
+    underTest := newUserServiceUnderTest(t, refusingEveryDispatch, nil)
+    keyList := []string{CacheKeyUserById("user-1"), CacheKeyUserByUsername("user"), CacheKeyUserList}
+    underTest.prime(t, keyList...)
+
+    deleted, deleteErr := underTest.service.DeleteById(underTest.runtime, "user-1", nil)
+    if nil == deleteErr || false == deleted {
+        t.Fatalf("expected the committed delete answered with the listener's failure, got %t, %v", deleted, deleteErr)
+    }
+
+    underTest.assertDropped(t, keyList...)
+}
+
+func TestUserService_GrantRoleDropsTheKeysWhenAListenerFails(t *testing.T) {
+    underTest := newUserServiceUnderTest(t, refusingEveryDispatch, nil)
+    keyList := []string{CacheKeyUserById("user-1"), CacheKeyUserByUsername("user"), CacheKeyUserList}
+    underTest.prime(t, keyList...)
+
+    _, outcome, grantErr := underTest.service.GrantRole(underTest.runtime, "user-1", entity.RoleEditor)
+    if nil == grantErr || repository.GrantRoleGranted != outcome {
+        t.Fatalf("expected the committed grant answered with the listener's failure, got %d, %v", outcome, grantErr)
+    }
+
+    underTest.assertDropped(t, keyList...)
+}
+
+func TestUserService_DropAttemptsEveryKeyWhenOneDeleteFails(t *testing.T) {
+    failing := &deleteFailingCache{failingKeyList: []string{CacheKeyUserById("user-1")}}
+    underTest := newUserServiceUnderTest(t, nil, func(cacheInstance melodycachecontract.Cache) melodycachecontract.Cache {
+        failing.Cache = cacheInstance
+
+        return failing
+    })
+
+    dropErr := underTest.service.dropCachedAccount(context.Background(), "user-1", "user", "renamed")
+    if nil == dropErr {
+        t.Fatal("expected the failed delete answered")
+    }
+
+    expected := []string{CacheKeyUserById("user-1"), CacheKeyUserList, CacheKeyUserByUsername("user"), CacheKeyUserByUsername("renamed")}
+    if attempted := failing.attempted(); false == slices.Equal(expected, attempted) {
+        t.Fatalf("expected every key attempted %v, got %v", expected, attempted)
+    }
+}
+
+func TestUserService_CreateAnswersTheDropFailureWhenTheCacheIsDown(t *testing.T) {
+    underTest := newUserServiceUnderTest(t, nil, func(cacheInstance melodycachecontract.Cache) melodycachecontract.Cache {
+        return &deleteFailingCache{Cache: cacheInstance}
+    })
+
+    _, createErr := underTest.service.Create(underTest.runtime, "user-9", "operator", "digest", []string{entity.RoleUser})
+    if nil == createErr || false == strings.Contains(createErr.Error(), "cache down") {
+        t.Fatalf("expected the failed drop answered, got %v", createErr)
+    }
+
+    if _, stored, _ := underTest.service.FindByUsernameInDirectory(context.Background(), "operator"); false == stored {
+        t.Fatal("expected the committed row stored")
+    }
+}
+
+func TestUserService_CachedEntriesCarryNoPasswordDigest(t *testing.T) {
+    underTest := newUserServiceUnderTest(t, nil, nil)
+
+    stored, found, findErr := underTest.userRepository.FindByUsername(context.Background(), "admin")
+    if nil != findErr || false == found || "" == stored.Password {
+        t.Fatalf("expected the seeded admin with a digest, got %v, %v", stored, findErr)
+    }
+
+    if _, listErr := underTest.service.List(context.Background()); nil != listErr {
+        t.Fatalf("list: %v", listErr)
+    }
+
+    profile, found, findErr := underTest.service.FindById(context.Background(), stored.Id)
+    if nil != findErr || false == found || "admin" != profile.Username {
+        t.Fatalf("expected the admin by id, got %v, %v", profile, findErr)
+    }
+
+    if _, found, findErr := underTest.service.FindByUsername(context.Background(), "admin"); nil != findErr || false == found {
+        t.Fatalf("expected the admin by name, got %v", findErr)
+    }
+
+    payloadList := underTest.serializer.payloads()
+    if 3 > len(payloadList) {
+        t.Fatalf("expected the three doors to write their entries, got %d payloads", len(payloadList))
+    }
+
+    for _, payload := range payloadList {
+        if true == strings.Contains(string(payload), stored.Password) {
+            t.Fatalf("expected no cached payload to carry the password digest")
+        }
+    }
 }

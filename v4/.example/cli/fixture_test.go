@@ -23,6 +23,7 @@ import (
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyevent "github.com/precision-soft/melody/v4/event"
@@ -37,11 +38,6 @@ import (
 
 const testUserServiceName = "service.test.user"
 
-/* commandFixture builds the collaborators a command reaches through its lazy handle, out of the same doors
-   the composition root uses rather than doubles: a handleless catalog storage falls back to the in-memory
-   repository, which is seeded, and the cache is the manager the application registers, with the example's
-   own GOB serializer. The serializer matters — a JSON one hands a map back where the service asserts
-   *entity.User, and every door would fail on the double rather than on the code. */
 type commandFixture struct {
     container      melodycontainercontract.Container
     runtime        melodyruntimecontract.Runtime
@@ -55,16 +51,12 @@ func newCommandFixture(t *testing.T) *commandFixture {
     return newCommandFixtureWithDispatcher(t, nil)
 }
 
-/* newCommandFixtureWithDispatcher is the fixture with the dispatcher the user service dispatches through
-   decorated — a dispatcher that refuses is how a command meets listeners whose backend is gone, after the write
-   they follow has landed. */
 func newCommandFixtureWithDispatcher(t *testing.T, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher) *commandFixture {
     t.Helper()
 
     return newCommandFixtureOver(t, dispatcherOf, persistence.NewCatalogStorage(bun.NewDB(sql.OpenDB(&undialledConnector{}), mysqldialect.New())))
 }
 
-/* newCommandFixtureOver registers the catalogue handle the composition root registers, which the commands read to tell a deployment with the catalogue database from one whose directory is each process's own memory; the user service under test stays in memory either way */
 func newCommandFixtureOver(t *testing.T, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher, catalogue *persistence.CatalogStorage) *commandFixture {
     t.Helper()
 
@@ -92,10 +84,6 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
         melodycache.ManagerConfig{OwnsBackend: true},
     )
 
-    /* the dispatcher carries the invalidation the application's subscriber performs on an update — the
-       three entries an account is served from — so a second run of a command reads the directory, not the
-       memo the first run planted before it wrote; the journal half of that subscriber is not wired, these
-       tests read the directory and not the journal */
     dispatcher := melodyevent.NewEventDispatcher(clockInstance)
     dispatcher.AddListener(
         event.UserUpdatedEventName,
@@ -133,7 +121,6 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
-    /* the backend is registered under the framework's own name, the way the composition root registers it: the scope helper of the writing commands reads the type of the backend there, and without the registration it would answer "this process's own" through its resolution-failure branch, a wiring the application never produces and one under which the shared-cache sentence could not be tested */
     melodycontainer.MustRegister(
         containerInstance,
         melodycache.ServiceCacheBackend,
@@ -143,9 +130,6 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
         melodycontainer.RegisterOptions{},
     )
 
-    /* the event dispatcher resolves the logger for every dispatch, so a container without one turns the
-       first event a command causes into a panic rather than into whatever the command was being tested for.
-       It is the nop logger because these tests read the directory, not the journal. */
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,
@@ -185,12 +169,10 @@ func (instance *commandFixture) lazyUserService() *melodycontainer.LazyService[*
     return melodycontainer.Lazy[*service.UserService](instance.container, testUserServiceName)
 }
 
-/* newFlagContext is the grant arm: the role as the flag the command requires, the user as its one argument. Its writer is io.Discard, because what a command PRINTS is not what these tests read — they read what the directory holds afterwards. */
 func newFlagContext(role string, user string) *melodyclicontract.CommandContext {
     return newFlagContextWithWriter(role, user, nil)
 }
 
-/* newFlagContextWithWriter is the grant arm for a test that reads what the command printed */
 func newFlagContextWithWriter(role string, user string, writer io.Writer) *melodyclicontract.CommandContext {
     return parsedContextValues{
         StringValues:   map[string]string{"role": role},
@@ -199,8 +181,6 @@ func newFlagContextWithWriter(role string, user string, writer io.Writer) *melod
     }.parse()
 }
 
-/* newBoolFlagContext is the arm the reset command needs: its only flag is a bool, and what a test of that
-   command reads is what the command wrote, so this one carries a writer of its own. */
 func newBoolFlagContext(flagName string, value bool, writer io.Writer) *melodyclicontract.CommandContext {
     return parsedContextValues{
         BoolValues:  map[string]bool{flagName: value},
@@ -208,7 +188,6 @@ func newBoolFlagContext(flagName string, value bool, writer io.Writer) *melodycl
     }.parse()
 }
 
-/* newStringFlagContext gives the string flags a run would parse, each given on the command line, and the writer the command prints to */
 func newStringFlagContext(stringValues map[string]string, writer io.Writer) *melodyclicontract.CommandContext {
     return parsedContextValues{
         StringValues: stringValues,
@@ -216,7 +195,6 @@ func newStringFlagContext(stringValues map[string]string, writer io.Writer) *mel
     }.parse()
 }
 
-/* parsedContextValues are the values a command line would carry, parsed by the engine into the command context a command's Run receives: every flag named here is declared and given, every other name reads as the zero value, and the arguments follow the flags as positionals. A nil writer discards. */
 type parsedContextValues struct {
     StringValues      map[string]string
     BoolValues        map[string]bool
@@ -289,7 +267,6 @@ func sortedKeys[V any](values map[string]V) []string {
     return keys
 }
 
-/* refusingWriter refuses every write, the shape of a closed pipe the operator's shell stopped reading */
 type refusingWriter struct {
     refusal error
 }
@@ -298,8 +275,6 @@ func (instance *refusingWriter) Write(payload []byte) (int, error) {
     return 0, instance.refusal
 }
 
-/* refusingDispatcher refuses every dispatch, the way a listener whose backend is gone would; the write it
-   follows has already landed. */
 type refusingDispatcher struct {
     melodyeventcontract.EventDispatcher
 }
@@ -308,7 +283,6 @@ func (instance *refusingDispatcher) DispatchName(runtimeInstance melodyruntimeco
     return nil, errors.New("redis: connection refused")
 }
 
-/* clearCountingCache is the cache the reset clears: it counts the clears and keeps the order they came in relative to the recorded statements, so the pin can say the clear came AFTER the reseed rather than merely that it happened. */
 type clearCountingCache struct {
     melodycachecontract.Cache
 
@@ -405,7 +379,6 @@ func newResetRuntimeWithArchive(
     return melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), cacheInstance
 }
 
-/* mustProductRepository answers the in-memory product catalogue a currency service reads before a delete */
 func mustProductRepository(t *testing.T) repository.ProductRepository {
     t.Helper()
 
@@ -417,7 +390,6 @@ func mustProductRepository(t *testing.T) repository.ProductRepository {
     return productRepository
 }
 
-/* undialledConnector stands for a configured database the test never reaches: sql.OpenDB does not dial, and a command that only asks whether the catalogue is persistent issues no statement */
 type undialledConnector struct{}
 
 func (instance *undialledConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -428,7 +400,6 @@ func (instance *undialledConnector) Driver() driver.Driver {
     return nil
 }
 
-/* the bound answers nil, so a door that drops the context fails its pin instead of hanging */
 func waitForTheCallerContext(ctx context.Context) error {
     select {
     case <-ctx.Done():
@@ -486,4 +457,21 @@ type stalledCurrencyRepository struct {
 
 func (instance *stalledCurrencyRepository) All(ctx context.Context) ([]*entity.Currency, error) {
     return nil, waitForTheCallerContext(ctx)
+}
+
+func runtimeWithClock(t *testing.T, clockInstance melodyclockcontract.Clock) melodyruntimecontract.Runtime {
+    t.Helper()
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodyclock.ServiceClock,
+        func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
+            return clockInstance, nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+
+    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }

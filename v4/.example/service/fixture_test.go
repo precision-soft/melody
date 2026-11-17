@@ -3,6 +3,7 @@ package service
 import (
     "context"
     "errors"
+    "slices"
     "sync"
     "sync/atomic"
     "testing"
@@ -28,9 +29,6 @@ import (
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* ttlRecordingCache answers what it was given and remembers under which ttl each write landed, which is
-   the whole property under test: the doors cannot be asked "for how long" any other way. It keeps values
-   as they are, because these probes are not about serialization. */
 type ttlRecordingCache struct {
     mutex       sync.Mutex
     values      map[string]any
@@ -39,8 +37,6 @@ type ttlRecordingCache struct {
     deletedKeys []string
 }
 
-/* deleteCount is how many entries a door dropped by key, the observable of an invalidation done without an
-   event */
 func (instance *ttlRecordingCache) deleteCount() int {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -101,8 +97,6 @@ func (instance *ttlRecordingCache) Delete(ctx context.Context, key string) error
     return nil
 }
 
-/* deletedKeyList answers WHICH keys were dropped, in order: a count of drops is satisfied by dropping the
-   wrong keys */
 func (instance *ttlRecordingCache) deletedKeyList() []string {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -176,13 +170,6 @@ func (instance *ttlRecordingCache) CloseWithContext(closeContext context.Context
 
 var _ melodycachecontract.Cache = (*ttlRecordingCache)(nil)
 
-/* countingUserRepository answers nothing and counts how often it was asked, which is what tells a
-   remembered absence from a lookup that reached the directory again. */
-
-/* recordingDispatcher is the framework's own dispatcher with one listener on it, rather than a double of the
-   whole six-method contract. It is the shorter thing to write and the stronger thing to assert: what the
-   write doors owe the cache is that the invalidation LISTENER runs, and a double that only counted calls
-   would answer the same whether the dispatch reached a listener or not. */
 type recordingDispatcher struct {
     dispatcher *melodyevent.EventDispatcher
     mutex      sync.Mutex
@@ -217,9 +204,6 @@ func (instance *recordingDispatcher) names() []string {
     return append([]string{}, instance.observed...)
 }
 
-/* frozenClock names the instant a stamping door writes, rather than letting it come from the wall. The
-   ticker half of the contract is not what these doors use, so it answers the real one: a door that started
-   a ticker would be a different subject, and a double that returned nothing there would hide it. */
 type frozenClock struct {
     instant time.Time
 }
@@ -236,10 +220,6 @@ var _ melodyclockcontract.Clock = (*frozenClock)(nil)
 
 var currencyQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
 
-/* the currency doors under test write through a repository, a cache and a dispatcher. All three are the real
-   ones: the storage without a database hands back the in-memory repository the application itself uses when
-   it is configured without one, the cache keeps values as they are because these probes are not about
-   serialization, and the dispatcher carries a listener so "the event was dispatched" means it arrived. */
 func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatcher, melodyruntimecontract.Runtime) {
     t.Helper()
 
@@ -254,8 +234,6 @@ func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatc
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
 
-    /* the framework's dispatcher resolves the logger from the runtime before it runs a listener, so a
-       container without one turns every dispatch into a refusal that looks like the door's */
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,
@@ -270,8 +248,6 @@ func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatc
         melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }
 
-/* updateCountingCurrencyRepository counts the UPDATE statements a door issues; the value the door answers
-   comes from the real repository underneath */
 type updateCountingCurrencyRepository struct {
     repository.CurrencyRepository
     updates atomic.Int64
@@ -289,7 +265,6 @@ func (instance *updateCountingCurrencyRepository) UpdateQuote(ctx context.Contex
     return instance.CurrencyRepository.UpdateQuote(ctx, id, quote)
 }
 
-/* newInMemoryProductRepositoryForTest answers the in-memory product catalogue a currency service reads before a delete */
 func newInMemoryProductRepositoryForTest(t *testing.T) repository.ProductRepository {
     t.Helper()
 
@@ -301,7 +276,6 @@ func newInMemoryProductRepositoryForTest(t *testing.T) repository.ProductReposit
     return productRepository
 }
 
-/* the bound answers nil, so a door that drops the context fails its pin instead of hanging */
 func waitForTheCallerContext(ctx context.Context) error {
     select {
     case <-ctx.Done():
@@ -323,7 +297,6 @@ func assertACanceledContextEndsTheRead(t *testing.T, door string, read func(ctx 
     }
 }
 
-/* assertPaddedIdentifierAnsweredAbsent asks a lookup for the identifier with a trailing space, which a PAD SPACE collation reads as the row's own: it must answer absent and leave nothing under the padded key, while the identifier itself is found and cached */
 func assertPaddedIdentifierAnsweredAbsent(t *testing.T, cacheInstance *ttlRecordingCache, cacheKey func(id string) string, find func(id string) (bool, error), id string) {
     t.Helper()
 
@@ -350,7 +323,6 @@ func assertPaddedIdentifierAnsweredAbsent(t *testing.T, cacheInstance *ttlRecord
     }
 }
 
-/* refusingDispatcher refuses every dispatch, the way a listener whose backend is gone would. */
 type refusingDispatcher struct {
     melodyeventcontract.EventDispatcher
 }
@@ -359,7 +331,6 @@ func (instance *refusingDispatcher) DispatchName(runtimeInstance melodyruntimeco
     return nil, errors.New("redis: connection refused")
 }
 
-/* errorRecordingLogger keeps the error records a service filed through the runtime's logger */
 type errorRecordingLogger struct {
     melodyloggingcontract.Logger
     mutex   sync.Mutex
@@ -380,7 +351,6 @@ func (instance *errorRecordingLogger) recorded() []melodyloggingcontract.Context
     return append([]melodyloggingcontract.Context{}, instance.records...)
 }
 
-/* catalogueUnderTest carries the three catalogue services over the in-memory repositories a handleless storage answers, one cache they all write, a dispatcher that refuses every event when refusing is set, and a runtime whose logger records */
 type catalogueUnderTest struct {
     product  *ProductService
     category *CategoryService
@@ -446,7 +416,6 @@ func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
     }
 }
 
-/* prime stores a stale entry under every key given, the state a listener that never ran leaves standing */
 func (instance *catalogueUnderTest) prime(t *testing.T, keyList ...string) {
     t.Helper()
 
@@ -457,7 +426,6 @@ func (instance *catalogueUnderTest) prime(t *testing.T, keyList ...string) {
     }
 }
 
-/* assertCommittedDispatchFailure asserts one error record naming the event and the entity, and every key given dropped */
 func (instance *catalogueUnderTest) assertCommittedDispatchFailure(t *testing.T, eventName string, entityId string, keyList ...string) {
     t.Helper()
 
@@ -476,4 +444,128 @@ func (instance *catalogueUnderTest) assertCommittedDispatchFailure(t *testing.T,
             t.Fatalf("expected %s dropped after the failed event", key)
         }
     }
+}
+
+type userServiceUnderTest struct {
+    service        *UserService
+    userRepository repository.UserRepository
+    cache          melodycachecontract.Cache
+    serializer     *recordingSerializer
+    runtime        melodyruntimecontract.Runtime
+}
+
+func newUserServiceUnderTest(t *testing.T, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher, cacheOf func(melodycachecontract.Cache) melodycachecontract.Cache) *userServiceUnderTest {
+    t.Helper()
+
+    userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
+    if nil != repositoryErr {
+        t.Fatalf("build the user repository: %v", repositoryErr)
+    }
+
+    clockInstance := melodyclock.NewSystemClock()
+    serializer := &recordingSerializer{Serializer: examplecache.NewGobSerializer()}
+    var cacheInstance melodycachecontract.Cache = melodycache.NewManager(melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance}), serializer, melodycache.ManagerConfig{OwnsBackend: true})
+    t.Cleanup(func() { _ = cacheInstance.CloseWithContext(context.Background()) })
+
+    if nil != cacheOf {
+        cacheInstance = cacheOf(cacheInstance)
+    }
+
+    var dispatcher melodyeventcontract.EventDispatcher = melodyevent.NewEventDispatcher(clockInstance)
+    if nil != dispatcherOf {
+        dispatcher = dispatcherOf(dispatcher)
+    }
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    t.Cleanup(func() { _ = containerInstance.Close() })
+    melodycontainer.MustRegister(
+        containerInstance,
+        melodylogging.ServiceLogger,
+        func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
+            return melodylogging.NewNopLogger(), nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+
+    return &userServiceUnderTest{
+        service:        NewUserService(userRepository, cacheInstance, dispatcher),
+        userRepository: userRepository,
+        cache:          cacheInstance,
+        serializer:     serializer,
+        runtime:        melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
+    }
+}
+
+func refusingEveryDispatch(dispatcher melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher {
+    return &refusingDispatcher{EventDispatcher: dispatcher}
+}
+
+func (instance *userServiceUnderTest) prime(t *testing.T, keyList ...string) {
+    t.Helper()
+
+    for _, key := range keyList {
+        if setErr := instance.cache.Set(context.Background(), key, "stale", melodybound.UnlimitedDuration()); nil != setErr {
+            t.Fatalf("prime %s: %v", key, setErr)
+        }
+    }
+}
+
+func (instance *userServiceUnderTest) assertDropped(t *testing.T, keyList ...string) {
+    t.Helper()
+
+    for _, key := range keyList {
+        if held, _ := instance.cache.Has(context.Background(), key); true == held {
+            t.Fatalf("expected %s dropped", key)
+        }
+    }
+}
+
+type recordingSerializer struct {
+    melodycachecontract.Serializer
+    mutex       sync.Mutex
+    payloadList [][]byte
+}
+
+func (instance *recordingSerializer) Serialize(value any) ([]byte, error) {
+    payload, serializeErr := instance.Serializer.Serialize(value)
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.payloadList = append(instance.payloadList, append([]byte{}, payload...))
+
+    return payload, serializeErr
+}
+
+func (instance *recordingSerializer) payloads() [][]byte {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([][]byte{}, instance.payloadList...)
+}
+
+type deleteFailingCache struct {
+    melodycachecontract.Cache
+    failingKeyList []string
+    mutex          sync.Mutex
+    attemptedList  []string
+}
+
+func (instance *deleteFailingCache) Delete(ctx context.Context, key string) error {
+    instance.mutex.Lock()
+    instance.attemptedList = append(instance.attemptedList, key)
+    instance.mutex.Unlock()
+
+    if 0 == len(instance.failingKeyList) || true == slices.Contains(instance.failingKeyList, key) {
+        return errors.New("cache down")
+    }
+
+    return instance.Cache.Delete(ctx, key)
+}
+
+func (instance *deleteFailingCache) attempted() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]string{}, instance.attemptedList...)
 }

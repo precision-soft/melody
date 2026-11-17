@@ -5,6 +5,8 @@ import (
     "errors"
     "io"
     nethttp "net/http"
+    "os"
+    "regexp"
     "strings"
     "testing"
 
@@ -36,7 +38,6 @@ func TestLoadRefusesAFileThatIsNotEmbedded(t *testing.T) {
     }
 }
 
-/* runtimeServingRoute hands back a runtime whose route registry holds exactly the one public route the caller names, so a test can put an arbitrary spelling into the manifest the page splices into its script; the runtime carries no security context, so the manifest is the public zone alone. */
 func runtimeServingRoute(t *testing.T, name string, pattern string) melodyruntimecontract.Runtime {
     t.Helper()
 
@@ -82,7 +83,6 @@ func bodyOf(t *testing.T, response melodyhttpcontract.Response) string {
     return string(content)
 }
 
-/* The manifest is spliced into a single-quoted JavaScript literal and json.Marshal leaves a single quote bare, so a quote in a route name must reach the literal escaped. The negative assertion pins the order of the two replacements: escaping the quote first yields \\', an escaped backslash followed by a live quote. Only an input carrying a quote separates the two orders. */
 func TestHtmlEscapesAQuoteOutOfTheScriptLiteral(t *testing.T) {
     runtimeInstance := runtimeServingRoute(t, "example.it's", "/injected/")
 
@@ -97,7 +97,6 @@ func TestHtmlEscapesAQuoteOutOfTheScriptLiteral(t *testing.T) {
     }
 }
 
-/* json.Marshal writes the one backslash of the name as two, and the escaping doubles each of them, so the literal carries four. */
 func TestHtmlEscapesABackslash(t *testing.T) {
     runtimeInstance := runtimeServingRoute(t, `example.back\slash`, "/back/")
 
@@ -132,7 +131,6 @@ func TestHtmlAnswersAFailureForAPageThatIsNotEmbedded(t *testing.T) {
     }
 }
 
-/* an anonymous render carries an empty role list, so a page hides every link marked data-requires-role rather than reading an unsubstituted placeholder */
 func TestHtmlPutsAnEmptyViewerForACallerWithoutAToken(t *testing.T) {
     runtimeInstance := runtimeServingRoute(t, "example.products.list.page", "/products/")
 
@@ -147,7 +145,6 @@ func TestHtmlPutsAnEmptyViewerForACallerWithoutAToken(t *testing.T) {
     }
 }
 
-/* every page that offers a link carries the viewer, the catalogue among them */
 func TestEveryPageCarriesTheViewerPlaceholder(t *testing.T) {
     for _, fileName := range []string{LoginHtml, CatalogueHtml, ProductsListHtml, ProductsDetailsHtml, ProfileHtml, UsersHtml} {
         content, loadErr := Load(fileName)
@@ -161,7 +158,6 @@ func TestEveryPageCarriesTheViewerPlaceholder(t *testing.T) {
     }
 }
 
-/* runtimeServingRouteAs is runtimeServingRoute with the request's security context carrying an authenticated token of the roles */
 func runtimeServingRouteAs(t *testing.T, name string, pattern string, roleList []string) melodyruntimecontract.Runtime {
     t.Helper()
 
@@ -181,7 +177,6 @@ func runtimeServingRouteAs(t *testing.T, name string, pattern string, roleList [
     return runtimeInstance
 }
 
-/* a signed-in render carries the token's roles expanded through the hierarchy, so the page shows the editor the links its role opens; a render that lost them would hide the Users link from an admin and Products from an editor with every other test green */
 func TestHtmlPutsTheViewersExpandedRolesInThePage(t *testing.T) {
     runtimeInstance := runtimeServingRouteAs(t, "example.products.list.page", "/products/", []string{"ROLE_EDITOR"})
 
@@ -192,7 +187,6 @@ func TestHtmlPutsTheViewersExpandedRolesInThePage(t *testing.T) {
     }
 }
 
-/* a role reaches the page inside a single-quoted script string, so a quote or a backslash in its spelling — a role the account store accepted as written — must arrive escaped for that string; unescaped, the quote would end the string and the rest of the role would run as script */
 func TestHtmlEscapesAViewersRoleForTheScriptString(t *testing.T) {
     runtimeInstance := runtimeServingRouteAs(t, "example.products.list.page", "/products/", []string{`ROLE_O'X\`})
 
@@ -203,7 +197,6 @@ func TestHtmlEscapesAViewersRoleForTheScriptString(t *testing.T) {
     }
 }
 
-/* every link to a page some roles are refused is marked with the role that opens it, so the bundle hides it from a viewer without that role; a link that lost its marking would lead a viewer to the refusal page with every other test green */
 func TestEveryLinkToARoleGatedPageCarriesItsRole(t *testing.T) {
     expectations := map[string][]string{
         ProductsListHtml: {`data-requires-role="ROLE_ADMIN" data-route="example.users.list.page"`},
@@ -226,5 +219,96 @@ func TestEveryLinkToARoleGatedPageCarriesItsRole(t *testing.T) {
                 t.Fatalf("%s does not carry %s", fileName, marking)
             }
         }
+    }
+}
+
+var externalAssetTagPattern = regexp.MustCompile(`<(?:link|script)\b[^>]*>`)
+var externalAssetUrlPattern = regexp.MustCompile(`(?:src|href)="(https?://[^"]+)"`)
+var integrityPattern = regexp.MustCompile(`integrity="([^"]*)"`)
+var sha384DigestPattern = regexp.MustCompile(`^sha384-[A-Za-z0-9+/]{64}$`)
+
+func externalAssetSources(t *testing.T) map[string]string {
+    t.Helper()
+
+    sourceMap := map[string]string{}
+
+    entryList, readDirErr := pages.ReadDir(".")
+    if nil != readDirErr {
+        t.Fatalf("read the embedded pages: %v", readDirErr)
+    }
+
+    for _, entry := range entryList {
+        content, loadErr := Load(entry.Name())
+        if nil != loadErr {
+            t.Fatalf("load %s: %v", entry.Name(), loadErr)
+        }
+
+        sourceMap[entry.Name()] = content
+    }
+
+    for _, path := range []string{"../public/index.html", "../security/default_access_denied_handler.go"} {
+        content, readErr := os.ReadFile(path)
+        if nil != readErr {
+            t.Fatalf("read %s: %v", path, readErr)
+        }
+
+        sourceMap[path] = string(content)
+    }
+
+    return sourceMap
+}
+
+func TestPages_EveryExternalAssetCarriesIntegrityAndCrossorigin(t *testing.T) {
+    externalTagCount := 0
+
+    for sourceName, content := range externalAssetSources(t) {
+        for _, tag := range externalAssetTagPattern.FindAllString(content, -1) {
+            if nil == externalAssetUrlPattern.FindStringSubmatch(tag) {
+                continue
+            }
+
+            externalTagCount++
+
+            if nil == integrityPattern.FindStringSubmatch(tag) {
+                t.Fatalf("%s: %s carries no integrity", sourceName, tag)
+            }
+
+            if false == strings.Contains(tag, `crossorigin="anonymous"`) {
+                t.Fatalf("%s: %s carries no crossorigin", sourceName, tag)
+            }
+        }
+    }
+
+    if 31 != externalTagCount {
+        t.Fatalf("expected 31 external asset tags, found %d", externalTagCount)
+    }
+}
+
+func TestPages_OneDigestPerExternalAsset(t *testing.T) {
+    digestByUrl := map[string]string{}
+
+    for sourceName, content := range externalAssetSources(t) {
+        for _, tag := range externalAssetTagPattern.FindAllString(content, -1) {
+            urlMatch := externalAssetUrlPattern.FindStringSubmatch(tag)
+            integrityMatch := integrityPattern.FindStringSubmatch(tag)
+            if nil == urlMatch || nil == integrityMatch {
+                continue
+            }
+
+            if false == sha384DigestPattern.MatchString(integrityMatch[1]) {
+                t.Fatalf("%s: %s is not a sha384 digest", sourceName, integrityMatch[1])
+            }
+
+            known, seen := digestByUrl[urlMatch[1]]
+            if true == seen && known != integrityMatch[1] {
+                t.Fatalf("%s: %s carries %s where another page carries %s", sourceName, urlMatch[1], integrityMatch[1], known)
+            }
+
+            digestByUrl[urlMatch[1]] = integrityMatch[1]
+        }
+    }
+
+    if 4 != len(digestByUrl) {
+        t.Fatalf("expected four external assets, found %d", len(digestByUrl))
     }
 }

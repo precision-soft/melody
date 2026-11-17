@@ -2,6 +2,8 @@ package accesstoken
 
 import (
     "context"
+    "encoding/json"
+    "errors"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -18,23 +20,31 @@ import (
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodyvalidation "github.com/precision-soft/melody/v4/validation"
 )
 
-/* emptyEnvironmentSource is a .env holding nothing, so the configuration the binding reads its limits from is the framework's defaults */
 type emptyEnvironmentSource struct{}
 
 func (instance emptyEnvironmentSource) Load() (map[string]string, error) {
     return map[string]string{}, nil
 }
 
-/* issueAs drives the issue door for a caller the session resolved to the given account, over a directory holding the example's accounts and an in-memory token store, and answers the status and the store */
-func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemoryTokenStore) {
+type accessTokenDoorCall struct {
+    handler        melodyhttpcontract.Handler
+    path           string
+    body           string
+    userIdentifier string
+    tokenStore     melodysecuritycontract.EpochRevocableTokenStore
+}
+
+func callAccessTokenDoor(t *testing.T, call accessTokenDoorCall) int {
     t.Helper()
 
     userRepository, repositoryErr := repository.NewUserRepository(persistence.NewCatalogStorage(nil).WithAccountSeed())
@@ -42,15 +52,13 @@ func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemory
         t.Fatalf("build the user repository: %v", repositoryErr)
     }
 
-    tokenStore := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
-
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.Close() })
     melodycontainer.MustRegister(containerInstance, repository.ServiceUserRepository, func(resolver melodycontainercontract.Resolver) (repository.UserRepository, error) {
         return userRepository, nil
     }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, melodyrueidis.ServiceTokenStore, func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.EpochRevocableTokenStore, error) {
-        return tokenStore, nil
+        return call.tokenStore, nil
     }, melodycontainer.RegisterOptions{})
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return melodylogging.NewNopLogger(), nil
@@ -79,9 +87,9 @@ func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemory
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
-    httpRequest := httptest.NewRequest(nethttp.MethodPost, "/access-token/issue/", strings.NewReader(`{"deviceIdentifier":"phone"}`))
+    httpRequest := httptest.NewRequest(nethttp.MethodPost, call.path, strings.NewReader(call.body))
     httpRequest.Header.Set("Content-Type", "application/json")
-    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("issue-test", time.Now()))
+    request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("access-token-test", time.Now()))
 
     firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
         Name:               "main",
@@ -90,18 +98,71 @@ func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemory
     })
     melodysecurity.SecurityContextSetOnRuntime(
         runtimeInstance,
-        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(userIdentifier, []string{"ROLE_EDITOR"}, nil)),
+        melodysecurity.NewSecurityContext(firewall, melodysecurity.NewAuthenticatedToken(call.userIdentifier, []string{"ROLE_EDITOR"}, nil)),
     )
 
-    response, handlerErr := IssueHandler()(runtimeInstance, httptest.NewRecorder(), request)
-    if nil != handlerErr || nil == response {
-        t.Fatalf("expected the issue door to answer, got %v, %v", response, handlerErr)
+    response, handlerErr := call.handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != handlerErr {
+        return nethttp.StatusInternalServerError
     }
 
-    return response.StatusCode(), tokenStore
+    if nil == response {
+        t.Fatal("expected the door to answer")
+    }
+
+    return response.StatusCode()
 }
 
-/* a session whose account is gone by the time the token is stored — deleted between the session's resolution and the write — is answered 401 and the token it wrote is taken back, so nothing of the account is left in the store; an account that still exists is issued its token */
+func issueAs(t *testing.T, userIdentifier string) (int, *melodysecurity.InMemoryTokenStore) {
+    t.Helper()
+
+    tokenStore := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
+
+    status := callAccessTokenDoor(t, accessTokenDoorCall{
+        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        path:           "/access-token/issue/",
+        body:           `{"deviceIdentifier":"phone"}`,
+        userIdentifier: userIdentifier,
+        tokenStore:     tokenStore,
+    })
+
+    return status, tokenStore
+}
+
+func issueDevice(t *testing.T, deviceIdentifier string) (int, *melodysecurity.InMemoryTokenStore) {
+    t.Helper()
+
+    tokenStore := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
+    body, _ := json.Marshal(map[string]string{"deviceIdentifier": deviceIdentifier})
+
+    status := callAccessTokenDoor(t, accessTokenDoorCall{
+        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        path:           "/access-token/issue/",
+        body:           string(body),
+        userIdentifier: "user-2",
+        tokenStore:     tokenStore,
+    })
+
+    return status, tokenStore
+}
+
+const defaultTestDeviceIdentifierMaximumBytes = 64
+
+type lookupFailingTokenStore struct {
+    *melodysecurity.InMemoryTokenStore
+    lookupErr    error
+    deletedCount int
+}
+
+func (instance *lookupFailingTokenStore) Lookup(runtimeInstance melodyruntimecontract.Runtime, tokenString string) (melodysecuritycontract.Claims, bool, error) {
+    return melodysecuritycontract.Claims{}, false, instance.lookupErr
+}
+
+func (instance *lookupFailingTokenStore) Delete(tokenString string) {
+    instance.deletedCount++
+    instance.InMemoryTokenStore.Delete(tokenString)
+}
+
 func TestIssueHandler_TakesBackATokenWhoseAccountIsGoneAfterTheWrite(t *testing.T) {
     status, tokenStore := issueAs(t, "user-9")
     if nethttp.StatusUnauthorized != status {
@@ -119,5 +180,117 @@ func TestIssueHandler_TakesBackATokenWhoseAccountIsGoneAfterTheWrite(t *testing.
 
     if held := tokenStore.DeleteByUser("user-2"); 1 != held {
         t.Fatalf("expected the existing account to hold the one token issued, found %d", held)
+    }
+}
+
+func TestIssueHandler_RefusesADeviceIdentifierPastTheBound(t *testing.T) {
+    status, tokenStore := issueDevice(t, strings.Repeat("a", defaultTestDeviceIdentifierMaximumBytes+1))
+    if nethttp.StatusBadRequest != status {
+        t.Fatalf("expected an identifier past the bound refused with 400, got %d", status)
+    }
+
+    if held := tokenStore.DeleteByUser("user-2"); 0 != held {
+        t.Fatalf("expected no token stored for a refused identifier, found %d", held)
+    }
+}
+
+func TestIssueHandler_RefusesADeviceIdentifierOutsideTheAlphabet(t *testing.T) {
+    for _, deviceIdentifier := range []string{"", "my phone", "phone:1", "phone/1", "téléphone", " phone", "phone\n"} {
+        if status, _ := issueDevice(t, deviceIdentifier); nethttp.StatusBadRequest != status {
+            t.Fatalf("expected %q refused with 400, got %d", deviceIdentifier, status)
+        }
+    }
+}
+
+func TestIssueHandler_AdmitsTheBound(t *testing.T) {
+    for _, deviceIdentifier := range []string{strings.Repeat("a", defaultTestDeviceIdentifierMaximumBytes), "Phone-1.work_2"} {
+        if status, _ := issueDevice(t, deviceIdentifier); nethttp.StatusCreated != status {
+            t.Fatalf("expected %q issued with 201, got %d", deviceIdentifier, status)
+        }
+    }
+}
+
+func TestRevokeDeviceHandler_RefusesADeviceIdentifierOutsideTheCeiling(t *testing.T) {
+    for _, deviceIdentifier := range []string{strings.Repeat("a", DeviceIdentifierMaximumBytesCeiling+1), "phone:1"} {
+        body, _ := json.Marshal(map[string]string{"deviceIdentifier": deviceIdentifier})
+
+        status := callAccessTokenDoor(t, accessTokenDoorCall{
+            handler:        RevokeDeviceHandler(),
+            path:           "/access-token/revoke-device/",
+            body:           string(body),
+            userIdentifier: "user-2",
+            tokenStore:     melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{}),
+        })
+        if nethttp.StatusBadRequest != status {
+            t.Fatalf("expected %q refused with 400, got %d", deviceIdentifier, status)
+        }
+    }
+
+    for _, deviceIdentifier := range []string{"phone", strings.Repeat("a", DeviceIdentifierMaximumBytesCeiling)} {
+        body, _ := json.Marshal(map[string]string{"deviceIdentifier": deviceIdentifier})
+
+        status := callAccessTokenDoor(t, accessTokenDoorCall{
+            handler:        RevokeDeviceHandler(),
+            path:           "/access-token/revoke-device/",
+            body:           string(body),
+            userIdentifier: "user-2",
+            tokenStore:     melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{}),
+        })
+        if nethttp.StatusOK != status {
+            t.Fatalf("expected %q inside the ceiling revoked with 200, got %d", deviceIdentifier, status)
+        }
+    }
+}
+
+func TestIssueHandler_DeletesTheTokenWhenTheLookupFails(t *testing.T) {
+    tokenStore := &lookupFailingTokenStore{InMemoryTokenStore: melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{}), lookupErr: errors.New("store unavailable")}
+
+    status := callAccessTokenDoor(t, accessTokenDoorCall{
+        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        path:           "/access-token/issue/",
+        body:           `{"deviceIdentifier":"phone"}`,
+        userIdentifier: "user-2",
+        tokenStore:     tokenStore,
+    })
+    if nethttp.StatusInternalServerError != status {
+        t.Fatalf("expected a failed lookup answered as an error, got %d", status)
+    }
+
+    if 1 != tokenStore.deletedCount || 0 != tokenStore.DeleteByUser("user-2") {
+        t.Fatalf("expected the minted token deleted once, deleted %d", tokenStore.deletedCount)
+    }
+}
+
+func TestIssueHandler_DeletesTheTokenWhenTheLookupFindsNothing(t *testing.T) {
+    tokenStore := &lookupFailingTokenStore{InMemoryTokenStore: melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})}
+
+    status := callAccessTokenDoor(t, accessTokenDoorCall{
+        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        path:           "/access-token/issue/",
+        body:           `{"deviceIdentifier":"phone"}`,
+        userIdentifier: "user-2",
+        tokenStore:     tokenStore,
+    })
+    if nethttp.StatusInternalServerError != status {
+        t.Fatalf("expected a lookup that found nothing answered 500, got %d", status)
+    }
+
+    if 1 != tokenStore.deletedCount || 0 != tokenStore.DeleteByUser("user-2") {
+        t.Fatalf("expected the minted token deleted once, deleted %d", tokenStore.deletedCount)
+    }
+}
+
+func TestRevokeUserHandler_RefusesAnIdentifierNoKeyCanCarry(t *testing.T) {
+    body, _ := json.Marshal(map[string]string{"userIdentifier": strings.Repeat("u", 256)})
+
+    status := callAccessTokenDoor(t, accessTokenDoorCall{
+        handler:        RevokeUserHandler(),
+        path:           "/access-token/revoke-user/",
+        body:           string(body),
+        userIdentifier: "user-1",
+        tokenStore:     melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{}),
+    })
+    if nethttp.StatusBadRequest != status {
+        t.Fatalf("expected an identifier no key can carry refused with 400, got %d", status)
     }
 }

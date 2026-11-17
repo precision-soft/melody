@@ -28,7 +28,6 @@ type layoutProbeHolder struct {
     hidden   int
 }
 
-/* the token is what the prefix carries, so it has to be the same on every call of the same build and short enough to sit in every key */
 func TestLayoutToken_IsStableAndTwelveHexCharacters(t *testing.T) {
     first := LayoutToken()
     second := LayoutToken()
@@ -42,7 +41,6 @@ func TestLayoutToken_IsStableAndTwelveHexCharacters(t *testing.T) {
     }
 }
 
-/* a field added to a cached struct is exactly the change gob decodes silently to zero, so it is the change the token has to see */
 func TestLayoutTokenOf_MovesWhenAFieldIsAdded(t *testing.T) {
     before := layoutTokenOf([]any{&layoutProbeBefore{}})
     after := layoutTokenOf([]any{&layoutProbeAfter{}})
@@ -52,7 +50,6 @@ func TestLayoutTokenOf_MovesWhenAFieldIsAdded(t *testing.T) {
     }
 }
 
-/* a field of a NESTED struct is decoded by the same rule, so the description looks through pointers and slices into the structs they hold, names each exported field, and leaves the unexported ones — which gob does not encode — out */
 func TestLayoutDescriptionOf_LooksIntoTheStructsAFieldHolds(t *testing.T) {
     description := layoutDescriptionOf(reflectTypeOf(&layoutProbeHolder{}), map[reflectType]bool{})
 
@@ -67,10 +64,9 @@ func TestLayoutDescriptionOf_LooksIntoTheStructsAFieldHolds(t *testing.T) {
     }
 }
 
-/* the list the serializer registers is the list the token is computed over: every entity the application caches is on it, so a type cached but not tokened cannot exist */
 func TestCachedValueList_CarriesEveryCachedEntity(t *testing.T) {
     expected := map[string]bool{}
-    for _, value := range []any{&entity.Product{}, &entity.Category{}, &entity.Currency{}, &entity.User{}} {
+    for _, value := range []any{&entity.Product{}, &entity.Category{}, &entity.Currency{}, &entity.UserProfile{}} {
         expected[reflectTypeOf(value).String()] = false
     }
 
@@ -85,7 +81,6 @@ func TestCachedValueList_CarriesEveryCachedEntity(t *testing.T) {
     }
 }
 
-/* small spellings so the tests above read as sentences */
 type reflectType = reflect.Type
 
 func reflectTypeOf(value any) reflect.Type {
@@ -100,11 +95,33 @@ type layoutProbeMapHolder struct {
     ByCode map[string]layoutProbeBefore
 }
 
-/* a struct held as a map value is decoded by gob by field name exactly like one held directly, so the walk looks through the map to its key and its element, and a field added to the value moves the token */
 func TestLayoutDescriptionOf_LooksThroughAMapToItsElement(t *testing.T) {
     description := layoutDescriptionOf(reflect.TypeOf(layoutProbeMapHolder{}), map[reflect.Type]bool{})
 
     if false == strings.Contains(description, "ByCode map[string]cache.layoutProbeBefore{Id string; Code string}") {
         t.Fatalf("expected the map's element to be described field by field, got %q", description)
+    }
+}
+
+func TestGobSerializer_RefusesAWholeUser(t *testing.T) {
+    if _, serializeErr := NewGobSerializer().Serialize(entity.NewUser("user-1", "user", "digest", []string{entity.RoleUser})); nil == serializeErr {
+        t.Fatal("expected a whole account, digest included, refused by the serializer")
+    }
+
+    if _, serializeErr := NewGobSerializer().Serialize(entity.NewUser("user-1", "user", "digest", []string{entity.RoleUser}).Profile()); nil != serializeErr {
+        t.Fatalf("expected the profile serialized, got %v", serializeErr)
+    }
+}
+
+func TestLayoutToken_CoversTheUserProfile(t *testing.T) {
+    withoutProfile := make([]any, 0, len(cachedValueList))
+    for _, value := range cachedValueList {
+        if _, isProfile := value.(*entity.UserProfile); false == isProfile {
+            withoutProfile = append(withoutProfile, value)
+        }
+    }
+
+    if len(cachedValueList) == len(withoutProfile) || LayoutToken() == layoutTokenOf(withoutProfile) {
+        t.Fatal("expected the layout token to cover the user profile")
     }
 }

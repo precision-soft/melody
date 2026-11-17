@@ -30,7 +30,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
         ),
         cli.NewAuthenticationTokenCommand(instance.jwtSecret),
         cli.NewInternalSignCommand(instance.internalAuthSigner),
-        cli.NewTotpCodeCommand(),
+        cli.NewTotpCodeCommand(os.Stdin),
         cli.NewMailSendCommand(instance.mailer),
         cli.NewDatabaseResetCommand(),
         cli.NewCacheClearCommand(),
