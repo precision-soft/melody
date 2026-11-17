@@ -40,3 +40,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - runner: a sibling failure's cause chain renders each pointer link once, breadth-first, as the framework's chain does, where a chain reaching itself repeated its links up to the bound of eight.
 - runner: a scheduled command's error whose `Unwrap` chain reaches itself no longer holds the dispatch worker that classifies it, nor the command that renders it.
 
+### Documentation
+
+- configuration: the GoDoc of `EntryConfig` states that a nil `Schedule`, like a field left out, runs the entry every minute, where it said the field was required.

@@ -98,3 +98,11 @@ func TestScheduleExpressionMixesProvidedAndWildcards(t *testing.T) {
         t.Fatalf("Expression() = %q, want %q", schedule.Expression(), "0 3 * * *")
     }
 }
+
+func TestScheduleExpressionOnNilReceiverRunsEveryMinute(t *testing.T) {
+    var schedule *Schedule
+
+    if "* * * * *" != schedule.Expression() {
+        t.Fatalf("Expression() = %q, want %q", schedule.Expression(), "* * * * *")
+    }
+}

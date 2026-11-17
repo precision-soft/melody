@@ -9,7 +9,7 @@ func CommandName[T clicontract.Command](factory func() T) string {
     return factory().Name()
 }
 
-/* EntryConfig is one scheduled entry. Schedule is required; User, the log file fields, DestinationFile and Command are the manifest's. A limit outside its rule is refused naming the field and the entry's command name, at NewRunnerCommand and, for Instances, by the generator too. */
+/* EntryConfig is one scheduled entry. Schedule is when the entry runs; nil, like a field left out, runs it every minute. User, the log file fields, DestinationFile and Command are the manifest's. A limit outside its rule is refused naming the field and the entry's command name, at NewRunnerCommand and, for Instances, by the generator too. */
 type EntryConfig struct {
     Schedule        *Schedule
     User            string

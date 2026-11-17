@@ -7,7 +7,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
-/* ForwardedHeadersPolicy decides whether forwarded headers from the direct peer are believed. The doors that accept it copy TrustedProxyList. X-Forwarded-Proto is read by its leftmost entry, so a trusted edge must overwrite the header rather than append to it. */
+/* ForwardedHeadersPolicy decides whether forwarded headers from the direct peer are believed. Both fields are needed: an empty TrustedProxyList trusts nobody, whatever TrustForwardedHeaders says. The doors that accept it copy TrustedProxyList. X-Forwarded-Proto is read by its leftmost entry, so a trusted edge must overwrite the header rather than append to it. */
 type ForwardedHeadersPolicy struct {
     TrustForwardedHeaders bool
     TrustedProxyList      []string

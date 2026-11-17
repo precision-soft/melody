@@ -46,7 +46,7 @@ This package covers the HTTP runtime behavior inside Melody:
 
 - Kernel orchestration:
     - [`Kernel`](../../http/kernel.go) / [`NewKernel`](../../http/kernel.go)
-    - The kernel's configuration via [`KernelConfig`](../../http/kernel.go), `MethodPolicy`, `ForwardedHeadersPolicy`, `SessionCookiePolicy`, `SessionPolicy`, `Middlewares`, `NotFoundHandler` and `UnavailableRetryAfter`; its zero value is the default, and every field has a boot-time door a module installs through, the setter of the same name or `Use` for the middlewares
+    - The kernel's configuration via [`KernelConfig`](../../http/kernel.go), `MethodPolicy`, `ForwardedHeadersPolicy` (see [Forwarded headers and trusted proxies](#forwarded-headers-and-trusted-proxies)), `SessionCookiePolicy`, `SessionPolicy`, `Middlewares`, `NotFoundHandler` and `UnavailableRetryAfter`; its zero value is the default, and every field has a boot-time door a module installs through, the setter of the same name or `Use` for the middlewares
     - The method policy — whether `HEAD` falls back to the `GET` route, whether an unrouted `OPTIONS` is answered with the computed `Allow` header — is installed with [`Kernel.SetMethodPolicy`](../../http/kernel.go), which takes the [`MethodPolicy`](../../http/contract/kernel.go) of the contract and is declared on [`Kernel`](../../http/contract/kernel.go); the zero policy keeps both halves on, which is what the framework has always done. An api that must answer `405` to `OPTIONS` sets `AutomaticOptionsDisabled`, and one that must not serve `HEAD` from the `GET` route sets `HeadFallbackDisabled`.
     - Kernel lifecycle events in [`kernel_event.go`](../../http/kernel_event.go)
 
@@ -446,6 +446,26 @@ const userPath = routes.path("user_show", { id: 42 });                   // /use
 const ordersPath = routes.path("user_show", { id: 42, tab: "orders" }); // /users/42?tab=orders
 ```
 
+## Forwarded headers and trusted proxies
+
+[`ForwardedHeadersPolicy`](../../http/contract/kernel.go) decides whether the kernel believes the forwarded headers a request carries. It is installed through `KernelConfig.ForwardedHeadersPolicy` or [`Kernel.SetForwardedHeadersPolicy`](../../http/kernel.go), a boot-only door refused once the kernel serves; the framework reads no configuration key for it.
+
+- **Default.** The zero value ignores every forwarded header: the scheme is `https` only when the direct connection is TLS, and the client address is the direct peer.
+- **Both fields are needed.** `TrustForwardedHeaders: true` and a non-empty `TrustedProxyList`. An empty list trusts nobody, whatever the flag says.
+- **The list.** An entry is a CIDR prefix (`10.0.0.0/8`) or a bare address (`10.0.0.7`), surrounding whitespace trimmed; an empty entry is skipped, and anything else refuses the boot naming the entry and its position. Trust-all is spelled by hand, `0.0.0.0/0` and `::/0`. The door copies the list.
+- **Who is believed.** Only a request whose direct peer is in the list. `X-Forwarded-Proto` is read by its leftmost entry, lower-cased, so the trusted edge must overwrite the header rather than append to it; a trusted request without the header is `http`.
+- **The client address.** The kernel does not read `X-Forwarded-For`. [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) walks it right to left past the trusted hops and answers the first untrusted address, falling back to the direct peer whenever the chain cannot be trusted; hand it the same policy and pass it as the rate limiter's `ClientIpResolver`.
+- **What reads the scheme.** The session cookie's `Secure` attribute under `SessionCookieSecureFromScheme` (see [`Secure`](#secure); `SessionCookieSecureAlways` is the setting for a TLS-terminating proxy that is not trusted for the header), the sign-in door's cross-site check in [SECURITY.md](SECURITY.md), and [`RequestAttributeScheme`](../../http/request.go), which the kernel publishes on the request.
+
+```go
+kernelInstance.HttpKernel().SetForwardedHeadersPolicy(httpcontract.ForwardedHeadersPolicy{
+    TrustForwardedHeaders: true,
+    TrustedProxyList:      []string{"10.0.0.0/8", "fd00::/8"},
+})
+```
+
+The example reads its list from its own `APP_TRUSTED_PROXY_LIST` and installs it in [`config/trusted_proxy.go`](../../.example/config/trusted_proxy.go) and [`config/http.go`](../../.example/config/http.go).
+
 ## Session cookie
 
 A session write the storage could not take is an infrastructure failure and answers an empty **503** with the kernel's `Retry-After` rather than the response the handler produced, unless the handler already committed the headers: on a streamed response whose request names the session the save still runs, and its failure is logged while the client keeps the status already sent. The handler wrote to the session and returned success on the assumption the write would land — a login answering `302 /dashboard` with the identity never stored — and the client cannot otherwise tell the difference from a line in the server log. The session cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. The **delete** path is deliberately different: a failed logout still expires the browser cookie and serves the handler's response, because clearing a cookie can only end a session and never resurrect one. A save refused because another request deleted the session is a third case — the session ending, not a failure — and it expires the cookie
@@ -615,7 +635,7 @@ Where the list itself comes from is the application's business — a constant as
 - [`type Kernel`](../../http/contract/kernel.go)
 - [`type SessionCookiePolicy`](../../http/contract/kernel.go)
 - [`type SessionCookieSecurePolicy`](../../http/contract/kernel.go) — `SessionCookieSecureFromScheme` (zero value), `SessionCookieSecureAlways`, `SessionCookieSecureNever`
-- [`type ForwardedHeadersPolicy`](../../http/contract/kernel.go)
+- [`type ForwardedHeadersPolicy`](../../http/contract/kernel.go) — `TrustForwardedHeaders` and `TrustedProxyList`, both needed; see [Forwarded headers and trusted proxies](#forwarded-headers-and-trusted-proxies)
 - [`type MethodPolicy`](../../http/contract/kernel.go) — the policy the section above calls "the `MethodPolicy` of the contract", declared beside the two policies listed here
 - [`type SessionPolicy`](../../http/contract/kernel.go) — `EmptyOnOutage`, the opt-in empty session for a session storage outage, installed through `KernelConfig.SessionPolicy` or `Kernel.SetSessionPolicy`
 - [`type Middleware`](../../http/contract/middleware.go)

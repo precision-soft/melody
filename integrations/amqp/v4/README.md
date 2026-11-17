@@ -230,16 +230,17 @@ stops reading its socket would otherwise hold the write — and with it every la
 ```go
 hub := melodyhttp.NewServerSentEventHub(melodyhttp.ServerSentEventHubConfig{})
 backplane := amqp.NewServerSentEventBackplane(amqp.ServerSentEventBackplaneConfig{
-    Connection: connection,
-    Dialer:     provider.Dialer(dsn),
-    Hub:        hub,
+    Connection:  connection,
+    Dialer:      provider.Dialer(dsn),
+    Hub:         hub,
+    CallTimeout: bound.Of(2 * time.Second),
 })
 defer func() {
     _ = backplane.CloseWithContext(ctx)
 }()
 ```
 
-`NewServerSentEventBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically; a limit outside its rule panics naming the field before the backplane is installed on the hub, so a refused config leaves the hub without one. Its `Reconnect` and `CloseTimeout` are inherited from the provider as a transport's are, and a nil or typed-nil `Logger` records nothing. `CloseWithContext` tears the subscription down and closes only a connection the backplane itself dialed (never the one you passed in). The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
+`NewServerSentEventBackplane` calls `hub.SetBackplane` itself, so after construction `hub.Broadcast(...)` replicates automatically; a limit outside its rule panics naming the field before the backplane is installed on the hub, so a refused config leaves the hub without one. Its `Reconnect` and `CloseTimeout` are inherited from the provider as a transport's are; `ServerSentEventBackplaneConfig.CloseTimeout` bounds each stretch of `CloseWithContext` that cannot observe its signal, the provider's when built through one and 30s otherwise, at least 1ms, unlimited refused. A nil or typed-nil `Logger` records nothing. `CloseWithContext` tears the subscription down and closes only a connection the backplane itself dialed (never the one you passed in). The same hub backs the WebSocket integration, so both transports fan out cluster-wide.
 
 ## Footguns & caveats
 
