@@ -69,7 +69,7 @@ func TestSession_Clear_SetsClearedFlagAndClearsValues(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set("a", "b")
 
     sessionInstance.Clear()
@@ -91,7 +91,7 @@ func TestSession_Delete_RemovesKey(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set("a", "b")
 
     sessionInstance.Delete("a")
@@ -105,7 +105,7 @@ func TestSession_String_ReturnsEmptyWhenMissing(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
 
     if "" != sessionInstance.String("missing") {
         t.Fatalf("expected empty string")
@@ -118,7 +118,7 @@ func TestSession_String_ReturnsEmptyForAValueThatIsNotAString(t *testing.T) {
 
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set("count", 12)
     sessionInstance.Set("name", "melody")
 
@@ -137,7 +137,7 @@ func TestSession_Clear_IsNotUndoneByALaterSet(t *testing.T) {
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    clearedSession, ok := mustSession(manager.NewSession()).(*Session)
+    clearedSession, ok := mustSession(manager.NewSession(context.Background())).(*Session)
     if false == ok {
         t.Fatalf("expected a session")
     }
@@ -162,10 +162,10 @@ func TestSession_ClearedSessionIsDeletedRatherThanSavedAfterALaterSet(t *testing
     storage := NewInMemoryStorage(InMemoryStorageConfig{})
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(30*time.Minute)})
 
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set("userId", "u-1")
 
-    if nil != manager.SaveSession(sessionInstance) {
+    if nil != manager.SaveSession(context.Background(), sessionInstance) {
         t.Fatalf("unexpected error seeding the session")
     }
 
@@ -174,11 +174,11 @@ func TestSession_ClearedSessionIsDeletedRatherThanSavedAfterALaterSet(t *testing
     sessionInstance.Clear()
     sessionInstance.Set("flash", "you have been logged out")
 
-    if nil != manager.SaveSession(sessionInstance) {
+    if nil != manager.SaveSession(context.Background(), sessionInstance) {
         t.Fatalf("unexpected error saving the cleared session")
     }
 
-    if _, exists, _ := storage.Load(sessionId); true == exists {
+    if _, exists, _ := storage.Load(context.Background(), sessionId); true == exists {
         t.Fatalf("expected the cleared session to be deleted from storage rather than written back under the same id")
     }
 }
@@ -292,12 +292,6 @@ func TestSession_SnapshotPairsTheFlagsWithTheValues(t *testing.T) {
     }
 }
 
-/* Set has to take its own copy at the depth the readers copy at. Get, All and Snapshot all hand out a deep
-copy so that a caller mutating what it received cannot change the live session behind Set's back; Set storing
-the caller's map by reference opens the same hole from the other side, and worse — the session then holds
-memory it does not own, so a caller that keeps writing to the map it handed over races the copy the response
-path makes. A concurrent map read and write is a fatal error in Go: it kills the process, and no recover
-reaches it. This runs under -race, which is the only lane that can observe it. */
 func TestSession_SetDoesNotKeepTheCallersMapByReference(t *testing.T) {
     sessionInstance := &Session{id: "0123456789abcdef0123456789abcdef", values: map[string]any{}}
 

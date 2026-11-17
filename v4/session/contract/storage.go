@@ -2,16 +2,17 @@ package contract
 
 import (
     "context"
-    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
-/* Storage is where sessions are kept, and an implementation must be safe for concurrent use: the manager serialises Save and Delete per session id only, and Load runs under no manager lock. The manager's refusal to re-save a deleted session is per process, so a storage shared between instances receives a Save a peer's tombstone would have refused. */
+/* Storage keeps sessions and is safe for concurrent use: the manager serialises Save and Delete per id only, and Load runs unlocked. Each operation refuses, in order, a nil context (RefuseNilContext), a closed storage, a bad id or ttl (ResolveTtl), then a done context, before the store is touched. */
 type Storage interface {
-    Load(sessionId string) (map[string]any, bool, error)
+    Load(ctx context.Context, sessionId string) (map[string]any, bool, error)
 
-    Save(sessionId string, data map[string]any, ttl time.Duration) error
+    Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error
 
-    Delete(sessionId string) error
+    Delete(ctx context.Context, sessionId string) error
 
     CloseWithContext(closeContext context.Context) error
 }

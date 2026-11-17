@@ -42,7 +42,7 @@ func (instance *Application) RegisterService(
     instance.MustRegister(serviceName, provider, options)
 }
 
-/* Register makes the application a container registrar, so a module may use container.MustRegisterType and the generated wiring as well as RegisterService. A duplicate is absorbed into the aggregated boot report rather than returned. */
+/* Register makes the application a container registrar; a duplicate joins the aggregated boot report rather than being returned. */
 func (instance *Application) Register(
     serviceName string,
     provider any,
@@ -57,7 +57,7 @@ func (instance *Application) Register(
         return nil
     }
 
-    /* duplicates are recorded for the aggregated boot report, the first registration winning until the report ends the boot; any other registration failure stays fail-fast */
+    /* a duplicate joins the aggregated boot report; any other registration failure stays fail-fast */
     if true == errors.Is(registerErr, container.ErrServiceIdAlreadyRegistered) {
         instance.recordBootCollision(bootCollisionKindService, serviceName)
         return nil
@@ -68,7 +68,7 @@ func (instance *Application) Register(
         return nil
     }
 
-    /* the name or type is already claimed at the scoped lifetime, the same wiring mistake from the other side, so it joins the same report */
+    /* a name claimed at the scoped lifetime joins the same report */
     if true == errors.Is(registerErr, container.ErrScopedServiceIdAlreadyRegistered) {
         instance.recordBootCollision(bootCollisionKindScopedService, serviceName)
         return nil
@@ -93,7 +93,7 @@ func (instance *Application) MustRegister(
     }
 }
 
-/* RegisterScopedService declares a service the application's scopes own: one instance per scope, one http request or one command run, closed with it. It mirrors RegisterService in everything but lifetime; a name claimed at both lifetimes joins the aggregated boot report. In console the run's scope spans the whole command, so a long-running command that processes many units creates a child runtime per unit, as the cron runner does: a scope from Container().NewScope(), a runtime.New over it, and a Close whose error joins the unit's own. */
+/* RegisterScopedService declares a service the application's scopes own, one instance per http request or command run, closed with it. */
 func (instance *Application) RegisterScopedService(
     serviceName string,
     provider any,
@@ -102,7 +102,7 @@ func (instance *Application) RegisterScopedService(
     instance.MustRegisterScoped(serviceName, provider, options)
 }
 
-/* RegisterScoped declares a service the application's scopes own: one instance per scope, one http request or one command run, closed with it. It mirrors Register in everything but lifetime; a name claimed at both lifetimes joins the aggregated boot report. */
+/* RegisterScoped declares a service the application's scopes own, one instance per http request or command run, closed with it. */
 func (instance *Application) RegisterScoped(
     serviceName string,
     provider any,
@@ -157,7 +157,6 @@ func (instance *Application) bootContainer() {
 
     serviceContainer := kernelInstance.ServiceContainer()
 
-    /* gated like the cache, session and firewall registrations below, so the application or a module can substitute the logger */
     if false == serviceContainer.Has(logging.ServiceLogger) {
         instance.RegisterService(
             logging.ServiceLogger,
@@ -212,7 +211,7 @@ func (instance *Application) bootContainer() {
         )
     }
 
-    /* the router, the dispatcher, the clock, the config, the route registry and the process role are not gated: the kernel owns them and reads them directly, so a substitute would be ignored. The gates stand where a replacement built outside is a whole answer. */
+    /* not gated: the kernel reads these directly, so a substitute would be ignored */
 
     instance.RegisterService(
         http.ServiceRouter,
@@ -230,7 +229,6 @@ func (instance *Application) bootContainer() {
         container.RegisterOptions{},
     )
 
-    /* gated so a module can substitute the manager content negotiation reads, to add a media type; NewSerializerManager takes the map, so a replacement built outside is a whole answer */
     if false == serviceContainer.Has(serializer.ServiceSerializerManager) {
         instance.RegisterService(
             serializer.ServiceSerializerManager,
@@ -246,7 +244,6 @@ func (instance *Application) bootContainer() {
         )
     }
 
-    /* the default serializer SerializerFromRuntime and SerializerMustFromRuntime answer; content negotiation runs through the manager above, so replacing it changes what those two resolvers answer, not what a request is served */
     if false == serviceContainer.Has(serializer.ServiceSerializer) {
         instance.RegisterService(
             serializer.ServiceSerializer,
@@ -281,7 +278,7 @@ func (instance *Application) bootContainer() {
 
     instance.registerSecurity()
 
-    /* the logger is resolved once, eagerly, whoever registered it, so a failing provider fails the boot step that owns it instead of the first run that resolves it; the container memoizes the built logger, so the log file is opened once */
+    /* resolved eagerly so a failing provider fails the boot step that owns it */
     _, loggerProbeErr := logging.LoggerFromContainer(instance.ctx, serviceContainer)
     if nil != loggerProbeErr {
         exception.Panic(
@@ -294,7 +291,7 @@ func (instance *Application) bootContainer() {
     }
 }
 
-/* consoleLogWriter is where the container logger writes when no MELODY_LOG_PATH is configured: standard output for the http process, standard error for a command, whose standard output carries what the command prints, a document a caller redirects to a file included */
+/* a command logs on standard error, since its standard output carries what it prints */
 func consoleLogWriter(mode string) io.Writer {
     if config.ModeCli == mode {
         return os.Stderr
@@ -303,7 +300,7 @@ func consoleLogWriter(mode string) io.Writer {
     return os.Stdout
 }
 
-/* newContainerLogger builds the logger the container serves. The module configuration is read before the descriptor is opened, because it panics on a configuration of the wrong type and a file opened before it would have no owner. The container arms the file journal for reopening on SIGHUP in every process, a console worker included, so a postrotate SIGHUP rotates its journal too, at the price that SIGHUP does not terminate a command whose terminal hung up; the exit-path logger belongs to a dying process and is not armed. */
+/* the configuration is read before the file is opened, since it panics and an opened file would have no owner */
 func newContainerLogger(
     logPath string,
     logLevel loggingcontract.Level,
@@ -317,7 +314,6 @@ func newContainerLogger(
     writer := consoleWriter
 
     if "" != logPath {
-        /* the parent directory is created as ensureRuntimeDirectories creates the logs directory, since MELODY_LOG_PATH may point elsewhere */
         mkdirErr := os.MkdirAll(filepath.Dir(logPath), 0o755)
         if nil != mkdirErr {
             exception.Panic(
@@ -348,7 +344,7 @@ func newContainerLogger(
         if true == armRotationReopen {
             armErr := fileWriter.ArmReopenOnSignal([]os.Signal{syscall.SIGHUP})
             if nil != armErr {
-                /* the descriptor is closed before the panic: the container stores only what a provider returns and does not memoize a creation failure, so a file left open here would have no owner and each later resolution would open another */
+                /* closed before the panic: the container does not memoize a creation failure, so each resolution would open another file */
                 _ = fileWriter.Close()
 
                 exception.Panic(
@@ -427,7 +423,6 @@ func (instance *Application) registerHttpSession() {
     serviceContainer := instance.kernel.ServiceContainer()
 
     if false == serviceContainer.Has(session.ServiceSessionStorage) {
-        /* nothing outside this process can expire the fallback storage, so checkDefaultSessionStorageBound reads its bound at the boot */
         instance.defaultInMemorySessionStorage = true
 
         instance.RegisterService(
@@ -452,12 +447,13 @@ func (instance *Application) registerHttpSession() {
                 storage := session.SessionStorageMustFromResolver(resolutionContext, resolver)
                 resolvedConfiguration := config.ConfigMustFromResolver(resolutionContext, resolver)
 
-                /* the manager resolves the clock the storage above resolves: the tombstone record and the entry expiry are two halves of one lifetime */
+                /* the clock the storage resolves: the tombstone record and the entry expiry are two halves of one lifetime */
                 return session.NewManager(
                     storage,
                     session.ManagerConfig{
                         Ttl:                resolvedConfiguration.Http().SessionTtl().Limit(),
                         TombstoneRetention: resolvedConfiguration.Http().SessionTombstoneRetention().Limit(),
+                        PersistenceTimeout: resolvedConfiguration.Http().SessionPersistenceTimeout().Limit(),
                         Clock:              clock.ClockMustFromResolver(resolutionContext, resolver),
                     },
                 ), nil
@@ -467,7 +463,7 @@ func (instance *Application) registerHttpSession() {
     }
 }
 
-/* registerSecurity wires what a compiled security configuration means for this process. The firewall manager is registered in every mode, since it is a plain view of the configuration; the two kernel listeners are the enforcement and stay http-only. */
+/* the firewall manager is registered in every mode; the two kernel listeners are the enforcement and stay http-only */
 func (instance *Application) registerSecurity() {
     if nil == instance.securityConfiguration {
         return
@@ -498,7 +494,7 @@ func (instance *Application) registerSecurity() {
 
 }
 
-/* verifyDeclaredTeardownDependencies refuses the boot when a declared teardown dependency does not name one container service — nothing, a scoped service or a type several services stand for — once every module and the framework registered and declared theirs: the waves would close the two services the declaration meant to order at once, and a wiring mistake is answered before Run rather than at the teardown. */
+/* verifyDeclaredTeardownDependencies refuses the boot when a declared teardown dependency names no single container service. */
 func (instance *Application) verifyDeclaredTeardownDependencies() {
     verifier, verifies := instance.kernel.ServiceContainer().(interface {
         VerifyDeclaredTeardownDependencies() error
@@ -512,7 +508,6 @@ func (instance *Application) verifyDeclaredTeardownDependencies() {
     }
 }
 
-/* runs once every module, cli command and http route is in, the last moment a boot-time handle can be built */
 func (instance *Application) verifyLazyHandles() {
     verifier, verifies := instance.kernel.ServiceContainer().(interface {
         VerifyLazyNames() error
@@ -526,7 +521,7 @@ func (instance *Application) verifyLazyHandles() {
     }
 }
 
-/* buildMessageBusTransportsCloser builds the closer that joins the registered message bus transports to the container's ordered teardown, for every process that never resolves the transports map itself, an http process routing through transport values among them, and declares it a teardown dependency of the buses the application registered: a bus routes through transport values its module captured, which no resolution records, so the edge is declared. Every service that publishes through a bus resolves it and closes before it, the bus before the transports, under the waves and the sequential teardown alike. A failure to order a bus or to build the closer fails the boot naming the service, since either leaves the transports outside the teardown. */
+/* a bus routes through transport values its module captured, which no resolution records, so the teardown edge is declared */
 func (instance *Application) buildMessageBusTransportsCloser() {
     serviceContainer := instance.kernel.ServiceContainer()
 

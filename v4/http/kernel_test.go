@@ -193,7 +193,6 @@ func TestKernel_ClosesDiscardedResponseBodyWhenResponseListenerSwapsResponse(t *
 
     handler.ServeHTTP(recorder, request)
 
-    /* an EventKernelResponse listener swapped the response, so the original file-backed body must be closed rather than leaked */
     if 1 != body.closeCount {
         t.Fatalf("expected the discarded original response body to be closed exactly once after a response listener swapped the response, got %d", body.closeCount)
     }
@@ -369,7 +368,6 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
 
     request := httptest.NewRequest(nethttp.MethodGet, "/save", nil)
 
-    /* the write fails after the headers were committed, so the first writeResponse persists the session and then panics, and the panic-recovery path re-enters writeResponse. */
     handler.ServeHTTP(&writeFailingResponseWriter{}, request)
 
     if 1 != storage.saveCount {
@@ -377,7 +375,6 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
     }
 }
 
-/* the early guard has to sit between the terminate guard and the scope close, which the status read at close time proves */
 func TestKernel_ServeHttpClosesScopeWhenRequestLoggerSetupFails(t *testing.T) {
     recorder := httptest.NewRecorder()
 
@@ -568,7 +565,6 @@ func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testi
     }
 }
 
-/* a required listener sits behind the one that stops and answers, so the kernel must drop that response for the error page; it tells this case from the neighbouring one by the type of the dispatch error, not by whether a response exists */
 func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -598,7 +594,6 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
 
     registrar.MarkListenerRequired(requiredRegistration)
 
-    /* the cache-shaped listener: it answers the request from its own store and stops, at a priority ahead of the required one */
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -631,7 +626,6 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
     }
 }
 
-/* the may-skip twin of the test above: the listener fails after producing a response, with a required listener behind it */
 func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -694,7 +688,6 @@ func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBe
     }
 }
 
-/* the kernel.controller twin of the test above, for the same reason and with the same measurement behind it */
 func TestKernel_KernelControllerStoppingListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -795,15 +788,15 @@ func TestKernel_ResponseListenerErrorDoesNotDropResponse(t *testing.T) {
 
 type failingSessionStorage struct{}
 
-func (instance *failingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+func (instance *failingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
     return nil, false, nil
 }
 
-func (instance *failingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+func (instance *failingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
     return exception.NewError("session backend down", nil, nil)
 }
 
-func (instance *failingSessionStorage) Delete(sessionId string) error {
+func (instance *failingSessionStorage) Delete(ctx context.Context, sessionId string) error {
     return exception.NewError("session backend down", nil, nil)
 }
 
@@ -811,7 +804,7 @@ func (instance *failingSessionStorage) CloseWithContext(closeContext context.Con
     return nil
 }
 
-func TestKernel_SessionSaveFailureAnswersFiveHundred(t *testing.T) {
+func TestKernel_SessionSaveFailureAnswersServiceUnavailable(t *testing.T) {
     router := NewRouter()
     router.Handle(
         nethttp.MethodGet,
@@ -836,8 +829,8 @@ func TestKernel_SessionSaveFailureAnswersFiveHundred(t *testing.T) {
 
     handler.ServeHTTP(recorder, request)
 
-    if nethttp.StatusInternalServerError != recorder.Code {
-        t.Fatalf("expected a session-store outage to answer 500 rather than the handler's success, got %d", recorder.Code)
+    if nethttp.StatusServiceUnavailable != recorder.Code || "5" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected a session-store outage to answer 503 with Retry-After rather than the handler's success, got %d and %q", recorder.Code, recorder.Header().Get("Retry-After"))
     }
 
     if "ok" == recorder.Body.String() {
@@ -849,7 +842,35 @@ func TestKernel_SessionSaveFailureAnswersFiveHundred(t *testing.T) {
     }
 }
 
-func TestKernel_SessionSaveFailureOnPanicRecoveryPathStillDelivers500(t *testing.T) {
+func TestKernel_SessionSaveFailureAnswersTheKernelsRetryAfter(t *testing.T) {
+    router := NewRouter()
+    router.Handle(
+        nethttp.MethodGet,
+        "/session-write",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            sessionInstance, sessionReadErr := RequestSession(request)
+            if nil != sessionReadErr {
+                t.Fatalf("expected the session request attribute to be present")
+            }
+            sessionInstance.Set("key", "value")
+
+            return TextResponse(nethttp.StatusOK, "ok"), nil
+        },
+    )
+
+    serviceContainer := newHttpTestContainerWithSessionStorage(&failingSessionStorage{})
+
+    handler := NewKernel(router, KernelConfig{UnavailableRetryAfter: bound.Of(30 * time.Second)}).ServeHttp(serviceContainer)
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/session-write", nil))
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "30" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected the failed save answered 503 with the kernel's Retry-After, got %d and %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+}
+
+func TestKernel_SessionSaveFailureOnPanicRecoveryPathStillDeliversAResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
         nethttp.MethodGet,
@@ -871,8 +892,8 @@ func TestKernel_SessionSaveFailureOnPanicRecoveryPathStillDelivers500(t *testing
 
     handler.ServeHTTP(recorder, request)
 
-    if nethttp.StatusInternalServerError != recorder.Code {
-        t.Fatalf("expected the recovered 500 to be delivered despite the session-store outage, got %d", recorder.Code)
+    if nethttp.StatusServiceUnavailable != recorder.Code {
+        t.Fatalf("expected the session-store outage to answer the recovered request 503, got %d", recorder.Code)
     }
 }
 
@@ -933,13 +954,11 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
         t.Fatalf("expected the response despite the dispatch error, got %d", recorder.Code)
     }
 
-    /* the dispatcher already logs "event listener error" once and marks the returned wrapper as logged; the handler-response finalization block must respect that mark (logEventDispatchError) instead of re-logging it — inline logging here would produce two error lines for one failure */
     if 1 != atomic.LoadInt64(&countingLogger.errorCount) {
         t.Fatalf("expected the dispatch error to be logged exactly once on the handler-response path, got %d error logs", atomic.LoadInt64(&countingLogger.errorCount))
     }
 }
 
-/* closeTrackingReader stands in for a file-backed response body (FileResponse / static ServeReader): the only thing that matters here is whether the kernel closed the descriptor. */
 type closeTrackingReader struct {
     closed atomic.Bool
 }
@@ -953,16 +972,15 @@ func (instance *closeTrackingReader) Close() error {
     return nil
 }
 
-/* panicOnceSessionStorage blows up on its first Save, the way a database driver does on a lost connection. writeResponse persists the session before WriteToHttpResponseWriter registers the body's deferred Close, so that panic unwinds with the response's descriptor still open. It succeeds afterwards so the kernel's recovery path can finish and write the error response. */
 type panicOnceSessionStorage struct {
     panicked atomic.Bool
 }
 
-func (instance *panicOnceSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+func (instance *panicOnceSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
     return nil, false, nil
 }
 
-func (instance *panicOnceSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+func (instance *panicOnceSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
     if true == instance.panicked.CompareAndSwap(false, true) {
         panic("session backend exploded")
     }
@@ -970,7 +988,7 @@ func (instance *panicOnceSessionStorage) Save(sessionId string, data map[string]
     return nil
 }
 
-func (instance *panicOnceSessionStorage) Delete(sessionId string) error {
+func (instance *panicOnceSessionStorage) Delete(ctx context.Context, sessionId string) error {
     return nil
 }
 
@@ -978,7 +996,6 @@ func (instance *panicOnceSessionStorage) CloseWithContext(closeContext context.C
     return nil
 }
 
-/* writeResponse persists the session BEFORE WriteToHttpResponseWriter registers the body's deferred Close, so a panic in the session backend unwinds with the file-backed response assigned to finalResponse and its descriptor still open. The recover handler replaces finalResponse with an error response; unless it closes the discarded one, every such request leaks a file descriptor. */
 func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) {
     bodyReader := &closeTrackingReader{}
     storage := &panicOnceSessionStorage{}
@@ -993,7 +1010,6 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
                 t.Fatal("expected the request to carry a session")
             }
 
-            /* dirty the session so writeResponse persists it — and panics doing so */
             sessionInstance.Set("key", "value")
 
             response := &Response{}
@@ -1019,13 +1035,6 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
     }
 }
 
-/* the dispatcher contains a listener's panic per listener and answers it as an error, with ONE exception:
-   an exit error, which it re-raises by contract so it reaches the edge of the process. On the recovery
-   path that publish is where the response built BEFORE the panic is decided, so a listener leaving by
-   that one route took the decision with it — nothing was written, nothing below it ran, and the
-   file-backed response lost its only reference with the descriptor still open. One leak per request that
-   reaches it. The close is the frame's now, not the step's, so the route the listener leaves by cannot
-   change it. */
 func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit(t *testing.T) {
     original := &closeRecordingReadCloser{}
     storage := &panicOnceSessionStorage{}
@@ -1040,7 +1049,6 @@ func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit
                 t.Fatal("expected the request to carry a session")
             }
 
-            /* dirty the session so writeResponse persists it — and panics doing so, ahead of the body write */
             sessionInstance.Set("key", "value")
 
             return &Response{
@@ -1053,8 +1061,6 @@ func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit
 
     serviceContainer := newHttpTestContainerWithSessionStorage(storage)
 
-    /* the first publish is the ordinary one, before the write; the exit has to fall on the SECOND, which
-       is the recovery's re-publish — the one that decides what happens to the response the panic left behind */
     publishes := 0
     dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
@@ -1085,11 +1091,6 @@ func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit
         t.Fatalf("expected the recovery to re-publish, so the exit falls on that publish, got %d", publishes)
     }
 
-    /* the exit does not reach the edge: the kernel's LAST guard — registered under the scope close, for a
-       panic raised inside the main guard after it has already recovered once — takes it and files its own
-       degraded record, which is why the recorder still carries a body. What the exit does take with it is
-       everything after the publish inside the write step, which is where the discarded response was
-       decided; the count below is the whole of what this pin is about. */
     if 0 == recorder.Body.Len() {
         t.Fatal("expected the kernel's last guard to have answered; the request produced no response at all")
     }
@@ -1099,7 +1100,6 @@ func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit
     }
 }
 
-/* the response a kernel.response listener swaps in is the one ServeHttp names while the write runs: a session backend that panics inside the write — ahead of the body write's own deferred Close — unwinds into the recovery with the swapped-in file-backed response holding its descriptor, and the recovery closes what ServeHttp names. Named by value, returned only when the write returned, the recovery closed the discarded original a second time and the swapped-in one never. */
 func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedOneTwice(t *testing.T) {
     original := &closeRecordingReadCloser{}
     swapped := &closeRecordingReadCloser{}
@@ -1115,7 +1115,6 @@ func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedO
                 t.Fatal("expected the request to carry a session")
             }
 
-            /* dirty the session so writeResponse persists it — and panics doing so, ahead of the body write */
             sessionInstance.Set("key", "value")
 
             return &Response{
@@ -1128,7 +1127,6 @@ func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedO
 
     serviceContainer := newHttpTestContainerWithSessionStorage(storage)
 
-    /* the listener swaps once: the recovery publishes its error response on the same event, and a second swap would hand the closed body back to the write */
     swappedOnce := false
     dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
     dispatcher.AddListener(
@@ -1168,7 +1166,6 @@ func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedO
     }
 }
 
-/* the sister of the pin above, on the listener the pin above steps round: one that answers with the response it already swapped in — a listener holding it in a per-request field, one memoising its own decoration — is handed that response back on the recovery's re-publish of the same event. Closing the panicked response BEFORE that publish closed the very body the write then read, on the response actually served; the close waits until the publish has said what is being written. */
 func TestKernel_PanicRecoveryDoesNotCloseAResponseTheRepublishHandsBack(t *testing.T) {
     original := &closeRecordingReadCloser{}
     swapped := &closeRecordingReadCloser{}
@@ -1236,13 +1233,11 @@ func TestKernel_PanicRecoveryDoesNotCloseAResponseTheRepublishHandsBack(t *testi
         t.Fatalf("expected the discarded original body to be closed exactly once, got %d", original.closeCount)
     }
 
-    /* once, by the write that served it. Closed ahead of the re-publish it was closed twice — and the first of those closes came BEFORE the write read it. */
     if 1 != swapped.closeCount {
         t.Fatalf("expected the body the re-publish handed back to be closed once, by the write that served it, got %d", swapped.closeCount)
     }
 }
 
-/* net/http documents this sentinel as "abort the connection and suppress the log", and a reverse proxy panics with it on every client disconnect mid-stream; converted into an error, an aborted upload would be answered with a 500 and an error line */
 func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.T) {
     router := NewRouter()
 
@@ -1267,7 +1262,6 @@ func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.
     }
 }
 
-/* the kernel resolves the scheme through the configured forwarded-headers policy and publishes it on the request; a listener has no access to that policy, so without the attribute the access log reported http for every request a trusted proxy terminated as https */
 func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
     router := NewRouter()
 
@@ -1320,15 +1314,15 @@ func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
 
 type loadFailingSessionStorage struct{}
 
-func (instance *loadFailingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+func (instance *loadFailingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
     return nil, false, exception.NewError("session backend down", nil, nil)
 }
 
-func (instance *loadFailingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+func (instance *loadFailingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
     return nil
 }
 
-func (instance *loadFailingSessionStorage) Delete(sessionId string) error {
+func (instance *loadFailingSessionStorage) Delete(ctx context.Context, sessionId string) error {
     return nil
 }
 
@@ -1336,7 +1330,6 @@ func (instance *loadFailingSessionStorage) CloseWithContext(closeContext context
     return nil
 }
 
-/* erroringSessionManager answers the errors it is given from its two load doors and hands every other call to the manager it wraps */
 type erroringSessionManager struct {
     inner              sessioncontract.Manager
     sessionErr         error
@@ -1345,34 +1338,38 @@ type erroringSessionManager struct {
     newSessionCalls    int
 }
 
-func (instance *erroringSessionManager) Session(sessionId string) (sessioncontract.Session, error) {
+func (instance *erroringSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
     if nil != instance.sessionErr {
         return instance.sessionBesideError, instance.sessionErr
     }
 
-    return instance.inner.Session(sessionId)
+    return instance.inner.Session(ctx, sessionId)
 }
 
-func (instance *erroringSessionManager) NewSession() (sessioncontract.Session, error) {
+func (instance *erroringSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
     instance.newSessionCalls = instance.newSessionCalls + 1
 
     if nil != instance.newSessionErr {
         return nil, instance.newSessionErr
     }
 
-    return instance.inner.NewSession()
+    return instance.inner.NewSession(ctx)
 }
 
-func (instance *erroringSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
-    return instance.inner.RegenerateSession(sessionInstance)
+func (instance *erroringSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    return instance.inner.RegenerateSession(ctx, sessionInstance)
 }
 
-func (instance *erroringSessionManager) SaveSession(sessionInstance sessioncontract.Session) error {
-    return instance.inner.SaveSession(sessionInstance)
+func (instance *erroringSessionManager) SaveSession(ctx context.Context, sessionInstance sessioncontract.Session) error {
+    return instance.inner.SaveSession(ctx, sessionInstance)
 }
 
-func (instance *erroringSessionManager) DeleteSession(sessionId string) error {
-    return instance.inner.DeleteSession(sessionId)
+func (instance *erroringSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
+    return instance.inner.DeleteSession(ctx, sessionId)
+}
+
+func (instance *erroringSessionManager) PersistenceTimeout() bound.Duration {
+    return bound.Duration{}
 }
 
 func (instance *erroringSessionManager) CloseWithContext(closeContext context.Context) error {
@@ -1584,23 +1581,22 @@ func TestKernel_ASessionStorageOutageReachesTheExceptionListenersRecordedOnce(t 
     }
 }
 
-/* typedNilErrorSessionManager answers its manager's sessions beside a typed-nil error, which a bare comparison takes for an error */
 type typedNilErrorSessionManager struct {
     sessioncontract.Manager
 }
 
-func (instance *typedNilErrorSessionManager) Session(sessionId string) (sessioncontract.Session, error) {
+func (instance *typedNilErrorSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
     var typedNil *exception.Error
 
-    sessionInstance, _ := instance.Manager.Session(sessionId)
+    sessionInstance, _ := instance.Manager.Session(ctx, sessionId)
 
     return sessionInstance, typedNil
 }
 
-func (instance *typedNilErrorSessionManager) NewSession() (sessioncontract.Session, error) {
+func (instance *typedNilErrorSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
     var typedNil *exception.Error
 
-    sessionInstance, _ := instance.Manager.NewSession()
+    sessionInstance, _ := instance.Manager.NewSession(ctx)
 
     return sessionInstance, typedNil
 }
@@ -1622,7 +1618,7 @@ func TestKernel_ATypedNilErrorBesideASessionIsNoError(t *testing.T) {
 func TestKernel_ASessionAnsweredBesideALoadErrorIsNotSavedWhenTheResponsePathPanics(t *testing.T) {
     innerManager := session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)})
 
-    halfMade := mustSession(innerManager.NewSession())
+    halfMade := mustSession(innerManager.NewSession(context.Background()))
     halfMade.Set("user", "alice")
 
     sessionManager := &erroringSessionManager{
@@ -1650,7 +1646,6 @@ func TestKernel_ASessionAnsweredBesideALoadErrorIsNotSavedWhenTheResponsePathPan
             if true == responsePanics {
                 responsePanics = false
 
-                /* an exit error is the panic the dispatcher re-raises, so it reaches the kernel's recovery with the session it holds */
                 panic(exception.NewExitError(1, exception.NewError("response listener exited", nil, nil)))
             }
 
@@ -1683,7 +1678,7 @@ func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) 
         nethttp.MethodGet,
         "/republish",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            replacement := mustSession(sessionManager.NewSession())
+            replacement := mustSession(sessionManager.NewSession(context.Background()))
             replacement.Set("userId", "u-1")
 
             _ = SetRequestSession(request, replacement)
@@ -1729,14 +1724,14 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
 
             sessionInstance.Set("userId", "u-1")
 
-            saveErr := sessionManager.SaveSession(sessionInstance)
+            saveErr := sessionManager.SaveSession(context.Background(), sessionInstance)
             if nil != saveErr {
                 return nil, saveErr
             }
 
             preRotationId = sessionInstance.Id()
 
-            rotated, rotateErr := sessionManager.RegenerateSession(sessionInstance)
+            rotated, rotateErr := sessionManager.RegenerateSession(context.Background(), sessionInstance)
             if nil != rotateErr {
                 return nil, rotateErr
             }
@@ -1772,11 +1767,11 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
         t.Fatalf("expected a live session cookie for the republished rotation, got MaxAge %d", cookies[0].MaxAge)
     }
 
-    if nil != mustSession(sessionManager.Session(preRotationId)) {
+    if nil != mustSession(sessionManager.Session(context.Background(), preRotationId)) {
         t.Fatalf("expected the pre-rotation session to be gone from storage")
     }
 
-    reloaded := mustSession(sessionManager.Session(rotatedId))
+    reloaded := mustSession(sessionManager.Session(context.Background(), rotatedId))
     if nil == reloaded {
         t.Fatalf("expected the rotated session to be stored")
     }
@@ -1790,10 +1785,10 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
-    existingSession := mustSession(sessionManager.NewSession())
+    existingSession := mustSession(sessionManager.NewSession(context.Background()))
     existingSession.Set("userId", "anonymous")
 
-    saveErr := sessionManager.SaveSession(existingSession)
+    saveErr := sessionManager.SaveSession(context.Background(), existingSession)
     if nil != saveErr {
         t.Fatalf("unexpected error: %v", saveErr)
     }
@@ -1810,7 +1805,7 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
                 t.Fatal("expected the request to carry a session")
             }
 
-            rotated, rotateErr := sessionManager.RegenerateSession(sessionInstance)
+            rotated, rotateErr := sessionManager.RegenerateSession(context.Background(), sessionInstance)
             if nil != rotateErr {
                 return nil, rotateErr
             }
@@ -1844,7 +1839,7 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
         t.Fatalf("expected a clearing cookie so a forgotten republish logs the client out instead of stranding it on a deleted session, got MaxAge %d", cookies[0].MaxAge)
     }
 
-    if nil != mustSession(sessionManager.Session(existingId)) {
+    if nil != mustSession(sessionManager.Session(context.Background(), existingId)) {
         t.Fatalf("expected the pre-rotation session to be gone from storage")
     }
 }
@@ -1999,7 +1994,6 @@ func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.
     }
 }
 
-/* A listener may still replace the synthesized empty response, the same way it may replace any other. */
 func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2043,8 +2037,6 @@ func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing
         t.Fatalf("expected the listener-replaced body, got %q", recorder.Body.String())
     }
 }
-
-/* the recovery boundary must record the stack of the panic site: the error value alone names the symptom but not the line that raised it, and net/http's own stack print never fires for a panic this recovery absorbs — without the frames a production nil-pointer is unlocatable from the logs */
 
 func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
     router := NewRouter()
@@ -2207,8 +2199,6 @@ func TestKernel_AListenerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testing.
     }
 }
 
-/* a urlencoded body whose read failed must refuse the request the way the json path refuses the identical condition: dispatching it would hand the handler a syntactically valid request whose form is simply empty, and an oversized submission would be processed as an empty one */
-
 func TestKernel_OversizedUrlencodedFormIsRefusedWith413(t *testing.T) {
     handlerInvoked := false
 
@@ -2241,7 +2231,6 @@ func TestKernel_OversizedUrlencodedFormIsRefusedWith413(t *testing.T) {
     }
 }
 
-/* brokenBodyReader fails mid-read the way a client aborting an upload does. */
 type brokenBodyReader struct {
     served bool
 }
@@ -2292,34 +2281,36 @@ type typedNilReturningSessionManager struct {
     delegate sessioncontract.Manager
 }
 
-/* Session reports "no such session" the way a careless implementation does: by returning a nil pointer of its own session type, which is not equal to nil once it is carried in the interface. */
-func (instance *typedNilReturningSessionManager) Session(sessionId string) (sessioncontract.Session, error) {
+func (instance *typedNilReturningSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
     var typedNil *session.Session
 
     return typedNil, nil
 }
 
-func (instance *typedNilReturningSessionManager) NewSession() (sessioncontract.Session, error) {
-    return instance.delegate.NewSession()
+func (instance *typedNilReturningSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
+    return instance.delegate.NewSession(ctx)
 }
 
-func (instance *typedNilReturningSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
-    return instance.delegate.RegenerateSession(sessionInstance)
+func (instance *typedNilReturningSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    return instance.delegate.RegenerateSession(ctx, sessionInstance)
 }
 
-func (instance *typedNilReturningSessionManager) SaveSession(sessionInstance sessioncontract.Session) error {
-    return instance.delegate.SaveSession(sessionInstance)
+func (instance *typedNilReturningSessionManager) SaveSession(ctx context.Context, sessionInstance sessioncontract.Session) error {
+    return instance.delegate.SaveSession(ctx, sessionInstance)
 }
 
-func (instance *typedNilReturningSessionManager) DeleteSession(sessionId string) error {
-    return instance.delegate.DeleteSession(sessionId)
+func (instance *typedNilReturningSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
+    return instance.delegate.DeleteSession(ctx, sessionId)
+}
+
+func (instance *typedNilReturningSessionManager) PersistenceTimeout() bound.Duration {
+    return bound.Duration{}
 }
 
 func (instance *typedNilReturningSessionManager) CloseWithContext(closeContext context.Context) error {
     return instance.delegate.CloseWithContext(context.Background())
 }
 
-/* The session manager is a replaceable service, so the kernel must test what it hands back with IsNilInterface rather than against nil: a typed nil passes a bare comparison, the kernel skips NewSession and publishes it, and the first handler that touches the session dereferences nil. The request must be served a working session instead. */
 func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2331,7 +2322,6 @@ func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
                 return TextResponse(nethttp.StatusInternalServerError, "no session"), nil
             }
 
-            /* a typed nil reaches here as a non-nil interface and panics on the first call */
             publishedSession.Set("touched", "yes")
 
             return TextResponse(nethttp.StatusOK, publishedSession.Id()), nil
@@ -2416,7 +2406,6 @@ func (instance *warningRecordingLogger) warningContextFor(message string) (loggi
     return nil, false
 }
 
-/* the no-route record is written for exactly the requests nobody routed, and a query string routinely carries a credential — the record keeps the parameter names for diagnosis and must not carry the values into the journal */
 func TestKernel_TheNoRouteRecordRedactsQueryValues(t *testing.T) {
     router := NewRouter()
 
@@ -2444,7 +2433,6 @@ func TestKernel_TheNoRouteRecordRedactsQueryValues(t *testing.T) {
     }
 }
 
-/* the method-not-allowed record redacts the same way: the 405 is answered before any handler runs, so this record is the only trace of the request — names kept, values withheld */
 func TestKernel_TheMethodNotAllowedRecordRedactsQueryValues(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2484,7 +2472,6 @@ func TestKernel_TheMethodNotAllowedRecordRedactsQueryValues(t *testing.T) {
     }
 }
 
-/* A handler that commits its own response and then rotates the session loses everything the session held: the rotation deletes the previous entry, and the response path refuses to store the replacement because no Set-Cookie can reach the client on a committed response. Refusing the write is right, but it must not be silent — without a line in the log this is indistinguishable from the ordinary case the branch exists for, a first-time visitor on a stream with nothing worth storing. */
 func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2519,7 +2506,6 @@ func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
     }
 }
 
-/* a stopping listener that skipped nothing required keeps answering the request: the refusal must not cost every short-circuiting listener its response */
 func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkipped(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2565,7 +2551,6 @@ func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkippe
     }
 }
 
-/* noMatchRouter reports "no match" the way the contract permits and the framework's own router does not: a nil result beside the false flag. */
 type noMatchRouter struct {
     *Router
 }
@@ -2589,7 +2574,6 @@ func TestKernel_ServeHttpAnswersARouterThatReportsNoMatchWithANilResult(t *testi
     }
 }
 
-/* The terminate dispatch is the one in ServeHttp with no recovery above it — its defer is registered before the recovery defer, so it runs after that one has already fired. It needs none: the dispatcher recovers a listener panic per listener and hands it back as an error. This pins that division, because a recovery added here would swallow the one panic the dispatcher re-raises on purpose, a deliberate exit. */
 func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2622,7 +2606,6 @@ func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.
     }
 }
 
-/* The listener is what the assertion turns on, not the status: writeResponse answers 204 for an absent response whichever way it became absent, so a status alone cannot tell the kernel's door from the writer's fallback. A listener is the only thing that decorates a response, and it must see the empty 204 the door built rather than the nothing a typed nil would have carried this far. */
 func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -2670,7 +2653,6 @@ func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault
     }
 }
 
-/* explodingError is what an application error looks like when its own rendering is broken. It is the input that reaches the window: a listener cannot panic out of a dispatch — the dispatcher recovers it per listener — so the only thing left between the chain returning and the response being published is the log context the kernel builds from the error, which reads it by calling Error(). */
 type explodingError struct{}
 
 func (instance *explodingError) Error() string {
@@ -2708,31 +2690,35 @@ type failingSaveSessionManager struct {
     inner sessioncontract.Manager
 }
 
-func (instance *failingSaveSessionManager) Session(sessionId string) (sessioncontract.Session, error) {
-    return instance.inner.Session(sessionId)
+func (instance *failingSaveSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
+    return instance.inner.Session(ctx, sessionId)
 }
 
-func (instance *failingSaveSessionManager) NewSession() (sessioncontract.Session, error) {
-    return instance.inner.NewSession()
+func (instance *failingSaveSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
+    return instance.inner.NewSession(ctx)
 }
 
-func (instance *failingSaveSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
-    return instance.inner.RegenerateSession(sessionInstance)
+func (instance *failingSaveSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    return instance.inner.RegenerateSession(ctx, sessionInstance)
 }
 
-func (instance *failingSaveSessionManager) SaveSession(sessionInstance sessioncontract.Session) error {
+func (instance *failingSaveSessionManager) SaveSession(ctx context.Context, sessionInstance sessioncontract.Session) error {
     return exception.NewError("session backend is down", nil, nil)
 }
 
-func (instance *failingSaveSessionManager) DeleteSession(sessionId string) error {
-    return instance.inner.DeleteSession(sessionId)
+func (instance *failingSaveSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
+    return instance.inner.DeleteSession(ctx, sessionId)
+}
+
+func (instance *failingSaveSessionManager) PersistenceTimeout() bound.Duration {
+    return bound.Duration{}
 }
 
 func (instance *failingSaveSessionManager) CloseWithContext(closeContext context.Context) error {
     return instance.inner.CloseWithContext(context.Background())
 }
 
-func TestKernel_ASessionSaveOutageReachesTerminateAsTheFiveHundredTheClientReceived(t *testing.T) {
+func TestKernel_ASessionSaveOutageReachesTerminateAsTheStatusTheClientReceived(t *testing.T) {
     manager := &failingSaveSessionManager{
         inner: session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30*time.Minute)}),
     }
@@ -2776,12 +2762,12 @@ func TestKernel_ASessionSaveOutageReachesTerminateAsTheFiveHundredTheClientRecei
     recorder := httptest.NewRecorder()
     handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/login", nil))
 
-    if nethttp.StatusInternalServerError != recorder.Code {
-        t.Fatalf("expected the save outage to answer the client 500, got %d", recorder.Code)
+    if nethttp.StatusServiceUnavailable != recorder.Code {
+        t.Fatalf("expected the save outage to answer the client 503, got %d", recorder.Code)
     }
 
-    if nethttp.StatusInternalServerError != terminateStatus {
-        t.Fatalf("expected kernel.terminate to see the 500 the client received, got %d", terminateStatus)
+    if nethttp.StatusServiceUnavailable != terminateStatus {
+        t.Fatalf("expected kernel.terminate to see the 503 the client received, got %d", terminateStatus)
     }
 }
 
@@ -2863,7 +2849,6 @@ func TestKernel_ErrorResponseCarriesTheRequestIdOnce(t *testing.T) {
     }
 }
 
-/* the discipline of the one record a handler failure files: an error something upstream already logged files nothing, a deliberate 4xx is a refusal at warning, a 5xx keeps error, the client's own cancellation is named for what it is — and every branch hands back a marked occurrence so the exception listener attaches coordinates instead of filing the failure a second time, the error value itself left unmarked. */
 func TestLogHandlerError_ADeliberate4xxFilesOneWarningAndMarksTheError(t *testing.T) {
     capture := &exceptionListenerCaptureLogger{}
     handlerErr := exception.TooManyRequests("rate limit exceeded")
@@ -2897,7 +2882,6 @@ func TestLogHandlerError_AServerFaultKeepsTheErrorLevel(t *testing.T) {
     }
 }
 
-/* the classification is pinned on the writer that runs FIRST: a validation exception a handler returns is filed and MARKED here, so the exception listener, which carries the same rule, only attaches coordinates to it and never reaches its error branch; a struct tag naming a rule that does not exist refuses every request the route will ever serve, so it is an error, not a warning among the users who mistyped their address */
 func TestLogHandlerError_ARuleWiringFaultIsFiledAtError(t *testing.T) {
     capture := &exceptionListenerCaptureLogger{}
 
@@ -2959,7 +2943,6 @@ func TestLogHandlerError_ACancellationCarryingTheApplicationsCauseStaysAnError(t
     }
 }
 
-/* a cancellation returned while the request context is alive is NOT the client's disconnect — a handler bug cancelled something of its own — and stays at the error level a genuine fault carries. */
 func TestLogHandlerError_ACancellationWithALiveRequestContextStaysAnError(t *testing.T) {
     capture := &exceptionListenerCaptureLogger{}
 
@@ -2970,7 +2953,6 @@ func TestLogHandlerError_ACancellationWithALiveRequestContextStaysAnError(t *tes
     }
 }
 
-/* the trusted proxy list decides every request's proxy trust; retained live, a caller reusing its slice rewrote the decision mid-serving as a data race. The setter copies. */
 func TestSetForwardedHeadersPolicy_CopiesTheTrustedProxyList(t *testing.T) {
     kernel := NewKernel(NewRouter(), KernelConfig{})
 
@@ -2987,7 +2969,6 @@ func TestSetForwardedHeadersPolicy_CopiesTheTrustedProxyList(t *testing.T) {
     }
 }
 
-/* recordCountingLogger counts what each level received, so a test can assert that one failure left one record. */
 type recordCountingLogger struct {
     loggingcontract.Logger
 
@@ -3032,7 +3013,6 @@ func serveAndCountErrorRecords(t *testing.T, handler httpcontract.Handler) *reco
     return countingLogger
 }
 
-/* a handler's plain errors.New carries no AlreadyLogged implementer, so the mark the kernel writes had nowhere to land and the exception listener filed the same failure a second time */
 func TestKernel_AForeignHandlerErrorFilesOneRecordNotTwo(t *testing.T) {
     countingLogger := serveAndCountErrorRecords(
         t,
@@ -3046,7 +3026,6 @@ func TestKernel_AForeignHandlerErrorFilesOneRecordNotTwo(t *testing.T) {
     }
 }
 
-/* the value a runtime panic recovers to is a runtime.Error, the case the recovery exists for, and it carries the mark no better than a plain error does */
 func TestKernel_ARuntimePanicFilesOneRecordNotTwo(t *testing.T) {
     countingLogger := serveAndCountErrorRecords(
         t,
@@ -3063,7 +3042,6 @@ func TestKernel_ARuntimePanicFilesOneRecordNotTwo(t *testing.T) {
     }
 }
 
-/* the recovery reads the mark through exception.IsAlreadyLogged: a handler that panics with an error it already recorded — through exception.Logged, or wrapped around a marked carrier — is not filed a second time under "unhandled http error". */
 func TestKernel_APanicWithAnAlreadyLoggedErrorFilesNoSecondRecord(t *testing.T) {
     handlerRan := false
 
@@ -3079,7 +3057,6 @@ func TestKernel_APanicWithAnAlreadyLoggedErrorFilesNoSecondRecord(t *testing.T) 
         },
     )
 
-    /* an empty journal is also what a request that never reached the handler leaves behind — a route that stopped matching, a container that refused to build — and the helper drops the recorder, so nothing else here can tell the two apart. The three siblings assert a record was written and are non-vacuous for that reason; this one asserts an absence and needs its own witness. */
     if false == handlerRan {
         t.Fatalf("expected the request to reach the handler that panics")
     }
@@ -3185,7 +3162,6 @@ func (instance *kernelHandlerErrorCaptureLogger) Error(message string, context l
     instance.errorMessages = append(instance.errorMessages, message)
 }
 
-/* a deliberate 4xx blaming the submitted VALUE is a refusal and keeps the warning it always had: the classification must separate the declaration from the value, not raise every 4xx */
 func TestLogHandlerError_AGenuineFieldRefusalStaysAtWarning(t *testing.T) {
     capture := &kernelHandlerErrorCaptureLogger{Logger: logging.NewNopLogger()}
 
@@ -3203,7 +3179,6 @@ func TestLogHandlerError_AGenuineFieldRefusalStaysAtWarning(t *testing.T) {
     }
 }
 
-/* the counter is what a shutdown reads to tell a drained server from one that still has work inside it, so it must rise for the whole time a request is being served and fall exactly when the scope closes. The proof holds the handler open and reads the count from another goroutine: reading it after the request returned would pass just as well against a counter that was never incremented at all. */
 func TestKernel_OpenRequestScopesRisesWhileARequestIsServedAndFallsWhenItsScopeCloses(t *testing.T) {
     handlerEntered := make(chan struct{})
     releaseHandler := make(chan struct{})
@@ -3251,7 +3226,6 @@ func TestKernel_OpenRequestScopesRisesWhileARequestIsServedAndFallsWhenItsScopeC
     }
 }
 
-/* the release rides the same defer as the close rather than the handler's return, so a request whose handler panics — the path with its own recovery defers above this one — still gives its scope back. A leaked count would make every later shutdown wait out its whole budget and then report a drain failure for a server with nothing in it. */
 func TestKernel_OpenRequestScopesIsReleasedWhenTheHandlerPanics(t *testing.T) {
     router := NewRouter()
     router.Handle(
@@ -3289,7 +3263,6 @@ func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
 
-    /* the path folds to "/login", which the access-control matcher would authorize as a different rule than the admin handler the router reaches; the kernel must refuse it before either runs */
     request := httptest.NewRequest(nethttp.MethodGet, "/admin/x/../../login", nil)
     recorder := httptest.NewRecorder()
 
@@ -3304,7 +3277,6 @@ func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
     }
 }
 
-/* the whitespace spelling routes to the catch-all under "/admin" while the access-control matcher trims it and answers with the rule of "/admin"; refused at the kernel, neither is asked */
 func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T) {
     for _, rawPath := range []string{"/admin%20", "/admin%09", "/admin%C2%A0"} {
         handlerRan := false
@@ -3337,7 +3309,6 @@ func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T
     }
 }
 
-/* the LEADING twin of the padded path on this major: Go's own server refuses a request line that does not begin with "/", but a handler mounted in front of the kernel that rewrites the path — the standard library's StripPrefix — hands the kernel " /public" for "/api%20/public". As routed that is "%20/public", a target that does not begin with "/", which the canonical guard leaves to the router; the guard asks the leading form of the decoded path as well, so this major answers 400 as the two frozen majors do and the upgrade notes promise */
 func TestKernel_RefusesALeadingWhitespacePathAHandlerInFrontHandedIt(t *testing.T) {
     for _, rawPath := range []string{"/api%20/public", "/api%09/public", "/api%C2%A0/public"} {
         handlerRan := false
@@ -3370,7 +3341,6 @@ func TestKernel_RefusesALeadingWhitespacePathAHandlerInFrontHandedIt(t *testing.
     }
 }
 
-/* the canonical question is asked of the spelling the router reads: "/a%2F..%2Fb" is ONE segment naming "a/../b" for the router, and the guard reads it the same way instead of refusing the decoded "/a/../b" — while the real fold "/a/../b" is still refused, and "/public%2F" reaches the catch-all as the resource "public/" the router serves it as */
 func TestKernel_AsksTheCanonicalQuestionOfThePathAsSpelled(t *testing.T) {
     for rawPath, expected := range map[string]struct {
         code     int
@@ -3447,7 +3417,6 @@ func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
     }
 }
 
-/* a multipart upload past the body limit surfaces as a handler's *MaxBytesError, which is not an HttpException and so was rendered 500 at error level while the urlencoded and json paths answered 413; the normalizer maps it onto a 413 HttpException so the three body paths agree, and leaves any other error untouched. */
 func TestNormalizeBodyLimitError_MapsMaxBytesErrorTo413(t *testing.T) {
     maxBytesError := &nethttp.MaxBytesError{Limit: 1048576}
 
@@ -3510,7 +3479,6 @@ func TestKernel_RefusesEveryConfigurationDoorOnceItStartedServing(t *testing.T) 
     } {
         kernel := NewKernel(NewRouter(), KernelConfig{})
 
-        /* configuring BEFORE the handler is built stays legal, which is the half that proves the guard discriminates rather than refusing everything */
         testCase.mutate(kernel)
 
         _ = kernel.ServeHttp(newHttpTestContainer())
@@ -3542,7 +3510,6 @@ func TestKernel_LeavesTheRouteTableReadableAfterItStartedServing(t *testing.T) {
 
     _ = kernel.ServeHttp(newHttpTestContainer())
 
-    /* the openapi document and the route manifest are served FROM a handler, so freezing the reading doors alongside the writing ones would break the very routes that publish the table */
     if 1 != len(router.RouteDefinitions()) {
         t.Fatalf("expected the route table to stay readable while serving")
     }
@@ -3565,7 +3532,6 @@ func TestKernel_ServesWhileAConfigurationDoorIsRefused(t *testing.T) {
     kernel := NewKernel(router, KernelConfig{})
     handler := kernel.ServeHttp(newHttpTestContainer())
 
-    /* a request is held open across the refusal, so the guard is exercised against a kernel that really is serving rather than one that merely built a handler; under -race this is the shape that would report the write the refusal prevents */
     started := make(chan struct{})
     finished := make(chan struct{})
 
@@ -3596,7 +3562,6 @@ func TestKernel_ServesWhileAConfigurationDoorIsRefused(t *testing.T) {
     <-finished
 }
 
-/* the abort sentinel suppresses the response, not the ownership of what it holds, so a deliberate abort over a file-backed response still closes the response in flight; invokeErrorHandlerSafely refuses to honour the sentinel for the same reason. */
 func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
     bodyReader := &closeTrackingReader{}
 
@@ -3617,7 +3582,6 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
 
     kernel := NewKernel(router, KernelConfig{})
 
-    /* the panic is raised by an OUTER middleware AFTER next() returned, which is the window in which the response the chain produced is held only by the recording shim */
     kernel.Use(
         []httpcontract.Middleware{
             func(next httpcontract.Handler) httpcontract.Handler {
@@ -3652,7 +3616,6 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
     }
 }
 
-/* the route is matched on the path as the client SPELLED it: net/http decodes "%2F" into a separator, so "/admin%2Fusers" — one segment naming a resource called "admin/users" — became two segments and reached the "/admin/users" handler, while a proxy rule written against the raw request line matched neither spelling. */
 func TestKernel_MatchesTheRouteOnThePathAsSpelled(t *testing.T) {
     reached := ""
 
@@ -3817,7 +3780,6 @@ func TestKernel_AStaleRawPathLeavesOnlyTheRefusalWarning(t *testing.T) {
     }
 }
 
-/* the tie-break is registration order, deliberately, and specificity is not a factor. The rule is written on the RouteHandler contract; this pins it so a future change to the selection has to be a decision rather than an accident. */
 func TestRouter_EqualPriorityIsWonByTheFirstRegistration(t *testing.T) {
     router := NewRouter()
 
@@ -3835,7 +3797,6 @@ func TestRouter_EqualPriorityIsWonByTheFirstRegistration(t *testing.T) {
     }
 }
 
-/* serveNegotiatedKernelProbe drives one request through a kernel whose container carries a json and a plain-text serializer, the two a client can name in Accept */
 func serveNegotiatedKernelProbe(t *testing.T, method string, target string, accept string) *httptest.ResponseRecorder {
     t.Helper()
 
@@ -3925,12 +3886,10 @@ func TestKernel_AnswersANotFoundWithoutAHandlerInTheRepresentationTheClientNegot
     }
 }
 
-/* loggedMarkSentinelErr and loggedMarkWrappedSentinelErr are the package-level failure values an application returns from more than one request */
 var loggedMarkSentinelErr = exception.NewError("the shared failure", nil, nil)
 
 var loggedMarkWrappedSentinelErr = exception.NewError("the shared wrapped failure", nil, nil)
 
-/* servedLoggedMarkKernel serves one route over a kernel whose logger keeps every record, with the framework's exception listener installed */
 func servedLoggedMarkKernel(handler httpcontract.Handler) (nethttp.Handler, *recordsCaptureLogger) {
     capture := &recordsCaptureLogger{}
 
@@ -3953,7 +3912,6 @@ func distinctRequestIdsOf(records []capturedRecord) map[string]bool {
     return requestIds
 }
 
-/* every request that fails files its own record, whether the error value is fresh, a package-level sentinel or a sentinel wrapped by the handler: the logged mark belongs to one occurrence, never to the value. An error a lower layer filed and marked before it returned is not filed again. */
 func TestKernel_EveryRequestFilesItsOwnRecordOfASharedErrorValue(t *testing.T) {
     cases := []struct {
         name            string
@@ -4005,7 +3963,6 @@ func TestKernel_EveryRequestFilesItsOwnRecordOfASharedErrorValue(t *testing.T) {
     }
 }
 
-/* the waiters of one remember flight are handed one error value: each request still files its own record, under its own request id */
 func TestKernel_TheWaitersOfOneRememberFlightFileOneRecordEach(t *testing.T) {
     flightErr := exception.NewError("the flight failed", nil, nil)
 
@@ -4061,7 +4018,6 @@ func TestKernel_TheWaitersOfOneRememberFlightFileOneRecordEach(t *testing.T) {
     }
 }
 
-/* an application listener on the kernel exception event reads the mark the kernel left, as every reader of the mark does: a failure the kernel filed is not filed a second time by it */
 func TestKernel_AnApplicationListenerReadsTheMarkOfTheOccurrenceTheKernelFiled(t *testing.T) {
     capture := &recordsCaptureLogger{}
 
@@ -4111,7 +4067,6 @@ func TestKernel_AnApplicationListenerReadsTheMarkOfTheOccurrenceTheKernelFiled(t
     }
 }
 
-/* a panic carrying an error value other requests also raise files one record per request: the recovery hands on a marked occurrence, never a mark written into the value */
 func TestKernel_EveryPanicCarryingASharedErrorValueFilesItsOwnRecord(t *testing.T) {
     sharedPanicErr := exception.NewError("the shared panic", nil, nil)
 
@@ -4134,7 +4089,6 @@ func TestKernel_EveryPanicCarryingASharedErrorValueFilesItsOwnRecord(t *testing.
     }
 }
 
-/* in debug mode the payload shows the request's coordinates beside the error's own context, read from the occurrence the kernel marked, while the error value keeps none */
 func TestKernel_TheDebugPayloadShowsTheCoordinatesOfTheOccurrence(t *testing.T) {
     sharedErr := exception.NewError("the shared failure in debug", map[string]any{"detail": "kept"}, nil)
 
@@ -5393,7 +5347,6 @@ func TestLogHandlerError_AStoreStatusBeneathTheMarkIsAnError(t *testing.T) {
     }
 }
 
-/* a panic carrying the mark is an outage like a returned one: a session manager that cannot read its storage panics with the storage's error */
 func TestKernel_APanicCarryingTheMarkAnswers503(t *testing.T) {
     for name, value := range map[string]any{
         "the marked error":           exception.MarkInfrastructureFailure(errors.New("storage is down")),
@@ -5435,22 +5388,22 @@ type operationCountingSessionStorage struct {
     deletes int64
 }
 
-func (instance *operationCountingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+func (instance *operationCountingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
     atomic.AddInt64(&instance.loads, 1)
 
-    return instance.Storage.Load(sessionId)
+    return instance.Storage.Load(ctx, sessionId)
 }
 
-func (instance *operationCountingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+func (instance *operationCountingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
     atomic.AddInt64(&instance.saves, 1)
 
-    return instance.Storage.Save(sessionId, data, ttl)
+    return instance.Storage.Save(ctx, sessionId, data, ttl)
 }
 
-func (instance *operationCountingSessionStorage) Delete(sessionId string) error {
+func (instance *operationCountingSessionStorage) Delete(ctx context.Context, sessionId string) error {
     atomic.AddInt64(&instance.deletes, 1)
 
-    return instance.Storage.Delete(sessionId)
+    return instance.Storage.Delete(ctx, sessionId)
 }
 
 func TestKernel_ARouteThatNeverReadsTheSessionCostsTheStorageNothing(t *testing.T) {
@@ -5466,7 +5419,7 @@ func TestKernel_ARouteThatNeverReadsTheSessionCostsTheStorageNothing(t *testing.
 
     for name, testCase := range cases {
         storage := &operationCountingSessionStorage{Storage: session.NewInMemoryStorage(session.InMemoryStorageConfig{})}
-        if saveErr := storage.Storage.Save(sessionOutageTestCookieValue, map[string]any{"userId": "u-1"}, time.Minute); nil != saveErr {
+        if saveErr := storage.Storage.Save(context.Background(), sessionOutageTestCookieValue, map[string]any{"userId": "u-1"}, bound.Of(time.Minute)); nil != saveErr {
             t.Fatalf("unexpected error seeding the session: %v", saveErr)
         }
 
@@ -5533,17 +5486,17 @@ type outageCountingSessionStorage struct {
     deleteCalls int64
 }
 
-func (instance *outageCountingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+func (instance *outageCountingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
     return nil, false, exception.NewError("session backend down", nil, nil)
 }
 
-func (instance *outageCountingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+func (instance *outageCountingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
     atomic.AddInt64(&instance.saveCalls, 1)
 
     return nil
 }
 
-func (instance *outageCountingSessionStorage) Delete(sessionId string) error {
+func (instance *outageCountingSessionStorage) Delete(ctx context.Context, sessionId string) error {
     atomic.AddInt64(&instance.deleteCalls, 1)
 
     return nil
@@ -5618,5 +5571,252 @@ func TestKernel_EmptyOnOutageServesTheRouteAndAnswersNoCookie(t *testing.T) {
         if 1 != atomic.LoadInt64(&countingLogger.warningCount) || 0 != atomic.LoadInt64(&countingLogger.errorCount) {
             t.Fatalf("%s: expected one warning and no error record, got %d warnings and %d errors", name, countingLogger.warningCount, countingLogger.errorCount)
         }
+    }
+}
+
+func persistenceTestKernel(t *testing.T, manager sessioncontract.Manager, path string, handlerFunc func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error)) (nethttp.Handler, *errorContextRecordingLogger) {
+    t.Helper()
+
+    router := NewRouter()
+    router.Handle(nethttp.MethodGet, path, handlerFunc)
+
+    serviceContainer := newHttpTestContainerWithSessionManager(manager)
+    recordingLogger := &errorContextRecordingLogger{}
+    serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
+
+    return NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer), recordingLogger
+}
+
+func TestKernel_ALoadBlockedInTheStorageEndsWhenTheRequestsContextIsCancelled(t *testing.T) {
+    storage := newContextBlockingSessionStorage()
+    manager := session.NewManager(storage, session.ManagerConfig{})
+    sessionId, _ := seedStoredSession(t, manager)
+    storage.blockLoad.Store(true)
+
+    var readerErr error
+    handler, _ := persistenceTestKernel(t, manager, "/read", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        _, readerErr = RequestSession(request)
+
+        return TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    requestContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/read", nil).WithContext(requestContext)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionId})
+
+    savesBefore, deletesBefore := storage.saves.Load(), storage.deletes.Load()
+
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        handler.ServeHTTP(httptest.NewRecorder(), request)
+    }()
+
+    awaitStorageDoor(t, storage.entered, "Load")
+    cancel()
+    awaitClosed(t, done, "ServeHTTP to return")
+
+    if false == exception.ChainIs(readerErr, session.ErrSessionUnavailable) || false == exception.ChainIs(readerErr, context.Canceled) {
+        t.Fatalf("expected the reader to get the unavailable session with the cancellation, got %v", readerErr)
+    }
+
+    if savesBefore != storage.saves.Load() || deletesBefore != storage.deletes.Load() {
+        t.Fatalf("expected a cut load to persist nothing")
+    }
+}
+
+func TestKernel_AClientHangupBeforePersistenceStillRecordsTheDelete(t *testing.T) {
+    storage := newContextBlockingSessionStorage()
+    manager := session.NewManager(storage, session.ManagerConfig{})
+    sessionId, copyLoaded := seedStoredSession(t, manager)
+
+    requestContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    handler, _ := persistenceTestKernel(t, manager, "/logout", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        sessionInstance, sessionErr := RequestSession(request)
+        if nil != sessionErr {
+            return nil, sessionErr
+        }
+
+        sessionInstance.Clear()
+        cancel()
+
+        return TextResponse(nethttp.StatusOK, "bye"), nil
+    })
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/logout", nil).WithContext(requestContext)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionId})
+    handler.ServeHTTP(httptest.NewRecorder(), request)
+
+    if 1 != storage.deletes.Load() {
+        t.Fatalf("expected the logout's delete recorded after the hangup, got %d deletes", storage.deletes.Load())
+    }
+
+    if _, held, _ := storage.inner.Load(context.Background(), sessionId); true == held {
+        t.Fatalf("expected the storage no longer to hold the session")
+    }
+
+    copyLoaded.Set("userId", "u-2")
+    if saveErr := manager.SaveSession(context.Background(), copyLoaded); false == exception.ChainIs(saveErr, session.ErrSessionDeleted) {
+        t.Fatalf("expected a copy loaded before the logout refused, got %v", saveErr)
+    }
+}
+
+func TestKernel_AClientHangupBeforePersistenceStillStoresTheSave(t *testing.T) {
+    storage := newContextBlockingSessionStorage()
+    manager := session.NewManager(storage, session.ManagerConfig{})
+    sessionId, _ := seedStoredSession(t, manager)
+
+    requestContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    handler, _ := persistenceTestKernel(t, manager, "/write", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        sessionInstance, sessionErr := RequestSession(request)
+        if nil != sessionErr {
+            return nil, sessionErr
+        }
+
+        sessionInstance.Set("cart", "written")
+        cancel()
+
+        return TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/write", nil).WithContext(requestContext)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionId})
+    handler.ServeHTTP(httptest.NewRecorder(), request)
+
+    data, held, _ := storage.inner.Load(context.Background(), sessionId)
+    if false == held || "written" != data["cart"] {
+        t.Fatalf("expected the save stored after the hangup, got %v", data)
+    }
+}
+
+func TestKernel_AHungSaveIsCutByThePersistenceTimeout(t *testing.T) {
+    storage := newContextBlockingSessionStorage()
+    manager := session.NewManager(storage, session.ManagerConfig{PersistenceTimeout: bound.Of(30 * time.Millisecond)})
+    sessionId, _ := seedStoredSession(t, manager)
+    storage.blockSave.Store(true)
+
+    handler, recordingLogger := persistenceTestKernel(t, manager, "/write", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        sessionInstance, sessionErr := RequestSession(request)
+        if nil != sessionErr {
+            return nil, sessionErr
+        }
+
+        sessionInstance.Set("cart", "lost")
+
+        return TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/write", nil)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionId})
+
+    recorder := httptest.NewRecorder()
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        handler.ServeHTTP(recorder, request)
+    }()
+    awaitClosed(t, done, "the hung save to be cut")
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "" == recorder.Header().Get("Retry-After") || "" != recorder.Header().Get("Set-Cookie") {
+        t.Fatalf("expected 503 with Retry-After and no cookie, got %d, %q and %q", recorder.Code, recorder.Header().Get("Retry-After"), recorder.Header().Get("Set-Cookie"))
+    }
+
+    if _, recorded := recordingLogger.errorContextFor("failed to save session"); false == recorded {
+        t.Fatalf("expected one error record of the failed save")
+    }
+}
+
+func TestKernel_AHungDeleteIsCutByThePersistenceTimeoutAndTheCookieStillExpires(t *testing.T) {
+    storage := newContextBlockingSessionStorage()
+    manager := session.NewManager(storage, session.ManagerConfig{PersistenceTimeout: bound.Of(30 * time.Millisecond)})
+    sessionId, _ := seedStoredSession(t, manager)
+    storage.blockDelete.Store(true)
+
+    handler, recordingLogger := persistenceTestKernel(t, manager, "/logout", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        sessionInstance, sessionErr := RequestSession(request)
+        if nil != sessionErr {
+            return nil, sessionErr
+        }
+
+        sessionInstance.Clear()
+
+        return TextResponse(nethttp.StatusOK, "bye"), nil
+    })
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/logout", nil)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionId})
+
+    recorder := httptest.NewRecorder()
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        handler.ServeHTTP(recorder, request)
+    }()
+    awaitClosed(t, done, "the hung delete to be cut")
+
+    cookies := recorder.Result().Cookies()
+    if 1 != len(cookies) || 0 <= cookies[0].MaxAge {
+        t.Fatalf("expected the expiring cookie, got %v", cookies)
+    }
+
+    if _, recorded := recordingLogger.errorContextFor("failed to delete session"); false == recorded {
+        t.Fatalf("expected one error record of the failed delete")
+    }
+}
+
+func TestKernel_APersistenceWaitingOnAHeldStripeIsCutByThePersistenceTimeout(t *testing.T) {
+    storage := newContextBlockingSessionStorage()
+    manager := session.NewManager(storage, session.ManagerConfig{PersistenceTimeout: bound.Of(30 * time.Millisecond)})
+    sessionId, holderCopy := seedStoredSession(t, manager)
+    storage.blockSave.Store(true)
+
+    holderContext, releaseHolder := context.WithCancel(context.Background())
+    holderDone := make(chan struct{})
+    go func() {
+        defer close(holderDone)
+        holderCopy.Set("holder", true)
+        _ = manager.SaveSession(holderContext, holderCopy)
+    }()
+    awaitStorageDoor(t, storage.entered, "Save")
+
+    savesWhileHeld := storage.saves.Load()
+
+    handler, _ := persistenceTestKernel(t, manager, "/write", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        sessionInstance, sessionErr := RequestSession(request)
+        if nil != sessionErr {
+            return nil, sessionErr
+        }
+
+        sessionInstance.Set("cart", "waiting")
+
+        return TextResponse(nethttp.StatusOK, "ok"), nil
+    })
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/write", nil)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionId})
+
+    recorder := httptest.NewRecorder()
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        handler.ServeHTTP(recorder, request)
+    }()
+    awaitClosed(t, done, "the wait on the held stripe to be cut")
+
+    releaseHolder()
+    awaitClosed(t, holderDone, "the holder to leave")
+
+    if nethttp.StatusServiceUnavailable != recorder.Code {
+        t.Fatalf("expected the cut wait answered 503, got %d", recorder.Code)
+    }
+
+    if savesWhileHeld != storage.saves.Load() {
+        t.Fatalf("expected the cut wait never to reach the storage's save")
     }
 }

@@ -64,7 +64,6 @@ type simulatedJournalCrash struct {
     point journalPoint
 }
 
-/* the panic skips every rollback, cut and close, as a kill would */
 func crashAt(t *testing.T, storage *FileStorage, point journalPoint, callback func()) {
     t.Helper()
 
@@ -133,7 +132,7 @@ func readSnapshot(t *testing.T, path string) map[string]fileSessionEntry {
 func mustSave(t *testing.T, storage *FileStorage, sessionId string, data map[string]any) {
     t.Helper()
 
-    if saveErr := storage.Save(sessionId, data, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), sessionId, data, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error for %s: %v", sessionId, saveErr)
     }
 }
@@ -150,7 +149,7 @@ func TestFileStorage_Journal_ASaveAppendsOneRecordAndLeavesTheSnapshotUntouched(
     storage := newJournalStorage(t, FileStorageConfig{Path: path})
     defer storage.CloseWithContext(context.Background())
 
-    if _, exists, _ := storage.Load("third"); false == exists {
+    if _, exists, _ := storage.Load(context.Background(), "third"); false == exists {
         t.Fatalf("expected the third major's snapshot to be read as is")
     }
 
@@ -180,7 +179,7 @@ func TestFileStorage_Journal_EveryRecordIsSyncedBeforeTheWriteAnswers(t *testing
 
     mustSave(t, storage, "a", map[string]any{"k": "v"})
 
-    if deleteErr := storage.Delete("a"); nil != deleteErr {
+    if deleteErr := storage.Delete(context.Background(), "a"); nil != deleteErr {
         t.Fatalf("unexpected delete error: %v", deleteErr)
     }
 
@@ -198,14 +197,14 @@ func TestFileStorage_Journal_ARecordWrittenBeforeACrashIsReplayed(t *testing.T) 
     mustSave(t, storage, "kept", map[string]any{"k": "kept"})
 
     crashAt(t, storage, journalPointRecordWritten, func() {
-        _ = storage.Save("last", map[string]any{"k": "last"}, time.Hour)
+        _ = storage.Save(context.Background(), "last", map[string]any{"k": "last"}, bound.Of(time.Hour))
     })
 
     reopened := newJournalStorage(t, FileStorageConfig{Path: path, Logger: logger})
     defer reopened.CloseWithContext(context.Background())
 
     for _, sessionId := range []string{"kept", "last"} {
-        if _, exists, _ := reopened.Load(sessionId); false == exists {
+        if _, exists, _ := reopened.Load(context.Background(), sessionId); false == exists {
             t.Fatalf("expected %s replayed from the journal", sessionId)
         }
     }
@@ -238,11 +237,11 @@ func TestFileStorage_Journal_ATornLastRecordIsCutAndReported(t *testing.T) {
     reopened := newJournalStorage(t, FileStorageConfig{Path: path, Logger: logger})
     defer reopened.CloseWithContext(context.Background())
 
-    if _, exists, _ := reopened.Load("whole"); false == exists {
+    if _, exists, _ := reopened.Load(context.Background(), "whole"); false == exists {
         t.Fatalf("expected the whole record before the torn one replayed")
     }
 
-    if _, exists, _ := reopened.Load("torn"); true == exists {
+    if _, exists, _ := reopened.Load(context.Background(), "torn"); true == exists {
         t.Fatalf("expected the torn record dropped")
     }
 
@@ -330,7 +329,7 @@ func TestFileStorage_Journal_ACrashBetweenTheSnapshotRenameAndTheJournalCutRepla
     mustSave(t, storage, "a", map[string]any{"k": "a"})
     mustSave(t, storage, "b", map[string]any{"k": "b"})
 
-    if deleteErr := storage.Delete("a"); nil != deleteErr {
+    if deleteErr := storage.Delete(context.Background(), "a"); nil != deleteErr {
         t.Fatalf("unexpected delete error: %v", deleteErr)
     }
 
@@ -345,11 +344,11 @@ func TestFileStorage_Journal_ACrashBetweenTheSnapshotRenameAndTheJournalCutRepla
     reopened := newJournalStorage(t, FileStorageConfig{Path: path})
     defer reopened.CloseWithContext(context.Background())
 
-    if _, exists, _ := reopened.Load("a"); true == exists {
+    if _, exists, _ := reopened.Load(context.Background(), "a"); true == exists {
         t.Fatalf("expected the deleted session to stay deleted after the replay")
     }
 
-    if data, exists, _ := reopened.Load("b"); false == exists || "b" != data["k"] {
+    if data, exists, _ := reopened.Load(context.Background(), "b"); false == exists || "b" != data["k"] {
         t.Fatalf("expected the saved session replayed, got %v %v", exists, data)
     }
 }
@@ -459,7 +458,7 @@ func TestFileStorage_Journal_TheDoorOffWritesTheSnapshotAndRetiresALeftJournal(t
         t.Fatalf("expected the journal left at the path removed, stat answered %v", statErr)
     }
 
-    if _, exists, _ := storage.Load("left"); false == exists {
+    if _, exists, _ := storage.Load(context.Background(), "left"); false == exists {
         t.Fatalf("expected the journal left at the path replayed before its removal")
     }
 
@@ -487,15 +486,15 @@ func TestFileStorage_Journal_AFailedAppendRollsBackAndAFailedCutCompactsBeforeTh
 
     storage.journal = readOnly
 
-    if saveErr := storage.Save("kept", map[string]any{"k": "new"}, time.Hour); nil == saveErr {
+    if saveErr := storage.Save(context.Background(), "kept", map[string]any{"k": "new"}, bound.Of(time.Hour)); nil == saveErr {
         t.Fatalf("expected the refused append reported")
     }
 
-    if deleteErr := storage.Delete("kept"); nil == deleteErr {
+    if deleteErr := storage.Delete(context.Background(), "kept"); nil == deleteErr {
         t.Fatalf("expected the refused append of the delete reported")
     }
 
-    if data, exists, _ := storage.Load("kept"); false == exists || "old" != data["k"] {
+    if data, exists, _ := storage.Load(context.Background(), "kept"); false == exists || "old" != data["k"] {
         t.Fatalf("expected both failed writes rolled back, got %v %v", exists, data)
     }
 
@@ -528,12 +527,12 @@ func TestFileStorage_Journal_ARecordWhoseSyncFailsIsReportedAndRolledBack(t *tes
 
     storage.journal = characterDevice
 
-    saveErr := storage.Save("unsynced", map[string]any{"k": "v"}, time.Hour)
+    saveErr := storage.Save(context.Background(), "unsynced", map[string]any{"k": "v"}, bound.Of(time.Hour))
     if nil == saveErr || "failed to sync session storage journal record" != saveErr.Error() {
         t.Fatalf("expected the refused fsync reported, got %v", saveErr)
     }
 
-    if _, exists, _ := storage.Load("unsynced"); true == exists {
+    if _, exists, _ := storage.Load(context.Background(), "unsynced"); true == exists {
         t.Fatalf("expected the save whose record never synced rolled back")
     }
 
@@ -557,7 +556,7 @@ func TestFileStorage_Journal_ALapsedSessionIsDroppedWithoutARecordAndAtTheReplay
     frozenClock := clock.NewFrozenClock(time.Unix(1_000_000, 0))
 
     storage := newJournalStorage(t, FileStorageConfig{Path: path, Clock: frozenClock})
-    if saveErr := storage.Save("lapsing", map[string]any{"k": "v"}, time.Minute); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "lapsing", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
     mustSave(t, storage, "keeper", map[string]any{"k": "keeper"})
@@ -573,7 +572,7 @@ func TestFileStorage_Journal_ALapsedSessionIsDroppedWithoutARecordAndAtTheReplay
 
     storage.sessionById["lapsing"] = fileSessionEntry{Data: map[string]any{}, ExpiresAt: frozenClock.Now().Add(-time.Second).UnixNano()}
 
-    if _, exists, _ := storage.Load("lapsing"); true == exists {
+    if _, exists, _ := storage.Load(context.Background(), "lapsing"); true == exists {
         t.Fatalf("expected the lapsed session absent")
     }
 
@@ -613,7 +612,7 @@ func TestFileStorage_Journal_ConcurrentWritesReplayWhole(t *testing.T) {
 
             for index := 0; index < 25; index++ {
                 sessionId := "w" + strconv.Itoa(worker) + "-" + strconv.Itoa(index)
-                if saveErr := storage.Save(sessionId, map[string]any{"index": index}, time.Hour); nil != saveErr {
+                if saveErr := storage.Save(context.Background(), sessionId, map[string]any{"index": index}, bound.Of(time.Hour)); nil != saveErr {
                     t.Errorf("unexpected save error: %v", saveErr)
                 }
             }
@@ -649,15 +648,15 @@ func TestFileStorage_Journal_AWriteRefusedByAPendingCompactionLeavesTheDiskAsThe
     storage.journal = readOnly
     storage.journalNeedsCompaction = true
 
-    if saveErr := storage.Save("kept", map[string]any{"k": "new"}, time.Hour); nil == saveErr {
+    if saveErr := storage.Save(context.Background(), "kept", map[string]any{"k": "new"}, bound.Of(time.Hour)); nil == saveErr {
         t.Fatalf("expected the pending compaction's refusal reported")
     }
 
-    if deleteErr := storage.Delete("kept"); nil == deleteErr {
+    if deleteErr := storage.Delete(context.Background(), "kept"); nil == deleteErr {
         t.Fatalf("expected the pending compaction's refusal reported on the delete")
     }
 
-    if data, exists, _ := storage.Load("kept"); false == exists || "old" != data["k"] {
+    if data, exists, _ := storage.Load(context.Background(), "kept"); false == exists || "old" != data["k"] {
         t.Fatalf("expected the map untouched, got %v %v", exists, data)
     }
 
@@ -684,7 +683,7 @@ func TestFileStorage_Journal_AJournalBehindASnapshotAnotherBuildRewroteIsDiscard
     reopened := newJournalStorage(t, FileStorageConfig{Path: path, Logger: logger})
     defer reopened.CloseWithContext(context.Background())
 
-    if _, exists, _ := reopened.Load("resurrected"); true == exists {
+    if _, exists, _ := reopened.Load(context.Background(), "resurrected"); true == exists {
         t.Fatalf("expected the stale journal not replayed over the newer snapshot")
     }
 
@@ -720,7 +719,7 @@ func TestFileStorage_Journal_AJournalWithoutItsHeaderIsCutWhole(t *testing.T) {
     storage := newJournalStorage(t, FileStorageConfig{Path: path, Logger: logger})
     defer storage.CloseWithContext(context.Background())
 
-    if _, exists, _ := storage.Load("headless"); true == exists {
+    if _, exists, _ := storage.Load(context.Background(), "headless"); true == exists {
         t.Fatalf("expected a record under no header dropped")
     }
 
@@ -762,7 +761,7 @@ func TestFileStorage_Journal_ADeleteAlsoPurgesTheLapsedAndCompactsPastTheThresho
     storage := newJournalStorage(t, FileStorageConfig{Path: path, Clock: frozenClock})
     defer storage.CloseWithContext(context.Background())
 
-    if saveErr := storage.Save("lapsing", map[string]any{"k": "v"}, time.Minute); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "lapsing", map[string]any{"k": "v"}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
     mustSave(t, storage, "deleted", map[string]any{"k": "v"})
@@ -770,7 +769,7 @@ func TestFileStorage_Journal_ADeleteAlsoPurgesTheLapsedAndCompactsPastTheThresho
     frozenClock.Advance(2 * time.Minute)
     storage.journalMaxBytes.Value = 1
 
-    if deleteErr := storage.Delete("deleted"); nil != deleteErr {
+    if deleteErr := storage.Delete(context.Background(), "deleted"); nil != deleteErr {
         t.Fatalf("unexpected delete error: %v", deleteErr)
     }
 
@@ -915,14 +914,14 @@ func TestFileStorage_Journal_AWriteAfterAFailedResetLandsUnderTheNewSnapshotsHea
 
         if "save" == operation {
             mustSave(t, storage, "target", map[string]any{"k": "new"})
-        } else if deleteErr := storage.Delete("target"); nil != deleteErr {
+        } else if deleteErr := storage.Delete(context.Background(), "target"); nil != deleteErr {
             t.Fatalf("unexpected delete error: %v", deleteErr)
         }
 
         _ = storage.journal.Close()
 
         reopened := newJournalStorage(t, FileStorageConfig{Path: path})
-        data, exists, _ := reopened.Load("target")
+        data, exists, _ := reopened.Load(context.Background(), "target")
         _ = reopened.CloseWithContext(context.Background())
 
         if ("save" == operation && (false == exists || "new" != data["k"])) || ("delete" == operation && true == exists) {

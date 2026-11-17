@@ -12,7 +12,6 @@ import (
     "sync/atomic"
     "syscall"
     "testing"
-
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -157,7 +156,6 @@ func TestApplicationRegisterService_PanicsAfterBoot(t *testing.T) {
     }, "may not register services after boot")
 }
 
-/* anonymousProbeTokenSource is the smallest token source a firewall can be compiled with */
 type anonymousProbeTokenSource struct{}
 
 func (instance *anonymousProbeTokenSource) Name() string {
@@ -192,7 +190,6 @@ func newSecurityWiringApplication(t *testing.T, mode string) *Application {
     return applicationInstance
 }
 
-/* registeredListenerCount reads how many listeners the kernel dispatcher carries, through the introspection the debug commands use */
 func registeredListenerCount(t *testing.T, applicationInstance *Application) int {
     t.Helper()
 
@@ -209,7 +206,6 @@ func registeredListenerCount(t *testing.T, applicationInstance *Application) int
     return total
 }
 
-/* a compiled security configuration only becomes enforcement when this runs: the firewall manager reaches the container and the two kernel listeners reach the dispatcher. Security in this framework is a pair of listeners rather than middleware, so a boot that skipped them would serve every protected route wide open with a configuration that looks correct everywhere it is printed. */
 func TestRegisterSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *testing.T) {
     applicationInstance := newSecurityWiringApplication(t, config.ModeHttp)
 
@@ -231,7 +227,6 @@ func TestRegisterSecurity_WiresTheFirewallManagerAndTheKernelListeners(t *testin
     }
 }
 
-/* a console process with a compiled configuration resolves the firewall manager — configured means resolvable, whatever the mode — but wires no listeners: they are the enforcement, they listen for requests, and a console process has no request to guard. A process without a compiled configuration wires nothing at all — that is an application that declared no security, not one whose security failed to compile, which the compile step refuses on its own. */
 func TestRegisterSecurity_AConsoleProcessResolvesTheManagerAndWiresNoListeners(t *testing.T) {
     cliApplication := newSecurityWiringApplication(t, config.ModeCli)
 
@@ -260,21 +255,21 @@ func TestRegisterSecurity_AConsoleProcessResolvesTheManagerAndWiresNoListeners(t
 
 type ttlRecordingSessionStorage struct {
     saveCalls int
-    savedTtl  time.Duration
+    savedTtl  bound.Duration
 }
 
-func (instance *ttlRecordingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+func (instance *ttlRecordingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
     return nil, false, nil
 }
 
-func (instance *ttlRecordingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+func (instance *ttlRecordingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
     instance.saveCalls = instance.saveCalls + 1
     instance.savedTtl = ttl
 
     return nil
 }
 
-func (instance *ttlRecordingSessionStorage) Delete(sessionId string) error {
+func (instance *ttlRecordingSessionStorage) Delete(ctx context.Context, sessionId string) error {
     return nil
 }
 
@@ -305,11 +300,15 @@ func registerSessionCollaborators(applicationInstance *Application) {
 func newSessionTtlTestApplication(t *testing.T, sessionTtl string) *Application {
     t.Helper()
 
+    return newSessionTestApplicationFromValues(t, map[string]string{config.HttpSessionTtlKey: sessionTtl})
+}
+
+func newSessionTestApplicationFromValues(t *testing.T, values map[string]string) *Application {
+    t.Helper()
+
     environment, environmentErr := config.NewEnvironment(
         &mapEnvironmentSource{
-            values: map[string]string{
-                config.HttpSessionTtlKey: sessionTtl,
-            },
+            values: values,
         },
     )
     if nil != environmentErr {
@@ -348,10 +347,10 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTtlToTheManager(t *tes
 
     manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
 
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set("key", "value")
 
-    saveErr := manager.SaveSession(sessionInstance)
+    saveErr := manager.SaveSession(context.Background(), sessionInstance)
     if nil != saveErr {
         t.Fatalf("unexpected save session error: %v", saveErr)
     }
@@ -360,12 +359,11 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTtlToTheManager(t *tes
         t.Fatalf("expected the manager to store the session once, got %d", storage.saveCalls)
     }
 
-    if 30*time.Minute != storage.savedTtl {
+    if bound.Of(30*time.Minute) != storage.savedTtl {
         t.Fatalf("expected the configured session ttl to reach the storage, got %v", storage.savedTtl)
     }
 }
 
-/* the configured window and the kernel's clock must both travel into the manager: on a frozen clock a deleted session is still refused a write-back 30 minutes later under a one-hour window and accepted 61 minutes later, where the five-minute default would accept the first and the wall clock would refuse the second. */
 func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndTheKernelClockToTheManager(t *testing.T) {
     environment, environmentErr := config.NewEnvironment(
         &mapEnvironmentSource{
@@ -401,18 +399,18 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
 
     manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
 
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set("identity", "alice")
-    if saveErr := manager.SaveSession(sessionInstance); nil != saveErr {
+    if saveErr := manager.SaveSession(context.Background(), sessionInstance); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    inFlightView := mustSession(manager.Session(sessionInstance.Id()))
+    inFlightView := mustSession(manager.Session(context.Background(), sessionInstance.Id()))
     if nil == inFlightView {
         t.Fatalf("expected the session to load")
     }
 
-    if deleteErr := manager.DeleteSession(sessionInstance.Id()); nil != deleteErr {
+    if deleteErr := manager.DeleteSession(context.Background(), sessionInstance.Id()); nil != deleteErr {
         t.Fatalf("unexpected delete error: %v", deleteErr)
     }
 
@@ -420,7 +418,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
 
     inFlightView.Set("lastSeen", "half an hour later")
 
-    if saveErr := manager.SaveSession(inFlightView); false == errors.Is(saveErr, session.ErrSessionDeleted) {
+    if saveErr := manager.SaveSession(context.Background(), inFlightView); false == errors.Is(saveErr, session.ErrSessionDeleted) {
         t.Fatalf("expected the write-back inside the configured one-hour window to be refused, got %v", saveErr)
     }
 
@@ -428,7 +426,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
 
     inFlightView.Set("lastSeen", "an hour and a minute later")
 
-    if saveErr := manager.SaveSession(inFlightView); nil != saveErr {
+    if saveErr := manager.SaveSession(context.Background(), inFlightView); nil != saveErr {
         t.Fatalf("expected the configured window to have lapsed on the kernel's clock, got %v", saveErr)
     }
 }
@@ -451,15 +449,15 @@ func TestApplicationRegisterHttpSession_HandsAnUnlimitedTtlToTheStorageAsNoExpir
 
     manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
 
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set("key", "value")
 
-    saveErr := manager.SaveSession(sessionInstance)
+    saveErr := manager.SaveSession(context.Background(), sessionInstance)
     if nil != saveErr {
         t.Fatalf("unexpected save session error: %v", saveErr)
     }
 
-    if 0 != storage.savedTtl {
+    if false == storage.savedTtl.IsUnlimited() {
         t.Fatalf("expected an unlimited session ttl to store without expiry, got %v", storage.savedTtl)
     }
 }
@@ -502,7 +500,6 @@ func TestApplicationRegisterCache_TheFallbackBackendIsBoundedAtTheDefaultCeiling
     }
 }
 
-/* every one of the three cache services is only supplied when the application did not: a framework registration that overwrote an application's own serializer would silently change the format of everything already in the cache, and one that overwrote the cache itself would hand every consumer a different instance than the one the wiring built */
 func TestApplicationRegisterCache_LeavesEveryApplicationSuppliedServiceAlone(t *testing.T) {
     applicationInstance := newSessionTtlTestApplication(t, "30m")
 
@@ -641,7 +638,6 @@ func TestNewContainerLogger_CreatesTheLogDirectory(t *testing.T) {
     }
 }
 
-/* the configured window must travel from the environment key through the configuration into the manager: only a lapsed 300ms window explains a deleted session accepting a write-back 400ms later, where the five-minute default would still refuse it. */
 func TestBootContainer_TheSerializerManagerIsSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -730,7 +726,6 @@ func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *t
     }
 }
 
-/* TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers pins the id the two published resolvers read. SerializerMustFromRuntime and SerializerFromRuntime were documented with the id nothing registered, so the Must door panicked for every caller and the soft one answered nil — by construction, on every boot the framework has ever performed. */
 func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -754,7 +749,6 @@ func TestBootContainer_TheDefaultSerializerAnswersItsDocumentedResolvers(t *test
     }
 }
 
-/* TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided pins the gate over the same id, so registering a default serializer is a substitution rather than the boot collision every ungated framework id answered with. */
 func TestBootContainer_TheApplicationsOwnDefaultSerializerIsSubstitutedNotCollided(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -817,7 +811,6 @@ func TestApplication_RegisterScopedAfterBootPanics(t *testing.T) {
     }, "may not register scoped services after boot")
 }
 
-/* A name claimed at both lifetimes is a wiring mistake, and it has to join the aggregated boot report rather than end the boot on its own — the report exists so a consolidation that produced several collisions surfaces them all at once. */
 func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t *testing.T) {
     kernelInstance := newTestKernel()
     applicationInstance := newScopedServiceApplication(kernelInstance)
@@ -851,7 +844,6 @@ func TestApplication_AScopedNameCollidingWithAContainerServiceIsReportedAtBoot(t
     }, "duplicate registrations detected at boot")
 }
 
-/* recordingCloseTransport records whether the container's teardown ever reached it. */
 type recordingCloseTransport struct {
     closed atomic.Bool
 }
@@ -878,7 +870,6 @@ func (instance *recordingCloseTransport) CloseWithContext(closeContext context.C
     return nil
 }
 
-/* the http process publishes through a routing that holds the transport value directly, so it never resolves the transports map; the container still closes the registered transports, or the broker connection lives exactly as long as the process. */
 func TestBoot_TheRegisteredTransportsAreClosedByAProcessThatNeverResolvesTheMap(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -900,7 +891,6 @@ func TestBoot_TheRegisteredTransportsAreClosedByAProcessThatNeverResolvesTheMap(
     }
 }
 
-/* the consume process still gets its ordered teardown: the edge is recorded on the RESOLUTION, so a closer already built at boot is no less a dependency of the map than one the map's own provider built. */
 func TestBoot_ResolvingTheTransportsMapStillOrdersTheTeardownAfterTheBootBuild(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -928,7 +918,6 @@ func TestBoot_ResolvingTheTransportsMapStillOrdersTheTeardownAfterTheBootBuild(t
     }
 }
 
-/* an application that registered nothing must not gain a service it never asked for, and the boot must not fail looking for one. */
 func TestBoot_NoTransportsRegisteredBuildsNoCloser(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -982,7 +971,6 @@ func TestBootContainer_TheJournalOfAConsoleProcessReopensOnSighup(t *testing.T) 
     }
 }
 
-/* a relative MELODY_LOG_PATH is anchored to the project directory and its parent directories are created before the open, so the console journal lands under the project and not under the working directory of the process */
 func TestBootContainer_ARelativeLogPathIsAnchoredToTheProjectDirectoryUnderACreatedParent(t *testing.T) {
     relativePath := filepath.Join("var", "log", "nested", "application.log")
 
@@ -1071,7 +1059,6 @@ func TestBuildMessageBusTransportsCloser_FailsWhenTheBusCannotBeOrderedBeforeIts
                 container.RegisterOptions{TypeRegistrationDisabled: true},
             )
 
-            /* the closer declared to close after the bus makes the framework's edge, the bus before the closer, a ring */
             applicationInstance.RegisterService(
                 messagebus.ServiceTransportsCloser,
                 func(resolver containercontract.Resolver) (*messagebus.TransportsCloser, error) {
@@ -1131,7 +1118,6 @@ func TestBuildMessageBusTransportsCloser_FailsWhenTheTransportsCloserCannotBeBui
     applicationInstance.buildMessageBusTransportsCloser()
 }
 
-/* the after-boot refusals of RegisterService and RegisterScopedService name the service that was registered too late, as the parameter and configuration siblings name theirs. */
 func TestApplicationRegisterService_AfterBootRefusalNamesTheService(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -1162,7 +1148,6 @@ func TestApplicationRegisterService_AfterBootRefusalNamesTheService(t *testing.T
     }
 }
 
-/* a log directory that cannot be created is refused naming the directory beside the file: the directory is what MkdirAll refused. */
 func TestNewContainerLogger_RefusesADirectoryItCannotCreateNamingTheDirectory(t *testing.T) {
     inTheWay := filepath.Join(t.TempDir(), "file")
     if writeErr := os.WriteFile(inTheWay, []byte("x"), 0o644); nil != writeErr {
@@ -1185,7 +1170,6 @@ func TestNewContainerLogger_RefusesADirectoryItCannotCreateNamingTheDirectory(t 
     _ = newContainerLogger(logPath, loggingcontract.LevelDebug, nil, clock.NewSystemClock(), false, os.Stdout)
 }
 
-/* without MELODY_LOG_PATH a command journals on standard error, so what it prints on standard output, a document redirected to a file included, carries no log line; the http process journals on standard output */
 func TestBootContainer_TheConsoleJournalOfACommandIsStandardError(t *testing.T) {
     for _, testCase := range []struct {
         mode     string
@@ -1276,11 +1260,50 @@ func TestBootContainer_TheFrameworkProvidersResolveTheirKernelValues(t *testing.
     }
 }
 
-/* mustSession hands on the session a manager door answered, panicking with the error it answered instead */
 func mustSession(sessionInstance sessioncontract.Session, sessionErr error) sessioncontract.Session {
     if nil != sessionErr {
         panic(sessionErr)
     }
 
     return sessionInstance
+}
+
+func TestApplication_WiresTheSessionPersistenceTimeoutFromTheEnvironment(t *testing.T) {
+    for _, row := range []struct {
+        name   string
+        values map[string]string
+        check  func(resolved bound.Resolved[time.Duration]) bool
+    }{
+        {"declared", map[string]string{config.HttpSessionPersistenceTimeoutKey: "2s"}, func(resolved bound.Resolved[time.Duration]) bool { return 2*time.Second == resolved.Value && false == resolved.Unlimited }},
+        {"unlimited", map[string]string{config.HttpSessionPersistenceTimeoutKey: "unlimited"}, func(resolved bound.Resolved[time.Duration]) bool { return true == resolved.Unlimited }},
+        {"unset", map[string]string{}, func(resolved bound.Resolved[time.Duration]) bool { return 5*time.Second == resolved.Value && false == resolved.Unlimited }},
+    } {
+        t.Run(row.name, func(t *testing.T) {
+            applicationInstance := newSessionTestApplicationFromValues(t, row.values)
+
+            applicationInstance.RegisterService(
+                session.ServiceSessionStorage,
+                func(resolver containercontract.Resolver) (sessioncontract.Storage, error) {
+                    return &ttlRecordingSessionStorage{}, nil
+                },
+                container.RegisterOptions{},
+            )
+
+            registerSessionCollaborators(applicationInstance)
+            applicationInstance.registerHttpSession()
+
+            manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
+
+            resolved, resolveErr := session.ResolvePersistenceTimeout(manager)
+            if nil != resolveErr || false == row.check(resolved) {
+                t.Fatalf("unexpected persistence timeout %+v, %v", resolved, resolveErr)
+            }
+        })
+    }
+}
+
+func TestSessionPersistenceTimeoutDefaultsAgree(t *testing.T) {
+    if config.DefaultSessionPersistenceTimeout != session.DefaultPersistenceTimeout {
+        t.Fatalf("expected the configuration's and the manager's defaults to agree, got %s and %s", config.DefaultSessionPersistenceTimeout, session.DefaultPersistenceTimeout)
+    }
 }

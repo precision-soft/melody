@@ -18,7 +18,7 @@ import (
 )
 
 var (
-    /* the optional "default:<fallback>:" prefix marks an environment key whose absence is tolerated: "%env(default::KEY)%" falls back to the empty string and "%env(default:some.parameter:KEY)%" falls back to another parameter. Without the prefix an undefined key stays a hard error, so a plain "%env(KEY)%" never silently degrades to empty. */
+    /* without the "default:<fallback>:" prefix an undefined key stays a hard error */
     envPlaceholderPattern = regexp.MustCompile(`%env\((default:([A-Za-z_][A-Za-z0-9_.]*)?:)?([A-Za-z_][A-Za-z0-9_]*)\)%`)
 )
 
@@ -78,7 +78,7 @@ func NewConfiguration(
     return configuration, nil
 }
 
-/* Configuration holds the environment, the parameters and the cli, kernel and http sections. It is written at boot and read on the request path, both under mutex; MarkServing sets serving under the write lock, and a resolution that arrives afterwards is refused rather than rewriting the parameters under settled readers. */
+/* Configuration holds the environment, the parameters and the cli, kernel and http sections; after MarkServing a Resolve is refused. */
 type Configuration struct {
     mutex       sync.RWMutex
     environment *Environment
@@ -88,18 +88,16 @@ type Configuration struct {
     kernel      *kernelConfiguration
     http        *httpConfiguration
 
-    /* set once the boot-time Resolve has run, so a parameter registered afterwards is resolved on registration instead of keeping its raw template */
     resolved bool
 
-    /* written and read under the configuration write lock, so a MarkServing racing a Resolve either waits for the rewrite or lands first and the rewrite is refused; the atomic wrapper is for a lock-free reader, not the synchronization */
+    /* written and read under the write lock; the atomic is for lock-free readers, not the synchronization */
     serving atomic.Bool
 
-    /* per instance, so two configurations of one process never share a declaration */
     declaredEnvironmentKeys       map[string]declaredEnvironmentKey
     declaredEnvironmentParameters map[string]string
 }
 
-/* MarkServing records that the wiring phase is over and the application has started running. From that point Resolve is refused: services built during boot hold the values they read, so re-resolving reconfigures nothing and only rewrites the parameter store under readers that expect it settled. Registering a parameter still works — it resolves itself on registration — which is what keeps a late module functioning. */
+/* MarkServing ends the wiring phase: Resolve is refused from then on, and a parameter registered later resolves on registration. */
 func (instance *Configuration) MarkServing() {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -120,7 +118,6 @@ func (instance *Configuration) Http() configcontract.HttpConfiguration {
 }
 
 func (instance *Configuration) Parameters() ParameterMap {
-    /* read under the read lock: RegisterRuntime mutates the parameters map at runtime */
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
@@ -129,7 +126,6 @@ func (instance *Configuration) Parameters() ParameterMap {
     )
 }
 
-/* projectDirectoryParameterValue reads the project-directory default for diagnostics without requiring a resolved configuration. */
 func (instance *Configuration) projectDirectoryParameterValue() string {
     parameter := instance.Get(KernelProjectDirectory)
     if true == internal.IsNilInterface(parameter) {
@@ -140,7 +136,6 @@ func (instance *Configuration) projectDirectoryParameterValue() string {
 }
 
 func (instance *Configuration) Get(name string) configcontract.Parameter {
-    /* read under the read lock: RegisterRuntime mutates the parameters map at runtime */
     instance.mutex.RLock()
     parameter := instance.getInternalParameter(name)
     instance.mutex.RUnlock()
@@ -173,7 +168,7 @@ func (instance *Configuration) RegisterRuntime(name string, value any) {
     instance.registerRuntimeParameter(name, value, false)
 }
 
-/* RegisterRuntimeSecret registers a parameter that holds a credential, so that the commands which render the configuration redact it. The value is stored and resolved like any other: the marking governs display, not storage, and it travels to every parameter whose template reads this one. It does not travel backwards: the parameter melody auto-registered from the environment key this template reads holds the same credential and needs its own MarkSecret. */
+/* RegisterRuntimeSecret registers a parameter holding a credential, redacted by the commands that render the configuration; the marking reaches the parameters whose template reads it, not the one it reads. */
 func (instance *Configuration) RegisterRuntimeSecret(name string, value any) {
     instance.registerRuntimeParameter(name, value, true)
 }
@@ -185,7 +180,6 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
         )
     }
 
-    /* the name is judged trimmed: Get is an exact map lookup, so a padded name would register a parameter no lookup reaches */
     if name != strings.TrimSpace(name) {
         exception.Panic(
             exception.NewError(
@@ -213,7 +207,7 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* the lock-free lookup, not Get: Get takes the read lock and sync.RWMutex is not reentrant, so calling it under the write lock would deadlock */
+    /* not Get: Get takes the read lock and sync.RWMutex is not reentrant */
     existingParameter := instance.getInternalParameter(name)
     if nil != existingParameter {
         exception.Panic(
@@ -231,10 +225,9 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
     parameter.name = name
     parameter.isSecret.Store(isSecret)
 
-    /* the parameter is published before its template is resolved and removed again if the resolution fails, because the secret propagation marks the readers it finds in this map; every step runs under the write lock every reader takes, so no reader sees the intermediate state */
+    /* published before the resolution, since the secret propagation reads this map, and removed again on failure */
     instance.parameters[name] = parameter
 
-    /* after the boot resolution a parameter is resolved on registration, or it would keep its raw template; a pre-resolve registration is left for the boot pass */
     if true == instance.resolved {
         stringValue, isString := value.(string)
         if true == isString {
@@ -245,7 +238,6 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
                 make(map[string]bool),
             )
             if nil != resolveErr {
-                /* the rollback runs before the panic, or a half-made parameter would serve its raw template and burn the name for a corrected retry */
                 delete(instance.parameters, name)
 
                 exception.Panic(
@@ -262,12 +254,12 @@ func (instance *Configuration) registerRuntimeParameter(name string, value any, 
             parameter.storeValue(resolvedValue)
         }
     } else if stringValue, isString := value.(string); true == isString && true == templateCarriesConstruct(stringValue) {
-        /* a pre-boot registration whose value carries a template construct is marked deferred, so a module reading it before the boot pass is refused instead of receiving the raw template; the boot pass clears the flag. The question is put to the resolution's grammar, so "Coverage 95%" is data. */
+        /* deferred so a module reading it before the boot pass is refused rather than handed the raw template */
         parameter.deferred.Store(true)
     }
 }
 
-/* MarkSecret marks an already registered parameter as holding a credential, typically one melody registered from the .env artifacts before any module ran. An absent parameter is left alone, since an environment key may be undefined in some environments; the secret column of debug:parameters confirms a marking took effect. */
+/* MarkSecret marks a registered parameter as holding a credential; an absent parameter is left alone. */
 func (instance *Configuration) MarkSecret(name string) bool {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -279,15 +271,13 @@ func (instance *Configuration) MarkSecret(name string) bool {
 
     parameter.isSecret.Store(true)
 
-    /* the marking travels to every parameter whose template reads this one, under every spelling it answers to, whether it arrives before or after the boot resolve */
     instance.propagateSecretMarkLocked(name)
 
     return true
 }
 
-/* propagateSecretMarkLocked marks every parameter whose raw template reads the named one, through %env(NAME)%, the default processor's fallback or a %NAME% reference, under every spelling the name answers to, and follows the marking to a fixpoint. A match inside doubled-percent escaped text over-marks, which errs toward redacting more. */
+/* a match inside doubled-percent escaped text over-marks, which errs toward redacting more */
 func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
-    /* seeded with every spelling the marked parameter answers to, since a kernel-aliased parameter is one object under two names */
     markedNames := instance.aliasesOfName(markedName)
 
     for 0 < len(markedNames) {
@@ -326,7 +316,7 @@ func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
     }
 }
 
-/* templateReferencedNames lists the environment keys, the fallback parameters and the parameters a template reads, scanned as scanTemplate scans it: a doubled percent is a literal, so "a%%%db.pass%" reads db.pass and "a%%db.pass%%" reads nothing */
+/* a doubled percent is a literal: "a%%%db.pass%" reads db.pass and "a%%db.pass%%" reads nothing */
 func templateReferencedNames(template string) []string {
     names := make([]string, 0)
 
@@ -396,7 +386,6 @@ func templateReadsName(template string, name string) bool {
 }
 
 func (instance *Configuration) Names() []string {
-    /* read under the read lock: RegisterRuntime mutates the parameters map at runtime */
     instance.mutex.RLock()
 
     names := make([]string, 0, len(instance.parameters))
@@ -425,7 +414,7 @@ func (instance *Configuration) applyDefaults(projectDirectory string) error {
     return nil
 }
 
-/* EnvironmentKeyCount reports how many keys the .env artifacts contributed. Zero almost always means the files were not found, so the application can refuse to serve http on development defaults alone. */
+/* EnvironmentKeyCount reports how many keys the .env artifacts contributed; zero almost always means the files were not found. */
 func (instance *Configuration) EnvironmentKeyCount() int {
     return len(instance.environment.All())
 }
@@ -447,7 +436,6 @@ func (instance *Configuration) applyEnvironmentOverrides() error {
         },
     )
 
-    /* zero keys almost always means the .env artifacts were not found: melody derives the project directory from the executable location, the working directory under go run, so the directory searched is named */
     if 0 == len(instance.environment.All()) {
         instance.logger.Warning(
             "no environment keys were loaded from the .env artifacts; melody derives the project directory from the executable location (the working directory under go run), so a binary run from elsewhere does not find its .env files",
@@ -460,7 +448,7 @@ func (instance *Configuration) applyEnvironmentOverrides() error {
     return nil
 }
 
-/* the constructor's pass does not mark the configuration resolved: the composition root registers its parameters after it and before boot, and resolving those eagerly would make registration order significant. The pass defers a reference to a parameter not yet registered, and the boot pass resolves them all in one order-independent batch. */
+/* the constructor's pass leaves the configuration unresolved, so registration order stays insignificant */
 func (instance *Configuration) resolvePlaceholders() error {
     resolveErr := instance.resolveAll(true)
     if nil != resolveErr {
@@ -560,7 +548,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         return staticEnableCacheErr
     }
 
-    /* an empty line is unset, as on every other switch key, and the default is on */
+    /* empty is unset; the default is on */
     staticEnableCache := false == staticEnableCacheSwitch.IsSet || true == staticEnableCacheSwitch.Value
 
     staticExcludedPaths := splitConfigurationList(instance.MustGet(KernelStaticExcludedPaths).MustString())
@@ -573,6 +561,11 @@ func (instance *Configuration) buildHttpConfiguration() error {
     sessionTombstoneRetention, sessionTombstoneRetentionErr := resolveParameter(instance.MustGet(KernelHttpSessionTombstoneRetention), HttpSessionTombstoneRetentionKey, SessionTombstoneRetentionRule)
     if nil != sessionTombstoneRetentionErr {
         return sessionTombstoneRetentionErr
+    }
+
+    sessionPersistenceTimeout, sessionPersistenceTimeoutErr := resolveParameter(instance.MustGet(KernelHttpSessionPersistenceTimeout), HttpSessionPersistenceTimeoutKey, SessionPersistenceTimeoutRule)
+    if nil != sessionPersistenceTimeoutErr {
+        return sessionPersistenceTimeoutErr
     }
 
     sessionMaxSessions, sessionMaxSessionsErr := resolveParameter(instance.MustGet(KernelHttpSessionMaxSessions), HttpSessionMaxSessionsKey, SessionMaxSessionsRule)
@@ -627,6 +620,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         staticExcludedPaths,
         sessionTtl,
         sessionTombstoneRetention,
+        sessionPersistenceTimeout,
         sessionMaxSessions,
         shutdownTimeout,
         serverLimits,
@@ -645,7 +639,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
 func (instance *Configuration) registerEnvironmentParameters() error {
     environment := instance.environment.All()
 
-    /* walked in sorted order, so the boot fails on the same reserved-prefix key every run */
+    /* sorted so the boot fails on the same reserved-prefix key every run */
     environmentKeys := make([]string, 0, len(environment))
     for environmentKey := range environment {
         environmentKeys = append(environmentKeys, environmentKey)
@@ -687,7 +681,7 @@ func (instance *Configuration) isReserved(name string) bool {
     return strings.HasPrefix(name, "kernel.")
 }
 
-/* getInternalParameter is the lock-free map lookup; it must not take the lock, since it runs both at single-threaded construction and under the write lock. Concurrent readers go through Get, Parameters and Names. */
+/* lock-free: it runs at construction and under the write lock */
 func (instance *Configuration) getInternalParameter(name string) *Parameter {
     parameter, exists := instance.parameters[name]
     if false == exists || nil == parameter {

@@ -1,6 +1,7 @@
 package security
 
 import (
+    "context"
     "errors"
     nethttp "net/http"
     "net/http/httptest"
@@ -548,9 +549,9 @@ func TestLogoutDoor_EndsTheSessionEvenWhenTheHandlerDidNot(t *testing.T) {
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
     sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
-    live := mustSession(sessionManager.NewSession())
+    live := mustSession(sessionManager.NewSession(context.Background()))
     live.Set("identity", "u1")
-    if saveErr := sessionManager.SaveSession(live); nil != saveErr {
+    if saveErr := sessionManager.SaveSession(context.Background(), live); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
@@ -570,7 +571,7 @@ func TestLogoutDoor_EndsTheSessionEvenWhenTheHandlerDidNot(t *testing.T) {
         t.Fatalf("expected the cookie expired, got %+v", cookie)
     }
 
-    if stored := mustSession(sessionManager.Session(live.Id())); false == internal.IsNilInterface(stored) {
+    if stored := mustSession(sessionManager.Session(context.Background(), live.Id())); false == internal.IsNilInterface(stored) {
         t.Fatalf("expected the session gone, got %+v", stored)
     }
 
@@ -607,9 +608,9 @@ func TestLogoutDoor_AFailedSuccessListenerStillEndsTheSession(t *testing.T) {
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
     sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
-    live := mustSession(sessionManager.NewSession())
+    live := mustSession(sessionManager.NewSession(context.Background()))
     live.Set("identity", "u1")
-    if saveErr := sessionManager.SaveSession(live); nil != saveErr {
+    if saveErr := sessionManager.SaveSession(context.Background(), live); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
@@ -624,7 +625,7 @@ func TestLogoutDoor_AFailedSuccessListenerStillEndsTheSession(t *testing.T) {
         t.Fatalf("expected the listener's error answered, got %d", recorder.Code)
     }
 
-    if stored := mustSession(sessionManager.Session(live.Id())); false == internal.IsNilInterface(stored) {
+    if stored := mustSession(sessionManager.Session(context.Background(), live.Id())); false == internal.IsNilInterface(stored) {
         t.Fatalf("expected the session gone, got %+v", stored)
     }
 }
@@ -956,13 +957,23 @@ func TestLoginDoor_AHandlerThatCouldNotReachItsStoreIsRefusedWith503AndNoFailedS
     }
 }
 
-/* rotationFailingSessionManager answers every door of the manager it wraps except the rotation, which meets a storage that could not answer */
 type rotationFailingSessionManager struct {
     sessioncontract.Manager
 }
 
-func (instance *rotationFailingSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+func (instance *rotationFailingSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
     return nil, exception.MarkInfrastructureFailure(exception.NewError("session store is down", nil, nil))
+}
+
+type hangupDuringRotationSessionManager struct {
+    sessioncontract.Manager
+    hangup context.CancelFunc
+}
+
+func (instance *hangupDuringRotationSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    instance.hangup()
+
+    return instance.Manager.RegenerateSession(ctx, sessionInstance)
 }
 
 type loadFailingSessionManager struct {
@@ -970,11 +981,11 @@ type loadFailingSessionManager struct {
     err error
 }
 
-func (instance *loadFailingSessionManager) Session(sessionId string) (sessioncontract.Session, error) {
+func (instance *loadFailingSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
     return nil, instance.err
 }
 
-func (instance *loadFailingSessionManager) NewSession() (sessioncontract.Session, error) {
+func (instance *loadFailingSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
     return nil, instance.err
 }
 
@@ -991,6 +1002,12 @@ func serveDoorOverSessionManager(t *testing.T, fixture *doorFixture, method stri
 func serveDoorWithCookie(t *testing.T, fixture *doorFixture, method string, target string, cookieValue string, wrap func(sessioncontract.Manager) sessioncontract.Manager) *httptest.ResponseRecorder {
     t.Helper()
 
+    return serveDoorUnderRequestContext(t, context.Background(), fixture, method, target, cookieValue, wrap)
+}
+
+func serveDoorUnderRequestContext(t *testing.T, requestContext context.Context, fixture *doorFixture, method string, target string, cookieValue string, wrap func(sessioncontract.Manager) sessioncontract.Manager) *httptest.ResponseRecorder {
+    t.Helper()
+
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
     if nil != wrap {
         serviceContainer.MustOverrideProtectedInstance(
@@ -1000,7 +1017,7 @@ func serveDoorWithCookie(t *testing.T, fixture *doorFixture, method string, targ
         )
     }
 
-    request := httptest.NewRequest(method, target, strings.NewReader(""))
+    request := httptest.NewRequest(method, target, strings.NewReader("")).WithContext(requestContext)
     request.Header.Set("Accept", "application/json")
     request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: cookieValue})
 
@@ -1144,6 +1161,30 @@ func TestLoginDoor_ARotationOutageAnswersTheFirewallDelay(t *testing.T) {
     }
 }
 
+func TestLoginDoor_ARotationTheClientsHangupCutIsRecordedAtWarning(t *testing.T) {
+    authenticator := &doorAuthenticator{token: NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)}
+
+    fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.LoginAuthenticator = authenticator
+        config.UnavailableRetryAfter = bound.Of(doorFirewallRetryAfter)
+    })
+
+    recorded := fixture.refusals()
+
+    requestContext, hangup := context.WithCancel(context.Background())
+    defer hangup()
+
+    serveDoorUnderRequestContext(t, requestContext, fixture, nethttp.MethodPost, doorLoginPath, doorSessionCookieValue, func(manager sessioncontract.Manager) sessioncontract.Manager {
+        return &hangupDuringRotationSessionManager{Manager: manager, hangup: hangup}
+    })
+
+    requireSessionUnavailableRefusal(t, recorded)
+
+    if 0 != fixture.errorRecords() || 0 == fixture.recordsAt(loggingcontract.LevelWarning, "security firewall door could not read or rotate the session: the client hung up") {
+        t.Fatalf("expected the hangup recorded at warning and no error, got %d errors", fixture.errorRecords())
+    }
+}
+
 func TestLogoutDoor_ASessionOutageIsRefusedBeforeTheHandler(t *testing.T) {
     fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
         config.UnavailableRetryAfter = bound.Of(doorFirewallRetryAfter)
@@ -1235,12 +1276,12 @@ func TestLogoutDoor_EndsTheSessionItsHandlerRotated(t *testing.T) {
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
     manager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
-    stored, mintErr := manager.NewSession()
+    stored, mintErr := manager.NewSession(context.Background())
     if nil != mintErr {
         t.Fatalf("unexpected error: %v", mintErr)
     }
     stored.Set("identity", "u1")
-    if saveErr := manager.SaveSession(stored); nil != saveErr {
+    if saveErr := manager.SaveSession(context.Background(), stored); nil != saveErr {
         t.Fatalf("unexpected error: %v", saveErr)
     }
 
@@ -1261,7 +1302,7 @@ func TestLogoutDoor_EndsTheSessionItsHandlerRotated(t *testing.T) {
         }
 
         if session.SessionCookieName == cookie.Name && "" != cookie.Value {
-            if rotated, loadErr := manager.Session(cookie.Value); nil == loadErr && nil != rotated && true == rotated.Has("identity") {
+            if rotated, loadErr := manager.Session(context.Background(), cookie.Value); nil == loadErr && nil != rotated && true == rotated.Has("identity") {
                 t.Fatalf("expected the rotated session ended, it still carries the identity")
             }
         }
@@ -1298,7 +1339,7 @@ type unmarkedRotationFailingSessionManager struct {
     sessioncontract.Manager
 }
 
-func (instance *unmarkedRotationFailingSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+func (instance *unmarkedRotationFailingSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
     return nil, exception.NewError("could not generate unique session id", nil, nil)
 }
 

@@ -13,18 +13,17 @@ import (
     melodysession "github.com/precision-soft/melody/v4/session"
 )
 
-/* The handler releases the session's place and leaves ending it to the firewall's door, whose pin asks the storage. */
 func TestSessionLogoutHandlerLeavesEndingTheSessionToTheDoor(t *testing.T) {
     storage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
     defer storage.CloseWithContext(context.Background())
 
     manager := melodysession.NewManager(storage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
 
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set(SessionKeySecurityUserId, "user-1")
     sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_USER"})
 
-    if err := manager.SaveSession(sessionInstance); nil != err {
+    if err := manager.SaveSession(context.Background(), sessionInstance); nil != err {
         t.Fatalf("the session was not saved: %v", err)
     }
 
@@ -46,7 +45,7 @@ func TestSessionLogoutHandlerLeavesEndingTheSessionToTheDoor(t *testing.T) {
         t.Fatal("expected the session left for the door to end")
     }
 
-    if _, exists, _ := storage.Load(sessionId); false == exists {
+    if _, exists, _ := storage.Load(context.Background(), sessionId); false == exists {
         t.Fatal("expected the entry left for the door's response path")
     }
 }
@@ -58,7 +57,6 @@ func TestSessionLogoutHandlerAnswersTheErrorOfARequestCarryingNoSession(t *testi
     }
 }
 
-/* the sign-out releases the row of the session it ends, so the account's place is free for its next sign-in */
 func TestSessionLogoutHandlerReleasesTheSessionsRow(t *testing.T) {
     request, sessionInstance := requestCarryingSession(t)
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})

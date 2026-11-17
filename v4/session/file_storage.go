@@ -25,27 +25,27 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* FileStorageConfig names the file the storage persists to, one way or the other; exactly one of Path and File is set: both is refused naming the two, and neither is refused. */
+/* FileStorageConfig names the file the storage persists to: exactly one of Path and File. */
 type FileStorageConfig struct {
-    /* Path is a file the storage owns: it creates the file with its directory and writes every snapshot through a temporary file and a rename. Each Save and Delete appends one synced record to the journal beside it, <path>.journal, and the snapshot is rewritten only when the journal is compacted: at construction, past JournalMaxBytes and at close. */
+    /* Path is a file the storage owns, snapshotted through a temporary file and a rename; each write appends a synced record to <path>.journal, compacted into the snapshot at construction, past JournalMaxBytes and at close. */
     Path string
 
-    /* File is an open handle the caller owns and keeps owning: it is not closed here, and every write goes through it. A write cannot be atomic through a handle, but the snapshot is encoded whole first, the write precedes the truncation and the truncation cuts to the length written, so no crash leaves a zero-length file; a kill mid-write can leave a torn document, which the next construction reports as a decode failure. A handle that cannot seek or that appends is refused, and so is a read-only one where the descriptor's access mode can be read; elsewhere its first Save reports it. A handle never journals: every write rewrites the whole snapshot, as JournalDisabled does over a Path. */
+    /* File is an open handle the caller keeps owning; every write rewrites the whole snapshot through it, never journaled, and a crash mid-write can leave a torn document. */
     File *os.File
 
-    /* JournalDisabled writes the whole snapshot on every Save and Delete in Path mode, the third major's form, which a build without the journal reads in full; a journal left at the path is still replayed and compacted at construction, then removed. File mode never journals. */
+    /* JournalDisabled writes the whole snapshot on every Save and Delete in Path mode; a journal left at the path is replayed and compacted at construction, then removed. */
     JournalDisabled bool
 
     /* JournalMaxBytes is the journal size past which a write compacts it into the snapshot: 8 MiB when left out, at least 64 KiB, unlimited refused. */
     JournalMaxBytes bound.Count
 
-    /* Logger journals what the construction replayed or discarded and each threshold compaction that failed after its write landed, which the next write past the threshold retries; nil journals nothing, a typed nil is refused. */
+    /* Logger journals what the construction replayed or discarded and each failed threshold compaction; nil journals nothing, a typed nil is refused. */
     Logger loggingcontract.Logger
 
-    /* MaxSessions bounds the sessions held at once: 100,000 when left out, at least 1, unlimited admitted. At the ceiling, once the lapsed ones are swept, a new id is refused and a stored one is still saved; a file already holding more keeps them. */
+    /* MaxSessions bounds the sessions held at once: 100,000 when left out, at least 1, unlimited admitted; at the ceiling a new id is refused. */
     MaxSessions bound.Count
 
-    /* Clock is where every expiry instant is read; nil is the system clock. The file persists the wall reading, so expiry follows every step of the wall clock; SESSION.md names the trade. */
+    /* Clock is where every expiry instant is read; nil is the system clock, and the file persists the wall reading. */
     Clock clockcontract.Clock
 }
 
@@ -56,7 +56,7 @@ var fileStorageMaxSessionsRule = bound.Rule[int]{
     UnlimitedAdmitted: true,
 }
 
-/* NewFileStorage builds the storage over the path or the handle the configuration names and loads the sessions the file holds, answering an error for a MaxSessions or a JournalMaxBytes it refuses, a typed nil Logger, a configuration naming both or neither, a path that cannot be created, a handle that cannot be written, a file that does not decode, a journal of a format it does not read and a journal it cannot open, replay or settle. */
+/* NewFileStorage builds the storage over the configured path or handle and loads the sessions the file holds. */
 func NewFileStorage(config FileStorageConfig) (*FileStorage, error) {
     if "" != config.Path && nil != config.File {
         return nil, exception.NewError(
@@ -163,7 +163,7 @@ func newFileStorageFromPath(path string, clockInstance clockcontract.Clock, jour
     return storage, nil
 }
 
-/* a journal left at the path is replayed even with the door off, so turning the journal off loses no write */
+/* replayed even with the journal off, so turning it off loses no write */
 func (instance *FileStorage) openJournal(journalEnabled bool, logger loggingcontract.Logger) error {
     journalPath := sessionJournalPath(instance.path)
 
@@ -237,7 +237,7 @@ func newFileStorageFromFile(fileInstance *os.File, clockInstance clockcontract.C
     return storage, nil
 }
 
-/* FileStorage is recommended for development only. Values are flushed as JSON and reloaded at construction, so after a restart an int reads back float64, a struct map[string]any and a time.Time a string, while in-process they keep the stored types. In Path mode a write appends and fsyncs one journal record, and the whole snapshot is re-encoded only at compaction; with the journal off, and in File mode, every write re-encodes and fsyncs the whole snapshot, so its cost grows with the number of sessions. */
+/* FileStorage is recommended for development only: values round-trip through JSON, so after a restart an int reads back float64. Every door honours its context on entry alone, and a write that began runs to its end. */
 type FileStorage struct {
     maxSessions    bound.Resolved[int]
     earliestExpiry int64
@@ -264,9 +264,9 @@ type fileSessionEntry struct {
     ExpiresAt int64          `json:"expiresAt"`
 }
 
-func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error) {
-    if "" == sessionId {
-        return nil, false, exception.NewError("session id is required in load session", nil, nil)
+func (instance *FileStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+        return nil, false, nilErr
     }
 
     instance.mutex.Lock()
@@ -274,6 +274,14 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
 
     if true == instance.closed {
         return nil, false, exception.NewError("session storage is closed", nil, nil)
+    }
+
+    if "" == sessionId {
+        return nil, false, exception.NewError("session id is required in load session", nil, nil)
+    }
+
+    if doneErr := ctx.Err(); nil != doneErr {
+        return nil, false, doneErr
     }
 
     entry, exists := instance.sessionById[sessionId]
@@ -289,7 +297,7 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
             return nil, false, nil
         }
 
-        /* the flush drops the lapsed entry, and its failure is not returned: this load's answer is settled, and an error would refuse the request 503 where a client without a cookie is served a fresh session */
+        /* the flush failure is not returned: this load's answer is settled, and an error would answer 503 where a fresh session is served */
         _ = instance.flushLocked()
 
         return nil, false, nil
@@ -298,15 +306,36 @@ func (instance *FileStorage) Load(sessionId string) (map[string]any, bool, error
     return internal.CopyAnyMap(entry.Data), true, nil
 }
 
-func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+func (instance *FileStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+        return nilErr
+    }
+
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    if true == instance.closed {
+        return exception.NewError("session storage is closed", nil, nil)
+    }
+
     if "" == sessionId {
         return exception.NewError("session id is required in save session", nil, nil)
     }
 
+    expiry, ttlErr := sessioncontract.ResolveTtl(ttl)
+    if nil != ttlErr {
+        return ttlErr
+    }
+
+    /* asked before the pending compaction, so a caller whose context ended pays for none */
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
+    }
+
     expiresAt := int64(0)
-    if 0 < ttl {
-        /* UnixNano wraps past 2262, so a very large ttl saturates at the maximum instant, as InMemoryStorage keeps it */
-        expiration := instance.clock.Now().Add(ttl)
+    if 0 < expiry {
+        /* UnixNano wraps past 2262, so a very large ttl saturates at the maximum instant */
+        expiration := instance.clock.Now().Add(expiry)
         if true == expiration.After(time.Unix(0, math.MaxInt64)) {
             expiresAt = math.MaxInt64
         } else {
@@ -317,13 +346,6 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
     entry := fileSessionEntry{
         Data:      internal.CopyAnyMap(data),
         ExpiresAt: expiresAt,
-    }
-
-    instance.mutex.Lock()
-    defer instance.mutex.Unlock()
-
-    if true == instance.closed {
-        return exception.NewError("session storage is closed", nil, nil)
     }
 
     if nil != instance.journal {
@@ -371,7 +393,7 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
 
     flushErr := instance.flushLocked()
     if nil != flushErr {
-        /* the entry is rolled back on a flush failure, so a failed Save is not visible to a later Load, unless the failure struck after the new document was written */
+        /* rolled back on a flush failure, unless it struck after the new document was written */
         if false == exception.ChainIs(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
             if true == hadPrevious {
                 instance.sessionById[sessionId] = previousEntry
@@ -386,7 +408,7 @@ func (instance *FileStorage) Save(sessionId string, data map[string]any, ttl tim
     return nil
 }
 
-/* refuseNewSessionAtCeilingLocked sweeps only once an entry can have lapsed, so a flood of refused saves does not walk the whole table on each one. */
+/* sweeps only once an entry can have lapsed, so a flood of refused saves does not walk the whole table each time */
 func (instance *FileStorage) refuseNewSessionAtCeilingLocked() error {
     if true == instance.maxSessions.Unlimited || len(instance.sessionById) < instance.maxSessions.Value {
         return nil
@@ -412,7 +434,6 @@ func (instance *FileStorage) refuseNewSessionAtCeilingLocked() error {
     )
 }
 
-/* earliestExpiryLocked answers the first instant a stored session lapses, the far end of time where none of them expires. */
 func (instance *FileStorage) earliestExpiryLocked() int64 {
     earliestExpiry := int64(math.MaxInt64)
 
@@ -425,9 +446,9 @@ func (instance *FileStorage) earliestExpiryLocked() int64 {
     return earliestExpiry
 }
 
-func (instance *FileStorage) Delete(sessionId string) error {
-    if "" == sessionId {
-        return exception.NewError("session id is required in delete session", nil, nil)
+func (instance *FileStorage) Delete(ctx context.Context, sessionId string) error {
+    if nilErr := sessioncontract.RefuseNilContext(ctx); nil != nilErr {
+        return nilErr
     }
 
     instance.mutex.Lock()
@@ -435,6 +456,15 @@ func (instance *FileStorage) Delete(sessionId string) error {
 
     if true == instance.closed {
         return exception.NewError("session storage is closed", nil, nil)
+    }
+
+    if "" == sessionId {
+        return exception.NewError("session id is required in delete session", nil, nil)
+    }
+
+    /* asked before the unknown-id shortcut, so a done context is answered one way */
+    if doneErr := ctx.Err(); nil != doneErr {
+        return doneErr
     }
 
     if _, exists := instance.sessionById[sessionId]; false == exists {
@@ -469,7 +499,7 @@ func (instance *FileStorage) Delete(sessionId string) error {
 
     flushErr := instance.flushLocked()
     if nil != flushErr {
-        /* the entry is restored on a flush failure, unless the failure struck after the new document was written */
+        /* restored on a flush failure, unless it struck after the new document was written */
         if false == exception.ChainIs(flushErr, errSessionStoragePersistedDespiteFlushFailure) {
             instance.sessionById[sessionId] = previousEntry
         }
@@ -480,7 +510,7 @@ func (instance *FileStorage) Delete(sessionId string) error {
     return nil
 }
 
-/* CloseWithContext compacts the journal, so a clean stop leaves the whole state in the snapshot for a build that does not read the journal; a failed compaction keeps the journal for the next construction to replay. */
+/* CloseWithContext compacts the journal into the snapshot; a failed compaction keeps the journal for the next construction to replay. */
 func (instance *FileStorage) CloseWithContext(closeContext context.Context) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -531,7 +561,7 @@ func (instance *FileStorage) CloseWithContext(closeContext context.Context) erro
     return nil
 }
 
-/* purgeExpiredLocked drops every lapsed session before a snapshot is written. It is the one place a lapsed entry is removed: no caller deletes the expired session it found, so narrowing the predicate gives them back that delete. */
+/* the one place a lapsed entry is removed: no caller deletes the expired session it found */
 func (instance *FileStorage) purgeExpiredLocked() {
     now := instance.clock.Now().UnixNano()
 
@@ -542,7 +572,6 @@ func (instance *FileStorage) purgeExpiredLocked() {
     }
 }
 
-/* flushLocked purges and then writes the snapshot, on every path. */
 func (instance *FileStorage) flushLocked() error {
     instance.purgeExpiredLocked()
 
@@ -604,7 +633,7 @@ func readSessionFileFromHandle(fileInstance *os.File) (map[string]fileSessionEnt
         return nil, exception.NewError("failed to decode session storage file", nil, err)
     }
 
-    /* a JSON null decodes without an error into a nil map, which the first Save would write into */
+    /* a JSON null decodes without an error into a nil map */
     if nil == decoded {
         return nil, exception.NewError("session storage snapshot must be a JSON object", nil, nil)
     }
@@ -687,7 +716,7 @@ func writeSessionBytesAtomically(path string, encoded []byte) error {
         return exception.NewError("failed to replace session storage file", nil, err)
     }
 
-    /* the rename is durable only once the directory is flushed; the failure carries the persisted-despite-flush mark, since the rename already committed the document */
+    /* the rename is durable only once the directory is flushed; the rename already committed the document */
     if directorySyncErr := syncSessionDirectory(filepath.Dir(path)); nil != directorySyncErr {
         return directorySyncErr
     }
@@ -695,7 +724,7 @@ func writeSessionBytesAtomically(path string, encoded []byte) error {
     return nil
 }
 
-/* syncSessionDirectory fsyncs the directory that received a rename. Every failure it answers is over a document already at its path, so each carries the persisted-despite-flush mark and Save and Delete keep the in-memory state. */
+/* every failure here is over a document already at its path, so each carries the persisted-despite-flush mark */
 func syncSessionDirectory(path string) error {
     directory, openErr := os.Open(path)
     if nil != openErr {
@@ -734,7 +763,7 @@ func syncSessionDirectory(path string) error {
     return nil
 }
 
-/* sessionTemporaryPrefix is the prefix of the temp files of a snapshot path, shared by the write and the sweep. A basename longer than 200 bytes is replaced by its digest, since the random part CreateTemp appends would push the name past the 255 bytes of one path component. */
+/* a basename past 200 bytes is replaced by its digest, or CreateTemp's random part would pass the 255-byte component limit */
 func sessionTemporaryPrefix(path string) string {
     base := filepath.Base(path)
     if 200 < len(base) {
@@ -745,7 +774,7 @@ func sessionTemporaryPrefix(path string) string {
     return base + "."
 }
 
-/* removeOrphanSessionTemporaryFiles sweeps the temp files a killed process left, each a full snapshot of every live session. It runs at construction, where per-process ownership means nothing is mid-rename; a file that cannot be removed is left for the next construction. */
+/* runs at construction, where per-process ownership means nothing is mid-rename */
 func removeOrphanSessionTemporaryFiles(path string) {
     directoryPath := filepath.Dir(path)
 
@@ -768,7 +797,7 @@ func removeOrphanSessionTemporaryFiles(path string) {
     }
 }
 
-/* refuseUnwritableHandle refuses a handle no Save could write through. An appending handle is refused by a zero-length WriteAt, which refuses such a handle before touching the file; a read-only one passes that write, which never reaches the descriptor, and is refused on the descriptor's access mode where the platform lets it be read. A mode that cannot be read is not a refusal: the handle is left to the read that follows. A truncate probe is not used, since it would also refuse a handle whose writes work while its truncate does not. */
+/* an appending handle is refused by a zero-length WriteAt and a read-only one by its access mode; a truncate probe would refuse a handle whose writes work */
 func refuseUnwritableHandle(fileInstance *os.File) error {
     _, err := fileInstance.WriteAt([]byte{}, 0)
     if nil != err {
@@ -796,7 +825,7 @@ func refuseUnwritableHandle(fileInstance *os.File) error {
 }
 
 func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSessionEntry) error {
-    /* encode into a buffer first, so a failed encode never touches the live file */
+    /* encoded first, so a failed encode never touches the live file */
     var buffer bytes.Buffer
 
     encoder := json.NewEncoder(&buffer)
@@ -806,10 +835,10 @@ func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSess
         return exception.NewError("failed to encode session storage file", nil, err)
     }
 
-    /* the write goes first and the truncation cuts to its length, so the file is never empty on disk. The offset is named on the write rather than sought, since write(2) on an appending descriptor ignores a seek and WriteAt refuses one. */
+    /* write first, then truncate to its length, so the file is never empty on disk; WriteAt, since write(2) on an appending descriptor ignores a seek */
     writtenCount, err := fileInstance.WriteAt(buffer.Bytes(), 0)
     if nil != err {
-        /* a write that failed part way has already torn the document it replaces, so it is marked persisted-despite-flush and the caller keeps its in-memory state */
+        /* a part-way write already tore the document it replaces */
         if 0 < writtenCount {
             return persistedDespiteFlushFailure("failed to write session storage file after it was partly written", nil, err)
         }
@@ -817,7 +846,7 @@ func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSess
         return exception.NewError("failed to write session storage file", nil, err)
     }
 
-    /* past this point the new document sits whole at offset 0 and a single Decode ignores a stale tail, so a Truncate or Sync failure is marked persisted-despite-flush */
+    /* the new document sits whole at offset 0 and a single Decode ignores a stale tail */
     err = fileInstance.Truncate(int64(buffer.Len()))
     if nil != err {
         return persistedDespiteFlushFailure("failed to truncate session storage file", nil, err)
@@ -831,7 +860,6 @@ func writeSessionFileInPlace(fileInstance *os.File, snapshot map[string]fileSess
     return nil
 }
 
-/* errSessionStoragePersistedDespiteFlushFailure marks a flush failure that happened after the new document was on disk, so the caller keeps its in-memory state. */
 var errSessionStoragePersistedDespiteFlushFailure = errors.New("session storage document was persisted before the flush step failed")
 
 func persistedDespiteFlushFailure(message string, context exceptioncontract.Context, cause error) error {

@@ -23,23 +23,19 @@ import (
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* The shared test material of the package lives here, and only here: this is the one test file the layout rule exempts from having a source of its own. */
-
-/* plainRequest builds a request with no headers of its own. The runtime and the request context are left nil because nothing on the paths under test reads them — the token resolver reaches the attribute bag and nothing else. */
 func plainRequest(t *testing.T) melodyhttpcontract.Request {
     t.Helper()
 
     return melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, nil, nil)
 }
 
-/* requestCarryingSession hands back a request whose attribute bag holds the session, the way the http kernel publishes it, together with the session itself so the caller can write into it. A real session is used rather than a double: the resolver reads the values back through the typed getters, and a double would let the test agree with itself about what a session stores. */
 func requestCarryingSession(t *testing.T) (melodyhttpcontract.Request, melodysessioncontract.Session) {
     t.Helper()
 
     request := plainRequest(t)
 
     manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
 
     _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
@@ -57,7 +53,6 @@ func sessionOnRequest(request melodyhttpcontract.Request) melodysessioncontract.
 
 const testPasswordHash = "test-password-hash"
 
-/* currentAccountLookup answers every account as present, holding testPasswordHash and the roles the session tests write for it, so a resolution that turns anonymous is one of the session's own guards and not the account check. */
 func currentAccountLookup(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
     roles := []string{"ROLE_USER", "ROLE_EDITOR"}
     if "user-3" == userId {
@@ -73,12 +68,10 @@ func refusingAccountLookup(request melodyhttpcontract.Request, userId string) (*
     return nil, false, errAccountRepositoryUnavailable
 }
 
-/* withCurrentCredential writes the credential version of testPasswordHash, so a test that drives an earlier guard is not also refused for a missing version */
 func withCurrentCredential(sessionInstance melodysessioncontract.Session) {
     sessionInstance.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion(testPasswordHash))
 }
 
-/* passwordRequest is a request carrying the credentials the sign-in door sets; an empty one is left unset. */
 func passwordRequest(t *testing.T, username string, password string) melodyhttpcontract.Request {
     t.Helper()
 
@@ -95,12 +88,10 @@ func passwordRequest(t *testing.T, username string, password string) melodyhttpc
 
 const budgetTestAllowance = 2
 
-/* budgetOverPassword is the budget over a password check that accepts "secret" for the editor and refuses anything else. */
 func budgetOverPassword() *SecondFactorBudget {
     return budgetOverPasswordWithLimiter(melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{Clock: melodyclock.NewFrozenClock(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)), Limit: budgetTestAllowance, Window: time.Minute}))
 }
 
-/* budgetOverPasswordWithLimiter is budgetOverPassword over the limiter given. */
 func budgetOverPasswordWithLimiter(limiter melodyhttpcontract.RateLimiter) *SecondFactorBudget {
     password := NewPasswordAuthenticator(func(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
         if "secret" != password {
@@ -124,7 +115,6 @@ func budgetRequestWithHeader(t *testing.T, password string, headerName string) m
     return request
 }
 
-/* sessionAdmission is one call the sign-in doors made on the session index */
 type sessionAdmission struct {
     userId            string
     previousSessionId string
@@ -132,7 +122,6 @@ type sessionAdmission struct {
     createdAt         time.Time
 }
 
-/* recordingSessionIndex stands in for repository.UserSessionRepository, which this package cannot import: it records what the doors ask of it, and refuses every admission with admitErr when one is set */
 type recordingSessionIndex struct {
     admitErr     error
     admittedList []sessionAdmission
@@ -159,10 +148,8 @@ func (instance *recordingSessionIndex) lookup(request melodyhttpcontract.Request
     return instance, nil
 }
 
-/* sessionAdmissionTestInstant is the frozen clock's instant an admission records */
 var sessionAdmissionTestInstant = time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
 
-/* registerAdmissionClock gives the container the clock AdmitSession stamps an admission with */
 func registerAdmissionClock(t *testing.T, containerInstance melodycontainercontract.Container) {
     t.Helper()
 
@@ -179,7 +166,6 @@ func registerAdmissionClock(t *testing.T, containerInstance melodycontainercontr
     }
 }
 
-/* mustSession hands on the session a manager door answered, panicking with the error it answered instead */
 func mustSession(sessionInstance melodysessioncontract.Session, sessionErr error) melodysessioncontract.Session {
     if nil != sessionErr {
         panic(sessionErr)

@@ -9,7 +9,7 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* RegenerateRequestSession rotates the id of the session the request carries and publishes the rotated session back on the request, which is the whole operation a login handler needs against session fixation: the response path saves that session and emits its cookie. Call it before writing the authenticated identity, and write the identity to the session it returns. It loads the session when nothing read it yet, and answers the load's or the rotation's error, a storage that could not answer carrying session.ErrSessionUnavailable. The two steps are one call on purpose — rotating without republishing destroys the id the browser holds without ever telling it the new one. */
+/* RegenerateRequestSession rotates the id of the request's session and publishes the rotated session on the request; write the authenticated identity to the session it returns. */
 func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Session, error) {
     if true == internal.IsNilInterface(request) {
         return nil, exception.NewError("request is nil in regenerate request session", nil, nil)
@@ -20,7 +20,7 @@ func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Ses
         return nil, currentSessionErr
     }
 
-    /* refused here and not left to the manager, which a replacement may not refuse; the kernel's cause is answered as it is, already filed, and one an application built is marked */
+    /* refused here, since a replacement manager may not refuse it */
     if cause, isUnavailable := session.SessionUnavailableCause(currentSession); true == isUnavailable {
         if false == exception.AnswersUnavailable(cause) {
             cause = exception.MarkInfrastructureFailure(cause)
@@ -47,7 +47,7 @@ func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Ses
         return nil, sessionManagerErr
     }
 
-    rotatedSession, regenerateErr := sessionManager.RegenerateSession(currentSession)
+    rotatedSession, regenerateErr := sessionManager.RegenerateSession(runtimeInstance.Context(), currentSession)
     if nil != regenerateErr {
         return nil, markSessionUnavailable(regenerateErr)
     }

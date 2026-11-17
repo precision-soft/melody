@@ -376,17 +376,20 @@ func refuseSessionErrorAtFirewallDoor(
 
     if false == exception.IsAlreadyLogged(sessionErr) {
         if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
-            logger.Error(
-                "security firewall door could not read or rotate the session: its storage is unavailable",
-                resolutionLogContext(
-                    sessionErr,
-                    requestEvent,
-                    exceptioncontract.Context{
-                        "firewallName": firewall.Name(),
-                        "doorName":     doorName,
-                    },
-                ),
+            logContext := resolutionLogContext(
+                sessionErr,
+                requestEvent,
+                exceptioncontract.Context{
+                    "firewallName": firewall.Name(),
+                    "doorName":     doorName,
+                },
             )
+
+            if false == internal.IsNilInterface(runtimeInstance) && true == internal.IsClientHangup(runtimeInstance.Context(), sessionErr) {
+                logger.Warning("security firewall door could not read or rotate the session: the client hung up", logContext)
+            } else {
+                logger.Error("security firewall door could not read or rotate the session: its storage is unavailable", logContext)
+            }
         }
     }
 

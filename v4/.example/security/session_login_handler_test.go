@@ -22,7 +22,6 @@ import (
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* the session a client held before authenticating is the one an attacker could have planted, so the identity must land on a session under a fresh id and never on the one the request arrived with */
 func TestSessionLoginHandlerWritesTheIdentityOnTheSessionTheRequestCarries(t *testing.T) {
     managerStorage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
     manager := melodysession.NewManager(managerStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
@@ -51,7 +50,7 @@ func TestSessionLoginHandlerWritesTheIdentityOnTheSessionTheRequestCarries(t *te
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
 
-    arrivedSession := mustSession(manager.NewSession())
+    arrivedSession := mustSession(manager.NewSession(context.Background()))
     arrivedSession.Set("cart", "kept across the login")
     _ = melodyhttp.SetRequestSession(request, arrivedSession)
 
@@ -93,7 +92,6 @@ func TestSessionLoginHandlerRefusesARequestWithoutASession(t *testing.T) {
     }
 }
 
-/* loginRequest builds a login request carrying a fresh session, over a runtime whose container holds the session manager the rotation needs */
 func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
@@ -123,12 +121,11 @@ func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontra
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
-    _ = melodyhttp.SetRequestSession(request, mustSession(manager.NewSession()))
+    _ = melodyhttp.SetRequestSession(request, mustSession(manager.NewSession(context.Background())))
 
     return runtimeInstance, request
 }
 
-/* the lookup's own failure is what the login door answers, not a refusal of the account: the repository being down says nothing about the account */
 func TestSessionLoginHandlerAnswersTheLookupsFailure(t *testing.T) {
     runtimeInstance, request := loginRequest(t)
 
@@ -142,7 +139,6 @@ func TestSessionLoginHandlerAnswersTheLookupsFailure(t *testing.T) {
     }
 }
 
-/* the session is written from the account, not from the token the authenticator built: the roles are the account's, and the credential version ties the session to the password hash, so a password change revokes it on the next request */
 func TestSessionLoginHandlerOpensASessionThePasswordChangeRevokes(t *testing.T) {
     runtimeInstance, request := loginRequest(t)
 
@@ -236,7 +232,6 @@ func TestSessionLoginHandlerRefusesAnAccountThatIsNotAvailable(t *testing.T) {
     }
 }
 
-/* the firewall's sign-in admits the rotated session under the account, naming the id the rotation retired, so a session opened through the firewall counts against the account's cap as one opened at the sign-in door does */
 func TestSessionLoginHandlerAdmitsTheRotatedSessionUnderTheAccount(t *testing.T) {
     runtimeInstance, request := loginRequest(t)
     arrivedSessionId := sessionOnRequest(request).Id()
@@ -258,7 +253,6 @@ func TestSessionLoginHandlerAdmitsTheRotatedSessionUnderTheAccount(t *testing.T)
     }
 }
 
-/* an admission the index refuses fails the sign-in and clears the rotated session, so the response path stores nothing the cap does not count */
 func TestSessionLoginHandlerRefusedAdmissionOpensNoSession(t *testing.T) {
     runtimeInstance, request := loginRequest(t)
 
@@ -279,7 +273,6 @@ func TestSessionLoginHandlerRefusedAdmissionOpensNoSession(t *testing.T) {
     }
 }
 
-/* registerLandingUrlGenerator gives the handler the url generator it reads the landing page through. */
 func registerLandingUrlGenerator(t *testing.T, containerInstance melodycontainercontract.Container) {
     t.Helper()
 

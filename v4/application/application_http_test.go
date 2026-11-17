@@ -58,7 +58,6 @@ func TestApplicationRegisterHttpRoute_AppendsRegistrarBeforeBoot(t *testing.T) {
     }
 }
 
-/* the queue this door feeds drains before the module phases run: a registrar queued from inside a module boot hook would never execute — a route silently absent — so the door refuses for the boot window and points at the hook made for module routes */
 func TestApplicationRegisterHttpRoute_RefusesDuringTheBootWindow(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         (&Application{booting: true}).RegisterHttpRoute(
@@ -424,11 +423,11 @@ func TestRegisterHttpSession_TheDefaultStorageHoldsTheConfiguredCount(t *testing
 
     storage := container.MustFromResolver[sessioncontract.Storage](context.Background(), applicationInstance.kernel.ServiceContainer(), session.ServiceSessionStorage)
 
-    if saveErr := storage.Save("first", map[string]any{"a": 1}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "first", map[string]any{"a": 1}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected first save error: %v", saveErr)
     }
 
-    if saveErr := storage.Save("second", map[string]any{"a": 1}, time.Hour); nil == saveErr {
+    if saveErr := storage.Save(context.Background(), "second", map[string]any{"a": 1}, bound.Of(time.Hour)); nil == saveErr {
         t.Fatalf("expected the second session refused at a ceiling of one")
     }
 }
@@ -518,7 +517,6 @@ func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) 
     }
 }
 
-/* the configured budget must travel from the environment key through the configuration into the shutdown, so the proof drives runHttp itself: a connection that sent half a request stays active through the whole shutdown, and only the 50ms the environment named — not the 5s default — explains a shutdown that gives up this fast. */
 func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T) {
     logger := &warningRecordingLogger{}
 
@@ -586,7 +584,6 @@ func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T
         _ = connection.Close()
     }()
 
-    /* half a request keeps the connection active for the whole shutdown: the header never completes, so the server cannot idle it */
     _, writeErr := connection.Write([]byte("GET / HTTP/1.1\r\n"))
     if nil != writeErr {
         t.Fatalf("unexpected write error: %v", writeErr)
@@ -618,7 +615,6 @@ func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T
     }
 }
 
-/* the budget is the parameter, not a constant: a request held open past the configured wait must be cut when the budget says so, and well before the default would. The handler is released only after the assertion, so the shutdown can never finish on its own first. */
 func TestAwaitHttpServerEnd_CutsTheShutdownAtTheConfiguredBudget(t *testing.T) {
     handlerStarted := make(chan struct{})
     releaseHandler := make(chan struct{})
@@ -749,7 +745,6 @@ func TestRunHttp_ServesTheListenerSetAConsoleInspectsPlusTheDeclaredBuiltIn(t *t
     }
 }
 
-/* registeredListenerNames reads the dispatcher through the same door the introspection command uses, so the comparison is over what an operator would actually see. */
 func registeredListenerNames(t *testing.T, applicationInstance *Application) []string {
     t.Helper()
 
@@ -808,7 +803,6 @@ func (instance *countingHttpKernel) OpenRequestScopes() int64 {
 
 var _ httpcontract.Kernel = (*countingHttpKernel)(nil)
 
-/* Shutdown returns at once for a hijacked connection, so the drain is what holds the exit until the last request scope closes */
 func TestAwaitOpenRequestScopes_WaitsUntilTheLastScopeCloses(t *testing.T) {
     httpKernel := &countingHttpKernel{}
     httpKernel.openScopes.Store(2)
@@ -832,7 +826,6 @@ func TestAwaitOpenRequestScopes_WaitsUntilTheLastScopeCloses(t *testing.T) {
     }
 }
 
-/* a drain that does not finish inside the budget is an error and not a warning, for the reason the shutdown overrun beside it is one: the process exits non-zero, which is how the operator is told that requests were still inside the server when it stopped. The count travels in the context, because "how many" is the whole of what the operator can act on. */
 func TestAwaitOpenRequestScopes_ReportsTheScopesStillOpenWhenTheBudgetRunsOut(t *testing.T) {
     httpKernel := &countingHttpKernel{}
     httpKernel.openScopes.Store(3)
@@ -865,7 +858,6 @@ func TestAwaitOpenRequestScopes_ReportsTheScopesStillOpenWhenTheBudgetRunsOut(t 
     }
 }
 
-/* a kernel that cannot be asked is not waited on at all: the absent door means "no measurement", and waiting on a number nobody maintains would hang every shutdown of a replacement kernel for its whole budget and then report a failure that never happened. */
 func TestAwaitOpenRequestScopes_DoesNotWaitOnAKernelThatCannotBeAsked(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
@@ -876,7 +868,6 @@ func TestAwaitOpenRequestScopes_DoesNotWaitOnAKernelThatCannotBeAsked(t *testing
     }
 }
 
-/* the whole chain, end to end and through runHttp itself: a handler hijacks its connection, the kernel's request scope stays open behind it, and the shutdown must refuse to report a stop it did not obtain. net/http's Shutdown returns immediately for a hijacked connection — it stopped being the server's the moment the handler took it — so before the scope was counted this exact shape answered nil in no time at all while the handler ran on and the container closed under it. */
 func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *testing.T) {
     handlerHijacked := make(chan struct{})
     releaseHandler := make(chan struct{})
@@ -949,7 +940,6 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
 
     applicationInstance.registerCache()
 
-    /* the request path resolves these on its way to the handler, and the bare test container carries none of them: without the configuration the kernel answers 500 before routing, and the hijack this test is about never happens */
     kernelInstance.serviceContainer.MustRegister(
         config.ServiceConfig,
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
@@ -985,7 +975,6 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
     }
 
     go func() {
-        /* the request ends in EOF by construction: the handler takes the connection and closes it, so there is no response to read. What the test observes is the shutdown, not this. */
         response, requestErr := nethttp.Get("http://127.0.0.1:34521/upgrade")
         if nil == requestErr {
             _ = response.Body.Close()
@@ -1022,7 +1011,6 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
     }
 }
 
-/* newServedExceptionTestApplication builds an http-mode application whose kernel serves a request end to end: the container carries the configuration, the session manager and the event dispatcher the request path resolves, and one route answers a 404 HttpException, the error that either the framework exception listener or an installed error handler has to render. */
 func newServedExceptionTestApplication(t *testing.T) *Application {
     t.Helper()
 
@@ -1059,7 +1047,6 @@ func newServedExceptionTestApplication(t *testing.T) *Application {
     return applicationInstance
 }
 
-/* serveMissingOverTheWire serves the kernel the way an application with its own net/http.Server does — Boot's kernel handed to a server, Run never called — and answers the status and body of the one 404 route. */
 func serveMissingOverTheWire(t *testing.T, applicationInstance *Application) (int, string) {
     t.Helper()
 
@@ -1228,9 +1215,6 @@ func TestRunHttp_ServesWithTheBuiltInExceptionListener(t *testing.T) {
     }
 }
 
-/* the drain exists for the connection the server's own Shutdown does not drain — a hijacked one — and that connection is exactly what makes Shutdown report a budget overrun, so returning on the overrun would skip the wait in the situation it exists for and close the application container under a handler still on the wire. Both causes are independently actionable, so both have to survive.
-
-   The error channel is filled by the Serve goroutine rather than ahead of the call: with a value already in it, both arms of the select are ready at once and the branch taken is a coin flip. */
 func TestAwaitHttpServerEnd_DrainsOpenScopesEvenWhenTheShutdownOverran(t *testing.T) {
     handlerStarted := make(chan struct{})
     releaseHandler := make(chan struct{})
@@ -1311,7 +1295,6 @@ func (shutdownHookUnwrapPanickingError) Unwrap() error {
     panic("Unwrap() panics")
 }
 
-/* a shutdown hook runs on a goroutine net/http starts and never joins, so the recovery of a hook is the last boundary it has: an error the hook panicked with whose Error or Unwrap panicked raised a second panic there, while the server was still draining, and ended the process. The hook's panic is now filed under the message that could be rendered */
 func TestWrapHttpShutdownHook_FilesAPanicWhoseErrorOrUnwrapPanics(t *testing.T) {
     for name, testCase := range map[string]struct {
         panicValue error
@@ -1396,7 +1379,6 @@ func TestApplicationRegisterHttpHandlerDecorator_PanicsAfterBoot(t *testing.T) {
     }, "may not register http handler decorators after boot")
 }
 
-/* the seam is proved on its own above; this proves runHttp serves what the seam answers: a request over the wire must pass through the registered decorator, which marks the response before the kernel's handler answers it */
 func TestRunHttp_ServesThroughTheRegisteredDecorators(t *testing.T) {
     environment, environmentErr := config.NewEnvironment(
         &mapEnvironmentSource{
@@ -1606,7 +1588,6 @@ func TestServeHttp_ASlashLessPathThatFoldsIsRefusedBeforeTheFirewallAndTheRouter
     security.RegisterKernelAccessControlListener(applicationInstance.kernel, registry)
     applicationInstance.registerKernelHttpListeners()
 
-    /* a handler in front of the kernel that strips a prefix hands "/apiadmin/../public" on as "admin/../public": the router routes it to the catch-all of "/admin" while the access-control matcher folds it to the rule of "/public" */
     server := httptest.NewServer(nethttp.StripPrefix("/api", applicationInstance.kernel.HttpKernel().ServeHttp(applicationInstance.kernel.ServiceContainer())))
     defer server.Close()
 
@@ -1778,6 +1759,56 @@ func TestRunHttp_RefusesAScopeTeardownTimeoutOutlastingTheShutdownBeforeServing(
     }
 }
 
+type refusedBoundSessionManager struct {
+    *session.Manager
+}
+
+func (instance *refusedBoundSessionManager) PersistenceTimeout() bound.Duration {
+    return bound.Of(time.Duration(0))
+}
+
+func TestRunHttp_RefusesAManagerDeclaringAPersistenceTimeoutTheRuleRefusesBeforeServing(t *testing.T) {
+    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.HttpAddressKey: "127.0.0.1:34524"}})
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    applicationInstance := &Application{
+        ctx:                  context.Background(),
+        configuration:        configuration,
+        runtimeFlags:         NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp}),
+        kernel:               newTestKernel(),
+        httpMiddlewares:      NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), configuration), configuration),
+        moduleConfigurations: make(map[string]any),
+    }
+
+    applicationInstance.RegisterService(
+        session.ServiceSessionManager,
+        func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
+            return &refusedBoundSessionManager{Manager: session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{})}, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    runErr := applicationInstance.runHttp(cancelledContext)
+    if nil == runErr || "the session manager declares a persistence timeout the rule refuses" != runErr.Error() {
+        t.Fatalf("expected the boot refused by name, got %v", runErr)
+    }
+
+    exceptionErr, isExceptionErr := runErr.(*exception.Error)
+    if false == isExceptionErr || session.PersistenceTimeoutRule.Name != exceptionErr.Context()["field"] {
+        t.Fatalf("expected the refusal to name %s, got %v", session.PersistenceTimeoutRule.Name, runErr)
+    }
+}
+
 func TestRunHttp_TheDeploymentsUnavailableDelayOutranksAModulesSetter(t *testing.T) {
     applicationInstance := newSessionBoundTestApplication(t, config.ModeHttp, map[string]string{config.HttpUnavailableRetryAfterKey: "7s"}, &warningRecordingLogger{})
 
@@ -1812,15 +1843,15 @@ func TestRunHttp_TheDeploymentsUnavailableDelayOutranksAModulesSetter(t *testing
 
 type loadFailingApplicationSessionStorage struct{}
 
-func (instance *loadFailingApplicationSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+func (instance *loadFailingApplicationSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
     return nil, false, errors.New("session store is down")
 }
 
-func (instance *loadFailingApplicationSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
+func (instance *loadFailingApplicationSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
     return nil
 }
 
-func (instance *loadFailingApplicationSessionStorage) Delete(sessionId string) error {
+func (instance *loadFailingApplicationSessionStorage) Delete(ctx context.Context, sessionId string) error {
     return nil
 }
 

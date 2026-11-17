@@ -1,6 +1,7 @@
 package http
 
 import (
+    "context"
     "sync"
 
     "github.com/precision-soft/melody/v4/exception"
@@ -12,7 +13,7 @@ import (
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* sessionUnavailableError puts session.ErrSessionUnavailable in the chain of a session the storage could not load or rotate, so a firewall door tells a session outage from a credential one; its message is the cause's */
+/* sessionUnavailableError puts session.ErrSessionUnavailable in the chain, so a firewall door tells a session outage from a credential one */
 type sessionUnavailableError struct {
     cause error
 }
@@ -37,21 +38,23 @@ func markSessionUnavailable(err error) error {
     return &sessionUnavailableError{cause: err}
 }
 
-/* requestSession is the session of one request, loaded from the storage at the first read and at most once: a request that never reads it costs the storage nothing, and a load that failed answers the same filed error to every later read, so one outage is one record. The load holds the handle's lock across the manager and the record, so a manager or a logger that reads the session of the same request blocks on it. */
+/* loaded at most once: a failed load answers the same filed error to every later read */
 type requestSession struct {
-    mutex         sync.Mutex
-    manager       sessioncontract.Manager
-    request       httpcontract.Request
-    logger        loggingcontract.Logger
-    cookieValue   string
-    cookiePresent bool
-    policy        httpcontract.SessionPolicy
-    loaded        bool
-    session       sessioncontract.Session
-    loadErr       error
+    mutex          sync.Mutex
+    requestContext context.Context
+    manager        sessioncontract.Manager
+    request        httpcontract.Request
+    logger         loggingcontract.Logger
+    cookieValue    string
+    cookiePresent  bool
+    policy         httpcontract.SessionPolicy
+    loaded         bool
+    session        sessioncontract.Session
+    loadErr        error
 }
 
 func newRequestSession(
+    requestContext context.Context,
     manager sessioncontract.Manager,
     request httpcontract.Request,
     logger loggingcontract.Logger,
@@ -60,12 +63,13 @@ func newRequestSession(
     policy httpcontract.SessionPolicy,
 ) *requestSession {
     return &requestSession{
-        manager:       manager,
-        request:       request,
-        logger:        logger,
-        cookieValue:   cookieValue,
-        cookiePresent: cookiePresent,
-        policy:        policy,
+        requestContext: requestContext,
+        manager:        manager,
+        request:        request,
+        logger:         logger,
+        cookieValue:    cookieValue,
+        cookiePresent:  cookiePresent,
+        policy:         policy,
     }
 }
 
@@ -81,22 +85,21 @@ func (instance *requestSession) load() (sessioncontract.Session, error) {
     var loadErr error
 
     if true == instance.cookiePresent {
-        sessionInstance, loadErr = instance.manager.Session(instance.cookieValue)
+        sessionInstance, loadErr = instance.manager.Session(instance.requestContext, instance.cookieValue)
     }
 
-    /* IsNilInterface on both, since a replaceable manager may answer "not found" with a typed-nil session, which a bare comparison takes for a live one, and "no error" with a typed-nil error, which it takes for an error */
+    /* a replaceable manager may answer a typed-nil session or a typed-nil error, which a bare comparison misreads */
     if true == internal.IsNilInterface(loadErr) && true == internal.IsNilInterface(sessionInstance) {
-        sessionInstance, loadErr = instance.manager.NewSession()
+        sessionInstance, loadErr = instance.manager.NewSession(instance.requestContext)
     }
 
     if false == internal.IsNilInterface(loadErr) {
-        /* a session a manager answered beside its error is half made and is neither served nor persisted */
+        /* a session answered beside an error is half made and neither served nor persisted */
         sessionInstance = nil
 
-        /* only an outage is served degraded under the policy; a manager's own fault stays an error */
         servedEmpty := true == instance.policy.EmptyOnOutage && true == exception.AnswersUnavailable(loadErr)
 
-        /* without a logger nothing is filed, so the error is not marked logged and its answerer files it */
+        /* without a logger the error is not marked logged, so its answerer files it */
         if false == internal.IsNilInterface(instance.logger) {
             if true == servedEmpty {
                 loadErr = recordOccurrence(
@@ -107,7 +110,13 @@ func (instance *requestSession) load() (sessioncontract.Session, error) {
                     occurrenceRecordConfig{Warning: true, Extra: instance.sessionReferenceContext()},
                 )
             } else {
-                loadErr = recordErrorOccurrence(instance.logger, instance.request, loadErr, "session could not be loaded")
+                loadErr = recordOccurrence(
+                    instance.logger,
+                    instance.request,
+                    loadErr,
+                    "session could not be loaded",
+                    occurrenceRecordConfig{Warning: true == internal.IsClientHangup(instance.requestContext, loadErr)},
+                )
             }
         }
 
@@ -133,7 +142,6 @@ func (instance *requestSession) load() (sessioncontract.Session, error) {
     return sessionInstance, loadErr
 }
 
-/* sessionReferenceContext names the session the cookie points at by its one-way reference, nothing without a cookie */
 func (instance *requestSession) sessionReferenceContext() exceptioncontract.Context {
     if false == instance.cookiePresent {
         return nil
@@ -142,7 +150,6 @@ func (instance *requestSession) sessionReferenceContext() exceptioncontract.Cont
     return exceptioncontract.Context{"sessionRef": sessionIdLogReference(instance.cookieValue)}
 }
 
-/* loadedSession answers the session a reader loaded, never loading it */
 func (instance *requestSession) loadedSession() sessioncontract.Session {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
@@ -150,7 +157,7 @@ func (instance *requestSession) loadedSession() sessioncontract.Session {
     return instance.session
 }
 
-/* RequestSession answers the session of the request, loading it from the storage at the first call: the stored session the cookie names, a new one when the cookie names none, and an error when it could not: for a storage that could not answer, an error marked as an infrastructure failure with session.ErrSessionUnavailable in its chain, which a handler returns to be answered 503 with Retry-After, and for a manager's own fault or a request the kernel did not serve, an unmarked one. The load happens once per request, so a later call answers the same session or the same error. A session published with SetRequestSession or rotated with RegenerateRequestSession is answered as published. */
+/* RequestSession answers the request's session, loaded once at the first call: the stored one the cookie names or a new one; a storage outage answers an error marked as an infrastructure failure carrying session.ErrSessionUnavailable. */
 func RequestSession(request httpcontract.Request) (sessioncontract.Session, error) {
     value, exists := requestSessionAttribute(request)
     if false == exists {
@@ -173,7 +180,7 @@ func RequestSession(request httpcontract.Request) (sessioncontract.Session, erro
     return nil, exception.NewError("the request carries no session", nil, nil)
 }
 
-/* SetRequestSession publishes a session on the request: the response path saves it and emits its cookie in place of the one a read loaded. A nil session is refused. */
+/* SetRequestSession publishes a session on the request, saved and given its cookie by the response path; a nil session is refused. */
 func SetRequestSession(request httpcontract.Request, sessionInstance sessioncontract.Session) error {
     if true == internal.IsNilInterface(request) || true == internal.IsNilInterface(request.Attributes()) {
         return exception.NewError("request is nil in set request session", nil, nil)
@@ -188,7 +195,6 @@ func SetRequestSession(request httpcontract.Request, sessionInstance sessioncont
     return nil
 }
 
-/* effectiveRequestSession is the session the response path persists, read without loading: the published one, else the one a reader loaded, else none */
 func effectiveRequestSession(request httpcontract.Request) sessioncontract.Session {
     value, exists := requestSessionAttribute(request)
     if false == exists {

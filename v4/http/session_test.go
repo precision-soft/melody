@@ -37,7 +37,7 @@ func TestRegenerateRequestSession_RotatesAndRepublishesInOneCall(t *testing.T) {
 
             sessionInstance.Set("userId", "anonymous")
 
-            saveErr := sessionManager.SaveSession(sessionInstance)
+            saveErr := sessionManager.SaveSession(context.Background(), sessionInstance)
             if nil != saveErr {
                 return nil, saveErr
             }
@@ -80,11 +80,11 @@ func TestRegenerateRequestSession_RotatesAndRepublishesInOneCall(t *testing.T) {
         t.Fatalf("expected a live session cookie, got MaxAge %d", cookies[0].MaxAge)
     }
 
-    if nil != mustSession(sessionManager.Session(preRotationId)) {
+    if nil != mustSession(sessionManager.Session(context.Background(), preRotationId)) {
         t.Fatalf("expected the pre-rotation session to be gone from storage")
     }
 
-    reloaded := mustSession(sessionManager.Session(rotatedId))
+    reloaded := mustSession(sessionManager.Session(context.Background(), rotatedId))
     if nil == reloaded {
         t.Fatalf("expected the rotated session to be stored")
     }
@@ -125,7 +125,7 @@ func TestRegenerateRequestSession_ReturnsErrorWhenTheSessionManagerIsNotRegister
 
     _ = SetRequestSession(
         request,
-        mustSession(session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.UnlimitedDuration()}).NewSession()),
+        mustSession(session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.UnlimitedDuration()}).NewSession(context.Background())),
     )
 
     rotated, err := RegenerateRequestSession(request)
@@ -142,10 +142,10 @@ func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *t
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
-    existingSession := mustSession(sessionManager.NewSession())
+    existingSession := mustSession(sessionManager.NewSession(context.Background()))
     existingSession.Set("userId", "anonymous")
 
-    saveErr := sessionManager.SaveSession(existingSession)
+    saveErr := sessionManager.SaveSession(context.Background(), existingSession)
     if nil != saveErr {
         t.Fatalf("unexpected error: %v", saveErr)
     }
@@ -162,7 +162,7 @@ func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *t
                 t.Fatal("expected the request to carry a session")
             }
 
-            if _, rotateErr := sessionManager.RegenerateSession(sessionInstance); nil != rotateErr {
+            if _, rotateErr := sessionManager.RegenerateSession(context.Background(), sessionInstance); nil != rotateErr {
                 return nil, rotateErr
             }
 
@@ -199,14 +199,11 @@ func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *t
         t.Fatalf("expected the rotated-away id not to be re-issued to the client")
     }
 
-    if nil != mustSession(sessionManager.Session(existingId)) {
+    if nil != mustSession(sessionManager.Session(context.Background(), existingId)) {
         t.Fatalf("expected the rotated-away id to stay gone from storage instead of being re-created under the authenticated identity")
     }
 }
 
-/* The request is an application-implementable contract, so a nil pointer of a request type reaches this
-door as a non-nil interface and the read below dereferences it. The untyped literal a sibling probe passes
-is the only shape a bare comparison already catches. */
 func TestRegenerateRequestSession_RefusesATypedNilRequest(t *testing.T) {
     var unassignedRequest *testhelper.HttpTestRequest
 
@@ -218,23 +215,19 @@ func TestRegenerateRequestSession_RefusesATypedNilRequest(t *testing.T) {
         t.Fatalf("expected no session for a typed nil request, got %v", rotated)
     }
 
-    /* the refusal is asserted by NAME: the session lookup below this guard carries its own reading of the
-       same typed nil and answers the missing-session refusal, so a probe that only asks whether an error came
-       back cannot tell the two apart. */
     if "request is nil in regenerate request session" != err.Error() {
         t.Fatalf("expected the request refusal to be the one that answered, got %q", err.Error())
     }
 }
 
-/* a logout landing while a request holds the session: the request's rotation must not mint a fresh id carrying the pre-logout identity, so nothing is stored and no live session cookie is issued */
 func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
     sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
 
-    existingSession := mustSession(sessionManager.NewSession())
+    existingSession := mustSession(sessionManager.NewSession(context.Background()))
     existingSession.Set("userId", "u-7")
 
-    if saveErr := sessionManager.SaveSession(existingSession); nil != saveErr {
+    if saveErr := sessionManager.SaveSession(context.Background(), existingSession); nil != saveErr {
         t.Fatalf("unexpected error seeding the session: %v", saveErr)
     }
 
@@ -247,12 +240,11 @@ func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan
         nethttp.MethodGet,
         "/rotate-after-logout",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            /* the copy is read before the concurrent logout buries it */
             if _, readErr := RequestSession(request); nil != readErr {
                 return nil, readErr
             }
 
-            if deleteErr := sessionManager.DeleteSession(existingId); nil != deleteErr {
+            if deleteErr := sessionManager.DeleteSession(context.Background(), existingId); nil != deleteErr {
                 return nil, deleteErr
             }
 
@@ -292,12 +284,12 @@ func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan
             continue
         }
 
-        if stored := mustSession(sessionManager.Session(cookie.Value)); nil != stored {
+        if stored := mustSession(sessionManager.Session(context.Background(), cookie.Value)); nil != stored {
             t.Fatalf("expected no live session cookie, got one naming a stored session holding userId %q", stored.String("userId"))
         }
     }
 
-    if nil != mustSession(sessionManager.Session(existingId)) {
+    if nil != mustSession(sessionManager.Session(context.Background(), existingId)) {
         t.Fatalf("expected the logged-out session to stay gone")
     }
 }
@@ -307,7 +299,7 @@ func TestRegenerateRequestSession_LoadsTheSessionNothingRead(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), nil)
-    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{}))
+    request.Attributes().Set(requestAttributeSession, newRequestSession(context.Background(), manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{}))
 
     rotated, rotateErr := RegenerateRequestSession(request)
     if nil != rotateErr || nil == rotated {
@@ -325,7 +317,7 @@ func TestRegenerateRequestSession_AnswersTheLoadErrorMarked(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), nil)
-    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{}))
+    request.Attributes().Set(requestAttributeSession, newRequestSession(context.Background(), manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{}))
 
     rotated, rotateErr := RegenerateRequestSession(request)
     if nil != rotated || false == errors.Is(rotateErr, storeErr) || false == exception.AnswersUnavailable(rotateErr) {
@@ -339,7 +331,7 @@ func TestRegenerateRequestSession_RefusesAnUnavailableSessionMarked(t *testing.T
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), nil)
-    request.Attributes().Set(requestAttributeSession, newRequestSession(manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{EmptyOnOutage: true}))
+    request.Attributes().Set(requestAttributeSession, newRequestSession(context.Background(), manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{EmptyOnOutage: true}))
 
     rotated, rotateErr := RegenerateRequestSession(request)
     if nil != rotated || false == errors.Is(rotateErr, storeErr) || false == errors.Is(rotateErr, session.ErrSessionUnavailable) || false == exception.AnswersUnavailable(rotateErr) {
@@ -360,10 +352,10 @@ type rotationCountingSessionManager struct {
     regenerateCalls int64
 }
 
-func (instance *rotationCountingSessionManager) RegenerateSession(sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+func (instance *rotationCountingSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
     atomic.AddInt64(&instance.regenerateCalls, 1)
 
-    return instance.Manager.RegenerateSession(sessionInstance)
+    return instance.Manager.RegenerateSession(ctx, sessionInstance)
 }
 
 func TestRegenerateRequestSession_RefusesAnUnavailableSessionWithoutAskingTheManager(t *testing.T) {
@@ -383,5 +375,43 @@ func TestRegenerateRequestSession_RefusesAnUnavailableSessionWithoutAskingTheMan
 
     if 0 != atomic.LoadInt64(&manager.regenerateCalls) {
         t.Fatalf("expected the manager not asked, got %d rotations", manager.regenerateCalls)
+    }
+}
+
+type rotationPlantedKey struct{}
+
+type rotationContextRecordingSessionManager struct {
+    sessioncontract.Manager
+    rotationContext context.Context
+}
+
+func (instance *rotationContextRecordingSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    instance.rotationContext = ctx
+
+    return instance.Manager.RegenerateSession(ctx, sessionInstance)
+}
+
+func TestRegenerateRequestSession_RotatesUnderTheRequestsContext(t *testing.T) {
+    manager := &rotationContextRecordingSessionManager{Manager: newCountingSessionManager().Manager}
+    serviceContainer := newHttpTestContainerWithSessionManager(manager)
+
+    requestContext := context.WithValue(context.Background(), rotationPlantedKey{}, "planted")
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(requestContext, serviceContainer.NewScope(), serviceContainer), nil)
+
+    current, newErr := manager.NewSession(context.Background())
+    if nil != newErr {
+        t.Fatalf("unexpected error: %v", newErr)
+    }
+
+    if publishErr := SetRequestSession(request, current); nil != publishErr {
+        t.Fatalf("unexpected publish error: %v", publishErr)
+    }
+
+    if _, rotateErr := RegenerateRequestSession(request); nil != rotateErr {
+        t.Fatalf("unexpected rotation error: %v", rotateErr)
+    }
+
+    if nil == manager.rotationContext || "planted" != manager.rotationContext.Value(rotationPlantedKey{}) {
+        t.Fatalf("expected the rotation to run on the request's context")
     }
 }

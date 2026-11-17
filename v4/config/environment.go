@@ -26,6 +26,7 @@ const (
     HttpMaxRequestBodyBytesKey       = "MELODY_HTTP_MAX_REQUEST_BODY_BYTES"
     HttpSessionTtlKey                = "MELODY_HTTP_SESSION_TTL"
     HttpSessionTombstoneRetentionKey = "MELODY_HTTP_SESSION_TOMBSTONE_RETENTION"
+    HttpSessionPersistenceTimeoutKey = "MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT"
     HttpSessionMaxSessionsKey        = "MELODY_HTTP_SESSION_MAX_SESSIONS"
     HttpShutdownTimeoutKey           = "MELODY_HTTP_SHUTDOWN_TIMEOUT"
     HttpReadTimeoutKey               = "MELODY_HTTP_READ_TIMEOUT"
@@ -59,6 +60,7 @@ const (
     KernelHttpMaxRequestBodyBytes       = "kernel.http.max_request_body_bytes"
     KernelHttpSessionTtl                = "kernel.http.session_ttl"
     KernelHttpSessionTombstoneRetention = "kernel.http.session_tombstone_retention"
+    KernelHttpSessionPersistenceTimeout = "kernel.http.session_persistence_timeout"
     KernelHttpSessionMaxSessions        = "kernel.http.session_max_sessions"
     KernelHttpShutdownTimeout           = "kernel.http.shutdown_timeout"
     KernelHttpReadTimeout               = "kernel.http.read_timeout"
@@ -95,7 +97,6 @@ type Environment struct {
     assembledFrom map[string][]string
 }
 
-/* dotEnvProvenanceReader is the source that knows which keys each .env value was assembled from */
 type dotEnvProvenanceReader interface {
     dotEnvAssembledFrom() map[string][]string
 }
@@ -121,7 +122,6 @@ func NewEnvironment(source configcontract.EnvironmentSource) (*Environment, erro
     }, nil
 }
 
-/* keysAssembledFrom answers the .env keys whose value was assembled from name through ${name} */
 func (instance *Environment) keysAssembledFrom(name string) []string {
     if nil == instance {
         return nil

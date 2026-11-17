@@ -26,11 +26,13 @@ func (instance *Configuration) registerDefaultParameters(
 
     instance.setDefaultParameter(HttpSessionTombstoneRetentionKey, DefaultSessionTombstoneRetention.String())
 
+    instance.setDefaultParameter(HttpSessionPersistenceTimeoutKey, DefaultSessionPersistenceTimeout.String())
+
     instance.setDefaultParameter(HttpSessionMaxSessionsKey, DefaultSessionMaxSessions)
 
     instance.setDefaultParameter(HttpShutdownTimeoutKey, DefaultHttpShutdownTimeout.String())
 
-    /* absent unless a deployment sets them, so ApplicationConfig and then the framework default fill them */
+    /* empty so ApplicationConfig and then the framework default fill them */
     instance.setDefaultParameter(TeardownTimeoutKey, "")
     instance.setDefaultParameter(ScopeTeardownTimeoutKey, "")
     instance.setDefaultParameter(ContainerCreationWaitersKey, "")
@@ -61,7 +63,6 @@ func (instance *Configuration) registerDefaultParameters(
     instance.setDefaultParameter(StaticEnableCacheKey, true)
     instance.setDefaultParameter(StaticCacheMaxAgeKey, DefaultStaticCacheMaxAge)
 
-    /* an empty list keeps the built-in file server answering for every path it recognizes */
     instance.setDefaultParameter(StaticExcludedPathsKey, "")
 }
 

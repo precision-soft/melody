@@ -38,6 +38,13 @@ var (
         Minimum: bound.TtlMinimum,
     }
 
+    SessionPersistenceTimeoutRule = bound.Rule[time.Duration]{
+        Name:              "HttpConfiguration.SessionPersistenceTimeout",
+        Default:           DefaultSessionPersistenceTimeout,
+        Minimum:           bound.TimeoutMinimum,
+        UnlimitedAdmitted: true,
+    }
+
     SessionMaxSessionsRule = bound.Rule[int]{
         Name:              "HttpConfiguration.SessionMaxSessions",
         Default:           DefaultSessionMaxSessions,
@@ -52,7 +59,7 @@ var (
     }
 )
 
-/* unlimited is refused on the five server limits, where net/http reads no bound as no timeout */
+/* unlimited is refused: net/http reads no bound as no timeout */
 var (
     HttpReadTimeoutRule = bound.Rule[time.Duration]{
         Name:    "ApplicationConfig.ReadTimeout",
@@ -91,7 +98,7 @@ var (
         UnlimitedAdmitted: true,
     }
 
-    /* UnavailableRetryAfterRule bounds the Retry-After of a 503 answering an infrastructure failure: 5s when left out, 1s to 1h, unlimited refused; ResolveUnavailableRetryAfter adds the whole-second check. */
+    /* UnavailableRetryAfterRule bounds the Retry-After of an infrastructure-failure 503: 5s when left out, 1s to 1h, unlimited refused. */
     UnavailableRetryAfterRule = bound.Rule[time.Duration]{
         Name:    "ApplicationConfig.UnavailableRetryAfter",
         Default: DefaultUnavailableRetryAfter,
@@ -102,7 +109,7 @@ var (
 
 const maximumUnavailableRetryAfter = time.Hour
 
-/* ResolveUnavailableRetryAfter decides the Retry-After delay of a 503 answering an infrastructure failure against UnavailableRetryAfterRule, and refuses a value that is not a whole number of seconds, since the header carries whole seconds; every refusal names field. */
+/* ResolveUnavailableRetryAfter decides the delay against UnavailableRetryAfterRule and refuses a value that is not a whole number of seconds, naming field. */
 func ResolveUnavailableRetryAfter(limit bound.Duration, field string) (time.Duration, error) {
     rule := UnavailableRetryAfterRule
     rule.Name = field
@@ -170,7 +177,6 @@ func resolveParameter[T bound.Unit](parameter configcontract.Parameter, environm
     return resolved, nil
 }
 
-/* an absent limit stays absent, for the application's own default to fill */
 func checkedParameterLimit[T bound.Unit](parameter configcontract.Parameter, environmentKey string, rule bound.Rule[T]) (bound.Limit[T], error) {
     limit, limitErr := parameterLimit[T](parameter, environmentKey)
     if nil != limitErr {
@@ -194,7 +200,6 @@ func checkedParameterLimit[T bound.Unit](parameter configcontract.Parameter, env
     return limit, nil
 }
 
-/* checkedUnavailableRetryAfter reads MELODY_HTTP_UNAVAILABLE_RETRY_AFTER as checkedParameterLimit reads a limit, the whole-second check included */
 func checkedUnavailableRetryAfter(parameter configcontract.Parameter) (bound.Duration, error) {
     limit, limitErr := checkedParameterLimit(parameter, HttpUnavailableRetryAfterKey, UnavailableRetryAfterRule)
     if nil != limitErr || true == limit.IsAbsent() {
@@ -214,7 +219,6 @@ func checkedUnavailableRetryAfter(parameter configcontract.Parameter) (bound.Dur
     return limit, nil
 }
 
-/* checkedParameterSwitch reads a boolean key the way checkedParameterLimit reads a limit: an empty value is unset, for the application's own config to decide, and a value that is not a boolean is refused naming the key. */
 func checkedParameterSwitch(parameter configcontract.Parameter, environmentKey string) (configcontract.Switch, error) {
     value := parameter.Value()
     if text, isString := value.(string); true == isString && "" == strings.TrimSpace(text) {

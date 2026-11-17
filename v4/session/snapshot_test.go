@@ -1,12 +1,12 @@
 package session
 
 import (
+    "context"
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
 )
 
-/* divergentSnapshotSession answers through Snapshot what its accessors do not, so a reading can be told apart by its values */
 type divergentSnapshotSession struct {
     foreignSession
 }
@@ -30,7 +30,7 @@ func TestSnapshot_AnswersTheSessionsOwnSnapshot(t *testing.T) {
 func TestSnapshot_ReadsTheFrameworkSession(t *testing.T) {
     manager := NewManager(NewInMemoryStorage(InMemoryStorageConfig{}), ManagerConfig{Ttl: bound.UnlimitedDuration()})
 
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set("key", "value")
 
     values, modified, cleared := Snapshot(sessionInstance)

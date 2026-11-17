@@ -5625,12 +5625,16 @@ func TestClose_ADeclaredCloserWinsOverTheDoorASecondNameReachesTheValueBy(t *tes
 func TestClose_EachNameOfARelaxedTypeClosesThroughItsOwnCloser(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
+    var closedByMutex sync.Mutex
     closedBy := map[string]string{}
     for _, name := range []string{"first", "second"} {
         name := name
         MustRegister[*closerlessService](serviceContainer, name, func(_ containercontract.Resolver) (*closerlessService, error) {
             return &closerlessService{name: name}, nil
         }, RegisterOptions{TypeRegistrationRelaxed: true, Closer: NewCloser(func(_ context.Context, value *closerlessService) error {
+            closedByMutex.Lock()
+            defer closedByMutex.Unlock()
+
             closedBy[value.name] = name
 
             return nil

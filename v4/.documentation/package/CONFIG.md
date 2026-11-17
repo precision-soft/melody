@@ -64,6 +64,7 @@ All recognised `.env` keys and their defaults live in [`config/environment.go`](
 | `MELODY_HTTP_MAX_REQUEST_BODY_BYTES`      | `kernel.http.max_request_body_bytes`      | `1048576`                                          |
 | `MELODY_HTTP_SESSION_TTL`                 | `kernel.http.session_ttl`                 | `24h`                                              |
 | `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`                                               |
+| `MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT` | `kernel.http.session_persistence_timeout` | `5s`                                               |
 | `MELODY_HTTP_SESSION_MAX_SESSIONS`        | `kernel.http.session_max_sessions`        | `100000`                                           |
 | `MELODY_HTTP_SHUTDOWN_TIMEOUT`            | `kernel.http.shutdown_timeout`            | `5s`                                               |
 | `MELODY_TEARDOWN_TIMEOUT`                 | `kernel.teardown_timeout`                 | `""` (the application's, then `10s`)               |
@@ -174,6 +175,16 @@ How long a deleted session id is remembered, so that a slow in-flight request st
 | `MELODY_HTTP_SESSION_TOMBSTONE_RETENTION` | `kernel.http.session_tombstone_retention` | `5m`    |
 
 The value is a Go duration string of at least one second, and `unlimited` is refused: a shorter window, zero included, fails the boot because a window that refuses nothing disarms the logout defence. The default is [`DefaultSessionTombstoneRetention`](../../config/http.go), five minutes.
+
+### Session persistence timeout
+
+How long the save or the delete of the session at the end of a request may take. The persistence runs detached from the client's hangup, so a logout is recorded after the client went away, and this bound keeps a storage that hangs from holding the end of the request; the load, the mint and the rotation run on the request's own context and are not bounded by it. Read through [`HttpConfiguration.SessionPersistenceTimeout()`](../../config/contract/http.go) and handed to the framework-wired manager as `ManagerConfig.PersistenceTimeout`, which the http kernel asks for through `Manager.PersistenceTimeout`.
+
+| Environment key                           | Parameter name                            | Default |
+|-------------------------------------------|-------------------------------------------|---------|
+| `MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT` | `kernel.http.session_persistence_timeout` | `5s`    |
+
+The value is a Go duration string of at least one millisecond, or `unlimited` for no bound, which leaves a request held for as long as the storage hangs; zero and a negative value fail the boot. A save the bound cuts answers `503` with `Retry-After` and no cookie, a delete it cuts still expires the cookie. The default is [`DefaultSessionPersistenceTimeout`](../../config/http.go), five seconds. The bound is cooperative: a storage that ignores its context is not interrupted (see [SESSION.md](SESSION.md#contexts-and-deadlines)).
 
 ### Session max sessions
 

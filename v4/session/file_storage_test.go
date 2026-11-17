@@ -1,6 +1,7 @@
 package session
 
 import (
+    "bytes"
     "context"
     "errors"
     "fmt"
@@ -15,7 +16,9 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
+    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
+    sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
 func TestFileStorage_Close_DoesNotCloseInjectedFile(t *testing.T) {
@@ -62,9 +65,10 @@ func TestFileStorage_Close_ClosesOwnedFile(t *testing.T) {
     }
 
     saveErr := storage.Save(
+        context.Background(),
         "abc",
         map[string]any{"k": "v"},
-        2*time.Second,
+        bound.Of(2*time.Second),
     )
     if nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
@@ -95,15 +99,16 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByPath(t *testing.T) {
     }
 
     saveErr := storage1.Save(
+        context.Background(),
         "abc",
         map[string]any{"k": "v"},
-        0,
+        bound.UnlimitedDuration(),
     )
     if nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    loadAfterSaveData, loadAfterSaveExists, loadAfterSaveErr := storage1.Load("abc")
+    loadAfterSaveData, loadAfterSaveExists, loadAfterSaveErr := storage1.Load(context.Background(), "abc")
     if nil != loadAfterSaveErr {
         t.Fatalf("unexpected load error: %s", loadAfterSaveErr.Error())
     }
@@ -126,7 +131,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByPath(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    data, exists, loadErr := storage2.Load("abc")
+    data, exists, loadErr := storage2.Load(context.Background(), "abc")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -160,9 +165,10 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
     }
 
     saveErr := storage1.Save(
+        context.Background(),
         "abc",
         map[string]any{"k": "v"},
-        0,
+        bound.UnlimitedDuration(),
     )
     if nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
@@ -173,7 +179,7 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    data, exists, loadErr := storage2.Load("abc")
+    data, exists, loadErr := storage2.Load(context.Background(), "abc")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -187,7 +193,6 @@ func TestFileStorage_Save_PersistsAcrossInstances_ByInjectedFile(t *testing.T) {
     }
 }
 
-/* expireStoredEntry rewinds a stored entry's expiry so it lapses without waiting for the wall clock. FileStorage reads time.Now directly, and Save purges anything already lapsed before it returns, so a ttl short enough to expire on its own never leaves an entry for Load to find. */
 func expireStoredEntry(t *testing.T, storage *FileStorage, sessionId string) {
     t.Helper()
 
@@ -213,18 +218,17 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     }
     defer storage.CloseWithContext(context.Background())
 
-    /* a ttl that outlives Save, so both entries reach the file and stay in the map */
-    if saveErr := storage.Save("expired", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "expired", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    if saveErr := storage.Save("live", map[string]any{"k": "live"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "live", map[string]any{"k": "live"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
     expireStoredEntry(t, storage, "expired")
 
-    data, exists, loadErr := storage.Load("expired")
+    data, exists, loadErr := storage.Load(context.Background(), "expired")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -241,7 +245,7 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
         t.Fatalf("expected the expired entry to be dropped from the in-memory state")
     }
 
-    liveData, liveExists, liveErr := storage.Load("live")
+    liveData, liveExists, liveErr := storage.Load(context.Background(), "live")
     if nil != liveErr {
         t.Fatalf("unexpected live load error: %s", liveErr.Error())
     }
@@ -249,14 +253,13 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
         t.Fatalf("expected the unexpired sibling to survive, got exists=%v data=%v", liveExists, liveData)
     }
 
-    /* the file still carried the entry with its original future expiry, so a reader that sees it gone proves Load rewrote the snapshot rather than merely reporting the entry as absent */
     storage2, err := NewFileStorage(FileStorageConfig{Path: path, JournalDisabled: true})
     if nil != err {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
     defer storage2.CloseWithContext(context.Background())
 
-    _, existsAfterReload, loadAfterReloadErr := storage2.Load("expired")
+    _, existsAfterReload, loadAfterReloadErr := storage2.Load(context.Background(), "expired")
     if nil != loadAfterReloadErr {
         t.Fatalf("unexpected reload error: %s", loadAfterReloadErr.Error())
     }
@@ -265,7 +268,7 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
         t.Fatalf("expected expired entry to be persisted as removed")
     }
 
-    _, liveExistsAfterReload, liveReloadErr := storage2.Load("live")
+    _, liveExistsAfterReload, liveReloadErr := storage2.Load(context.Background(), "live")
     if nil != liveReloadErr {
         t.Fatalf("unexpected live reload error: %s", liveReloadErr.Error())
     }
@@ -275,7 +278,6 @@ func TestFileStorage_Load_ExpiredEntryIsDeleted(t *testing.T) {
     }
 }
 
-/* an entry nobody loads is only ever dropped by the purge every flush runs; without it the map and the snapshot grow with everything that ever expired */
 func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -286,18 +288,17 @@ func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T
     }
     defer storage.CloseWithContext(context.Background())
 
-    if saveErr := storage.Save("lapsed", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "lapsed", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    if saveErr := storage.Save("keeper", map[string]any{"k": "keeper"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "keeper", map[string]any{"k": "keeper"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
     expireStoredEntry(t, storage, "lapsed")
 
-    /* an unrelated Save is the only thing that happens: nothing ever names the lapsed entry */
-    if saveErr := storage.Save("keeper", map[string]any{"k": "keeper"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "keeper", map[string]any{"k": "keeper"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
@@ -320,7 +321,6 @@ func TestFileStorage_Save_PurgesEntriesThatLapsedWithoutBeingLoaded(t *testing.T
     }
 }
 
-/* Delete refuses an empty id the way Load and Save do — the id is what names the entry, and an empty one would otherwise reach the map as a real key */
 func TestFileStorage_Delete_RefusesAnEmptySessionId(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -331,7 +331,7 @@ func TestFileStorage_Delete_RefusesAnEmptySessionId(t *testing.T) {
     }
     defer storage.CloseWithContext(context.Background())
 
-    deleteErr := storage.Delete("")
+    deleteErr := storage.Delete(context.Background(), "")
     if nil == deleteErr {
         t.Fatalf("expected an empty session id to be refused")
     }
@@ -341,7 +341,6 @@ func TestFileStorage_Delete_RefusesAnEmptySessionId(t *testing.T) {
     }
 }
 
-/* a closed storage refuses to delete, exactly as it refuses to load and to save: the file is gone and the map is not authoritative, so a delete that reported success would tell a caller a session was dropped when nothing was written */
 func TestFileStorage_Delete_AfterCloseReturnsError(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -351,13 +350,13 @@ func TestFileStorage_Delete_AfterCloseReturnsError(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    if saveErr := storage.Save("abc", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "abc", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
     _ = storage.CloseWithContext(t.Context())
 
-    deleteErr := storage.Delete("abc")
+    deleteErr := storage.Delete(context.Background(), "abc")
     if nil == deleteErr {
         t.Fatalf("expected delete after close to error")
     }
@@ -367,9 +366,6 @@ func TestFileStorage_Delete_AfterCloseReturnsError(t *testing.T) {
     }
 }
 
-/* Delete takes the entry out of the map and out of the file, and a delete of an id the storage does not hold answers success without writing anything.
-
-   The absent id is proved on a storage whose flush cannot write: the read-only handle turns any flush into an error, so a delete that skipped the early return would surface it. That distinguishes "returned nil because nothing was there" from "returned nil after rewriting the snapshot". */
 func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -379,15 +375,15 @@ func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *test
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    if saveErr := storage.Save("deleted", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "deleted", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    if saveErr := storage.Save("kept", map[string]any{"k": "kept"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "kept", map[string]any{"k": "kept"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    if deleteErr := storage.Delete("deleted"); nil != deleteErr {
+    if deleteErr := storage.Delete(context.Background(), "deleted"); nil != deleteErr {
         t.Fatalf("unexpected delete error: %s", deleteErr.Error())
     }
 
@@ -395,7 +391,7 @@ func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *test
         t.Fatalf("expected the deleted entry to be gone from the in-memory state")
     }
 
-    _, exists, loadErr := storage.Load("deleted")
+    _, exists, loadErr := storage.Load(context.Background(), "deleted")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -425,12 +421,11 @@ func TestFileStorage_Delete_RemovesTheEntryAndSkipsTheFlushForAnAbsentId(t *test
 
     unwritableStorage := newFileStorageOverAReadOnlyHandle(t, readOnlyPath)
 
-    if deleteErr := unwritableStorage.Delete("never-stored"); nil != deleteErr {
+    if deleteErr := unwritableStorage.Delete(context.Background(), "never-stored"); nil != deleteErr {
         t.Fatalf("expected deleting an absent id to answer success without flushing, got %s", deleteErr.Error())
     }
 }
 
-/* a Delete whose flush fails must put the entry back: the session is still in the file, and dropping it from the map as well would make the storage answer "no such session" for something a reader reopening the file still finds */
 func TestFileStorage_Delete_RestoresTheEntryWhenTheFlushFails(t *testing.T) {
     fileInstance, err := os.CreateTemp("", "melody_session_delete_rollback_*.json")
     if nil != err {
@@ -449,16 +444,15 @@ func TestFileStorage_Delete_RestoresTheEntryWhenTheFlushFails(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    if saveErr := storage.Save("doomed", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "doomed", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    /* the handle the storage writes through is closed under it, so the flush the delete triggers cannot write */
     if closeErr := fileInstance.Close(); nil != closeErr {
         t.Fatalf("unexpected error closing the handle: %s", closeErr.Error())
     }
 
-    deleteErr := storage.Delete("doomed")
+    deleteErr := storage.Delete(context.Background(), "doomed")
     if nil == deleteErr {
         t.Fatalf("expected the delete to fail when its flush cannot write")
     }
@@ -486,7 +480,6 @@ func TestFileStorage_Close_IsIdempotent(t *testing.T) {
     }
 }
 
-/* the storage directory is created at construction, and a path whose directory cannot exist is refused there rather than on the first flush — the boot is where a bad path is fixable */
 func TestNewFileStorage_RefusesAPathWhoseDirectoryCannotBeCreated(t *testing.T) {
     directory := t.TempDir()
 
@@ -509,7 +502,6 @@ func TestNewFileStorage_RefusesAPathWhoseDirectoryCannotBeCreated(t *testing.T) 
     }
 }
 
-/* a closed storage refuses to load as well as to save and delete: the map it still holds is not authoritative, and answering from it would serve a session the file may not carry */
 func TestFileStorage_Load_AfterCloseReturnsError(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -519,13 +511,13 @@ func TestFileStorage_Load_AfterCloseReturnsError(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    if saveErr := storage.Save("abc", map[string]any{"k": "v"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "abc", map[string]any{"k": "v"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
     _ = storage.CloseWithContext(t.Context())
 
-    _, exists, loadErr := storage.Load("abc")
+    _, exists, loadErr := storage.Load(context.Background(), "abc")
     if nil == loadErr {
         t.Fatalf("expected load after close to error")
     }
@@ -539,9 +531,6 @@ func TestFileStorage_Load_AfterCloseReturnsError(t *testing.T) {
     }
 }
 
-/* a file that cannot be opened for a reason other than "it is not there yet" is reported: the absent file is the ordinary first-boot case and answers an empty store, while anything else — a path that is not reachable at all — must not be read as "no sessions yet" and then overwritten by the first flush.
-
-   The state is built by calling the reader directly, because the constructor above it creates the directory first and would fail before this line. */
 func TestReadSessionFileAtPath_ReportsAnOpenFailureThatIsNotAMissingFile(t *testing.T) {
     directory := t.TempDir()
 
@@ -563,7 +552,6 @@ func TestReadSessionFileAtPath_ReportsAnOpenFailureThatIsNotAMissingFile(t *test
         t.Fatalf("expected the open refusal, got %q", readErr.Error())
     }
 
-    /* the missing file itself is the ordinary case and answers an empty store */
     empty, missingErr := readSessionFileAtPath(filepath.Join(directory, "never-written.json"))
     if nil != missingErr {
         t.Fatalf("expected a missing file to answer an empty store, got %s", missingErr.Error())
@@ -573,7 +561,6 @@ func TestReadSessionFileAtPath_ReportsAnOpenFailureThatIsNotAMissingFile(t *test
     }
 }
 
-/* a storage that does not own its file has nothing to write through once the handle is gone, and the flush says so instead of reporting success over a write that never happened. The constructors never produce this state — the injecting one refuses a nil handle — so it is built here; the guard is what keeps the invariant from being the only thing between a lost write and a caller that was told it succeeded. */
 func TestFileStorage_FlushLocked_RefusesWhenTheInjectedHandleIsGone(t *testing.T) {
     fileInstance, err := os.CreateTemp("", "melody_session_handle_gone_*.json")
     if nil != err {
@@ -592,7 +579,7 @@ func TestFileStorage_FlushLocked_RefusesWhenTheInjectedHandleIsGone(t *testing.T
 
     storage.file = nil
 
-    saveErr := storage.Save("abc", map[string]any{"k": "v"}, time.Hour)
+    saveErr := storage.Save(context.Background(), "abc", map[string]any{"k": "v"}, bound.Of(time.Hour))
     if nil == saveErr {
         t.Fatalf("expected the flush to refuse when there is no handle to write through")
     }
@@ -602,7 +589,6 @@ func TestFileStorage_FlushLocked_RefusesWhenTheInjectedHandleIsGone(t *testing.T
     }
 }
 
-/* a storage that owns its file reports a failing close instead of swallowing it, because that failure is where a buffered write is lost. The two constructors never produce this state — the one that owns the file opens it per write and never holds a handle — so the state is built here directly; the guard is what keeps the invariant from being the only thing holding the report up. */
 func TestFileStorage_Close_ReportsAFailingCloseOfTheOwnedFile(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -617,7 +603,6 @@ func TestFileStorage_Close_ReportsAFailingCloseOfTheOwnedFile(t *testing.T) {
         t.Fatalf("unexpected create error: %s", createErr.Error())
     }
 
-    /* closing it here is what makes the storage's own close fail */
     if closeErr := ownedFile.Close(); nil != closeErr {
         t.Fatalf("unexpected error closing the handle: %s", closeErr.Error())
     }
@@ -645,7 +630,7 @@ func TestFileStorage_Save_AfterCloseReturnsError(t *testing.T) {
 
     _ = storage.CloseWithContext(t.Context())
 
-    saveErr := storage.Save("k", map[string]any{"v": 1}, time.Minute)
+    saveErr := storage.Save(context.Background(), "k", map[string]any{"v": 1}, bound.Of(time.Minute))
     if nil == saveErr {
         t.Fatalf("expected save after close to error")
     }
@@ -663,9 +648,10 @@ func TestFileStorage_AtomicWrite_DoesNotLeaveTempFiles(t *testing.T) {
 
     for iteration := 0; iteration < 5; iteration++ {
         saveErr := storage.Save(
+            context.Background(),
             "s"+strconv.Itoa(iteration),
             map[string]any{"iteration": iteration},
-            time.Minute,
+            bound.Of(time.Minute),
         )
         if nil != saveErr {
             t.Fatalf("unexpected save error: %s", saveErr.Error())
@@ -687,9 +673,6 @@ func TestFileStorage_AtomicWrite_DoesNotLeaveTempFiles(t *testing.T) {
     }
 }
 
-/* the snapshot is written to a temp file and moved into place, so a failed move must take the temp file with it: the directory the sessions live in would otherwise collect one orphan per failed write, and each orphan holds a full copy of every live session on disk.
-
-   The move is made to fail structurally — the destination is a non-empty directory, which rename can never replace — because the test runs as root, where permissions refuse nothing. */
 func TestWriteSessionFileAtomically_RemovesTheTempFileWhenTheReplaceFails(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -723,7 +706,6 @@ func TestWriteSessionFileAtomically_RemovesTheTempFileWhenTheReplaceFails(t *tes
     }
 }
 
-/* a storage directory that cannot be created is named as such rather than surfacing as the temp-file failure that follows it, because the path an operator has to fix is the directory */
 func TestWriteSessionFileAtomically_RefusesWhenTheDirectoryCannotBeCreated(t *testing.T) {
     directory := t.TempDir()
 
@@ -742,7 +724,6 @@ func TestWriteSessionFileAtomically_RefusesWhenTheDirectoryCannotBeCreated(t *te
     }
 }
 
-/* the injected handle is read from the start, and a handle that cannot be positioned is refused at construction rather than decoded from wherever it happened to stand: a storage built over it would answer with whatever the tail of the file parsed into. */
 func TestNewFileStorage_RefusesAHandleThatCannotBeSeeked(t *testing.T) {
     fileInstance, err := os.CreateTemp("", "melody_session_unseekable_*.json")
     if nil != err {
@@ -773,7 +754,6 @@ func TestNewFileStorage_RefusesAHandleThatCannotBeSeeked(t *testing.T) {
     }
 }
 
-/* an appending handle ignores every seek, so each snapshot would land after the document it replaces and the truncation would then cut the pair to the new length. Refusing it at construction is the only place the operator can still be told: the saves that follow report success. */
 func TestNewFileStorage_RefusesAHandleOpenedForAppending(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -805,7 +785,6 @@ func TestNewFileStorage_RefusesAHandleOpenedForAppending(t *testing.T) {
     }
 }
 
-/* the refusal above is a door, not the guarantee: the write itself names its offset, so even a handle that reached the storage another way cannot land a snapshot at the end of the file. */
 func TestFileStorage_InPlaceWrite_RefusesToLandAnywhereButTheStartOfTheFile(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -850,7 +829,6 @@ func TestFileStorage_InPlaceWrite_RefusesToLandAnywhereButTheStartOfTheFile(t *t
     }
 }
 
-/* a snapshot file whose content is not the map the storage wrote is refused at construction: decoding it into a zero-value map would present an empty session store as a healthy one and silently log every user out, and the next write would overwrite whatever was really there. */
 func TestNewFileStorage_RefusesAFileThatIsNotASnapshot(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -873,7 +851,6 @@ func TestNewFileStorage_RefusesAFileThatIsNotASnapshot(t *testing.T) {
     }
 }
 
-/* the path is what names the file the sessions live in, so a path that names nothing is refused at construction instead of writing a snapshot into the working directory */
 func TestNewFileStorage_RefusesAPathThatNamesNoFile(t *testing.T) {
     for _, path := range []string{".", "./"} {
         storage, storageErr := NewFileStorage(FileStorageConfig{Path: path})
@@ -956,7 +933,6 @@ func TestNewFileStorage_RefusesAConfigurationNamingBothAPathAndAFile(t *testing.
     }
 }
 
-/* a write-only handle cannot load the sessions it would replace, so the read that follows the mode checks refuses it */
 func TestNewFileStorage_RefusesAWriteOnlyHandleAtTheRead(t *testing.T) {
     fileInstance := openSeededSessionFile(t, os.O_WRONLY)
 
@@ -982,7 +958,7 @@ func TestNewFileStorage_AcceptsAReadWriteHandleAndSaves(t *testing.T) {
         t.Fatalf("unexpected error over a read-write handle: %s", storageErr.Error())
     }
 
-    if saveErr := storage.Save("sid-1", map[string]any{"key": "value"}, 0); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "sid-1", map[string]any{"key": "value"}, bound.UnlimitedDuration()); nil != saveErr {
         t.Fatalf("unexpected save error over a read-write handle: %s", saveErr.Error())
     }
 }
@@ -1008,7 +984,6 @@ func openSeededSessionFile(t *testing.T, flag int) *os.File {
     return fileInstance
 }
 
-/* newFileStorageOverAReadOnlyHandle builds a storage whose every flush fails: construction refuses a read-only handle, so the storage is built over a read-write one and handed the read-only one after. */
 func newFileStorageOverAReadOnlyHandle(t *testing.T, path string) *FileStorage {
     t.Helper()
 
@@ -1038,7 +1013,6 @@ func newFileStorageOverAReadOnlyHandle(t *testing.T, path string) *FileStorage {
     return storage
 }
 
-/* a nil handle is refused where a nil path is refused: the storage would otherwise construct successfully and fail on the first flush, long after the wiring mistake */
 func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -1051,7 +1025,7 @@ func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
 
     sessionId := "concurrent-session"
 
-    if saveErr := storage.Save(sessionId, map[string]any{"counter": 0}, time.Minute); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), sessionId, map[string]any{"counter": 0}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
@@ -1064,6 +1038,7 @@ func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
             defer waitGroup.Done()
             for index := 0; index < iterations; index++ {
                 _ = storage.Save(
+                    context.Background(),
                     sessionId,
                     map[string]any{
                         "counter": index,
@@ -1072,7 +1047,7 @@ func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
                             "value": index,
                         },
                     },
-                    time.Minute,
+                    bound.Of(time.Minute),
                 )
             }
         }(writerIndex)
@@ -1083,7 +1058,7 @@ func TestFileStorage_ConcurrentLoadSaveIsRaceFree(t *testing.T) {
         go func() {
             defer waitGroup.Done()
             for index := 0; index < iterations; index++ {
-                loaded, _, loadErr := storage.Load(sessionId)
+                loaded, _, loadErr := storage.Load(context.Background(), sessionId)
                 if nil != loadErr {
                     t.Errorf("load error: %v", loadErr)
                     return
@@ -1114,7 +1089,7 @@ func TestFileStorage_Save_FailedEncodeDoesNotDestroyPersistedSessions(t *testing
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    saveErr := storage.Save("keep", map[string]any{"k": "v"}, 0)
+    saveErr := storage.Save(context.Background(), "keep", map[string]any{"k": "v"}, bound.UnlimitedDuration())
     if nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
@@ -1127,8 +1102,7 @@ func TestFileStorage_Save_FailedEncodeDoesNotDestroyPersistedSessions(t *testing
         t.Fatalf("expected the persisted session file to be non-empty after a successful save")
     }
 
-    /* a Save whose value cannot be JSON-encoded (here a channel) must fail without truncating the live file and destroying the already-persisted "keep" session — the in-place writer must encode before it truncates, mirroring the atomic writer */
-    badSaveErr := storage.Save("bad", map[string]any{"ch": make(chan int)}, 0)
+    badSaveErr := storage.Save(context.Background(), "bad", map[string]any{"ch": make(chan int)}, bound.UnlimitedDuration())
     if nil == badSaveErr {
         t.Fatalf("expected a non-marshalable session value to fail the save")
     }
@@ -1146,7 +1120,7 @@ func TestFileStorage_Save_FailedEncodeDoesNotDestroyPersistedSessions(t *testing
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    data, exists, loadErr := reader.Load("keep")
+    data, exists, loadErr := reader.Load(context.Background(), "keep")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -1174,25 +1148,23 @@ func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
         t.Fatalf("unexpected storage error: %s", err.Error())
     }
 
-    if saveErr := storage.Save("existing", map[string]any{"v": "old"}, 0); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "existing", map[string]any{"v": "old"}, bound.UnlimitedDuration()); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    /* a failed Save of a NEW id must roll the in-memory entry back so Load does not surface a session that was never persisted */
-    if newErr := storage.Save("fresh", map[string]any{"ch": make(chan int)}, 0); nil == newErr {
+    if newErr := storage.Save(context.Background(), "fresh", map[string]any{"ch": make(chan int)}, bound.UnlimitedDuration()); nil == newErr {
         t.Fatalf("expected the non-marshalable save to fail")
     }
-    if _, exists, loadErr := storage.Load("fresh"); nil != loadErr {
+    if _, exists, loadErr := storage.Load(context.Background(), "fresh"); nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     } else if true == exists {
         t.Fatalf("a failed Save of a new id must not be observable via Load")
     }
 
-    /* a failed Save that updates an EXISTING id must restore the previous in-memory value */
-    if updErr := storage.Save("existing", map[string]any{"ch": make(chan int)}, 0); nil == updErr {
+    if updErr := storage.Save(context.Background(), "existing", map[string]any{"ch": make(chan int)}, bound.UnlimitedDuration()); nil == updErr {
         t.Fatalf("expected the non-marshalable update to fail")
     }
-    data, exists, loadErr := storage.Load("existing")
+    data, exists, loadErr := storage.Load(context.Background(), "existing")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -1201,7 +1173,6 @@ func TestFileStorage_Save_RollsBackInMemoryEntryWhenFlushFails(t *testing.T) {
     }
 }
 
-/* a flush that fails only past the persisted write keeps the NEW in-memory state: the document already sits on disk in full, so rolling back would make memory disagree with what was persisted — the divergence the rollback exists to prevent, inverted. A character device accepts the write at offset zero and refuses the truncation, which is exactly the after-the-persist failure. */
 func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *testing.T) {
     characterDevice, openErr := os.OpenFile(refusingCharacterDevice, os.O_RDWR, 0)
     if nil != openErr {
@@ -1217,7 +1188,7 @@ func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *te
         t.Fatalf("unexpected storage error: %s", storageErr.Error())
     }
 
-    saveErr := storage.Save("kept", map[string]any{"v": "new"}, 0)
+    saveErr := storage.Save(context.Background(), "kept", map[string]any{"v": "new"}, bound.UnlimitedDuration())
     if nil == saveErr {
         t.Fatalf("expected the truncation refusal to be reported")
     }
@@ -1226,7 +1197,7 @@ func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *te
         t.Fatalf("expected the failure to carry the persisted-despite-flush mark, got %s", saveErr.Error())
     }
 
-    data, exists, loadErr := storage.Load("kept")
+    data, exists, loadErr := storage.Load(context.Background(), "kept")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -1236,7 +1207,6 @@ func TestFileStorage_Save_KeepsTheNewEntryWhenTheFlushFailsAfterThePersist(t *te
     }
 }
 
-/* the deletion twin of the kept-entry rule: the document without the session already sits on disk when the flush failure strikes, so restoring the entry in memory would resurrect a session the persisted state does not hold. */
 func TestFileStorage_Delete_KeepsTheEntryDeletedWhenTheFlushFailsAfterThePersist(t *testing.T) {
     characterDevice, openErr := os.OpenFile(refusingCharacterDevice, os.O_RDWR, 0)
     if nil != openErr {
@@ -1252,11 +1222,11 @@ func TestFileStorage_Delete_KeepsTheEntryDeletedWhenTheFlushFailsAfterThePersist
         t.Fatalf("unexpected storage error: %s", storageErr.Error())
     }
 
-    if saveErr := storage.Save("gone", map[string]any{"v": "old"}, 0); false == errors.Is(saveErr, errSessionStoragePersistedDespiteFlushFailure) {
+    if saveErr := storage.Save(context.Background(), "gone", map[string]any{"v": "old"}, bound.UnlimitedDuration()); false == errors.Is(saveErr, errSessionStoragePersistedDespiteFlushFailure) {
         t.Fatalf("expected the seeding save to fail only past the persist, got %v", saveErr)
     }
 
-    deleteErr := storage.Delete("gone")
+    deleteErr := storage.Delete(context.Background(), "gone")
     if nil == deleteErr {
         t.Fatalf("expected the truncation refusal to be reported")
     }
@@ -1265,7 +1235,7 @@ func TestFileStorage_Delete_KeepsTheEntryDeletedWhenTheFlushFailsAfterThePersist
         t.Fatalf("expected the failure to carry the persisted-despite-flush mark, got %s", deleteErr.Error())
     }
 
-    if _, exists, loadErr := storage.Load("gone"); nil != loadErr {
+    if _, exists, loadErr := storage.Load(context.Background(), "gone"); nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     } else if true == exists {
         t.Fatalf("expected the entry deleted before the failed flush to stay deleted")
@@ -1282,12 +1252,11 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
     }
     defer storage.CloseWithContext(context.Background())
 
-    /* a ttl that pushes the expiry past 2262-04-11 overflows time.Time.UnixNano to a negative int64; the session must be kept with a saturated far-future expiry exactly as InMemoryStorage keeps it, not treated as already expired and purged on the same Save */
-    if saveErr := storage.Save("forever", map[string]any{"k": "v"}, time.Duration(math.MaxInt64)); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "forever", map[string]any{"k": "v"}, bound.Of(time.Duration(math.MaxInt64))); nil != saveErr {
         t.Fatalf("unexpected save error: %s", saveErr.Error())
     }
 
-    data, exists, loadErr := storage.Load("forever")
+    data, exists, loadErr := storage.Load(context.Background(), "forever")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -1298,14 +1267,13 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
         t.Fatalf("expected the persisted session data to survive, got %v", data)
     }
 
-    /* it must also survive a reload from disk — an overflowed negative expiry would have been dropped from the snapshot on the same Save and never written to the file */
     reader, err := NewFileStorage(FileStorageConfig{Path: path})
     if nil != err {
         t.Fatalf("unexpected reader storage error: %s", err.Error())
     }
     defer reader.CloseWithContext(context.Background())
 
-    reloadData, reloadExists, reloadErr := reader.Load("forever")
+    reloadData, reloadExists, reloadErr := reader.Load(context.Background(), "forever")
     if nil != reloadErr {
         t.Fatalf("unexpected reload error: %s", reloadErr.Error())
     }
@@ -1314,9 +1282,6 @@ func TestFileStorage_Save_TtlBeyondYear2262IsKeptNotPurged(t *testing.T) {
     }
 }
 
-/* Loading an expired session must remove it from the map and from the file, and the flush inside Load is the only thing that does it: purgeExpiredLocked runs inside flushLocked against the same clock and the same predicate, so Load names no session of its own. This pins that mechanism — if the purge ever stops covering a lapsed entry, the explicit delete has to come back.
-
-   Both sessions are stored with a lifetime that cannot lapse while they are being written, and the one under test is aged afterwards by rewriting its stored instant rather than by sleeping. A short ttl plus a sleep does not pin this: the second Save flushes too, and the purge inside that flush drops an entry the first Save aged past its lifetime while the file was being written, so Load is handed a session that is already gone and the branch this test names is never entered. It stayed green with the flush removed from Load entirely. */
 func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "sessions.json")
@@ -1326,12 +1291,12 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
         t.Fatalf("unexpected storage error: %v", newErr)
     }
 
-    saveErr := storage.Save("expired", map[string]any{"user": "alice"}, time.Hour)
+    saveErr := storage.Save(context.Background(), "expired", map[string]any{"user": "alice"}, bound.Of(time.Hour))
     if nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    saveErr = storage.Save("live", map[string]any{"user": "bob"}, time.Hour)
+    saveErr = storage.Save(context.Background(), "live", map[string]any{"user": "bob"}, bound.Of(time.Hour))
     if nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
@@ -1340,7 +1305,7 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
     agedEntry.ExpiresAt = time.Now().Add(-time.Hour).UnixNano()
     storage.sessionById["expired"] = agedEntry
 
-    _, exists, loadErr := storage.Load("expired")
+    _, exists, loadErr := storage.Load(context.Background(), "expired")
     if nil != loadErr {
         t.Fatalf("unexpected load error: %v", loadErr)
     }
@@ -1367,7 +1332,6 @@ func TestFileStorage_LoadingAnExpiredSessionRemovesItFromTheFile(t *testing.T) {
     }
 }
 
-/* The answer to a load of a lapsed entry — no such session — is settled before the housekeeping flush is attempted, so that flush failing must not change it. Returning its error instead would make Manager.Session panic, so an expired cookie on a store that cannot be written would answer 500 where a client holding no cookie at all is served a fresh session. */
 func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "sessions.json")
@@ -1385,7 +1349,7 @@ func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *t
         ExpiresAt: time.Now().Add(-time.Hour).UnixNano(),
     }
 
-    data, exists, loadErr := storage.Load(sessionId)
+    data, exists, loadErr := storage.Load(context.Background(), sessionId)
     if nil != loadErr {
         t.Fatalf("expected a lapsed entry to answer absent rather than surface the housekeeping failure, got %v", loadErr)
     }
@@ -1396,12 +1360,11 @@ func TestFileStorage_LoadOfALapsedEntryAnswersAbsentWhenTheFlushCannotWrite(t *t
 
     manager := NewManager(storage, ManagerConfig{Ttl: bound.Of(time.Minute)})
 
-    if nil != mustSession(manager.Session(sessionId)) {
+    if nil != mustSession(manager.Session(context.Background(), sessionId)) {
         t.Fatalf("expected the manager to answer no session instead of panicking")
     }
 }
 
-/* the truncation cuts to the length just written rather than to zero, so a snapshot that shrinks — a session deleted, a value removed — leaves no tail of the previous document behind for the next decode to choke on */
 func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
@@ -1419,7 +1382,7 @@ func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testin
     for index := 0; index < 12; index++ {
         sessionId := strings.Repeat(strconv.Itoa(index%10), 32)
 
-        if saveErr := storage.Save(sessionId, map[string]any{"padding": strings.Repeat("x", 64)}, 0); nil != saveErr {
+        if saveErr := storage.Save(context.Background(), sessionId, map[string]any{"padding": strings.Repeat("x", 64)}, bound.UnlimitedDuration()); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
@@ -1432,7 +1395,7 @@ func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testin
     for index := 0; index < 12; index++ {
         sessionId := strings.Repeat(strconv.Itoa(index%10), 32)
 
-        if deleteErr := storage.Delete(sessionId); nil != deleteErr {
+        if deleteErr := storage.Delete(context.Background(), sessionId); nil != deleteErr {
             t.Fatalf("unexpected delete error: %v", deleteErr)
         }
     }
@@ -1456,7 +1419,6 @@ func TestFileStorage_InPlaceWrite_AShrinkingSnapshotLeavesNoTailBehind(t *testin
     }
 }
 
-/* a hard kill between CreateTemp and the rename skips every cleanup path, and each orphan is a complete snapshot of every live session; the sweep runs at construction, where the per-process ownership the session documentation states means nothing else can be mid-rename over this path */
 func TestNewFileStorage_SweepsTheOrphanTemporaryFiles(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, "session.json")
@@ -1517,7 +1479,6 @@ func TestSyncSessionDirectory_AnswersTheDirectoryItCouldNotOpen(t *testing.T) {
     }
 }
 
-/* fsync of a character device is refused, which is the directory flush failing after the open succeeded — the branch the missing directory never reaches. It carries the same mark for the same reason: the rename that preceded it already put the document at its path. */
 func TestSyncSessionDirectory_MarksTheRefusedFlushAsPersisted(t *testing.T) {
     syncErr := syncSessionDirectory(refusingCharacterDevice)
     if nil == syncErr {
@@ -1535,7 +1496,6 @@ func TestSyncSessionDirectory_AcceptsARealDirectory(t *testing.T) {
     }
 }
 
-/* the file storage persists the WALL reading of the injected clock, and compares against the same clock: frozen, nothing lapses; travelled past the ttl, the entry is gone — with no sleep and no dependence on the process clock */
 func TestFileStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC))
 
@@ -1545,19 +1505,19 @@ func TestFileStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     }
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
-    saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour)
+    saveErr := storage.Save(context.Background(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour))
     if nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
 
-    _, exists, loadErr := storage.Load("session-1")
+    _, exists, loadErr := storage.Load(context.Background(), "session-1")
     if nil != loadErr || false == exists {
         t.Fatalf("expected the fresh session, got exists=%v err=%v", exists, loadErr)
     }
 
     frozenClock.Advance(2 * time.Hour)
 
-    _, exists, loadErr = storage.Load("session-1")
+    _, exists, loadErr = storage.Load(context.Background(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -1566,7 +1526,6 @@ func TestFileStorage_ExpiryFollowsTheInjectedClock(t *testing.T) {
     }
 }
 
-/* the purge reads the INJECTED clock, and nothing proved it: no fixture ever ran the purge under a clock that disagrees with the wall clock. The frozen instant here is far in the WALL-CLOCK past, so a purge reading time.Now instead drops a session the injected clock says is still live — and because the purge is the ONE place a lapsed entry is removed, that loss is silent and permanent. */
 func TestFileStorage_ThePurgeReadsTheInjectedClockNotTheWallClock(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC))
 
@@ -1578,16 +1537,15 @@ func TestFileStorage_ThePurgeReadsTheInjectedClockNotTheWallClock(t *testing.T) 
     }
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
-    if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
 
-    /* a second Save is what reaches the purge on every path, and it rewrites the whole snapshot */
-    if saveErr := storage.Save("session-2", map[string]any{"user": "admin"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "session-2", map[string]any{"user": "admin"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
 
-    _, exists, loadErr := storage.Load("session-1")
+    _, exists, loadErr := storage.Load(context.Background(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -1597,7 +1555,6 @@ func TestFileStorage_ThePurgeReadsTheInjectedClockNotTheWallClock(t *testing.T) 
     }
 }
 
-/* the expiry instant ITSELF is lapsed, and no fixture reached it: every other one ages a session by an hour, where the comparison answers the same whether it is > or >=. The two halves below sit one nanosecond apart around the exact instant Save wrote. */
 func TestFileStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T) {
     frozenTime := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
     frozenClock := clock.NewFrozenClock(frozenTime)
@@ -1610,13 +1567,13 @@ func TestFileStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T)
     }
     defer func() { _ = storage.CloseWithContext(context.Background()) }()
 
-    if saveErr := storage.Save("session-1", map[string]any{"user": "editor"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "session-1", map[string]any{"user": "editor"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("save error: %v", saveErr)
     }
 
     frozenClock.TravelTo(frozenTime.Add(time.Hour).Add(-time.Nanosecond))
 
-    _, exists, loadErr := storage.Load("session-1")
+    _, exists, loadErr := storage.Load(context.Background(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -1627,7 +1584,7 @@ func TestFileStorage_TreatsTheExpiryInstantItselfAsLapsedAtTheDoor(t *testing.T)
 
     frozenClock.TravelTo(frozenTime.Add(time.Hour))
 
-    _, exists, loadErr = storage.Load("session-1")
+    _, exists, loadErr = storage.Load(context.Background(), "session-1")
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -1675,7 +1632,6 @@ func TestFileStorage_RefusesANullSnapshotOnBothConstructors(t *testing.T) {
     }
 }
 
-/* a basename of 255 bytes is the longest a path component admits; the temp file beside it must fit the same component, and the sweep must find what the write names */
 func TestFileStorage_SavesUnderABasenameThatFillsTheFilesystemComponent(t *testing.T) {
     directory := t.TempDir()
     path := filepath.Join(directory, strings.Repeat("s", 250)+".json")
@@ -1697,7 +1653,7 @@ func TestFileStorage_SavesUnderABasenameThatFillsTheFilesystemComponent(t *testi
         t.Fatalf("expected the orphan of the long basename swept away, stat answered %v", statErr)
     }
 
-    if saveErr := storage.Save("session-id", map[string]any{"user": "u"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "session-id", map[string]any{"user": "u"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected a save under a basename of 255 bytes, got %v", saveErr)
     }
 
@@ -1722,12 +1678,12 @@ func TestFileStorage_MaxSessionsRefusesANewIdAtTheCeilingAndKeepsTheStoredOnes(t
     }
 
     for _, sessionId := range []string{"first", "second"} {
-        if saveErr := storage.Save(sessionId, map[string]any{"key": "value"}, time.Hour); nil != saveErr {
+        if saveErr := storage.Save(context.Background(), sessionId, map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
 
-    saveErr := storage.Save("third", map[string]any{}, time.Hour)
+    saveErr := storage.Save(context.Background(), "third", map[string]any{}, bound.Of(time.Hour))
     if nil == saveErr || "the session file storage is full" != saveErr.Error() {
         t.Fatalf("expected the new id refused, got %v", saveErr)
     }
@@ -1736,11 +1692,11 @@ func TestFileStorage_MaxSessionsRefusesANewIdAtTheCeilingAndKeepsTheStoredOnes(t
         t.Fatalf("expected the refusal to name the field, got %v", exception.LogContext(saveErr, exception.LogContextConfig{}))
     }
 
-    if _, found, _ := storage.Load("third"); true == found {
+    if _, found, _ := storage.Load(context.Background(), "third"); true == found {
         t.Fatalf("expected the refused id not stored")
     }
 
-    if resaveErr := storage.Save("first", map[string]any{"key": "other"}, time.Hour); nil != resaveErr {
+    if resaveErr := storage.Save(context.Background(), "first", map[string]any{"key": "other"}, bound.Of(time.Hour)); nil != resaveErr {
         t.Fatalf("expected a stored id saved at the ceiling, got %v", resaveErr)
     }
 }
@@ -1755,7 +1711,7 @@ func TestFileStorage_ASessionLapsedInALoadedFileFreesItsSlotAtTheCeiling(t *test
     }
 
     for sessionId, ttl := range map[string]time.Duration{"short": time.Minute, "long": 2 * time.Hour} {
-        if saveErr := writer.Save(sessionId, map[string]any{}, ttl); nil != saveErr {
+        if saveErr := writer.Save(context.Background(), sessionId, map[string]any{}, bound.Of(ttl)); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
@@ -1767,22 +1723,21 @@ func TestFileStorage_ASessionLapsedInALoadedFileFreesItsSlotAtTheCeiling(t *test
         t.Fatalf("unexpected storage error: %v", storageErr)
     }
 
-    if saveErr := storage.Save("late", map[string]any{}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "late", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected the lapsed session's slot freed, got %v", saveErr)
     }
 
-    if saveErr := storage.Save("fuller", map[string]any{}, time.Hour); nil == saveErr {
+    if saveErr := storage.Save(context.Background(), "fuller", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
         t.Fatalf("expected the id refused with the table full again")
     }
 
-    /* the first instant anything lapses after the sweep, so a refused flood stops walking the table until then */
     if expected := frozenClock.Now().Add(time.Hour).UnixNano(); expected != storage.earliestExpiry {
         t.Fatalf("expected the sweep to move the earliest expiry to %d, got %d", expected, storage.earliestExpiry)
     }
 
     frozenClock.Advance(time.Hour)
 
-    if saveErr := storage.Save("after", map[string]any{}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "after", map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected the sweep's next earliest expiry honoured, got %v", saveErr)
     }
 }
@@ -1813,7 +1768,7 @@ func TestFileStorage_AFileHoldingMoreThanTheCeilingKeepsThemAndRefusesANewId(t *
     }
 
     for _, sessionId := range []string{"first", "second", "third"} {
-        if saveErr := writer.Save(sessionId, map[string]any{}, time.Hour); nil != saveErr {
+        if saveErr := writer.Save(context.Background(), sessionId, map[string]any{}, bound.Of(time.Hour)); nil != saveErr {
             t.Fatalf("unexpected save error: %v", saveErr)
         }
     }
@@ -1824,16 +1779,16 @@ func TestFileStorage_AFileHoldingMoreThanTheCeilingKeepsThemAndRefusesANewId(t *
     }
 
     for _, sessionId := range []string{"first", "second", "third"} {
-        if _, found, _ := storage.Load(sessionId); false == found {
+        if _, found, _ := storage.Load(context.Background(), sessionId); false == found {
             t.Fatalf("expected %q kept", sessionId)
         }
     }
 
-    if saveErr := storage.Save("fourth", map[string]any{}, time.Hour); nil == saveErr {
+    if saveErr := storage.Save(context.Background(), "fourth", map[string]any{}, bound.Of(time.Hour)); nil == saveErr {
         t.Fatalf("expected a new id refused")
     }
 
-    if saveErr := storage.Save("first", map[string]any{"key": "value"}, time.Hour); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "first", map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != saveErr {
         t.Fatalf("expected a stored id saved, got %v", saveErr)
     }
 }
@@ -1852,19 +1807,19 @@ func TestFileStorage_TheHandleFormCarriesTheCeiling(t *testing.T) {
         t.Fatalf("unexpected storage error: %v", storageErr)
     }
 
-    if saveErr := storage.Save("first", map[string]any{}, 0); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "first", map[string]any{}, bound.UnlimitedDuration()); nil != saveErr {
         t.Fatalf("unexpected save error: %v", saveErr)
     }
 
-    if saveErr := storage.Save("second", map[string]any{}, 0); nil == saveErr || "the session file storage is full" != saveErr.Error() {
+    if saveErr := storage.Save(context.Background(), "second", map[string]any{}, bound.UnlimitedDuration()); nil == saveErr || "the session file storage is full" != saveErr.Error() {
         t.Fatalf("expected the new id refused, got %v", saveErr)
     }
 
-    if deleteErr := storage.Delete("first"); nil != deleteErr {
+    if deleteErr := storage.Delete(context.Background(), "first"); nil != deleteErr {
         t.Fatalf("unexpected delete error: %v", deleteErr)
     }
 
-    if saveErr := storage.Save("second", map[string]any{}, 0); nil != saveErr {
+    if saveErr := storage.Save(context.Background(), "second", map[string]any{}, bound.UnlimitedDuration()); nil != saveErr {
         t.Fatalf("expected the deleted session's slot freed, got %v", saveErr)
     }
 }
@@ -1931,7 +1886,7 @@ func TestFileStorage_SaveAndDeleteReturnOnACyclicChainFromAValue(t *testing.T) {
     value := map[string]any{"custom": failingMarshalValue{failure: &failure}}
 
     for _, sessionId := range []string{"kept", "deleted"} {
-        if saveErr := storage.Save(sessionId, value, time.Minute); nil != saveErr {
+        if saveErr := storage.Save(context.Background(), sessionId, value, bound.Of(time.Minute)); nil != saveErr {
             t.Fatalf("unexpected save error: %s", saveErr.Error())
         }
     }
@@ -1939,12 +1894,168 @@ func TestFileStorage_SaveAndDeleteReturnOnACyclicChainFromAValue(t *testing.T) {
     failure = newCyclicChainError()
 
     assertReturnsOnACyclicChain(t, func() {
-        if saveErr := storage.Save("refused", value, time.Minute); nil == saveErr {
+        if saveErr := storage.Save(context.Background(), "refused", value, bound.Of(time.Minute)); nil == saveErr {
             t.Error("expected the save to carry the value's failure")
         }
 
-        if deleteErr := storage.Delete("deleted"); nil == deleteErr {
+        if deleteErr := storage.Delete(context.Background(), "deleted"); nil == deleteErr {
             t.Error("expected the delete to carry the value's failure")
         }
     })
+}
+
+func fileStorageFactories() map[string]storageFactory {
+    return map[string]storageFactory{
+        "path with the journal": func(t *testing.T, clockInstance clockcontract.Clock) sessioncontract.Storage {
+            return newJournalStorage(t, FileStorageConfig{Path: filepath.Join(t.TempDir(), "sessions.json"), Clock: clockInstance})
+        },
+        "path without the journal": func(t *testing.T, clockInstance clockcontract.Clock) sessioncontract.Storage {
+            return newJournalStorage(t, FileStorageConfig{Path: filepath.Join(t.TempDir(), "sessions.json"), JournalDisabled: true, Clock: clockInstance})
+        },
+        "file": func(t *testing.T, clockInstance clockcontract.Clock) sessioncontract.Storage {
+            fileInstance, createErr := os.CreateTemp(t.TempDir(), "sessions_*.json")
+            if nil != createErr {
+                t.Fatalf("unexpected create temp error: %v", createErr)
+            }
+            t.Cleanup(func() { _ = fileInstance.Close() })
+
+            return newJournalStorage(t, FileStorageConfig{File: fileInstance, Clock: clockInstance})
+        },
+    }
+}
+
+func runEveryFileStorageForm(t *testing.T, assertion func(t *testing.T, factory storageFactory)) {
+    for name, factory := range fileStorageFactories() {
+        t.Run(name, func(t *testing.T) {
+            assertion(t, factory)
+        })
+    }
+}
+
+func TestFileStorage_EveryDoorRefusesANilAndATypedNilContext(t *testing.T) {
+    runEveryFileStorageForm(t, assertEveryStorageDoorRefusesANilContextFirst)
+}
+
+func TestFileStorage_ADoneContextAnswersItsErrorBeforeTheStoreIsTouched(t *testing.T) {
+    runEveryFileStorageForm(t, assertStorageAnswersADoneContextBeforeTheStoreIsTouched)
+}
+
+func TestFileStorage_TheArgumentsAreJudgedBeforeADoneContext(t *testing.T) {
+    runEveryFileStorageForm(t, assertStorageJudgesItsArgumentsBeforeADoneContext)
+}
+
+func TestFileStorage_ADoneContextIsAnsweredBeforeTheFullStorage(t *testing.T) {
+    storage, storageErr := NewFileStorage(FileStorageConfig{Path: filepath.Join(t.TempDir(), "sessions.json"), MaxSessions: bound.Of(1)})
+    if nil != storageErr {
+        t.Fatalf("unexpected storage error: %v", storageErr)
+    }
+    defer func() {
+        _ = storage.CloseWithContext(context.Background())
+    }()
+
+    if seedErr := storage.Save(context.Background(), "first", map[string]any{"key": "value"}, bound.Of(time.Hour)); nil != seedErr {
+        t.Fatalf("unexpected seed error: %v", seedErr)
+    }
+
+    if saveErr := storage.Save(cancelledContext(), "second", map[string]any{}, bound.Of(time.Hour)); false == errors.Is(saveErr, context.Canceled) {
+        t.Fatalf("expected the done context answered before the ceiling, got %v", saveErr)
+    }
+}
+
+func TestFileStorage_SaveRefusesAnAbsentTtlAndStoresNothing(t *testing.T) {
+    runEveryFileStorageForm(t, assertStorageRefusesAnAbsentTtlAndStoresNothing)
+}
+
+func TestFileStorage_AnUnlimitedTtlNeverLapses(t *testing.T) {
+    runEveryFileStorageForm(t, assertStorageKeepsAnUnlimitedTtl)
+}
+
+func TestFileStorage_SaveRefusesATtlBelowASecond(t *testing.T) {
+    runEveryFileStorageForm(t, assertStorageRefusesATtlBelowASecond)
+}
+
+func TestFileStorage_AnUnlimitedTtlIsPersistedAsNoExpiry(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "sessions.json")
+    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+
+    if saveErr := storage.Save(context.Background(), contractTestSessionId, map[string]any{"a": 1}, bound.UnlimitedDuration()); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    if closeErr := storage.CloseWithContext(context.Background()); nil != closeErr {
+        t.Fatalf("unexpected close error: %v", closeErr)
+    }
+
+    reopened := newJournalStorage(t, FileStorageConfig{Path: path})
+    defer reopened.CloseWithContext(context.Background())
+
+    entry, exists := reopened.sessionById[contractTestSessionId]
+    if false == exists || 0 != entry.ExpiresAt {
+        t.Fatalf("expected the unlimited session persisted with no expiry, got %v and %v", entry, exists)
+    }
+}
+
+func TestFileStorage_ADoneContextPaysForNoPendingCompaction(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "sessions.json")
+    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+    defer storage.CloseWithContext(context.Background())
+
+    mustSave(t, storage, "pending", map[string]any{"k": "v"})
+
+    storage.journalNeedsCompaction = true
+    snapshotBefore, _ := os.ReadFile(path)
+    journalBefore := journalSize(t, path)
+
+    if saveErr := storage.Save(cancelledContext(), "other", map[string]any{"k": "v"}, bound.Of(time.Hour)); false == errors.Is(saveErr, context.Canceled) {
+        t.Fatalf("expected the context error, got %v", saveErr)
+    }
+
+    snapshotAfter, _ := os.ReadFile(path)
+    if false == bytes.Equal(snapshotBefore, snapshotAfter) || journalBefore != journalSize(t, path) || false == storage.journalNeedsCompaction {
+        t.Fatalf("expected a save under a done context to run no pending compaction")
+    }
+}
+
+func TestFileStorage_ADoneContextDeleteOfAnUnknownIdAnswersTheContext(t *testing.T) {
+    runEveryFileStorageForm(t, func(t *testing.T, factory storageFactory) {
+        storage := factory(t, clock.NewSystemClock())
+        defer storage.CloseWithContext(context.Background())
+
+        if deleteErr := storage.Delete(cancelledContext(), "unknown"); false == errors.Is(deleteErr, context.Canceled) {
+            t.Fatalf("expected the context error for an unknown id, got %v", deleteErr)
+        }
+    })
+}
+
+func TestFileStorage_AContextThatEndsDuringTheWriteDoesNotTearIt(t *testing.T) {
+    path := filepath.Join(t.TempDir(), "sessions.json")
+    storage := newJournalStorage(t, FileStorageConfig{Path: path})
+
+    writeContext, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    storage.journalSeam = func(point journalPoint) {
+        if journalPointRecordWritten == point {
+            cancel()
+        }
+    }
+
+    if saveErr := storage.Save(writeContext, contractTestSessionId, map[string]any{"k": "whole"}, bound.Of(time.Hour)); nil != saveErr {
+        t.Fatalf("expected a write that began to finish, got %v", saveErr)
+    }
+
+    if nil == writeContext.Err() {
+        t.Fatalf("expected the seam to have cancelled the context during the write")
+    }
+
+    storage.journalSeam = nil
+    _ = storage.journal.Close()
+
+    reopened := newJournalStorage(t, FileStorageConfig{Path: path})
+    defer reopened.CloseWithContext(context.Background())
+
+    data, exists, loadErr := reopened.Load(context.Background(), contractTestSessionId)
+    if nil != loadErr || false == exists || "whole" != data["k"] {
+        t.Fatalf("expected the replay to read the record whole, got %v, %v and %v", data, exists, loadErr)
+    }
 }

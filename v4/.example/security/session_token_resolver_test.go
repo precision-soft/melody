@@ -31,7 +31,6 @@ import (
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* signedIn writes what the login handler writes: the identity, the roles and the credential version. */
 func signedIn(t *testing.T, userId string, roles []string) melodysecuritycontract.Token {
     t.Helper()
 
@@ -59,7 +58,6 @@ func TestSessionTokenResolverAnswersTheSignedInIdentity(t *testing.T) {
     }
 }
 
-/* The producer is driven rather than imitated: a real file-backed storage is written, closed and read again by a second storage, which is what a process restart is. The role list comes back as []any because the snapshot round-trips through json — session.FileStorage says so in its own GoDoc — and a resolver that accepted only []string would leave every signed-in visitor anonymous from the first restart onwards, on the very storage the boot warning asks an operator to register. */
 func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     path := filepath.Join(t.TempDir(), "sessions.json")
 
@@ -69,12 +67,12 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     }
 
     manager := melodysession.NewManager(storage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set(SessionKeySecurityUserId, "user-7")
     sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_USER", "ROLE_EDITOR"})
     withCurrentCredential(sessionInstance)
 
-    if err := manager.SaveSession(sessionInstance); nil != err {
+    if err := manager.SaveSession(context.Background(), sessionInstance); nil != err {
         t.Fatalf("the session was not saved: %v", err)
     }
 
@@ -90,7 +88,7 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     }
     defer restartedStorage.CloseWithContext(context.Background())
 
-    restoredSession := mustSession(melodysession.NewManager(restartedStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}).Session(sessionId))
+    restoredSession := mustSession(melodysession.NewManager(restartedStorage, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}).Session(context.Background(), sessionId))
     if nil == restoredSession {
         t.Fatal("the session did not survive the restart at all")
     }
@@ -117,7 +115,6 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     }
 }
 
-/* the same shape, written directly, so the acceptance is pinned without a filesystem under it */
 func TestSessionTokenResolverAcceptsARestoredRoleList(t *testing.T) {
     request, sessionInstance := requestCarryingSession(t)
     sessionInstance.Set(SessionKeySecurityUserId, "user-2")
@@ -135,7 +132,6 @@ func TestSessionTokenResolverAcceptsARestoredRoleList(t *testing.T) {
     }
 }
 
-/* Every guard below answers the same anonymous token, so each is driven on its own: a table that fused them would let one guard cover for a disarmed sibling. Together they are the whole fail-closed surface between a request and an identity: anything the session cannot supply exactly leaves the request anonymous rather than partly authenticated. */
 func TestSessionTokenResolverFailsClosed(t *testing.T) {
     for name, resolve := range map[string]func(*testing.T) melodysecuritycontract.Token{
         "no request at all": func(t *testing.T) melodysecuritycontract.Token {
@@ -211,7 +207,6 @@ func TestSessionTokenResolverFailsClosed(t *testing.T) {
     }
 }
 
-/* the session's authority is the account's current one: every change to the account after the login is read on the next request, and a session the account does not back is emptied so it cannot come back once the account does */
 func TestSessionTokenResolverAnswersTheAccountsCurrentAuthority(t *testing.T) {
     for name, scenario := range map[string]struct {
         sessionVersion any
@@ -332,7 +327,6 @@ func TestSessionTokenResolverAnswersTheAccountsCurrentAuthority(t *testing.T) {
     }
 }
 
-/* resolverJournal keeps the error records the resolver writes; every other level falls to the embedded nop logger */
 type resolverJournal struct {
     melodyloggingcontract.Logger
     messageList []string
@@ -344,7 +338,6 @@ func (instance *resolverJournal) Error(message string, context melodyloggingcont
     instance.contextList = append(instance.contextList, context)
 }
 
-/* requestCarryingSessionAndJournal is requestCarryingSession on a runtime whose logger is the journal handed back */
 func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request, melodysessioncontract.Session, *resolverJournal) {
     t.Helper()
 
@@ -364,7 +357,7 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, runtimeInstance, nil)
 
     manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
-    sessionInstance := mustSession(manager.NewSession())
+    sessionInstance := mustSession(manager.NewSession(context.Background()))
     _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
     return request, sessionInstance, journal
@@ -418,7 +411,7 @@ type outageSessionStorage struct {
     melodysessioncontract.Storage
 }
 
-func (instance *outageSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
+func (instance *outageSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
     return nil, false, errors.New("session store is down")
 }
 

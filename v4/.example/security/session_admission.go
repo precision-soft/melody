@@ -13,17 +13,16 @@ import (
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-/* SessionIndex is the index of the sessions each account holds (repository.UserSessionRepository), named here by what the sign-in and sign-out doors call. */
+/* SessionIndex is the index of the sessions each account holds (repository.UserSessionRepository). */
 type SessionIndex interface {
     Admit(ctx context.Context, userId string, previousSessionId string, sessionId string, createdAt time.Time, sessionLive func(sessionId string) (bool, error), release func(sessionId string) error) error
 
     Release(ctx context.Context, sessionId string) error
 }
 
-/* SessionIndexLookup resolves the session index for a request, as SessionUserLookup resolves the account. */
 type SessionIndexLookup func(request melodyhttpcontract.Request) (SessionIndex, error)
 
-/* AdmitSession records the session a sign-in rotated to under its account and ends, through the session manager, the account's oldest sessions past the cap, so the storage never holds more of one account's sessions than the index admits. A refused admission clears the rotated session, so the response stores nothing and expires the cookie: the sign-in fails rather than opening a session the cap does not count. */
+/* AdmitSession records the rotated session under its account and ends the account's oldest sessions past the cap; a refused admission clears the rotated session, so the sign-in fails rather than opening a session the cap does not count. */
 func AdmitSession(
     request melodyhttpcontract.Request,
     sessionIndex SessionIndexLookup,
@@ -83,22 +82,26 @@ func admitSession(
         return sessionStorageErr
     }
 
+    admissionContext := runtimeInstance.Context()
+
     return index.Admit(
-        runtimeInstance.Context(),
+        admissionContext,
         userId,
         previousSessionId,
         rotatedSession.Id(),
         clockInstance.Now(),
         func(sessionId string) (bool, error) {
-            _, exists, loadErr := sessionStorage.Load(sessionId)
+            _, exists, loadErr := sessionStorage.Load(admissionContext, sessionId)
 
             return exists, loadErr
         },
-        sessionManager.DeleteSession,
+        func(sessionId string) error {
+            return sessionManager.DeleteSession(admissionContext, sessionId)
+        },
     )
 }
 
-/* ReleaseSession removes the row of the session a sign-out ends. The sign-out ends the session whatever this answers: a row left behind holds one of the account's places until a later sign-in drops it as the oldest. */
+/* ReleaseSession removes the row of the session a sign-out ends; the sign-out ends the session whatever this answers. */
 func ReleaseSession(request melodyhttpcontract.Request, sessionIndex SessionIndexLookup, sessionId string) error {
     if nil == sessionIndex {
         return errors.New("the session index is not configured")

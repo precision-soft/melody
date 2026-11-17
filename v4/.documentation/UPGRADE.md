@@ -310,6 +310,14 @@ A `Changes` that is not a json array, an `Entry` built by hand, is written as a 
 
 **Remedy.** Pass the request's context, `runtimeInstance.Context()` in a handler, as the first argument of every call; replace `GetCtx` and its siblings with the plain names; drop the context from `NewBackend` and the `WithContext` call; declare the context first on an implementation of the application's own, refusing a nil one through `cachecontract.RefuseNilContext`; and write `ConnectionWriteTimeout:`. A call that must outlive the command timeout raises `BackendConfig.CommandTimeout`.
 
+### Session: every operation takes the context first, and a storage reads its ttl through one rule
+
+**What changed.** Every door of [`sessioncontract.Manager`](../session/contract/manager.go) and [`sessioncontract.Storage`](../session/contract/storage.go) takes the caller's context first: `Session(ctx, id)`, `NewSession(ctx)`, `SaveSession(ctx, session)`, `DeleteSession(ctx, id)`, `RegenerateSession(ctx, session)`, and `Load(ctx, id)`, `Save(ctx, id, data, ttl)`, `Delete(ctx, id)`; [`InMemoryStorage.Clear(ctx)`](../session/in_memory_storage.go) with them. A nil or typed-nil context is refused with `session context is nil` before anything else is judged; a storage then judges a closed storage, the id and the ttl, in the order the cache contract judges them, and answers a context already done its own error before the store is touched; the manager answers a context that is done, or that ends while it waits for a session another operation holds, an error marked as an infrastructure failure carrying the context's error. `Storage.Save` takes a [`bound.Duration`](../bound/limit.go) read through `sessioncontract.ResolveTtl`: an absent ttl is refused and unlimited is `bound.UnlimitedDuration()`, where `0` meant no expiry. `Manager` declares a sixth method, `PersistenceTimeout() bound.Duration`, which the http kernel judges by the rule of `ManagerConfig.PersistenceTimeout`: absent is 5s, unlimited is no bound, and a value below 1ms fails the http boot, judged once on the registered manager before the server listens. The http kernel loads the session and rotates it on the request's context, and saves or deletes it at the end of the request detached from the request's cancellation, bounded by `MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT` (`ManagerConfig.PersistenceTimeout`), 5s when left out, `unlimited` for no bound. A session save outage at the end of a request, the bound cutting it included, now answers an empty `503` with `Retry-After`, where it answered the empty `500`.
+
+**Symptom.** `manager.Session(id)`, `manager.SaveSession(session)`, `storage.Save(id, data, time.Hour)` and a method value such as `manager.DeleteSession` handed to a `func(string) error` no longer compile; a manager or a storage of the application's own no longer satisfies the contract. A storage that received `0` for sessions that never lapse receives an unlimited `bound.Duration`. A closed storage handed an empty id answers `session storage is closed` where it answered the id refusal. The save and the logout's delete still run when the client hung up, now bounded by five seconds, a first read of the session ends when the client goes away and is recorded at warning, and a save against a storage that does not answer ends after five seconds as the empty `503` where it held the request; a client or a monitor that read the `500` of a failed save reads a `503` with `Retry-After`.
+
+**Remedy.** Pass the request's context, `runtimeInstance.Context()` in a handler, as the first argument; declare the context first on an implementation of the application's own, refuse a nil one through `sessioncontract.RefuseNilContext`, judge a closed storage before the arguments, read the ttl through `sessioncontract.ResolveTtl` and honour the context in every round trip; write `bound.Of(…)` or `bound.UnlimitedDuration()` where a duration or `0` was passed; wrap a method value in a closure over the context; a manager of the application's own declares `PersistenceTimeout()`, `bound.Duration{}` for the default, and a decorator forwards the decorated manager's; a deployment whose storage legitimately takes longer raises the key.
+
 ### Outbox: an unreachable transport charges no attempt
 
 **What changed.** A send the transport marks with `exception.MarkInfrastructureFailure`, which the amqp transport now does for every publish failure but the broker's verdict on the message, the caller's own cancellation and a closing transport, hands the row back through the new [`Repository.RescheduleUncharged`](../../integrations/outbox/v4/repository.go) once the next row of the batch, sent as a probe, failed too (a delivered probe charges the failed row as before): its attempts unchanged, the claim's delivery attempt taken back, pending again after [`RelayConfig.UnavailableBackoff`](../../integrations/outbox/v4/relay.go) (15s, growing per consecutive outage pass) capped by `UnavailableBackoffMax` (1m).
@@ -468,11 +476,11 @@ A `Changes` that is not a json array, an `Entry` built by hand, is written as a 
 
 ### Session: `Manager.Session` and `NewSession` answer an error, and a storage outage is `503` with `Retry-After`
 
-**What changed.** [`session/contract.Manager`](../session/contract/manager.go) declares `Session(sessionId string) (Session, error)` and `NewSession() (Session, error)`. The framework's [`session.Manager`](../session/manager.go) answers a storage that could not answer, on those two doors and on `SaveSession`, `DeleteSession` and `RegenerateSession`, as an error carrying [`exception.MarkInfrastructureFailure`](../exception/infrastructure_failure.go), the storage's own error in the chain, where `Session` and `NewSession` panicked; 128 minted ids in a row already held is an unmarked error. The http kernel answers a load or mint error to the session's first reader, [`http.RequestSession`](../http/request_session.go) (the next section): a handler that returns a marked one answers `503` with the kernel's `Retry-After`, any other `500`, and no session cookie is written. A firewall's sign-in door with an `Authenticator` reads the session before it and the sign-out door before its `Handler`: a session read or rotation that meets the outage refuses the door `503` with the firewall's `Retry-After`, reason `session_unavailable`, with no sign-in event.
+**What changed.** [`session/contract.Manager`](../session/contract/manager.go) declares `Session(ctx context.Context, sessionId string) (Session, error)` and `NewSession(ctx context.Context) (Session, error)`; the context first is the section "Session: every operation takes the context first" above. The framework's [`session.Manager`](../session/manager.go) answers a storage that could not answer, on those two doors and on `SaveSession`, `DeleteSession` and `RegenerateSession`, as an error carrying [`exception.MarkInfrastructureFailure`](../exception/infrastructure_failure.go), the storage's own error in the chain, where `Session` and `NewSession` panicked; 128 minted ids in a row already held is an unmarked error. The http kernel answers a load or mint error to the session's first reader, [`http.RequestSession`](../http/request_session.go) (the next section): a handler that returns a marked one answers `503` with the kernel's `Retry-After`, any other `500`, and no session cookie is written. A firewall's sign-in door with an `Authenticator` reads the session before it and the sign-out door before its `Handler`: a session read or rotation that meets the outage refuses the door `503` with the firewall's `Retry-After`, reason `session_unavailable`, with no sign-in event.
 
 **Symptom.** A call of `Session` or `NewSession` with one result no longer compiles, nor an out-of-tree `Manager` declaring the one-result forms. During a session storage outage a request that reads the session answers `503` with `Retry-After` and one that does not is served, where every request answered `500`. An error returned by `SaveSession`, `DeleteSession` or `RegenerateSession` for a storage failure is the framework's error wrapping the storage's, so a comparison by identity no longer matches; `errors.Is` still does.
 
-**Remedy.** Read both results: `sessionInstance, loadErr := manager.Session(sessionId)`, then `nil != loadErr` before `nil == sessionInstance`. An out-of-tree manager returns its storage's error through `exception.MarkInfrastructureFailure` for an outage, and an unmarked error for a fault of its own. Compare storage errors with `errors.Is`.
+**Remedy.** Read both results: `sessionInstance, loadErr := manager.Session(ctx, sessionId)`, then `nil != loadErr` before `nil == sessionInstance`. An out-of-tree manager returns its storage's error through `exception.MarkInfrastructureFailure` for an outage, and an unmarked error for a fault of its own. Compare storage errors with `errors.Is`.
 
 ### Http: the session is read through `http.RequestSession`, loaded at its first read
 
@@ -762,7 +770,7 @@ The same holds for a value a module was handed and would drop, refused at the ho
 
 **What changed.** [`InMemoryStorageConfig.MaxSessions`](../session/in_memory_storage.go) and [`FileStorageConfig.MaxSessions`](../session/file_storage.go) are `bound.Count` fields of 100,000 when left out, at least 1, unlimited admitted. At the ceiling, once the lapsed sessions are swept, a `Save` of a new id is refused and a `Save` of a stored id still lands. A value below the minimum panics in `NewInMemoryStorage` and is returned as an error by `NewFileStorage`. The third major has no ceiling, and its table grows with every session written.
 
-**Symptom.** A process at 100,000 live sessions answers a 500 with no session cookie to a request that writes to a new session, unless its response is already committed, where the refusal is only logged, with `the in-memory session storage is full` or `the session file storage is full` in its journal.
+**Symptom.** A process at 100,000 live sessions answers an empty 503 with `Retry-After` and no session cookie to a request that writes to a new session, unless its response is already committed, where the refusal is only logged, with `the in-memory session storage is full` or `the session file storage is full` in its journal.
 
 **Remedy.** Register the storage with a larger `MaxSessions`, or `bound.UnlimitedCount()` for the third major's behaviour, or move to a shared storage. The framework's fallback storage reads its count from `MELODY_HTTP_SESSION_MAX_SESSIONS`.
 
@@ -2217,11 +2225,11 @@ debug.NewMiddlewareCommand(
 
 **Remedy.** Send the path without the padding; nothing legitimate names a resource by a trailing space. There is no opt-out: the previous behaviour let a request reach a handler under an authorization decision made for a different path, which is the defect the refusal closes.
 
-### Http: a urlencoded body that failed to read or parse is refused, and a session save outage answers 500
+### Http: a urlencoded body that failed to read or parse is refused, and a session save outage replaces the response
 
-**What changed.** A `application/x-www-form-urlencoded` body whose read failed answers 413 when the size limit stopped it and 400 when the client broke it, before the handler — it used to be a warning beside an empty form, with the handler running and often answering 200. A multipart upload past `MaxRequestBodyBytes` surfacing from `ParseMultipartForm` is answered 413 instead of a 500 at error level. Separately, a session-storage outage on the save path replaces the handler's response with an empty 500 and suppresses the session cookie; the handler's success used to be delivered with the session write silently lost.
+**What changed.** A `application/x-www-form-urlencoded` body whose read failed answers 413 when the size limit stopped it and 400 when the client broke it, before the handler — it used to be a warning beside an empty form, with the handler running and often answering 200. A multipart upload past `MaxRequestBodyBytes` surfacing from `ParseMultipartForm` is answered 413 instead of a 500 at error level. Separately, a session-storage outage on the save path replaces the handler's response with an empty `503` carrying `Retry-After` (see "Session: every operation takes the context first") and suppresses the session cookie; the handler's success used to be delivered with the session write silently lost.
 
-**Symptom.** Endpoints that previously "accepted" oversized or truncated form submissions as empty forms now refuse them; a login or counter endpoint in front of a down session backend answers 500 instead of a success whose session never landed.
+**Symptom.** Endpoints that previously "accepted" oversized or truncated form submissions as empty forms now refuse them; a login or counter endpoint in front of a down session backend answers 503 instead of a success whose session never landed.
 
 **Remedy.** None for the refusals — they surface failures that were being mis-answered. A handler that must serve degraded responses during a session-backend outage stops writing to the session on that path.
 
@@ -2793,7 +2801,7 @@ An implementation of your own declares the two methods: it holds the providers a
 
 ### Session: id rotation is `Manager.RegenerateSession`
 
-**What changed.** [`session/contract.Manager`](../session/contract/manager.go) declares `RegenerateSession(session Session) (Session, error)`, the session-fixation defence: it mints a fresh id, carries the values over, removes the entry the previous id pointed at, and latches the session passed in out of use. The framework's own [`session.Manager`](../session/manager.go) implements it, and [`http.RegenerateRequestSession`](../http/session.go) calls it on the registered manager and rotates and republishes in one call. The sibling `SessionRegenerator` the third major asserted is removed.
+**What changed.** [`session/contract.Manager`](../session/contract/manager.go) declares `RegenerateSession(ctx context.Context, session Session) (Session, error)`, the session-fixation defence: it mints a fresh id, carries the values over, removes the entry the previous id pointed at, and latches the session passed in out of use. The framework's own [`session.Manager`](../session/manager.go) implements it, and [`http.RegenerateRequestSession`](../http/session.go) calls it on the registered manager and rotates and republishes in one call. The sibling `SessionRegenerator` the third major asserted is removed.
 
 **Symptom.** An out-of-tree `session/contract.Manager` — a Redis-backed or database-backed session manager, say — no longer compiles until it declares `RegenerateSession`.
 
@@ -2807,9 +2815,10 @@ type CustomSessionManager struct {
 }
 
 func (instance *CustomSessionManager) RegenerateSession(
+    ctx context.Context,
     sessionInstance sessioncontract.Session,
 ) (sessioncontract.Session, error) {
-    rotatedSession, mintErr := instance.NewSession()
+    rotatedSession, mintErr := instance.NewSession(ctx)
     if nil != mintErr {
         return nil, mintErr
     }
@@ -2818,7 +2827,7 @@ func (instance *CustomSessionManager) RegenerateSession(
         rotatedSession.Set(key, value)
     }
 
-    deleteErr := instance.DeleteSession(sessionInstance.Id())
+    deleteErr := instance.DeleteSession(ctx, sessionInstance.Id())
     if nil != deleteErr {
         return nil, deleteErr
     }
@@ -3359,7 +3368,7 @@ grammar is refused rather than surviving as literal text — nobody types `${...
 ```go
 sessionInstance.Clear()
 
-replacement, mintErr := manager.NewSession()
+replacement, mintErr := manager.NewSession(runtimeInstance.Context())
 if nil != mintErr {
     return nil, mintErr
 }
@@ -3374,7 +3383,7 @@ if publishErr := melodyhttp.SetRequestSession(request, replacement); nil != publ
 Code that calls `SaveSession` directly should treat `ErrSessionDeleted` as the session having ended rather than as a failure:
 
 ```go
-if err := manager.SaveSession(sessionInstance); nil != err {
+if err := manager.SaveSession(ctx, sessionInstance); nil != err {
     if true == errors.Is(err, session.ErrSessionDeleted) {
         /* another request signed this session out; nothing to persist */
         return nil

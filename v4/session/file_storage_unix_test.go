@@ -11,13 +11,12 @@ import (
     "strings"
     "syscall"
     "testing"
+
+    "github.com/precision-soft/melody/v4/bound"
 )
 
 const fileStorageWriteWindowProbeMarker = "MELODY_SESSION_WRITE_WINDOW_PROBE"
 
-/* the in-place writer must never leave the file empty: a truncation to zero followed by the write would leave, for a process killed between the two — an OOM kill, a docker kill, a deploy with no grace period — a zero-length file that the next boot reads as "no sessions at all" and answers by logging every user out with no error anywhere.
-
-   The kill is stood in for by a file size limit of zero, which is the only injection that reproduces it deterministically: a truncation to zero stays inside the limit and succeeds, while the write that follows fails at its first byte. The limit is process-wide, so this runs in a child of its own. */
 func TestFileStorage_InPlaceWrite_ARefusedWriteLeavesThePersistedSessionsIntact(t *testing.T) {
     if "1" == os.Getenv(fileStorageWriteWindowProbeMarker) {
         runFileStorageWriteWindowChild()
@@ -40,7 +39,6 @@ func TestFileStorage_InPlaceWrite_ARefusedWriteLeavesThePersistedSessionsIntact(
         t.Fatalf("the refused write left the file empty, destroying every persisted session: %q", string(output))
     }
 
-    /* the child answers a distinct token per exit, so a run that never applied the limit cannot read as a pass */
     if true == strings.Contains(string(output), "probe-unavailable") {
         t.Skipf("the environment refused the file size limit this probe injects with: %q", string(output))
     }
@@ -57,9 +55,6 @@ func TestFileStorage_InPlaceWrite_ARefusedWriteLeavesThePersistedSessionsIntact(
 func runFileStorageWriteWindowChild() {
     signal.Ignore(syscall.SIGXFSZ)
 
-    /* a directory of its own, not a fixed name under os.TempDir: the three majors share one temp directory
-       and their suites run concurrently, so a fixed name had the children of two majors seed and remove the
-       same file and one of them report a failed seed. */
     directory, directoryErr := os.MkdirTemp("", "melody_session_write_window")
     if nil != directoryErr {
         _, _ = os.Stdout.WriteString("temp-directory-failed\n")
@@ -77,7 +72,7 @@ func runFileStorageWriteWindowChild() {
         return
     }
 
-    if nil != seed.Save("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]any{"userId": "u-1"}, 0) {
+    if nil != seed.Save(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", map[string]any{"userId": "u-1"}, bound.UnlimitedDuration()) {
         _, _ = os.Stdout.WriteString("seed-save-failed\n")
 
         return
@@ -113,7 +108,7 @@ func runFileStorageWriteWindowChild() {
         return
     }
 
-    saveErr := storage.Save("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", map[string]any{"userId": "u-2"}, 0)
+    saveErr := storage.Save(context.Background(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", map[string]any{"userId": "u-2"}, bound.UnlimitedDuration())
 
     _ = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &previous)
 

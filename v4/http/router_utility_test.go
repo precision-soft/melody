@@ -14,6 +14,8 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
+
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -27,34 +29,61 @@ import (
 )
 
 type stubSessionManager struct {
-    saveCalled   int
-    deleteCalled int
-    saveErr      error
-    deleteErr    error
+    saveCalled         int
+    deleteCalled       int
+    saveErr            error
+    deleteErr          error
+    persistenceTimeout bound.Duration
+    saveContext        context.Context
+    deleteContext      context.Context
+    saveDeadline       time.Duration
+    savePanic          any
+    deletePanic        any
+    timeoutAsked       int
 }
 
-func (instance *stubSessionManager) Session(sessionId string) (contract.Session, error) {
+func (instance *stubSessionManager) Session(ctx context.Context, sessionId string) (contract.Session, error) {
     return nil, nil
 }
 
-func (instance *stubSessionManager) NewSession() (contract.Session, error) {
+func (instance *stubSessionManager) NewSession(ctx context.Context) (contract.Session, error) {
     return nil, nil
 }
 
-func (instance *stubSessionManager) RegenerateSession(sessionInstance contract.Session) (contract.Session, error) {
+func (instance *stubSessionManager) RegenerateSession(ctx context.Context, sessionInstance contract.Session) (contract.Session, error) {
     return nil, nil
 }
 
-func (instance *stubSessionManager) SaveSession(sessionInstance contract.Session) error {
+func (instance *stubSessionManager) SaveSession(ctx context.Context, sessionInstance contract.Session) error {
     instance.saveCalled++
+    instance.saveContext = ctx
+
+    if deadline, hasDeadline := ctx.Deadline(); true == hasDeadline {
+        instance.saveDeadline = time.Until(deadline)
+    }
+
+    if nil != instance.savePanic {
+        panic(instance.savePanic)
+    }
 
     return instance.saveErr
 }
 
-func (instance *stubSessionManager) DeleteSession(sessionId string) error {
+func (instance *stubSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
     instance.deleteCalled++
+    instance.deleteContext = ctx
+
+    if nil != instance.deletePanic {
+        panic(instance.deletePanic)
+    }
 
     return instance.deleteErr
+}
+
+func (instance *stubSessionManager) PersistenceTimeout() bound.Duration {
+    instance.timeoutAsked++
+
+    return instance.persistenceTimeout
 }
 
 func (instance *stubSessionManager) CloseWithContext(closeContext context.Context) error { return nil }
@@ -106,7 +135,6 @@ func TestIsRequestFromTrustedProxy_MatchesIpAndCidr(t *testing.T) {
     }
 }
 
-/* A peer whose RemoteAddr arrives in IPv4-mapped IPv6 form (::ffff:172.18.0.2 from a PROXY-protocol listener or a custom net.Conn) is the IPv4 address it names, so an IPv4 CIDR or an unmapped literal in the trusted proxy list must still match it. isRequestFromTrustedProxy mirrors the per-address check in http/middleware/client_ip.go, which unmaps both sides before comparing. */
 func TestIsRequestFromTrustedProxy_UnmapsIpv4MappedIpv6Peer(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "[::ffff:172.18.0.2]:5555"
@@ -123,7 +151,6 @@ func TestIsRequestFromTrustedProxy_UnmapsIpv4MappedIpv6Peer(t *testing.T) {
     }
 }
 
-/* detectSchemeWithForwardedHeadersPolicy must trust a mapped IPv4-in-IPv6 proxy peer so it honours X-Forwarded-Proto: without the Unmap the trusted-proxy check fails, the scheme collapses to http, and the session cookie is set with Secure=false behind a TLS-terminating proxy. */
 func TestDetectSchemeWithForwardedHeadersPolicy_TrustsIpv4MappedIpv6Peer(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "[::ffff:172.18.0.2]:5555"
@@ -142,7 +169,6 @@ func TestDetectSchemeWithForwardedHeadersPolicy_TrustsIpv4MappedIpv6Peer(t *test
     }
 }
 
-/* A trusted proxy entry written in IPv4-mapped IPv6 CIDR form (::ffff:10.0.0.0/104) names the IPv4 range it embeds, so an unmapped IPv4 peer inside that range must still be trusted. Without rewriting the mapped prefix to its 10.0.0.0/8 equivalent, netip.Prefix.Contains rejects the IPv4 peer across address families, the proxy reads as untrusted, X-Forwarded-Proto is discarded and the scheme collapses to http — which sets the session cookie with Secure=false behind a TLS-terminating proxy. */
 func TestDetectSchemeWithForwardedHeadersPolicy_TrustsMappedFormCidr(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "10.0.0.5:5555"
@@ -251,6 +277,7 @@ func TestWriteResponse_SetsSessionCookieWithSecureAndSameSite(t *testing.T) {
             Domain:   "",
             SameSite: nethttp.SameSiteLaxMode,
         },
+        0,
     )
 
     if 1 != sessionManager.saveCalled {
@@ -322,6 +349,7 @@ func TestWriteResponse_ClearsSessionCookieWithMaxAgeNegative(t *testing.T) {
             Domain:   "",
             SameSite: nethttp.SameSiteLaxMode,
         },
+        0,
     )
 
     if 1 != sessionManager.deleteCalled {
@@ -379,6 +407,7 @@ func TestWriteResponse_ForcesTheSecureSessionCookieWhenThePolicyDemandsIt(t *tes
             SameSite: nethttp.SameSiteLaxMode,
             Secure:   httpcontract.SessionCookieSecureAlways,
         },
+        0,
     )
 
     cookies := writer.Result().Cookies()
@@ -425,6 +454,7 @@ func TestWriteResponse_SessionCookieSecureNeverOverridesTheDetectedScheme(t *tes
             SameSite: nethttp.SameSiteLaxMode,
             Secure:   httpcontract.SessionCookieSecureNever,
         },
+        0,
     )
 
     cookies := writer.Result().Cookies()
@@ -470,6 +500,7 @@ func TestWriteResponse_DoesNotStoreASessionTheDiscardedResponseCannotAdvertise(t
             Domain:   "",
             SameSite: nethttp.SameSiteLaxMode,
         },
+        0,
     )
 
     if 0 != sessionManager.saveCalled {
@@ -520,6 +551,7 @@ func TestWriteResponse_StillStoresASessionTheClientAlreadyHoldsOnADiscardedRespo
             Domain:   "",
             SameSite: nethttp.SameSiteLaxMode,
         },
+        0,
     )
 
     if 1 != sessionManager.saveCalled {
@@ -561,6 +593,7 @@ func TestWriteResponse_StillDeletesAClearedSessionOnADiscardedResponse(t *testin
             Domain:   "",
             SameSite: nethttp.SameSiteLaxMode,
         },
+        0,
     )
 
     if 1 != sessionManager.deleteCalled {
@@ -1053,7 +1086,6 @@ func TestControllerHandler_PanicsWhenDependencyIsNilFromScope(t *testing.T) {
     _, _ = handler(runtimeInstance, httptest.NewRecorder(), request)
 }
 
-/* A chain of proxies appends to X-Forwarded-Proto rather than replacing it, so the header arrives as "https, http". The client-facing hop is the leftmost entry; returning the whole list yields a scheme equal to neither "http" nor "https", which quietly drops the Secure attribute from every cookie the response sets. */
 func TestDetectSchemeWithForwardedHeadersPolicy_UsesTheClientFacingProtoOfAChain(t *testing.T) {
     for _, headerValue := range []string{"https, http", "https,http", " https , http "} {
         netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
@@ -1107,6 +1139,7 @@ func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T
             Domain:   "",
             SameSite: nethttp.SameSiteLaxMode,
         },
+        0,
     )
 
     if 1 != sessionManager.deleteCalled {
@@ -1129,7 +1162,6 @@ func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T
     }
 }
 
-/* A typed nil session must not reach the persistence block. The session manager is a replaceable service, and one that reports "not found" by returning a nil pointer of its own session type hands back an interface that is not equal to nil — a `nil !=` test takes it for a live session and IsCleared below dereferences it. This call happens inside the kernel's recovery defer, where recover has already run, so that panic escapes ServeHttp and the client is served nothing at all. */
 func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1159,6 +1191,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
         sessionManager,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
+        0,
     )
 
     if 0 != sessionManager.saveCalled {
@@ -1170,7 +1203,6 @@ func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
     }
 }
 
-/* The same applies to a typed nil manager: the persistence block must test both with IsNilInterface. */
 func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1200,6 +1232,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
         typedNilManager,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
+        0,
     )
 
     if 0 != len(writer.Result().Cookies()) {
@@ -1207,7 +1240,6 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
     }
 }
 
-/* A session deleted while the request was running is not a storage outage and must not be answered as one: the write is refused so the deleted session cannot be re-created, the browser cookie is expired so the client stops presenting an id the storage does not hold, and the handler's own response is served unchanged. */
 func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1232,6 +1264,7 @@ func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *tes
         sessionManager,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
+        0,
     )
 
     httpResponse := writer.Result()
@@ -1250,7 +1283,6 @@ func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *tes
     }
 }
 
-/* an expiring session cookie addresses one client as much as a live one does: replayed out of a shared cache it logs the next client out, so the response that carries it is marked private at every door that writes it, not only at the save */
 func TestWriteResponse_AnExpiringSessionCookieMarksTheResponsePrivate(t *testing.T) {
     arms := []struct {
         name            string
@@ -1289,6 +1321,7 @@ func TestWriteResponse_AnExpiringSessionCookieMarksTheResponsePrivate(t *testing
             arm.sessionManager,
             httpcontract.ForwardedHeadersPolicy{},
             httpcontract.SessionCookiePolicy{Path: "/"},
+            0,
         )
 
         httpResponse := writer.Result()
@@ -1305,7 +1338,6 @@ func TestWriteResponse_AnExpiringSessionCookieMarksTheResponsePrivate(t *testing
     }
 }
 
-/* A session ROTATED away while the request was running is refused the same write and answered differently: the identity did not end, it moved to a fresh id the rotating request is handing the client in its own Set-Cookie, so expiring the browser cookie here would race that header and log the user out immediately after the login that rotated the session. The write is still refused, the refusal is still logged, and the handler's own response is still served — only the clearing cookie is gone. */
 func TestWriteResponse_ARotatedAwaySessionKeepsTheCookieAndTheResponse(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -1334,6 +1366,7 @@ func TestWriteResponse_ARotatedAwaySessionKeepsTheCookieAndTheResponse(t *testin
         sessionManager,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
+        0,
     )
 
     httpResponse := writer.Result()
@@ -1347,8 +1380,7 @@ func TestWriteResponse_ARotatedAwaySessionKeepsTheCookieAndTheResponse(t *testin
     }
 }
 
-/* A storage outage on the save path answers 500 rather than the response the handler produced: the handler wrote to the session and returned success on the assumption the write would land — a login answering "welcome" with the identity never stored — and the client cannot tell the difference. The cookie is suppressed either way, so the browser is never pointed at an id nothing persisted. */
-func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T) {
+func TestWriteResponse_ASaveOutageAnswersServiceUnavailableWithoutACookie(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
@@ -1372,12 +1404,13 @@ func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T)
         sessionManager,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
+        0,
     )
 
     httpResponse := writer.Result()
 
-    if nethttp.StatusInternalServerError != httpResponse.StatusCode {
-        t.Fatalf("expected a storage outage to answer 500, got %d", httpResponse.StatusCode)
+    if nethttp.StatusServiceUnavailable != httpResponse.StatusCode || "5" != httpResponse.Header.Get("Retry-After") {
+        t.Fatalf("expected a storage outage to answer 503 with the default Retry-After, got %d and %q", httpResponse.StatusCode, httpResponse.Header.Get("Retry-After"))
     }
 
     if 0 != len(httpResponse.Cookies()) {
@@ -1385,7 +1418,6 @@ func TestWriteResponse_ASaveOutageAnswersFiveHundredWithoutACookie(t *testing.T)
     }
 }
 
-/* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a typed nil dereferenced on BodyReader is a second panic after recover has already run and ServeHttp answers nothing at all. */
 func TestCloseDiscardedResponseBody_ReadsATypedNilResponseAsAbsent(t *testing.T) {
     var unassignedResponse *Response
 
@@ -1405,6 +1437,7 @@ func TestWriteResponse_ReadsATypedNilResponseAsTheEmptyDefault(t *testing.T) {
         nil,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
+        0,
     )
 
     if nethttp.StatusNoContent != recorder.Code {
@@ -1412,7 +1445,7 @@ func TestWriteResponse_ReadsATypedNilResponseAsTheEmptyDefault(t *testing.T) {
     }
 }
 
-func TestWriteResponse_ReturnsTheReplacedFiveHundredOnASaveOutage(t *testing.T) {
+func TestWriteResponse_ReturnsTheReplacedServiceUnavailableOnASaveOutage(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
@@ -1436,10 +1469,11 @@ func TestWriteResponse_ReturnsTheReplacedFiveHundredOnASaveOutage(t *testing.T) 
         sessionManager,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
+        0,
     )
 
-    if nil == writtenResponse || nethttp.StatusInternalServerError != writtenResponse.StatusCode() {
-        t.Fatalf("expected the returned response to be the replaced 500, got %#v", writtenResponse)
+    if nil == writtenResponse || nethttp.StatusServiceUnavailable != writtenResponse.StatusCode() {
+        t.Fatalf("expected the returned response to be the replaced 503, got %#v", writtenResponse)
     }
 
     if response == writtenResponse {
@@ -1464,6 +1498,7 @@ func TestWriteResponse_ReturnsTheCallersResponseWhenNothingReplacedIt(t *testing
         nil,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
+        0,
     )
 
     if response != writtenResponse {
@@ -1471,7 +1506,6 @@ func TestWriteResponse_ReturnsTheCallersResponseWhenNothingReplacedIt(t *testing
     }
 }
 
-/* the divergent fake constructs the interleaving instead of awaiting it: its Snapshot answers a cleared session while the individual accessors still answer a live one, exactly the state a Clear landing mid-decision produces. The branch must follow the snapshot. */
 type snapshotDivergentSession struct {
     stubSession
 }
@@ -1515,6 +1549,7 @@ func TestWriteResponse_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *tes
             Domain:   "",
             SameSite: nethttp.SameSiteLaxMode,
         },
+        0,
     )
 
     if 1 != sessionManager.deleteCalled || 0 != sessionManager.saveCalled {
@@ -1563,6 +1598,7 @@ func TestWriteResponse_RefusesTheOutOfRangeCodeBeforeTheDelegate(t *testing.T) {
         nil,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
+        0,
     )
 
     if nethttp.StatusInternalServerError != recorder.Code {
@@ -1574,7 +1610,6 @@ func TestWriteResponse_RefusesTheOutOfRangeCodeBeforeTheDelegate(t *testing.T) {
     }
 }
 
-/* the write-failure record's severity turns on who caused it: the request context net/http cancels on disconnect, and the broken-pipe family a write to a gone peer answers with, classify as the client's abort; everything else stays a server-side failure. */
 func TestIsClientAbortWriteError_ClassifiesTheBrokenPipeAndTheCancelledRequest(t *testing.T) {
     liveRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
 
@@ -1599,7 +1634,6 @@ func TestIsClientAbortWriteError_ClassifiesTheBrokenPipeAndTheCancelledRequest(t
     }
 }
 
-/* a deadline or a cause-carrying cancellation the application set on the request context is not a client disconnect: a write failure under either stays the server's, while a broken pipe under the same expired deadline is still the client's. */
 func TestIsClientAbortWriteError_KeepsAFailureUnderAnApplicationDeadlineOrCauseServerSide(t *testing.T) {
     expiredContext, cancelExpired := context.WithDeadline(context.Background(), time.Unix(0, 0))
     defer cancelExpired()
@@ -1622,7 +1656,6 @@ func TestIsClientAbortWriteError_KeepsAFailureUnderAnApplicationDeadlineOrCauseS
     }
 }
 
-/* closeDiscardedResponseBody runs inside the kernel's recovery defer, where a body whose Close panics would raise a second panic past the recovery and reset the connection: the panic is contained into the error the caller already reports. */
 func TestCloseResponseBodySafely_ContainsAPanickingClose(t *testing.T) {
     closeErr := closeResponseBodySafely(&panickingCloser{})
     if nil == closeErr {
@@ -1640,7 +1673,6 @@ func (instance *panickingCloser) Close() error {
     panic("close died on the state the panic invalidated")
 }
 
-/* the response writeResponse returns feeds the terminate event and the access log; for a stream the handler committed itself, the truth lives on the connection — the journal recorded 204 for every streamed 200 and a rendered-but-never-written 500 for a panic mid-stream. */
 func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/stream", nil)
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
@@ -1657,6 +1689,7 @@ func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T)
         nil,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
+        0,
     )
 
     if nethttp.StatusOK != reported.StatusCode() {
@@ -1664,7 +1697,6 @@ func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T)
     }
 }
 
-/* a hijacked connection records no status; the substitute stays, because inventing one would be a worse lie than the synthetic response. */
 func TestWriteResponse_AHijackedConnectionKeepsTheSubstituteStatus(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/upgrade", nil)
     melodyRequest := NewRequest(netRequest, nil, nil, nil)
@@ -1683,6 +1715,7 @@ func TestWriteResponse_AHijackedConnectionKeepsTheSubstituteStatus(t *testing.T)
         nil,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
+        0,
     )
 
     if nethttp.StatusNoContent != reported.StatusCode() {
@@ -1754,10 +1787,10 @@ func writeResponseWithSessionOutcome(
         sessionManager,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
+        0,
     )
 }
 
-/* a session another request ended under this one is the session ending, not a storage outage — the contract says so in as many words. At error it read exactly like a redis that had fallen over, so a user who logged out in a second tab paged the operator once per concurrent request. */
 func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinates(t *testing.T) {
     capture := &sessionPersistenceCaptureLogger{}
 
@@ -1788,7 +1821,6 @@ func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinat
         t.Fatalf("unexpected message: %q", record.message)
     }
 
-    /* the record names the session through a one-way reference, never the raw id */
     if nil != record.context["sessionId"] {
         t.Fatalf("the raw session id must not reach the log, got %v", record.context["sessionId"])
     }
@@ -1800,7 +1832,6 @@ func TestWriteResponse_ADeletedSessionIsRecordedAtWarningWithTheRequestCoordinat
     }
 }
 
-/* a storage outage keeps the error level it deserves, and it too names the session — through a one-way reference, never the raw id — and the route. */
 func TestWriteResponse_ASaveOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t *testing.T) {
     capture := &sessionPersistenceCaptureLogger{}
 
@@ -1836,7 +1867,6 @@ func TestWriteResponse_ASaveOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t *t
     }
 }
 
-/* the delete-path outage is the third of the family and carries the same coordinates. */
 func TestWriteResponse_ADeleteOutageStaysAtErrorAndNamesTheSessionAndTheRoute(t *testing.T) {
     capture := &sessionPersistenceCaptureLogger{}
 
@@ -1883,7 +1913,6 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/admin//",
         "/.well-known/acme-challenge/token",
         "/assets/app.css",
-        /* whitespace INSIDE the path is a spelling the router and the matcher read alike — neither trims it — so it is not refused */
         "/public /",
         "/a b/c",
     }
@@ -1894,7 +1923,6 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         }
     }
 
-    /* the folds the router does not apply but the access-control matcher does: each must be refused here, before the two can disagree about which rule answers the request. The whitespace spellings are the decoded forms of "/public%20", "/public%09" and "/public%C2%A0": the router keeps the whitespace and the matcher trims it */
     foldedPaths := []string{
         "/admin/x/../../login",
         "/admin/..",
@@ -1909,7 +1937,6 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
         "/public\t",
         "/public\u00a0",
         "/ ",
-        /* the LEADING form: a handler in front of the kernel that rewrites the path, the standard library's StripPrefix on "/api%20/public", hands the kernel " /public", which the router routed as a segment of its own while the matcher trimmed it to "/public" */
         " /public",
         "\t/public",
         "\u00a0/public",
@@ -1924,7 +1951,6 @@ func TestRequestPathIsCanonical_RefusesFoldsAndAllowsTrailingSlash(t *testing.T)
 }
 
 func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
-    /* the asterisk-form of OPTIONS and an authority-form CONNECT do not begin with "/" and are not path-routed, so the fold guard must not answer for them */
     for _, target := range []string{"*", "example.com:443", ""} {
         if false == requestPathIsCanonical(target) {
             t.Fatalf("expected non-path target %q to be left to the router", target)
@@ -1933,7 +1959,6 @@ func TestRequestPathIsCanonical_LeavesNonPathTargetsToTheRouter(t *testing.T) {
 }
 
 func TestRequestPathIsCanonical_JudgesASlashLessPathAsTheMatchersReadIt(t *testing.T) {
-    /* a handler in front of the kernel that strips a prefix hands the path on without its leading slash; the matchers read it with the "/" prepended and the access-control matcher folds it, so a fold is refused as it is with the slash */
     for _, foldedPath := range []string{"admin/../public", "admin/./x", "admin//x", "./admin", "admin ", "..", "../public"} {
         if true == requestPathIsCanonical(foldedPath) {
             t.Fatalf("expected slash-less path %q that folds to be refused", foldedPath)
@@ -1974,7 +1999,6 @@ func TestRequestPathAsRouted_KeepsAnEncodedSeparatorInsideItsSegmentAndDecodesTh
     }
 }
 
-/* the routed spelling is the router's own reading joined back: each segment is the one splitRequestPath binds, with a separator the segment carries put back as "%2F" — a plus sign is not a space here, and a malformed escape is left as sent, exactly as the router leaves it */
 func TestRequestPathAsRouted_AgreesWithTheRoutersOwnSegments(t *testing.T) {
     for _, escapedPath := range []string{"/caf%C3%A9", "/a%20b/c", "/a+b", "/a%zz/b", "/files/a%2Fb/c", "/public%252F", "/x/%2E%2E/y", "/a%00b"} {
         routedSegments := strings.Split(RequestPathAsRouted(escapedPath), "/")
@@ -1992,7 +2016,6 @@ func TestRequestPathAsRouted_AgreesWithTheRoutersOwnSegments(t *testing.T) {
     }
 }
 
-/* the session cookie names one client, so a response carrying it must not be stored by a shared cache under its url and replayed to another; the guard drops a public token and adds private, keeps an already-restrictive directive, and marks an undirected response private. */
 func TestMarkResponsePrivateForSessionCookie(t *testing.T) {
     for _, testCase := range []struct {
         name     string
@@ -2052,7 +2075,6 @@ func TestMatchesHost_ComparesThePortWhenTheRouteDeclaredOne(t *testing.T) {
 }
 
 func TestMatchesHost_ReachesABracketedIpv6RouteBehindAPort(t *testing.T) {
-    /* the colons of a bracketed literal are the address's own: read as a declared port they made every route bound to one unreachable behind any port, which is every developer machine and every ipv6 deployment that does not answer on 443 */
     if false == matchesHost("[::1]", "[::1]:8080") {
         t.Fatalf("expected a route bound to a bracketed ipv6 literal to be reachable behind a port")
     }
@@ -2157,7 +2179,6 @@ func (instance *closeTrackingResponseBodyReader) Close() error {
     return nil
 }
 
-/* the response being replaced owns whatever its body reader holds, and nothing downstream will ever read it: a file response would leave its *os.File open for the life of the process, one descriptor per request whose status lands outside the range net/http accepts */
 func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T) {
     bodyReader := &closeTrackingResponseBodyReader{reader: strings.NewReader("file bytes")}
 
@@ -2167,7 +2188,7 @@ func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
 
-    written := writeResponse(nil, request, httptest.NewRecorder(), response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{})
+    written := writeResponse(nil, request, httptest.NewRecorder(), response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{}, 0)
 
     if nethttp.StatusInternalServerError != written.StatusCode() {
         t.Fatalf("expected the rendered 500, got %d", written.StatusCode())
@@ -2178,7 +2199,6 @@ func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T
     }
 }
 
-/* Cache-Control is a list header a response may carry on several field lines, and its directives may carry quoted field-name lists. Reading only the first line loses every directive on the ones behind it, and splitting on a bare comma cuts through the quotes — both rewrite a header the guard was only supposed to add "private" to. */
 func TestMarkResponsePrivateForSessionCookie_KeepsEveryFieldLineAndQuotedList(t *testing.T) {
     t.Run("directives on a second field line survive", func(t *testing.T) {
         response := NewResponse(nethttp.StatusOK, nil)
@@ -2234,6 +2254,7 @@ func TestWriteResponse_AnEarlyHintLeavesTheReturnedResponseToBeWritten(t *testin
                 Domain:   "",
                 SameSite: nethttp.SameSiteLaxMode,
             },
+            0,
         )
     }))
     defer server.Close()
@@ -2249,7 +2270,6 @@ func TestWriteResponse_AnEarlyHintLeavesTheReturnedResponseToBeWritten(t *testin
     }
 }
 
-/* a cleared session the request's cookie does not name was never stored: the kernel minted it for an unknown or absent cookie, so nothing is deleted and the cookie is still expired */
 func TestWriteResponse_AClearedSessionTheRequestDoesNotNameIsNotDeleted(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/logout", nil)
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: "fedcba9876543210fedcba9876543210"})
@@ -2268,6 +2288,7 @@ func TestWriteResponse_AClearedSessionTheRequestDoesNotNameIsNotDeleted(t *testi
         sessionManager,
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
+        0,
     )
 
     if 0 != sessionManager.deleteCalled {
@@ -2280,24 +2301,23 @@ func TestWriteResponse_AClearedSessionTheRequestDoesNotNameIsNotDeleted(t *testi
     }
 }
 
-/* deleteCountingSessionStorage counts the removals the session manager asks of the storage */
 type deleteCountingSessionStorage struct {
     inner   *session.InMemoryStorage
     deletes int
 }
 
-func (instance *deleteCountingSessionStorage) Load(sessionId string) (map[string]any, bool, error) {
-    return instance.inner.Load(sessionId)
+func (instance *deleteCountingSessionStorage) Load(ctx context.Context, sessionId string) (map[string]any, bool, error) {
+    return instance.inner.Load(ctx, sessionId)
 }
 
-func (instance *deleteCountingSessionStorage) Save(sessionId string, data map[string]any, ttl time.Duration) error {
-    return instance.inner.Save(sessionId, data, ttl)
+func (instance *deleteCountingSessionStorage) Save(ctx context.Context, sessionId string, data map[string]any, ttl bound.Duration) error {
+    return instance.inner.Save(ctx, sessionId, data, ttl)
 }
 
-func (instance *deleteCountingSessionStorage) Delete(sessionId string) error {
+func (instance *deleteCountingSessionStorage) Delete(ctx context.Context, sessionId string) error {
     instance.deletes++
 
-    return instance.inner.Delete(sessionId)
+    return instance.inner.Delete(ctx, sessionId)
 }
 
 func (instance *deleteCountingSessionStorage) CloseWithContext(closeContext context.Context) error {
@@ -2330,7 +2350,6 @@ func serveALogout(t *testing.T, storage *deleteCountingSessionStorage, cookieVal
     return recorder
 }
 
-/* a logout presenting a cookie no stored session answers to reaches no storage removal and leaves no record: the kernel minted a fresh session for it */
 func TestKernel_ALogoutWhoseCookieNamesNoStoredSessionDeletesNothing(t *testing.T) {
     storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage(session.InMemoryStorageConfig{})}
 
@@ -2346,12 +2365,11 @@ func TestKernel_ALogoutWhoseCookieNamesNoStoredSessionDeletesNothing(t *testing.
     }
 }
 
-/* the control: a logout presenting the cookie of a stored session removes it */
 func TestKernel_ALogoutWhoseCookieNamesAStoredSessionDeletesIt(t *testing.T) {
     storage := &deleteCountingSessionStorage{inner: session.NewInMemoryStorage(session.InMemoryStorageConfig{})}
 
     storedId := "0123456789abcdef0123456789abcdef"
-    if saveErr := storage.inner.Save(storedId, map[string]any{"userId": "u-1"}, time.Minute); nil != saveErr {
+    if saveErr := storage.inner.Save(context.Background(), storedId, map[string]any{"userId": "u-1"}, bound.Of(time.Minute)); nil != saveErr {
         t.Fatalf("unexpected error seeding the session: %v", saveErr)
     }
 
@@ -2361,7 +2379,7 @@ func TestKernel_ALogoutWhoseCookieNamesAStoredSessionDeletesIt(t *testing.T) {
         t.Fatalf("expected the stored session removed once, got %d", storage.deletes)
     }
 
-    if _, held, _ := storage.inner.Load(storedId); true == held {
+    if _, held, _ := storage.inner.Load(context.Background(), storedId); true == held {
         t.Fatalf("expected the stored session gone")
     }
 }
@@ -2385,6 +2403,7 @@ func sessionCookieWrittenOverPlainHttp(t *testing.T, sameSite nethttp.SameSite, 
         &stubSessionManager{},
         httpcontract.ForwardedHeadersPolicy{TrustedProxyList: []string{}},
         httpcontract.SessionCookiePolicy{Path: "/", SameSite: sameSite, Secure: secure},
+        0,
     )
 
     cookies := writer.Result().Cookies()
@@ -2431,7 +2450,6 @@ func TestMarkResponsePrivateForSessionCookie_ABalancedQuoteKeepsItsMembers(t *te
     }
 }
 
-/* every signature refusal past the function check carries the controller's signature under `type`; the argument-count and result-count refusals count what they refuse. */
 func TestControllerHandler_SignatureRefusalsCarryTheSignature(t *testing.T) {
     t.Run("first argument", func(t *testing.T) {
         defer func() {
@@ -2525,7 +2543,7 @@ func TestCloseDiscardedResponseBody_ReturnsOnACyclicChain(t *testing.T) {
     })
 }
 
-func TestWriteResponse_ACyclicChainFromTheSessionSaveIsAnsweredWithAFiveHundred(t *testing.T) {
+func TestWriteResponse_ACyclicChainFromTheSessionSaveIsAnsweredWithAServiceUnavailable(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
@@ -2543,11 +2561,12 @@ func TestWriteResponse_ACyclicChainFromTheSessionSaveIsAnsweredWithAFiveHundred(
             &stubSessionManager{saveErr: newCyclicChainError()},
             httpcontract.ForwardedHeadersPolicy{},
             httpcontract.SessionCookiePolicy{Path: "/"},
+            0,
         )
     })
 
-    if nethttp.StatusInternalServerError != writer.Result().StatusCode {
-        t.Fatalf("expected 500, got %d", writer.Result().StatusCode)
+    if nethttp.StatusServiceUnavailable != writer.Result().StatusCode {
+        t.Fatalf("expected 503, got %d", writer.Result().StatusCode)
     }
 }
 
@@ -2559,7 +2578,7 @@ func TestWriteResponse_AnInformationalStatusIsAnsweredAsTheRenderedInternalServe
     response.Headers().Add("Set-Cookie", "leaked=1")
 
     writer := httptest.NewRecorder()
-    written := writeResponse(nil, melodyRequest, writer, response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{})
+    written := writeResponse(nil, melodyRequest, writer, response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{}, 0)
 
     if nethttp.StatusInternalServerError != writer.Code || nethttp.StatusInternalServerError != written.StatusCode() {
         t.Fatalf("expected the rendered 500 written and answered, got %d and %d", writer.Code, written.StatusCode())
@@ -2567,5 +2586,269 @@ func TestWriteResponse_AnInformationalStatusIsAnsweredAsTheRenderedInternalServe
 
     if "" != writer.Header().Get("Set-Cookie") || false == body.closed.Load() {
         t.Fatalf("expected the refused response's cookie dropped and its body closed, got %v, closed %v", writer.Header(), body.closed.Load())
+    }
+}
+
+type persistencePlantedKey struct{}
+
+func writeResponseUnderRequestContext(
+    t *testing.T,
+    requestContext context.Context,
+    sessionManager contract.Manager,
+    sessionInstance contract.Session,
+    writer nethttp.ResponseWriter,
+) httpcontract.Response {
+    t.Helper()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
+    runtimeInstance := runtime.New(requestContext, scope, serviceContainer)
+
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account", nil).WithContext(requestContext)
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
+
+    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
+    return writeResponse(
+        runtimeInstance,
+        sessionRequest,
+        writer,
+        TextResponse(nethttp.StatusOK, "handler body"),
+        sessionManager,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+        0,
+    )
+}
+
+func cancelledRequestContext() context.Context {
+    requestContext, cancel := context.WithCancel(context.WithValue(context.Background(), persistencePlantedKey{}, "planted"))
+    cancel()
+
+    return requestContext
+}
+
+func TestWriteResponse_PersistsUnderAContextTheRequestsCancellationDoesNotReach(t *testing.T) {
+    sessionManager := &stubSessionManager{}
+
+    writeResponseUnderRequestContext(t, cancelledRequestContext(), sessionManager, &stubSession{id: "session-1", isModified: true}, httptest.NewRecorder())
+
+    if 1 != sessionManager.saveCalled || nil == sessionManager.saveContext {
+        t.Fatalf("expected one save, got %d", sessionManager.saveCalled)
+    }
+
+    if "planted" != sessionManager.saveContext.Value(persistencePlantedKey{}) {
+        t.Fatalf("expected the persistence context to keep the request's values")
+    }
+
+    if 0 >= sessionManager.saveDeadline || 5*time.Second < sessionManager.saveDeadline {
+        t.Fatalf("expected a deadline within 5s, got %s", sessionManager.saveDeadline)
+    }
+}
+
+func TestWriteResponse_PersistsUnderTheRuntimesContextOverTheNetRequests(t *testing.T) {
+    sessionManager := &stubSessionManager{}
+    sessionInstance := &stubSession{id: "session-1", isModified: true}
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
+    runtimeInstance := runtime.New(context.WithValue(context.Background(), persistencePlantedKey{}, "planted"), scope, serviceContainer)
+
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account", nil)
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
+
+    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
+    writeResponse(runtimeInstance, sessionRequest, httptest.NewRecorder(), TextResponse(nethttp.StatusOK, "handler body"), sessionManager, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{Path: "/"}, 0)
+
+    if 1 != sessionManager.saveCalled || "planted" != sessionManager.saveContext.Value(persistencePlantedKey{}) {
+        t.Fatalf("expected one save under the runtime's context, got %d", sessionManager.saveCalled)
+    }
+}
+
+func TestWriteResponse_DeletesUnderAContextTheRequestsCancellationDoesNotReach(t *testing.T) {
+    sessionManager := &stubSessionManager{}
+
+    writeResponseUnderRequestContext(t, cancelledRequestContext(), sessionManager, &stubSession{id: "session-1", isCleared: true}, httptest.NewRecorder())
+
+    if 1 != sessionManager.deleteCalled || nil == sessionManager.deleteContext {
+        t.Fatalf("expected one delete, got %d", sessionManager.deleteCalled)
+    }
+
+    if "planted" != sessionManager.deleteContext.Value(persistencePlantedKey{}) {
+        t.Fatalf("expected the persistence context to keep the request's values")
+    }
+
+    if _, hasDeadline := sessionManager.deleteContext.Deadline(); false == hasDeadline {
+        t.Fatalf("expected the delete bounded by the persistence timeout")
+    }
+}
+
+type errorAtCallContextManager struct {
+    stubSessionManager
+    errAtCall error
+}
+
+func (instance *errorAtCallContextManager) SaveSession(ctx context.Context, sessionInstance contract.Session) error {
+    instance.errAtCall = ctx.Err()
+
+    return instance.stubSessionManager.SaveSession(ctx, sessionInstance)
+}
+
+func TestWriteResponse_ThePersistenceContextIsLiveAtTheCall(t *testing.T) {
+    sessionManager := &errorAtCallContextManager{}
+
+    writeResponseUnderRequestContext(t, cancelledRequestContext(), sessionManager, &stubSession{id: "session-1", isModified: true}, httptest.NewRecorder())
+
+    if 1 != sessionManager.saveCalled || nil != sessionManager.errAtCall {
+        t.Fatalf("expected the save called under a live context, got %d calls and %v", sessionManager.saveCalled, sessionManager.errAtCall)
+    }
+}
+
+func TestWriteResponse_AnUnlimitedPersistenceTimeoutSetsNoDeadline(t *testing.T) {
+    sessionManager := &stubSessionManager{persistenceTimeout: bound.UnlimitedDuration()}
+
+    writeResponseUnderRequestContext(t, context.Background(), sessionManager, &stubSession{id: "session-1", isModified: true}, httptest.NewRecorder())
+
+    if _, hasDeadline := sessionManager.saveContext.Deadline(); true == hasDeadline || nil != sessionManager.saveContext.Err() {
+        t.Fatalf("expected no deadline and a live context under an unlimited bound")
+    }
+}
+
+func TestWriteResponse_AnAbsentBoundPersistsUnderTheDefault(t *testing.T) {
+    sessionManager := &stubSessionManager{}
+
+    writeResponseUnderRequestContext(t, context.Background(), sessionManager, &stubSession{id: "session-1", isModified: true}, httptest.NewRecorder())
+
+    if 4*time.Second > sessionManager.saveDeadline || 5*time.Second < sessionManager.saveDeadline {
+        t.Fatalf("expected the deadline about 5s away, got %s", sessionManager.saveDeadline)
+    }
+}
+
+func TestWriteResponse_ADeclaredBoundIsTheDeadline(t *testing.T) {
+    sessionManager := &stubSessionManager{persistenceTimeout: bound.Of(2 * time.Second)}
+
+    writeResponseUnderRequestContext(t, context.Background(), sessionManager, &stubSession{id: "session-1", isModified: true}, httptest.NewRecorder())
+
+    if time.Second > sessionManager.saveDeadline || 2*time.Second < sessionManager.saveDeadline {
+        t.Fatalf("expected the deadline about 2s away, got %s", sessionManager.saveDeadline)
+    }
+}
+
+func TestWriteResponse_ABoundTheRuleRefusesFailsThePersistence(t *testing.T) {
+    sessionManager := &stubSessionManager{persistenceTimeout: bound.Of(time.Microsecond)}
+    writer := httptest.NewRecorder()
+
+    writeResponseUnderRequestContext(t, context.Background(), sessionManager, &stubSession{id: "session-1", isModified: true}, writer)
+
+    if 0 != sessionManager.saveCalled {
+        t.Fatalf("expected a refused bound never to reach the manager's save")
+    }
+
+    if nethttp.StatusServiceUnavailable != writer.Code || 0 != len(writer.Result().Cookies()) {
+        t.Fatalf("expected the failed persistence answered 503 without a cookie, got %d", writer.Code)
+    }
+
+    deleteManager := &stubSessionManager{persistenceTimeout: bound.Of(time.Microsecond)}
+    writeResponseUnderRequestContext(t, context.Background(), deleteManager, &stubSession{id: "session-1", isCleared: true}, httptest.NewRecorder())
+
+    if 0 != deleteManager.deleteCalled {
+        t.Fatalf("expected a refused bound never to reach the manager's delete")
+    }
+}
+
+type bodyObservingWriter struct {
+    *httptest.ResponseRecorder
+    sessionManager *stubSessionManager
+    observed       bool
+    errAtWrite     error
+}
+
+func (instance *bodyObservingWriter) Write(body []byte) (int, error) {
+    if false == instance.observed && nil != instance.sessionManager.saveContext {
+        instance.observed = true
+        instance.errAtWrite = instance.sessionManager.saveContext.Err()
+    }
+
+    return instance.ResponseRecorder.Write(body)
+}
+
+func TestWriteResponse_ThePersistenceTimerIsReleasedBeforeTheBodyIsWritten(t *testing.T) {
+    sessionManager := &stubSessionManager{}
+    writer := &bodyObservingWriter{ResponseRecorder: httptest.NewRecorder(), sessionManager: sessionManager}
+
+    writeResponseUnderRequestContext(t, context.Background(), sessionManager, &stubSession{id: "session-1", isModified: true}, writer)
+
+    if false == writer.observed || false == errors.Is(writer.errAtWrite, context.Canceled) {
+        t.Fatalf("expected the persistence context released before the body write, got %v", writer.errAtWrite)
+    }
+}
+
+func TestWriteResponse_APanickingDoorLeavesNoPersistenceTimerArmed(t *testing.T) {
+    for _, row := range []struct {
+        name            string
+        sessionManager  *stubSessionManager
+        sessionInstance *stubSession
+    }{
+        {"save", &stubSessionManager{persistenceTimeout: bound.Of(time.Hour), savePanic: "save panicked"}, &stubSession{id: "session-1", isModified: true}},
+        {"delete", &stubSessionManager{persistenceTimeout: bound.Of(time.Hour), deletePanic: "delete panicked"}, &stubSession{id: "session-1", isCleared: true}},
+    } {
+        t.Run(row.name, func(t *testing.T) {
+            func() {
+                defer func() { _ = recover() }()
+
+                writeResponseUnderRequestContext(t, context.Background(), row.sessionManager, row.sessionInstance, httptest.NewRecorder())
+            }()
+
+            persistenceContext := row.sessionManager.saveContext
+            if nil == persistenceContext {
+                persistenceContext = row.sessionManager.deleteContext
+            }
+
+            if nil == persistenceContext || false == errors.Is(persistenceContext.Err(), context.Canceled) {
+                t.Fatalf("expected the persistence context released through the panic, got %v", persistenceContext)
+            }
+        })
+    }
+}
+
+func TestWriteResponse_AnUnmodifiedSessionBuildsNoPersistenceContext(t *testing.T) {
+    sessionManager := &stubSessionManager{}
+
+    writeResponseUnderRequestContext(t, context.Background(), sessionManager, &stubSession{id: "session-1"}, httptest.NewRecorder())
+
+    if 0 != sessionManager.timeoutAsked || 0 != sessionManager.saveCalled || 0 != sessionManager.deleteCalled {
+        t.Fatalf("expected an unmodified session never to ask for the persistence bound, asked %d times", sessionManager.timeoutAsked)
+    }
+
+    writeResponseUnderRequestContext(t, context.Background(), sessionManager, &stubSession{id: "session-1", isModified: true}, httptest.NewRecorder())
+
+    if 1 != sessionManager.timeoutAsked {
+        t.Fatalf("expected a modified session to ask for the persistence bound once, asked %d times", sessionManager.timeoutAsked)
+    }
+}
+
+func TestWriteResponse_ASaveOutageAnswersTheKernelsRetryAfter(t *testing.T) {
+    sessionRequest := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
+    sessionRequest.Attributes().Set(requestAttributeSession, &stubSession{id: "session-1", isModified: true})
+
+    writer := httptest.NewRecorder()
+    writeResponse(
+        nil,
+        sessionRequest,
+        writer,
+        TextResponse(nethttp.StatusOK, "welcome"),
+        &stubSessionManager{saveErr: errors.New("unmarked outage")},
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+        42*time.Second,
+    )
+
+    if nethttp.StatusServiceUnavailable != writer.Code || "42" != writer.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with the kernel's Retry-After, got %d and %q", writer.Code, writer.Header().Get("Retry-After"))
     }
 }

@@ -10,6 +10,8 @@ import (
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
@@ -19,6 +21,7 @@ import (
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/session"
+    sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
 /* RegisterHttpRoute queues one of the application's own routes. The queue drains before any module's RegisterHttpRoutes runs, so a root route wins the registration-order tie-break against a module route. */
@@ -148,6 +151,10 @@ func (instance *Application) runHttp(
         return unavailableRetryAfterErr
     }
 
+    if refusedErr := refuseSessionPersistenceTimeout(ctx, instance.kernel.ServiceContainer()); nil != refusedErr {
+        return refusedErr
+    }
+
     httpKernel := instance.kernel.HttpKernel()
 
     /* installed again last, so a module's own SetUnavailableRetryAfter or SetSessionPolicy does not outrank the deployment's key */
@@ -199,6 +206,31 @@ func (instance *Application) runHttp(
         httpKernel,
         &shutdownHooksDone,
     )
+}
+
+/* refuseSessionPersistenceTimeout judges the registered manager's bound once at boot, so a replaced manager declaring one the rule refuses fails the boot rather than every saving request. */
+func refuseSessionPersistenceTimeout(ctx context.Context, serviceContainer containercontract.Container) error {
+    if false == serviceContainer.Has(session.ServiceSessionManager) {
+        return nil
+    }
+
+    sessionManager, sessionManagerErr := container.FromResolver[sessioncontract.Manager](ctx, serviceContainer, session.ServiceSessionManager)
+    if nil != sessionManagerErr {
+        return sessionManagerErr
+    }
+
+    if _, timeoutErr := session.ResolvePersistenceTimeout(sessionManager); nil != timeoutErr {
+        return exception.NewError(
+            "the session manager declares a persistence timeout the rule refuses",
+            exceptioncontract.Context{
+                "service": session.ServiceSessionManager,
+                "field":   session.PersistenceTimeoutRule.Name,
+            },
+            timeoutErr,
+        )
+    }
+
+    return nil
 }
 
 /* awaitHttpServerEnd waits for the cancelled context or the server's own failure, whichever ends the serving first. The serve error is read on the shutdown branch too, since a listen failing in the same instant may lose the select. A shutdown that outlives its budget surfaces the deadline error and exits non-zero. Shutdown does not account for hijacked connections, so the shutdown hooks and then the open request scopes are joined under the same budget. */
