@@ -712,6 +712,21 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         )
     }
 
+    /* a value a candidate declares a closer for closes through that candidate only, since the closer replaces the value's doors */
+    declaredPointers := make(map[pointerIdentity]struct{})
+    declaredValues := make(map[any]struct{})
+    for _, candidate := range candidates {
+        if nil == candidate.closer || false == candidate.closer.takes(candidate.value) {
+            continue
+        }
+
+        if pointerKey, hasPointer := pointerKeyOf(candidate.value); true == hasPointer && false == isZeroSizePointerIdentity(pointerKey) {
+            declaredPointers[pointerKey] = struct{}{}
+        } else if false == isZeroSizeValue(candidate.value) && true == isComparableValue(candidate.value) {
+            declaredValues[candidate.value] = struct{}{}
+        }
+    }
+
     teardownInWaves := instance.teardownInWaves
 
     instance.mutex.Unlock()
@@ -747,6 +762,19 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         } else if true == comparableValue {
             if _, alreadyClosed := closedValues[candidate.value]; true == alreadyClosed {
                 return nil, nil, false
+            }
+        }
+
+        carriesDeclaredCloser := nil != candidate.closer && true == candidate.closer.takes(candidate.value)
+        if false == carriesDeclaredCloser {
+            if true == hasPointer {
+                if _, declared := declaredPointers[pointerKey]; true == declared {
+                    return nil, nil, false
+                }
+            } else if true == comparableValue {
+                if _, declared := declaredValues[candidate.value]; true == declared {
+                    return nil, nil, false
+                }
             }
         }
 

@@ -3,6 +3,8 @@ package container
 import (
     "context"
     "errors"
+    "fmt"
+    "sync"
     "sync/atomic"
     "testing"
     "time"
@@ -65,7 +67,6 @@ func TestRegisterOptions_EachMovesExactlyItsOwnField(t *testing.T) {
     }
 }
 
-/* TestWithTeardownDependency_ComposesAcrossCallsAndArguments pins the promise the option's documentation makes about composing: two declarations add to one list rather than the second replacing the first, and one call naming several services keeps all of them in the order they were written. A replacing fold would silently drop the first collaborator, which is the failure no ordering test can see — the edge that is missing simply never constrains anything. */
 func TestWithTeardownDependency_ComposesAcrossCallsAndArguments(t *testing.T) {
     option := applyRegisterServiceOptions([]containercontract.RegisterOption{
         WithTeardownDependency("service.logger", "service.metrics"),
@@ -110,7 +111,6 @@ func TestApplyRegisterServiceOptions_FoldsInOrderAndSkipsANilOption(t *testing.T
     }
 }
 
-/* foreignClosingService stands for a value of a type the application does not own, whose own Close the teardown must not reach */
 type foreignClosingService struct {
     ownCloses atomic.Int32
 }
@@ -212,7 +212,6 @@ func TestWithCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheCloser(t *testi
     }
 }
 
-/* otherClosingService is an override of another type than the closer takes, installed under a name registered without its type */
 type otherClosingService struct {
     ownCloses atomic.Int32
 }
@@ -290,6 +289,211 @@ func TestWithCloser_AnOverrideOfTheTypeTheCloserTakesIsClosedThroughTheCloser(t 
 
     if false == closedOverride.Load() || 0 != override.ownCloses.Load() {
         t.Fatalf("expected the override closed through the closer only, got closer %v own %d", closedOverride.Load(), override.ownCloses.Load())
+    }
+}
+
+type doorlessService struct {
+    label string
+}
+
+func TestWithCloser_AnEvictedInstanceHeldUnderASecondNameIsClosedThroughTheCloser(t *testing.T) {
+    for _, armed := range []bool{false, true} {
+        serviceContainer := NewContainer()
+        original := &doorlessService{label: "original"}
+        override := &doorlessService{label: "override"}
+
+        var bookMutex sync.Mutex
+        closed := []string{}
+
+        serviceContainer.MustRegister(
+            "a",
+            func(resolver containercontract.Resolver) (*doorlessService, error) {
+                return original, nil
+            },
+            WithoutTypeRegistration(),
+            WithCloser(func(closeContext context.Context, value *doorlessService) error {
+                bookMutex.Lock()
+                defer bookMutex.Unlock()
+
+                closed = append(closed, value.label)
+
+                return nil
+            }),
+        )
+        serviceContainer.MustRegister(
+            "b",
+            func(resolver containercontract.Resolver) (*doorlessService, error) {
+                return MustFromResolver[*doorlessService](resolver, "a"), nil
+            },
+            WithoutTypeRegistration(),
+        )
+
+        if true == armed {
+            armParallelTeardown(t, serviceContainer)
+        }
+
+        _ = MustFromResolver[*doorlessService](serviceContainer, "b")
+
+        if overrideErr := serviceContainer.OverrideInstance("a", override); nil != overrideErr {
+            t.Fatalf("armed %v: override: %v", armed, overrideErr)
+        }
+
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Fatalf("armed %v: close: %v", armed, closeErr)
+        }
+
+        if "[override original]" != fmt.Sprint(closed) {
+            t.Fatalf("armed %v: expected the override and then the evicted instance closed through the closer, got %v", armed, closed)
+        }
+    }
+}
+
+func TestWithCloser_AnEvictedInstanceWithItsOwnCloseHeldUnderASecondNameIsClosedThroughTheCloserOnly(t *testing.T) {
+    for _, armed := range []bool{false, true} {
+        serviceContainer := NewContainer()
+        original := &foreignClosingService{}
+        override := &foreignClosingService{}
+        originalCloserCalls := atomic.Int32{}
+
+        serviceContainer.MustRegister(
+            "a",
+            func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+                return original, nil
+            },
+            WithoutTypeRegistration(),
+            WithCloser(func(closeContext context.Context, value *foreignClosingService) error {
+                if original == value {
+                    originalCloserCalls.Add(1)
+                }
+
+                return nil
+            }),
+        )
+        serviceContainer.MustRegister(
+            "b",
+            func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+                return MustFromResolver[*foreignClosingService](resolver, "a"), nil
+            },
+            WithoutTypeRegistration(),
+        )
+
+        if true == armed {
+            armParallelTeardown(t, serviceContainer)
+        }
+
+        _ = MustFromResolver[*foreignClosingService](serviceContainer, "b")
+
+        if overrideErr := serviceContainer.OverrideInstance("a", override); nil != overrideErr {
+            t.Fatalf("armed %v: override: %v", armed, overrideErr)
+        }
+
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Fatalf("armed %v: close: %v", armed, closeErr)
+        }
+
+        if 1 != originalCloserCalls.Load() || 0 != original.ownCloses.Load() {
+            t.Fatalf("armed %v: expected the evicted instance closed once through the closer only, got closer %d own %d", armed, originalCloserCalls.Load(), original.ownCloses.Load())
+        }
+
+        if 0 != override.ownCloses.Load() {
+            t.Fatalf("armed %v: expected the override closed through the closer, its own Close called %d times", armed, override.ownCloses.Load())
+        }
+    }
+}
+
+func TestWithCloser_AnEvictedInstanceTwoDeclaringNamesHoldIsClosedOnce(t *testing.T) {
+    serviceContainer := NewContainer()
+    original := &doorlessService{label: "original"}
+    originalCloserCalls := atomic.Int32{}
+
+    countingCloser := WithCloser(func(closeContext context.Context, value *doorlessService) error {
+        if original == value {
+            originalCloserCalls.Add(1)
+        }
+
+        return nil
+    })
+
+    serviceContainer.MustRegister(
+        "a",
+        func(resolver containercontract.Resolver) (*doorlessService, error) {
+            return original, nil
+        },
+        WithoutTypeRegistration(),
+        countingCloser,
+    )
+    serviceContainer.MustRegister(
+        "c",
+        func(resolver containercontract.Resolver) (*doorlessService, error) {
+            return MustFromResolver[*doorlessService](resolver, "a"), nil
+        },
+        WithoutTypeRegistration(),
+        countingCloser,
+    )
+
+    _ = MustFromResolver[*doorlessService](serviceContainer, "c")
+
+    if overrideErr := serviceContainer.OverrideInstance("a", &doorlessService{label: "override"}); nil != overrideErr {
+        t.Fatalf("override: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if 1 != originalCloserCalls.Load() {
+        t.Fatalf("expected the evicted instance closed once, got %d closer calls", originalCloserCalls.Load())
+    }
+}
+
+type closingValue struct {
+    label     string
+    ownCloses *atomic.Int32
+}
+
+func (instance closingValue) Close() error {
+    instance.ownCloses.Add(1)
+
+    return nil
+}
+
+func TestWithCloser_AnEvictedValueWithItsOwnCloseHeldUnderASecondNameIsClosedThroughTheCloserOnly(t *testing.T) {
+    serviceContainer := NewContainer()
+    ownCloses := &atomic.Int32{}
+    closed := []string{}
+
+    serviceContainer.MustRegister(
+        "a",
+        func(resolver containercontract.Resolver) (closingValue, error) {
+            return closingValue{label: "original", ownCloses: ownCloses}, nil
+        },
+        WithoutTypeRegistration(),
+        WithCloser(func(closeContext context.Context, value closingValue) error {
+            closed = append(closed, value.label)
+
+            return nil
+        }),
+    )
+    serviceContainer.MustRegister(
+        "b",
+        func(resolver containercontract.Resolver) (closingValue, error) {
+            return MustFromResolver[closingValue](resolver, "a"), nil
+        },
+        WithoutTypeRegistration(),
+    )
+
+    _ = MustFromResolver[closingValue](serviceContainer, "b")
+
+    if overrideErr := serviceContainer.OverrideInstance("a", closingValue{label: "override", ownCloses: ownCloses}); nil != overrideErr {
+        t.Fatalf("override: %v", overrideErr)
+    }
+
+    if closeErr := serviceContainer.Close(); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    if "[override original]" != fmt.Sprint(closed) || 0 != ownCloses.Load() {
+        t.Fatalf("expected the override and then the evicted value closed through the closer only, got %v own %d", closed, ownCloses.Load())
     }
 }
 

@@ -8,6 +8,7 @@ import (
     "errors"
     "fmt"
     "io"
+    "slices"
     "strings"
     "sync"
     "sync/atomic"
@@ -46,14 +47,12 @@ func deterministicCandidateMatches(t *testing.T, cipher Cipher, plaintext string
     return false
 }
 
-/* scriptedSqlDriver answers each query by the first matching fragment, so a test can shape the information_schema answer, the keyset pages and the update results independently. */
 type scriptedSqlResponse struct {
     fragment    string
     columns     []string
     columnTypes []string
     rows        [][]driver.Value
     err         error
-    /* nextErr is what the rows answer once the scripted ones are read, in place of the end of the set — a failure surfacing through Rows.Err */
     nextErr error
 }
 
@@ -67,6 +66,7 @@ type scriptedSqlDriver struct {
     responses      []scriptedSqlResponse
     queries        []string
     queryArguments []recordedScriptedQuery
+    execErr error
 }
 
 func (instance *scriptedSqlDriver) Open(name string) (driver.Conn, error) {
@@ -120,21 +120,25 @@ func (instance *scriptedSqlStatement) NumInput() int {
     return -1
 }
 
-/* Exec records its arguments beside the queries', so a test can read the value an update wrote */
 func (instance *scriptedSqlStatement) Exec(arguments []driver.Value) (driver.Result, error) {
     instance.shared.mutex.Lock()
     instance.shared.queryArguments = append(instance.shared.queryArguments, recordedScriptedQuery{
         query:     instance.query,
         arguments: append([]driver.Value(nil), arguments...),
     })
+    execErr := instance.shared.execErr
     instance.shared.mutex.Unlock()
+
+    if nil != execErr {
+        return nil, execErr
+    }
 
     return driver.RowsAffected(1), nil
 }
 
 func (instance *scriptedSqlStatement) Query(arguments []driver.Value) (driver.Rows, error) {
     instance.shared.mutex.Lock()
-    responses := instance.shared.responses
+    responses := withSchemaJudgeDefaults(instance.shared.responses)
     instance.shared.queryArguments = append(instance.shared.queryArguments, recordedScriptedQuery{
         query:     instance.query,
         arguments: append([]driver.Value(nil), arguments...),
@@ -167,7 +171,6 @@ func (instance *scriptedSqlRows) Columns() []string {
     return instance.columns
 }
 
-/* ColumnTypeDatabaseTypeName reports the scripted type name, empty when the script declared none — the same silence a driver without the capability answers. */
 func (instance *scriptedSqlRows) ColumnTypeDatabaseTypeName(index int) string {
     if index >= len(instance.columnTypes) {
         return ""
@@ -195,12 +198,62 @@ func (instance *scriptedSqlRows) Next(destination []driver.Value) error {
     return nil
 }
 
+func withSchemaJudgeDefaults(responses []scriptedSqlResponse) []scriptedSqlResponse {
+    answers := func(fragment string) bool {
+        for _, response := range responses {
+            if true == strings.Contains(response.fragment, fragment) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    columns := []string{"id"}
+    for _, response := range responses {
+        if "ORDER BY" == response.fragment && 0 < len(response.columns) {
+            columns = response.columns
+        }
+    }
+
+    for _, response := range responses {
+        if "CHARACTER_SET_NAME" != response.fragment {
+            continue
+        }
+
+        for _, row := range response.rows {
+            if name, isName := row[0].(string); true == isName && false == slices.Contains(columns, name) {
+                columns = append(columns, name)
+            }
+        }
+    }
+
+    defaults := make([]scriptedSqlResponse, 0, 3)
+    if false == answers("SELECT COLUMN_NAME FROM") {
+        rows := make([][]driver.Value, 0, len(columns))
+        for _, column := range columns {
+            rows = append(rows, []driver.Value{column})
+        }
+
+        defaults = append(defaults, scriptedSqlResponse{fragment: "SELECT COLUMN_NAME FROM", columns: []string{"COLUMN_NAME"}, rows: rows})
+    }
+
+    if false == answers("TABLE_TYPE") {
+        defaults = append(defaults, scriptedSqlResponse{fragment: "TABLE_TYPE", columns: []string{"TABLE_TYPE"}, rows: [][]driver.Value{{"BASE TABLE"}}})
+    }
+
+    if false == answers("STATISTICS") {
+        defaults = append(defaults, scriptedSqlResponse{fragment: "STATISTICS", columns: []string{"INDEX_NAME", "COLUMN_NAME", "NON_UNIQUE"}, rows: [][]driver.Value{{"PRIMARY", columns[0], int64(0)}}})
+    }
+
+    return append(defaults, responses...)
+}
+
 var scriptedSqlSequence atomic.Uint64
 
 func newScriptedMigrator(t *testing.T, responses []scriptedSqlResponse) (*Migrator, *scriptedSqlDriver) {
     t.Helper()
 
-    /* every run reads the table's charsets first; a script that does not answer it reads every column as utf8mb4, the shape of the tables these pins describe */
     answersCharsets := false
     for _, response := range responses {
         if true == strings.Contains(response.fragment, "CHARACTER_SET_NAME") {
@@ -245,7 +298,7 @@ func (instance fakeRuntime) Container() containercontract.Container {
     return nil
 }
 
-/* newRampKey is the 32-byte ramp key the live mysql suites seal with; the sibling newKey fills every byte alike, and the two must stay distinguishable because a rotation test needs two keys that differ in every position. */
+/* distinct from newKey in every byte, which a rotation between the two keys needs */
 func newRampKey() []byte {
     key := make([]byte, 32)
     for index := range key {
@@ -254,7 +307,7 @@ func newRampKey() []byte {
     return key
 }
 
-/* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
+/* keeps the command's own error apart from a refused command line, which the dispatch answers */
 type capturingCommand struct {
     clicontract.Command
     runtimeInstance runtimecontract.Runtime
@@ -272,7 +325,7 @@ func (instance *capturingCommand) Run(
     return nil
 }
 
-/* wrappedCipher forwards every door to the package cipher it embeds, the shape of an application's metrics or tracing wrapper: it carries none of the package's unexported doors */
+/* carries none of the package's unexported doors, as an application's metrics wrapper does */
 type wrappedCipher struct {
     Cipher
 }

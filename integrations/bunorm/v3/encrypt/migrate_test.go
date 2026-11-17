@@ -333,6 +333,18 @@ func (instance *stubMigrateStatement) Exec(arguments []driver.Value) (driver.Res
 }
 
 func (instance *stubMigrateStatement) Query(arguments []driver.Value) (driver.Rows, error) {
+    if true == strings.Contains(instance.query, "SELECT COLUMN_NAME FROM") {
+        return &stubMigrateRows{columns: []string{"COLUMN_NAME"}, remaining: [][]driver.Value{{"id"}, {"secret"}}}, nil
+    }
+
+    if true == strings.Contains(instance.query, "TABLE_TYPE") {
+        return &stubMigrateRows{columns: []string{"TABLE_TYPE"}, remaining: [][]driver.Value{{"BASE TABLE"}}}, nil
+    }
+
+    if true == strings.Contains(instance.query, "STATISTICS") {
+        return &stubMigrateRows{columns: []string{"INDEX_NAME", "COLUMN_NAME", "NON_UNIQUE"}, remaining: [][]driver.Value{{"PRIMARY", "id", int64(0)}}}, nil
+    }
+
     if true == strings.Contains(instance.query, "MAX(LENGTH(") {
         return &stubMigrateRows{columns: []string{"longest"}, remaining: [][]driver.Value{{nil}}}, nil
     }
@@ -672,6 +684,7 @@ func TestColumnWidth_ReadsAVarcharInCharacters(t *testing.T) {
 
 func TestMigrateEncrypt_RefusesANarrowColumnBeforeWritingARow(t *testing.T) {
     migrator, stub := newScriptedMigrator(t, []scriptedSqlResponse{
+        {fragment: "SELECT COLUMN_NAME FROM", columns: []string{"COLUMN_NAME"}, rows: [][]driver.Value{{"id"}, {"iban"}}},
         {
             fragment: "NOT LIKE",
             columns:  []string{"longest"},

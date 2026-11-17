@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **Behavioural change**: `encrypt` — `MigrateEncrypt`, `MigrateReencrypt` and `MigrateDecrypt` judge the spec against the schema before the capacity check and the first row: a column and the key are matched letter case aside and used in the table's spelling, a table the database lacks, a name the table lacks or two names for one column are refused, and over a base table a paging key that is not the only column of the primary key or of a unique index is refused as `the paging key is not unique`, a nullable key under a unique index admitted as before and a view's key left unjudged, since a view lists no index, where a column of a narrower character set spelled in another case never finished converting, every re-run skipping its rows as changed under the run, and a key two rows shared left rows unconverted behind a run that reported success. See `UPGRADE.md`.
+- `encrypt`: `EnsureColumnCapacity` and `EnsureColumnCapacityForReencrypt` read the columns in the table's spelling, where a column of a narrower character set spelled in another case was measured in that set's bytes and a column too narrow for the run passed the check.
+
+### Security
+
+- `encrypt`: a write the server refuses during a bulk run is reported with its number and SQLSTATE and a `*mysql.MySQLError` of that number in the chain, the server's message withheld from the journal and from the error stream, where it quoted the statement's values: a plaintext under a decrypt and in the guard of an encrypt.
+
 ## [v3.6.7] - 2026-11-13 - Audit Before Image Holds the Primary Key
 
 ### Fixed

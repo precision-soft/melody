@@ -50,11 +50,16 @@ func NewMigrator(db *bun.DB, cipher Cipher) *Migrator {
 }
 
 func (instance *Migrator) MigrateEncrypt(ctx context.Context, spec TableSpec) (int, error) {
-    if capacityErr := instance.ensureColumnCapacity(ctx, spec, ""); nil != capacityErr {
-        return 0, instance.classifyRunError(spec, 0, "", capacityErr)
+    resolved, judgeErr := instance.judgeSpecAgainstTheSchema(ctx, spec)
+    if nil != judgeErr {
+        return 0, instance.classifyRunError(spec, 0, "", judgeErr)
     }
 
-    return instance.run(ctx, spec, instance.encryptTransform(spec))
+    if capacityErr := instance.ensureColumnCapacity(ctx, resolved, ""); nil != capacityErr {
+        return 0, instance.classifyRunError(resolved, 0, "", capacityErr)
+    }
+
+    return instance.run(ctx, resolved, instance.encryptTransform(resolved))
 }
 
 func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) (int, error) {
@@ -62,16 +67,26 @@ func (instance *Migrator) MigrateReencrypt(ctx context.Context, spec TableSpec, 
         return 0, exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": spec.Table}, nil)
     }
 
-    if capacityErr := instance.ensureColumnCapacity(ctx, spec, targetKeyId); nil != capacityErr {
-        return 0, instance.classifyRunError(spec, 0, "", capacityErr)
+    resolved, judgeErr := instance.judgeSpecAgainstTheSchema(ctx, spec)
+    if nil != judgeErr {
+        return 0, instance.classifyRunError(spec, 0, "", judgeErr)
     }
 
-    return instance.run(ctx, spec, instance.reencryptTransform(spec, targetKeyId))
+    if capacityErr := instance.ensureColumnCapacity(ctx, resolved, targetKeyId); nil != capacityErr {
+        return 0, instance.classifyRunError(resolved, 0, "", capacityErr)
+    }
+
+    return instance.run(ctx, resolved, instance.reencryptTransform(resolved, targetKeyId))
 }
 
 /* MigrateDecrypt reads the stored format before the cipher does, so a pass-through cipher cannot turn an unknown seal into plaintext, and stops on a decrypted value of the marker family, which written bare would read back as a seal. */
 func (instance *Migrator) MigrateDecrypt(ctx context.Context, spec TableSpec) (int, error) {
-    return instance.run(ctx, spec, func(value string) (string, error) {
+    resolved, judgeErr := instance.judgeSpecAgainstTheSchema(ctx, spec)
+    if nil != judgeErr {
+        return 0, instance.classifyRunError(spec, 0, "", judgeErr)
+    }
+
+    return instance.run(ctx, resolved, func(value string) (string, error) {
         if _, _, keyIdErr := keyIdOf(value); nil != keyIdErr {
             return "", keyIdErr
         }
@@ -221,7 +236,12 @@ func (instance *Migrator) reencryptTransform(spec TableSpec, targetKeyId string)
 }
 
 func (instance *Migrator) EnsureColumnCapacity(ctx context.Context, spec TableSpec) error {
-    return instance.ensureColumnCapacity(ctx, spec, "")
+    resolved, resolveErr := instance.resolveColumnSpelling(ctx, spec)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return instance.ensureColumnCapacity(ctx, resolved, "")
 }
 
 func (instance *Migrator) EnsureColumnCapacityForReencrypt(ctx context.Context, spec TableSpec, targetKeyId string) error {
@@ -229,7 +249,12 @@ func (instance *Migrator) EnsureColumnCapacityForReencrypt(ctx context.Context, 
         return exception.NewError("migrate reencrypt needs the key id it will rotate to", map[string]any{"table": spec.Table}, nil)
     }
 
-    return instance.ensureColumnCapacity(ctx, spec, targetKeyId)
+    resolved, resolveErr := instance.resolveColumnSpelling(ctx, spec)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return instance.ensureColumnCapacity(ctx, resolved, targetKeyId)
 }
 
 func (instance *Migrator) ensureColumnCapacity(ctx context.Context, spec TableSpec, targetKeyId string) error {
@@ -613,6 +638,11 @@ func (instance *Migrator) applyRow(ctx context.Context, spec TableSpec, guardByC
 
     result, execErr := instance.db.DB.ExecContext(ctx, updateSql, arguments...)
     if nil != execErr {
+        /* the server's refusal quotes the statement's values, a plaintext under either mode */
+        if withheld, isWithheld := withholdQuotedValue(execErr); true == isWithheld {
+            return false, exception.NewError("migrate update failed", map[string]any{"table": spec.Table, "columns": spec.Columns, "id": row.primaryKey}, withheld)
+        }
+
         return false, exception.NewError("migrate update failed", map[string]any{"table": spec.Table, "id": row.primaryKey}, execErr)
     }
 

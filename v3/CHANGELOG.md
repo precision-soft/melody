@@ -8,6 +8,10 @@ The example application inside this major keeps no changelog: it is not a projec
 
 ## [Unreleased]
 
+### Fixed
+
+- `container`: an instance an override evicted from a name registered `WithCloser`, still held under a second name registered without a closer, is closed once through that closer, after the graph, where the second name spent its claim: an instance with no `Close` of its own was never closed, and one carrying a `Close` was closed through it, the door the closer replaces. A built instance no override evicted, held under such a second name sorting after the name registered `WithCloser`, still closes through its own doors.
+
 ## [v3.14.5] - 2026-11-13 - Bounded Response Writer Chain
 
 ### Changed
