@@ -173,7 +173,7 @@ func TestEncryptDatabaseCommand_WritesTheCauseChainOfARefusedRun(t *testing.T) {
         t.Fatalf("expected the error to keep its message, got: %v", runErr)
     }
 
-    expected := `encrypt database migration failed: migrate column lookup failed: connection refused\r\x1b[2Kforged` + "\n"
+    expected := `encrypt database migration failed: migrate could not take a connection for the run: connection refused\r\x1b[2Kforged` + "\n"
     if expected != errorOutput.String() {
         t.Fatalf("expected the error stream to read %q, got %q", expected, errorOutput.String())
     }

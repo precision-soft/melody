@@ -53,7 +53,7 @@ type scriptedSqlResponse struct {
     columnTypes []string
     rows        [][]driver.Value
     err         error
-    nextErr error
+    nextErr     error
 }
 
 type recordedScriptedQuery struct {
@@ -66,10 +66,18 @@ type scriptedSqlDriver struct {
     responses      []scriptedSqlResponse
     queries        []string
     queryArguments []recordedScriptedQuery
-    execErr error
+    execErr        error
+    failFirstPing  bool
+    pings          int
+    opens          int
 }
 
 func (instance *scriptedSqlDriver) Open(name string) (driver.Conn, error) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.opens++
+
     return &scriptedSqlConnection{shared: instance}, nil
 }
 
@@ -100,6 +108,18 @@ func (instance *scriptedSqlConnection) Prepare(query string) (driver.Stmt, error
 }
 
 func (instance *scriptedSqlConnection) Close() error {
+    return nil
+}
+
+func (instance *scriptedSqlConnection) Ping(ctx context.Context) error {
+    instance.shared.mutex.Lock()
+    defer instance.shared.mutex.Unlock()
+
+    instance.shared.pings++
+    if true == instance.shared.failFirstPing && 1 == instance.shared.pings {
+        return driver.ErrBadConn
+    }
+
     return nil
 }
 
@@ -263,6 +283,17 @@ func newScriptedMigrator(t *testing.T, responses []scriptedSqlResponse) (*Migrat
 
     if false == answersCharsets {
         responses = append([]scriptedSqlResponse{{fragment: "CHARACTER_SET_NAME", columns: []string{"COLUMN_NAME", "CHARACTER_SET_NAME"}}}, responses...)
+    }
+
+    answersSqlMode := false
+    for _, response := range responses {
+        if true == strings.Contains(response.fragment, "sql_mode") {
+            answersSqlMode = true
+        }
+    }
+
+    if false == answersSqlMode {
+        responses = append(responses, scriptedSqlResponse{fragment: "sql_mode", columns: []string{"sql_mode", "character_set_client"}, rows: [][]driver.Value{{"STRICT_TRANS_TABLES", "utf8mb4"}}})
     }
 
     stub := &scriptedSqlDriver{responses: responses}

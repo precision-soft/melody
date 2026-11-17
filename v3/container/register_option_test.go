@@ -342,8 +342,8 @@ func TestWithCloser_AnEvictedInstanceHeldUnderASecondNameIsClosedThroughTheClose
             t.Fatalf("armed %v: close: %v", armed, closeErr)
         }
 
-        if "[override original]" != fmt.Sprint(closed) {
-            t.Fatalf("armed %v: expected the override and then the evicted instance closed through the closer, got %v", armed, closed)
+        if "[original override]" != fmt.Sprint(closed) {
+            t.Fatalf("armed %v: expected the evicted instance closed through the closer at the second name's place, before the override, got %v", armed, closed)
         }
     }
 }
@@ -492,8 +492,8 @@ func TestWithCloser_AnEvictedValueWithItsOwnCloseHeldUnderASecondNameIsClosedThr
         t.Fatalf("close: %v", closeErr)
     }
 
-    if "[override original]" != fmt.Sprint(closed) || 0 != ownCloses.Load() {
-        t.Fatalf("expected the override and then the evicted value closed through the closer only, got %v own %d", closed, ownCloses.Load())
+    if "[original override]" != fmt.Sprint(closed) || 0 != ownCloses.Load() {
+        t.Fatalf("expected the evicted value closed through the closer only at the second name's place, before the override, got %v own %d", closed, ownCloses.Load())
     }
 }
 
@@ -529,5 +529,175 @@ func TestWithCloser_TheScopedRegistrationsRefuseTheOption(t *testing.T) {
 
     if registerErr := scopeInstance.(*scope).RegisterScoped("app.scoped.own", provider, closer); false == errors.Is(registerErr, ErrScopedCloserUnsupported) {
         t.Fatalf("expected the scope's own registration refused, got %v", registerErr)
+    }
+}
+
+func TestWithCloser_TwoNamesOnOneInstanceCloseThroughTheCloserWhateverTheNamesSort(t *testing.T) {
+    for _, names := range [][2]string{{"a", "b"}, {"z", "c"}} {
+        for _, armed := range []bool{false, true} {
+            declaringName, aliasName := names[0], names[1]
+            serviceContainer := NewContainer()
+            shared := &foreignClosingService{}
+            closerCalls := atomic.Int32{}
+
+            serviceContainer.MustRegister(
+                declaringName,
+                func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+                    return shared, nil
+                },
+                WithoutTypeRegistration(),
+                WithCloser(func(closeContext context.Context, value *foreignClosingService) error {
+                    if shared == value {
+                        closerCalls.Add(1)
+                    }
+
+                    return nil
+                }),
+            )
+            serviceContainer.MustRegister(
+                aliasName,
+                func(resolver containercontract.Resolver) (*foreignClosingService, error) {
+                    return MustFromResolver[*foreignClosingService](resolver, declaringName), nil
+                },
+                WithoutTypeRegistration(),
+            )
+
+            if true == armed {
+                armParallelTeardown(t, serviceContainer)
+            }
+
+            _ = MustFromResolver[*foreignClosingService](serviceContainer, aliasName)
+
+            if closeErr := serviceContainer.Close(); nil != closeErr {
+                t.Fatalf("names %v armed %v: close: %v", names, armed, closeErr)
+            }
+
+            if 1 != closerCalls.Load() || 0 != shared.ownCloses.Load() {
+                t.Fatalf("names %v armed %v: expected the shared instance closed once through the closer only, got closer %d own %d", names, armed, closerCalls.Load(), shared.ownCloses.Load())
+            }
+        }
+    }
+}
+
+func TestWithCloser_ADoorlessInstanceTwoNamesHoldIsClosedThroughTheCloserWhateverTheNamesSort(t *testing.T) {
+    for _, names := range [][2]string{{"a", "b"}, {"z", "c"}} {
+        declaringName, aliasName := names[0], names[1]
+        serviceContainer := NewContainer()
+        shared := &doorlessService{label: "shared"}
+        closerCalls := atomic.Int32{}
+
+        serviceContainer.MustRegister(
+            declaringName,
+            func(resolver containercontract.Resolver) (*doorlessService, error) {
+                return shared, nil
+            },
+            WithoutTypeRegistration(),
+            WithCloser(func(closeContext context.Context, value *doorlessService) error {
+                closerCalls.Add(1)
+
+                return nil
+            }),
+        )
+        serviceContainer.MustRegister(
+            aliasName,
+            func(resolver containercontract.Resolver) (*doorlessService, error) {
+                return MustFromResolver[*doorlessService](resolver, declaringName), nil
+            },
+            WithoutTypeRegistration(),
+        )
+
+        _ = MustFromResolver[*doorlessService](serviceContainer, aliasName)
+
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Fatalf("names %v: close: %v", names, closeErr)
+        }
+
+        if 1 != closerCalls.Load() {
+            t.Fatalf("names %v: expected the doorless instance closed once through the closer, got %d", names, closerCalls.Load())
+        }
+    }
+}
+
+type orderedClosingService struct {
+    label  string
+    closed *[]string
+    mutex  *sync.Mutex
+}
+
+func (instance *orderedClosingService) Close() error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    *instance.closed = append(*instance.closed, instance.label)
+
+    return nil
+}
+
+func TestWithCloser_AnEvictedInstanceASecondNameHoldsClosesBeforeWhatItDependsOn(t *testing.T) {
+    for _, armed := range []bool{false, true} {
+        serviceContainer := NewContainer()
+        var bookMutex sync.Mutex
+        closed := []string{}
+        original := &doorlessService{label: "original"}
+
+        serviceContainer.MustRegister(
+            "dependency",
+            func(resolver containercontract.Resolver) (*orderedClosingService, error) {
+                return &orderedClosingService{label: "dependency", closed: &closed, mutex: &bookMutex}, nil
+            },
+            WithoutTypeRegistration(),
+        )
+        serviceContainer.MustRegister(
+            "a",
+            func(resolver containercontract.Resolver) (*doorlessService, error) {
+                _ = MustFromResolver[*orderedClosingService](resolver, "dependency")
+
+                return original, nil
+            },
+            WithoutTypeRegistration(),
+            WithCloser(func(closeContext context.Context, value *doorlessService) error {
+                bookMutex.Lock()
+                defer bookMutex.Unlock()
+
+                closed = append(closed, value.label)
+
+                return nil
+            }),
+        )
+        serviceContainer.MustRegister(
+            "b",
+            func(resolver containercontract.Resolver) (*doorlessService, error) {
+                return MustFromResolver[*doorlessService](resolver, "a"), nil
+            },
+            WithoutTypeRegistration(),
+        )
+
+        if true == armed {
+            armParallelTeardown(t, serviceContainer)
+        }
+
+        _ = MustFromResolver[*doorlessService](serviceContainer, "b")
+
+        if overrideErr := serviceContainer.OverrideInstance("a", &doorlessService{label: "override"}); nil != overrideErr {
+            t.Fatalf("armed %v: override: %v", armed, overrideErr)
+        }
+
+        if closeErr := serviceContainer.Close(); nil != closeErr {
+            t.Fatalf("armed %v: close: %v", armed, closeErr)
+        }
+
+        originalAt, dependencyAt := -1, -1
+        for index, label := range closed {
+            switch label {
+            case "original":
+                originalAt = index
+            case "dependency":
+                dependencyAt = index
+            }
+        }
+
+        if -1 == originalAt || -1 == dependencyAt || originalAt > dependencyAt || 3 != len(closed) {
+            t.Fatalf("armed %v: expected the evicted instance closed once through the closer before what it depends on, got %v", armed, closed)
+        }
     }
 }

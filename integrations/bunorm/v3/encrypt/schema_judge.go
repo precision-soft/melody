@@ -13,7 +13,7 @@ import (
 )
 
 /* a column is matched as MySQL matches it, letter case aside, and the run carries the spelling the table stores */
-func (instance *Migrator) judgeSpecAgainstTheSchema(ctx context.Context, spec TableSpec) (TableSpec, error) {
+func (instance *Migrator) judgeSpecAgainstTheSchema(ctx context.Context, spec TableSpec, mode string) (TableSpec, error) {
     if "" == spec.Table || "" == spec.PrimaryKey || 0 == len(spec.Columns) {
         return spec, exception.NewError("migrate spec needs a table, primary key and at least one column", nil, nil)
     }
@@ -50,7 +50,66 @@ func (instance *Migrator) judgeSpecAgainstTheSchema(ctx context.Context, spec Ta
         return spec, keyErr
     }
 
+    if migrateModeDecrypt == mode {
+        if sessionErr := instance.judgeTheDecryptSession(ctx, resolved); nil != sessionErr {
+            return spec, sessionErr
+        }
+    }
+
     return resolved, nil
+}
+
+/* ucs2 holds the basic plane only */
+func holdsEveryRune(charset string) bool {
+    switch charset {
+    case "", "utf8mb4", "binary", "utf16", "utf16le", "utf32":
+        return true
+    }
+
+    return false
+}
+
+/* a relaxed session writes '?' for a rune the column or the connection cannot hold, over the only copy of the plaintext */
+func (instance *Migrator) judgeTheDecryptSession(ctx context.Context, spec TableSpec) error {
+    charsetByColumn, charsetErr := instance.columnCharsets(ctx, spec.Table)
+    if nil != charsetErr {
+        return charsetErr
+    }
+
+    var sqlMode string
+    var clientCharset string
+    if scanErr := instance.queries().QueryRowContext(ctx, "SELECT @@SESSION.sql_mode, @@SESSION.character_set_client").Scan(&sqlMode, &clientCharset); nil != scanErr {
+        return exception.NewError("migrate sql_mode lookup failed", map[string]any{"table": spec.Table}, scanErr)
+    }
+
+    for _, sessionMode := range strings.Split(strings.ToUpper(sqlMode), ",") {
+        if "STRICT_TRANS_TABLES" == sessionMode || "STRICT_ALL_TABLES" == sessionMode {
+            return nil
+        }
+    }
+
+    if "utf8mb4" != strings.ToLower(clientCharset) {
+        return exception.NewError(
+            "migrate decrypt would write through a connection of character set "+clientCharset+", which is not utf8mb4, under a non-strict sql_mode ("+sqlMode+"); set STRICT_TRANS_TABLES or STRICT_ALL_TABLES for the session or connect with charset=utf8mb4",
+            map[string]any{"table": spec.Table, "clientCharacterSet": clientCharset, "sqlMode": sqlMode},
+            nil,
+        )
+    }
+
+    for _, column := range spec.Columns {
+        charset := strings.ToLower(charsetByColumn[column])
+        if true == holdsEveryRune(charset) {
+            continue
+        }
+
+        return exception.NewError(
+            "migrate decrypt would write into the column "+column+" of character set "+charset+", which is not utf8mb4, under a non-strict sql_mode ("+sqlMode+"); set STRICT_TRANS_TABLES or STRICT_ALL_TABLES for the session or convert the column to utf8mb4",
+            map[string]any{"table": spec.Table, "column": column, "characterSet": charset, "sqlMode": sqlMode},
+            nil,
+        )
+    }
+
+    return nil
 }
 
 func resolveColumn(storedByLower map[string]string, table string, column string, field string) (string, error) {
@@ -63,7 +122,7 @@ func resolveColumn(storedByLower map[string]string, table string, column string,
 }
 
 func (instance *Migrator) tableColumns(ctx context.Context, table string) (map[string]string, error) {
-    rows, queryErr := instance.db.DB.QueryContext(
+    rows, queryErr := instance.queries().QueryContext(
         ctx,
         "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
         table,
@@ -97,7 +156,7 @@ func (instance *Migrator) tableColumns(ctx context.Context, table string) (map[s
 /* a view lists no index of the table under it, so its key is left unjudged */
 func (instance *Migrator) isView(ctx context.Context, table string) (bool, error) {
     var tableType string
-    scanErr := instance.db.DB.QueryRowContext(
+    scanErr := instance.queries().QueryRowContext(
         ctx,
         "SELECT TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
         table,
@@ -120,7 +179,7 @@ func (instance *Migrator) judgeTheKey(ctx context.Context, table string, key str
         return nil
     }
 
-    rows, queryErr := instance.db.DB.QueryContext(
+    rows, queryErr := instance.queries().QueryContext(
         ctx,
         "SELECT INDEX_NAME, COLUMN_NAME, NON_UNIQUE FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
         table,

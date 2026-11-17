@@ -607,3 +607,143 @@ func TestMigrateEncrypt_LiveAViewOverAPrimaryKeyedTableConverts(t *testing.T) {
         }
     }
 }
+
+func TestMigrateDecrypt_RefusesANarrowCharsetUnderANonStrictSession(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        charset any
+        sqlMode string
+        refused bool
+    }{
+        "latin1 non-strict":        {charset: "latin1", sqlMode: "NO_ENGINE_SUBSTITUTION", refused: true},
+        "latin1 empty mode":        {charset: "latin1", sqlMode: "", refused: true},
+        "ucs2 non-strict":          {charset: "ucs2", sqlMode: "", refused: true},
+        "latin1 strict trans":      {charset: "latin1", sqlMode: "ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES"},
+        "latin1 strict all":        {charset: "latin1", sqlMode: "strict_all_tables"},
+        "utf8mb4 non-strict":       {charset: "utf8mb4", sqlMode: ""},
+        "utf16 non-strict":         {charset: "utf16", sqlMode: ""},
+        "utf32 non-strict":         {charset: "UTF32", sqlMode: ""},
+        "a binary type non-strict": {charset: nil, sqlMode: ""},
+    } {
+        responses := append([]scriptedSqlResponse{{fragment: "sql_mode", columns: []string{"sql_mode", "character_set_client"}, rows: [][]driver.Value{{testCase.sqlMode, "utf8mb4"}}}}, judgeTable(accountsColumns, accountsPrimary, [][]driver.Value{{"notes", testCase.charset}})...)
+        migrator, stub := newScriptedMigrator(t, responses)
+
+        _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+        refused := nil != runErr && true == strings.Contains(runErr.Error(), "non-strict sql_mode")
+        if testCase.refused != refused {
+            t.Fatalf("%s: expected refused %v, got %v", name, testCase.refused, runErr)
+        }
+
+        if true == refused {
+            context := refusalContext(t, runErr)
+            if "notes" != context["column"] || testCase.charset != context["characterSet"] || testCase.sqlMode != context["sqlMode"] || true == readTheTable(stub) {
+                t.Fatalf("%s: expected the column, charset and mode named before the table is read, got %v", name, context)
+            }
+        }
+    }
+}
+
+func TestMigrateEncrypt_IsNotRefusedByTheDecryptSessionCheck(t *testing.T) {
+    responses := append([]scriptedSqlResponse{{fragment: "sql_mode", columns: []string{"sql_mode", "character_set_client"}, rows: [][]driver.Value{{"", "utf8"}}}}, judgeTable(accountsColumns, accountsPrimary, [][]driver.Value{{"notes", "latin1"}})...)
+    migrator, stub := newScriptedMigrator(t, responses)
+
+    if _, runErr := migrator.MigrateEncrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}}); nil != runErr {
+        t.Fatalf("expected an encrypt not judged on the session's mode, got %v", runErr)
+    }
+
+    for _, query := range stub.recorded() {
+        if true == strings.Contains(query, "sql_mode") {
+            t.Fatal("expected an encrypt not to read the sql_mode")
+        }
+    }
+}
+
+func TestMigrateDecrypt_RefusesAConnectionCharsetThatIsNotUtf8mb4UnderANonStrictSession(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        clientCharset string
+        sqlMode       string
+        refused       bool
+    }{
+        "utf8 non-strict":    {clientCharset: "utf8mb3", sqlMode: "", refused: true},
+        "latin1 non-strict":  {clientCharset: "latin1", sqlMode: "NO_ENGINE_SUBSTITUTION", refused: true},
+        "utf8 strict":        {clientCharset: "utf8mb3", sqlMode: "STRICT_TRANS_TABLES"},
+        "utf8mb4 non-strict": {clientCharset: "UTF8MB4", sqlMode: ""},
+    } {
+        responses := append([]scriptedSqlResponse{{fragment: "sql_mode", columns: []string{"sql_mode", "character_set_client"}, rows: [][]driver.Value{{testCase.sqlMode, testCase.clientCharset}}}}, judgeTable(accountsColumns, accountsPrimary, [][]driver.Value{{"notes", "utf8mb4"}})...)
+        migrator, stub := newScriptedMigrator(t, responses)
+
+        _, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: "accounts", PrimaryKey: "id", Columns: []string{"notes"}})
+        refused := nil != runErr && true == strings.Contains(runErr.Error(), "through a connection of character set")
+        if testCase.refused != refused {
+            t.Fatalf("%s: expected refused %v, got %v", name, testCase.refused, runErr)
+        }
+
+        if true == refused {
+            context := refusalContext(t, runErr)
+            if testCase.clientCharset != context["clientCharacterSet"] || true == readTheTable(stub) {
+                t.Fatalf("%s: expected the connection charset named before the table is read, got %v", name, context)
+            }
+        }
+    }
+}
+
+func TestMigrateDecrypt_LiveANonStrictSessionIsRefusedAndTheSealKept(t *testing.T) {
+    table := "migrate_judge_non_strict_record"
+    sqlDb := liveJudgeDatabase(t, table, "CREATE TABLE "+table+" (id BIGINT NOT NULL PRIMARY KEY, email VARCHAR(1024) CHARACTER SET latin1 NULL)")
+    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()}))
+    sealed, sealErr := cipher.Encrypt("secret žluťoučký kůň")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    if _, insertErr := sqlDb.ExecContext(context.Background(), "INSERT INTO "+table+" (id, email) VALUES (1, ?)", sealed); nil != insertErr {
+        t.Fatalf("insert: %v", insertErr)
+    }
+
+    /* one connection, so the relaxed mode set here is the session the run pins */
+    sqlDb.SetMaxOpenConns(1)
+    if _, modeErr := sqlDb.ExecContext(context.Background(), "SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'"); nil != modeErr {
+        t.Fatalf("relax the session: %v", modeErr)
+    }
+
+    migrator := NewMigrator(bun.NewDB(sqlDb, mysqldialect.New()), cipher)
+
+    processed, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: table, PrimaryKey: "id", Columns: []string{"Email"}})
+    if nil == runErr || false == strings.Contains(runErr.Error(), "non-strict sql_mode") || 0 != processed {
+        t.Fatalf("expected the non-strict session refused before the first row, got processed=%d %v", processed, runErr)
+    }
+
+    if sealed != liveEmails(t, sqlDb, table, "id")[0] {
+        t.Fatal("expected the stored seal byte-identical after the refusal")
+    }
+}
+
+func TestMigrateDecrypt_LiveAConnectionCharsetThatIsNotUtf8mb4IsRefusedUnderANonStrictSession(t *testing.T) {
+    table := "migrate_judge_client_charset_record"
+    sqlDb := liveJudgeDatabase(t, table, "CREATE TABLE "+table+" (id BIGINT NOT NULL PRIMARY KEY, email VARCHAR(1024) CHARACTER SET utf8mb4 NULL)")
+    cipher := NewCipher(NewStaticKeyProvider("v1", map[string][]byte{"v1": newRampKey()}))
+    sealed, sealErr := cipher.Encrypt("secret 🔑 key")
+    if nil != sealErr {
+        t.Fatalf("seal: %v", sealErr)
+    }
+
+    if _, insertErr := sqlDb.ExecContext(context.Background(), "INSERT INTO "+table+" (id, email) VALUES (1, ?)", sealed); nil != insertErr {
+        t.Fatalf("insert: %v", insertErr)
+    }
+
+    /* one connection, so the relaxed session set here is the one the run pins */
+    sqlDb.SetMaxOpenConns(1)
+    if _, modeErr := sqlDb.ExecContext(context.Background(), "SET SESSION sql_mode = '', NAMES utf8mb3"); nil != modeErr {
+        t.Fatalf("relax the session: %v", modeErr)
+    }
+
+    migrator := NewMigrator(bun.NewDB(sqlDb, mysqldialect.New()), cipher)
+
+    processed, runErr := migrator.MigrateDecrypt(context.Background(), TableSpec{Table: table, PrimaryKey: "id", Columns: []string{"email"}})
+    if nil == runErr || false == strings.Contains(runErr.Error(), "through a connection of character set utf8mb3") || 0 != processed {
+        t.Fatalf("expected the utf8mb3 connection refused before the first row, got processed=%d %v", processed, runErr)
+    }
+
+    if sealed != liveEmails(t, sqlDb, table, "id")[0] {
+        t.Fatal("expected the stored seal byte-identical after the refusal")
+    }
+}

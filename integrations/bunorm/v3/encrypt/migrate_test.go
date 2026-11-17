@@ -1680,6 +1680,7 @@ func TestMigrateDecrypt_StopsOnAPlaintextOfTheMarkerFamily(t *testing.T) {
 
     stub.responses = []scriptedSqlResponse{
         {fragment: "CHARACTER_SET_NAME", columns: []string{"COLUMN_NAME", "CHARACTER_SET_NAME"}},
+        {fragment: "sql_mode", columns: []string{"sql_mode", "character_set_client"}, rows: [][]driver.Value{{"STRICT_TRANS_TABLES", "utf8mb4"}}},
         {
             fragment: "ORDER BY",
             columns:  []string{"id", "notes"},
@@ -1708,6 +1709,7 @@ func TestMigrateDecrypt_StopsOnARowWhoseDecryptedValueIsASeal(t *testing.T) {
 
     stub.responses = []scriptedSqlResponse{
         {fragment: "CHARACTER_SET_NAME", columns: []string{"COLUMN_NAME", "CHARACTER_SET_NAME"}},
+        {fragment: "sql_mode", columns: []string{"sql_mode", "character_set_client"}, rows: [][]driver.Value{{"STRICT_TRANS_TABLES", "utf8mb4"}}},
         {
             fragment: "ORDER BY",
             columns:  []string{"id", "notes"},
