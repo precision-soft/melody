@@ -6,20 +6,17 @@ This document describes local development, testing, and contribution rules for M
 
 Melody ships as three parallel Go module lines (see the [`README.md`](./README.md#versions--project-status)):
 
-- **v3** (`./v3/`) — stable, actively maintained. **New features go here up to v3.14.0, its last feature release;**
-  after it v3 receives security fixes and patch-level defect fixes, and new features target v4 (planned Q1 2027).
+- **v3** (`./v3/`) — stable, actively maintained. **New features go here up to v3.14.0, its last feature release;** after it v3 receives security fixes and patch-level defect fixes, and new features target v4 (planned Q1 2027).
 - **v2** (`./v2/`) and **v1** (repository root) — maintenance mode.
 
 Rules for contributions:
 
 - **New features:** v3 only, up to v3.14.0; a feature proposed after it targets v4. Do not add features to v1 or v2.
 - **Bug fixes:** apply to v3. **Back-port to v1 and v2 whenever the defect is observable there and the fix fits a patch release** — no new public symbols, no signature changes, nothing breaking (a `**Behavioural change**` that closes a defect is admitted at patch level; a `**Breaking**` one is not). A fix that needs new API surface stays on v3, and a capability gap is not a defect: behavior that is merely poorer on a frozen line does not qualify. v1 and v2 receive such patch-level fixes through the support dates in [`README.md`](./README.md#versions--project-status) — 2027-08-17 for v1, 2027-09-08 for v2.
-- **Breaking changes:** instead of changing a v3 API in place, mark the old form with a `/* Deprecated: ... */`
-  doc comment and keep it working; breaking changes accumulate toward v4 (planned Q1 2027).
+- **Breaking changes:** instead of changing a v3 API in place, mark the old form with a `/* Deprecated: ... */` doc comment and keep it working; breaking changes accumulate toward v4 (planned Q1 2027).
 - The three versions are **intentionally duplicated** so each binds to one framework version. Do not try to consolidate or de-duplicate them — such pull requests will not be accepted.
 
-When a change touches multiple version lines, keep each line's edit self-contained and update each line's
-`CHANGELOG.md`.
+When a change touches multiple version lines, keep each line's edit self-contained and update each line's `CHANGELOG.md`.
 
 A change to a line's **example application** is filed nowhere. The examples keep no changelog: an example is not a project with a past, it has one state — the present one — so what describes it is its `README.md`, which is brought to the truth by the same change. What the framework's `CHANGELOG.md` records about a change to an example is only the part a consumer of the framework can see, which is usually nothing.
 
@@ -37,14 +34,11 @@ The quickest way into the development shell is the [`./dc`](./dc) wrapper, which
 ./dc up:all       # plus integration services (RabbitMQ, Redis, MySQL, LocalStack, PostgreSQL, Mailpit, Prometheus, the OTLP collector)
 ```
 
-Inside the shell, the convenience functions described under
-[Development shell aliases](#development-shell-aliases) run the verification matrix for the module you are in; the whole-repository gate is `melody_validate_all` (alias `mva`, staged-files variant `mvs`), which delegates to [`.dev/validate/all.sh`](./.dev/validate/all.sh).
+Inside the shell, the convenience functions described under [Development shell aliases](#development-shell-aliases) run the verification matrix for the module you are in; the whole-repository gate is `melody_validate_all` (alias `mva`, staged-files variant `mvs`), which delegates to [`.dev/validate/all.sh`](./.dev/validate/all.sh).
 
 ### Overriding host ports
 
-The committed [`.dev/docker/.env`](./.dev/docker/.env) carries the default host ports the compose file reads (the HTTP load balancer on `80`, the example app on `8180`, and the `up:all` services on
-`5673`/`15673` (RabbitMQ), `6380` (Redis), `3307` (MySQL), `4566` (LocalStack)); the compose file supplies its own defaults for the rest — `5433` (PostgreSQL), `1026`/`8026` (Mailpit), `9091` (Prometheus), `4317`/`4318` (the OTLP collector) — and the per-major `dev-v1`/`dev-v2` shells publish no host port. Each port is read in [`docker-compose.yml`](./.dev/docker/docker-compose.yml) as a `${VAR:-default}` lookup, so you can move any of them without editing the committed file: create an uncommitted `.dev/docker/.env.local`
-(gitignored, loaded after `.env` so it wins) and set only the ports you need to change. This is the supported way to run the melody dev stack alongside other local stacks that already use those ports.
+The committed [`.dev/docker/.env`](./.dev/docker/.env) carries the default host ports the compose file reads (the HTTP load balancer on `80`, the example app on `8180`, and the `up:all` services on `5673`/`15673` (RabbitMQ), `6380` (Redis), `3307` (MySQL), `4566` (LocalStack)); the compose file supplies its own defaults for the rest — `5433` (PostgreSQL), `1026`/`8026` (Mailpit), `9091` (Prometheus), `4317`/`4318` (the OTLP collector) — and the per-major `dev-v1`/`dev-v2` shells publish no host port. Each port is read in [`docker-compose.yml`](./.dev/docker/docker-compose.yml) as a `${VAR:-default}` lookup, so you can move any of them without editing the committed file: create an uncommitted `.dev/docker/.env.local` (gitignored, loaded after `.env` so it wins) and set only the ports you need to change. This is the supported way to run the melody dev stack alongside other local stacks that already use those ports.
 
 ```bash
 # .dev/docker/.env.local  (gitignored, per-developer)

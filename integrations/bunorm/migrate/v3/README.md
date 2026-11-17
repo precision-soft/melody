@@ -106,10 +106,15 @@ name at registration.
 
 ## Commands
 
-All commands accept the standard Melody output flags. Under `--format=json` a command accumulates its output
-and renders one machine-readable json envelope on a single line — the failure included — instead of the
-plain-text output; `--format=json-pretty` renders the same document indented for reading by hand, and
-`--verbose` and `--no-color` shape the plain-text output alone. The per-query lines a migration prints through `RunQueries` follow the same flags: the command hands its posture to the migrations through the context the migrator passes them, so a migration passes that context on to `RunQueries` itself: the skeleton `db:create` writes is bun's default template, since the command passes no `WithGoTemplate` option, and it runs no query and prints its own line to standard output. A migration that drops the context falls back to the process-wide default, which the command installs only for the length of its run; a host that runs migrations on its own sets it through `SetDefaultRunnerOption`.
+All commands accept the standard Melody output flags. Under `--format=json` a command accumulates its output and renders
+one machine-readable json envelope on a single line — the failure included — instead of the plain-text output;
+`--format=json-pretty` renders the same document indented for reading by hand, and `--verbose` and `--no-color` shape
+the plain-text output alone. The per-query lines a migration prints through `RunQueries` follow the same flags: the
+command hands its posture to the migrations through the context the migrator passes them, so a migration passes that
+context on to `RunQueries` itself: the skeleton `db:create` writes is bun's default template, since the command passes
+no `WithGoTemplate` option, and it runs no query and prints its own line to standard output. A migration that drops the
+context falls back to the process-wide default, which the command installs only for the length of its run; a host that
+runs migrations on its own sets it through `SetDefaultRunnerOption`.
 
 The json document therefore carries every block the command produces at any verbosity: `--verbose` never
 shapes it. Its keys are stable — `data.details`, `data.migrations.applied`, `data.migrations.pending`,
@@ -118,16 +123,16 @@ text blocks print. `data.database.database` is json `null` when the connection r
 where the text block renders `<null>`. One consequence is worth knowing: a json run performs the
 database-identity query a text run only performs under `--verbose`.
 
-The plain-text rendering escapes every control character visibly — the named C0 ones as `\n`, `\r`, `\t`, every
-other C0 one, DEL and the C1 block as `\xNN`, and the Unicode line and paragraph separators as `\uNNNN` —
-in every string the commands did not write themselves — the error text off the wire, the failed statement,
-the query names, the identity block the server answers and the migration names — and it does so before the
-table cells are measured, so the alignment counts the escaped spelling. The failed statement alone keeps its
-real line breaks. A byte that is not valid UTF-8 is rendered as `\xNN` of that byte, so a raw C1 introducer off the wire is shown rather than passed through or replaced by U+FFFD. The json rendering is the framework printer's, which spells the C1 block the encoder leaves raw as `\u00NN` escapes; a byte that is not valid UTF-8 reaches the document as U+FFFD, the encoder's documented answer.
+The plain-text rendering escapes every control character visibly — the named C0 ones as `\n`, `\r`, `\t`, every other C0
+one, DEL and the C1 block as `\xNN`, and the Unicode line and paragraph separators as `\uNNNN` — in every string the
+commands did not write themselves — the error text off the wire, the failed statement, the query names, the identity
+block the server answers and the migration names — and it does so before the table cells are measured, so the alignment
+counts the escaped spelling. The failed statement alone keeps its real line breaks. A byte that is not valid UTF-8 is
+rendered as `\xNN` of that byte, so a raw C1 introducer off the wire is shown rather than passed through or replaced by
+U+FFFD. The json rendering is the framework printer's, which spells the C1 block the encoder leaves raw as `\u00NN`
+escapes; a byte that is not valid UTF-8 reaches the document as U+FFFD, the encoder's documented answer.
 
-The verbose `DATABASE` block is answered for MySQL and for PostgreSQL. Over a unix socket — the connection a
-local migration is most likely to take — PostgreSQL reports no server address, so the host reads
-`<local socket>`.
+The verbose `DATABASE` block is answered for MySQL and for PostgreSQL. Over a unix socket — the connection a local migration is most likely to take — PostgreSQL reports no server address, so the host reads `<local socket>`.
 
 All six commands prefer the dedicated migration connection when the registry's provider implements
 `bunorm.MigrationProvider`, and fall back to the ordinary pool otherwise: the request pool carries driver

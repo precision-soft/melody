@@ -667,7 +667,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         nodeKey   string
         value     any
         waveIndex int
-        closer *declaredCloser
+        closer    *declaredCloser
     }
 
     /* the clock starts before the lock: the plan computed under it spends the same budget */

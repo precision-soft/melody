@@ -33,9 +33,7 @@ For convenience, the example ships with a few predefined users:
 - `editor` / `editor` — `ROLE_USER`, `ROLE_EDITOR`
 - `admin` / `admin` — `ROLE_USER`, `ROLE_EDITOR`, `ROLE_ADMIN`
 
-Passwords are stored as **bcrypt hashes** ([`security/password_hasher.go`](./security/password_hasher.go)):
-`security.HashPassword` at seeding and in the user handlers, `security.PasswordMatches`
-(`bcrypt.CompareHashAndPassword`) at login. The hash is salted, so the same password produces a different stored value on every boot; the credentials above are the stable contract, not the bytes in the table.
+Passwords are stored as **bcrypt hashes** ([`security/password_hasher.go`](./security/password_hasher.go)): `security.HashPassword` at seeding and in the user handlers, `security.PasswordMatches` (`bcrypt.CompareHashAndPassword`) at login. The hash is salted, so the same password produces a different stored value on every boot; the credentials above are the stable contract, not the bytes in the table.
 
 **These accounts are seeded into an empty table in every environment, and their passwords are in this README.** They are a development convenience, not accounts to deploy: an application built from this example removes them, or changes their passwords, before it serves anyone. (The third major's example seeds them in development only.)
 
@@ -114,9 +112,7 @@ Cron defaults (user, logs directory, destination file, template, heartbeat) come
 
 ### Live integrations: database, cache and clock
 
-Beside cron, the example wires [`integrations/bunorm`](../../integrations/bunorm/v2/) with its
-[mysql provider](../../integrations/bunorm/mysql/v2/), [`integrations/rueidis`](../../integrations/rueidis/v2/) with its
-[cache backend](../../integrations/rueidis/v2/cache/), and the framework's own [`clock`](../clock/).
+Beside cron, the example wires [`integrations/bunorm`](../../integrations/bunorm/v2/) with its [mysql provider](../../integrations/bunorm/mysql/v2/), [`integrations/rueidis`](../../integrations/rueidis/v2/) with its [cache backend](../../integrations/rueidis/v2/cache/), and the framework's own [`clock`](../clock/).
 
 Each one is gated on an endpoint parameter, and an unset endpoint leaves the integration unwired: no service, nothing dialled, and the nomenclature falls back to what it can reach inside the process. That is what keeps the example bootable with no containers at all. The endpoints ship in [`.env`](./.env) pointing at the docker-compose service names, and a configured-but-unreachable redis endpoint is a warning rather than a boot failure, while the database is dialled on first use, so an unreachable one refuses the first request or command that reaches a repository rather than the boot; `go run .` works on a laptop.
 
@@ -147,15 +143,13 @@ Beside the integrations, the example wires several framework doors that need no 
 | secure session cookie | `APP_SESSION_COOKIE_SECURE`  | `always` marks the session cookie `Secure` on every response through the kernel's session cookie policy ([`config/session_cookie.go`](./config/session_cookie.go)), for a proxy that terminates tls from outside the private ranges the forwarded scheme is believed from. Empty or `from-scheme` keeps the scheme's answer; any other value refuses the boot                                                                              |
 | static cache          | `MELODY_STATIC_ENABLE_CACHE` | the framework's static file server with its validators armed (`.env` ships `true` and `MELODY_STATIC_CACHE_MAX_AGE=3600`): assets answer with a strong `ETag`, `Last-Modified` and `Cache-Control: public, max-age=3600`, a replayed validator is answered `304`, and `If-None-Match` silences `If-Modified-Since`, as the precedence demands                                                                                              |
 
-The session token resolver ([`security/session_token_resolver.go`](./security/session_token_resolver.go))
-accepts the role list in the two spellings a session can carry: the `[]string` the login handler writes, and the `[]any` the file storage answers after a restart — its snapshot round-trips through json, which keeps no element type.
+The session token resolver ([`security/session_token_resolver.go`](./security/session_token_resolver.go)) accepts the role list in the two spellings a session can carry: the `[]string` the login handler writes, and the `[]any` the file storage answers after a restart — its snapshot round-trips through json, which keeps no element type.
 
 ### The migration set
 
 The schema is owned by one migration set in [`migration/`](./migration/) — a single mysql DDL migration holding the six tables, the journal and the session index among them, and the unique key on the folded spelling of a username, which is what holds a name against two callers that pass the repository's read-then-write check at the same moment (they answer `201` and `400`); the primary key holds a supplied product `id` the same way, and a create on an `id` another product holds answers `409`: this major keeps the journal on the same connection as the catalogue, where v1 gives it a second database on postgres. The set is one migration because this application has no history — an example has one state, the present one, so its schema is the statement of that state rather than the record of how it got there, and a database left in an older shape is answered by `example:db:reset` rather than by a step that repairs its past. Two doors run the set, so neither can drift from the other:
 
-- the **repository providers** call `migration.EnsureMigrated` at first resolution, and the four catalogue providers then seed an empty table. That is what keeps a freshly recreated volume usable with no operator step — the tables appear when the first request reaches a repository — and it is why every `CREATE TABLE`
-  carries `IF NOT EXISTS`: several processes of the example may apply the set at the same time, serialized by bun's migration lock with a bounded retry — the retry also outlives a refusal a retry can heal, a lock wait timeout, a deadlock or a dropped connection, while a refusal no wait heals, a missing grant, is answered at once;
+- the **repository providers** call `migration.EnsureMigrated` at first resolution, and the four catalogue providers then seed an empty table. That is what keeps a freshly recreated volume usable with no operator step — the tables appear when the first request reaches a repository — and it is why every `CREATE TABLE` carries `IF NOT EXISTS`: several processes of the example may apply the set at the same time, serialized by bun's migration lock with a bounded retry — the retry also outlives a refusal a retry can heal, a lock wait timeout, a deadlock or a dropped connection, while a refusal no wait heals, a missing grant, is answered at once;
 - the **`db:*` command family** (`db:init`, `db:migrate`, `db:rollback`, `db:status`, `db:unlock`, `db:create`)
   runs the same set from the operator's side. It comes from the
   [`integrations/bunorm/migrate`](../../integrations/bunorm/migrate/v2/) module facade registered in
@@ -211,8 +205,7 @@ Once started, open the application in your browser:
 
 - http://localhost:8080
 
-The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. It is public on purpose: everything else in the example falls under the
-`^/` catch-all rule of [`config/security.go`](./config/security.go), so a probe that had to authenticate would be answered with a `401` (or, for a client whose `Accept` prefers HTML, a redirect to the login page) instead of the readiness of the process.
+The application also answers `GET /health` without a session, which is the route a monitoring system or a container orchestrator probes. It is public on purpose: everything else in the example falls under the `^/` catch-all rule of [`config/security.go`](./config/security.go), so a probe that had to authenticate would be answered with a `401` (or, for a client whose `Accept` prefers HTML, a redirect to the login page) instead of the readiness of the process.
 
 ### Frontend bundle
 
@@ -263,8 +256,7 @@ cd v2/.example
 go run . melody:cron:run --once
 ```
 
-The example's own commands (`app:info`, `product:list`, `catalog:journal`, `catalog:report:refresh`) render through the framework's `cli/output` envelope, so each accepts the standard flag set (`--format=table|json|json-pretty`, `--limit`, `--offset`, `--order`, `--quiet`, `--verbose`,
-`--table-width`) and answers one machine-readable document under `--format=json`. For `catalog:journal` the standard `--limit` replaces the flag the command used to declare itself: `0` (the default) answers every entry, newest first.
+The example's own commands (`app:info`, `product:list`, `catalog:journal`, `catalog:report:refresh`) render through the framework's `cli/output` envelope, so each accepts the standard flag set (`--format=table|json|json-pretty`, `--limit`, `--offset`, `--order`, `--quiet`, `--verbose`, `--table-width`) and answers one machine-readable document under `--format=json`. For `catalog:journal` the standard `--limit` replaces the flag the command used to declare itself: `0` (the default) answers every entry, newest first.
 
 ---
 

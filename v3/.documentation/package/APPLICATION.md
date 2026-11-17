@@ -31,8 +31,7 @@ The application boot is split around configuration resolve:
 2. **Resolve**: application configuration is resolved.
 3. **Post-resolve**: modules may register services via [`ServiceModule`](../../application/contract/service_module.go), then request-lifetime services via [`ScopedServiceModule`](../../application/contract/scoped_service_module.go), then register security, event subscribers, HTTP middlewares, HTTP handler decorators, HTTP routes and, last, CLI commands.
 
-This allows HTTP/CLI module code to read resolved configuration values during registration, e.g.
-`kernelInstance.Config().MustGet("my.param").String()`.
+This allows HTTP/CLI module code to read resolved configuration values during registration, e.g. `kernelInstance.Config().MustGet("my.param").String()`.
 
 `Run` is called once per process. It closes the application when it returns, and a second call does not start over: `Boot` answers the kernel it already booted, so a second command runs over the closed container and its closed logger, logging nothing, and in http mode a second `Run` binds the address again. `Boot` and `Close` may be called again and do nothing the second time; `Run` may not, so return from `main` after it.
 

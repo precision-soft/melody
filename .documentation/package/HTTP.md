@@ -71,8 +71,7 @@ These services are typically registered by the application/kernel wiring. Userla
 
 ### Runtime parameter injection
 
-When a controller function declares a parameter of type
-[`runtimecontract.Runtime`](../../runtime/contract), Melody injects the current `runtimeInstance` directly (it is **not** resolved from the scope/container by type).
+When a controller function declares a parameter of type [`runtimecontract.Runtime`](../../runtime/contract), Melody injects the current `runtimeInstance` directly (it is **not** resolved from the scope/container by type).
 
 This allows controllers to access request-scoped state via `runtimeInstance.Scope()` without registering `runtimecontract.Runtime` as a service.
 
@@ -338,8 +337,7 @@ No session row is written for a response the kernel discards because the handler
 A discarded response carries no `Set-Cookie`, so saving a session the client does not already hold would write a row nothing can ever reference: a first-time visitor on a streamed endpoint would leave one unreachable session behind per reconnect. A session the request already names needs no cookie to be reachable and is saved as before. See [`requestNamesSession`](../../http/router_utility.go).
 
 Clearing is only half unaffected. The delete still happens — a cleared session is destroyed whatever the response does — but the expiring cookie never leaves the process: [`SetCookie`](../../http/cookie.go) adds it to the `Response` object, and [`WriteToHttpResponseWriter`](../../http/response_writer.go) is the only place a response's headers are copied onto the writer, which [`writeResponse`](../../http/router_utility.go) returns before reaching on the discard path. **No `Set-Cookie` the framework adds to the `Response` reaches the client on a discarded response**, the `MaxAge: -1` clearing cookie included; only a cookie the streaming handler wrote onto the writer itself, before it committed, does. The client keeps a cookie naming a row that is gone; its next request presents that id, [`Manager.Session`](../../session/manager.go) finds nothing under it, and the kernel hands out a fresh session instead. The values are unreachable either way, so this is not a session that stays
-authenticated — but the stale cookie is only replaced when some later ordinary response emits one, so put a logout on an
-ordinary response rather than on a streamed one.
+authenticated — but the stale cookie is only replaced when some later ordinary response emits one, so put a logout on an ordinary response rather than on a streamed one.
 
 ## Static file serving
 
@@ -364,8 +362,7 @@ The mount **root** is the one path the rule reads generously, and only in the se
 ### Dot-prefixed paths
 
 The file server refuses every request path carrying an element that begins with a dot. `.env`, `.git` and `.htpasswd` are what a deployment keeps beside its files and never means to publish, and the embedded mode packs them into the binary on purpose, because the embed directive spells `all:public` to keep the packed tree faithful to the directory — so both modes need the refusal. One allowance stands: the **first** element below the strip prefix, which itself is never inspected, may name a dot-prefixed directory that appears in the file server's allowed-prefix list, which carries [`DefaultAllowedDotPrefix`](../../http/static/option.go) (`.well-known`) alone out of the box. RFC 8615 publishes the ACME http-01 challenge, `security.txt` and `assetlinks.json` there, and a deployment that renews its certificate through the application would otherwise lose the renewal to the refusal. The allowance never reaches past that first element, so `.well-known/.env` is refused exactly like `/.env`.
-See [
-`hasDotPrefixedPathElement`](../../http/static/utility.go).
+See [`hasDotPrefixedPathElement`](../../http/static/utility.go).
 
 [`FileServerConfig.SetAllowedDotPrefixList`](../../http/static/option.go) replaces the list whole. An entry is compared against the complete first element, and an empty list — or `nil` — refuses every dot-prefixed path, `.well-known` included.
 
