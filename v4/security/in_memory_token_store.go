@@ -1,13 +1,17 @@
 package security
 
 import (
+    "errors"
+    "math"
     "sync"
     "time"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -15,6 +19,9 @@ import (
 
 /* InMemoryTokenStoreConfig is what the in-memory store declares at construction; the zero value is the default. */
 type InMemoryTokenStoreConfig struct {
+    /* MaxEntries bounds the tokens stored at once: at the ceiling, after the lapsed and the revoked ones are swept, Put refuses a token it does not already hold with ErrTokenStoreFull, marked as an infrastructure failure, so a flood never evicts a live token. 100,000 by default, at least 1, unlimited for a store bounded by its tokens' lifetimes alone. RevokeBefore is never refused at the ceiling: the boundaries are bounded by the users, and a refused revocation would be a bypass. */
+    MaxEntries bound.Count
+
     /* RevocationEpochRetention is how long PurgeExpired keeps a revocation boundary after its instant, so it must cover the longest lifetime of a token issued before it: 7 days by default, at least 1s, unlimited for boundaries kept until the process exits, the safe reading when token lifetimes are not bounded, since a boundary dropped early is a revocation bypass. */
     RevocationEpochRetention bound.Duration
 
@@ -23,6 +30,16 @@ type InMemoryTokenStoreConfig struct {
 
     /* Clock is where the issue stamps and the expiries are read; nil is the system clock. */
     Clock clockcontract.Clock
+}
+
+/* ErrTokenStoreFull is in the chain of a Put the in-memory store refused at InMemoryTokenStoreConfig.MaxEntries. */
+var ErrTokenStoreFull = errors.New("the token store is full")
+
+var inMemoryTokenStoreMaxEntriesRule = bound.Rule[int]{
+    Name:              "InMemoryTokenStoreConfig.MaxEntries",
+    Default:           100_000,
+    Minimum:           1,
+    UnlimitedAdmitted: true,
 }
 
 var inMemoryTokenStoreRevocationEpochRetentionRule = bound.Rule[time.Duration]{
@@ -41,6 +58,11 @@ var inMemoryTokenStoreSweepIntervalRule = bound.Rule[time.Duration]{
 
 /* NewInMemoryTokenStore resolves the configuration, panicking on a field below its minimum by name, and builds the store. */
 func NewInMemoryTokenStore(config InMemoryTokenStoreConfig) *InMemoryTokenStore {
+    maxEntries, maxEntriesErr := bound.Resolve(config.MaxEntries, inMemoryTokenStoreMaxEntriesRule)
+    if nil != maxEntriesErr {
+        exception.Panic(exception.FromError(maxEntriesErr))
+    }
+
     retention, retentionErr := bound.Resolve(config.RevocationEpochRetention, inMemoryTokenStoreRevocationEpochRetentionRule)
     if nil != retentionErr {
         exception.Panic(exception.FromError(retentionErr))
@@ -56,9 +78,10 @@ func NewInMemoryTokenStore(config InMemoryTokenStoreConfig) *InMemoryTokenStore 
         clockInstance = clock.NewSystemClock()
     }
 
-    /* 0 is the unlimited retention, the reading PurgeExpired gives it */
+    /* 0 is the unlimited retention and the unlimited ceiling */
     return &InMemoryTokenStore{
         clock:                    clockInstance,
+        maxEntries:               maxEntries.Value,
         entriesByToken:           make(map[string]tokenEntry),
         tokensByUser:             make(map[string]map[string]struct{}),
         epochsByUser:             make(map[string]map[string]time.Time),
@@ -70,6 +93,7 @@ func NewInMemoryTokenStore(config InMemoryTokenStoreConfig) *InMemoryTokenStore 
 
 type InMemoryTokenStore struct {
     clock                    clockcontract.Clock
+    maxEntries               int
     mutex                    sync.RWMutex
     entriesByToken           map[string]tokenEntry
     tokensByUser             map[string]map[string]struct{}
@@ -78,6 +102,41 @@ type InMemoryTokenStore struct {
     sweepInterval            time.Duration
     sweepDisabled            bool
     lastSweep                time.Time
+
+    /* so a store at its ceiling does not walk every entry on each refused Put */
+    earliestExpiry              time.Time
+    boundaryPublishedSinceSweep bool
+}
+
+/* the instants a revocation boundary admits are those the redis store can encode in Unix nanoseconds */
+var (
+    revocationInstantLowerBound = time.Unix(0, 0)
+    revocationInstantUpperBound = time.Unix(0, math.MaxInt64)
+)
+
+func refuseNonUtf8TokenStoreUser(userIdentifier string) error {
+    if false == utf8.ValidString(userIdentifier) {
+        return exception.NewError(
+            "token store user identifier must be valid UTF-8",
+            map[string]any{"userLength": len(userIdentifier)},
+            nil,
+        )
+    }
+
+    return nil
+}
+
+func refuseDoneTokenStoreContext(runtimeInstance runtimecontract.Runtime, door string) error {
+    contextErr := runtimeInstance.Context().Err()
+    if nil == contextErr {
+        return nil
+    }
+
+    return exception.NewError(
+        "token store call refused, the caller's context is done",
+        exceptioncontract.Context{"door": door},
+        exception.MarkInfrastructureFailure(contextErr),
+    )
 }
 
 const (
@@ -99,17 +158,42 @@ type tokenEntry struct {
     expiresAt time.Time
 }
 
-/* Put stores the claims under the ttl, panicking on an absent one and one under a second by the ttl's name; unlimited stores with no expiry. */
-func (instance *InMemoryTokenStore) Put(tokenString string, claims securitycontract.Claims, ttl bound.Duration) {
-    expiry, err := securitycontract.ResolveTokenTtl(ttl)
-    if nil != err {
-        exception.Panic(exception.FromError(err))
+/* Put stores the claims under the ttl, refusing an absent one and one under a second by the ttl's name; unlimited stores with no expiry. The user identifier must be valid UTF-8, as the redis store asks. */
+func (instance *InMemoryTokenStore) Put(
+    runtimeInstance runtimecontract.Runtime,
+    tokenString string,
+    claims securitycontract.Claims,
+    ttl bound.Duration,
+) error {
+    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return runtimeErr
     }
 
-    instance.put(tokenString, claims, expiry)
+    expiry, err := securitycontract.ResolveTokenTtl(ttl)
+    if nil != err {
+        return err
+    }
+
+    if utf8Err := refuseNonUtf8TokenStoreUser(claims.UserIdentifier); nil != utf8Err {
+        return utf8Err
+    }
+
+    if doneErr := refuseDoneTokenStoreContext(runtimeInstance, "Put"); nil != doneErr {
+        return doneErr
+    }
+
+    return instance.put(tokenString, claims, expiry)
 }
 
-func (instance *InMemoryTokenStore) Delete(tokenString string) {
+func (instance *InMemoryTokenStore) Delete(runtimeInstance runtimecontract.Runtime, tokenString string) error {
+    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return runtimeErr
+    }
+
+    if doneErr := refuseDoneTokenStoreContext(runtimeInstance, "Delete"); nil != doneErr {
+        return doneErr
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -119,9 +203,23 @@ func (instance *InMemoryTokenStore) Delete(tokenString string) {
         instance.unindexLocked(entry.claims.UserIdentifier, tokenString)
         delete(instance.entriesByToken, tokenString)
     }
+
+    return nil
 }
 
-func (instance *InMemoryTokenStore) DeleteByUser(userIdentifier string) int {
+func (instance *InMemoryTokenStore) DeleteByUser(runtimeInstance runtimecontract.Runtime, userIdentifier string) (int, error) {
+    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return 0, runtimeErr
+    }
+
+    if utf8Err := refuseNonUtf8TokenStoreUser(userIdentifier); nil != utf8Err {
+        return 0, utf8Err
+    }
+
+    if doneErr := refuseDoneTokenStoreContext(runtimeInstance, "DeleteByUser"); nil != doneErr {
+        return 0, doneErr
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -129,7 +227,7 @@ func (instance *InMemoryTokenStore) DeleteByUser(userIdentifier string) int {
 
     tokens, exists := instance.tokensByUser[userIdentifier]
     if false == exists {
-        return 0
+        return 0, nil
     }
 
     removed := 0
@@ -140,10 +238,18 @@ func (instance *InMemoryTokenStore) DeleteByUser(userIdentifier string) int {
 
     delete(instance.tokensByUser, userIdentifier)
 
-    return removed
+    return removed, nil
 }
 
-func (instance *InMemoryTokenStore) PurgeExpired() int {
+func (instance *InMemoryTokenStore) PurgeExpired(runtimeInstance runtimecontract.Runtime) (int, error) {
+    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return 0, runtimeErr
+    }
+
+    if doneErr := refuseDoneTokenStoreContext(runtimeInstance, "PurgeExpired"); nil != doneErr {
+        return 0, doneErr
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -151,16 +257,15 @@ func (instance *InMemoryTokenStore) PurgeExpired() int {
     purged := instance.purgeStoredTokensLocked(now)
     instance.purgeBoundariesLocked(now)
 
-    return purged
+    return purged, nil
 }
 
-/* sweepWhenDueLocked drops the lapsed and the revoked stored tokens from a write once SweepInterval has passed since the last sweep, or the clock stepped back behind it */
 func (instance *InMemoryTokenStore) sweepWhenDueLocked(now time.Time) {
     if true == instance.sweepDisabled {
         return
     }
 
-    /* a store never swept has a zero instant, so its first write sweeps, over nothing, and starts the interval: building the store reads no clock */
+    /* building the store reads no clock, so its first write sweeps over nothing and starts the interval */
     if elapsed := now.Sub(instance.lastSweep); 0 <= elapsed && elapsed < instance.sweepInterval {
         return
     }
@@ -170,6 +275,7 @@ func (instance *InMemoryTokenStore) sweepWhenDueLocked(now time.Time) {
 
 func (instance *InMemoryTokenStore) purgeStoredTokensLocked(now time.Time) int {
     instance.lastSweep = now
+    instance.boundaryPublishedSinceSweep = false
 
     purged := 0
     for tokenString, entry := range instance.entriesByToken {
@@ -180,7 +286,7 @@ func (instance *InMemoryTokenStore) purgeStoredTokensLocked(now time.Time) int {
         }
     }
 
-    /* a revoked entry is unusable for good, so it leaves before a boundary can: a boundary dropped below must not hand a stored token back */
+    /* a boundary dropped below must not hand a revoked token back */
     for tokenString, entry := range instance.entriesByToken {
         if true == instance.isRevokedLocked(entry.claims) {
             instance.unindexLocked(entry.claims.UserIdentifier, tokenString)
@@ -189,11 +295,27 @@ func (instance *InMemoryTokenStore) purgeStoredTokensLocked(now time.Time) int {
         }
     }
 
+    earliestExpiry := time.Time{}
+    for _, entry := range instance.entriesByToken {
+        if false == entry.expiresAt.IsZero() && (true == earliestExpiry.IsZero() || true == entry.expiresAt.Before(earliestExpiry)) {
+            earliestExpiry = entry.expiresAt
+        }
+    }
+    instance.earliestExpiry = earliestExpiry
+
     return purged
 }
 
+func (instance *InMemoryTokenStore) sweepCanFreeLocked(now time.Time) bool {
+    if true == instance.boundaryPublishedSinceSweep {
+        return true
+    }
+
+    return false == instance.earliestExpiry.IsZero() && true == now.After(instance.earliestExpiry)
+}
+
 func (instance *InMemoryTokenStore) purgeBoundariesLocked(now time.Time) {
-    /* a boundary's life is bound to the retention window alone, never to the user's stored tokens: a stateless JWT is checked against it without being stored */
+    /* a stateless JWT is checked against a boundary without being stored */
     if 0 < instance.revocationEpochRetention {
         horizon := now.Add(-instance.revocationEpochRetention)
         for userIdentifier, boundaries := range instance.epochsByUser {
@@ -230,10 +352,9 @@ func cloneClaims(claims securitycontract.Claims) securitycontract.Claims {
     return cloned
 }
 
-/* maxActorImpersonationDepth bounds the impersonator-chain deep copy, so a cyclic ActorData cannot recurse until the goroutine stack overflows, a fatal error no recover catches. A real chain is a handful of links deep. */
+/* a cyclic ActorData would recurse into a stack overflow no recover catches */
 const maxActorImpersonationDepth = 10000
 
-/* cloneActorData deep-copies an originating actor with its impersonator chain, so a stored or returned actor never aliases the caller's mutable ActorData; a nil carrier clones to nil. */
 func cloneActorData(actor *securitycontract.ActorData) *securitycontract.ActorData {
     return cloneActorDataAtDepth(actor, 0)
 }
@@ -251,7 +372,6 @@ func cloneActorDataAtDepth(actor *securitycontract.ActorData, depth int) *securi
         actorCopy.Attributes = internal.CopyStringMap(actor.Attributes)
     }
 
-    /* at the depth bound the chain is cut, never aliased */
     if depth >= maxActorImpersonationDepth {
         actorCopy.Impersonator = nil
 
@@ -267,6 +387,14 @@ func (instance *InMemoryTokenStore) Lookup(
     runtimeInstance runtimecontract.Runtime,
     tokenString string,
 ) (securitycontract.Claims, bool, error) {
+    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return securitycontract.Claims{}, false, runtimeErr
+    }
+
+    if doneErr := refuseDoneTokenStoreContext(runtimeInstance, "Lookup"); nil != doneErr {
+        return securitycontract.Claims{}, false, doneErr
+    }
+
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
@@ -286,17 +414,42 @@ func (instance *InMemoryTokenStore) Lookup(
     return cloneClaims(entry.claims), true, nil
 }
 
-func (instance *InMemoryTokenStore) RevokeBefore(userIdentifier string, deviceIdentifier string, instant time.Time) {
+func (instance *InMemoryTokenStore) RevokeBefore(
+    runtimeInstance runtimecontract.Runtime,
+    userIdentifier string,
+    deviceIdentifier string,
+    instant time.Time,
+) error {
+    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return runtimeErr
+    }
+
     if "" == userIdentifier {
-        exception.Panic(exception.NewError("token store revocation needs a user identifier", nil, nil))
+        return exception.NewError("token store revocation needs a user identifier", nil, nil)
+    }
+
+    if utf8Err := refuseNonUtf8TokenStoreUser(userIdentifier); nil != utf8Err {
+        return utf8Err
     }
 
     if true == instant.IsZero() {
-        exception.Panic(exception.NewError(
+        return exception.NewError(
             "token store revocation instant is zero",
             map[string]any{"user": userIdentifier},
             nil,
-        ))
+        )
+    }
+
+    if true == instant.Before(revocationInstantLowerBound) || true == instant.After(revocationInstantUpperBound) {
+        return exception.NewError(
+            "token store revocation instant is not representable",
+            map[string]any{"user": userIdentifier, "instant": instant.String()},
+            nil,
+        )
+    }
+
+    if doneErr := refuseDoneTokenStoreContext(runtimeInstance, "RevokeBefore"); nil != doneErr {
+        return doneErr
     }
 
     instance.mutex.Lock()
@@ -312,17 +465,30 @@ func (instance *InMemoryTokenStore) RevokeBefore(userIdentifier string, deviceId
 
     field := revocationField(deviceIdentifier)
     if published, found := boundaries[field]; true == found && false == instant.After(published) {
-        return
+        return nil
     }
 
     boundaries[field] = instant
+    if 0 < len(instance.tokensByUser[userIdentifier]) {
+        instance.boundaryPublishedSinceSweep = true
+    }
+
+    return nil
 }
 
 func (instance *InMemoryTokenStore) RevocationEpoch(
-    _ runtimecontract.Runtime,
+    runtimeInstance runtimecontract.Runtime,
     userIdentifier string,
     deviceIdentifier string,
 ) (time.Time, error) {
+    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return time.Time{}, runtimeErr
+    }
+
+    if doneErr := refuseDoneTokenStoreContext(runtimeInstance, "RevocationEpoch"); nil != doneErr {
+        return time.Time{}, doneErr
+    }
+
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
@@ -355,11 +521,11 @@ func (instance *InMemoryTokenStore) isRevokedLocked(claims securitycontract.Clai
     return false == claims.IssuedAt.After(epoch)
 }
 
-func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontract.Claims, ttl time.Duration) {
+func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontract.Claims, ttl time.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    /* the IssuedAt stamp and the expiry are read in the critical section that inserts the entry, so a RevokeBefore cannot land between the stamp and the insert and revoke a token issued after it */
+    /* stamped under the insert's lock, so a RevokeBefore cannot land between the stamp and the insert */
     now := instance.clock.Now()
 
     instance.sweepWhenDueLocked(now)
@@ -371,12 +537,53 @@ func (instance *InMemoryTokenStore) put(tokenString string, claims securitycontr
         expiresAt = now.Add(ttl)
     }
 
-    if existing, found := instance.entriesByToken[tokenString]; true == found && existing.claims.UserIdentifier != claims.UserIdentifier {
+    existing, found := instance.entriesByToken[tokenString]
+    if false == found {
+        if fullErr := instance.refuseAtTheCeilingLocked(now); nil != fullErr {
+            return fullErr
+        }
+    }
+
+    if true == found && existing.claims.UserIdentifier != claims.UserIdentifier {
         instance.unindexLocked(existing.claims.UserIdentifier, tokenString)
     }
 
     instance.entriesByToken[tokenString] = tokenEntry{claims: cloneClaims(claims), expiresAt: expiresAt}
     instance.indexLocked(claims.UserIdentifier, tokenString)
+
+    /* a token born under a future boundary is already refused, so the ceiling's sweep can free it */
+    if true == instance.isRevokedLocked(claims) {
+        instance.boundaryPublishedSinceSweep = true
+    }
+
+    if false == expiresAt.IsZero() && (true == instance.earliestExpiry.IsZero() || true == expiresAt.Before(instance.earliestExpiry)) {
+        instance.earliestExpiry = expiresAt
+    }
+
+    return nil
+}
+
+func (instance *InMemoryTokenStore) refuseAtTheCeilingLocked(now time.Time) error {
+    if 0 == instance.maxEntries || len(instance.entriesByToken) < instance.maxEntries {
+        return nil
+    }
+
+    if true == instance.sweepCanFreeLocked(now) {
+        instance.purgeStoredTokensLocked(now)
+    }
+
+    if len(instance.entriesByToken) < instance.maxEntries {
+        return nil
+    }
+
+    return exception.NewError(
+        "the token store is full",
+        exceptioncontract.Context{
+            "field":      inMemoryTokenStoreMaxEntriesRule.Name,
+            "maxEntries": instance.maxEntries,
+        },
+        exception.MarkInfrastructureFailure(ErrTokenStoreFull),
+    )
 }
 
 func (instance *InMemoryTokenStore) indexLocked(userIdentifier string, tokenString string) {

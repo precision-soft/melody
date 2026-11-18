@@ -1,8 +1,10 @@
 package security
 
 import (
+    "context"
     "fmt"
     "strings"
+    "sync"
     "testing"
     "time"
 
@@ -13,27 +15,78 @@ import (
 const thirtyTwoByteSecret = "a-secret-of-exactly-32-bytes-ok!"
 
 type customHmacSecretProvider struct {
-    secret []byte
+    secret          []byte
+    keyId           string
+    application     string
+    currentKeyIdErr error
+    secretErr       error
+    applicationErr  error
+    mutex           sync.Mutex
+    seenContexts    []context.Context
 }
 
-func (instance *customHmacSecretProvider) CurrentKeyId() string {
-    return "key-custom"
+func (instance *customHmacSecretProvider) record(ctx context.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.seenContexts = append(instance.seenContexts, ctx)
 }
 
-func (instance *customHmacSecretProvider) Secret(keyId string) ([]byte, bool) {
-    if "key-custom" != keyId {
-        return nil, false
+func (instance *customHmacSecretProvider) contextsSeen() []context.Context {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]context.Context{}, instance.seenContexts...)
+}
+
+func (instance *customHmacSecretProvider) currentKeyIdValue() string {
+    if "" == instance.keyId {
+        return "key-custom"
     }
 
-    return append([]byte{}, instance.secret...), true
+    return instance.keyId
 }
 
-func (instance *customHmacSecretProvider) ApplicationForKeyId(keyId string) (string, bool) {
-    if "key-custom" != keyId {
-        return "", false
+func (instance *customHmacSecretProvider) CurrentKeyId(ctx context.Context) (string, error) {
+    instance.record(ctx)
+
+    if nil != instance.currentKeyIdErr {
+        return "", instance.currentKeyIdErr
     }
 
-    return "wms-service", true
+    return instance.currentKeyIdValue(), nil
+}
+
+func (instance *customHmacSecretProvider) Secret(ctx context.Context, keyId string) ([]byte, bool, error) {
+    instance.record(ctx)
+
+    if nil != instance.secretErr {
+        return nil, false, instance.secretErr
+    }
+
+    if instance.currentKeyIdValue() != keyId {
+        return nil, false, nil
+    }
+
+    return append([]byte{}, instance.secret...), true, nil
+}
+
+func (instance *customHmacSecretProvider) ApplicationForKeyId(ctx context.Context, keyId string) (string, bool, error) {
+    instance.record(ctx)
+
+    if nil != instance.applicationErr {
+        return "", false, instance.applicationErr
+    }
+
+    if instance.currentKeyIdValue() != keyId {
+        return "", false, nil
+    }
+
+    if "" != instance.application {
+        return instance.application, true, nil
+    }
+
+    return "wms-service", true, nil
 }
 
 func expectShortSecretRefusal(t *testing.T, field string, secretLength int, minimumLength int, keyId string, callback func()) {
@@ -171,30 +224,30 @@ func TestHmacTokenSource_AShortSecretOfACustomProviderVerifiesNothing(t *testing
 }
 
 func TestHmacEnvelopeSigner_RefusesToSignWithAShortSecret(t *testing.T) {
-    expectShortSecretRefusal(t, "HmacEnvelopeSignerConfig.Secrets", 19, 32, "key-custom", func() {
-        NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "wms-service", Secrets: &customHmacSecretProvider{secret: []byte("short-custom-secret")}})
+    expectShortSecretRefusal(t, "NewHmacEnvelopeSigner.secrets", 19, 32, "key-custom", func() {
+        NewHmacEnvelopeSigner(context.Background(), &customHmacSecretProvider{secret: []byte("short-custom-secret")}, HmacEnvelopeSignerConfig{Application: "wms-service"})
     })
 
     rotatingProvider := &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret)}
-    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "wms-service", Secrets: rotatingProvider})
+    signer := NewHmacEnvelopeSigner(context.Background(), rotatingProvider, HmacEnvelopeSignerConfig{Application: "wms-service"})
     rotatingProvider.secret = []byte("short-custom-secret")
 
-    headerValue, signErr := signer.Sign("GET", "/internal", nil, nil)
+    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, nil)
     if "" != headerValue {
         t.Fatalf("expected nothing signed, got %q", headerValue)
     }
 
     refusal, isRefusal := signErr.(*exception.Error)
-    if false == isRefusal || "HmacEnvelopeSignerConfig.Secrets" != refusal.Context()["field"] || "key-custom" != refusal.Context()["keyId"] || 19 != refusal.Context()["secretLength"] {
+    if false == isRefusal || "NewHmacEnvelopeSigner.secrets" != refusal.Context()["field"] || "key-custom" != refusal.Context()["keyId"] || 19 != refusal.Context()["secretLength"] {
         t.Fatalf("expected the short secret refused naming the field and the key id, got %v", signErr)
     }
 
-    longSigner := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "wms-service", Secrets: &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret)}})
-    if _, longErr := longSigner.Sign("GET", "/internal", nil, nil); nil != longErr {
+    longSigner := NewHmacEnvelopeSigner(context.Background(), &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret)}, HmacEnvelopeSignerConfig{Application: "wms-service"})
+    if _, longErr := longSigner.Sign(newTestRuntime(), "GET", "/internal", nil, nil); nil != longErr {
         t.Fatalf("expected a 32-byte secret to sign, got %v", longErr)
     }
 
     expectPanicNamingField(t, "HmacEnvelopeSignerConfig.MinimumSecretLength", func() {
-        NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "wms-service", Secrets: hmacTestSecrets(), MinimumSecretLength: bound.UnlimitedCount()})
+        NewHmacEnvelopeSigner(context.Background(), hmacTestSecrets(), HmacEnvelopeSignerConfig{Application: "wms-service", MinimumSecretLength: bound.UnlimitedCount()})
     })
 }

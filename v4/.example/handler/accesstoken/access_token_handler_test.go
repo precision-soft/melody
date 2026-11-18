@@ -13,6 +13,7 @@ import (
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
+    melodybound "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodyconfig "github.com/precision-soft/melody/v4/config"
@@ -42,6 +43,7 @@ type accessTokenDoorCall struct {
     body           string
     userIdentifier string
     tokenStore     melodysecuritycontract.EpochRevocableTokenStore
+    handlerErr     *error
 }
 
 func callAccessTokenDoor(t *testing.T, call accessTokenDoorCall) int {
@@ -102,6 +104,10 @@ func callAccessTokenDoor(t *testing.T, call accessTokenDoorCall) int {
     )
 
     response, handlerErr := call.handler(runtimeInstance, httptest.NewRecorder(), request)
+    if nil != call.handlerErr {
+        *call.handlerErr = handlerErr
+    }
+
     if nil != handlerErr {
         return nethttp.StatusInternalServerError
     }
@@ -151,6 +157,7 @@ const defaultTestDeviceIdentifierMaximumBytes = 64
 type lookupFailingTokenStore struct {
     *melodysecurity.InMemoryTokenStore
     lookupErr    error
+    deleteErr    error
     deletedCount int
 }
 
@@ -158,9 +165,79 @@ func (instance *lookupFailingTokenStore) Lookup(runtimeInstance melodyruntimecon
     return melodysecuritycontract.Claims{}, false, instance.lookupErr
 }
 
-func (instance *lookupFailingTokenStore) Delete(tokenString string) {
+func (instance *lookupFailingTokenStore) Delete(runtimeInstance melodyruntimecontract.Runtime, tokenString string) error {
     instance.deletedCount++
-    instance.InMemoryTokenStore.Delete(tokenString)
+
+    if nil != instance.deleteErr {
+        return instance.deleteErr
+    }
+
+    return instance.InMemoryTokenStore.Delete(runtimeInstance, tokenString)
+}
+
+type putFailingTokenStore struct {
+    *melodysecurity.InMemoryTokenStore
+    putErr error
+}
+
+func (instance *putFailingTokenStore) Put(_ melodyruntimecontract.Runtime, _ string, _ melodysecuritycontract.Claims, _ melodybound.Duration) error {
+    return instance.putErr
+}
+
+func heldTokens(t *testing.T, store melodysecuritycontract.RevocableTokenStore, userIdentifier string) int {
+    t.Helper()
+
+    held, deleteErr := store.DeleteByUser(accessTokenTestRuntime(), userIdentifier)
+    if nil != deleteErr {
+        t.Fatalf("delete by user: %v", deleteErr)
+    }
+
+    return held
+}
+
+func accessTokenTestRuntime() melodyruntimecontract.Runtime {
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+
+    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+}
+
+func TestIssueHandler_AFailedLookupOverAStoreThatCannotDeleteStillAnswersTheLookupError(t *testing.T) {
+    lookupErr := errors.New("lookup unavailable")
+    deleteErr := errors.New("delete unavailable")
+    tokenStore := &lookupFailingTokenStore{InMemoryTokenStore: melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{}), lookupErr: lookupErr, deleteErr: deleteErr}
+
+    var handlerErr error
+    callAccessTokenDoor(t, accessTokenDoorCall{
+        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        path:           "/access-token/issue/",
+        body:           `{"deviceIdentifier":"phone"}`,
+        userIdentifier: "user-2",
+        tokenStore:     tokenStore,
+        handlerErr:     &handlerErr,
+    })
+
+    if false == errors.Is(handlerErr, lookupErr) || true == errors.Is(handlerErr, deleteErr) || 1 != tokenStore.deletedCount {
+        t.Fatalf("expected the lookup error answered after one failed delete, got %v after %d deletes", handlerErr, tokenStore.deletedCount)
+    }
+}
+
+func TestIssueHandler_AFailedPutIsReturned(t *testing.T) {
+    putErr := errors.New("put unavailable")
+    tokenStore := &putFailingTokenStore{InMemoryTokenStore: melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{}), putErr: putErr}
+
+    var handlerErr error
+    callAccessTokenDoor(t, accessTokenDoorCall{
+        handler:        IssueHandler(defaultTestDeviceIdentifierMaximumBytes),
+        path:           "/access-token/issue/",
+        body:           `{"deviceIdentifier":"phone"}`,
+        userIdentifier: "user-2",
+        tokenStore:     tokenStore,
+        handlerErr:     &handlerErr,
+    })
+
+    if false == errors.Is(handlerErr, putErr) {
+        t.Fatalf("expected the failed put returned, got %v", handlerErr)
+    }
 }
 
 func TestIssueHandler_TakesBackATokenWhoseAccountIsGoneAfterTheWrite(t *testing.T) {
@@ -169,7 +246,7 @@ func TestIssueHandler_TakesBackATokenWhoseAccountIsGoneAfterTheWrite(t *testing.
         t.Fatalf("expected a gone account answered 401, got %d", status)
     }
 
-    if left := tokenStore.DeleteByUser("user-9"); 0 != left {
+    if left := heldTokens(t, tokenStore, "user-9"); 0 != left {
         t.Fatalf("expected no token left for the gone account, found %d", left)
     }
 
@@ -178,7 +255,7 @@ func TestIssueHandler_TakesBackATokenWhoseAccountIsGoneAfterTheWrite(t *testing.
         t.Fatalf("expected an existing account issued its token with 201, got %d", status)
     }
 
-    if held := tokenStore.DeleteByUser("user-2"); 1 != held {
+    if held := heldTokens(t, tokenStore, "user-2"); 1 != held {
         t.Fatalf("expected the existing account to hold the one token issued, found %d", held)
     }
 }
@@ -189,7 +266,7 @@ func TestIssueHandler_RefusesADeviceIdentifierPastTheBound(t *testing.T) {
         t.Fatalf("expected an identifier past the bound refused with 400, got %d", status)
     }
 
-    if held := tokenStore.DeleteByUser("user-2"); 0 != held {
+    if held := heldTokens(t, tokenStore, "user-2"); 0 != held {
         t.Fatalf("expected no token stored for a refused identifier, found %d", held)
     }
 }
@@ -256,7 +333,7 @@ func TestIssueHandler_DeletesTheTokenWhenTheLookupFails(t *testing.T) {
         t.Fatalf("expected a failed lookup answered as an error, got %d", status)
     }
 
-    if 1 != tokenStore.deletedCount || 0 != tokenStore.DeleteByUser("user-2") {
+    if 1 != tokenStore.deletedCount || 0 != heldTokens(t, tokenStore, "user-2") {
         t.Fatalf("expected the minted token deleted once, deleted %d", tokenStore.deletedCount)
     }
 }
@@ -275,7 +352,7 @@ func TestIssueHandler_DeletesTheTokenWhenTheLookupFindsNothing(t *testing.T) {
         t.Fatalf("expected a lookup that found nothing answered 500, got %d", status)
     }
 
-    if 1 != tokenStore.deletedCount || 0 != tokenStore.DeleteByUser("user-2") {
+    if 1 != tokenStore.deletedCount || 0 != heldTokens(t, tokenStore, "user-2") {
         t.Fatalf("expected the minted token deleted once, deleted %d", tokenStore.deletedCount)
     }
 }
@@ -292,5 +369,22 @@ func TestRevokeUserHandler_RefusesAnIdentifierNoKeyCanCarry(t *testing.T) {
     })
     if nethttp.StatusBadRequest != status {
         t.Fatalf("expected an identifier no key can carry refused with 400, got %d", status)
+    }
+}
+
+func TestWithdrawMintedToken_ACancelledRequestStillWithdrawsTheToken(t *testing.T) {
+    store := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
+    if putErr := store.Put(accessTokenTestRuntime(), "minted", melodysecuritycontract.Claims{UserIdentifier: "user-9"}, melodybound.UnlimitedDuration()); nil != putErr {
+        t.Fatalf("put: %v", putErr)
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+
+    withdrawMintedToken(melodyruntime.New(cancelledContext, containerInstance.NewScope(), containerInstance), store, "minted")
+
+    if _, found, _ := store.Lookup(accessTokenTestRuntime(), "minted"); true == found {
+        t.Fatalf("expected the minted token withdrawn although the request was cancelled")
     }
 }

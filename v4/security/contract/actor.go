@@ -30,9 +30,9 @@ type ActorImpersonating interface {
 
 /* ActorData is the serializable carrier for an originating actor inside Claims, rebuilt into a concrete Actor when a token is constructed. Impersonator, when set, is the admin acting behind this actor. */
 type ActorData struct {
-    Identifier   string            `json:"Identifier"`
-    Type         string            `json:"Type"`
-    Roles        []string          `json:"Roles,omitempty"`
-    Attributes   map[string]string `json:"Attributes,omitempty"`
-    Impersonator *ActorData        `json:"Impersonator,omitempty"`
+    Identifier   string            `json:"identifier"`
+    Type         string            `json:"type"`
+    Roles        []string          `json:"roles,omitempty"`
+    Attributes   map[string]string `json:"attributes,omitempty"`
+    Impersonator *ActorData        `json:"impersonator,omitempty"`
 }

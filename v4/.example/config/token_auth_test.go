@@ -18,7 +18,13 @@ type fixedRevocationEpochStore struct {
     epoch time.Time
 }
 
-func (instance fixedRevocationEpochStore) RevokeBefore(userIdentifier string, deviceIdentifier string, instant time.Time) {
+func (instance fixedRevocationEpochStore) RevokeBefore(
+    _ melodyruntimecontract.Runtime,
+    _ string,
+    _ string,
+    _ time.Time,
+) error {
+    return nil
 }
 
 func (instance fixedRevocationEpochStore) RevocationEpoch(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string, deviceIdentifier string) (time.Time, error) {

@@ -102,7 +102,7 @@ type exampleContainerDescription struct {
     TypeName string `json:"typeName"`
 }
 
-/* exampleProcessServiceInventoryOf answers the inventory one major's example is held to: the rows name their module path, and the fourth major's integration module adds the cipher as a service of its own */
+/* exampleProcessServiceInventoryOf answers the inventory one major's example is held to: the rows name their module path, and the fourth major adds the cipher of its integration module and the internal-auth signer, whose judged key id is kept under its lock */
 func exampleProcessServiceInventoryOf(major exampleMajor) map[string]processServiceClassification {
     inventory := make(map[string]processServiceClassification, len(exampleProcessServiceInventory)+1)
     for serviceName, classification := range exampleProcessServiceInventory {
@@ -111,6 +111,7 @@ func exampleProcessServiceInventoryOf(major exampleMajor) map[string]processServ
 
     if 4 == major.number {
         inventory["service.encrypt.cipher"] = processServiceClassification{typeName: "*encrypt.aes256Cipher", category: processServiceStore}
+        inventory["service.example.internal_auth.signer"] = processServiceClassification{typeName: "*security.HmacEnvelopeSigner", category: processServiceStore}
     }
 
     return inventory

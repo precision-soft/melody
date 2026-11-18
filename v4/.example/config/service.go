@@ -59,6 +59,8 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
 
     instance.registerServerSentEventHubService(registrar)
 
+    instance.registerInternalAuthSignerService(registrar)
+
     instance.registerSessionStorage(registrar)
 
     /* the token store's namespace on redis, which example:db:reset empties; without redis the store is the server process's own memory and has none */

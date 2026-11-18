@@ -12,9 +12,12 @@ import (
     "time"
 
     melodyconfig "github.com/precision-soft/melody/v4/config"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
@@ -124,4 +127,10 @@ func recoveredRefusal(t *testing.T, step func()) (refusal error) {
     step()
 
     return nil
+}
+
+func configTestRuntime() melodyruntimecontract.Runtime {
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+
+    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }

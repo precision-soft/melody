@@ -431,7 +431,7 @@ func TestJwtTokenValidator_UnderAStoreTheFutureIssuedAtToleratesTheSkewNotTheLee
     frozen := clock.NewFrozenClock(time.Unix(1000, 0))
 
     store := &revocationEpochStoreStub{}
-    store.RevokeBefore("alice", "", time.Unix(1000, 0))
+    store.RevokeBefore(newTestRuntime(), "alice", "", time.Unix(1000, 0))
 
     for _, testCase := range []struct {
         name     string
@@ -505,12 +505,19 @@ type revocationEpochStoreStub struct {
     askedDevice string
 }
 
-func (instance *revocationEpochStoreStub) RevokeBefore(userIdentifier string, deviceIdentifier string, instant time.Time) {
+func (instance *revocationEpochStoreStub) RevokeBefore(
+    _ runtimecontract.Runtime,
+    userIdentifier string,
+    deviceIdentifier string,
+    instant time.Time,
+) error {
     if nil == instance.epochs {
         instance.epochs = map[string]time.Time{}
     }
 
     instance.epochs[userIdentifier+"|"+deviceIdentifier] = instant
+
+    return nil
 }
 
 func (instance *revocationEpochStoreStub) RevocationEpoch(
@@ -585,7 +592,7 @@ func TestJwtTokenValidator_RefusesATokenIssuedBeforeTheBoundary(t *testing.T) {
     boundary := time.Now().Add(-time.Minute)
 
     store := &revocationEpochStoreStub{}
-    store.RevokeBefore("alice", "", boundary)
+    store.RevokeBefore(newTestRuntime(), "alice", "", boundary)
 
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: store})
 
@@ -615,7 +622,7 @@ func TestJwtTokenValidator_DeviceBoundarySparesAnotherDevice(t *testing.T) {
     boundary := time.Now().Add(-time.Minute)
 
     store := &revocationEpochStoreStub{}
-    store.RevokeBefore("alice", "phone", boundary)
+    store.RevokeBefore(newTestRuntime(), "alice", "phone", boundary)
 
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, DeviceClaim: "device_id", RevocationEpochStore: store})
 
@@ -718,7 +725,7 @@ func TestJwtTokenValidator_SecondGranularIssuedAtNeedsTheSkewAllowanceToBeRefuse
     boundary := issuance.Add(500 * time.Millisecond)
 
     store := &revocationEpochStoreStub{}
-    store.RevokeBefore("alice", "", boundary)
+    store.RevokeBefore(newTestRuntime(), "alice", "", boundary)
 
     token := signJwtHs256(secret, map[string]any{
         "sub": "alice",
@@ -743,7 +750,7 @@ func TestJwtTokenValidator_RevocationEpochSkewCoversAnAheadIssuer(t *testing.T) 
     boundary := time.Now().Add(-5 * time.Minute)
 
     store := &revocationEpochStoreStub{}
-    store.RevokeBefore("alice", "", boundary)
+    store.RevokeBefore(newTestRuntime(), "alice", "", boundary)
 
     aheadIssuance := boundary.Add(20 * time.Second)
     token := signJwtHs256(secret, map[string]any{
@@ -827,7 +834,7 @@ func TestJwtTokenValidator_TheDefaultLeewayDoesNotWidenTheRevocationBoundary(t *
     boundary := time.Unix(1000, 0)
 
     store := &revocationEpochStoreStub{}
-    store.RevokeBefore("alice", "", boundary)
+    store.RevokeBefore(newTestRuntime(), "alice", "", boundary)
 
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, RevocationEpochStore: store, Clock: clock.NewFrozenClock(time.Unix(1010, 0))})
 
@@ -970,7 +977,7 @@ func TestJwtTokenValidator_ReadsAFractionalIssuedAtDownAtTheRevocationBoundary(t
     secret := []byte("secret-padded-to-the-hs256-minimum")
 
     store := &revocationEpochStoreStub{}
-    store.RevokeBefore("alice", "", time.Unix(999, 700_000_000))
+    store.RevokeBefore(newTestRuntime(), "alice", "", time.Unix(999, 700_000_000))
 
     validator := NewJwtTokenValidator(JwtConfig{Secret: secret, Clock: clock.NewFrozenClock(time.Unix(1000, 900_000_000)), RevocationEpochStore: store})
 
@@ -1000,7 +1007,7 @@ func TestJwtTokenValidator_RevocationRefusalInsideTheSkewNamesTheBoundaryAndCarr
     boundary := time.Now().Add(-5 * time.Minute).Truncate(time.Second)
 
     store := &revocationEpochStoreStub{}
-    store.RevokeBefore("alice", "", boundary)
+    store.RevokeBefore(newTestRuntime(), "alice", "", boundary)
 
     insideTheSkew := boundary.Add(20 * time.Second)
     token := signJwtHs256(secret, map[string]any{

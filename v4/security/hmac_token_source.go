@@ -143,13 +143,24 @@ func (instance *HmacTokenSource) Resolve(
         return NewAnonymousToken(), nil
     }
 
-    envelope, keyId, decodeErr := decodeHmacHeaderValue(headerValue, instance.secrets, instance.minimumSecretLength)
+    envelope, keyId, decodeErr := decodeHmacHeaderValue(runtimeInstance, headerValue, instance.secrets, instance.minimumSecretLength)
     if nil != decodeErr {
         return instance.reject(runtimeInstance, decodeErr)
     }
 
-    /* the key id must be issued to the application the envelope claims, or any holder of a valid secret could impersonate another application */
-    boundApplication, keyBound := instance.secrets.ApplicationForKeyId(keyId)
+    /* otherwise any holder of a valid secret could impersonate another application */
+    boundApplication, keyBound, boundErr := instance.secrets.ApplicationForKeyId(runtimeInstance.Context(), keyId)
+    if nil != boundErr {
+        return instance.reject(
+            runtimeInstance,
+            exception.NewError(
+                "internal-auth secret provider failed",
+                map[string]any{"keyId": internal.BoundDiagnosticText(keyId)},
+                exception.MarkInfrastructureFailure(boundErr),
+            ),
+        )
+    }
+
     if false == keyBound || boundApplication != envelope.Application {
         return instance.reject(
             runtimeInstance,
@@ -161,7 +172,18 @@ func (instance *HmacTokenSource) Resolve(
         )
     }
 
-    roles, applicationKnown := instance.applications.RolesForApplication(envelope.Application)
+    roles, applicationKnown, rolesErr := instance.applications.RolesForApplication(runtimeInstance, envelope.Application)
+    if nil != rolesErr {
+        return instance.reject(
+            runtimeInstance,
+            exception.NewError(
+                "internal-auth application registry failed",
+                map[string]any{"application": internal.BoundDiagnosticText(envelope.Application)},
+                exception.MarkInfrastructureFailure(rolesErr),
+            ),
+        )
+    }
+
     if false == applicationKnown {
         return instance.reject(
             runtimeInstance,
@@ -195,7 +217,6 @@ func (instance *HmacTokenSource) Resolve(
 
 func (instance *HmacTokenSource) verifyAudience(envelope hmacEnvelope) error {
     if "" == instance.serviceIdentity {
-        /* audience enforcement is opt-in: with no ServiceIdentity the audience is not checked */
         return nil
     }
 
@@ -217,7 +238,6 @@ func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request h
     }
 
     if nil == httpRequest.URL {
-        /* a request built by hand may carry a nil URL; endpoint verification fails closed on it */
         return exception.NewError("internal-auth request url is nil", nil, nil)
     }
 
@@ -229,10 +249,10 @@ func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request h
         )
     }
 
-    /* the signed path is bound to the spelling the router matched, not to the decoded URL.Path, so an envelope signed for the two-segment "/files/a/b" does not authenticate the one-segment resource "/files/a%2Fb" */
+    /* bound to the routed spelling, so "/files/a/b" does not verify for the one segment "a/b" */
     requestPath := http.RequestPathAsRouted(internal.RequestPathAsSent(httpRequest.URL))
 
-    /* a segment that decodes to a literal "%2F" shares its routed spelling with a separator encoded inside a segment, so the envelope cannot say which of the two resources it names: refused */
+    /* a literal "%2F" shares its routed spelling with an encoded separator, so it cannot be signed */
     if true == internal.RequestPathCarriesLiteralEncodedSeparator(httpRequest.URL) {
         return exception.NewError(
             "internal-auth path carries a literal encoded separator the signed path cannot name",
@@ -250,7 +270,7 @@ func (instance *HmacTokenSource) verifyEndpoint(envelope hmacEnvelope, request h
     }
 
     if envelope.Query != httpRequest.URL.RawQuery {
-        /* only the parameter names reach the log context; the values may be credentials */
+        /* the values may be credentials */
         return exception.NewError(
             "internal-auth query does not match the request",
             map[string]any{
@@ -282,7 +302,7 @@ func (instance *HmacTokenSource) verifyTimeWindow(envelope hmacEnvelope, now tim
     }
 
     if 0 < envelope.IssuedAt {
-        /* IssuedAt carries whole seconds, the signer's instant truncated down, so a receiver whose clock trails the sender's by a millisecond across a second boundary reads the envelope as issued in its future: the claim's own resolution is tolerated on top of the leeway, on this check alone, since the expiry and the nonce ttl are not widened by it */
+        /* IssuedAt is truncated to the second, so a millisecond of skew across a second must pass */
         activation := time.Unix(envelope.IssuedAt, 0).Add(-instance.leeway).Add(-hmacIssuedAtResolution)
         if true == now.Before(activation) {
             return exception.NewError("internal-auth envelope is not yet valid", nil, nil)
@@ -292,7 +312,6 @@ func (instance *HmacTokenSource) verifyTimeWindow(envelope hmacEnvelope, now tim
     return nil
 }
 
-/* hmacIssuedAtResolution is the resolution of an envelope's IssuedAt claim, a count of whole seconds */
 const hmacIssuedAtResolution = time.Second
 
 func (instance *HmacTokenSource) verifyBody(envelope hmacEnvelope, request httpcontract.Request) error {
@@ -320,13 +339,12 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
 
     ttl := time.Unix(envelope.ExpiresAt, 0).Add(instance.leeway).Sub(instance.clock.Now())
     if securitycontract.NonceTtlRule.Minimum > ttl {
-        /* the nonce guard refuses a ttl under its minimum, so an envelope at the edge of the window is refused here, as the envelope's failure rather than the guard's */
+        /* the guard refuses a ttl under its minimum, so this is the envelope's failure, not the guard's */
         return exception.NewError("internal-auth envelope is too close to expiry to guard against replay", nil, nil)
     }
 
     seen, rememberErr := instance.nonceGuard.Remember(runtimeInstance, hmacNonceGuardKey(keyId, envelope.Nonce), bound.Of(ttl))
     if nil != rememberErr {
-        /* the guard failing to answer is the platform's failure, marked so reject logs it as an incident */
         return exception.NewError("internal-auth nonce guard failed", nil, exception.MarkInfrastructureFailure(rememberErr))
     }
 
@@ -337,12 +355,11 @@ func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runt
     return nil
 }
 
-/* hmacNonceGuardKey namespaces the caller-chosen envelope nonce before it reaches the shared NonceGuard. The nonce field is fully controlled by whoever signs the envelope, so recording it verbatim would let a holder of a valid key write into any other component's key space of the same guard — for example the TOTP replay guard, which keys "2fa:<user>:<code>". The key id's length is encoded in front of it because key ids have no charset restriction: with a plain "hmac:<keyId>:<nonce>" join, key ids "a" and "a:b" would let a holder of key "a" sign nonce "b:<n>" and pre-burn key "a:b"'s nonce "<n>", forcing rejection of that key's legitimate requests. */
+/* the nonce is caller-chosen, so it is namespaced away from other users of the shared guard */
 func hmacNonceGuardKey(keyId string, nonce string) string {
     return "hmac:" + strconv.Itoa(len(keyId)) + ":" + keyId + ":" + nonce
 }
 
-/* guardNonceAndBody runs the replay and body-hash checks in the order selected for this request. Nonce-first (the default) lets a captured-but-valid envelope force at most one body buffering, since a replay is rejected before readAndRestoreBody runs; body-first rejects a mismatched body without consuming the nonce, so an on-path party cannot burn a legitimate request's nonce by replaying its header with a mutated body. The signature has already been verified, so only a legitimate envelope ever reaches either check. */
 func (instance *HmacTokenSource) guardNonceAndBody(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
@@ -364,7 +381,6 @@ func (instance *HmacTokenSource) guardNonceAndBody(
     return instance.verifyBody(envelope, request)
 }
 
-/* effectiveVerifyBodyBeforeNonce resolves the per-request override (a bool under HmacVerifyBodyBeforeNonceAttribute, set by a route attribute or SetHmacVerifyBodyBeforeNonce) and falls back to the source's configured default. */
 func (instance *HmacTokenSource) effectiveVerifyBodyBeforeNonce(request httpcontract.Request) bool {
     if override, exists := request.Attributes().Get(HmacVerifyBodyBeforeNonceAttribute); true == exists {
         if value, isBool := override.(bool); true == isBool {
@@ -379,7 +395,6 @@ func (instance *HmacTokenSource) reject(
     runtimeInstance runtimecontract.Runtime,
     cause error,
 ) (securitycontract.Token, error) {
-    /* a guard or a secret provider that cannot answer is the unavailable token, recorded once by the resolution listener; a bad envelope is anonymous */
     if true == exception.IsInfrastructureFailure(cause) {
         return NewUnavailableToken(cause), nil
     }
@@ -392,7 +407,7 @@ func (instance *HmacTokenSource) reject(
     return NewAnonymousToken(), nil
 }
 
-/* readAndRestoreBody reads the full request body so it can be hashed, then replaces the consumed body (and GetBody) with a fresh reader so the downstream handler still sees it. Reading happens only after the envelope signature has already been verified, so an unauthenticated caller can never make the server buffer a body. */
+/* read only after the signature verified, so an unauthenticated caller cannot make the server buffer a body */
 func readAndRestoreBody(httpRequest *nethttp.Request) ([]byte, error) {
     if nil == httpRequest.Body {
         return []byte{}, nil

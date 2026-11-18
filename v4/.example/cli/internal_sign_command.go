@@ -1,6 +1,7 @@
 package cli
 
 import (
+    "context"
     "fmt"
     "strings"
     "time"
@@ -8,18 +9,23 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* NewInternalSignCommand mints the internal-auth (HMAC) header a caller service would send to reach the /internal firewall. It signs with the same shared secret the firewall verifies against, so the printed header authenticates. The signed method/path/body must match the request exactly, so pass the same values to curl. newSigner builds the signer for the envelope lifetime asked with --ttl, absent when the flag is left out so the signer takes its default. */
-func NewInternalSignCommand(newSigner func(ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner) *InternalSignCommand {
-    return &InternalSignCommand{newSigner: newSigner}
+/* NewInternalSignCommand mints the internal-auth (HMAC) header a caller service would send to reach the /internal firewall. It signs with the same shared secret the firewall verifies against, so the printed header authenticates. The signed method/path/body must match the request exactly, so pass the same values to curl. signer is the one built at boot, with the signer's default lifetime; newSigner builds one under the run's context only for the lifetime asked with --ttl. */
+func NewInternalSignCommand(
+    signer *melodycontainer.LazyService[*melodysecurity.HmacEnvelopeSigner],
+    newSigner func(ctx context.Context, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner,
+) *InternalSignCommand {
+    return &InternalSignCommand{signer: signer, newSigner: newSigner}
 }
 
 type InternalSignCommand struct {
-    newSigner func(ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner
+    signer    *melodycontainer.LazyService[*melodysecurity.HmacEnvelopeSigner]
+    newSigner func(ctx context.Context, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner
 }
 
 func (instance *InternalSignCommand) Name() string {
@@ -111,19 +117,12 @@ func (instance *InternalSignCommand) Run(
         )
     }
 
-    ttl := bound.Duration{}
-    if rawTtl := commandContext.String("ttl"); "" != rawTtl {
-        parsedTtl, parseErr := time.ParseDuration(rawTtl)
-        if nil != parseErr || bound.TtlMinimum > parsedTtl {
-            return fmt.Errorf("internal:sign --ttl %q is not a go duration of at least 1s", rawTtl)
-        }
-
-        ttl = bound.Of(parsedTtl)
+    signer, signerErr := instance.signerFor(runtimeInstance, commandContext.String("ttl"))
+    if nil != signerErr {
+        return signerErr
     }
 
-    signer := instance.newSigner(ttl)
-
-    header, signErr := signer.Sign(method, path, body, actor)
+    header, signErr := signer.Sign(runtimeInstance, method, path, body, actor)
     if nil != signErr {
         return signErr
     }
@@ -139,6 +138,19 @@ func (instance *InternalSignCommand) Run(
     return writeErr
 }
 
+func (instance *InternalSignCommand) signerFor(runtimeInstance melodyruntimecontract.Runtime, rawTtl string) (*melodysecurity.HmacEnvelopeSigner, error) {
+    if "" == rawTtl {
+        return instance.signer.Resolve(runtimeInstance.Context())
+    }
+
+    parsedTtl, parseErr := time.ParseDuration(rawTtl)
+    if nil != parseErr || bound.TtlMinimum > parsedTtl {
+        return nil, fmt.Errorf("internal:sign --ttl %q is not a go duration of at least 1s", rawTtl)
+    }
+
+    return instance.newSigner(runtimeInstance.Context(), bound.Of(parsedTtl)), nil
+}
+
 const (
     defaultInternalSignActorRoles      = "ROLE_BUYER"
     defaultInternalSignActorAttributes = "tenant=acme"
@@ -152,7 +164,7 @@ func flagOrDefault(commandContext *melodyclicontract.CommandContext, name string
     return commandContext.String(name)
 }
 
-/* an explicitly empty value is an actor holding no role, distinct from the flag left out, which takes the default */
+/* an empty value is no role, distinct from the flag left out */
 func internalSignActorRoles(value string) ([]string, error) {
     roleList := make([]string, 0)
     if "" == value {
@@ -176,7 +188,7 @@ func internalSignActorRoles(value string) ([]string, error) {
     return roleList, nil
 }
 
-/* an explicitly empty value is an actor holding no attribute, distinct from the flag left out, which takes the default; a key and its value are both trimmed */
+/* an empty value is no attribute, distinct from the flag left out */
 func internalSignActorAttributes(value string) (map[string]string, error) {
     attributes := map[string]string{}
     if "" == value {

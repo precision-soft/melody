@@ -7,17 +7,17 @@ import (
 )
 
 type Claims struct {
-    UserIdentifier string   `json:"UserIdentifier"`
-    Roles          []string `json:"Roles"`
+    UserIdentifier string   `json:"userIdentifier"`
+    Roles          []string `json:"roles"`
 
-    IssuedAt         time.Time `json:"IssuedAt,omitzero"`
-    DeviceIdentifier string    `json:"DeviceIdentifier,omitempty"`
+    IssuedAt         time.Time `json:"issuedAt,omitzero"`
+    DeviceIdentifier string    `json:"deviceIdentifier,omitempty"`
 
-    Scope map[string]any `json:"Scope,omitempty"`
+    Scope map[string]any `json:"scope,omitempty"`
 
-    Attributes map[string]any `json:"Attributes,omitempty"`
+    Attributes map[string]any `json:"attributes,omitempty"`
 
-    OriginatingActor *ActorData `json:"OriginatingActor,omitempty"`
+    OriginatingActor *ActorData `json:"originatingActor,omitempty"`
 }
 
 type TokenValidator interface {

@@ -13,6 +13,7 @@ import (
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodylock "github.com/precision-soft/melody/v4/lock"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodywiring "github.com/precision-soft/melody/v4/wiring"
 )
 
@@ -29,7 +30,10 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
             instance.messageBusTransport,
         ),
         cli.NewAuthenticationTokenCommand(instance.jwtSecret),
-        cli.NewInternalSignCommand(instance.internalAuthSigner),
+        cli.NewInternalSignCommand(
+            melodycontainer.Lazy[*melodysecurity.HmacEnvelopeSigner](kernelInstance.ServiceContainer(), ServiceInternalAuthSigner),
+            instance.internalAuthSigner,
+        ),
         cli.NewTotpCodeCommand(os.Stdin),
         cli.NewMailSendCommand(instance.mailer),
         cli.NewDatabaseResetCommand(),

@@ -1,8 +1,11 @@
 package subscriber
 
 import (
+    "errors"
+
     "github.com/precision-soft/melody/v4/.example/event"
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
+    examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
@@ -13,10 +16,10 @@ import (
 /* AccessTokenStoreSource answers the token store the device tokens of an account live in, with the revocation epochs the bearer firewall reads beside it */
 type AccessTokenStoreSource func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore
 
-/* AccessTokenReleasePriority is the release's place on the deletion event: above every other listener of it. The dispatcher ends a dispatch at the first listener that fails, the release itself included, so a release placed after the two-factor release or the cache listener would be skipped by their outage and leave a deleted account authenticating. The release can fail too: the redis store answers an outage with a panic, which the dispatcher turns into the deletion's error, so the deletion is reported failed with the row already gone, the listeners after the release are skipped, and the tokens it left are refused by the device firewall, which honours a token only while its account exists (see deviceAccountEnricher). */
+/* AccessTokenReleasePriority is the release's place on the deletion event: above every other listener of it. The dispatcher ends a dispatch at the first listener that fails, the release itself included, so a release placed after the two-factor release or the cache listener would be skipped by their outage and leave a deleted account authenticating. The release can fail too: a store outage is the listener's error, so the deletion is reported failed with the row already gone, the listeners after the release are skipped, and the tokens it left are refused by the device firewall, which honours a token only while its account exists (see deviceAccountEnricher). */
 const AccessTokenReleasePriority = 20
 
-/* AccessTokenReleaseSubscriber releases the tokens of an account with the account: a token outlives its account otherwise, and a deleted account keeps its api access until each token expires. It listens where the deletion is published, so every door that deletes an account releases its tokens. Two doors are used, because neither alone is the revocation: DeleteByUser removes the device tokens the store holds, and RevokeBefore at the deletion's instant refuses every token of the account issued up to it — the bearer tokens, which no store holds, and on redis a device token the walk of DeleteByUser missed. A token issued after the deletion is the issue door's to refuse (see the access-token handler). */
+/* AccessTokenReleaseSubscriber releases the tokens of an account with the account: a token outlives its account otherwise, and a deleted account keeps its api access until each token expires. It listens where the deletion is published, so every door that deletes an account releases its tokens. Two doors are used, because neither alone is the revocation: DeleteByUser removes the device tokens the store holds, and RevokeBefore at the deletion's instant refuses every token of the account issued up to it — the bearer tokens, which no store holds, and on redis a device token the walk of DeleteByUser missed. A token issued after the deletion is the issue door's to refuse (see the access-token handler). Both run on a runtime detached from the request's cancellation, so a client that hangs up after the row is gone does not leave the account's tokens honoured. */
 type AccessTokenReleaseSubscriber struct {
     storeSource AccessTokenStoreSource
 }
@@ -41,8 +44,9 @@ func (instance *AccessTokenReleaseSubscriber) onUserDeleted() melodyeventcontrac
         }
 
         store := instance.storeSource(runtimeInstance)
-        store.RevokeBefore(payloadInstance.UserId(), "", eventValue.Timestamp())
-        released := store.DeleteByUser(payloadInstance.UserId())
+        compensationRuntime := examplesecurity.DetachedRuntime(runtimeInstance)
+        revokeErr := store.RevokeBefore(compensationRuntime, payloadInstance.UserId(), "", eventValue.Timestamp())
+        released, releaseErr := store.DeleteByUser(compensationRuntime, payloadInstance.UserId())
         if 0 < released {
             examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Info(
                 "the device tokens of a deleted account were released",
@@ -50,7 +54,7 @@ func (instance *AccessTokenReleaseSubscriber) onUserDeleted() melodyeventcontrac
             )
         }
 
-        return nil
+        return errors.Join(revokeErr, releaseErr)
     }
 }
 

@@ -24,9 +24,9 @@ func TestNewOpaqueTokenValidator_RefusesAStoreItCanNotAsk(t *testing.T) {
 
 func TestOpaqueTokenValidator_ValidateAnswersTheStoredClaims(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
-    store.Put("opaque-123", securitycontract.Claims{UserIdentifier: "u1", Roles: []string{"ROLE_USER"}}, bound.UnlimitedDuration())
+    store.Put(newTestRuntime(), "opaque-123", securitycontract.Claims{UserIdentifier: "u1", Roles: []string{"ROLE_USER"}}, bound.UnlimitedDuration())
 
-    claims, validateErr := NewOpaqueTokenValidator(store).Validate(nil, "opaque-123")
+    claims, validateErr := NewOpaqueTokenValidator(store).Validate(newTestRuntime(), "opaque-123")
     if nil != validateErr {
         t.Fatalf("unexpected error: %v", validateErr)
     }
@@ -37,7 +37,7 @@ func TestOpaqueTokenValidator_ValidateAnswersTheStoredClaims(t *testing.T) {
 }
 
 func TestOpaqueTokenValidator_ValidateRefusesATokenTheStoreDoesNotHold(t *testing.T) {
-    _, validateErr := NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})).Validate(nil, "opaque-nobody-stored")
+    _, validateErr := NewOpaqueTokenValidator(NewInMemoryTokenStore(InMemoryTokenStoreConfig{})).Validate(newTestRuntime(), "opaque-nobody-stored")
     if nil == validateErr || false == strings.Contains(validateErr.Error(), "opaque token was not found") {
         t.Fatalf("expected the not-found refusal, got %v", validateErr)
     }
@@ -46,9 +46,9 @@ func TestOpaqueTokenValidator_ValidateRefusesATokenTheStoreDoesNotHold(t *testin
 /* a stored record with no subject would authenticate a principal nobody can name: the roles would still be granted, and every audit line downstream would carry an empty identifier */
 func TestOpaqueTokenValidator_ValidateRefusesAStoredRecordWithoutASubject(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
-    store.Put("opaque-empty", securitycontract.Claims{UserIdentifier: "", Roles: []string{"ROLE_USER"}}, bound.UnlimitedDuration())
+    store.Put(newTestRuntime(), "opaque-empty", securitycontract.Claims{UserIdentifier: "", Roles: []string{"ROLE_USER"}}, bound.UnlimitedDuration())
 
-    _, validateErr := NewOpaqueTokenValidator(store).Validate(nil, "opaque-empty")
+    _, validateErr := NewOpaqueTokenValidator(store).Validate(newTestRuntime(), "opaque-empty")
     if nil == validateErr || false == strings.Contains(validateErr.Error(), "opaque token has an empty subject") {
         t.Fatalf("expected the empty-subject refusal, got %v", validateErr)
     }
@@ -58,7 +58,7 @@ func TestOpaqueTokenValidator_ValidateRefusesAStoredRecordWithoutASubject(t *tes
 func TestOpaqueTokenValidator_ValidateMarksAStoreFailureAsInfrastructure(t *testing.T) {
     lookupFailure := errors.New("redis is down")
 
-    _, validateErr := NewOpaqueTokenValidator(&failingTokenStore{failure: lookupFailure}).Validate(nil, "opaque-123")
+    _, validateErr := NewOpaqueTokenValidator(&failingTokenStore{failure: lookupFailure}).Validate(newTestRuntime(), "opaque-123")
     if nil == validateErr {
         t.Fatal("expected an unanswerable store to refuse")
     }
@@ -72,7 +72,7 @@ func TestOpaqueTokenValidator_ValidateMarksAStoreFailureAsInfrastructure(t *test
     }
 
     notFoundErr := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
-    _, routineErr := NewOpaqueTokenValidator(notFoundErr).Validate(nil, "opaque-absent")
+    _, routineErr := NewOpaqueTokenValidator(notFoundErr).Validate(newTestRuntime(), "opaque-absent")
     if true == exception.IsInfrastructureFailure(routineErr) {
         t.Fatalf("expected an absent token to stay a routine refusal, got %v", routineErr)
     }

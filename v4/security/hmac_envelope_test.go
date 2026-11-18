@@ -1,6 +1,7 @@
 package security
 
 import (
+    "context"
     "encoding/base64"
     "encoding/json"
     "strings"
@@ -50,7 +51,7 @@ func TestHashBody_HashesTheEmptyBodyToo(t *testing.T) {
 }
 
 func TestEncodeHmacHeaderValue_RoundTripsThroughTheDecoder(t *testing.T) {
-    secret, _ := hmacEnvelopeProbeSecrets().Secret("key-current")
+    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(context.Background(), "key-current")
 
     headerValue, encodeErr := encodeHmacHeaderValue("key-current", hmacEnvelopeProbe(), secret)
     if nil != encodeErr {
@@ -61,7 +62,7 @@ func TestEncodeHmacHeaderValue_RoundTripsThroughTheDecoder(t *testing.T) {
         t.Fatalf("expected three dot-separated parts, got %q", headerValue)
     }
 
-    envelope, keyId, decodeErr := decodeHmacHeaderValue(headerValue, hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
+    envelope, keyId, decodeErr := decodeHmacHeaderValue(newTestRuntime(), headerValue, hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
     if nil != decodeErr {
         t.Fatalf("unexpected decode error: %v", decodeErr)
     }
@@ -77,7 +78,7 @@ func TestEncodeHmacHeaderValue_RoundTripsThroughTheDecoder(t *testing.T) {
 
 /* the decoder fails closed on every structural problem: each of these would otherwise reach the signature comparison or past it with a half-read envelope */
 func TestDecodeHmacHeaderValue_RefusesEveryStructuralDamage(t *testing.T) {
-    secret, _ := hmacEnvelopeProbeSecrets().Secret("key-current")
+    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(context.Background(), "key-current")
     valid, _ := encodeHmacHeaderValue("key-current", hmacEnvelopeProbe(), secret)
     parts := strings.Split(valid, ".")
 
@@ -92,7 +93,7 @@ func TestDecodeHmacHeaderValue_RefusesEveryStructuralDamage(t *testing.T) {
         {name: "header not json", headerValue: base64.RawURLEncoding.EncodeToString([]byte("{")) + "." + parts[1] + "." + parts[2], expected: "internal-auth header is not valid json"},
         {name: "signature not base64url", headerValue: parts[0] + "." + parts[1] + ".not base64!", expected: "internal-auth signature is not valid base64url"},
     } {
-        _, _, decodeErr := decodeHmacHeaderValue(probe.headerValue, hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
+        _, _, decodeErr := decodeHmacHeaderValue(newTestRuntime(), probe.headerValue, hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
         if nil == decodeErr || false == strings.Contains(decodeErr.Error(), probe.expected) {
             t.Fatalf("%s: expected %q, got %v", probe.name, probe.expected, decodeErr)
         }
@@ -101,7 +102,7 @@ func TestDecodeHmacHeaderValue_RefusesEveryStructuralDamage(t *testing.T) {
 
 /* the algorithm and the type are the domain separation: a JSON web token is byte-identical in shape and signs through the same primitive, so without a type of its own the only thing keeping one credential from verifying as the other is the two secrets happening to differ */
 func TestDecodeHmacHeaderValue_RefusesAnyOtherAlgorithmOrType(t *testing.T) {
-    secret, _ := hmacEnvelopeProbeSecrets().Secret("key-current")
+    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(context.Background(), "key-current")
 
     for _, probe := range []struct {
         header   hmacEnvelopeHeader
@@ -120,7 +121,7 @@ func TestDecodeHmacHeaderValue_RefusesAnyOtherAlgorithmOrType(t *testing.T) {
         part1 := base64.RawURLEncoding.EncodeToString(payloadBytes)
         part2 := base64.RawURLEncoding.EncodeToString(signHmacSha256(part0+"."+part1, secret))
 
-        _, _, decodeErr := decodeHmacHeaderValue(part0+"."+part1+"."+part2, hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
+        _, _, decodeErr := decodeHmacHeaderValue(newTestRuntime(), part0+"."+part1+"."+part2, hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
         if nil == decodeErr || false == strings.Contains(decodeErr.Error(), probe.expected) {
             t.Fatalf("%#v: expected %q, got %v", probe.header, probe.expected, decodeErr)
         }
@@ -145,7 +146,7 @@ func TestDecodeHmacHeaderValue_RefusalsBoundTheCallerChosenHeaderFields(t *testi
         part0 := base64.RawURLEncoding.EncodeToString(headerBytes)
         part1 := base64.RawURLEncoding.EncodeToString(payloadBytes)
 
-        _, _, decodeErr := decodeHmacHeaderValue(part0+"."+part1+".c2lnbmF0dXJl", hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
+        _, _, decodeErr := decodeHmacHeaderValue(newTestRuntime(), part0+"."+part1+".c2lnbmF0dXJl", hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
         if nil == decodeErr {
             t.Fatalf("%s: expected the header refused", probe.field)
         }
@@ -159,7 +160,7 @@ func TestDecodeHmacHeaderValue_RefusalsBoundTheCallerChosenHeaderFields(t *testi
 
 /* a signed envelope carrying no typ, or a wrong one, is refused: the typ is what keeps a JSON web token from verifying on this header. */
 func TestDecodeHmacHeaderValue_RefusesAnAbsentTypeAndAWrongOne(t *testing.T) {
-    secret, _ := hmacEnvelopeProbeSecrets().Secret("key-current")
+    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(context.Background(), "key-current")
 
     encode := func(headerType string) string {
         headerBytes, _ := json.Marshal(hmacEnvelopeHeader{Algorithm: hmacEnvelopeAlgorithm, Type: headerType, KeyId: "key-current"})
@@ -172,7 +173,7 @@ func TestDecodeHmacHeaderValue_RefusesAnAbsentTypeAndAWrongOne(t *testing.T) {
     }
 
     for _, headerType := range []string{"", "JWT"} {
-        _, _, decodeErr := decodeHmacHeaderValue(encode(headerType), hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
+        _, _, decodeErr := decodeHmacHeaderValue(newTestRuntime(), encode(headerType), hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
         if nil == decodeErr || false == strings.Contains(decodeErr.Error(), "internal-auth type is not accepted") {
             t.Fatalf("expected the typ %q to be refused, got %v", headerType, decodeErr)
         }
@@ -180,7 +181,7 @@ func TestDecodeHmacHeaderValue_RefusesAnAbsentTypeAndAWrongOne(t *testing.T) {
 }
 
 func TestDecodeHmacHeaderValue_RefusesASignatureOverOtherContent(t *testing.T) {
-    secret, _ := hmacEnvelopeProbeSecrets().Secret("key-current")
+    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(context.Background(), "key-current")
     valid, _ := encodeHmacHeaderValue("key-current", hmacEnvelopeProbe(), secret)
     parts := strings.Split(valid, ".")
 
@@ -188,7 +189,7 @@ func TestDecodeHmacHeaderValue_RefusesASignatureOverOtherContent(t *testing.T) {
     tampered.Path = "/admin"
     tamperedBytes, _ := json.Marshal(tampered)
 
-    _, _, decodeErr := decodeHmacHeaderValue(parts[0]+"."+base64.RawURLEncoding.EncodeToString(tamperedBytes)+"."+parts[2], hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
+    _, _, decodeErr := decodeHmacHeaderValue(newTestRuntime(), parts[0]+"."+base64.RawURLEncoding.EncodeToString(tamperedBytes)+"."+parts[2], hmacEnvelopeProbeSecrets(), minimumHmacSha256SecretLength)
     if nil == decodeErr || false == strings.Contains(decodeErr.Error(), "internal-auth signature mismatch") {
         t.Fatalf("expected a signature mismatch on a swapped payload, got %v", decodeErr)
     }
@@ -200,15 +201,15 @@ func TestDecodeHmacHeaderValue_RefusesASignatureOverOtherContent(t *testing.T) {
         },
     })
 
-    _, _, otherKeyErr := decodeHmacHeaderValue(valid, otherSecrets, minimumHmacSha256SecretLength)
+    _, _, otherKeyErr := decodeHmacHeaderValue(newTestRuntime(), valid, otherSecrets, minimumHmacSha256SecretLength)
     if nil == otherKeyErr || false == strings.Contains(otherKeyErr.Error(), "internal-auth signature mismatch") {
         t.Fatalf("expected a signature mismatch under another secret, got %v", otherKeyErr)
     }
 }
 
 func TestHmacEnvelope_TheWireFieldOfTheApplicationIsApp(t *testing.T) {
-    signer := NewHmacEnvelopeSigner(HmacEnvelopeSignerConfig{Application: "wms-service", Secrets: hmacTestSecrets()})
-    headerValue, signErr := signer.Sign("GET", "/internal/ping", nil, nil)
+    signer := NewHmacEnvelopeSigner(context.Background(), hmacTestSecrets(), HmacEnvelopeSignerConfig{Application: "wms-service"})
+    headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
     if nil != signErr {
         t.Fatalf("expected the envelope to sign, got %v", signErr)
     }

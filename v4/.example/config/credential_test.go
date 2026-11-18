@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "fmt"
     "strings"
     "testing"
@@ -96,19 +97,30 @@ func TestBuildInternalAuth_ReadsTheKeyIdApplicationAndSecretFromConfiguration(t 
     })
     moduleInstance.buildInternalAuth()
 
-    secret, found := moduleInstance.hmacSecrets.Secret("erp-key-7")
-    application, _ := moduleInstance.hmacSecrets.ApplicationForKeyId("erp-key-7")
-    if false == found || "an-operator-chosen-shared-secret" != string(secret) || "erp-service" != application || "erp-key-7" != moduleInstance.hmacSecrets.CurrentKeyId() {
+    secret, found, _ := moduleInstance.hmacSecrets.Secret(context.Background(), "erp-key-7")
+    application, _, _ := moduleInstance.hmacSecrets.ApplicationForKeyId(context.Background(), "erp-key-7")
+    if false == found || "an-operator-chosen-shared-secret" != string(secret) || "erp-service" != application || "erp-key-7" != currentKeyIdOf(t, moduleInstance) {
         t.Fatalf("expected the configured key, got %q %v %q", secret, found, application)
     }
 
-    if _, found := moduleInstance.hmacSecrets.Secret(internalCallerKeyId); true == found {
+    if _, found, _ := moduleInstance.hmacSecrets.Secret(context.Background(), internalCallerKeyId); true == found {
         t.Fatal("expected the committed key id unknown once another is configured")
     }
 
     developmentInstance := moduleWithEnvironment(t, map[string]string{})
     developmentInstance.buildInternalAuth()
-    if developmentInstance.hmacSecrets.CurrentKeyId() != internalCallerKeyId || internalCallerApplication != developmentInstance.internalAuthApplication {
-        t.Fatalf("expected blank names to take the example's own, got %q %q", developmentInstance.hmacSecrets.CurrentKeyId(), developmentInstance.internalAuthApplication)
+    if currentKeyIdOf(t, developmentInstance) != internalCallerKeyId || internalCallerApplication != developmentInstance.internalAuthApplication {
+        t.Fatalf("expected blank names to take the example's own, got %q %q", currentKeyIdOf(t, developmentInstance), developmentInstance.internalAuthApplication)
     }
+}
+
+func currentKeyIdOf(t *testing.T, moduleInstance *Module) string {
+    t.Helper()
+
+    keyId, keyIdErr := moduleInstance.hmacSecrets.CurrentKeyId(context.Background())
+    if nil != keyIdErr {
+        t.Fatalf("current key id: %v", keyIdErr)
+    }
+
+    return keyId
 }

@@ -9,20 +9,20 @@ import (
 
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 const (
     hmacEnvelopeAlgorithm = "HS256"
 
-    /* hmacEnvelopeType is the header typ every envelope is signed under and the only one the decoder accepts: it separates the envelope from the JSON web token, which has the same shape and signs through the same primitive */
+    /* it separates the envelope from a JSON web token of the same shape */
     hmacEnvelopeType = "melody-internal"
 
     /* DefaultHmacHeaderName is the request header the internal-auth envelope is carried on unless a source/signer overrides it. */
     DefaultHmacHeaderName = "X-Melody-Internal-Auth"
 )
 
-/* hmacEnvelope is the signed payload of the internal-auth header, one signature covering every field: Method, Path and Query bind it to one endpoint, Audience optionally to one callee, IssuedAt, ExpiresAt and Nonce bound its lifetime and single use, BodyHash covers the body, and Actor carries the originating actor. */
 type hmacEnvelope struct {
     Application string                      `json:"app"`
     Audience    string                      `json:"audience,omitempty"`
@@ -42,7 +42,6 @@ type hmacEnvelopeHeader struct {
     KeyId     string `json:"kid"`
 }
 
-/* hashBody returns the base64url-encoded SHA-256 of the request body, so an empty body hashes deterministically rather than being skipped. */
 func hashBody(body []byte) string {
     sum := sha256.Sum256(body)
 
@@ -68,8 +67,13 @@ func encodeHmacHeaderValue(keyId string, envelope hmacEnvelope, secret []byte) (
     return part0 + "." + part1 + "." + part2, nil
 }
 
-/* decodeHmacHeaderValue verifies the signature against the secret resolved for the envelope's key id and returns the decoded envelope together with the verified key id, so the caller can check the key id is authorized for the envelope's claimed application. It fails closed on any structural, key-lookup or signature problem, and it requires the envelope's own typ. A resolved secret shorter than minimumSecretLength verifies nothing and is answered as an infrastructure failure: the provider, not the caller, is misconfigured. */
-func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider, minimumSecretLength int) (hmacEnvelope, string, error) {
+/* a short resolved secret is the provider's misconfiguration, answered as an infrastructure failure */
+func decodeHmacHeaderValue(
+    runtimeInstance runtimecontract.Runtime,
+    headerValue string,
+    secrets HmacSecretProvider,
+    minimumSecretLength int,
+) (hmacEnvelope, string, error) {
     parts := strings.Split(headerValue, ".")
     if 3 != len(parts) {
         return hmacEnvelope{}, "", exception.NewError("internal-auth header has an invalid structure", nil, nil)
@@ -93,7 +97,7 @@ func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider, minim
         )
     }
 
-    /* the typ is required: a JSON web token carries none, so it is refused on this header even under a secret provider that resolves the empty key id */
+    /* a JSON web token carries no typ, so it is refused even under a provider resolving the empty key id */
     if hmacEnvelopeType != header.Type {
         return hmacEnvelope{}, "", exception.NewError(
             "internal-auth type is not accepted",
@@ -102,7 +106,15 @@ func decodeHmacHeaderValue(headerValue string, secrets HmacSecretProvider, minim
         )
     }
 
-    secret, secretExists := secrets.Secret(header.KeyId)
+    secret, secretExists, secretErr := secrets.Secret(runtimeInstance.Context(), header.KeyId)
+    if nil != secretErr {
+        return hmacEnvelope{}, "", exception.NewError(
+            "internal-auth secret provider failed",
+            map[string]any{"keyId": internal.BoundDiagnosticText(header.KeyId)},
+            exception.MarkInfrastructureFailure(secretErr),
+        )
+    }
+
     if false == secretExists {
         return hmacEnvelope{}, "", exception.NewError(
             "internal-auth key id is not known",

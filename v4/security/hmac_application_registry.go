@@ -2,11 +2,12 @@ package security
 
 import (
     "github.com/precision-soft/melody/v4/exception"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-/* HmacApplicationRegistry maps a calling application name (as carried by the envelope) to the roles its service principal is granted once the envelope is verified. An application absent from the registry is rejected, so only known callers obtain a token. */
+/* HmacApplicationRegistry maps a calling application name (as carried by the envelope) to the roles its service principal is granted once the envelope is verified. An application absent from the registry, an answer of false, is rejected, so only known callers obtain a token; an error says the registry could not answer, and the verifier answers it as unavailable. */
 type HmacApplicationRegistry interface {
-    RolesForApplication(application string) ([]string, bool)
+    RolesForApplication(runtimeInstance runtimecontract.Runtime, application string) ([]string, bool, error)
 }
 
 func NewStaticHmacApplicationRegistry(rolesByApplication map[string][]string) *StaticHmacApplicationRegistry {
@@ -30,13 +31,17 @@ type StaticHmacApplicationRegistry struct {
     rolesByApplication map[string][]string
 }
 
-func (instance *StaticHmacApplicationRegistry) RolesForApplication(application string) ([]string, bool) {
-    roles, exists := instance.rolesByApplication[application]
-    if false == exists {
-        return nil, false
+func (instance *StaticHmacApplicationRegistry) RolesForApplication(runtimeInstance runtimecontract.Runtime, application string) ([]string, bool, error) {
+    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return nil, false, runtimeErr
     }
 
-    return append([]string{}, roles...), true
+    roles, exists := instance.rolesByApplication[application]
+    if false == exists {
+        return nil, false, nil
+    }
+
+    return append([]string{}, roles...), true, nil
 }
 
 var _ HmacApplicationRegistry = (*StaticHmacApplicationRegistry)(nil)

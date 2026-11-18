@@ -1,20 +1,27 @@
 package config
 
 import (
+    "context"
     "time"
 
+    melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
-/* the internal-auth wiring mirrors the cross-app machine-to-machine story: a caller service (wms-service) signs an HMAC envelope with a shared secret bound to its own key id, and this application verifies it and authenticates the call as the caller's principal (roles from the application registry). The three are configuration — APP_INTERNAL_AUTH_KEY_ID, APP_INTERNAL_AUTH_APP and APP_INTERNAL_AUTH_SECRET —, and the values below are the ones .env commits: a blank key id or application takes them anywhere, since they name the caller and grant nothing, while the secret is a credential and outside development refuses the boot blank or committed. */
+/* ServiceInternalAuthSigner is the caller service's signer, built once at boot with the signer's default envelope lifetime. */
+const ServiceInternalAuthSigner = "service.example.internal_auth.signer"
+
+/* a blank key id or application takes these; the secret is a credential and refuses the boot outside development */
 const (
     internalCallerKeyId       = "wms-key-1"
     internalCallerApplication = "wms-service"
     internalCallerSecret      = "melody-example-internal-shared-secret-0001"
     internalCallerRole        = "ROLE_SERVICE"
 
-    /* internalEnvelopeMaxFutureExpiry is how far past this process's clock an envelope's expiry may sit: the nonce guard remembers each nonce until its envelope expires, so an unbounded horizon lets a caller make the replay memory hold a nonce for as long as it likes */
+    /* the nonce guard holds each nonce until its envelope expires, so the horizon bounds that memory */
     internalEnvelopeMaxFutureExpiry = 5 * time.Minute
 )
 
@@ -37,11 +44,19 @@ func (instance *Module) buildInternalAuth() {
     )
 }
 
-/* internalAuthSigner builds a signer for the caller service (wms-service), used by the internal:sign CLI command to mint a header a client would send, valid for ttl, an absent one taking the signer's default. It shares the same secret provider the firewall verifies against, so a signed envelope authenticates. */
-func (instance *Module) internalAuthSigner(ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
-    return melodysecurity.NewHmacEnvelopeSigner(melodysecurity.HmacEnvelopeSignerConfig{
+func (instance *Module) registerInternalAuthSignerService(registrar melodyapplicationcontract.ServiceRegistrar) {
+    registrar.RegisterService(
+        ServiceInternalAuthSigner,
+        func(resolver melodycontainercontract.Resolver) (*melodysecurity.HmacEnvelopeSigner, error) {
+            return instance.internalAuthSigner(melodycontainer.ContextOf(resolver), bound.Duration{}), nil
+        },
+        melodycontainer.RegisterOptions{},
+    )
+}
+
+func (instance *Module) internalAuthSigner(ctx context.Context, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
+    return melodysecurity.NewHmacEnvelopeSigner(ctx, instance.hmacSecrets, melodysecurity.HmacEnvelopeSignerConfig{
         Application: instance.internalAuthApplication,
-        Secrets:     instance.hmacSecrets,
         Ttl:         ttl,
     })
 }

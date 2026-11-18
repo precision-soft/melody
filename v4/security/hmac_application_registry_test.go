@@ -3,6 +3,7 @@ package security
 import (
     "testing"
 
+    "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
@@ -26,7 +27,7 @@ func TestNewStaticHmacApplicationRegistry_RefusesAnEmptyApplicationName(t *testi
 func TestStaticHmacApplicationRegistry_RolesForApplicationAnswersFalseForAnUnknownApplication(t *testing.T) {
     registry := NewStaticHmacApplicationRegistry(map[string][]string{"billing": {"ROLE_SERVICE"}})
 
-    roles, exists := registry.RolesForApplication("crm")
+    roles, exists, _ := registry.RolesForApplication(newTestRuntime(), "crm")
     if true == exists {
         t.Fatalf("expected an unknown application to be refused, got %v", roles)
     }
@@ -43,15 +44,21 @@ func TestStaticHmacApplicationRegistry_OwnsItsRoles(t *testing.T) {
 
     callerRoles[0] = "ROLE_ADMIN"
 
-    roles, _ := registry.RolesForApplication("billing")
+    roles, _, _ := registry.RolesForApplication(newTestRuntime(), "billing")
     if "ROLE_SERVICE" != roles[0] {
         t.Fatalf("expected the registry to keep its own copy, got %v", roles)
     }
 
     roles[0] = "ROLE_ADMIN"
 
-    readAgain, _ := registry.RolesForApplication("billing")
+    readAgain, _, _ := registry.RolesForApplication(newTestRuntime(), "billing")
     if "ROLE_SERVICE" != readAgain[0] {
         t.Fatalf("expected the registry to hand out a copy, got %v", readAgain)
+    }
+}
+
+func TestStaticHmacApplicationRegistry_RefusesANilRuntime(t *testing.T) {
+    if _, _, rolesErr := hmacTestApplications().RolesForApplication(nil, "wms-service"); "runtimeInstance" != exception.LogContext(rolesErr, exception.LogContextConfig{})["argument"] {
+        t.Fatalf("expected a nil runtime refused naming the argument, got %v", rolesErr)
     }
 }

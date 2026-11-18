@@ -263,7 +263,7 @@ func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExist
         moduleInstance.buildTokenAuth()
         moduleInstance.buildImpersonation()
 
-        moduleInstance.opaqueTokenStore.Put("device-token", melodysecuritycontract.Claims{UserIdentifier: "user-2", DeviceIdentifier: "phone", Roles: []string{entity.RoleAdmin}}, bound.UnlimitedDuration())
+        moduleInstance.opaqueTokenStore.Put(configTestRuntime(), "device-token", melodysecuritycontract.Claims{UserIdentifier: "user-2", DeviceIdentifier: "phone", Roles: []string{entity.RoleAdmin}}, bound.UnlimitedDuration())
 
         builder := melodysecurityconfig.NewBuilder()
         moduleInstance.RegisterSecurity(builder)
@@ -377,8 +377,8 @@ func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryA
         UnavailableRetryAfter: bound.Of(internalFirewall.UnavailableRetryAfter()),
     })
 
-    signer := moduleInstance.internalAuthSigner(bound.Duration{})
-    headerValue, signErr := signer.Sign(nethttp.MethodGet, route.InternalWhoamiPattern, nil, nil)
+    signer := moduleInstance.internalAuthSigner(context.Background(), bound.Duration{})
+    headerValue, signErr := signer.Sign(configTestRuntime(), nethttp.MethodGet, route.InternalWhoamiPattern, nil, nil)
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }

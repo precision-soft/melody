@@ -15,6 +15,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/runtime"
@@ -103,7 +104,7 @@ type gate struct {
     mutex      sync.Mutex
     wedged     bool
     replyType  byte
-    passArrays int
+    passReplies int
 }
 
 func (instance *gate) Wedge() {
@@ -121,12 +122,20 @@ func (instance *gate) WedgeIntegerReplies() {
     instance.mutex.Unlock()
 }
 
+func (instance *gate) WedgeIntegerRepliesAfter(passed int) {
+    instance.mutex.Lock()
+    instance.wedged = true
+    instance.replyType = ':'
+    instance.passReplies = passed
+    instance.mutex.Unlock()
+}
+
 /* WedgeArrayRepliesAfter lets the next `passed` array replies through and swallows the arrays after them, so the second cursor walk of a call is wedged while the first step of the outer walk passes; the client's own PONGs are not arrays and are never counted. */
 func (instance *gate) WedgeArrayRepliesAfter(passed int) {
     instance.mutex.Lock()
     instance.wedged = true
     instance.replyType = '*'
-    instance.passArrays = passed
+    instance.passReplies = passed
     instance.mutex.Unlock()
 }
 
@@ -146,8 +155,8 @@ func (instance *gate) swallows(first byte) bool {
         return false
     }
 
-    if 0 < instance.passArrays {
-        instance.passArrays--
+    if 0 < instance.passReplies {
+        instance.passReplies--
 
         return false
     }
@@ -436,6 +445,66 @@ func (instance *scriptCountingConn) Write(payload []byte) (int, error) {
     instance.frames.Add(int64(bytes.Count(bytes.ToUpper(payload), []byte("\r\nEVAL"))))
 
     return instance.Conn.Write(payload)
+}
+
+type contextOnlyRuntime struct {
+    ctx context.Context
+}
+
+func (instance *contextOnlyRuntime) Context() context.Context {
+    return instance.ctx
+}
+
+func (instance *contextOnlyRuntime) Scope() containercontract.Scope {
+    return nil
+}
+
+func (instance *contextOnlyRuntime) Container() containercontract.Container {
+    return nil
+}
+
+type commandCountingConn struct {
+    net.Conn
+    commands *atomic.Int64
+}
+
+func (instance *commandCountingConn) Write(payload []byte) (int, error) {
+    upper := bytes.ToUpper(payload)
+    for _, command := range [][]byte{[]byte("\r\nEVAL"), []byte("\r\nSSCAN\r\n"), []byte("\r\nSCAN\r\n"), []byte("\r\nHMGET\r\n")} {
+        instance.commands.Add(int64(bytes.Count(upper, command)))
+    }
+
+    return instance.Conn.Write(payload)
+}
+
+func newCommandCountingClient(t *testing.T) (redisclient.Client, *atomic.Int64) {
+    t.Helper()
+
+    address := os.Getenv("REDIS_ADDRESS")
+    if "" == address {
+        t.Skip("REDIS_ADDRESS is not set")
+    }
+
+    commands := &atomic.Int64{}
+    client, clientErr := redisclient.NewClient(redisclient.ClientOption{
+        InitAddress:  []string{address},
+        DisableCache: true,
+        DialCtxFn: func(ctx context.Context, addr string, dialer *net.Dialer, tlsConfig *tls.Config) (net.Conn, error) {
+            raw, dialErr := dialer.DialContext(ctx, "tcp", addr)
+            if nil != dialErr {
+                return nil, dialErr
+            }
+
+            return &commandCountingConn{Conn: raw, commands: commands}, nil
+        },
+    })
+    if nil != clientErr {
+        t.Fatalf("could not reach redis at %s: %v", address, clientErr)
+    }
+
+    t.Cleanup(client.Close)
+
+    return client, commands
 }
 
 func newScriptCountingClient(t *testing.T) (redisclient.Client, *atomic.Int64) {

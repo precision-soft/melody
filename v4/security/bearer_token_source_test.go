@@ -16,7 +16,7 @@ import (
 
 func TestBearerTokenSource_OpaqueValidTokenAuthenticates(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
-    store.Put("opaque-123", securitycontract.Claims{UserIdentifier: "user-9", Roles: []string{"ROLE_ADMIN"}}, bound.UnlimitedDuration())
+    store.Put(newTestRuntime(), "opaque-123", securitycontract.Claims{UserIdentifier: "user-9", Roles: []string{"ROLE_ADMIN"}}, bound.UnlimitedDuration())
 
     source := NewBearerTokenSource(NewOpaqueTokenValidator(store), nil)
 
@@ -40,7 +40,7 @@ func TestBearerTokenSource_OpaqueValidTokenAuthenticates(t *testing.T) {
 
 func TestBearerTokenSource_AcceptsCaseInsensitiveScheme(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
-    store.Put("opaque-123", securitycontract.Claims{UserIdentifier: "user-9", Roles: []string{"ROLE_ADMIN"}}, bound.UnlimitedDuration())
+    store.Put(newTestRuntime(), "opaque-123", securitycontract.Claims{UserIdentifier: "user-9", Roles: []string{"ROLE_ADMIN"}}, bound.UnlimitedDuration())
 
     source := NewBearerTokenSource(NewOpaqueTokenValidator(store), nil)
 
@@ -85,7 +85,7 @@ func TestBearerTokenSource_UnknownOpaqueTokenIsAnonymous(t *testing.T) {
 
 func TestBearerTokenSource_RejectsEmptySubjectOpaqueToken(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
-    store.Put("opaque-empty", securitycontract.Claims{Roles: []string{"ROLE_USER"}}, bound.UnlimitedDuration())
+    store.Put(newTestRuntime(), "opaque-empty", securitycontract.Claims{Roles: []string{"ROLE_USER"}}, bound.UnlimitedDuration())
 
     source := NewBearerTokenSource(NewOpaqueTokenValidator(store), nil)
 
@@ -228,7 +228,7 @@ func (instance *markingEnricher) Enrich(
 
 func TestBearerTokenSource_AMarkedEnrichmentFailureIsUnavailable(t *testing.T) {
     store := NewInMemoryTokenStore(InMemoryTokenStoreConfig{})
-    store.Put("opaque-1", securitycontract.Claims{UserIdentifier: "user-9"}, bound.UnlimitedDuration())
+    store.Put(newTestRuntime(), "opaque-1", securitycontract.Claims{UserIdentifier: "user-9"}, bound.UnlimitedDuration())
 
     source := NewBearerTokenSource(NewOpaqueTokenValidator(store), &markingEnricher{})
     runtimeInstance, logger := runtimeWithRecordingLogger()
