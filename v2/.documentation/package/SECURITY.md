@@ -51,9 +51,7 @@ When a firewall inherits the global access control, `security/config` merges the
     - [`AccessControlMergeGlobalFirst`](../../security/config/security_module.go) — `globalFirst`
     - [`AccessControlMergeOverrideOnly`](../../security/config/security_module.go) — `overrideOnly`, the global policy is cut off entirely and nothing is merged
 
-The strategy is chosen with
-[`(FirewallOverrideConfiguration).WithMergeStrategy`](../../security/config/security_module.go), and inheritance is turned off entirely with
-[`(FirewallOverrideConfiguration).WithInheritGlobalAccessControl`](../../security/config/security_module.go). A value that is none of the three is refused at the setter with a named panic.
+The strategy is chosen with [`(FirewallOverrideConfiguration).WithMergeStrategy`](../../security/config/security_module.go), and inheritance is turned off entirely with [`(FirewallOverrideConfiguration).WithInheritGlobalAccessControl`](../../security/config/security_module.go). A value that is none of the three is refused at the setter with a named panic.
 
 An override built from `NewFirewallOverrideConfiguration()` — or from the zero value, which every setter reads as the constructor — inherits the global policy under `localFirst`. A firewall that inherits nothing and declares no access control of its own **enforces nothing behind it**: the compiled control is empty, no rule matches, and every request reaches its handler. Pair `WithInheritGlobalAccessControl(false)` with `WithAccessControl`.
 

@@ -4,10 +4,7 @@
 
 # Melody
 
-[![Go >= 1.22 (v1/v2) · 1.25 (v3)](https://img.shields.io/badge/go-%3E%3D1.22%20(v1%2Fv2)%20%C2%B7%201.25%20(v3)-00ADD8)](https://go.dev/)
-[![Go Report Card](https://goreportcard.com/badge/github.com/precision-soft/melody)](https://goreportcard.com/report/github.com/precision-soft/melody)
-[![Go Reference](https://pkg.go.dev/badge/github.com/precision-soft/melody.svg)](https://pkg.go.dev/github.com/precision-soft/melody)
-[![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Go >= 1.22 (v1/v2) · 1.25 (v3)](https://img.shields.io/badge/go-%3E%3D1.22%20(v1%2Fv2)%20%C2%B7%201.25%20(v3)-00ADD8)](https://go.dev/) [![Go Report Card](https://goreportcard.com/badge/github.com/precision-soft/melody)](https://goreportcard.com/report/github.com/precision-soft/melody) [![Go Reference](https://pkg.go.dev/badge/github.com/precision-soft/melody.svg)](https://pkg.go.dev/github.com/precision-soft/melody) [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Melody is a Go framework focused on building **HTTP applications and CLI commands** on top of the same runtime, container, configuration, logging, and validation infrastructure.
 
@@ -74,8 +71,7 @@ curl http://localhost:8080/health
   ./dc up:all --build
   ```
 
-  Then open http://localhost:8180 (`DEV_HTTP_HOST_PORT`). Use `./dc up:all` (backends are on the compose
-  `all` profile) — not plain `./dc up`; see the [example README](./v3/.example/README.md#running-fully-against-containers) for details.
+  Then open http://localhost:8180 (`DEV_HTTP_HOST_PORT`). Use `./dc up:all` (backends are on the compose `all` profile) — not plain `./dc up`; see the [example README](./v3/.example/README.md#running-fully-against-containers) for details.
 - Browse the [v3 package documentation](./v3/.documentation/package/) for the API reference.
 - Add an [integration](./integrations/) (database, Redis, message broker, object storage, observability).
 
@@ -105,7 +101,7 @@ Melody ships as three parallel Go module lines, with a fourth in development:
 | Version line | Module path                                              | Released              | Latest      | Status                                                                                                                                                                | Supported until                          |
 |--------------|----------------------------------------------------------|-----------------------|-------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------|
 | v4           | `github.com/precision-soft/melody/v4`                    | **Q1 2027** (planned) | —           | Planned — the deprecations v3 accumulates are removed there; no code exists yet                                                                                       | —                                        |
-| **v3**       | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | 2026-03-08            | **v3.14.5** | **Stable, actively maintained — use this for new projects.** v3.14.0 is its last feature release; security fixes, patch-level defect fixes and deprecations land here | set the day v4 ships, 18 months after it |
+| **v3**       | `github.com/precision-soft/melody/v3` ([`./v3/`](./v3/)) | 2026-03-08            | **v3.14.6** | **Stable, actively maintained — use this for new projects.** v3.14.0 is its last feature release; security fixes, patch-level defect fixes and deprecations land here | set the day v4 ships, 18 months after it |
 | v2           | `github.com/precision-soft/melody/v2` ([`./v2/`](./v2/)) | 2026-02-17            | v2.13.4     | Feature-frozen since 2026-08-18 (`v2.13.0`)                                                                                                                           | **2027-09-08**                           |
 | v1           | `github.com/precision-soft/melody` (repository root)     | 2026-01-17            | v1.19.4     | Feature-frozen since 2026-08-18 (`v1.19.0`)                                                                                                                           | **2027-08-17**                           |
 
@@ -123,14 +119,16 @@ capability whatever remains of its window. An application that wants the v4 voca
 replacements v3 already carries — every deprecated symbol names its successor — and then crosses the cut
 with no change to its own code.
 
-Three versions exist for historical reasons: earlier major versions introduced changes that were not backwards compatible, and each was maintained in parallel. **v3.14.0 is the last feature release of v3; the next features ship in v4 (planned Q1 2027).** Until then v3 keeps receiving security fixes and patch-level defect fixes, and the day v4 ships it enters the 18-month window v1 and v2 are in now.
-v1 and v2 are feature-frozen and receive patch-level defect and security fixes through the dates in the table above (see [`SECURITY.md`](./SECURITY.md) and
-[`CONTRIBUTING.md`](./CONTRIBUTING.md)). An application moving off a frozen major starts at the
-"Migrating to v3" section of its upgrade guide: [`.documentation/UPGRADE.md`](./.documentation/UPGRADE.md)
-for v1, [`v2/.documentation/UPGRADE.md`](./v2/.documentation/UPGRADE.md) for v2.
+Three versions exist for historical reasons: earlier major versions introduced changes that were not backwards
+compatible, and each was maintained in parallel. **v3.14.0 is the last feature release of v3; the next features ship in
+v4 (planned Q1 2027).** Until then v3 keeps receiving security fixes and patch-level defect fixes, and the day v4 ships
+it enters the 18-month window v1 and v2 are in now. v1 and v2 are feature-frozen and receive patch-level defect and
+security fixes through the dates in the table above (see [`SECURITY.md`](./SECURITY.md) and
+[`CONTRIBUTING.md`](./CONTRIBUTING.md)). An application moving off a frozen major starts at the "Migrating to v3"
+section of its upgrade guide: [`.documentation/UPGRADE.md`](./.documentation/UPGRADE.md) for v1,
+[`v2/.documentation/UPGRADE.md`](./v2/.documentation/UPGRADE.md) for v2.
 
-Within v3, evolution follows the standard Go approach: APIs that need to change are first marked with a
-`/* Deprecated: ... */` doc comment and kept working, and a future **v4** (planned Q1 2027) will be cut once enough breaking changes have accumulated.
+Within v3, evolution follows the standard Go approach: APIs that need to change are first marked with a `/* Deprecated: ... */` doc comment and kept working, and a future **v4** (planned Q1 2027) will be cut once enough breaking changes have accumulated.
 
 The three versions are intentionally **self-contained duplicates** rather than shared code, so that every module and integration binds to exactly one framework version. **This duplication is by design and is not to be consolidated.**
 
@@ -234,9 +232,7 @@ Key entry points:
 
 ## Packages
 
-The list below is the **v1** package surface (repository root). The actively maintained **v3** line adds
-`lock`, `mailer`, `messagebus`, `openapi`, `storage`, `translation`, and `wiring` — see the
-[v3 package list](./v3/README.md#packages).
+The list below is the **v1** package surface (repository root). The actively maintained **v3** line adds `lock`, `mailer`, `messagebus`, `openapi`, `storage`, `translation`, and `wiring` — see the [v3 package list](./v3/README.md#packages).
 
 Each package below links to its source folder and its package documentation.
 
@@ -321,5 +317,4 @@ Melody was developed and iterated through multiple internal, beta, and release-c
 
 This GitHub repository represents the **first stable public release** of Melody, starting with version **v1.0.0**, intentionally published with a clean history focused on long-term stability and user adoption.
 
-If you want to explore the full development history that led to v1.0.0, see:
-https://gitlab.com/precision-soft-open-source/go/melody
+If you want to explore the full development history that led to v1.0.0, see: https://gitlab.com/precision-soft-open-source/go/melody

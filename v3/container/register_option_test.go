@@ -65,7 +65,6 @@ func TestRegisterOptions_EachMovesExactlyItsOwnField(t *testing.T) {
     }
 }
 
-/* TestWithTeardownDependency_ComposesAcrossCallsAndArguments pins the promise the option's documentation makes about composing: two declarations add to one list rather than the second replacing the first, and one call naming several services keeps all of them in the order they were written. A replacing fold would silently drop the first collaborator, which is the failure no ordering test can see — the edge that is missing simply never constrains anything. */
 func TestWithTeardownDependency_ComposesAcrossCallsAndArguments(t *testing.T) {
     option := applyRegisterServiceOptions([]containercontract.RegisterOption{
         WithTeardownDependency("service.logger", "service.metrics"),
@@ -110,7 +109,6 @@ func TestApplyRegisterServiceOptions_FoldsInOrderAndSkipsANilOption(t *testing.T
     }
 }
 
-/* foreignClosingService stands for a value of a type the application does not own, whose own Close the teardown must not reach */
 type foreignClosingService struct {
     ownCloses atomic.Int32
 }
@@ -212,7 +210,6 @@ func TestWithCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheCloser(t *testi
     }
 }
 
-/* otherClosingService is an override of another type than the closer takes, installed under a name registered without its type */
 type otherClosingService struct {
     ownCloses atomic.Int32
 }

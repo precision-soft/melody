@@ -1,7 +1,6 @@
 # audit — per-field change audit trail for bun
 
-Records who changed what, when, as a per-field before/after diff, for [bun](https://bun.uptrace.dev/)
-models. Go-native equivalent of a Doctrine unit-of-work audit listener.
+Records who changed what, when, as a per-field before/after diff, for [bun](https://bun.uptrace.dev/) models. Go-native equivalent of a Doctrine unit-of-work audit listener.
 
 ## Change set
 

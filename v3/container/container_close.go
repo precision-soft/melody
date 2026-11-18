@@ -170,7 +170,6 @@ func (instance *container) declaredEdgeIsScopedLocked(declaredEdge declaredTeard
     return true == known && 0 < len(instance.scopedTypeRegistrationNamesByType[registeredType])
 }
 
-/* teardownNodeIsScopedLocked answers whether a node key names a scoped registration, under either its name or its type. */
 func (instance *container) teardownNodeIsScopedLocked(nodeKey string) bool {
     if true == strings.HasPrefix(nodeKey, containerNameNodeKeyPrefix) {
         _, scoped := instance.scopedProviders[strings.TrimPrefix(nodeKey, containerNameNodeKeyPrefix)]
@@ -293,6 +292,26 @@ type teardownPlan struct {
     canonicalEdges   map[string]map[string]struct{}
     unorderedGroupOf map[string]int
     aliasesOf        map[string][]string
+}
+
+/* the representative's closer, then the other names' in sorted order, so a declared closer does not hang on how the names sort */
+func (instance *container) closerOfNodeGroupLocked(nodeKey string, aliases []string, value any) *declaredCloser {
+    if closer := instance.closerByNodeKey[nodeKey]; nil != closer && true == closer.takes(value) {
+        return closer
+    }
+
+    /* a type node's closer is the last registration of that type to declare one, possibly another name's, so only the names are asked */
+    for _, alias := range aliases {
+        if true == strings.HasPrefix(alias, containerTypeNodeKeyPrefix) {
+            continue
+        }
+
+        if closer := instance.closerByNodeKey[alias]; nil != closer && true == closer.takes(value) {
+            return closer
+        }
+    }
+
+    return nil
 }
 
 /* teardownPlanLocked computes the plan from what the container holds, for the teardown and for the read-only view alike. It writes nothing, so it can run under the read lock. */
@@ -648,8 +667,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         nodeKey   string
         value     any
         waveIndex int
-        /* closer is the one the registration declared WithCloser, nil where none */
-        closer *declaredCloser
+        closer    *declaredCloser
     }
 
     /* the clock starts before the lock: the plan computed under it spends the same budget */
@@ -672,10 +690,35 @@ func (instance *container) closeInternal(closeContext context.Context) error {
 
     candidates := make([]closeCandidate, 0, len(closeOrder)+len(instance.replacedBuiltInstances))
 
+    /* an evicted instance a live name still holds closes at that name's place, before what it depends on, through its evicted name's closer */
+    replacedCloserOfPointer := make(map[pointerIdentity]*declaredCloser)
+    replacedCloserOfValue := make(map[any]*declaredCloser)
+    for replacedIndex, replacedValue := range instance.replacedBuiltInstances {
+        replacedCloser := instance.replacedBuiltClosers[replacedIndex]
+        if nil == replacedCloser || false == replacedCloser.takes(replacedValue) {
+            continue
+        }
+
+        if pointerKey, hasPointer := pointerKeyOf(replacedValue); true == hasPointer && false == isZeroSizePointerIdentity(pointerKey) {
+            replacedCloserOfPointer[pointerKey] = replacedCloser
+        } else if false == isZeroSizeValue(replacedValue) && true == isComparableValue(replacedValue) {
+            replacedCloserOfValue[replacedValue] = replacedCloser
+        }
+    }
+
     for _, nodeKey := range closeOrder {
         value, exists := valueOfNodeKey[nodeKey]
         if false == exists {
             continue
+        }
+
+        nodeCloser := instance.closerOfNodeGroupLocked(nodeKey, plan.aliasesOf[nodeKey], value)
+        if nil == nodeCloser {
+            if pointerKey, hasPointer := pointerKeyOf(value); true == hasPointer && false == isZeroSizePointerIdentity(pointerKey) {
+                nodeCloser = replacedCloserOfPointer[pointerKey]
+            } else if false == isZeroSizeValue(value) && true == isComparableValue(value) {
+                nodeCloser = replacedCloserOfValue[value]
+            }
         }
 
         candidates = append(
@@ -684,7 +727,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
                 nodeKey:   nodeKey,
                 value:     value,
                 waveIndex: closeWaveIndexOf[nodeKey],
-                closer:    instance.closerByNodeKey[nodeKey],
+                closer:    nodeCloser,
             },
         )
     }
@@ -710,6 +753,21 @@ func (instance *container) closeInternal(closeContext context.Context) error {
                 closer:    instance.replacedBuiltClosers[replacedIndex],
             },
         )
+    }
+
+    /* a value a candidate declares a closer for closes through that candidate only, since the closer replaces the value's doors */
+    declaredPointers := make(map[pointerIdentity]struct{})
+    declaredValues := make(map[any]struct{})
+    for _, candidate := range candidates {
+        if nil == candidate.closer || false == candidate.closer.takes(candidate.value) {
+            continue
+        }
+
+        if pointerKey, hasPointer := pointerKeyOf(candidate.value); true == hasPointer && false == isZeroSizePointerIdentity(pointerKey) {
+            declaredPointers[pointerKey] = struct{}{}
+        } else if false == isZeroSizeValue(candidate.value) && true == isComparableValue(candidate.value) {
+            declaredValues[candidate.value] = struct{}{}
+        }
     }
 
     teardownInWaves := instance.teardownInWaves
@@ -747,6 +805,19 @@ func (instance *container) closeInternal(closeContext context.Context) error {
         } else if true == comparableValue {
             if _, alreadyClosed := closedValues[candidate.value]; true == alreadyClosed {
                 return nil, nil, false
+            }
+        }
+
+        carriesDeclaredCloser := nil != candidate.closer && true == candidate.closer.takes(candidate.value)
+        if false == carriesDeclaredCloser {
+            if true == hasPointer {
+                if _, declared := declaredPointers[pointerKey]; true == declared {
+                    return nil, nil, false
+                }
+            } else if true == comparableValue {
+                if _, declared := declaredValues[candidate.value]; true == declared {
+                    return nil, nil, false
+                }
             }
         }
 
@@ -1022,7 +1093,6 @@ func closeDoorsOfWithCloser(value any, closer *declaredCloser) (closeable interf
     return closeDoorsOf(value)
 }
 
-/* declaredCloser is a registration's WithCloser closer with the type it takes, nil where the registration named none */
 type declaredCloser struct {
     valueType reflect.Type
     close     func(closeContext context.Context, value any) error
@@ -1059,7 +1129,6 @@ func closeServiceValueWithin(closeContext context.Context, closeable interface{ 
     return closeServiceValue(closeable)
 }
 
-/* closeServiceValueWithContext is closeServiceValue for the context-taking door. */
 func closeServiceValueWithContext(closeContext context.Context, closeable containercontract.ContextCloser) error {
     return containedClose(func() error {
         return closeable.CloseWithContext(closeContext)
@@ -1162,7 +1231,6 @@ func containedCloseFailureDetails(closeErr error) (details exceptioncontract.Con
     return exception.LogContext(closeErr)
 }
 
-/* withCloseFailureDetails adds the details under "failureDetails" only when there is something beyond the failure line. */
 func withCloseFailureDetails(context exceptioncontract.Context, failureDetails map[string]exceptioncontract.Context) exceptioncontract.Context {
     if 0 < len(failureDetails) {
         context["failureDetails"] = failureDetails
@@ -1324,7 +1392,6 @@ func teardownCloseOrderYieldingWeakEdges(
     return closeOrder, closeWaveIndexOf, cycleNodeKeys, yieldedEdges
 }
 
-/* weakOnlyEdges answers the weak edges no strong edge shares */
 func weakOnlyEdges(weakEdges map[string]map[string]struct{}, strongEdges map[string]map[string]struct{}) map[string]map[string]struct{} {
     weakOnly := make(map[string]map[string]struct{}, len(weakEdges))
     for dependentKey, dependencySet := range weakEdges {
@@ -1340,7 +1407,6 @@ func weakOnlyEdges(weakEdges map[string]map[string]struct{}, strongEdges map[str
     return weakOnly
 }
 
-/* dependencyReaches answers whether target is reachable from start along the edges */
 func dependencyReaches(edges map[string]map[string]struct{}, start string, target string) bool {
     visited := map[string]struct{}{start: {}}
     pending := []string{start}

@@ -383,8 +383,7 @@ of it was proven by compilation.
   delete. A missing currency is a `404` on both. A product write naming a category or a currency that does not
   exist is the caller's `400`. The currencies are not audited. The write doors validate the body in the
   spelling they store, trimmed: a name of one character padded with a space is refused, not stored.
-- `catalog:report:refresh` pushes its reading to `APP_REPORTING_EXPORT_ENDPOINT` when one is configured, and
-  takes the command's exit code with it if the sink refuses.
+- `catalog:report:refresh` pushes its reading to `APP_REPORTING_EXPORT_ENDPOINT` when one is configured, and takes the command's exit code with it if the sink refuses.
 
 The two endpoints are the two SHAPES the client supports, and they are not interchangeable. `RATES_BASE_URL`
 is a **base** and carries its trailing slash: the client resolves every target against it by RFC 3986, so the
