@@ -134,3 +134,9 @@ func configTestRuntime() melodyruntimecontract.Runtime {
 
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }
+
+func allowedBy(limiter melodyhttpcontract.RateLimiter, key string) bool {
+    decision, _ := limiter.Allow(configTestRuntime(), key)
+
+    return decision.Allowed
+}

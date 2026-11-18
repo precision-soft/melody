@@ -146,12 +146,12 @@ func TestRequestBudgetLimiter_AdmitsTheBudgetPerHourAndRefusesTheNext(t *testing
 
     limiter := requestBudgetLimiter(3)
     for request := 1; request <= 3; request++ {
-        if false == limiter.Allow("203.0.113.7") {
+        if false == allowedBy(limiter, "203.0.113.7") {
             t.Fatalf("expected request %d of a budget of 3 admitted", request)
         }
     }
 
-    if true == limiter.Allow("203.0.113.7") {
+    if true == allowedBy(limiter, "203.0.113.7") {
         t.Fatal("expected the fourth request of a budget of 3 refused")
     }
 }
@@ -227,20 +227,20 @@ func TestRequestBudgetLimiter_BoundsTheAddressesItTracksByEvictingTheOldest(t *t
     limiter := requestBudgetLimiter(1)
 
     for address := 0; address < inProcessWriteThrottleMaxAddresses; address++ {
-        if false == limiter.Allow(fmt.Sprintf("address-%d", address)) {
+        if false == allowedBy(limiter, fmt.Sprintf("address-%d", address)) {
             t.Fatalf("expected address %d admitted below the ceiling", address)
         }
     }
 
-    if true == limiter.Allow("address-1") {
+    if true == allowedBy(limiter, "address-1") {
         t.Fatal("expected a tracked address to keep its spent budget")
     }
 
-    if false == limiter.Allow("address-past-the-ceiling") {
+    if false == allowedBy(limiter, "address-past-the-ceiling") {
         t.Fatalf("expected an unseen address admitted once %d addresses are tracked", inProcessWriteThrottleMaxAddresses)
     }
 
-    if false == limiter.Allow("address-0") {
+    if false == allowedBy(limiter, "address-0") {
         t.Fatal("expected the address used longest ago evicted and back with a full budget")
     }
 }

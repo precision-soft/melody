@@ -566,9 +566,9 @@ func (instance *Configuration) buildHttpConfiguration() error {
         return sessionTombstoneRetentionErr
     }
 
-    sessionPersistenceTimeout, sessionPersistenceTimeoutErr := resolveParameter(instance.MustGet(KernelHttpSessionPersistenceTimeout), HttpSessionPersistenceTimeoutKey, SessionPersistenceTimeoutRule)
-    if nil != sessionPersistenceTimeoutErr {
-        return sessionPersistenceTimeoutErr
+    sessionStorageTimeout, sessionStorageTimeoutErr := resolveParameter(instance.MustGet(KernelHttpSessionStorageTimeout), HttpSessionStorageTimeoutKey, SessionStorageTimeoutRule)
+    if nil != sessionStorageTimeoutErr {
+        return sessionStorageTimeoutErr
     }
 
     sessionMaxSessions, sessionMaxSessionsErr := resolveParameter(instance.MustGet(KernelHttpSessionMaxSessions), HttpSessionMaxSessionsKey, SessionMaxSessionsRule)
@@ -623,7 +623,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
         staticExcludedPaths,
         sessionTtl,
         sessionTombstoneRetention,
-        sessionPersistenceTimeout,
+        sessionStorageTimeout,
         sessionMaxSessions,
         shutdownTimeout,
         serverLimits,

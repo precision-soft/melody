@@ -17,6 +17,7 @@ import (
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
+    melodyruntime "github.com/precision-soft/melody/v4/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysession "github.com/precision-soft/melody/v4/session"
@@ -26,7 +27,10 @@ import (
 func plainRequest(t *testing.T) melodyhttpcontract.Request {
     t.Helper()
 
-    return melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, nil, nil)
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+
+    return melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, runtimeInstance, nil)
 }
 
 func requestCarryingSession(t *testing.T) (melodyhttpcontract.Request, melodysessioncontract.Session) {
@@ -89,7 +93,7 @@ func passwordRequest(t *testing.T, username string, password string) melodyhttpc
 const budgetTestAllowance = 2
 
 func budgetOverPassword() *SecondFactorBudget {
-    return budgetOverPasswordWithLimiter(melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{Clock: melodyclock.NewFrozenClock(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)), Limit: budgetTestAllowance, Window: time.Minute}))
+    return budgetOverPasswordWithLimiter(melodyhttpmiddleware.NewSlidingWindowLimiter("test", budgetTestAllowance, time.Minute, melodyhttpmiddleware.LimiterConfig{Clock: melodyclock.NewFrozenClock(time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC))}))
 }
 
 func budgetOverPasswordWithLimiter(limiter melodyhttpcontract.RateLimiter) *SecondFactorBudget {

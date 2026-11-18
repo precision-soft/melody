@@ -3,6 +3,7 @@ package rueidis
 import (
     "context"
     "net"
+    "reflect"
     "strings"
     "time"
 
@@ -271,4 +272,19 @@ func (instance *Provider) Ping(client rueidis.Client) error {
     defer cancel()
 
     return client.Do(ctx, client.B().Ping().Build()).Error()
+}
+
+/* isAbsentLogger answers whether a logger is nil, the nil interface or a nil value of a nilable kind behind it */
+func isAbsentLogger(logger loggingcontract.Logger) bool {
+    if nil == logger {
+        return true
+    }
+
+    value := reflect.ValueOf(logger)
+    switch value.Kind() {
+    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+        return value.IsNil()
+    default:
+        return false
+    }
 }

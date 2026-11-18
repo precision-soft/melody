@@ -453,7 +453,7 @@ func (instance *Application) registerHttpSession() {
                     session.ManagerConfig{
                         Ttl:                resolvedConfiguration.Http().SessionTtl().Limit(),
                         TombstoneRetention: resolvedConfiguration.Http().SessionTombstoneRetention().Limit(),
-                        PersistenceTimeout: resolvedConfiguration.Http().SessionPersistenceTimeout().Limit(),
+                        StorageTimeout:     resolvedConfiguration.Http().SessionStorageTimeout().Limit(),
                         Clock:              clock.ClockMustFromResolver(resolutionContext, resolver),
                     },
                 ), nil

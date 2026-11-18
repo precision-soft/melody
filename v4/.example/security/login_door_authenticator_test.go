@@ -9,12 +9,12 @@ import (
     "io"
     nethttp "net/http"
     "net/http/httptest"
+    "strconv"
     "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/.example/entity"
-    examplejournal "github.com/precision-soft/melody/v4/.example/journal"
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/repository"
@@ -778,7 +778,7 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         t.Fatalf("new session index: %v", sessionIndexErr)
     }
 
-    var limiter melodyhttpcontract.RateLimiter = melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{Clock: clockInstance, Limit: secondFactorTestAllowance, Window: 15 * time.Minute})
+    var limiter melodyhttpcontract.RateLimiter = melodyhttpmiddleware.NewSlidingWindowLimiter("test", secondFactorTestAllowance, 15 * time.Minute, melodyhttpmiddleware.LimiterConfig{Clock: clockInstance})
     if nil != options.limiter {
         limiter = options.limiter(clockInstance)
     }
@@ -967,6 +967,10 @@ func TestLoginHandler_RefusesTheRightCodeOnceTheAccountSpentItsBudget(t *testing
     spent, _ := login.post(t, "editor", "editor", map[string]string{melodysecurity.DefaultTotpCodeHeaderName: login.currentCode(t)})
     requireLoginAnswer(t, spent, nethttp.StatusTooManyRequests, "too many attempts")
 
+    if retryAfter, parseErr := strconv.Atoi(spent.Headers().Get("Retry-After")); nil != parseErr || 0 >= retryAfter {
+        t.Fatalf("expected the 429 to carry the budget's Retry-After, got %q", spent.Headers().Get("Retry-After"))
+    }
+
     challenge, _ := login.post(t, "editor", "editor", nil)
     requireLoginAnswer(t, challenge, nethttp.StatusUnauthorized, "second factor required")
 }
@@ -1154,19 +1158,15 @@ func TestLoginHandler_SignInsNotYetStoredStillMeetTheCap(t *testing.T) {
 
 type unreadableBudgetLimiter struct{}
 
-func (instance *unreadableBudgetLimiter) Allow(key string) bool {
-    return false
+func (instance *unreadableBudgetLimiter) Allow(runtimeInstance melodyruntimecontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
+    storeErr := melodyexception.NewError("redis rate limiter store failure", map[string]any{"key": key}, melodyexception.MarkInfrastructureFailure(errors.New("connection refused")))
+
+    return melodyhttpcontract.RateLimitDecision{}, storeErr
 }
 
-func (instance *unreadableBudgetLimiter) AllowWithRuntime(runtimeInstance melodyruntimecontract.Runtime, key string) (bool, error) {
-    storeErr := melodyexception.NewError("redis rate limiter store failure", map[string]any{"key": key}, errors.New("connection refused"))
-
-    examplejournal.LoggerOr(runtimeInstance, melodylogging.NewNopLogger()).Error("rate limiter store failure", melodyexception.LogContext(storeErr, melodyexception.LogContextConfig{}))
-
-    return false, melodyexception.MarkLogged(storeErr)
+func (instance *unreadableBudgetLimiter) Reset(runtimeInstance melodyruntimecontract.Runtime, key string) error {
+    return nil
 }
-
-func (instance *unreadableBudgetLimiter) Reset(key string) {}
 
 func TestLoginHandler_AnswersAnUnreadableBudgetWith503RetryAfterAndOneRecord(t *testing.T) {
     journal := &loginJournalRecordingLogger{Logger: melodylogging.NewNopLogger()}
@@ -1184,8 +1184,8 @@ func TestLoginHandler_AnswersAnUnreadableBudgetWith503RetryAfterAndOneRecord(t *
         t.Fatalf("expected the firewall's Retry-After, got %q", response.Headers().Get("Retry-After"))
     }
 
-    if 1 != len(journal.recordsNamed("rate limiter store failure")) || 0 != len(journal.recordsNamed("security login door authenticator could not verify the credential: its platform is unavailable")) || 0 != len(journal.recordsNamed("handler answered a server error")) {
-        t.Fatalf("expected the outage filed once, by the limiter, got %v", journal.errorRecords)
+    if 0 != len(journal.recordsNamed("rate limiter store failure")) || 1 != len(journal.recordsNamed("security login door authenticator could not verify the credential: its platform is unavailable")) || 0 != len(journal.recordsNamed("handler answered a server error")) {
+        t.Fatalf("expected the outage filed once, by the door, got %v", journal.errorRecords)
     }
 
     if "" != sessionInstance.String(security.SessionKeySecurityUserId) || 0 != len(*login.failureList) {

@@ -39,8 +39,8 @@ const (
 /* DefaultSessionTombstoneRetention is how long a deleted session id keeps refusing a write-back when MELODY_HTTP_SESSION_TOMBSTONE_RETENTION says nothing. */
 const DefaultSessionTombstoneRetention = 5 * time.Minute
 
-/* DefaultSessionPersistenceTimeout bounds the end-of-request session save or delete when MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT says nothing. */
-const DefaultSessionPersistenceTimeout = 5 * time.Second
+/* DefaultSessionStorageTimeout bounds every session storage call when MELODY_HTTP_SESSION_STORAGE_TIMEOUT says nothing. */
+const DefaultSessionStorageTimeout = 5 * time.Second
 
 /* DefaultSessionMaxSessions is how many sessions the framework-wired in-memory storage holds when MELODY_HTTP_SESSION_MAX_SESSIONS says nothing. */
 const DefaultSessionMaxSessions = 100_000
@@ -62,7 +62,7 @@ func newHttpConfiguration(
     staticExcludedPaths []string,
     sessionTtl bound.Resolved[time.Duration],
     sessionTombstoneRetention bound.Resolved[time.Duration],
-    sessionPersistenceTimeout bound.Resolved[time.Duration],
+    sessionStorageTimeout bound.Resolved[time.Duration],
     sessionMaxSessions bound.Resolved[int],
     shutdownTimeout bound.Resolved[time.Duration],
     serverLimits httpServerLimits,
@@ -91,7 +91,7 @@ func newHttpConfiguration(
         staticExcludedPaths:       copiedStaticExcludedPaths,
         sessionTtl:                sessionTtl,
         sessionTombstoneRetention: sessionTombstoneRetention,
-        sessionPersistenceTimeout: sessionPersistenceTimeout,
+        sessionStorageTimeout:     sessionStorageTimeout,
         sessionMaxSessions:        sessionMaxSessions,
         shutdownTimeout:           shutdownTimeout,
         serverLimits:              serverLimits,
@@ -116,7 +116,7 @@ type httpConfiguration struct {
     staticExcludedPaths       []string
     sessionTtl                bound.Resolved[time.Duration]
     sessionTombstoneRetention bound.Resolved[time.Duration]
-    sessionPersistenceTimeout bound.Resolved[time.Duration]
+    sessionStorageTimeout     bound.Resolved[time.Duration]
     sessionMaxSessions        bound.Resolved[int]
     shutdownTimeout           bound.Resolved[time.Duration]
     serverLimits              httpServerLimits
@@ -178,9 +178,9 @@ func (instance *httpConfiguration) SessionTombstoneRetention() bound.Resolved[ti
     return instance.sessionTombstoneRetention
 }
 
-/* SessionPersistenceTimeout bounds the end-of-request session save or delete, at least 1ms or unlimited, DefaultSessionPersistenceTimeout when MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT says nothing. */
-func (instance *httpConfiguration) SessionPersistenceTimeout() bound.Resolved[time.Duration] {
-    return instance.sessionPersistenceTimeout
+/* SessionStorageTimeout bounds every session storage call, the load, the mint, the rotation, the save and the delete, at least 1ms or unlimited, DefaultSessionStorageTimeout when MELODY_HTTP_SESSION_STORAGE_TIMEOUT says nothing. */
+func (instance *httpConfiguration) SessionStorageTimeout() bound.Resolved[time.Duration] {
+    return instance.sessionStorageTimeout
 }
 
 /* SessionMaxSessions bounds the framework-wired in-memory storage, at least one or unlimited, DefaultSessionMaxSessions when MELODY_HTTP_SESSION_MAX_SESSIONS says nothing. */

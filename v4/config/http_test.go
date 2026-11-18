@@ -45,8 +45,8 @@ func TestConfigurationHttpLimitsTakeTheirDefaultsWhenLeftOut(t *testing.T) {
     if (bound.Resolved[time.Duration]{Value: 5 * time.Minute}) != httpConfiguration.SessionTombstoneRetention() {
         t.Fatalf("expected a 5m tombstone retention, got %+v", httpConfiguration.SessionTombstoneRetention())
     }
-    if (bound.Resolved[time.Duration]{Value: 5 * time.Second}) != httpConfiguration.SessionPersistenceTimeout() {
-        t.Fatalf("expected a 5s session persistence timeout, got %+v", httpConfiguration.SessionPersistenceTimeout())
+    if (bound.Resolved[time.Duration]{Value: 5 * time.Second}) != httpConfiguration.SessionStorageTimeout() {
+        t.Fatalf("expected a 5s session storage timeout, got %+v", httpConfiguration.SessionStorageTimeout())
     }
     if (bound.Resolved[int]{Value: 100_000}) != httpConfiguration.SessionMaxSessions() {
         t.Fatalf("expected 100,000 sessions, got %+v", httpConfiguration.SessionMaxSessions())
@@ -62,7 +62,7 @@ func TestConfigurationHttpLimitsAreReadFromTheEnvironment(t *testing.T) {
         StaticCacheMaxAgeKey:             "0",
         HttpSessionTtlKey:                "30m",
         HttpSessionTombstoneRetentionKey: "1s",
-        HttpSessionPersistenceTimeoutKey: "2s",
+        HttpSessionStorageTimeoutKey:     "2s",
         HttpSessionMaxSessionsKey:        "1",
         HttpShutdownTimeoutKey:           "45s",
     }).Http()
@@ -83,8 +83,8 @@ func TestConfigurationHttpLimitsAreReadFromTheEnvironment(t *testing.T) {
     if (bound.Resolved[time.Duration]{Value: time.Second}) != httpConfiguration.SessionTombstoneRetention() {
         t.Fatalf("unexpected tombstone retention %+v", httpConfiguration.SessionTombstoneRetention())
     }
-    if (bound.Resolved[time.Duration]{Value: 2 * time.Second}) != httpConfiguration.SessionPersistenceTimeout() {
-        t.Fatalf("unexpected session persistence timeout %+v", httpConfiguration.SessionPersistenceTimeout())
+    if (bound.Resolved[time.Duration]{Value: 2 * time.Second}) != httpConfiguration.SessionStorageTimeout() {
+        t.Fatalf("unexpected session storage timeout %+v", httpConfiguration.SessionStorageTimeout())
     }
     if (bound.Resolved[time.Duration]{Value: 45 * time.Second}) != httpConfiguration.ShutdownTimeout() {
         t.Fatalf("unexpected shutdown timeout %+v", httpConfiguration.ShutdownTimeout())
@@ -102,17 +102,17 @@ func TestConfigurationHttpSessionMaxSessionsAdmitsUnlimitedAndRefusesZero(t *tes
     }
 }
 
-func TestConfigurationHttpSessionPersistenceTimeoutLeftEmptyIsTheDefault(t *testing.T) {
-    persistenceTimeout := mustConfigurationFromValues(t, map[string]string{HttpSessionPersistenceTimeoutKey: ""}).Http().SessionPersistenceTimeout()
-    if (bound.Resolved[time.Duration]{Value: DefaultSessionPersistenceTimeout}) != persistenceTimeout {
-        t.Fatalf("expected an empty value to take the 5s default, got %+v", persistenceTimeout)
+func TestConfigurationHttpSessionStorageTimeoutLeftEmptyIsTheDefault(t *testing.T) {
+    storageTimeout := mustConfigurationFromValues(t, map[string]string{HttpSessionStorageTimeoutKey: ""}).Http().SessionStorageTimeout()
+    if (bound.Resolved[time.Duration]{Value: DefaultSessionStorageTimeout}) != storageTimeout {
+        t.Fatalf("expected an empty value to take the 5s default, got %+v", storageTimeout)
     }
 }
 
-func TestConfigurationHttpSessionPersistenceTimeoutAdmitsUnlimited(t *testing.T) {
-    persistenceTimeout := mustConfigurationFromValues(t, map[string]string{HttpSessionPersistenceTimeoutKey: "unlimited"}).Http().SessionPersistenceTimeout()
-    if false == persistenceTimeout.Unlimited {
-        t.Fatalf("expected unlimited, got %+v", persistenceTimeout)
+func TestConfigurationHttpSessionStorageTimeoutAdmitsUnlimited(t *testing.T) {
+    storageTimeout := mustConfigurationFromValues(t, map[string]string{HttpSessionStorageTimeoutKey: "unlimited"}).Http().SessionStorageTimeout()
+    if false == storageTimeout.Unlimited {
+        t.Fatalf("expected unlimited, got %+v", storageTimeout)
     }
 }
 
@@ -138,9 +138,9 @@ func TestConfigurationHttpLimitsRefuseWhatTheirRuleDoesNotAdmit(t *testing.T) {
         {HttpSessionTtlKey, "999ms", "HttpConfiguration.SessionTtl"},
         {HttpSessionTombstoneRetentionKey, "999ms", "HttpConfiguration.SessionTombstoneRetention"},
         {HttpSessionTombstoneRetentionKey, "unlimited", "HttpConfiguration.SessionTombstoneRetention"},
-        {HttpSessionPersistenceTimeoutKey, "0", "HttpConfiguration.SessionPersistenceTimeout"},
-        {HttpSessionPersistenceTimeoutKey, "-1s", "HttpConfiguration.SessionPersistenceTimeout"},
-        {HttpSessionPersistenceTimeoutKey, "500us", "HttpConfiguration.SessionPersistenceTimeout"},
+        {HttpSessionStorageTimeoutKey, "0", "HttpConfiguration.SessionStorageTimeout"},
+        {HttpSessionStorageTimeoutKey, "-1s", "HttpConfiguration.SessionStorageTimeout"},
+        {HttpSessionStorageTimeoutKey, "500us", "HttpConfiguration.SessionStorageTimeout"},
         {HttpShutdownTimeoutKey, "0", "HttpConfiguration.ShutdownTimeout"},
         {HttpShutdownTimeoutKey, "unlimited", "HttpConfiguration.ShutdownTimeout"},
         {HttpReadTimeoutKey, "0", "ApplicationConfig.ReadTimeout"},
@@ -519,7 +519,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
                 testCase.staticExcludedPaths,
                 bound.Resolved[time.Duration]{Value: DefaultSessionTtl},
                 bound.Resolved[time.Duration]{Value: DefaultSessionTombstoneRetention},
-                bound.Resolved[time.Duration]{Value: DefaultSessionPersistenceTimeout},
+                bound.Resolved[time.Duration]{Value: DefaultSessionStorageTimeout},
                 bound.Resolved[int]{Value: DefaultSessionMaxSessions},
                 bound.Resolved[time.Duration]{Value: DefaultHttpShutdownTimeout},
                 httpServerLimits{},
@@ -552,7 +552,7 @@ func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *te
         []string{"/internal"},
         bound.Resolved[time.Duration]{Value: time.Minute},
         bound.Resolved[time.Duration]{Value: 11 * time.Minute},
-        bound.Resolved[time.Duration]{Value: DefaultSessionPersistenceTimeout},
+        bound.Resolved[time.Duration]{Value: DefaultSessionStorageTimeout},
         bound.Resolved[int]{Value: 13},
         bound.Resolved[time.Duration]{Value: 7 * time.Second},
         httpServerLimits{readTimeout: bound.Of(time.Second)},

@@ -1763,11 +1763,11 @@ type refusedBoundSessionManager struct {
     *session.Manager
 }
 
-func (instance *refusedBoundSessionManager) PersistenceTimeout() bound.Duration {
+func (instance *refusedBoundSessionManager) StorageTimeout() bound.Duration {
     return bound.Of(time.Duration(0))
 }
 
-func TestRunHttp_RefusesAManagerDeclaringAPersistenceTimeoutTheRuleRefusesBeforeServing(t *testing.T) {
+func TestRunHttp_RefusesAManagerDeclaringAStorageTimeoutTheRuleRefusesBeforeServing(t *testing.T) {
     environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.HttpAddressKey: "127.0.0.1:34524"}})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
@@ -1799,13 +1799,13 @@ func TestRunHttp_RefusesAManagerDeclaringAPersistenceTimeoutTheRuleRefusesBefore
     cancel()
 
     runErr := applicationInstance.runHttp(cancelledContext)
-    if nil == runErr || "the session manager declares a persistence timeout the rule refuses" != runErr.Error() {
+    if nil == runErr || "the session manager declares a storage timeout the rule refuses" != runErr.Error() {
         t.Fatalf("expected the boot refused by name, got %v", runErr)
     }
 
     exceptionErr, isExceptionErr := runErr.(*exception.Error)
-    if false == isExceptionErr || session.PersistenceTimeoutRule.Name != exceptionErr.Context()["field"] {
-        t.Fatalf("expected the refusal to name %s, got %v", session.PersistenceTimeoutRule.Name, runErr)
+    if false == isExceptionErr || session.StorageTimeoutRule.Name != exceptionErr.Context()["field"] {
+        t.Fatalf("expected the refusal to name %s, got %v", session.StorageTimeoutRule.Name, runErr)
     }
 }
 

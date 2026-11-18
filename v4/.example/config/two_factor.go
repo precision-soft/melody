@@ -16,7 +16,6 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
-    melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -27,8 +26,8 @@ const (
     /* secondFactorReplayGuardPrefix names the codes the sign-in and the verification door burn, so two applications on one redis never refuse each other's codes as replays */
     secondFactorReplayGuardPrefix = "melody-example-v4:2fa"
 
-    /* secondFactorBudgetKeyPrefix names the per-account budget of presented second factors, apart from the per-address write budget */
-    secondFactorBudgetKeyPrefix = "melody-example-v4:second_factor_budget:"
+    /* secondFactorBudgetLimiterName keys the per-account budget of presented second factors apart from the per-address write budget under the same prefix */
+    secondFactorBudgetLimiterName = "second_factor_budget"
 
     /* secondFactorBudgetAllowance codes may be presented for one account inside secondFactorBudgetWindow: enough for a user who mistypes, far too few to walk a million six-digit codes */
     secondFactorBudgetAllowance = 5
@@ -73,7 +72,6 @@ func (instance *Module) buildSecondFactorReplayGuard(clockInstance melodyclockco
 func (instance *Module) buildLoginAuthentication(
     clockInstance melodyclockcontract.Clock,
     replayGuard melodysecuritycontract.NonceGuard,
-    logger melodyloggingcontract.Logger,
 ) *security.LoginAuthentication {
     password := security.NewPasswordAuthenticator(checkLoginPassword)
 
@@ -83,7 +81,7 @@ func (instance *Module) buildLoginAuthentication(
 
     budget := security.NewSecondFactorBudget(
         password,
-        instance.buildSecondFactorBudgetLimiter(clockInstance, logger),
+        instance.buildSecondFactorBudgetLimiter(clockInstance),
         melodysecurity.DefaultTotpCodeHeaderName,
         melodysecurity.DefaultTotpRecoveryHeaderName,
     )
@@ -100,20 +98,15 @@ func (instance *Module) buildLoginAuthentication(
     return security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager([]melodysecuritycontract.Authenticator{secondFactor}), budget)
 }
 
-/* buildSecondFactorBudgetLimiter counts the presented codes in redis when the example has one, so every replica spends one budget, and in this process otherwise; with redis unreachable the limiter fails closed, so a code is refused rather than read uncounted. The redis limiter records a store failure on the request's logger, and a failed release of the budget, which carries no request, on the application's logger. The in-process budget is keyed per account and spent only once the password was accepted, so its 10,000 entries are accounts that presented a code; a full table gives the slot of the account seen longest ago to the next one, and handing one account its budget back early takes the passwords of 10,000 others. */
-func (instance *Module) buildSecondFactorBudgetLimiter(clockInstance melodyclockcontract.Clock, logger melodyloggingcontract.Logger) melodyhttpcontract.RateLimiter {
+/* buildSecondFactorBudgetLimiter counts the presented codes in redis when the example has one, so every replica spends one budget, and in this process otherwise; with redis unreachable the limiter fails closed, so a code is refused rather than read uncounted. A store failure is returned to the budget, which journals it on the request's logger. The in-process budget is keyed per account and spent only once the password was accepted, so its 10,000 entries are accounts that presented a code; a full table gives the slot of the account seen longest ago to the next one, and handing one account its budget back early takes the passwords of 10,000 others. */
+func (instance *Module) buildSecondFactorBudgetLimiter(clockInstance melodyclockcontract.Clock) melodyhttpcontract.RateLimiter {
     if nil != instance.redisClient {
-        return melodyrueidis.NewRateLimiter(instance.redisClient, melodyrueidis.RateLimiterConfig{
-            Limit:     secondFactorBudgetAllowance,
-            Window:    secondFactorBudgetWindow,
-            KeyPrefix: secondFactorBudgetKeyPrefix,
-            Logger:    logger,
+        return melodyrueidis.NewRateLimiter(instance.redisClient, secondFactorBudgetLimiterName, secondFactorBudgetAllowance, secondFactorBudgetWindow, melodyrueidis.RateLimiterConfig{
+            KeyPrefix: redisRateLimitKeyPrefix,
         })
     }
 
-    return melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{
-        Limit:   secondFactorBudgetAllowance,
-        Window:  secondFactorBudgetWindow,
+    return melodyhttpmiddleware.NewSlidingWindowLimiter(secondFactorBudgetLimiterName, secondFactorBudgetAllowance, secondFactorBudgetWindow, melodyhttpmiddleware.LimiterConfig{
         MaxKeys: melodybound.Of(inProcessWriteThrottleMaxAddresses),
         Clock:   clockInstance,
     })

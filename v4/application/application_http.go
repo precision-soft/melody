@@ -151,7 +151,7 @@ func (instance *Application) runHttp(
         return unavailableRetryAfterErr
     }
 
-    if refusedErr := refuseSessionPersistenceTimeout(ctx, instance.kernel.ServiceContainer()); nil != refusedErr {
+    if refusedErr := refuseSessionStorageTimeout(ctx, instance.kernel.ServiceContainer()); nil != refusedErr {
         return refusedErr
     }
 
@@ -208,8 +208,8 @@ func (instance *Application) runHttp(
     )
 }
 
-/* refuseSessionPersistenceTimeout judges the registered manager's bound once at boot, so a replaced manager declaring one the rule refuses fails the boot rather than every saving request. */
-func refuseSessionPersistenceTimeout(ctx context.Context, serviceContainer containercontract.Container) error {
+/* refuseSessionStorageTimeout judges the registered manager's bound once at boot, so a replaced manager declaring one the rule refuses fails the boot rather than every saving request. */
+func refuseSessionStorageTimeout(ctx context.Context, serviceContainer containercontract.Container) error {
     if false == serviceContainer.Has(session.ServiceSessionManager) {
         return nil
     }
@@ -219,12 +219,12 @@ func refuseSessionPersistenceTimeout(ctx context.Context, serviceContainer conta
         return sessionManagerErr
     }
 
-    if _, timeoutErr := session.ResolvePersistenceTimeout(sessionManager); nil != timeoutErr {
+    if _, timeoutErr := session.ResolveStorageTimeout(sessionManager); nil != timeoutErr {
         return exception.NewError(
-            "the session manager declares a persistence timeout the rule refuses",
+            "the session manager declares a storage timeout the rule refuses",
             exceptioncontract.Context{
                 "service": session.ServiceSessionManager,
-                "field":   session.PersistenceTimeoutRule.Name,
+                "field":   session.StorageTimeoutRule.Name,
             },
             timeoutErr,
         )

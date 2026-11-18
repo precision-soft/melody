@@ -6,6 +6,7 @@ import (
     "mime"
     nethttp "net/http"
     "strings"
+    "time"
 
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -75,8 +76,9 @@ func (instance *LoginDoorAuthenticator) Authenticate(request melodyhttpcontract.
         return token, nil
     }
 
-    if true == errors.Is(authenticationErr, ErrSecondFactorBudgetSpent) {
-        return nil, chainRefusal(nethttp.StatusTooManyRequests, "too many attempts", authenticationErr)
+    var spentErr *SecondFactorBudgetSpentError
+    if true == errors.As(authenticationErr, &spentErr) {
+        return nil, chainRefusal(nethttp.StatusTooManyRequests, "too many attempts", authenticationErr, spentErr.RetryAfter)
     }
 
     /* an outage carries the framework's mark: the door answers it 503 with the firewall's Retry-After */
@@ -85,12 +87,12 @@ func (instance *LoginDoorAuthenticator) Authenticate(request melodyhttpcontract.
     }
 
     /* the cause names internals and this door is unauthenticated, so the public message says nothing of it */
-    return nil, chainRefusal(nethttp.StatusInternalServerError, "authentication failed", authenticationErr)
+    return nil, chainRefusal(nethttp.StatusInternalServerError, "authentication failed", authenticationErr, 0)
 }
 
 /* chainRefusal carries the chain's error as the cause; one the chain already filed, the limiter's outage, is not filed a second time under the refusal. */
-func chainRefusal(statusCode int, message string, causeErr error) error {
-    refusal := melodyexception.NewHttpError(statusCode, melodyexception.HttpErrorConfig{Message: message, Cause: causeErr})
+func chainRefusal(statusCode int, message string, causeErr error, retryAfter time.Duration) error {
+    refusal := melodyexception.NewHttpError(statusCode, melodyexception.HttpErrorConfig{Message: message, Cause: causeErr, RetryAfter: retryAfter})
 
     if true == melodyexception.IsAlreadyLogged(causeErr) {
         refusal.MarkAsLogged()

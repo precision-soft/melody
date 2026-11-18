@@ -38,9 +38,9 @@ var (
         Minimum: bound.TtlMinimum,
     }
 
-    SessionPersistenceTimeoutRule = bound.Rule[time.Duration]{
-        Name:              "HttpConfiguration.SessionPersistenceTimeout",
-        Default:           DefaultSessionPersistenceTimeout,
+    SessionStorageTimeoutRule = bound.Rule[time.Duration]{
+        Name:              "HttpConfiguration.SessionStorageTimeout",
+        Default:           DefaultSessionStorageTimeout,
         Minimum:           bound.TimeoutMinimum,
         UnlimitedAdmitted: true,
     }

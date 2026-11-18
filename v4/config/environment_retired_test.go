@@ -26,6 +26,19 @@ func TestRetiredEnvironmentKeys_FrameworkKeySet_AnswersKeyAndSuccessor(t *testin
     }
 }
 
+func TestRetiredEnvironmentKeys_TheSessionPersistenceTimeoutKeyNamesTheStorageTimeoutKey(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT": "5s"})
+
+    expected := []configcontract.RetiredEnvironmentKey{{Key: "MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT", Successor: HttpSessionStorageTimeoutKey, Owner: "the framework"}}
+    if retiredKeys := configuration.RetiredEnvironmentKeys(); false == slices.Equal(expected, retiredKeys) {
+        t.Fatalf("expected %v, got %v", expected, retiredKeys)
+    }
+
+    if successor, isRetired := configuration.RetiredEnvironmentKeySuccessor("MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT"); false == isRetired || "MELODY_HTTP_SESSION_STORAGE_TIMEOUT" != successor {
+        t.Fatalf("expected the storage timeout key as the successor, got %q %v", successor, isRetired)
+    }
+}
+
 func TestRetiredEnvironmentKeys_EmptyValue_StillAnswered(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_PUBLIC_DIR": ""})
 

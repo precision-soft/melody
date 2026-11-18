@@ -33,7 +33,7 @@ type stubSessionManager struct {
     deleteCalled       int
     saveErr            error
     deleteErr          error
-    persistenceTimeout bound.Duration
+    storageTimeout     bound.Duration
     saveContext        context.Context
     deleteContext      context.Context
     saveDeadline       time.Duration
@@ -80,10 +80,10 @@ func (instance *stubSessionManager) DeleteSession(ctx context.Context, sessionId
     return instance.deleteErr
 }
 
-func (instance *stubSessionManager) PersistenceTimeout() bound.Duration {
+func (instance *stubSessionManager) StorageTimeout() bound.Duration {
     instance.timeoutAsked++
 
-    return instance.persistenceTimeout
+    return instance.storageTimeout
 }
 
 func (instance *stubSessionManager) CloseWithContext(closeContext context.Context) error { return nil }
@@ -278,6 +278,7 @@ func TestWriteResponse_SetsSessionCookieWithSecureAndSameSite(t *testing.T) {
             SameSite: nethttp.SameSiteLaxMode,
         },
         0,
+        nil,
     )
 
     if 1 != sessionManager.saveCalled {
@@ -350,6 +351,7 @@ func TestWriteResponse_ClearsSessionCookieWithMaxAgeNegative(t *testing.T) {
             SameSite: nethttp.SameSiteLaxMode,
         },
         0,
+        nil,
     )
 
     if 1 != sessionManager.deleteCalled {
@@ -408,6 +410,7 @@ func TestWriteResponse_ForcesTheSecureSessionCookieWhenThePolicyDemandsIt(t *tes
             Secure:   httpcontract.SessionCookieSecureAlways,
         },
         0,
+        nil,
     )
 
     cookies := writer.Result().Cookies()
@@ -455,6 +458,7 @@ func TestWriteResponse_SessionCookieSecureNeverOverridesTheDetectedScheme(t *tes
             Secure:   httpcontract.SessionCookieSecureNever,
         },
         0,
+        nil,
     )
 
     cookies := writer.Result().Cookies()
@@ -501,6 +505,7 @@ func TestWriteResponse_DoesNotStoreASessionTheDiscardedResponseCannotAdvertise(t
             SameSite: nethttp.SameSiteLaxMode,
         },
         0,
+        nil,
     )
 
     if 0 != sessionManager.saveCalled {
@@ -552,6 +557,7 @@ func TestWriteResponse_StillStoresASessionTheClientAlreadyHoldsOnADiscardedRespo
             SameSite: nethttp.SameSiteLaxMode,
         },
         0,
+        nil,
     )
 
     if 1 != sessionManager.saveCalled {
@@ -594,6 +600,7 @@ func TestWriteResponse_StillDeletesAClearedSessionOnADiscardedResponse(t *testin
             SameSite: nethttp.SameSiteLaxMode,
         },
         0,
+        nil,
     )
 
     if 1 != sessionManager.deleteCalled {
@@ -1140,6 +1147,7 @@ func TestWriteResponse_NilResponsePersistsSessionAndWritesNoContent(t *testing.T
             SameSite: nethttp.SameSiteLaxMode,
         },
         0,
+        nil,
     )
 
     if 1 != sessionManager.deleteCalled {
@@ -1192,6 +1200,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilSession(t *testing.T) {
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
         0,
+        nil,
     )
 
     if 0 != sessionManager.saveCalled {
@@ -1233,6 +1242,7 @@ func TestWriteResponse_SkipsPersistenceForATypedNilManager(t *testing.T) {
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
         0,
+        nil,
     )
 
     if 0 != len(writer.Result().Cookies()) {
@@ -1265,6 +1275,7 @@ func TestWriteResponse_ADeletedSessionExpiresTheCookieAndKeepsTheResponse(t *tes
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
         0,
+        nil,
     )
 
     httpResponse := writer.Result()
@@ -1322,6 +1333,7 @@ func TestWriteResponse_AnExpiringSessionCookieMarksTheResponsePrivate(t *testing
             httpcontract.ForwardedHeadersPolicy{},
             httpcontract.SessionCookiePolicy{Path: "/"},
             0,
+            nil,
         )
 
         httpResponse := writer.Result()
@@ -1367,6 +1379,7 @@ func TestWriteResponse_ARotatedAwaySessionKeepsTheCookieAndTheResponse(t *testin
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
         0,
+        nil,
     )
 
     httpResponse := writer.Result()
@@ -1390,7 +1403,7 @@ func TestWriteResponse_ASaveOutageAnswersServiceUnavailableWithoutACookie(t *tes
     writer := httptest.NewRecorder()
 
     sessionManager := &stubSessionManager{
-        saveErr: exception.NewError("storage is unreachable", nil, nil),
+        saveErr: exception.NewError("storage is unreachable", nil, exception.MarkInfrastructureFailure(errors.New("connection refused"))),
     }
     sessionInstance := &stubSession{id: "session-123", isModified: true}
 
@@ -1405,6 +1418,7 @@ func TestWriteResponse_ASaveOutageAnswersServiceUnavailableWithoutACookie(t *tes
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
         0,
+        nil,
     )
 
     httpResponse := writer.Result()
@@ -1438,6 +1452,7 @@ func TestWriteResponse_ReadsATypedNilResponseAsTheEmptyDefault(t *testing.T) {
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
         0,
+        nil,
     )
 
     if nethttp.StatusNoContent != recorder.Code {
@@ -1455,7 +1470,7 @@ func TestWriteResponse_ReturnsTheReplacedServiceUnavailableOnASaveOutage(t *test
     writer := httptest.NewRecorder()
 
     sessionManager := &stubSessionManager{
-        saveErr: exception.NewError("storage is unreachable", nil, nil),
+        saveErr: exception.NewError("storage is unreachable", nil, exception.MarkInfrastructureFailure(errors.New("connection refused"))),
     }
     sessionInstance := &stubSession{id: "session-123", isModified: true}
 
@@ -1470,6 +1485,7 @@ func TestWriteResponse_ReturnsTheReplacedServiceUnavailableOnASaveOutage(t *test
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
         0,
+        nil,
     )
 
     if nil == writtenResponse || nethttp.StatusServiceUnavailable != writtenResponse.StatusCode() {
@@ -1499,6 +1515,7 @@ func TestWriteResponse_ReturnsTheCallersResponseWhenNothingReplacedIt(t *testing
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
         0,
+        nil,
     )
 
     if response != writtenResponse {
@@ -1550,6 +1567,7 @@ func TestWriteResponse_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *tes
             SameSite: nethttp.SameSiteLaxMode,
         },
         0,
+        nil,
     )
 
     if 1 != sessionManager.deleteCalled || 0 != sessionManager.saveCalled {
@@ -1599,6 +1617,7 @@ func TestWriteResponse_RefusesTheOutOfRangeCodeBeforeTheDelegate(t *testing.T) {
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
         0,
+        nil,
     )
 
     if nethttp.StatusInternalServerError != recorder.Code {
@@ -1690,6 +1709,7 @@ func TestWriteResponse_ADiscardedResponseReportsTheCommittedStatus(t *testing.T)
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
         0,
+        nil,
     )
 
     if nethttp.StatusOK != reported.StatusCode() {
@@ -1716,6 +1736,7 @@ func TestWriteResponse_AHijackedConnectionKeepsTheSubstituteStatus(t *testing.T)
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{},
         0,
+        nil,
     )
 
     if nethttp.StatusNoContent != reported.StatusCode() {
@@ -1788,6 +1809,7 @@ func writeResponseWithSessionOutcome(
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
         0,
+        nil,
     )
 }
 
@@ -2188,7 +2210,7 @@ func TestWriteResponse_ClosesTheBodyItDiscardsForAnOutOfRangeStatus(t *testing.T
 
     request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "/download", nil), nil, nil, nil)
 
-    written := writeResponse(nil, request, httptest.NewRecorder(), response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{}, 0)
+    written := writeResponse(nil, request, httptest.NewRecorder(), response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{}, 0, nil)
 
     if nethttp.StatusInternalServerError != written.StatusCode() {
         t.Fatalf("expected the rendered 500, got %d", written.StatusCode())
@@ -2255,6 +2277,7 @@ func TestWriteResponse_AnEarlyHintLeavesTheReturnedResponseToBeWritten(t *testin
                 SameSite: nethttp.SameSiteLaxMode,
             },
             0,
+            nil,
         )
     }))
     defer server.Close()
@@ -2289,6 +2312,7 @@ func TestWriteResponse_AClearedSessionTheRequestDoesNotNameIsNotDeleted(t *testi
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
         0,
+        nil,
     )
 
     if 0 != sessionManager.deleteCalled {
@@ -2404,6 +2428,7 @@ func sessionCookieWrittenOverPlainHttp(t *testing.T, sameSite nethttp.SameSite, 
         httpcontract.ForwardedHeadersPolicy{TrustedProxyList: []string{}},
         httpcontract.SessionCookiePolicy{Path: "/", SameSite: sameSite, Secure: secure},
         0,
+        nil,
     )
 
     cookies := writer.Result().Cookies()
@@ -2543,7 +2568,7 @@ func TestCloseDiscardedResponseBody_ReturnsOnACyclicChain(t *testing.T) {
     })
 }
 
-func TestWriteResponse_ACyclicChainFromTheSessionSaveIsAnsweredWithAServiceUnavailable(t *testing.T) {
+func TestWriteResponse_AnUnmarkedCyclicChainFromTheSessionSaveIsAnsweredWithAnInternalServerError(t *testing.T) {
     netRequest := httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
 
@@ -2562,11 +2587,12 @@ func TestWriteResponse_ACyclicChainFromTheSessionSaveIsAnsweredWithAServiceUnava
             httpcontract.ForwardedHeadersPolicy{},
             httpcontract.SessionCookiePolicy{Path: "/"},
             0,
+            nil,
         )
     })
 
-    if nethttp.StatusServiceUnavailable != writer.Result().StatusCode {
-        t.Fatalf("expected 503, got %d", writer.Result().StatusCode)
+    if nethttp.StatusInternalServerError != writer.Result().StatusCode {
+        t.Fatalf("expected 500, got %d", writer.Result().StatusCode)
     }
 }
 
@@ -2578,7 +2604,7 @@ func TestWriteResponse_AnInformationalStatusIsAnsweredAsTheRenderedInternalServe
     response.Headers().Add("Set-Cookie", "leaked=1")
 
     writer := httptest.NewRecorder()
-    written := writeResponse(nil, melodyRequest, writer, response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{}, 0)
+    written := writeResponse(nil, melodyRequest, writer, response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{}, 0, nil)
 
     if nethttp.StatusInternalServerError != writer.Code || nethttp.StatusInternalServerError != written.StatusCode() {
         t.Fatalf("expected the rendered 500 written and answered, got %d and %d", writer.Code, written.StatusCode())
@@ -2602,7 +2628,7 @@ func TestKernel_AResponseObjectWithSwitchingProtocolsIsAnsweredAsTheRendered500(
     response := &Response{statusCode: nethttp.StatusSwitchingProtocols, headers: make(nethttp.Header), bodyReader: body}
 
     writer := httptest.NewRecorder()
-    written := writeResponse(runtimeInstance, melodyRequest, writer, response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{}, 0)
+    written := writeResponse(runtimeInstance, melodyRequest, writer, response, nil, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{}, 0, nil)
 
     if nethttp.StatusInternalServerError != writer.Code || nethttp.StatusInternalServerError != written.StatusCode() {
         t.Fatalf("expected the rendered 500 written and answered, got %d and %d", writer.Code, written.StatusCode())
@@ -2652,6 +2678,7 @@ func writeResponseUnderRequestContext(
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
         0,
+        nil,
     )
 }
 
@@ -2695,7 +2722,7 @@ func TestWriteResponse_PersistsUnderTheRuntimesContextOverTheNetRequests(t *test
     sessionRequest := NewRequest(netRequest, nil, nil, nil)
     sessionRequest.Attributes().Set(requestAttributeSession, sessionInstance)
 
-    writeResponse(runtimeInstance, sessionRequest, httptest.NewRecorder(), TextResponse(nethttp.StatusOK, "handler body"), sessionManager, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{Path: "/"}, 0)
+    writeResponse(runtimeInstance, sessionRequest, httptest.NewRecorder(), TextResponse(nethttp.StatusOK, "handler body"), sessionManager, httpcontract.ForwardedHeadersPolicy{}, httpcontract.SessionCookiePolicy{Path: "/"}, 0, nil)
 
     if 1 != sessionManager.saveCalled || "planted" != sessionManager.saveContext.Value(persistencePlantedKey{}) {
         t.Fatalf("expected one save under the runtime's context, got %d", sessionManager.saveCalled)
@@ -2716,7 +2743,7 @@ func TestWriteResponse_DeletesUnderAContextTheRequestsCancellationDoesNotReach(t
     }
 
     if _, hasDeadline := sessionManager.deleteContext.Deadline(); false == hasDeadline {
-        t.Fatalf("expected the delete bounded by the persistence timeout")
+        t.Fatalf("expected the delete bounded by the storage timeout")
     }
 }
 
@@ -2741,8 +2768,8 @@ func TestWriteResponse_ThePersistenceContextIsLiveAtTheCall(t *testing.T) {
     }
 }
 
-func TestWriteResponse_AnUnlimitedPersistenceTimeoutSetsNoDeadline(t *testing.T) {
-    sessionManager := &stubSessionManager{persistenceTimeout: bound.UnlimitedDuration()}
+func TestWriteResponse_AnUnlimitedStorageTimeoutSetsNoDeadline(t *testing.T) {
+    sessionManager := &stubSessionManager{storageTimeout: bound.UnlimitedDuration()}
 
     writeResponseUnderRequestContext(t, context.Background(), sessionManager, &stubSession{id: "session-1", isModified: true}, httptest.NewRecorder())
 
@@ -2762,7 +2789,7 @@ func TestWriteResponse_AnAbsentBoundPersistsUnderTheDefault(t *testing.T) {
 }
 
 func TestWriteResponse_ADeclaredBoundIsTheDeadline(t *testing.T) {
-    sessionManager := &stubSessionManager{persistenceTimeout: bound.Of(2 * time.Second)}
+    sessionManager := &stubSessionManager{storageTimeout: bound.Of(2 * time.Second)}
 
     writeResponseUnderRequestContext(t, context.Background(), sessionManager, &stubSession{id: "session-1", isModified: true}, httptest.NewRecorder())
 
@@ -2772,7 +2799,7 @@ func TestWriteResponse_ADeclaredBoundIsTheDeadline(t *testing.T) {
 }
 
 func TestWriteResponse_ABoundTheRuleRefusesFailsThePersistence(t *testing.T) {
-    sessionManager := &stubSessionManager{persistenceTimeout: bound.Of(time.Microsecond)}
+    sessionManager := &stubSessionManager{storageTimeout: bound.Of(time.Microsecond)}
     writer := httptest.NewRecorder()
 
     writeResponseUnderRequestContext(t, context.Background(), sessionManager, &stubSession{id: "session-1", isModified: true}, writer)
@@ -2781,15 +2808,20 @@ func TestWriteResponse_ABoundTheRuleRefusesFailsThePersistence(t *testing.T) {
         t.Fatalf("expected a refused bound never to reach the manager's save")
     }
 
-    if nethttp.StatusServiceUnavailable != writer.Code || 0 != len(writer.Result().Cookies()) {
-        t.Fatalf("expected the failed persistence answered 503 without a cookie, got %d", writer.Code)
+    if nethttp.StatusInternalServerError != writer.Code || "" != writer.Header().Get("Retry-After") || 0 != len(writer.Result().Cookies()) {
+        t.Fatalf("expected the failed persistence answered 500 without Retry-After or a cookie, got %d", writer.Code)
     }
 
-    deleteManager := &stubSessionManager{persistenceTimeout: bound.Of(time.Microsecond)}
-    writeResponseUnderRequestContext(t, context.Background(), deleteManager, &stubSession{id: "session-1", isCleared: true}, httptest.NewRecorder())
+    deleteManager := &stubSessionManager{storageTimeout: bound.Of(time.Microsecond)}
+    deleteWriter := httptest.NewRecorder()
+    writeResponseUnderRequestContext(t, context.Background(), deleteManager, &stubSession{id: "session-1", isCleared: true}, deleteWriter)
 
     if 0 != deleteManager.deleteCalled {
         t.Fatalf("expected a refused bound never to reach the manager's delete")
+    }
+
+    if cookies := deleteWriter.Result().Cookies(); nethttp.StatusInternalServerError != deleteWriter.Code || 1 != len(cookies) || 0 <= cookies[0].MaxAge {
+        t.Fatalf("expected the failed delete answered 500 with the expiring cookie, got %d %v", deleteWriter.Code, cookies)
     }
 }
 
@@ -2826,8 +2858,8 @@ func TestWriteResponse_APanickingDoorLeavesNoPersistenceTimerArmed(t *testing.T)
         sessionManager  *stubSessionManager
         sessionInstance *stubSession
     }{
-        {"save", &stubSessionManager{persistenceTimeout: bound.Of(time.Hour), savePanic: "save panicked"}, &stubSession{id: "session-1", isModified: true}},
-        {"delete", &stubSessionManager{persistenceTimeout: bound.Of(time.Hour), deletePanic: "delete panicked"}, &stubSession{id: "session-1", isCleared: true}},
+        {"save", &stubSessionManager{storageTimeout: bound.Of(time.Hour), savePanic: "save panicked"}, &stubSession{id: "session-1", isModified: true}},
+        {"delete", &stubSessionManager{storageTimeout: bound.Of(time.Hour), deletePanic: "delete panicked"}, &stubSession{id: "session-1", isCleared: true}},
     } {
         t.Run(row.name, func(t *testing.T) {
             func() {
@@ -2874,13 +2906,174 @@ func TestWriteResponse_ASaveOutageAnswersTheKernelsRetryAfter(t *testing.T) {
         sessionRequest,
         writer,
         TextResponse(nethttp.StatusOK, "welcome"),
-        &stubSessionManager{saveErr: errors.New("unmarked outage")},
+        &stubSessionManager{saveErr: exception.MarkInfrastructureFailure(errors.New("storage outage"))},
         httpcontract.ForwardedHeadersPolicy{},
         httpcontract.SessionCookiePolicy{Path: "/"},
         42*time.Second,
+        nil,
     )
 
     if nethttp.StatusServiceUnavailable != writer.Code || "42" != writer.Header().Get("Retry-After") {
         t.Fatalf("expected 503 with the kernel's Retry-After, got %d and %q", writer.Code, writer.Header().Get("Retry-After"))
+    }
+}
+
+/* hangingSessionManager waits on the context of its save or delete and answers its bare, unmarked error, as a replaced manager that forgets the mark would */
+type hangingSessionManager struct {
+    stubSessionManager
+}
+
+func (instance *hangingSessionManager) SaveSession(ctx context.Context, sessionInstance contract.Session) error {
+    instance.saveCalled++
+    return awaitStorageContext(ctx)
+}
+
+func (instance *hangingSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
+    instance.deleteCalled++
+    return awaitStorageContext(ctx)
+}
+
+func writeResponseRecorded(
+    t *testing.T,
+    sessionManager contract.Manager,
+    sessionInstance contract.Session,
+    writer nethttp.ResponseWriter,
+) (httpcontract.Response, *errorContextRecordingLogger) {
+    t.Helper()
+
+    recordingLogger := &errorContextRecordingLogger{}
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
+    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+
+    netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account", nil)
+    netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
+
+    sessionRequest := NewRequest(netRequest, nil, nil, nil)
+    sessionRequest.Attributes().Set(requestAttributeSession, sessionInstance)
+
+    response := writeResponse(
+        runtimeInstance,
+        sessionRequest,
+        writer,
+        TextResponse(nethttp.StatusOK, "handler body"),
+        sessionManager,
+        httpcontract.ForwardedHeadersPolicy{},
+        httpcontract.SessionCookiePolicy{Path: "/"},
+        7*time.Second,
+        nil,
+    )
+
+    return response, recordingLogger
+}
+
+func TestWriteResponse_ASaveRefusedForAReasonThatIsNoOutageAnswers500WithoutRetryAfter(t *testing.T) {
+    writer := httptest.NewRecorder()
+    _, recordingLogger := writeResponseRecorded(t, &stubSessionManager{saveErr: errors.New("session id is invalid in save session")}, &stubSession{id: "session-1", isModified: true}, writer)
+
+    if nethttp.StatusInternalServerError != writer.Code || "" != writer.Header().Get("Retry-After") || 0 != len(writer.Result().Cookies()) {
+        t.Fatalf("expected 500 without Retry-After or a cookie, got %d %q %v", writer.Code, writer.Header().Get("Retry-After"), writer.Result().Cookies())
+    }
+
+    if _, recorded := recordingLogger.errorContextFor("failed to save session"); false == recorded {
+        t.Fatalf("expected the failed save recorded at error")
+    }
+}
+
+func TestWriteResponse_ASaveCutByTheStorageBoundIs503EvenUnmarked(t *testing.T) {
+    sessionManager := &hangingSessionManager{stubSessionManager: stubSessionManager{storageTimeout: bound.Of(20 * time.Millisecond)}}
+    writer := httptest.NewRecorder()
+
+    _, recordingLogger := writeResponseRecorded(t, sessionManager, &stubSession{id: "session-1", isModified: true}, writer)
+
+    if nethttp.StatusServiceUnavailable != writer.Code || "7" != writer.Header().Get("Retry-After") {
+        t.Fatalf("expected the cut save answered 503 with the kernel's Retry-After, got %d %q", writer.Code, writer.Header().Get("Retry-After"))
+    }
+
+    recordContext, recorded := recordingLogger.errorContextFor("failed to save session")
+    if false == recorded || session.StorageTimeoutRule.Name != recordContext["bound"] {
+        t.Fatalf("expected the record to name the bound, got %v", recordContext)
+    }
+}
+
+func TestWriteResponse_ADeleteOutageAnswers503WithRetryAfter(t *testing.T) {
+    writer := httptest.NewRecorder()
+    sessionManager := &stubSessionManager{deleteErr: exception.MarkInfrastructureFailure(errors.New("connection refused"))}
+
+    _, recordingLogger := writeResponseRecorded(t, sessionManager, &stubSession{id: "session-1", isCleared: true}, writer)
+
+    if nethttp.StatusServiceUnavailable != writer.Code || "7" != writer.Header().Get("Retry-After") {
+        t.Fatalf("expected the delete outage answered 503 with Retry-After, got %d %q", writer.Code, writer.Header().Get("Retry-After"))
+    }
+
+    if cookies := writer.Result().Cookies(); 0 != len(cookies) {
+        t.Fatalf("expected the cookie kept on the 503, got %v", cookies)
+    }
+
+    if "handler body" == writer.Body.String() {
+        t.Fatalf("expected the handler's response replaced")
+    }
+
+    if _, recorded := recordingLogger.errorContextFor("failed to delete session"); false == recorded {
+        t.Fatalf("expected the failed delete recorded at error")
+    }
+}
+
+func TestWriteResponse_ADeleteCutByTheStorageBoundIs503EvenUnmarkedAndNamesTheBound(t *testing.T) {
+    sessionManager := &hangingSessionManager{stubSessionManager: stubSessionManager{storageTimeout: bound.Of(20 * time.Millisecond)}}
+    writer := httptest.NewRecorder()
+
+    _, recordingLogger := writeResponseRecorded(t, sessionManager, &stubSession{id: "session-1", isCleared: true}, writer)
+
+    if nethttp.StatusServiceUnavailable != writer.Code || 0 != len(writer.Result().Cookies()) {
+        t.Fatalf("expected the cut delete answered 503 keeping the cookie, got %d %v", writer.Code, writer.Result().Cookies())
+    }
+
+    recordContext, recorded := recordingLogger.errorContextFor("failed to delete session")
+    if false == recorded || session.StorageTimeoutRule.Name != recordContext["bound"] {
+        t.Fatalf("expected the record to name the bound, got %v", recordContext)
+    }
+}
+
+func TestWriteResponse_ADeleteFailureThatIsNoOutageAnswers500AndExpiresTheCookie(t *testing.T) {
+    writer := httptest.NewRecorder()
+    _, _ = writeResponseRecorded(t, &stubSessionManager{deleteErr: errors.New("session id is invalid")}, &stubSession{id: "session-1", isCleared: true}, writer)
+
+    cookies := writer.Result().Cookies()
+    if nethttp.StatusInternalServerError != writer.Code || "" != writer.Header().Get("Retry-After") || 1 != len(cookies) || 0 <= cookies[0].MaxAge {
+        t.Fatalf("expected 500 with the expiring cookie and no Retry-After, got %d %q %v", writer.Code, writer.Header().Get("Retry-After"), cookies)
+    }
+}
+
+func TestWriteResponse_ADeleteOutageOnACommittedResponseKeepsItsStatus(t *testing.T) {
+    committed := newRecordingResponseWriter(httptest.NewRecorder())
+    committed.WriteHeader(nethttp.StatusOK)
+
+    response, recordingLogger := writeResponseRecorded(t, &stubSessionManager{deleteErr: exception.MarkInfrastructureFailure(errors.New("connection refused"))}, &stubSession{id: "session-1", isCleared: true}, committed)
+
+    if nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the committed response kept, got %d", response.StatusCode())
+    }
+
+    if _, recorded := recordingLogger.errorContextFor("failed to delete session"); false == recorded {
+        t.Fatalf("expected the failed delete still recorded")
+    }
+}
+
+/* a hijacked connection records no status, so the response writeResponse answers is the one it keeps */
+type hijackedHeadersWriter struct {
+    *httptest.ResponseRecorder
+}
+
+func (instance *hijackedHeadersWriter) HeadersWritten() bool {
+    return true
+}
+
+func TestWriteResponse_ADeleteOutageOnAHijackedConnectionKeepsTheHandlersResponse(t *testing.T) {
+    response, _ := writeResponseRecorded(t, &stubSessionManager{deleteErr: exception.MarkInfrastructureFailure(errors.New("connection refused"))}, &stubSession{id: "session-1", isCleared: true}, &hijackedHeadersWriter{ResponseRecorder: httptest.NewRecorder()})
+
+    if nethttp.StatusOK != response.StatusCode() {
+        t.Fatalf("expected the handler's response kept on a committed connection, got %d", response.StatusCode())
     }
 }

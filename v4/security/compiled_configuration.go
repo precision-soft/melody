@@ -303,8 +303,27 @@ func (instance *CompiledFirewall) Login(
     return result, nil
 }
 
-/* Logout runs the firewall's logout handler. A result beside an error means the handler succeeded and security.logout.success could not be dispatched: the sign-out stands. */
+/* Logout runs the firewall's logout handler. A result beside an error means the handler succeeded and security.logout.success could not be dispatched: the sign-out stands. The logout door runs the handler without this dispatch and raises the event once the session's delete landed. */
 func (instance *CompiledFirewall) Logout(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    input securitycontract.LogoutInput,
+) (*securitycontract.LogoutResult, error) {
+    result, err := instance.runLogoutHandler(runtimeInstance, request, input)
+    if nil != err {
+        return nil, err
+    }
+
+    dispatchErr := instance.dispatchLogoutSuccess(runtimeInstance, request)
+    if nil != dispatchErr {
+        return result, dispatchErr
+    }
+
+    return result, nil
+}
+
+/* runLogoutHandler raises security.logout.failure for a handler's error and leaves the success to its caller */
+func (instance *CompiledFirewall) runLogoutHandler(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LogoutInput,
@@ -346,11 +365,6 @@ func (instance *CompiledFirewall) Logout(
             },
             nil,
         )
-    }
-
-    dispatchErr := instance.dispatchLogoutSuccess(runtimeInstance, request)
-    if nil != dispatchErr {
-        return result, dispatchErr
     }
 
     return result, nil

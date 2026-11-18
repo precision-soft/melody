@@ -22,8 +22,8 @@ type Manager interface {
     /* RegenerateSession answers the values under a fresh id, marked modified, and removes the previous entry. */
     RegenerateSession(ctx context.Context, session Session) (Session, error)
 
-    /* PersistenceTimeout bounds the end-of-request save or delete by the rule of session.ManagerConfig.PersistenceTimeout; a decorator forwards it. */
-    PersistenceTimeout() bound.Duration
+    /* StorageTimeout bounds every call to the storage the kernel makes, the load, the mint, the rotation, the save and the delete, by the rule of session.ManagerConfig.StorageTimeout; a decorator forwards it. */
+    StorageTimeout() bound.Duration
 
     CloseWithContext(closeContext context.Context) error
 }

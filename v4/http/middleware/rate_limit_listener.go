@@ -61,7 +61,7 @@ type RateLimitGate struct {
 func (instance *RateLimitGate) Apply(runtimeInstance runtimecontract.Runtime, requestEvent *http.KernelRequestEvent) bool {
     request := requestEvent.Request()
 
-    allowed, unavailableErr := allowRequestUnderLimit(instance.settings, runtimeInstance, request)
+    decision, unavailableErr := allowRequestUnderLimit(instance.settings, runtimeInstance, request)
 
     /* a denial from a store that could not answer is refused with the marked error, 503 with Retry-After, and the limit handler is not called */
     if nil != unavailableErr {
@@ -70,29 +70,29 @@ func (instance *RateLimitGate) Apply(runtimeInstance runtimecontract.Runtime, re
         return true
     }
 
-    if true == allowed {
+    if true == decision.Allowed {
         return false
     }
 
-    response, limitErr := instance.settings.onLimitExceeded(request)
+    response, limitErr := instance.settings.onLimitExceeded(request, decision)
 
     if false == internal.IsNilInterface(limitErr) {
         http.CloseDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
 
-        requestEvent.Refuse(limitErr)
+        requestEvent.Refuse(withDecisionRetryAfterError(limitErr, decision))
 
         return true
     }
 
     /* IsNilInterface, since the application's handler may answer a typed-nil response, which would leave the refused request served */
     if false == internal.IsNilInterface(response) {
-        requestEvent.SetResponse(response)
+        requestEvent.SetResponse(withDecisionRetryAfter(response, decision))
 
         return true
     }
 
     /* a limit handler that answered neither response nor error still refused the request */
-    requestEvent.SetResponse(http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests"))
+    requestEvent.SetResponse(withDecisionRetryAfter(http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests"), decision))
 
     return true
 }

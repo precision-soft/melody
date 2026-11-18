@@ -1268,14 +1268,14 @@ func mustSession(sessionInstance sessioncontract.Session, sessionErr error) sess
     return sessionInstance
 }
 
-func TestApplication_WiresTheSessionPersistenceTimeoutFromTheEnvironment(t *testing.T) {
+func TestApplication_WiresTheSessionStorageTimeoutFromTheEnvironment(t *testing.T) {
     for _, row := range []struct {
         name   string
         values map[string]string
         check  func(resolved bound.Resolved[time.Duration]) bool
     }{
-        {"declared", map[string]string{config.HttpSessionPersistenceTimeoutKey: "2s"}, func(resolved bound.Resolved[time.Duration]) bool { return 2*time.Second == resolved.Value && false == resolved.Unlimited }},
-        {"unlimited", map[string]string{config.HttpSessionPersistenceTimeoutKey: "unlimited"}, func(resolved bound.Resolved[time.Duration]) bool { return true == resolved.Unlimited }},
+        {"declared", map[string]string{config.HttpSessionStorageTimeoutKey: "2s"}, func(resolved bound.Resolved[time.Duration]) bool { return 2*time.Second == resolved.Value && false == resolved.Unlimited }},
+        {"unlimited", map[string]string{config.HttpSessionStorageTimeoutKey: "unlimited"}, func(resolved bound.Resolved[time.Duration]) bool { return true == resolved.Unlimited }},
         {"unset", map[string]string{}, func(resolved bound.Resolved[time.Duration]) bool { return 5*time.Second == resolved.Value && false == resolved.Unlimited }},
     } {
         t.Run(row.name, func(t *testing.T) {
@@ -1294,16 +1294,16 @@ func TestApplication_WiresTheSessionPersistenceTimeoutFromTheEnvironment(t *test
 
             manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
 
-            resolved, resolveErr := session.ResolvePersistenceTimeout(manager)
+            resolved, resolveErr := session.ResolveStorageTimeout(manager)
             if nil != resolveErr || false == row.check(resolved) {
-                t.Fatalf("unexpected persistence timeout %+v, %v", resolved, resolveErr)
+                t.Fatalf("unexpected storage timeout %+v, %v", resolved, resolveErr)
             }
         })
     }
 }
 
-func TestSessionPersistenceTimeoutDefaultsAgree(t *testing.T) {
-    if config.DefaultSessionPersistenceTimeout != session.DefaultPersistenceTimeout {
-        t.Fatalf("expected the configuration's and the manager's defaults to agree, got %s and %s", config.DefaultSessionPersistenceTimeout, session.DefaultPersistenceTimeout)
+func TestSessionStorageTimeoutDefaultsAgree(t *testing.T) {
+    if config.DefaultSessionStorageTimeout != session.DefaultStorageTimeout {
+        t.Fatalf("expected the configuration's and the manager's defaults to agree, got %s and %s", config.DefaultSessionStorageTimeout, session.DefaultStorageTimeout)
     }
 }

@@ -27,14 +27,8 @@ import (
 
 const defaultMaxRateLimitKeys = 1_000_000
 
-/* LimiterConfig is what an in-process limiter declares. Limit and Window are required, the budget and the span it is counted over; the rest has a default. The limiter copies it when it is built. */
+/* LimiterConfig is what an in-process limiter declares beside its name, limit and window; every field has a default. The limiter copies it when it is built. */
 type LimiterConfig struct {
-    /* Limit is the requests admitted per Window, at least 1; a limit of 0 or below is refused, since it would deny all traffic. */
-    Limit int
-
-    /* Window is the span the limit is counted over, at least 1ms; a window below it is refused, since it would refill on every request and disable the limiter. */
-    Window time.Duration
-
     /* MaxKeys bounds how many distinct keys the limiter tracks, so a caller varying the key cannot grow the table without bound: 1,000,000 by default, at least 1, unlimited refused. A full table gives the slot of the key whose last request is the oldest to an unseen key, never denies it: a caller minting keys gains nothing a fresh key does not already give it, and a caller who cannot mint the key it is limited by resets it only by sending MaxKeys requests under other keys after its last one. */
     MaxKeys bound.Count
 
@@ -58,6 +52,7 @@ var limiterCleanupIntervalRule = bound.Rule[time.Duration]{
 }
 
 type limiterSettings struct {
+    name            string
     limit           int
     window          time.Duration
     maxKeys         int
@@ -65,9 +60,10 @@ type limiterSettings struct {
     clockInstance   clockcontract.Clock
 }
 
-func resolveLimiterConfig(config LimiterConfig) limiterSettings {
-    refuseBelowMinimum(1 > config.Limit, "LimiterConfig.Limit", strconv.Itoa(config.Limit), "1")
-    refuseBelowMinimum(bound.TimeoutMinimum > config.Window, "LimiterConfig.Window", config.Window.String(), bound.TimeoutMinimum.String())
+func resolveLimiterConfig(name string, limit int, window time.Duration, config LimiterConfig) limiterSettings {
+    refuseMalformedLimiterName(name)
+    refuseArgumentBelowMinimum(1 > limit, "limit", name, strconv.Itoa(limit), "1")
+    refuseArgumentBelowMinimum(bound.TimeoutMinimum > window, "window", name, window.String(), bound.TimeoutMinimum.String())
 
     maxKeys, maxKeysErr := bound.Resolve(config.MaxKeys, limiterMaxKeysRule)
     if nil != maxKeysErr {
@@ -85,8 +81,9 @@ func resolveLimiterConfig(config LimiterConfig) limiterSettings {
     }
 
     return limiterSettings{
-        limit:           config.Limit,
-        window:          config.Window,
+        name:            name,
+        limit:           limit,
+        window:          window,
         maxKeys:         maxKeys.Value,
         cleanupInterval: cleanupInterval.Value,
         clockInstance:   clockInstance,
@@ -112,11 +109,62 @@ func refuseBelowMinimum(isBelow bool, field string, value string, minimum string
     )
 }
 
+const limiterNameMaximumLength = 64
+
+/* the colon is left out so a counter key <name>:<key> splits one way only */
+func refuseMalformedLimiterName(name string) {
+    wellFormed := 0 < len(name) && limiterNameMaximumLength >= len(name)
+
+    for index := 0; true == wellFormed && index < len(name); index++ {
+        character := name[index]
+        wellFormed = ('a' <= character && 'z' >= character) ||
+            ('A' <= character && 'Z' >= character) ||
+            ('0' <= character && '9' >= character) ||
+            '.' == character || '_' == character || '-' == character
+    }
+
+    if true == wellFormed {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "the limiter name is malformed",
+            exceptioncontract.Context{
+                "argument": "name",
+                "value":    name,
+                "grammar":  "[A-Za-z0-9._-]{1,64}",
+            },
+            nil,
+        ),
+    )
+}
+
+func refuseArgumentBelowMinimum(isBelow bool, argument string, name string, value string, minimum string) {
+    if false == isBelow {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "the limit is below its minimum",
+            exceptioncontract.Context{
+                "argument": argument,
+                "limiter":  name,
+                "value":    value,
+                "minimum":  minimum,
+            },
+            nil,
+        ),
+    )
+}
+
 /* NewFixedWindowLimiter builds a limiter whose counters live in this process only: a restart hands every caller a full budget back, and each replica enforces the limit on its own. Where the limit is a security control, as on login, one-time-password or password-reset routes, use integrations/rueidis.RateLimiter, the distributed drop-in. The bucket refills to full capacity at the window edge, so it admits up to twice the limit across an instant straddling that edge; use NewSlidingWindowLimiter where the limit must hold over every trailing window. */
-func NewFixedWindowLimiter(config LimiterConfig) *FixedWindowLimiter {
-    settings := resolveLimiterConfig(config)
+func NewFixedWindowLimiter(name string, limit int, window time.Duration, config LimiterConfig) *FixedWindowLimiter {
+    settings := resolveLimiterConfig(name, limit, window, config)
 
     return &FixedWindowLimiter{
+        name:            settings.name,
         buckets:         make(map[string]*fixedWindowBucket),
         rate:            settings.limit,
         window:          settings.window,
@@ -129,6 +177,7 @@ func NewFixedWindowLimiter(config LimiterConfig) *FixedWindowLimiter {
 }
 
 type FixedWindowLimiter struct {
+    name            string
     mutex           sync.RWMutex
     buckets         map[string]*fixedWindowBucket
     rate            int
@@ -146,7 +195,15 @@ type fixedWindowBucket struct {
     lastRefill time.Time
 }
 
-func (instance *FixedWindowLimiter) Allow(key string) bool {
+func (instance *FixedWindowLimiter) Name() string {
+    return instance.name
+}
+
+func (instance *FixedWindowLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+    if refusalErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+        return httpcontract.RateLimitDecision{Limit: instance.capacity}, refusalErr
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -177,6 +234,12 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
     /* a fixed window: the allowance is restored whole at the edge, so up to twice the rate can pass across it */
     elapsed := now.Sub(bucket.lastRefill)
 
+    /* a clock stepped back moves the refill instant to now, so a denial never waits past one window */
+    if 0 > elapsed {
+        bucket.lastRefill = now
+        elapsed = 0
+    }
+
     if instance.window <= elapsed {
         bucket.tokens = instance.capacity
         bucket.lastRefill = now
@@ -185,17 +248,23 @@ func (instance *FixedWindowLimiter) Allow(key string) bool {
     if 0 < bucket.tokens {
         bucket.tokens--
 
-        return true
+        return httpcontract.RateLimitDecision{Allowed: true, Remaining: bucket.tokens, Limit: instance.capacity}, nil
     }
 
-    return false
+    return httpcontract.RateLimitDecision{RetryAfter: clampRetryAfter(instance.window-elapsed, instance.window), Limit: instance.capacity}, nil
 }
 
-func (instance *FixedWindowLimiter) Reset(key string) {
+func (instance *FixedWindowLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
+    if refusalErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+        return refusalErr
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     instance.deleteLocked(key)
+
+    return nil
 }
 
 func (instance *FixedWindowLimiter) deleteLocked(key string) {
@@ -241,10 +310,11 @@ func idlePruneThreshold(window time.Duration) time.Duration {
 var _ httpcontract.RateLimiter = (*FixedWindowLimiter)(nil)
 
 /* NewSlidingWindowLimiter holds its timestamps in this process only, as NewFixedWindowLimiter holds its counters. Where the limit is a security control, use the distributed drop-in in integrations/rueidis. */
-func NewSlidingWindowLimiter(config LimiterConfig) *SlidingWindowLimiter {
-    settings := resolveLimiterConfig(config)
+func NewSlidingWindowLimiter(name string, limit int, window time.Duration, config LimiterConfig) *SlidingWindowLimiter {
+    settings := resolveLimiterConfig(name, limit, window, config)
 
     return &SlidingWindowLimiter{
+        name:            settings.name,
         windows:         make(map[string]*slidingWindow),
         limit:           settings.limit,
         window:          settings.window,
@@ -256,6 +326,7 @@ func NewSlidingWindowLimiter(config LimiterConfig) *SlidingWindowLimiter {
 }
 
 type SlidingWindowLimiter struct {
+    name            string
     mutex           sync.RWMutex
     windows         map[string]*slidingWindow
     limit           int
@@ -271,7 +342,15 @@ type slidingWindow struct {
     requests []time.Time
 }
 
-func (instance *SlidingWindowLimiter) Allow(key string) bool {
+func (instance *SlidingWindowLimiter) Name() string {
+    return instance.name
+}
+
+func (instance *SlidingWindowLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+    if refusalErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+        return httpcontract.RateLimitDecision{Limit: instance.limit}, refusalErr
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -313,7 +392,8 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
     }
 
     if instance.limit <= len(window.requests) {
-        return false
+        /* the oldest mark may be the clamped later instant of a clock stepped back */
+        return httpcontract.RateLimitDecision{RetryAfter: clampRetryAfter(window.requests[0].Add(instance.window).Sub(now), instance.window), Limit: instance.limit}, nil
     }
 
     recordedAt := now
@@ -326,14 +406,20 @@ func (instance *SlidingWindowLimiter) Allow(key string) bool {
 
     window.requests = append(window.requests, recordedAt)
 
-    return true
+    return httpcontract.RateLimitDecision{Allowed: true, Remaining: instance.limit - len(window.requests), Limit: instance.limit}, nil
 }
 
-func (instance *SlidingWindowLimiter) Reset(key string) {
+func (instance *SlidingWindowLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
+    if refusalErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+        return refusalErr
+    }
+
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     instance.deleteLocked(key)
+
+    return nil
 }
 
 func (instance *SlidingWindowLimiter) deleteLocked(key string) {
@@ -419,7 +505,8 @@ func (instance *keyRecency) oldest() (string, bool) {
 
 type KeyExtractor = func(httpcontract.Request) string
 
-type OnLimitExceeded = func(httpcontract.Request) (httpcontract.Response, error)
+/* OnLimitExceeded answers a request the limiter denied, handed the decision; a response it answers without a Retry-After header is served with the decision's. */
+type OnLimitExceeded = func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error)
 
 type ClientIpResolver = func(httpcontract.Request) string
 
@@ -437,7 +524,7 @@ type RateLimitConfig struct {
     /* KeyExtractor names the budget a request is charged to; nil charges the client address, read through ClientIpResolver. */
     KeyExtractor KeyExtractor
 
-    /* OnLimitExceeded answers a request over budget; nil answers 429 through the framework's exception. */
+    /* OnLimitExceeded answers a request over budget; nil answers 429 through the framework's exception, with the decision's Retry-After. */
     OnLimitExceeded OnLimitExceeded
 
     /* ClientIpResolver reads the client address the default key charges, an IPv6 one on its /64; nil reads the direct peer, so behind a reverse proxy every client shares the proxy's budget: pass NewForwardedClientIpResolver with the kernel's policy there. */
@@ -515,25 +602,25 @@ func RateLimitMiddleware(limiter httpcontract.RateLimiter, config RateLimitConfi
 
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-            allowed, unavailableErr := allowRequestUnderLimit(settings, runtimeInstance, request)
+            decision, unavailableErr := allowRequestUnderLimit(settings, runtimeInstance, request)
 
             /* a denial from a store that could not answer is the limiter's outage, not the client's budget: it is answered 503 with Retry-After and the limit handler is not called */
             if nil != unavailableErr {
                 return nil, unavailableErr
             }
 
-            if false == allowed {
-                response, limitErr := settings.onLimitExceeded(request)
+            if false == decision.Allowed {
+                response, limitErr := settings.onLimitExceeded(request, decision)
                 if nil != limitErr {
-                    return response, limitErr
+                    return response, withDecisionRetryAfterError(limitErr, decision)
                 }
 
                 /* a limit handler that answered neither response nor error still refused the request, as the listener door reads it */
                 if true == internal.IsNilInterface(response) {
-                    return http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests"), nil
+                    response = http.JsonErrorResponse(nethttp.StatusTooManyRequests, "too many requests")
                 }
 
-                return response, nil
+                return withDecisionRetryAfter(response, decision), nil
             }
 
             return next(runtimeInstance, writer, request)
@@ -562,15 +649,11 @@ type UserLimitConfig struct {
     ClientIpResolver ClientIpResolver
 }
 
-func quickLimiterConfig(requestsPerMinute int) LimiterConfig {
-    return LimiterConfig{Limit: requestsPerMinute, Window: time.Minute}
-}
-
 /* SimpleRateLimit charges each client address a fixed-window budget per minute. */
 func SimpleRateLimit(config QuickLimitConfig) httpcontract.Middleware {
     refuseBelowMinimum(1 > config.RequestsPerMinute, "QuickLimitConfig.RequestsPerMinute", strconv.Itoa(config.RequestsPerMinute), "1")
 
-    return RateLimitMiddleware(NewFixedWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)), RateLimitConfig{
+    return RateLimitMiddleware(NewFixedWindowLimiter("simple", config.RequestsPerMinute, time.Minute, LimiterConfig{}), RateLimitConfig{
         ClientIpResolver: config.ClientIpResolver,
     })
 }
@@ -579,7 +662,7 @@ func SimpleRateLimit(config QuickLimitConfig) httpcontract.Middleware {
 func IpRateLimit(config QuickLimitConfig) httpcontract.Middleware {
     refuseBelowMinimum(1 > config.RequestsPerMinute, "QuickLimitConfig.RequestsPerMinute", strconv.Itoa(config.RequestsPerMinute), "1")
 
-    return RateLimitMiddleware(NewSlidingWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)), RateLimitConfig{
+    return RateLimitMiddleware(NewSlidingWindowLimiter("ip", config.RequestsPerMinute, time.Minute, LimiterConfig{}), RateLimitConfig{
         ClientIpResolver: config.ClientIpResolver,
     })
 }
@@ -604,7 +687,7 @@ func UserRateLimit(config UserLimitConfig) httpcontract.Middleware {
     getUserId := config.UserId
     clientIpResolver := config.ClientIpResolver
 
-    return RateLimitMiddleware(NewSlidingWindowLimiter(quickLimiterConfig(config.RequestsPerMinute)), RateLimitConfig{
+    return RateLimitMiddleware(NewSlidingWindowLimiter("user", config.RequestsPerMinute, time.Minute, LimiterConfig{}), RateLimitConfig{
         KeyExtractor: func(request httpcontract.Request) string {
             userId := getUserId(request)
 
@@ -618,42 +701,86 @@ func UserRateLimit(config UserLimitConfig) httpcontract.Middleware {
     })
 }
 
-func defaultOnLimitExceeded(request httpcontract.Request) (httpcontract.Response, error) {
-    return nil, exception.TooManyRequests("rate limit exceeded")
+func defaultOnLimitExceeded(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
+    return nil, exception.NewHttpError(
+        nethttp.StatusTooManyRequests,
+        exception.HttpErrorConfig{
+            Message:    "rate limit exceeded",
+            RetryAfter: max(decision.RetryAfter, 0),
+        },
+    )
 }
 
-/* allowRequestUnderLimit is the metering step the middleware and the listener doors share: the key is extracted, the limiter asked, and a store failure reported once, unless the limiter already marked it logged. The caller's own cancellation is recorded at warning. The returned value already reflects the limiter's failure policy; a denial whose error is answered as unavailable is returned beside it, marked logged once recorded, and an unmarked error beside a denial stays a 429. */
-func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (bool, error) {
-    key := settings.keyExtractor(request)
-
-    runtimeLimiter, isRuntimeLimiter := settings.limiter.(httpcontract.RuntimeRateLimiter)
-    if false == isRuntimeLimiter {
-        return settings.limiter.Allow(key), nil
+func clampRetryAfter(retryAfter time.Duration, window time.Duration) time.Duration {
+    if 0 > retryAfter {
+        return 0
     }
 
-    allowed, allowErr := runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
+    if window < retryAfter {
+        return window
+    }
+
+    return retryAfter
+}
+
+func withDecisionRetryAfter(response httpcontract.Response, decision httpcontract.RateLimitDecision) httpcontract.Response {
+    if "" == response.Headers().Get("Retry-After") {
+        http.SetRetryAfter(response, decision.RetryAfter)
+    }
+
+    return response
+}
+
+/* matched on the error itself: an error answered unavailable is the mark wrapping the exception, never the exception */
+func withDecisionRetryAfterError(limitErr error, decision httpcontract.RateLimitDecision) error {
+    httpException, isHttpException := limitErr.(*exception.HttpException)
+    if false == isHttpException || nil == httpException || 0 != httpException.RetryAfter() || 0 >= decision.RetryAfter {
+        return limitErr
+    }
+
+    rebuilt := exception.NewHttpError(
+        httpException.StatusCode(),
+        exception.HttpErrorConfig{
+            Code:       httpException.Code(),
+            Key:        httpException.Key(),
+            Message:    httpException.Message(),
+            Parameters: httpException.Parameters(),
+            Cause:      httpException.CauseErr(),
+            RetryAfter: decision.RetryAfter,
+        },
+    )
+    rebuilt.SetContext(httpException.Context())
+
+    if true == httpException.AlreadyLogged() {
+        rebuilt.MarkAsLogged()
+    }
+
+    return rebuilt
+}
+
+/* allowRequestUnderLimit is the metering step the middleware and the listener doors share: the key is extracted, the limiter asked, and a failure recorded once unless already marked logged, at warning when the caller's own context ended it. The decision already reflects the limiter's failure policy; a denial whose error is answered as unavailable is returned beside it, marked logged once recorded, and an unmarked error beside a denial stays a 429. */
+func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (httpcontract.RateLimitDecision, error) {
+    key := settings.keyExtractor(request)
+
+    decision, allowErr := settings.limiter.Allow(runtimeInstance, key)
     if nil != allowErr && false == exception.IsAlreadyLogged(allowErr) {
         logger := logging.LoggerFromRuntime(runtimeInstance)
         if nil != logger {
-            if true == exception.ChainIs(allowErr, context.Canceled) {
-                logger.Warning(
-                    "rate limiter call cancelled",
-                    exception.LogContext(allowErr, exception.LogContextConfig{Extra: exceptioncontract.Context{"key": key}}),
-                )
+            recordContext := exception.LogContext(allowErr, exception.LogContextConfig{Extra: exceptioncontract.Context{"key": key}})
+
+            if true == exception.ChainIs(allowErr, context.Canceled) || nil != runtimeInstance.Context().Err() {
+                logger.Warning("rate limiter call ended by the caller", recordContext)
             } else {
-                logger.Error(
-                    "rate limiter store failure",
-                    exception.LogContext(allowErr, exception.LogContextConfig{Extra: exceptioncontract.Context{"key": key}}),
-                )
+                logger.Error("rate limiter store failure", recordContext)
             }
 
             allowErr = exception.MarkLogged(allowErr)
         }
     }
 
-    if false == allowed && true == exception.AnswersUnavailable(allowErr) {
-        return false, allowErr
+    if false == decision.Allowed && true == exception.AnswersUnavailable(allowErr) {
+        return decision, allowErr
     }
 
-    return allowed, nil
+    return decision, nil
 }

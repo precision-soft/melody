@@ -30,8 +30,8 @@ type HttpConfiguration interface {
     /* SessionTombstoneRetention is how long a deleted session id keeps refusing a write-back; the framework's configuration defaults it to config.DefaultSessionTombstoneRetention. */
     SessionTombstoneRetention() bound.Resolved[time.Duration]
 
-    /* SessionPersistenceTimeout bounds the save or delete of the session at the end of a request. */
-    SessionPersistenceTimeout() bound.Resolved[time.Duration]
+    /* SessionStorageTimeout bounds every call of the session manager to its storage: the load, the mint, the rotation, the save and the delete. */
+    SessionStorageTimeout() bound.Resolved[time.Duration]
 
     /* SessionMaxSessions is how many sessions the framework-wired in-memory storage holds at once. */
     SessionMaxSessions() bound.Resolved[int]

@@ -7,6 +7,7 @@ import (
     "net/http/httptest"
     "sync/atomic"
     "testing"
+    "time"
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
@@ -413,5 +414,79 @@ func TestRegenerateRequestSession_RotatesUnderTheRequestsContext(t *testing.T) {
 
     if nil == manager.rotationContext || "planted" != manager.rotationContext.Value(rotationPlantedKey{}) {
         t.Fatalf("expected the rotation to run on the request's context")
+    }
+}
+
+func rotationRequest(requestContext context.Context, manager sessioncontract.Manager) *Request {
+    serviceContainer := newHttpTestContainerWithSessionManager(manager)
+
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(requestContext, serviceContainer.NewScope(), serviceContainer), nil)
+    request.Attributes().Set(requestAttributeSession, newRequestSession(requestContext, manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{}))
+
+    return request
+}
+
+func TestRegenerateRequestSession_TheRotationIsBoundedByTheStorageTimeoutOnTheRequestContext(t *testing.T) {
+    manager := newBoundedSessionManager(bound.Of(2 * time.Second))
+
+    requestContext, cancel := context.WithCancel(context.WithValue(context.Background(), rotationContextKey{}, "request"))
+    defer cancel()
+
+    if _, rotateErr := RegenerateRequestSession(rotationRequest(requestContext, manager)); nil != rotateErr {
+        t.Fatalf("unexpected rotation failure: %v", rotateErr)
+    }
+
+    contextList := manager.recorded()
+    rotationContext := contextList[len(contextList)-1]
+
+    deadline, hasDeadline := rotationContext.Deadline()
+    if false == hasDeadline || time.Second > time.Until(deadline) || 2*time.Second < time.Until(deadline) {
+        t.Fatalf("expected the rotation bounded by the 2s storage timeout, got %v %v", deadline, hasDeadline)
+    }
+
+    if "request" != rotationContext.Value(rotationContextKey{}) {
+        t.Fatalf("expected the rotation to run on the request's context, not a detached one")
+    }
+
+    if nil == rotationContext.Err() {
+        t.Fatalf("expected the rotation context released once the rotation returned")
+    }
+}
+
+type rotationContextKey struct{}
+
+func TestRegenerateRequestSession_AHungRotationIsCutByTheBoundAsAnOutageNamingIt(t *testing.T) {
+    manager := newBoundedSessionManager(bound.Of(30 * time.Millisecond))
+    manager.hangRotation = true
+
+    startedAt := time.Now()
+    rotated, rotateErr := RegenerateRequestSession(rotationRequest(context.Background(), manager))
+
+    if elapsed := time.Since(startedAt); time.Second < elapsed {
+        t.Fatalf("expected the hung rotation cut by the bound, it took %s", elapsed)
+    }
+
+    if nil != rotated || false == exception.AnswersUnavailable(rotateErr) || session.StorageTimeoutRule.Name != exception.LogContext(rotateErr, exception.LogContextConfig{})["bound"] {
+        t.Fatalf("expected the cut rotation answered as an outage naming the bound, got %v %v", rotated, rotateErr)
+    }
+}
+
+func TestRegenerateRequestSession_AClientThatLeftStopsTheRotation(t *testing.T) {
+    manager := newBoundedSessionManager(bound.Of(time.Hour))
+    manager.hangRotation = true
+
+    requestContext, cancel := context.WithCancel(context.Background())
+    request := rotationRequest(requestContext, manager)
+    if _, loadErr := RequestSession(request); nil != loadErr {
+        t.Fatalf("unexpected load failure: %v", loadErr)
+    }
+
+    go func() {
+        time.Sleep(20 * time.Millisecond)
+        cancel()
+    }()
+
+    if _, rotateErr := RegenerateRequestSession(request); false == errors.Is(rotateErr, context.Canceled) {
+        t.Fatalf("expected the rotation stopped by the client's cancellation, got %v", rotateErr)
     }
 }

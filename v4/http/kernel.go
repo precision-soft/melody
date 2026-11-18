@@ -544,7 +544,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = exceptionResponse
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, panickedResponse, sessionManager, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, panickedResponse, sessionManager, requestLogger, eventDispatcher, debugMode)
         }()
 
         /* resolved below the recovery defer, since a replaceable container may panic */
@@ -571,7 +571,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, nethttp.StatusBadRequest, "bad request", nil)
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher, debugMode)
 
             return
         }
@@ -602,7 +602,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = renderErrorResponse(runtimeInstance, melodyRequest, statusCode, message, nil)
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher, debugMode)
 
             return
         }
@@ -640,7 +640,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
             finalResponse = instance.raiseException(runtimeInstance, melodyRequest, reportedErr, requestLogger, eventDispatcher, debugMode)
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher, debugMode)
 
             return
         }
@@ -648,7 +648,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != kernelRequestEvent.Response() {
             finalResponse = kernelRequestEvent.Response()
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher, debugMode)
 
             return
         }
@@ -763,7 +763,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         if nil != kernelControllerEvent.Response() {
             finalResponse = kernelControllerEvent.Response()
 
-            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
+            instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher, debugMode)
 
             return
         }
@@ -801,7 +801,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }
 
         finalResponse = response
-        instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher)
+        instance.dispatchResponseAndWrite(runtimeInstance, melodyRequest, writer, &finalResponse, nil, sessionManager, requestLogger, eventDispatcher, debugMode)
     })
 }
 
@@ -815,6 +815,7 @@ func (instance *Kernel) dispatchResponseAndWrite(
     sessionManager sessioncontract.Manager,
     requestLogger loggingcontract.Logger,
     eventDispatcher eventcontract.EventDispatcher,
+    debugMode bool,
 ) {
     kernelResponseEvent := NewKernelResponseEvent(melodyRequest, *finalResponse)
 
@@ -851,6 +852,11 @@ func (instance *Kernel) dispatchResponseAndWrite(
         instance.policies.forwardedHeadersPolicy,
         instance.policies.sessionCookiePolicy,
         instance.unavailableRetryAfter,
+        func(callbackErr error) httpcontract.Response {
+            reportedErr := logHandlerError(requestLogger, "session persisted callback error", callbackErr, melodyRequest.HttpRequest())
+
+            return instance.raiseException(runtimeInstance, melodyRequest, reportedErr, requestLogger, eventDispatcher, debugMode)
+        },
     )
 }
 

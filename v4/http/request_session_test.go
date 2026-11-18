@@ -463,3 +463,248 @@ func TestRequestSession_ALoadTheClientsHangupCancelledIsRecordedAtWarning(t *tes
         })
     }
 }
+
+/* boundedSessionManager declares a storage bound, records the context each storage call received, and can hang until that context ends, answering its bare error */
+type boundedSessionManager struct {
+    sessioncontract.Manager
+    mutex          sync.Mutex
+    storageTimeout bound.Duration
+    hangLoad       bool
+    hangMint       bool
+    hangRotation   bool
+    panicLoad      bool
+    contextList    []context.Context
+}
+
+func (instance *boundedSessionManager) record(ctx context.Context) {
+    instance.mutex.Lock()
+    instance.contextList = append(instance.contextList, ctx)
+    instance.mutex.Unlock()
+}
+
+func (instance *boundedSessionManager) recorded() []context.Context {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return append([]context.Context{}, instance.contextList...)
+}
+
+func (instance *boundedSessionManager) Session(ctx context.Context, sessionId string) (sessioncontract.Session, error) {
+    instance.record(ctx)
+
+    if true == instance.panicLoad {
+        panic("the load panicked")
+    }
+
+    if true == instance.hangLoad {
+        return nil, awaitStorageContext(ctx)
+    }
+
+    return nil, nil
+}
+
+func (instance *boundedSessionManager) NewSession(ctx context.Context) (sessioncontract.Session, error) {
+    instance.record(ctx)
+
+    if true == instance.hangMint {
+        return nil, awaitStorageContext(ctx)
+    }
+
+    return instance.Manager.NewSession(ctx)
+}
+
+func (instance *boundedSessionManager) RegenerateSession(ctx context.Context, sessionInstance sessioncontract.Session) (sessioncontract.Session, error) {
+    instance.record(ctx)
+
+    if true == instance.hangRotation {
+        return nil, awaitStorageContext(ctx)
+    }
+
+    return instance.Manager.RegenerateSession(ctx, sessionInstance)
+}
+
+func (instance *boundedSessionManager) StorageTimeout() bound.Duration {
+    return instance.storageTimeout
+}
+
+func newBoundedSessionManager(storageTimeout bound.Duration) *boundedSessionManager {
+    return &boundedSessionManager{
+        Manager:        session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{Ttl: bound.Of(30 * time.Minute)}),
+        storageTimeout: storageTimeout,
+    }
+}
+
+type messageContextRecordingLogger struct {
+    levelRecordingLogger
+    contextList []loggingcontract.Context
+}
+
+func (instance *messageContextRecordingLogger) Warning(message string, context loggingcontract.Context) {
+    instance.record(loggingcontract.LevelWarning)
+    instance.contextList = append(instance.contextList, context)
+}
+
+func (instance *messageContextRecordingLogger) Error(message string, context loggingcontract.Context) {
+    instance.record(loggingcontract.LevelError)
+    instance.contextList = append(instance.contextList, context)
+}
+
+func boundedLoadRequest(requestContext context.Context, manager sessioncontract.Manager, logger loggingcontract.Logger, cookiePresent bool, policy httpcontract.SessionPolicy) *Request {
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, nil, nil)
+    request.Attributes().Set(requestAttributeSession, newRequestSession(requestContext, manager, request, logger, sessionOutageTestCookieValue, cookiePresent, policy))
+
+    return request
+}
+
+func TestRequestSession_AHungLoadIsCutByTheStorageTimeoutAndAnswers503(t *testing.T) {
+    manager := newBoundedSessionManager(bound.Of(50 * time.Millisecond))
+    manager.hangLoad = true
+
+    startedAt := time.Now()
+    _, sessionErr := RequestSession(boundedLoadRequest(context.Background(), manager, &errorCountingLogger{}, true, httpcontract.SessionPolicy{}))
+
+    if elapsed := time.Since(startedAt); time.Second < elapsed {
+        t.Fatalf("expected the hung load cut by the 50ms bound, it took %s", elapsed)
+    }
+
+    if false == exception.AnswersUnavailable(sessionErr) || false == errors.Is(sessionErr, session.ErrSessionUnavailable) || false == errors.Is(sessionErr, context.DeadlineExceeded) {
+        t.Fatalf("expected an unavailable load carrying the deadline, got %v", sessionErr)
+    }
+}
+
+func TestRequestSession_TheBoundCoversTheMintAfterAMiss(t *testing.T) {
+    manager := newBoundedSessionManager(bound.Of(50 * time.Millisecond))
+    manager.hangMint = true
+
+    startedAt := time.Now()
+    _, sessionErr := RequestSession(boundedLoadRequest(context.Background(), manager, &errorCountingLogger{}, true, httpcontract.SessionPolicy{}))
+
+    if elapsed := time.Since(startedAt); time.Second < elapsed || false == exception.AnswersUnavailable(sessionErr) {
+        t.Fatalf("expected the hung mint cut by the bound as an outage, got %v after %s", sessionErr, elapsed)
+    }
+
+    contextList := manager.recorded()
+    if 2 != len(contextList) || contextList[0] != contextList[1] {
+        t.Fatalf("expected the load and the mint under one bounded context, got %d contexts", len(contextList))
+    }
+
+    if _, hasDeadline := contextList[0].Deadline(); false == hasDeadline {
+        t.Fatalf("expected the load context to carry the bound")
+    }
+}
+
+func TestRequestSession_AnUnlimitedStorageTimeoutArmsNoTimer(t *testing.T) {
+    manager := newBoundedSessionManager(bound.UnlimitedDuration())
+
+    if _, sessionErr := RequestSession(boundedLoadRequest(context.Background(), manager, &errorCountingLogger{}, true, httpcontract.SessionPolicy{})); nil != sessionErr {
+        t.Fatalf("unexpected load failure: %v", sessionErr)
+    }
+
+    for _, ctx := range manager.recorded() {
+        if _, hasDeadline := ctx.Deadline(); true == hasDeadline {
+            t.Fatalf("expected no timer under an unlimited bound")
+        }
+    }
+}
+
+func TestRequestSession_ALoadCutByTheBoundIsRecordedAtErrorNamingTheBound(t *testing.T) {
+    manager := newBoundedSessionManager(bound.Of(20 * time.Millisecond))
+    manager.hangLoad = true
+    logger := &messageContextRecordingLogger{}
+
+    _, _ = RequestSession(boundedLoadRequest(context.Background(), manager, logger, true, httpcontract.SessionPolicy{}))
+
+    if 1 != len(logger.levels) || loggingcontract.LevelError != logger.levels[0] || session.StorageTimeoutRule.Name != logger.contextList[0]["bound"] {
+        t.Fatalf("expected one error record naming the bound, got %v %v", logger.levels, logger.contextList)
+    }
+}
+
+func TestRequestSession_AClientHangupDuringTheLoadStaysAWarningNamingNoBound(t *testing.T) {
+    manager := newBoundedSessionManager(bound.Of(time.Hour))
+    manager.hangLoad = true
+    logger := &messageContextRecordingLogger{}
+
+    requestContext, cancel := context.WithCancel(context.Background())
+    go func() {
+        time.Sleep(20 * time.Millisecond)
+        cancel()
+    }()
+
+    _, sessionErr := RequestSession(boundedLoadRequest(requestContext, manager, logger, true, httpcontract.SessionPolicy{}))
+
+    if false == errors.Is(sessionErr, context.Canceled) || 1 != len(logger.levels) || loggingcontract.LevelWarning != logger.levels[0] || nil != logger.contextList[0]["bound"] {
+        t.Fatalf("expected the hangup recorded once at warning naming no bound, got %v %v %v", sessionErr, logger.levels, logger.contextList)
+    }
+}
+
+func TestRequestSession_ALoadCutByTheBoundServesTheEmptySessionUnderEmptyOnOutage(t *testing.T) {
+    manager := newBoundedSessionManager(bound.Of(20 * time.Millisecond))
+    manager.hangLoad = true
+
+    sessionInstance, sessionErr := RequestSession(boundedLoadRequest(context.Background(), manager, &errorCountingLogger{}, true, httpcontract.SessionPolicy{EmptyOnOutage: true}))
+    if nil != sessionErr {
+        t.Fatalf("expected the empty session served, got %v", sessionErr)
+    }
+
+    if _, isUnavailable := session.SessionUnavailableCause(sessionInstance); false == isUnavailable {
+        t.Fatalf("expected the unavailable empty session, got %v", sessionInstance)
+    }
+}
+
+func TestRequestSession_TheLoadContextIsReleasedOnEveryPath(t *testing.T) {
+    served := newBoundedSessionManager(bound.Of(time.Hour))
+    if _, sessionErr := RequestSession(boundedLoadRequest(context.Background(), served, &errorCountingLogger{}, true, httpcontract.SessionPolicy{})); nil != sessionErr {
+        t.Fatalf("unexpected load failure: %v", sessionErr)
+    }
+
+    panicking := newBoundedSessionManager(bound.Of(time.Hour))
+    panicking.panicLoad = true
+    func() {
+        defer func() { _ = recover() }()
+        _, _ = RequestSession(boundedLoadRequest(context.Background(), panicking, &errorCountingLogger{}, true, httpcontract.SessionPolicy{}))
+    }()
+
+    for name, manager := range map[string]*boundedSessionManager{"served": served, "panicking": panicking} {
+        contextList := manager.recorded()
+        if 0 == len(contextList) || nil == contextList[0].Err() {
+            t.Fatalf("%s: expected the load context released once load returned", name)
+        }
+    }
+}
+
+func TestRequestSession_ARefusedStorageTimeoutFailsTheLoadUnmarked(t *testing.T) {
+    manager := newBoundedSessionManager(bound.Of(time.Microsecond))
+
+    _, sessionErr := RequestSession(boundedLoadRequest(context.Background(), manager, &errorCountingLogger{}, true, httpcontract.SessionPolicy{}))
+    if nil == sessionErr || true == exception.AnswersUnavailable(sessionErr) || 0 != len(manager.recorded()) {
+        t.Fatalf("expected the refused bound to fail the load unmarked before the storage, got %v", sessionErr)
+    }
+}
+
+/* the wait gives up after two seconds, so a mutant that drops the bound fails instead of hanging the run */
+func awaitStorageContext(ctx context.Context) error {
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    case <-time.After(2 * time.Second):
+        return errors.New("the storage call outlived the test's budget")
+    }
+}
+
+func TestStorageBoundExpired_ReadsAPassedDeadlineTheContextHasNotRecorded(t *testing.T) {
+    if false == storageBoundExpired(lapsedStorageContext{Context: context.Background()}) {
+        t.Fatalf("expected a deadline already passed read as expired before the context records it")
+    }
+
+    if true == storageBoundExpired(context.Background()) {
+        t.Fatalf("expected a context with no deadline not expired")
+    }
+}
+
+type lapsedStorageContext struct {
+    context.Context
+}
+
+func (instance lapsedStorageContext) Deadline() (time.Time, bool) {
+    return time.Now().Add(-time.Second), true
+}

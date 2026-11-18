@@ -13,7 +13,10 @@ import (
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     store2fa "github.com/precision-soft/melody/v4/.example/twofactor"
     "github.com/precision-soft/melody/v4/bound"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
+    melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -166,7 +169,7 @@ func ConfirmHandler(storeSource store2fa.StoreSource, replayGuard melodysecurity
         }
 
         if nil != budget {
-            budget.Release(user)
+            releaseFactorBudget(runtimeInstance, budget, user)
         }
 
         return presenter.ApiSuccess(runtimeInstance, request, nethttp.StatusOK, map[string]any{"userIdentifier": user, "enrolled": true}), nil
@@ -250,7 +253,7 @@ func currentFactor(
 ) (string, melodyhttpcontract.Response) {
     factor, refusal := presentedFactor(runtimeInstance, request, store, user, replayGuard, budget, absent)
     if nil == refusal && nil != budget {
-        budget.Release(user)
+        releaseFactorBudget(runtimeInstance, budget, user)
     }
 
     return factor, refusal
@@ -260,10 +263,22 @@ func currentFactor(
 type FactorBudget interface {
     Spend(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string) error
 
-    Release(userIdentifier string)
+    Release(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string) error
 }
 
-/* refuseOverBudget counts the presented factor and answers the refusal of an account past its allowance, 429, or of a budget that cannot be read, 503. */
+/* releaseFactorBudget journals a failed release, which never refuses the factor that was accepted */
+func releaseFactorBudget(runtimeInstance melodyruntimecontract.Runtime, budget FactorBudget, user string) {
+    releaseErr := budget.Release(runtimeInstance, user)
+    if nil == releaseErr {
+        return
+    }
+
+    if logger := melodylogging.LoggerFromRuntime(runtimeInstance); nil != logger {
+        logger.Error("second factor budget release failed", melodyexception.LogContext(releaseErr, melodyexception.LogContextConfig{}))
+    }
+}
+
+/* refuseOverBudget counts the presented factor and answers the refusal of an account past its allowance, 429 with the budget's Retry-After, of a budget whose store could not answer, 503, or of any other failure, 500. */
 func refuseOverBudget(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, user string, budget FactorBudget) melodyhttpcontract.Response {
     if nil == budget {
         return nil
@@ -274,8 +289,16 @@ func refuseOverBudget(runtimeInstance melodyruntimecontract.Runtime, request mel
         return nil
     }
 
-    if true == errors.Is(spendErr, examplesecurity.ErrSecondFactorBudgetSpent) {
-        return presenter.ApiError(runtimeInstance, request, nethttp.StatusTooManyRequests, "too many attempts")
+    var spentErr *examplesecurity.SecondFactorBudgetSpentError
+    if true == errors.As(spendErr, &spentErr) {
+        refusal := presenter.ApiError(runtimeInstance, request, nethttp.StatusTooManyRequests, "too many attempts")
+        melodyhttp.SetRetryAfter(refusal, spentErr.RetryAfter)
+
+        return refusal
+    }
+
+    if false == melodyexception.AnswersUnavailable(spendErr) {
+        return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the second factor budget failed", spendErr)
     }
 
     return unavailableStore(runtimeInstance, request, spendErr)

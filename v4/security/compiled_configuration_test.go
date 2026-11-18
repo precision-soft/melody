@@ -406,3 +406,39 @@ func TestNewCompiledFirewall_RefusesAnUnavailableRetryAfterOutsideItsRule(t *tes
         t.Fatalf("expected the 5s default, got %s", defaulted.UnavailableRetryAfter())
     }
 }
+
+type compiledFirewallSucceedingLogoutHandler struct{}
+
+func (instance *compiledFirewallSucceedingLogoutHandler) Logout(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, input securitycontract.LogoutInput) (*securitycontract.LogoutResult, error) {
+    return &securitycontract.LogoutResult{}, nil
+}
+
+func TestCompiledFirewall_Logout_DispatchesTheSuccessItself(t *testing.T) {
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            NewPathPrefixMatcher("/"),
+        MatcherDescription: "matcher",
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+        LogoutHandler:      &compiledFirewallSucceedingLogoutHandler{},
+    })
+
+    runtimeInstance, dispatcher := newTokenSourceTestRuntime(t)
+
+    listenerFailure := errors.New("the audit sink refused the record")
+    successes := 0
+    dispatcher.AddListener(
+        securitycontract.EventSecurityLogoutSuccess,
+        func(listenerRuntime runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            successes++
+
+            return listenerFailure
+        },
+        0,
+    )
+
+    result, logoutErr := firewall.Logout(runtimeInstance, nil, securitycontract.LogoutInput{})
+    if nil == result || false == errors.Is(logoutErr, listenerFailure) || 1 != successes {
+        t.Fatalf("expected the result beside the success listener's failure, got %v, %v and %d successes", result, logoutErr, successes)
+    }
+}

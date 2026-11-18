@@ -2,11 +2,14 @@ package middleware
 
 import (
     "context"
+    "errors"
     "fmt"
     "math"
     nethttp "net/http"
     "net/http/httptest"
+    "os"
     "strconv"
+    "strings"
     "testing"
     "time"
 
@@ -14,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
@@ -79,82 +83,82 @@ func TestDefaultClientIp_IgnoresBothHeaders(t *testing.T) {
 
 func TestFixedWindowLimiter_AllowsUpToRate(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 3, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 3, time.Minute, LimiterConfig{Clock: frozenClock})
 
     for i := 0; i < 3; i++ {
-        if false == limiter.Allow("key1") {
+        if false == allowedBy(limiter, "key1") {
             t.Fatalf("expected request %d to be allowed", i+1)
         }
     }
 
-    if true == limiter.Allow("key1") {
+    if true == allowedBy(limiter, "key1") {
         t.Fatalf("expected request to be rejected after rate exceeded")
     }
 }
 
 func TestFixedWindowLimiter_RefillsAfterWindow(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 2, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 2, time.Minute, LimiterConfig{Clock: frozenClock})
 
-    limiter.Allow("key1")
-    limiter.Allow("key1")
+    allowedBy(limiter, "key1")
+    allowedBy(limiter, "key1")
 
-    if true == limiter.Allow("key1") {
+    if true == allowedBy(limiter, "key1") {
         t.Fatalf("expected rejection before window expires")
     }
 
     frozenClock.Advance(time.Minute + time.Second)
 
-    if false == limiter.Allow("key1") {
+    if false == allowedBy(limiter, "key1") {
         t.Fatalf("expected allow after window elapsed")
     }
 }
 
 func TestFixedWindowLimiter_Reset(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{Clock: frozenClock})
 
-    limiter.Allow("key1")
+    allowedBy(limiter, "key1")
 
-    if true == limiter.Allow("key1") {
+    if true == allowedBy(limiter, "key1") {
         t.Fatalf("expected rejection")
     }
 
-    limiter.Reset("key1")
+    resetBy(limiter, "key1")
 
-    if false == limiter.Allow("key1") {
+    if false == allowedBy(limiter, "key1") {
         t.Fatalf("expected allow after reset")
     }
 }
 
 func TestSlidingWindowLimiter_AllowsUpToLimit(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 3, Window: time.Minute})
+    limiter := NewSlidingWindowLimiter("test", 3, time.Minute, LimiterConfig{Clock: frozenClock})
 
     for i := 0; i < 3; i++ {
-        if false == limiter.Allow("key1") {
+        if false == allowedBy(limiter, "key1") {
             t.Fatalf("expected request %d to be allowed", i+1)
         }
     }
 
-    if true == limiter.Allow("key1") {
+    if true == allowedBy(limiter, "key1") {
         t.Fatalf("expected rejection after limit exceeded")
     }
 }
 
 func TestSlidingWindowLimiter_AllowsAfterWindowExpires(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Minute})
+    limiter := NewSlidingWindowLimiter("test", 1, time.Minute, LimiterConfig{Clock: frozenClock})
 
-    limiter.Allow("key1")
+    allowedBy(limiter, "key1")
 
-    if true == limiter.Allow("key1") {
+    if true == allowedBy(limiter, "key1") {
         t.Fatalf("expected rejection")
     }
 
     frozenClock.Advance(time.Minute + time.Second)
 
-    if false == limiter.Allow("key1") {
+    if false == allowedBy(limiter, "key1") {
         t.Fatalf("expected allow after window elapsed")
     }
 }
@@ -163,54 +167,54 @@ func TestSlidingWindowLimiter_AllowsAfterWindowExpires(t *testing.T) {
 func TestSlidingWindowLimiter_FreesExactlyTheExpiredPrefix(t *testing.T) {
     startedAt := time.Now()
     frozenClock := clock.NewFrozenClock(startedAt)
-    limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 3, Window: time.Minute})
+    limiter := NewSlidingWindowLimiter("test", 3, time.Minute, LimiterConfig{Clock: frozenClock})
 
     for i := 0; i < 3; i++ {
         if 0 < i {
             frozenClock.Advance(20 * time.Second)
         }
 
-        if false == limiter.Allow("key1") {
+        if false == allowedBy(limiter, "key1") {
             t.Fatalf("expected mark %d to be admitted", i+1)
         }
     }
 
     /* the marks sit at +0s, +20s and +40s, and the clock reads +40s */
-    if true == limiter.Allow("key1") {
+    if true == allowedBy(limiter, "key1") {
         t.Fatalf("expected refusal while all three marks are inside the window")
     }
 
     frozenClock.TravelTo(startedAt.Add(61 * time.Second))
 
-    if false == limiter.Allow("key1") {
+    if false == allowedBy(limiter, "key1") {
         t.Fatalf("expected the slot of the mark at +0s to be free")
     }
 
-    if true == limiter.Allow("key1") {
+    if true == allowedBy(limiter, "key1") {
         t.Fatalf("expected refusal: the marks at +20s and +40s have not expired yet")
     }
 }
 
 func TestSlidingWindowLimiter_Reset(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Minute})
+    limiter := NewSlidingWindowLimiter("test", 1, time.Minute, LimiterConfig{Clock: frozenClock})
 
-    limiter.Allow("key1")
+    allowedBy(limiter, "key1")
 
-    if true == limiter.Allow("key1") {
+    if true == allowedBy(limiter, "key1") {
         t.Fatalf("expected rejection")
     }
 
-    limiter.Reset("key1")
+    resetBy(limiter, "key1")
 
-    if false == limiter.Allow("key1") {
+    if false == allowedBy(limiter, "key1") {
         t.Fatalf("expected allow after reset")
     }
 }
 
 func TestRateLimitMiddleware_AllowsRequest(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 10, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 10, time.Minute, LimiterConfig{Clock: frozenClock})
 
     config := RateLimitConfig{}
     middleware := RateLimitMiddleware(limiter, config)
@@ -227,7 +231,7 @@ func TestRateLimitMiddleware_AllowsRequest(t *testing.T) {
     recorder := httptest.NewRecorder()
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    response, err := handler(nil, recorder, melodyRequest)
+    response, err := handler(rateLimitTestRuntime(), recorder, melodyRequest)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -241,7 +245,7 @@ func TestRateLimitMiddleware_AllowsRequest(t *testing.T) {
 
 func TestRateLimitMiddleware_RejectsWhenLimitExceeded(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{Clock: frozenClock})
 
     config := RateLimitConfig{}
     middleware := RateLimitMiddleware(limiter, config)
@@ -256,9 +260,9 @@ func TestRateLimitMiddleware_RejectsWhenLimitExceeded(t *testing.T) {
     recorder := httptest.NewRecorder()
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    _, _ = handler(nil, recorder, melodyRequest)
+    _, _ = handler(rateLimitTestRuntime(), recorder, melodyRequest)
 
-    _, err := handler(nil, recorder, melodyRequest)
+    _, err := handler(rateLimitTestRuntime(), recorder, melodyRequest)
     if nil == err {
         t.Fatalf("expected error from rate limit exceeded")
     }
@@ -271,7 +275,7 @@ func TestDefaultKeyExtractor_UsesRemoteAddrByDefault(t *testing.T) {
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: clock.NewFrozenClock(time.Now()), Limit: 10, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 10, time.Minute, LimiterConfig{Clock: clock.NewFrozenClock(time.Now())})
     config := RateLimitConfig{}
     key := resolveRateLimitConfig(limiter, config, "", "").keyExtractor(melodyRequest)
 
@@ -287,7 +291,7 @@ func TestRateLimitConfig_ClientIpResolver_OverridesDefault(t *testing.T) {
 
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: clock.NewFrozenClock(time.Now()), Limit: 10, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 10, time.Minute, LimiterConfig{Clock: clock.NewFrozenClock(time.Now())})
     config := RateLimitConfig{}
 
     config.ClientIpResolver = func(request httpcontract.Request) string {
@@ -318,15 +322,15 @@ func TestIpRateLimit_UsesRemoteAddrByDefault(t *testing.T) {
 
 func TestFixedWindowLimiter_Cleanup(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 5, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 5, time.Minute, LimiterConfig{Clock: frozenClock})
     limiter.cleanupInterval = time.Second
 
-    limiter.Allow("key1")
-    limiter.Allow("key2")
+    allowedBy(limiter, "key1")
+    allowedBy(limiter, "key2")
 
     frozenClock.Advance(3 * time.Minute)
 
-    limiter.Allow("key3")
+    allowedBy(limiter, "key3")
 
     limiter.mutex.RLock()
     _, key1Exists := limiter.buckets["key1"]
@@ -347,15 +351,15 @@ func TestFixedWindowLimiter_Cleanup(t *testing.T) {
 
 func TestSlidingWindowLimiter_Cleanup(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 5, Window: time.Minute})
+    limiter := NewSlidingWindowLimiter("test", 5, time.Minute, LimiterConfig{Clock: frozenClock})
     limiter.cleanupInterval = time.Second
 
-    limiter.Allow("key1")
-    limiter.Allow("key2")
+    allowedBy(limiter, "key1")
+    allowedBy(limiter, "key2")
 
     frozenClock.Advance(3 * time.Minute)
 
-    limiter.Allow("key3")
+    allowedBy(limiter, "key3")
 
     limiter.mutex.RLock()
     _, key1Exists := limiter.windows["key1"]
@@ -376,23 +380,23 @@ func TestSlidingWindowLimiter_Cleanup(t *testing.T) {
 
 func TestFixedWindowLimiter_SeparateKeys(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{Clock: frozenClock})
 
-    if false == limiter.Allow("key1") {
+    if false == allowedBy(limiter, "key1") {
         t.Fatalf("expected key1 first request to be allowed")
     }
 
-    if false == limiter.Allow("key2") {
+    if false == allowedBy(limiter, "key2") {
         t.Fatalf("expected key2 first request to be allowed (separate bucket)")
     }
 
-    if true == limiter.Allow("key1") {
+    if true == allowedBy(limiter, "key1") {
         t.Fatalf("expected key1 second request to be rejected")
     }
 }
 
 func TestDefaultKeyExtractor_KeysOnClientIpAcrossPaths(t *testing.T) {
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: clock.NewFrozenClock(time.Now()), Limit: 10, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 10, time.Minute, LimiterConfig{Clock: clock.NewFrozenClock(time.Now())})
     config := RateLimitConfig{}
     keyFor := func(path string) string {
         request := httptest.NewRequest(nethttp.MethodGet, path, nil)
@@ -421,9 +425,9 @@ type boundedLimiter struct {
     ordered func() int
 }
 
-func boundedLimiters(config LimiterConfig) []boundedLimiter {
-    fixed := NewFixedWindowLimiter(config)
-    sliding := NewSlidingWindowLimiter(config)
+func boundedLimiters(limit int, window time.Duration, config LimiterConfig) []boundedLimiter {
+    fixed := NewFixedWindowLimiter("test", limit, window, config)
+    sliding := NewSlidingWindowLimiter("test", limit, window, config)
 
     return []boundedLimiter{
         {
@@ -472,18 +476,18 @@ func boundedLimiters(config LimiterConfig) []boundedLimiter {
 func TestLimiters_AFullTableEvictsTheLeastRecentlySeenKey(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
 
-    for _, subject := range boundedLimiters(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(2)}) {
-        subject.limiter.Allow("a")
+    for _, subject := range boundedLimiters(1, time.Hour, LimiterConfig{Clock: frozenClock, MaxKeys: bound.Of(2)}) {
+        allowedBy(subject.limiter, "a")
         frozenClock.Advance(time.Second)
-        subject.limiter.Allow("b")
+        allowedBy(subject.limiter, "b")
         frozenClock.Advance(time.Second)
-        subject.limiter.Allow("a")
+        allowedBy(subject.limiter, "a")
 
-        if false == subject.limiter.Allow("c") {
+        if false == allowedBy(subject.limiter, "c") {
             t.Fatalf("%s: expected an unseen key admitted at a full table of active keys", subject.name)
         }
 
-        if true == subject.limiter.Allow("a") {
+        if true == allowedBy(subject.limiter, "a") {
             t.Fatalf("%s: expected the key seen last to keep its spent budget", subject.name)
         }
 
@@ -496,20 +500,20 @@ func TestLimiters_AFullTableEvictsTheLeastRecentlySeenKey(t *testing.T) {
 func TestLimiters_AnEvictedKeyComesBackWithAFullBudget(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
 
-    for _, subject := range boundedLimiters(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(2)}) {
-        subject.limiter.Allow("a")
-        if true == subject.limiter.Allow("a") {
+    for _, subject := range boundedLimiters(1, time.Hour, LimiterConfig{Clock: frozenClock, MaxKeys: bound.Of(2)}) {
+        allowedBy(subject.limiter, "a")
+        if true == allowedBy(subject.limiter, "a") {
             t.Fatalf("%s: expected a's budget spent", subject.name)
         }
 
-        subject.limiter.Allow("b")
-        subject.limiter.Allow("c")
+        allowedBy(subject.limiter, "b")
+        allowedBy(subject.limiter, "c")
 
         if true == subject.held("a") {
             t.Fatalf("%s: expected a evicted by c", subject.name)
         }
 
-        if false == subject.limiter.Allow("a") {
+        if false == allowedBy(subject.limiter, "a") {
             t.Fatalf("%s: expected the evicted key back with a full budget", subject.name)
         }
     }
@@ -518,21 +522,21 @@ func TestLimiters_AnEvictedKeyComesBackWithAFullBudget(t *testing.T) {
 func TestLimiters_AKeySeenAgainIsNotTheOneEvicted(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
 
-    for _, subject := range boundedLimiters(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(2)}) {
-        subject.limiter.Allow("a")
-        subject.limiter.Allow("b")
+    for _, subject := range boundedLimiters(1, time.Hour, LimiterConfig{Clock: frozenClock, MaxKeys: bound.Of(2)}) {
+        allowedBy(subject.limiter, "a")
+        allowedBy(subject.limiter, "b")
 
-        if true == subject.limiter.Allow("a") {
+        if true == allowedBy(subject.limiter, "a") {
             t.Fatalf("%s: expected a's second request denied", subject.name)
         }
 
-        subject.limiter.Allow("c")
+        allowedBy(subject.limiter, "c")
 
         if false == subject.held("a") || true == subject.held("b") {
             t.Fatalf("%s: expected b evicted and a kept, got a=%t b=%t", subject.name, subject.held("a"), subject.held("b"))
         }
 
-        if true == subject.limiter.Allow("a") {
+        if true == allowedBy(subject.limiter, "a") {
             t.Fatalf("%s: expected the kept key to keep its spent budget", subject.name)
         }
     }
@@ -541,9 +545,9 @@ func TestLimiters_AKeySeenAgainIsNotTheOneEvicted(t *testing.T) {
 func TestLimiters_TheTableNeverHoldsMoreThanMaxKeys(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
 
-    for _, subject := range boundedLimiters(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(3)}) {
+    for _, subject := range boundedLimiters(1, time.Hour, LimiterConfig{Clock: frozenClock, MaxKeys: bound.Of(3)}) {
         for index := 0; index < 30; index++ {
-            if false == subject.limiter.Allow(fmt.Sprintf("flood-%d", index)) {
+            if false == allowedBy(subject.limiter, fmt.Sprintf("flood-%d", index)) {
                 t.Fatalf("%s: expected unseen key %d admitted", subject.name, index)
             }
 
@@ -567,11 +571,11 @@ func TestLimiters_TheTableNeverHoldsMoreThanMaxKeys(t *testing.T) {
 func TestLimiters_AResetKeyFreesItsSlot(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
 
-    for _, subject := range boundedLimiters(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Hour, MaxKeys: bound.Of(2)}) {
-        subject.limiter.Allow("a")
-        subject.limiter.Allow("b")
-        subject.limiter.Reset("a")
-        subject.limiter.Allow("c")
+    for _, subject := range boundedLimiters(1, time.Hour, LimiterConfig{Clock: frozenClock, MaxKeys: bound.Of(2)}) {
+        allowedBy(subject.limiter, "a")
+        allowedBy(subject.limiter, "b")
+        resetBy(subject.limiter, "a")
+        allowedBy(subject.limiter, "c")
 
         if false == subject.held("b") || false == subject.held("c") || 2 != subject.size() {
             t.Fatalf("%s: expected the reset key's slot reused without an eviction, got b=%t c=%t size=%d", subject.name, subject.held("b"), subject.held("c"), subject.size())
@@ -584,28 +588,25 @@ func TestLimiters_AResetKeyFreesItsSlot(t *testing.T) {
 }
 
 type fakeRuntimeRateLimiter struct {
-    allowCalls            int
-    allowWithRuntimeCalls int
-    allowed               bool
-    err                   error
+    allowCalls   int
+    allowed      bool
+    retryAfter   time.Duration
+    err          error
+    seenRuntime  runtimecontract.Runtime
 }
 
-func (instance *fakeRuntimeRateLimiter) Allow(key string) bool {
+func (instance *fakeRuntimeRateLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
     instance.allowCalls++
-    return instance.allowed
+    instance.seenRuntime = runtimeInstance
+
+    return httpcontract.RateLimitDecision{Allowed: instance.allowed, RetryAfter: instance.retryAfter, Limit: 1}, instance.err
 }
 
-func (instance *fakeRuntimeRateLimiter) Reset(key string) {}
-
-func (instance *fakeRuntimeRateLimiter) AllowWithRuntime(
-    runtimeInstance runtimecontract.Runtime,
-    key string,
-) (bool, error) {
-    instance.allowWithRuntimeCalls++
-    return instance.allowed, instance.err
+func (instance *fakeRuntimeRateLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
+    return nil
 }
 
-func TestRateLimitMiddleware_PrefersRuntimeRateLimiter(t *testing.T) {
+func TestRateLimitMiddleware_HandsTheRequestRuntimeToTheLimiter(t *testing.T) {
     limiter := &fakeRuntimeRateLimiter{allowed: true}
 
     config := RateLimitConfig{}
@@ -616,16 +617,13 @@ func TestRateLimitMiddleware_PrefersRuntimeRateLimiter(t *testing.T) {
     request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    if _, err := handler(nil, httptest.NewRecorder(), melodyRequest); nil != err {
+    runtimeInstance := rateLimitTestRuntime()
+    if _, err := handler(runtimeInstance, httptest.NewRecorder(), melodyRequest); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    if 1 != limiter.allowWithRuntimeCalls || 0 != limiter.allowCalls {
-        t.Fatalf(
-            "expected the runtime path to be preferred: withRuntime=%d plain=%d",
-            limiter.allowWithRuntimeCalls,
-            limiter.allowCalls,
-        )
+    if 1 != limiter.allowCalls || runtimeInstance != limiter.seenRuntime {
+        t.Fatalf("expected one call carrying the request runtime, got %d calls", limiter.allowCalls)
     }
 }
 
@@ -641,7 +639,7 @@ func TestRateLimitMiddleware_HonorsFailurePolicyDenialOnStoreError(t *testing.T)
     request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    _, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    _, err := handler(rateLimitTestRuntime(), httptest.NewRecorder(), melodyRequest)
     if nil == err {
         t.Fatalf("expected the limit-exceeded rejection to surface")
     }
@@ -662,7 +660,7 @@ func TestRateLimitMiddleware_HonorsFailurePolicyAllowanceOnStoreError(t *testing
     request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    if _, err := handler(nil, httptest.NewRecorder(), melodyRequest); nil != err {
+    if _, err := handler(rateLimitTestRuntime(), httptest.NewRecorder(), melodyRequest); nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
@@ -674,60 +672,87 @@ func TestRateLimitMiddleware_HonorsFailurePolicyAllowanceOnStoreError(t *testing
 /* a ceiling of zero would deny every request for the process lifetime */
 func TestLimiters_RefuseAMaxKeysTheRuleRefuses(t *testing.T) {
     for name, build := range map[string]func(config LimiterConfig){
-        "fixed":   func(config LimiterConfig) { NewFixedWindowLimiter(config) },
-        "sliding": func(config LimiterConfig) { NewSlidingWindowLimiter(config) },
+        "fixed":   func(config LimiterConfig) { NewFixedWindowLimiter("test", 10, time.Minute, config) },
+        "sliding": func(config LimiterConfig) { NewSlidingWindowLimiter("test", 10, time.Minute, config) },
     } {
         t.Run(name, func(t *testing.T) {
-            assertPanicsNamingField(t, func() { build(LimiterConfig{Limit: 10, Window: time.Minute, MaxKeys: bound.Of(0)}) }, "the limit is below its minimum", "LimiterConfig.MaxKeys")
-            assertPanicsNamingField(t, func() { build(LimiterConfig{Limit: 10, Window: time.Minute, MaxKeys: bound.UnlimitedCount()}) }, "the limit does not admit unlimited", "LimiterConfig.MaxKeys")
+            assertPanicsNamingField(t, func() { build(LimiterConfig{MaxKeys: bound.Of(0)}) }, "the limit is below its minimum", "LimiterConfig.MaxKeys")
+            assertPanicsNamingField(t, func() { build(LimiterConfig{MaxKeys: bound.UnlimitedCount()}) }, "the limit does not admit unlimited", "LimiterConfig.MaxKeys")
         })
     }
 }
 
-func TestLimiters_RefuseALimitOrAWindowBelowItsMinimum(t *testing.T) {
-    for name, build := range map[string]func(config LimiterConfig){
-        "fixed":   func(config LimiterConfig) { NewFixedWindowLimiter(config) },
-        "sliding": func(config LimiterConfig) { NewSlidingWindowLimiter(config) },
+func TestRateLimiter_ALimitBelowOneAndAWindowBelowAMillisecondAreRefusedNamingTheArgument(t *testing.T) {
+    for name, build := range map[string]func(limit int, window time.Duration){
+        "fixed":   func(limit int, window time.Duration) { NewFixedWindowLimiter("test", limit, window, LimiterConfig{}) },
+        "sliding": func(limit int, window time.Duration) { NewSlidingWindowLimiter("test", limit, window, LimiterConfig{}) },
     } {
         t.Run(name, func(t *testing.T) {
-            assertPanicsNamingField(t, func() { build(LimiterConfig{Limit: 0, Window: time.Minute}) }, "the limit is below its minimum", "LimiterConfig.Limit")
-            assertPanicsNamingField(t, func() { build(LimiterConfig{Limit: -1, Window: time.Minute}) }, "the limit is below its minimum", "LimiterConfig.Limit")
-            assertPanicsNamingField(t, func() { build(LimiterConfig{Limit: 1}) }, "the limit is below its minimum", "LimiterConfig.Window")
-            assertPanicsNamingField(t, func() { build(LimiterConfig{Limit: 1, Window: time.Microsecond}) }, "the limit is below its minimum", "LimiterConfig.Window")
-            assertPanicsNamingField(t, func() { build(LimiterConfig{Limit: 1, Window: -time.Minute}) }, "the limit is below its minimum", "LimiterConfig.Window")
-            build(LimiterConfig{Limit: 1, Window: time.Millisecond})
+            assertPanicsNamingContextKey(t, func() { build(0, time.Minute) }, "the limit is below its minimum", "argument", "limit")
+            assertPanicsNamingContextKey(t, func() { build(-1, time.Minute) }, "the limit is below its minimum", "argument", "limit")
+            assertPanicsNamingContextKey(t, func() { build(1, 0) }, "the limit is below its minimum", "argument", "window")
+            assertPanicsNamingContextKey(t, func() { build(1, time.Microsecond) }, "the limit is below its minimum", "argument", "window")
+            assertPanicsNamingContextKey(t, func() { build(1, -time.Minute) }, "the limit is below its minimum", "argument", "window")
+            build(1, time.Millisecond)
         })
+    }
+}
+
+func TestRateLimiter_AnEmptyOrMalformedNameIsRefusedAtConstruction(t *testing.T) {
+    for name, build := range map[string]func(limiterName string){
+        "fixed":   func(limiterName string) { NewFixedWindowLimiter(limiterName, 1, time.Minute, LimiterConfig{}) },
+        "sliding": func(limiterName string) { NewSlidingWindowLimiter(limiterName, 1, time.Minute, LimiterConfig{}) },
+    } {
+        t.Run(name, func(t *testing.T) {
+            for _, refused := range []string{"", "a:b", "a b", strings.Repeat("a", 65), "é", "a/b"} {
+                assertPanicsNamingContextKey(t, func() { build(refused) }, "the limiter name is malformed", "argument", "name")
+            }
+
+            for _, admitted := range []string{"a", "Login-2fa_budget.v1", strings.Repeat("z", 64)} {
+                build(admitted)
+            }
+        })
+    }
+}
+
+func TestRateLimiter_TheInProcessLimitersAnswerTheirName(t *testing.T) {
+    if "login" != NewFixedWindowLimiter("login", 1, time.Minute, LimiterConfig{}).Name() {
+        t.Fatalf("expected the fixed window limiter to answer its name")
+    }
+
+    if "login" != NewSlidingWindowLimiter("login", 1, time.Minute, LimiterConfig{}).Name() {
+        t.Fatalf("expected the sliding window limiter to answer its name")
     }
 }
 
 func TestLimiters_ResolveTheCleanupInterval(t *testing.T) {
-    if 5*time.Minute != NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}).cleanupInterval {
+    if 5*time.Minute != NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}).cleanupInterval {
         t.Fatalf("expected the fixed window limiter's absent cleanup interval to read 5m")
     }
 
-    if 5*time.Minute != NewSlidingWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}).cleanupInterval {
+    if 5*time.Minute != NewSlidingWindowLimiter("test", 1, time.Minute, LimiterConfig{}).cleanupInterval {
         t.Fatalf("expected the sliding window limiter's absent cleanup interval to read 5m")
     }
 
-    if time.Second != NewSlidingWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute, CleanupInterval: bound.Of(time.Second)}).cleanupInterval {
+    if time.Second != NewSlidingWindowLimiter("test", 1, time.Minute, LimiterConfig{CleanupInterval: bound.Of(time.Second)}).cleanupInterval {
         t.Fatalf("expected the declared cleanup interval to be kept")
     }
 
     assertPanicsNamingField(t, func() {
-        NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute, CleanupInterval: bound.Of(time.Microsecond)})
+        NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{CleanupInterval: bound.Of(time.Microsecond)})
     }, "the limit is below its minimum", "LimiterConfig.CleanupInterval")
     assertPanicsNamingField(t, func() {
-        NewSlidingWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute, CleanupInterval: bound.UnlimitedDuration()})
+        NewSlidingWindowLimiter("test", 1, time.Minute, LimiterConfig{CleanupInterval: bound.UnlimitedDuration()})
     }, "the limit does not admit unlimited", "LimiterConfig.CleanupInterval")
 }
 
 func TestFixedWindowLimiter_ForgetsAnIdleKeyAtTheDeclaredCleanupInterval(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Second, CleanupInterval: bound.Of(10 * time.Second)})
+    limiter := NewFixedWindowLimiter("test", 1, time.Second, LimiterConfig{Clock: frozenClock, CleanupInterval: bound.Of(10 * time.Second)})
 
-    limiter.Allow("idle")
+    allowedBy(limiter, "idle")
     frozenClock.Advance(11 * time.Second)
-    limiter.Allow("other")
+    allowedBy(limiter, "other")
 
     limiter.mutex.RLock()
     _, idleHeld := limiter.buckets["idle"]
@@ -741,11 +766,11 @@ func TestFixedWindowLimiter_ForgetsAnIdleKeyAtTheDeclaredCleanupInterval(t *test
 /* the limiter is a fixed window, not a token bucket: the allowance is restored whole at the edge, so an instant straddling it admits up to twice the rate. Locked deliberately — SlidingWindowLimiter is the strict-invariant option. */
 func TestFixedWindowLimiter_RestoresTheWholeAllowanceAtTheWindowEdge(t *testing.T) {
     clockInstance := clock.NewFrozenClock(time.Unix(0, 0).UTC())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: clockInstance, Limit: 100, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 100, time.Minute, LimiterConfig{Clock: clockInstance})
 
     admittedBeforeEdge := 0
     for index := 0; index < 100; index++ {
-        if true == limiter.Allow("client") {
+        if true == allowedBy(limiter, "client") {
             admittedBeforeEdge++
         }
     }
@@ -754,7 +779,7 @@ func TestFixedWindowLimiter_RestoresTheWholeAllowanceAtTheWindowEdge(t *testing.
         t.Fatalf("expected the whole allowance before the edge, got %d", admittedBeforeEdge)
     }
 
-    if true == limiter.Allow("client") {
+    if true == allowedBy(limiter, "client") {
         t.Fatalf("expected the allowance to be spent before the edge")
     }
 
@@ -762,7 +787,7 @@ func TestFixedWindowLimiter_RestoresTheWholeAllowanceAtTheWindowEdge(t *testing.
 
     admittedAfterEdge := 0
     for index := 0; index < 100; index++ {
-        if true == limiter.Allow("client") {
+        if true == allowedBy(limiter, "client") {
             admittedAfterEdge++
         }
     }
@@ -802,12 +827,12 @@ func TestSlidingWindowLimiter_HoldsTheRateWhereTheFixedWindowDoesNot(t *testing.
     }
 
     fixedClock := clock.NewFrozenClock(time.Unix(0, 0).UTC())
-    fixedLimiter := NewFixedWindowLimiter(LimiterConfig{Clock: fixedClock, Limit: 100, Window: time.Minute})
-    fixedAdmitted := spendHalfThenCountAtEdge(fixedLimiter.Allow, fixedClock.Advance)
+    fixedLimiter := NewFixedWindowLimiter("test", 100, time.Minute, LimiterConfig{Clock: fixedClock})
+    fixedAdmitted := spendHalfThenCountAtEdge(func(key string) bool { return allowedBy(fixedLimiter, key) }, fixedClock.Advance)
 
     slidingClock := clock.NewFrozenClock(time.Unix(0, 0).UTC())
-    slidingLimiter := NewSlidingWindowLimiter(LimiterConfig{Clock: slidingClock, Limit: 100, Window: time.Minute})
-    slidingAdmitted := spendHalfThenCountAtEdge(slidingLimiter.Allow, slidingClock.Advance)
+    slidingLimiter := NewSlidingWindowLimiter("test", 100, time.Minute, LimiterConfig{Clock: slidingClock})
+    slidingAdmitted := spendHalfThenCountAtEdge(func(key string) bool { return allowedBy(slidingLimiter, key) }, slidingClock.Advance)
 
     if 100 != fixedAdmitted {
         t.Fatalf("expected the fixed window to restore the whole allowance at the edge, got %d", fixedAdmitted)
@@ -829,17 +854,17 @@ func TestIpRateLimit_ChargesTheForwardedClient(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
     handler := IpRateLimit(QuickLimitConfig{RequestsPerMinute: 1, ClientIpResolver: resolver})(allowingNext())
 
-    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
         t.Fatalf("the first client's only request must pass, got: %v", firstErr)
     }
 
-    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    _, secondErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
     if nil != secondErr {
         t.Fatalf("a different client behind the same proxy must have its own budget, got: %v", secondErr)
     }
 
-    _, thirdErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:7777", "203.0.113.7"))
+    _, thirdErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:7777", "203.0.113.7"))
     if nil == thirdErr {
         t.Fatalf("the first client's second request must exhaust its own budget")
     }
@@ -849,12 +874,12 @@ func TestIpRateLimit_ChargesTheForwardedClient(t *testing.T) {
 func TestIpRateLimit_StillChargesTheDirectPeer(t *testing.T) {
     handler := IpRateLimit(QuickLimitConfig{RequestsPerMinute: 1})(allowingNext())
 
-    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
         t.Fatalf("the first request must pass, got: %v", firstErr)
     }
 
-    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    _, secondErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
     if nil == secondErr {
         t.Fatalf("without a resolver both clients key the direct peer and share one budget")
     }
@@ -864,17 +889,17 @@ func TestSimpleRateLimit_ChargesTheForwardedClient(t *testing.T) {
     resolver := NewForwardedClientIpResolver(trustingPolicy("10.0.0.0/8"))
     handler := SimpleRateLimit(QuickLimitConfig{RequestsPerMinute: 1, ClientIpResolver: resolver})(allowingNext())
 
-    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
         t.Fatalf("the first client's only request must pass, got: %v", firstErr)
     }
 
-    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    _, secondErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
     if nil != secondErr {
         t.Fatalf("a different client behind the same proxy must have its own budget, got: %v", secondErr)
     }
 
-    _, thirdErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:7777", "203.0.113.7"))
+    _, thirdErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:7777", "203.0.113.7"))
     if nil == thirdErr {
         t.Fatalf("the first client's second request must exhaust its own budget")
     }
@@ -886,17 +911,17 @@ func TestUserRateLimit_ChargesTheForwardedClientWhenAnonymous(t *testing.T) {
     anonymous := func(request httpcontract.Request) string { return "" }
     handler := UserRateLimit(UserLimitConfig{RequestsPerMinute: 1, UserId: anonymous, ClientIpResolver: resolver})(allowingNext())
 
-    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
         t.Fatalf("the first client's only request must pass, got: %v", firstErr)
     }
 
-    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    _, secondErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
     if nil != secondErr {
         t.Fatalf("a different anonymous client behind the same proxy must have its own budget, got: %v", secondErr)
     }
 
-    _, thirdErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:7777", "203.0.113.7"))
+    _, thirdErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:7777", "203.0.113.7"))
     if nil == thirdErr {
         t.Fatalf("the first client's second request must exhaust its own budget")
     }
@@ -908,12 +933,12 @@ func TestUserRateLimit_KeepsKeyingIdentifiedUsersById(t *testing.T) {
     identified := func(request httpcontract.Request) string { return "user-1" }
     handler := UserRateLimit(UserLimitConfig{RequestsPerMinute: 1, UserId: identified, ClientIpResolver: resolver})(allowingNext())
 
-    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
         t.Fatalf("the user's only request must pass, got: %v", firstErr)
     }
 
-    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    _, secondErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
     if nil == secondErr {
         t.Fatalf("one user reaching the service from two addresses must still share one budget")
     }
@@ -923,12 +948,12 @@ func TestUserRateLimit_KeepsKeyingIdentifiedUsersById(t *testing.T) {
 func TestQuickRateLimits_NilResolverKeepsTheDirectPeer(t *testing.T) {
     handler := IpRateLimit(QuickLimitConfig{RequestsPerMinute: 1})(allowingNext())
 
-    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
         t.Fatalf("the first request must pass, got: %v", firstErr)
     }
 
-    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    _, secondErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
     if nil == secondErr {
         t.Fatalf("a nil resolver must key the direct peer, so both clients share one budget")
     }
@@ -938,30 +963,30 @@ func TestQuickRateLimits_NilResolverKeepsTheDirectPeer(t *testing.T) {
 
 func TestFixedWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Duration(math.MaxInt64)})
+    limiter := NewFixedWindowLimiter("test", 1, time.Duration(math.MaxInt64), LimiterConfig{Clock: frozenClock})
 
-    if false == limiter.Allow("client") {
+    if false == allowedBy(limiter, "client") {
         t.Fatalf("the single budgeted request must be allowed")
     }
 
     frozenClock.Advance(limiter.cleanupInterval + time.Second)
 
-    if true == limiter.Allow("client") {
+    if true == allowedBy(limiter, "client") {
         t.Fatalf("a never-refilling window must not refill after the idle cleanup")
     }
 }
 
 func TestSlidingWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Duration(math.MaxInt64)})
+    limiter := NewSlidingWindowLimiter("test", 1, time.Duration(math.MaxInt64), LimiterConfig{Clock: frozenClock})
 
-    if false == limiter.Allow("client") {
+    if false == allowedBy(limiter, "client") {
         t.Fatalf("the single budgeted request must be allowed")
     }
 
     frozenClock.Advance(limiter.cleanupInterval + time.Second)
 
-    if true == limiter.Allow("client") {
+    if true == allowedBy(limiter, "client") {
         t.Fatalf("a never-refilling window must not refill after the idle cleanup")
     }
 }
@@ -971,12 +996,12 @@ func TestSlidingWindowLimiter_MaxDurationWindowSurvivesIdlePrune(t *testing.T) {
 func TestSimpleRateLimit_ChargesTheDirectPeer(t *testing.T) {
     handler := SimpleRateLimit(QuickLimitConfig{RequestsPerMinute: 1})(allowingNext())
 
-    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
+    _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", "203.0.113.7"))
     if nil != firstErr {
         t.Fatalf("the first request must pass, got: %v", firstErr)
     }
 
-    _, secondErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
+    _, secondErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", "203.0.113.8"))
     if nil == secondErr {
         t.Fatalf("without a resolver both clients key the direct peer and share one budget")
     }
@@ -994,11 +1019,11 @@ func TestSimpleRateLimit_RefusesWithTooManyRequests(t *testing.T) {
         return testhelper.NewHttpTestRequestFromHttpRequest(request)
     }
 
-    if _, firstErr := handler(nil, httptest.NewRecorder(), peer()); nil != firstErr {
+    if _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), peer()); nil != firstErr {
         t.Fatalf("the first request must pass, got: %v", firstErr)
     }
 
-    _, secondErr := handler(nil, httptest.NewRecorder(), peer())
+    _, secondErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), peer())
     if nil == secondErr {
         t.Fatalf("the second request must exhaust the budget")
     }
@@ -1028,7 +1053,7 @@ func TestQuickRateLimits_RefuseABudgetBelowOne(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_AResolverSetAfterTheBuildDoesNotChangeTheKey(t *testing.T) {
-    limiter := NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute, Clock: clock.NewFrozenClock(time.Now())})
+    limiter := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{Clock: clock.NewFrozenClock(time.Now())})
     config := RateLimitConfig{}
     handler := RateLimitMiddleware(limiter, config)(allowingNext())
 
@@ -1037,30 +1062,30 @@ func TestRateLimitMiddleware_AResolverSetAfterTheBuildDoesNotChangeTheKey(t *tes
     request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
     request.RemoteAddr = "10.0.0.1:1234"
 
-    if _, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request)); nil != err {
+    if _, err := handler(rateLimitTestRuntime(), httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request)); nil != err {
         t.Fatalf("expected the first request admitted, got %v", err)
     }
 
-    if true == limiter.Allow("10.0.0.1") {
+    if true == allowedBy(limiter, "10.0.0.1") {
         t.Fatalf("expected the request charged to the direct peer, the key the middleware was built with")
     }
 
-    if false == limiter.Allow("203.0.113.9") {
+    if false == allowedBy(limiter, "203.0.113.9") {
         t.Fatalf("expected the resolver written after the build never to have been charged")
     }
 }
 
 func TestLimiters_ANilClockReadsTheSystemClock(t *testing.T) {
-    if nil == NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}).clockInstance {
+    if nil == NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}).clockInstance {
         t.Fatalf("expected the fixed window limiter to read the system clock")
     }
 
-    sliding := NewSlidingWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute})
+    sliding := NewSlidingWindowLimiter("test", 1, time.Minute, LimiterConfig{})
     if nil == sliding.clockInstance {
         t.Fatalf("expected the sliding window limiter to read the system clock")
     }
 
-    if false == sliding.Allow("a") || true == sliding.Allow("a") {
+    if false == allowedBy(sliding, "a") || true == allowedBy(sliding, "a") {
         t.Fatalf("expected the system-clock limiter to admit one request and refuse the next")
     }
 }
@@ -1073,19 +1098,19 @@ func TestUserRateLimit_KeysOnTheIdentityRatherThanTheAddress(t *testing.T) {
 
     handler := UserRateLimit(UserLimitConfig{RequestsPerMinute: 1, UserId: getUserId})(allowingNext())
 
-    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
+    _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
     if nil != firstErr {
         t.Fatalf("the first request must pass, got: %v", firstErr)
     }
 
-    _, sameUserErr := handler(nil, httptest.NewRecorder(), forwardedRequest("198.51.100.4:9999", ""))
+    _, sameUserErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("198.51.100.4:9999", ""))
     if nil == sameUserErr {
         t.Fatalf("the same identity arriving from another address must carry the same budget")
     }
 
     identity = "bob"
 
-    _, otherUserErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
+    _, otherUserErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
     if nil != otherUserErr {
         t.Fatalf("a different identity on the same address must have its own budget, got: %v", otherUserErr)
     }
@@ -1098,17 +1123,17 @@ func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
 
     handler := UserRateLimit(UserLimitConfig{RequestsPerMinute: 1, UserId: anonymous})(allowingNext())
 
-    _, firstErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
+    _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:5555", ""))
     if nil != firstErr {
         t.Fatalf("the first anonymous request must pass, got: %v", firstErr)
     }
 
-    _, otherAddressErr := handler(nil, httptest.NewRecorder(), forwardedRequest("198.51.100.4:9999", ""))
+    _, otherAddressErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("198.51.100.4:9999", ""))
     if nil != otherAddressErr {
         t.Fatalf("another anonymous client must have its own budget rather than share one empty key, got: %v", otherAddressErr)
     }
 
-    _, sameAddressErr := handler(nil, httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", ""))
+    _, sameAddressErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), forwardedRequest("10.0.0.1:6666", ""))
     if nil == sameAddressErr {
         t.Fatalf("the same anonymous address must exhaust its own budget")
     }
@@ -1117,9 +1142,9 @@ func TestUserRateLimit_FallsBackToTheAddressWhenAnonymous(t *testing.T) {
 /* a limit handler that produces neither response nor error still refused the request, the reading the listener door gives: passed through, the nil response would be normalized into an empty 204 and the refused request served as success. */
 func TestRateLimitMiddleware_AnswersTheSilentLimitHandlerWith429(t *testing.T) {
     frozenClock := clock.NewFrozenClock(time.Now())
-    limiter := NewFixedWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 1, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{Clock: frozenClock})
 
-    silentHandler := func(request httpcontract.Request) (httpcontract.Response, error) {
+    silentHandler := func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
         return nil, nil
     }
 
@@ -1135,11 +1160,11 @@ func TestRateLimitMiddleware_AnswersTheSilentLimitHandlerWith429(t *testing.T) {
     request := httptest.NewRequest(nethttp.MethodGet, "/test", nil)
     melodyRequest := testhelper.NewHttpTestRequestFromHttpRequest(request)
 
-    if _, firstErr := handler(nil, httptest.NewRecorder(), melodyRequest); nil != firstErr {
+    if _, firstErr := handler(rateLimitTestRuntime(), httptest.NewRecorder(), melodyRequest); nil != firstErr {
         t.Fatalf("unexpected error on the allowed request: %v", firstErr)
     }
 
-    response, err := handler(nil, httptest.NewRecorder(), melodyRequest)
+    response, err := handler(rateLimitTestRuntime(), httptest.NewRecorder(), melodyRequest)
     if nil != err {
         t.Fatalf("unexpected error on the refused request: %v", err)
     }
@@ -1190,15 +1215,12 @@ func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing
 
 type cancellingRuntimeLimiter struct{}
 
-func (instance *cancellingRuntimeLimiter) Allow(key string) bool {
-    return true
+func (instance *cancellingRuntimeLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+    return httpcontract.RateLimitDecision{Allowed: true}, context.Canceled
 }
 
-func (instance *cancellingRuntimeLimiter) Reset(key string) {
-}
-
-func (instance *cancellingRuntimeLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
-    return true, context.Canceled
+func (instance *cancellingRuntimeLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
+    return nil
 }
 
 type rateLimitCaptureLogger struct {
@@ -1219,17 +1241,14 @@ type alreadyReportingRuntimeLimiter struct {
     allowWithRuntimeCalls int
 }
 
-func (instance *alreadyReportingRuntimeLimiter) Allow(key string) bool {
-    return true
+func (instance *alreadyReportingRuntimeLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
+    return nil
 }
 
-func (instance *alreadyReportingRuntimeLimiter) Reset(key string) {
-}
-
-func (instance *alreadyReportingRuntimeLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
+func (instance *alreadyReportingRuntimeLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
     instance.allowWithRuntimeCalls++
 
-    return true, exception.MarkLogged(
+    return httpcontract.RateLimitDecision{Allowed: true}, exception.MarkLogged(
         exception.NewError("rate limiter store failure", exceptioncontract.Context{"key": "actor"}, nil),
     )
 }
@@ -1287,36 +1306,36 @@ func TestRegisterRateLimitRequestListener_RefusesATypedNilLimiterByName(t *testi
 func TestSlidingWindowLimiter_AClockMovedBackwardsNeverReplenishesTheBudget(t *testing.T) {
     startedAt := time.Now()
     frozenClock := clock.NewFrozenClock(startedAt)
-    limiter := NewSlidingWindowLimiter(LimiterConfig{Clock: frozenClock, Limit: 2, Window: 12 * time.Second})
+    limiter := NewSlidingWindowLimiter("test", 2, 12 * time.Second, LimiterConfig{Clock: frozenClock})
 
     frozenClock.TravelTo(startedAt.Add(20 * time.Second))
-    if false == limiter.Allow("key1") {
+    if false == allowedBy(limiter, "key1") {
         t.Fatal("expected the first request to be admitted")
     }
 
     /* the clock answers an earlier instant than one already recorded */
     frozenClock.TravelTo(startedAt.Add(5 * time.Second))
-    if false == limiter.Allow("key1") {
+    if false == allowedBy(limiter, "key1") {
         t.Fatal("expected the second request to be admitted; the budget is two")
     }
 
     /* the mark at +20s is still inside the twelve second window that opens at +18s, so the budget is spent */
     frozenClock.TravelTo(startedAt.Add(30 * time.Second))
-    if true == limiter.Allow("key1") {
+    if true == allowedBy(limiter, "key1") {
         t.Fatal("expected the refusal: the live mark must not be cut away by a search over unordered marks")
     }
 }
 
 /* one IPv6 host is routinely handed a /64 and can rotate through it, so the key aggregates an IPv6 address to its /64: keyed on the /128, every request of one host had a budget of its own */
 func TestDefaultKeyExtractor_AggregatesAnIpv6ClientToItsSlash64(t *testing.T) {
-    limiter := NewFixedWindowLimiter(LimiterConfig{Limit: 5, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 5, time.Minute, LimiterConfig{})
     config := RateLimitConfig{}
     allowedCount := 0
     for index := 1; index <= 100; index++ {
         request := httptest.NewRequest(nethttp.MethodGet, "/api/data", nil)
         request.RemoteAddr = fmt.Sprintf("[2001:db8:1:2::%x]:4711", index)
 
-        if true == limiter.Allow(resolveRateLimitConfig(limiter, config, "", "").keyExtractor(testhelper.NewHttpTestRequestFromHttpRequest(request))) {
+        if true == allowedBy(limiter, resolveRateLimitConfig(limiter, config, "", "").keyExtractor(testhelper.NewHttpTestRequestFromHttpRequest(request))) {
             allowedCount++
         }
     }
@@ -1351,7 +1370,7 @@ func TestRateLimitConfig_ClientIpResolver_AnIpv6AddressItResolvesKeysOnItsSlash6
     request.RemoteAddr = "10.0.0.1:4711"
     request.Header.Set("X-Forwarded-For", "2001:db8:aa:bb:cc:dd:ee:ff")
 
-    limiter := NewFixedWindowLimiter(LimiterConfig{Limit: 5, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 5, time.Minute, LimiterConfig{})
     config := RateLimitConfig{}
     config.ClientIpResolver = NewForwardedClientIpResolver(httpcontract.ForwardedHeadersPolicy{
         TrustForwardedHeaders: true,
@@ -1364,23 +1383,16 @@ func TestRateLimitConfig_ClientIpResolver_AnIpv6AddressItResolvesKeysOnItsSlash6
 }
 
 func TestLimiters_ResolveTheMaxKeys(t *testing.T) {
-    if 1_000_000 != NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}).maxKeys {
+    if 1_000_000 != NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}).maxKeys {
         t.Fatalf("expected the fixed window limiter's absent ceiling to read 1,000,000")
     }
 
-    if 1_000_000 != NewSlidingWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}).maxKeys {
+    if 1_000_000 != NewSlidingWindowLimiter("test", 1, time.Minute, LimiterConfig{}).maxKeys {
         t.Fatalf("expected the sliding window limiter's absent ceiling to read 1,000,000")
     }
 
-    if 3 != NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute, MaxKeys: bound.Of(3)}).maxKeys {
+    if 3 != NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{MaxKeys: bound.Of(3)}).maxKeys {
         t.Fatalf("expected the declared ceiling to be kept")
-    }
-}
-
-func TestQuickLimiterConfig_IsTheBudgetOverOneMinute(t *testing.T) {
-    config := quickLimiterConfig(7)
-    if 7 != config.Limit || time.Minute != config.Window {
-        t.Fatalf("expected a budget of 7 over one minute, got %d over %s", config.Limit, config.Window)
     }
 }
 
@@ -1390,7 +1402,7 @@ func TestUserRateLimit_AdmitsTheBudgetPerUser(t *testing.T) {
 
     for attempt := 1; attempt <= 3; attempt++ {
         request := httptest.NewRequest(nethttp.MethodGet, "/x", nil)
-        _, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
+        _, err := handler(rateLimitTestRuntime(), httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(request))
         if (3 == attempt) != (nil != err) {
             t.Fatalf("expected requests 1 and 2 admitted and 3 refused, attempt %d answered %v", attempt, err)
         }
@@ -1399,8 +1411,8 @@ func TestUserRateLimit_AdmitsTheBudgetPerUser(t *testing.T) {
 
 func TestLimiters_AreContainerServicesThroughBothRegistrationForms(t *testing.T) {
     newLimiters := map[string]func() httpcontract.RateLimiter{
-        "fixed":   func() httpcontract.RateLimiter { return NewFixedWindowLimiter(LimiterConfig{Limit: 5, Window: time.Minute}) },
-        "sliding": func() httpcontract.RateLimiter { return NewSlidingWindowLimiter(LimiterConfig{Limit: 5, Window: time.Minute}) },
+        "fixed":   func() httpcontract.RateLimiter { return NewFixedWindowLimiter("test", 5, time.Minute, LimiterConfig{}) },
+        "sliding": func() httpcontract.RateLimiter { return NewSlidingWindowLimiter("test", 5, time.Minute, LimiterConfig{}) },
     }
 
     for name, newLimiter := range newLimiters {
@@ -1458,15 +1470,12 @@ func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
 
 type cyclicRuntimeLimiter struct{}
 
-func (instance *cyclicRuntimeLimiter) Allow(key string) bool {
-    return true
+func (instance *cyclicRuntimeLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+    return httpcontract.RateLimitDecision{Allowed: true}, newCyclicChainError()
 }
 
-func (instance *cyclicRuntimeLimiter) Reset(key string) {
-}
-
-func (instance *cyclicRuntimeLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
-    return true, newCyclicChainError()
+func (instance *cyclicRuntimeLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
+    return nil
 }
 
 func TestRateLimitMiddleware_ACyclicChainFromTheLimiterIsRecordedAsAFailure(t *testing.T) {
@@ -1511,7 +1520,7 @@ func TestRateLimitMiddleware_AMarkedDenialReturnsTheUnavailableErrorAndSkipsTheL
     limitHandlerCalls := 0
     nextCalls := 0
     handler := RateLimitMiddleware(limiter, RateLimitConfig{
-        OnLimitExceeded: func(request httpcontract.Request) (httpcontract.Response, error) {
+        OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
             limitHandlerCalls++
 
             return nil, exception.TooManyRequests("too many")
@@ -1546,7 +1555,7 @@ func TestRateLimitMiddleware_AnUnmarkedDenialBesideAnErrorStays429(t *testing.T)
     })
 
     request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
-    _, err := handler(nil, httptest.NewRecorder(), request)
+    _, err := handler(rateLimitTestRuntime(), httptest.NewRecorder(), request)
 
     if httpException := exception.AsHttpException(err); nil == httpException || nethttp.StatusTooManyRequests != httpException.StatusCode() || true == exception.AnswersUnavailable(err) {
         t.Fatalf("expected an unmarked error beside a denial to stay 429, got %v", err)
@@ -1564,7 +1573,7 @@ func TestRateLimitMiddleware_AMarkedErrorBesideAnAllowanceServesTheRequest(t *te
     })
 
     request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
-    if _, err := handler(nil, httptest.NewRecorder(), request); nil != err || 1 != nextCalls {
+    if _, err := handler(rateLimitTestRuntime(), httptest.NewRecorder(), request); nil != err || 1 != nextCalls {
         t.Fatalf("expected the open mode to serve the request, got %v and %d calls", err, nextCalls)
     }
 }
@@ -1577,7 +1586,7 @@ func TestRateLimitMiddleware_AMarkedDenialNobodyRecordedIsNotMarkedLogged(t *tes
     })
 
     request := testhelper.NewHttpTestRequest(nethttp.MethodGet, "http://example.com/limited")
-    _, err := handler(nil, httptest.NewRecorder(), request)
+    _, err := handler(rateLimitTestRuntime(), httptest.NewRecorder(), request)
 
     if false == exception.AnswersUnavailable(err) || true == exception.IsAlreadyLogged(err) {
         t.Fatalf("expected the unrecorded outage returned unavailable and not marked logged, so the kernel files it, got %v, logged %v", err, exception.IsAlreadyLogged(err))
@@ -1590,27 +1599,427 @@ func BenchmarkLimiters_KnownKeys(b *testing.B) {
         keys[index] = strconv.Itoa(index)
     }
 
-    for _, subject := range boundedLimiters(LimiterConfig{Limit: 1_000_000_000, Window: time.Hour, MaxKeys: bound.Of(10_000)}) {
+    for _, subject := range boundedLimiters(1_000_000_000, time.Hour, LimiterConfig{MaxKeys: bound.Of(10_000)}) {
         b.Run(subject.name, func(b *testing.B) {
             b.ReportAllocs()
             for index := 0; index < b.N; index++ {
-                subject.limiter.Allow(keys[index%len(keys)])
+                allowedBy(subject.limiter, keys[index%len(keys)])
             }
         })
     }
 }
 
 func BenchmarkLimiters_UnseenKeysAtAFullTable(b *testing.B) {
-    for _, subject := range boundedLimiters(LimiterConfig{Limit: 1_000_000_000, Window: time.Hour, MaxKeys: bound.Of(10_000)}) {
+    for _, subject := range boundedLimiters(1_000_000_000, time.Hour, LimiterConfig{MaxKeys: bound.Of(10_000)}) {
         for index := 0; index < 10_000; index++ {
-            subject.limiter.Allow("warm" + strconv.Itoa(index))
+            allowedBy(subject.limiter, "warm" + strconv.Itoa(index))
         }
 
         b.Run(subject.name, func(b *testing.B) {
             b.ReportAllocs()
             for index := 0; index < b.N; index++ {
-                subject.limiter.Allow("flood" + strconv.Itoa(index))
+                allowedBy(subject.limiter, "flood" + strconv.Itoa(index))
             }
         })
+    }
+}
+
+func TestRateLimiter_TheInProcessLimitersAnswerTheDecision(t *testing.T) {
+    for name, build := range map[string]func(clockInstance *clock.FrozenClock) httpcontract.RateLimiter{
+        "fixed": func(clockInstance *clock.FrozenClock) httpcontract.RateLimiter {
+            return NewFixedWindowLimiter("test", 3, time.Minute, LimiterConfig{Clock: clockInstance})
+        },
+        "sliding": func(clockInstance *clock.FrozenClock) httpcontract.RateLimiter {
+            return NewSlidingWindowLimiter("test", 3, time.Minute, LimiterConfig{Clock: clockInstance})
+        },
+    } {
+        t.Run(name, func(t *testing.T) {
+            frozenClock := clock.NewFrozenClock(time.Unix(1_700_000_000, 0))
+            limiter := build(frozenClock)
+            runtimeInstance := rateLimitTestRuntime()
+
+            for index, expected := range []httpcontract.RateLimitDecision{
+                {Allowed: true, Remaining: 2, Limit: 3},
+                {Allowed: true, Remaining: 1, Limit: 3},
+                {Allowed: true, Remaining: 0, Limit: 3},
+            } {
+                decision, allowErr := limiter.Allow(runtimeInstance, "client")
+                if nil != allowErr || expected != decision {
+                    t.Fatalf("call %d: expected %+v, got %+v %v", index+1, expected, decision, allowErr)
+                }
+
+                frozenClock.Advance(10 * time.Second)
+            }
+
+            decision, allowErr := limiter.Allow(runtimeInstance, "client")
+            if nil != allowErr || false != decision.Allowed || 0 != decision.Remaining || 3 != decision.Limit {
+                t.Fatalf("expected the fourth call denied, got %+v %v", decision, allowErr)
+            }
+
+            if 30*time.Second != decision.RetryAfter {
+                t.Fatalf("expected the denial to answer the remainder of the window, 30s, got %s", decision.RetryAfter)
+            }
+        })
+    }
+}
+
+func TestRateLimiter_ADenialAnswersTheRemainderOfTheWindow(t *testing.T) {
+    fixedClock := clock.NewFrozenClock(time.Unix(1_700_000_000, 0))
+    fixed := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{Clock: fixedClock})
+    allowedBy(fixed, "client")
+    fixedClock.Advance(45 * time.Second)
+
+    if decision, _ := fixed.Allow(rateLimitTestRuntime(), "client"); 15*time.Second != decision.RetryAfter {
+        t.Fatalf("expected the fixed window to answer 15s, got %s", decision.RetryAfter)
+    }
+
+    slidingClock := clock.NewFrozenClock(time.Unix(1_700_000_000, 0))
+    sliding := NewSlidingWindowLimiter("test", 2, time.Minute, LimiterConfig{Clock: slidingClock})
+    allowedBy(sliding, "client")
+    slidingClock.Advance(20 * time.Second)
+    allowedBy(sliding, "client")
+    slidingClock.Advance(5 * time.Second)
+
+    if decision, _ := sliding.Allow(rateLimitTestRuntime(), "client"); 35*time.Second != decision.RetryAfter {
+        t.Fatalf("expected the sliding window to answer the oldest live mark's remainder, 35s, got %s", decision.RetryAfter)
+    }
+}
+
+type typedNilRuntime struct {
+    runtimecontract.Runtime
+}
+
+func TestRateLimiter_AllowRefusesANilRuntime(t *testing.T) {
+    var typedNil *typedNilRuntime
+
+    for name, limiter := range map[string]httpcontract.RateLimiter{
+        "fixed":   NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
+        "sliding": NewSlidingWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
+    } {
+        for runtimeName, runtimeInstance := range map[string]runtimecontract.Runtime{"nil": nil, "typed nil": typedNil} {
+            decision, allowErr := limiter.Allow(runtimeInstance, "client")
+            if nil == allowErr || true == decision.Allowed || true == exception.AnswersUnavailable(allowErr) {
+                t.Fatalf("%s, %s runtime: expected an unmarked refusal and a denial, got %+v %v", name, runtimeName, decision, allowErr)
+            }
+
+            if resetErr := limiter.Reset(runtimeInstance, "client"); nil == resetErr || true == exception.AnswersUnavailable(resetErr) {
+                t.Fatalf("%s, %s runtime: expected Reset to refuse unmarked, got %v", name, runtimeName, resetErr)
+            }
+        }
+
+        if true != allowedBy(limiter, "client") {
+            t.Fatalf("%s: expected the refused calls to charge nothing", name)
+        }
+    }
+}
+
+func TestRateLimiterContract_NoImplementationIsProbedForAWidening(t *testing.T) {
+    var _ httpcontract.RateLimiter = (*FixedWindowLimiter)(nil)
+    var _ httpcontract.RateLimiter = (*SlidingWindowLimiter)(nil)
+
+    for _, path := range []string{"rate_limit.go", "rate_limit_listener.go", "../contract/middleware.go"} {
+        source, readErr := os.ReadFile(path)
+        if nil != readErr {
+            t.Fatalf("read %s: %v", path, readErr)
+        }
+
+        for _, gone := range []string{"RuntimeRateLimiter", "AllowWithRuntime"} {
+            if true == strings.Contains(string(source), gone) {
+                t.Fatalf("expected %s gone from %s", gone, path)
+            }
+        }
+    }
+}
+
+func limitedRequest() httpcontract.Request {
+    return testhelper.NewHttpTestRequestFromHttpRequest(httptest.NewRequest(nethttp.MethodGet, "/limited", nil))
+}
+
+func TestRateLimitMiddleware_ADenialAnswers429WithRetryAfter(t *testing.T) {
+    limiter := &fakeRuntimeRateLimiter{allowed: false, retryAfter: 1500 * time.Millisecond}
+
+    _, err := RateLimitMiddleware(limiter, RateLimitConfig{})(allowingNext())(rateLimitTestRuntime(), httptest.NewRecorder(), limitedRequest())
+
+    httpException := exception.AsHttpException(err)
+    if nil == httpException || nethttp.StatusTooManyRequests != httpException.StatusCode() || 1500*time.Millisecond != httpException.RetryAfter() {
+        t.Fatalf("expected a 429 carrying the decision's 1.5s, got %v", err)
+    }
+}
+
+func TestRateLimitGate_ADenialAnswers429WithRetryAfter(t *testing.T) {
+    gate := NewRateLimitGate(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 7 * time.Second}, RateLimitConfig{})
+    requestEvent := newRateLimitListenerTestRequestEvent(newRateLimitListenerTestRuntime())
+
+    if false == gate.Apply(newRateLimitListenerTestRuntime(), requestEvent) {
+        t.Fatalf("expected the denial to stop the request")
+    }
+
+    httpException := exception.AsHttpException(requestEvent.Refusal())
+    if nil == httpException || nethttp.StatusTooManyRequests != httpException.StatusCode() || 7*time.Second != httpException.RetryAfter() {
+        t.Fatalf("expected a 429 carrying the decision's 7s, got %v", requestEvent.Refusal())
+    }
+}
+
+func TestRateLimitMiddleware_ADenialTheLimiterCannotTimeCarriesNoRetryAfter(t *testing.T) {
+    _, err := RateLimitMiddleware(&fakeRuntimeRateLimiter{allowed: false}, RateLimitConfig{})(allowingNext())(rateLimitTestRuntime(), httptest.NewRecorder(), limitedRequest())
+
+    httpException := exception.AsHttpException(err)
+    if nil == httpException || nethttp.StatusTooManyRequests != httpException.StatusCode() || 0 != httpException.RetryAfter() {
+        t.Fatalf("expected a 429 with no Retry-After, got %v", err)
+    }
+
+    response, _ := RateLimitMiddleware(&fakeRuntimeRateLimiter{allowed: false}, RateLimitConfig{
+        OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
+            return http.TextResponse(nethttp.StatusTooManyRequests, "slow down"), nil
+        },
+    })(allowingNext())(rateLimitTestRuntime(), httptest.NewRecorder(), limitedRequest())
+
+    if "" != response.Headers().Get("Retry-After") {
+        t.Fatalf("expected no Retry-After header, got %q", response.Headers().Get("Retry-After"))
+    }
+}
+
+func TestRateLimitMiddleware_AResponseOfTheLimitHandlerWithoutRetryAfterGetsTheDecisions(t *testing.T) {
+    config := RateLimitConfig{
+        OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
+            return http.TextResponse(nethttp.StatusTooManyRequests, "slow down"), nil
+        },
+    }
+
+    response, _ := RateLimitMiddleware(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 2100 * time.Millisecond}, config)(allowingNext())(rateLimitTestRuntime(), httptest.NewRecorder(), limitedRequest())
+    if "3" != response.Headers().Get("Retry-After") {
+        t.Fatalf("expected the decision's Retry-After rounded up to 3, got %q", response.Headers().Get("Retry-After"))
+    }
+
+    gate := NewRateLimitGate(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 2100 * time.Millisecond}, config)
+    requestEvent := newRateLimitListenerTestRequestEvent(newRateLimitListenerTestRuntime())
+    gate.Apply(newRateLimitListenerTestRuntime(), requestEvent)
+
+    if nil == requestEvent.Response() || "3" != requestEvent.Response().Headers().Get("Retry-After") {
+        t.Fatalf("expected the gate's response to carry the decision's Retry-After, got %v", requestEvent.Response())
+    }
+
+    silent := NewRateLimitGate(&fakeRuntimeRateLimiter{allowed: false, retryAfter: time.Second}, RateLimitConfig{
+        OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
+            return nil, nil
+        },
+    })
+    silentEvent := newRateLimitListenerTestRequestEvent(newRateLimitListenerTestRuntime())
+    silent.Apply(newRateLimitListenerTestRuntime(), silentEvent)
+
+    if nil == silentEvent.Response() || "1" != silentEvent.Response().Headers().Get("Retry-After") {
+        t.Fatalf("expected the fallback 429 to carry the decision's Retry-After, got %v", silentEvent.Response())
+    }
+}
+
+func TestRateLimitMiddleware_AResponseOfTheLimitHandlerWithItsOwnRetryAfterKeepsIt(t *testing.T) {
+    config := RateLimitConfig{
+        OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
+            response := http.TextResponse(nethttp.StatusTooManyRequests, "slow down")
+            http.SetRetryAfter(response, 60*time.Second)
+
+            return response, nil
+        },
+    }
+
+    response, _ := RateLimitMiddleware(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 2 * time.Second}, config)(allowingNext())(rateLimitTestRuntime(), httptest.NewRecorder(), limitedRequest())
+    if "60" != response.Headers().Get("Retry-After") {
+        t.Fatalf("expected the handler's own Retry-After kept, got %q", response.Headers().Get("Retry-After"))
+    }
+
+    gate := NewRateLimitGate(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 2 * time.Second}, config)
+    requestEvent := newRateLimitListenerTestRequestEvent(newRateLimitListenerTestRuntime())
+    gate.Apply(newRateLimitListenerTestRuntime(), requestEvent)
+
+    if "60" != requestEvent.Response().Headers().Get("Retry-After") {
+        t.Fatalf("expected the gate to keep the handler's own Retry-After, got %q", requestEvent.Response().Headers().Get("Retry-After"))
+    }
+}
+
+func TestRateLimitMiddleware_TheLimitHandlerReceivesTheDecision(t *testing.T) {
+    var received []httpcontract.RateLimitDecision
+    config := RateLimitConfig{
+        OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
+            received = append(received, decision)
+
+            return nil, exception.TooManyRequests("")
+        },
+    }
+
+    limiter := &fakeRuntimeRateLimiter{allowed: false, retryAfter: 4 * time.Second}
+    _, _ = RateLimitMiddleware(limiter, config)(allowingNext())(rateLimitTestRuntime(), httptest.NewRecorder(), limitedRequest())
+    NewRateLimitGate(limiter, config).Apply(newRateLimitListenerTestRuntime(), newRateLimitListenerTestRequestEvent(newRateLimitListenerTestRuntime()))
+
+    expected := httpcontract.RateLimitDecision{RetryAfter: 4 * time.Second, Limit: 1}
+    if 2 != len(received) || expected != received[0] || expected != received[1] {
+        t.Fatalf("expected both doors to hand the handler %+v, got %+v", expected, received)
+    }
+}
+
+func TestRateLimitMiddleware_ACallTheCallersOwnContextEndedIsRecordedAtWarning(t *testing.T) {
+    capture := &rateLimitCaptureLogger{}
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    scope := serviceContainer.NewScope()
+    scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
+    deadlineContext, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+    defer cancel()
+    runtimeInstance := runtime.New(deadlineContext, scope, serviceContainer)
+
+    limiter := &fakeRuntimeRateLimiter{allowed: false, err: exception.NewError("deadline", nil, context.DeadlineExceeded)}
+    _, _ = RateLimitMiddleware(limiter, RateLimitConfig{})(allowingNext())(runtimeInstance, httptest.NewRecorder(), limitedRequest())
+
+    if 1 != capture.warningCalls || 0 != capture.errorCalls {
+        t.Fatalf("expected the caller's own deadline at warning, got %d warnings %d errors", capture.warningCalls, capture.errorCalls)
+    }
+}
+
+func TestRateLimitMiddleware_AnErrorOfTheLimitHandlerWithoutRetryAfterGetsTheDecisions(t *testing.T) {
+    config := RateLimitConfig{
+        OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
+            return nil, exception.TooManyRequests("slow down")
+        },
+    }
+
+    _, err := RateLimitMiddleware(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 42 * time.Second}, config)(allowingNext())(rateLimitTestRuntime(), httptest.NewRecorder(), limitedRequest())
+
+    httpException := exception.AsHttpException(err)
+    if nil == httpException || nethttp.StatusTooManyRequests != httpException.StatusCode() || "slow down" != httpException.Message() || 42*time.Second != httpException.RetryAfter() {
+        t.Fatalf("expected the handler's 429 carrying the decision's 42s, got %v", err)
+    }
+
+    gate := NewRateLimitGate(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 42 * time.Second}, config)
+    requestEvent := newRateLimitListenerTestRequestEvent(newRateLimitListenerTestRuntime())
+    gate.Apply(newRateLimitListenerTestRuntime(), requestEvent)
+
+    if gateException := exception.AsHttpException(requestEvent.Refusal()); nil == gateException || 42*time.Second != gateException.RetryAfter() {
+        t.Fatalf("expected the gate's refusal carrying the decision's 42s, got %v", requestEvent.Refusal())
+    }
+}
+
+func TestWithDecisionRetryAfterError_KeepsTheIdentityOfTheRebuiltException(t *testing.T) {
+    cause := errors.New("budget spent")
+    built := exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{
+        Code:       "rate_limited",
+        Key:        "error.rate_limited",
+        Message:    "slow down",
+        Parameters: map[string]any{"limit": 5},
+        Cause:      cause,
+    })
+    built.SetContextValue("route", "login")
+    built.MarkAsLogged()
+
+    rebuilt := exception.AsHttpException(withDecisionRetryAfterError(built, httpcontract.RateLimitDecision{RetryAfter: 3 * time.Second}))
+
+    if nil == rebuilt || 3*time.Second != rebuilt.RetryAfter() || "rate_limited" != rebuilt.Code() || "error.rate_limited" != rebuilt.Key() || "slow down" != rebuilt.Message() || 5 != rebuilt.Parameters()["limit"] {
+        t.Fatalf("expected the identity kept beside the decision's delay, got %+v", rebuilt)
+    }
+
+    if false == errors.Is(rebuilt, cause) || "login" != rebuilt.Context()["route"] || false == rebuilt.AlreadyLogged() {
+        t.Fatalf("expected the cause, the context and the logged mark kept, got %v %v %v", rebuilt.CauseErr(), rebuilt.Context(), rebuilt.AlreadyLogged())
+    }
+
+    unlogged := exception.AsHttpException(withDecisionRetryAfterError(exception.TooManyRequests("slow down"), httpcontract.RateLimitDecision{RetryAfter: time.Second}))
+    if nil == unlogged || true == unlogged.AlreadyLogged() {
+        t.Fatalf("expected an unlogged exception to stay unlogged")
+    }
+}
+
+func TestWithDecisionRetryAfterError_LeavesAnErrorItDoesNotRebuildAsBuilt(t *testing.T) {
+    decision := httpcontract.RateLimitDecision{RetryAfter: 3 * time.Second}
+
+    ownDelay := exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{RetryAfter: time.Minute})
+    marked := exception.MarkInfrastructureFailure(exception.TooManyRequests("store down"))
+    plain := errors.New("refused")
+    wrapped := fmt.Errorf("wrapped: %w", exception.TooManyRequests("slow down"))
+    var typedNil *exception.HttpException
+
+    for name, limitErr := range map[string]error{"own delay": ownDelay, "unavailable": marked, "plain": plain, "wrapped": wrapped, "typed nil": typedNil} {
+        if answered := withDecisionRetryAfterError(limitErr, decision); answered != limitErr {
+            t.Fatalf("%s: expected the error as built, got %v", name, answered)
+        }
+    }
+
+    untimed := exception.TooManyRequests("slow down")
+    if answered := withDecisionRetryAfterError(untimed, httpcontract.RateLimitDecision{}); answered != error(untimed) {
+        t.Fatalf("expected a decision with no delay to leave the error as built, got %v", answered)
+    }
+}
+
+func TestFixedWindowLimiter_AClockSteppedBackDeniesForAtMostOneWindow(t *testing.T) {
+    startedAt := time.Now()
+    frozenClock := clock.NewFrozenClock(startedAt)
+    limiter := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{Clock: frozenClock})
+
+    allowedBy(limiter, "client")
+    frozenClock.TravelTo(startedAt.Add(-30 * time.Minute))
+
+    decision, _ := limiter.Allow(rateLimitTestRuntime(), "client")
+    if true == decision.Allowed || time.Minute != decision.RetryAfter {
+        t.Fatalf("expected a denial answering one window, got %+v", decision)
+    }
+
+    frozenClock.Advance(time.Minute)
+
+    if false == allowedBy(limiter, "client") {
+        t.Fatalf("expected the budget restored one window after the moved refill instant")
+    }
+}
+
+func TestSlidingWindowLimiter_AClockSteppedBackDeniesForAtMostOneWindow(t *testing.T) {
+    startedAt := time.Now()
+    frozenClock := clock.NewFrozenClock(startedAt)
+    limiter := NewSlidingWindowLimiter("test", 1, time.Minute, LimiterConfig{Clock: frozenClock})
+
+    allowedBy(limiter, "client")
+    frozenClock.TravelTo(startedAt.Add(-30 * time.Minute))
+
+    decision, _ := limiter.Allow(rateLimitTestRuntime(), "client")
+    if true == decision.Allowed || time.Minute != decision.RetryAfter {
+        t.Fatalf("expected a denial answering at most one window, got %+v", decision)
+    }
+}
+
+func TestClampRetryAfter_HoldsTheDelayWithinTheWindow(t *testing.T) {
+    for _, testCase := range []struct {
+        retryAfter time.Duration
+        expected   time.Duration
+    }{
+        {retryAfter: -time.Second, expected: 0},
+        {retryAfter: 0, expected: 0},
+        {retryAfter: 30 * time.Second, expected: 30 * time.Second},
+        {retryAfter: time.Minute, expected: time.Minute},
+        {retryAfter: time.Minute + time.Nanosecond, expected: time.Minute},
+    } {
+        if clamped := clampRetryAfter(testCase.retryAfter, time.Minute); testCase.expected != clamped {
+            t.Fatalf("expected %s clamped to %s, got %s", testCase.retryAfter, testCase.expected, clamped)
+        }
+    }
+}
+
+func TestRateLimit_ADenialThroughTheKernelServesRetryAfterOnTheWire(t *testing.T) {
+    for name, configure := range map[string]func(router *http.Router, dispatcher eventcontract.EventDispatcher){
+        "middleware": func(router *http.Router, dispatcher eventcontract.EventDispatcher) {
+            router.Handle(nethttp.MethodGet, "/limited", RateLimitMiddleware(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 2100 * time.Millisecond}, RateLimitConfig{})(allowingNext()))
+        },
+        "listener": func(router *http.Router, dispatcher eventcontract.EventDispatcher) {
+            router.Handle(nethttp.MethodGet, "/limited", allowingNext())
+            RegisterRateLimitRequestListener(dispatcher, &fakeRuntimeRateLimiter{allowed: false, retryAfter: 2100 * time.Millisecond}, RateLimitConfig{})
+        },
+        "handler error": func(router *http.Router, dispatcher eventcontract.EventDispatcher) {
+            router.Handle(nethttp.MethodGet, "/limited", RateLimitMiddleware(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 2100 * time.Millisecond}, RateLimitConfig{
+                OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
+                    return nil, exception.TooManyRequests("slow down")
+                },
+            })(allowingNext()))
+        },
+    } {
+        handler := servedRateLimitKernel(t, configure)
+
+        recorder := httptest.NewRecorder()
+        handler.ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/limited", nil))
+
+        if nethttp.StatusTooManyRequests != recorder.Code || "3" != recorder.Header().Get("Retry-After") {
+            t.Fatalf("%s: expected 429 with Retry-After 3 on the wire, got %d %q", name, recorder.Code, recorder.Header().Get("Retry-After"))
+        }
     }
 }

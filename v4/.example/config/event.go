@@ -124,9 +124,7 @@ const requestBudgetWindow = time.Hour
 
 /* requestBudgetLimiter is the hourly budget, held in this process and tracking at most 10,000 addresses, the ceiling of the example's other in-process tables; past it an unseen address takes the slot of the address whose last request is the oldest, which comes back with a full budget. */
 func requestBudgetLimiter(budget int) *melodyhttpmiddleware.FixedWindowLimiter {
-    return melodyhttpmiddleware.NewFixedWindowLimiter(melodyhttpmiddleware.LimiterConfig{
-        Limit:   budget,
-        Window:  requestBudgetWindow,
+    return melodyhttpmiddleware.NewFixedWindowLimiter("request_budget", budget, requestBudgetWindow, melodyhttpmiddleware.LimiterConfig{
         MaxKeys: melodybound.Of(inProcessWriteThrottleMaxAddresses),
     })
 }

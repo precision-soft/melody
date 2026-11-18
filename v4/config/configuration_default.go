@@ -26,7 +26,7 @@ func (instance *Configuration) registerDefaultParameters(
 
     instance.setDefaultParameter(HttpSessionTombstoneRetentionKey, DefaultSessionTombstoneRetention.String())
 
-    instance.setDefaultParameter(HttpSessionPersistenceTimeoutKey, DefaultSessionPersistenceTimeout.String())
+    instance.setDefaultParameter(HttpSessionStorageTimeoutKey, DefaultSessionStorageTimeout.String())
 
     instance.setDefaultParameter(HttpSessionMaxSessionsKey, DefaultSessionMaxSessions)
 

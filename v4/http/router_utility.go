@@ -336,6 +336,7 @@ func writeResponse(
     forwardedHeadersPolicy httpcontract.ForwardedHeadersPolicy,
     sessionCookiePolicy httpcontract.SessionCookiePolicy,
     unavailableRetryAfter time.Duration,
+    raiseCallbackError func(error) httpcontract.Response,
 ) httpcontract.Response {
     if true == internal.IsNilInterface(response) {
         response = &Response{
@@ -375,6 +376,8 @@ func writeResponse(
         sessionInstance = nil
     }
 
+    var persistErr error
+
     if false == sessionAlreadyPersisted && false == internal.IsNilInterface(sessionManager) && false == internal.IsNilInterface(sessionInstance) {
         sessionPersistFailed := false
 
@@ -394,6 +397,8 @@ func writeResponse(
 
         if true == sessionCleared {
             /* a session the cookie did not name has no entry to remove and no copy to bury */
+            deleteAnsweredUnavailable := false
+
             if true == requestNamesSession(request, sessionInstance.Id()) {
                 persistenceContext, err := openPersistenceContext()
                 if nil == err {
@@ -401,14 +406,31 @@ func writeResponse(
                 }
 
                 if nil != err {
-                    /* a failed delete still expires the cookie, which can only end a session */
                     sessionPersistFailed = true
 
+                    var unavailable bool
+                    err, unavailable = classifySessionPersistenceFailure(persistenceContext, err)
+                    persistErr = err
+
                     logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to delete session", err, sessionInstance.Id(), request)
+
+                    /* the outage keeps the cookie, so the client's retry names the session still stored */
+                    if false == responseIsDiscarded {
+                        closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
+
+                        if true == unavailable {
+                            response = sessionUnavailableResponse(unavailableRetryAfter)
+                            deleteAnsweredUnavailable = true
+                        } else {
+                            response = EmptyResponse(nethttp.StatusInternalServerError)
+                        }
+                    }
                 }
             }
 
-            setSessionCookie(response, expiringSessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy))
+            if false == deleteAnsweredUnavailable {
+                setSessionCookie(response, expiringSessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy))
+            }
         } else if true == sessionModified {
             /* a discarded response carries no Set-Cookie, so nothing could reference a session stored for it */
             if true == responseIsDiscarded && false == requestNamesSession(request, sessionInstance.Id()) {
@@ -431,6 +453,10 @@ func writeResponse(
                     err = sessionManager.SaveSession(persistenceContext, sessionInstance)
                 }
 
+                if nil != err {
+                    persistErr = err
+                }
+
                 if true == exception.ChainIs(err, session.ErrSessionRotated) {
                     /* the cookie is left alone: the rotating request hands the client the new id */
                     sessionPersistFailed = true
@@ -443,24 +469,22 @@ func writeResponse(
 
                     setSessionCookie(response, expiringSessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy))
                 } else if nil != err {
-                    /* the response assumed the save would land, so a failure answers 503 unless committed */
+                    /* the response assumed the save would land: an outage answers 503, any other failure 500 */
                     sessionPersistFailed = true
 
-                    if false == exception.AnswersUnavailable(err) {
-                        err = exception.MarkInfrastructureFailure(err)
-                    }
+                    var unavailable bool
+                    err, unavailable = classifySessionPersistenceFailure(persistenceContext, err)
+                    persistErr = err
 
                     logSessionPersistenceEvent(runtimeInstance, loggingcontract.LevelError, "failed to save session", err, sessionInstance.Id(), request)
 
                     closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
 
-                    response = EmptyResponse(nethttp.StatusServiceUnavailable)
-
-                    if 0 >= unavailableRetryAfter {
-                        unavailableRetryAfter = config.DefaultUnavailableRetryAfter
+                    if true == unavailable {
+                        response = sessionUnavailableResponse(unavailableRetryAfter)
+                    } else {
+                        response = EmptyResponse(nethttp.StatusInternalServerError)
                     }
-
-                    SetRetryAfter(response, unavailableRetryAfter)
                 } else {
                     setSessionCookie(response, sessionCookie(request, forwardedHeadersPolicy, sessionCookiePolicy, sessionInstance.Id()))
                 }
@@ -474,6 +498,8 @@ func writeResponse(
             persistenceRecorder.MarkSessionPersisted()
         }
     }
+
+    response = runSessionPersistedCallbacks(runtimeInstance, request, response, persistErr, responseIsDiscarded, raiseCallbackError)
 
     if true == responseIsDiscarded {
         closeDiscardedResponseBody(response, logging.LoggerFromRuntime(runtimeInstance))
@@ -548,13 +574,53 @@ func isClientAbortWriteError(request httpcontract.Request, err error) bool {
     return context.Canceled == context.Cause(request.HttpRequest().Context())
 }
 
+func sessionUnavailableResponse(unavailableRetryAfter time.Duration) httpcontract.Response {
+    response := EmptyResponse(nethttp.StatusServiceUnavailable)
+
+    if 0 >= unavailableRetryAfter {
+        unavailableRetryAfter = config.DefaultUnavailableRetryAfter
+    }
+
+    SetRetryAfter(response, unavailableRetryAfter)
+
+    return response
+}
+
+/* a call the kernel's own bound cut is an outage whatever the manager answered, so a bare deadline from a replaced manager still answers 503 */
+func classifySessionPersistenceFailure(persistenceContext context.Context, err error) (error, bool) {
+    if true == storageBoundExpired(persistenceContext) {
+        return exception.NewError(
+            "the session storage call was cut by its bound",
+            exceptioncontract.Context{"bound": session.StorageTimeoutRule.Name},
+            exception.MarkInfrastructureFailure(err),
+        ), true
+    }
+
+    return err, exception.AnswersUnavailable(err)
+}
+
+/* the storage can answer the deadline a moment before the context records it */
+func storageBoundExpired(ctx context.Context) bool {
+    if nil == ctx {
+        return false
+    }
+
+    if nil != ctx.Err() {
+        return true
+    }
+
+    deadline, hasDeadline := ctx.Deadline()
+
+    return true == hasDeadline && false == time.Now().Before(deadline)
+}
+
 /* the request's values without its cancellation, so a client that hung up still has its logout recorded */
 func sessionPersistenceContext(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
     sessionManager sessioncontract.Manager,
 ) (context.Context, context.CancelFunc, error) {
-    timeout, timeoutErr := session.ResolvePersistenceTimeout(sessionManager)
+    timeout, timeoutErr := session.ResolveStorageTimeout(sessionManager)
     if nil != timeoutErr {
         return context.Background(), func() {}, timeoutErr
     }

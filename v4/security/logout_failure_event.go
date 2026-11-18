@@ -11,6 +11,7 @@ func NewLogoutFailureEvent(request httpcontract.Request, err error) *LogoutFailu
     }
 }
 
+/* LogoutFailureEvent is the payload of security.logout.failure: the logout handler's error, or the error of a session delete that did not land, the response then answering the storage's failure. */
 type LogoutFailureEvent struct {
     request httpcontract.Request
     err     error

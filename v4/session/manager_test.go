@@ -2402,7 +2402,7 @@ func TestManager_TheBurialReadOutlivesTheContextThatCutTheRemoval(t *testing.T) 
 func TestManager_TheBurialReadContextIsReleasedOnceTheReadAnswers(t *testing.T) {
     storage := newBurialProbeStorage()
     storage.failDelete = true
-    manager := NewManager(storage, ManagerConfig{PersistenceTimeout: bound.Of(time.Hour)})
+    manager := NewManager(storage, ManagerConfig{StorageTimeout: bound.Of(time.Hour)})
     sessionId, _ := seedBurialProbe(t, manager, storage)
 
     if deleteErr := manager.DeleteSession(context.Background(), sessionId); nil == deleteErr {
@@ -2419,11 +2419,11 @@ func TestManager_TheBurialReadContextIsReleasedOnceTheReadAnswers(t *testing.T) 
     }
 }
 
-func TestManager_TheBurialReadIsBoundedByThePersistenceTimeout(t *testing.T) {
+func TestManager_TheBurialReadIsBoundedByTheStorageTimeout(t *testing.T) {
     storage := newBurialProbeStorage()
     storage.failDelete = true
     storage.blockArmedLoad = true
-    manager := NewManager(storage, ManagerConfig{PersistenceTimeout: bound.Of(50 * time.Millisecond)})
+    manager := NewManager(storage, ManagerConfig{StorageTimeout: bound.Of(50 * time.Millisecond)})
     sessionId, _ := seedBurialProbe(t, manager, storage)
 
     start := time.Now()
@@ -2459,7 +2459,7 @@ func TestManager_APanickingBurialReadLeavesNoTimerArmed(t *testing.T) {
     storage := newBurialProbeStorage()
     storage.failDelete = true
     storage.panicArmedLoad = true
-    manager := NewManager(storage, ManagerConfig{PersistenceTimeout: bound.Of(time.Hour)})
+    manager := NewManager(storage, ManagerConfig{StorageTimeout: bound.Of(time.Hour)})
     sessionId, _ := seedBurialProbe(t, manager, storage)
 
     func() {
@@ -2501,10 +2501,10 @@ func TestManager_AContextEndedAsTheStripeIsWonReachesNoStorage(t *testing.T) {
     }
 }
 
-func TestManager_AnUnlimitedPersistenceTimeoutGivesTheBurialReadNoDeadline(t *testing.T) {
+func TestManager_AnUnlimitedStorageTimeoutGivesTheBurialReadNoDeadline(t *testing.T) {
     storage := newBurialProbeStorage()
     storage.failDelete = true
-    manager := NewManager(storage, ManagerConfig{PersistenceTimeout: bound.UnlimitedDuration()})
+    manager := NewManager(storage, ManagerConfig{StorageTimeout: bound.UnlimitedDuration()})
     sessionId, _ := seedBurialProbe(t, manager, storage)
 
     if deleteErr := manager.DeleteSession(context.Background(), sessionId); nil == deleteErr {
@@ -2521,30 +2521,30 @@ func TestManager_AnUnlimitedPersistenceTimeoutGivesTheBurialReadNoDeadline(t *te
     }
 }
 
-func TestNewManager_PanicsOnAPersistenceTimeoutBelowTheMinimum(t *testing.T) {
+func TestNewManager_PanicsOnAStorageTimeoutBelowTheMinimum(t *testing.T) {
     defer func() {
         recoveredErr, isError := recover().(error)
-        if false == isError || "ManagerConfig.PersistenceTimeout" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected the refusal to name ManagerConfig.PersistenceTimeout, got %v", recoveredErr)
+        if false == isError || "ManagerConfig.StorageTimeout" != exception.LogContext(recoveredErr, exception.LogContextConfig{})["field"] {
+            t.Fatalf("expected the refusal to name ManagerConfig.StorageTimeout, got %v", recoveredErr)
         }
     }()
 
-    _ = NewManager(&nilMapStorage{}, ManagerConfig{PersistenceTimeout: bound.Of(time.Microsecond)})
+    _ = NewManager(&nilMapStorage{}, ManagerConfig{StorageTimeout: bound.Of(time.Microsecond)})
 }
 
-func TestNewManager_DefaultsThePersistenceTimeoutToFiveSeconds(t *testing.T) {
+func TestNewManager_DefaultsTheStorageTimeoutToFiveSeconds(t *testing.T) {
     manager := NewManager(&nilMapStorage{}, ManagerConfig{})
 
-    if bound.Of(5*time.Second) != manager.PersistenceTimeout() || 5*time.Second != DefaultPersistenceTimeout {
-        t.Fatalf("expected the default persistence timeout to be 5s, got %s", manager.PersistenceTimeout())
+    if bound.Of(5*time.Second) != manager.StorageTimeout() || 5*time.Second != DefaultStorageTimeout {
+        t.Fatalf("expected the default storage timeout to be 5s, got %s", manager.StorageTimeout())
     }
 }
 
-func TestNewManager_AdmitsAnUnlimitedPersistenceTimeout(t *testing.T) {
-    manager := NewManager(&nilMapStorage{}, ManagerConfig{PersistenceTimeout: bound.UnlimitedDuration()})
+func TestNewManager_AdmitsAnUnlimitedStorageTimeout(t *testing.T) {
+    manager := NewManager(&nilMapStorage{}, ManagerConfig{StorageTimeout: bound.UnlimitedDuration()})
 
-    if false == manager.PersistenceTimeout().IsUnlimited() {
-        t.Fatalf("expected an unlimited persistence timeout, got %s", manager.PersistenceTimeout())
+    if false == manager.StorageTimeout().IsUnlimited() {
+        t.Fatalf("expected an unlimited storage timeout, got %s", manager.StorageTimeout())
     }
 }
 
@@ -2553,33 +2553,33 @@ type declaredBoundManager struct {
     declared bound.Duration
 }
 
-func (instance *declaredBoundManager) PersistenceTimeout() bound.Duration {
+func (instance *declaredBoundManager) StorageTimeout() bound.Duration {
     return instance.declared
 }
 
-func TestResolvePersistenceTimeout_JudgesEveryManagerByTheRule(t *testing.T) {
-    own := NewManager(&nilMapStorage{}, ManagerConfig{PersistenceTimeout: bound.Of(2 * time.Second)})
-    if resolved, err := ResolvePersistenceTimeout(own); nil != err || 2*time.Second != resolved.Value {
+func TestResolveStorageTimeout_JudgesEveryManagerByTheRule(t *testing.T) {
+    own := NewManager(&nilMapStorage{}, ManagerConfig{StorageTimeout: bound.Of(2 * time.Second)})
+    if resolved, err := ResolveStorageTimeout(own); nil != err || 2*time.Second != resolved.Value {
         t.Fatalf("expected the manager's own bound, got %v and %v", resolved, err)
     }
 
     absent := &declaredBoundManager{Manager: own}
-    if resolved, err := ResolvePersistenceTimeout(absent); nil != err || DefaultPersistenceTimeout != resolved.Value {
+    if resolved, err := ResolveStorageTimeout(absent); nil != err || DefaultStorageTimeout != resolved.Value {
         t.Fatalf("expected an absent bound to be the default, got %v and %v", resolved, err)
     }
 
     below := &declaredBoundManager{Manager: own, declared: bound.Of(time.Microsecond)}
-    if _, err := ResolvePersistenceTimeout(below); nil == err || "ManagerConfig.PersistenceTimeout" != exception.LogContext(err, exception.LogContextConfig{})["field"] {
+    if _, err := ResolveStorageTimeout(below); nil == err || "ManagerConfig.StorageTimeout" != exception.LogContext(err, exception.LogContextConfig{})["field"] {
         t.Fatalf("expected a bound below the minimum refused naming the field, got %v", err)
     }
 
     unlimited := &declaredBoundManager{Manager: own, declared: bound.UnlimitedDuration()}
-    if resolved, err := ResolvePersistenceTimeout(unlimited); nil != err || false == resolved.Unlimited {
+    if resolved, err := ResolveStorageTimeout(unlimited); nil != err || false == resolved.Unlimited {
         t.Fatalf("expected unlimited admitted, got %v and %v", resolved, err)
     }
 
     var nilManager *Manager
-    if _, err := ResolvePersistenceTimeout(nilManager); nil == err {
+    if _, err := ResolveStorageTimeout(nilManager); nil == err {
         t.Fatalf("expected a nil manager refused")
     }
 }

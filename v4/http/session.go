@@ -47,9 +47,16 @@ func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Ses
         return nil, sessionManagerErr
     }
 
-    rotatedSession, regenerateErr := sessionManager.RegenerateSession(runtimeInstance.Context(), currentSession)
+    rotationContext, releaseRotationContext, regenerateErr := storageCallContext(runtimeInstance.Context(), sessionManager)
+    defer releaseRotationContext()
+
     if nil != regenerateErr {
-        return nil, markSessionUnavailable(regenerateErr)
+        return nil, regenerateErr
+    }
+
+    rotatedSession, regenerateErr := sessionManager.RegenerateSession(rotationContext, currentSession)
+    if nil != regenerateErr {
+        return nil, markSessionUnavailable(namedStorageBound(runtimeInstance.Context(), rotationContext, regenerateErr))
     }
 
     if publishErr := SetRequestSession(request, rotatedSession); nil != publishErr {

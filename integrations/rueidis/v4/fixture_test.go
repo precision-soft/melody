@@ -470,7 +470,7 @@ type commandCountingConn struct {
 
 func (instance *commandCountingConn) Write(payload []byte) (int, error) {
     upper := bytes.ToUpper(payload)
-    for _, command := range [][]byte{[]byte("\r\nEVAL"), []byte("\r\nSSCAN\r\n"), []byte("\r\nSCAN\r\n"), []byte("\r\nHMGET\r\n")} {
+    for _, command := range [][]byte{[]byte("\r\nEVAL"), []byte("\r\nSSCAN\r\n"), []byte("\r\nSCAN\r\n"), []byte("\r\nHMGET\r\n"), []byte("\r\nDEL\r\n")} {
         instance.commands.Add(int64(bytes.Count(upper, command)))
     }
 

@@ -418,25 +418,27 @@ func serveLogoutDoor(
         return
     }
 
-    result, logoutErr := firewall.Logout(runtimeInstance, request, securitycontract.LogoutInput{Token: token})
+    result, logoutErr := firewall.runLogoutHandler(runtimeInstance, request, securitycontract.LogoutInput{Token: token})
+    if nil != logoutErr {
+        requestEvent.Refuse(logoutErr)
 
-    /* a result beside an error is a handler that succeeded and a success listener that failed: the sign-out stands, so the session ends either way, the one a handler rotated or published included. Clear routes the response path to deleting the entry and expiring the cookie. */
-    if nil != result {
-        sessionInstance.Clear()
-
-        if publishedSession, publishedErr := http.RequestSession(request); nil == publishedErr && publishedSession != sessionInstance {
-            publishedSession.Clear()
-        }
-
-        setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
+        return
     }
 
-    if nil != logoutErr {
-        if nil != result {
-            http.CloseDiscardedResponseBody(result.Response, logging.LoggerFromRuntime(runtimeInstance))
-        }
+    /* the session ends, the one a handler rotated or published included: Clear routes the response path to deleting the entry and expiring the cookie */
+    sessionInstance.Clear()
 
-        requestEvent.Refuse(logoutErr)
+    if publishedSession, publishedErr := http.RequestSession(request); nil == publishedErr && publishedSession != sessionInstance {
+        publishedSession.Clear()
+    }
+
+    setSecurityContextOnRuntime(runtimeInstance, firewall, NewAnonymousToken())
+
+    registerErr := http.OnSessionPersisted(request, logoutOutcomeDispatcher(runtimeInstance, request, firewall))
+    if nil != registerErr {
+        http.CloseDiscardedResponseBody(result.Response, logging.LoggerFromRuntime(runtimeInstance))
+
+        requestEvent.Refuse(registerErr)
 
         return
     }
@@ -449,6 +451,38 @@ func serveLogoutDoor(
             return http.EmptyResponse(nethttp.StatusNoContent), nil
         },
     )
+}
+
+/* a failure listener's error is logged, not returned, so the storage's 503 and its Retry-After reach the client's retry */
+func logoutOutcomeDispatcher(
+    runtimeInstance runtimecontract.Runtime,
+    request httpcontract.Request,
+    firewall *CompiledFirewall,
+) http.SessionPersistedCallback {
+    return func(persistErr error) error {
+        if nil == persistErr {
+            return firewall.dispatchLogoutSuccess(runtimeInstance, request)
+        }
+
+        dispatchErr := firewall.dispatchLogoutFailure(runtimeInstance, request, persistErr)
+        if nil != dispatchErr {
+            if logger := logging.LoggerFromRuntime(runtimeInstance); nil != logger {
+                logger.Error(
+                    "security logout failure event dispatch failed",
+                    exception.LogContext(
+                        dispatchErr,
+                        exception.LogContextConfig{
+                            Extra: exceptioncontract.Context{
+                                "firewallName": firewall.Name(),
+                            },
+                        },
+                    ),
+                )
+            }
+        }
+
+        return nil
+    }
 }
 
 /* answerFirewallDoor serves the handler's response; a handler that answered none redirects an html client and gives any other its own answer. */

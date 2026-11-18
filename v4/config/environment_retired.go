@@ -12,7 +12,8 @@ const frameworkEnvironmentKeyOwner = "the framework"
 
 /* retiredEnvironmentKeyMap is keyed by the retired spelling and holds the successor of every key the framework renamed */
 var retiredEnvironmentKeyMap = map[string]string{
-    "MELODY_PUBLIC_DIR": PublicDirectoryKey,
+    "MELODY_HTTP_SESSION_PERSISTENCE_TIMEOUT": HttpSessionStorageTimeoutKey,
+    "MELODY_PUBLIC_DIR":                       PublicDirectoryKey,
 }
 
 /* RetiredEnvironmentKeys answers, sorted by key, every retired spelling the .env artifacts set, the framework's and the declared ones; presence counts, an empty line included. */

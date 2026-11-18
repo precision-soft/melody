@@ -15,6 +15,7 @@ import (
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     store2fa "github.com/precision-soft/melody/v4/.example/twofactor"
     "github.com/precision-soft/melody/v4/bound"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
@@ -392,20 +393,27 @@ type countingFactorBudget struct {
     allowance int
     spent     int
     releases  int
+    spendErr  error
 }
 
 func (instance *countingFactorBudget) Spend(melodyruntimecontract.Runtime, string) error {
     instance.spent++
+    if nil != instance.spendErr {
+        return instance.spendErr
+    }
+
     if instance.allowance < instance.spent {
-        return examplesecurity.ErrSecondFactorBudgetSpent
+        return &examplesecurity.SecondFactorBudgetSpentError{RetryAfter: 30 * time.Second}
     }
 
     return nil
 }
 
-func (instance *countingFactorBudget) Release(string) {
+func (instance *countingFactorBudget) Release(melodyruntimecontract.Runtime, string) error {
     instance.releases++
     instance.spent = 0
+
+    return nil
 }
 
 func TestTheSecondFactorDoorsSpendTheAccountsBudgetOnEveryPresentedFactor(t *testing.T) {
@@ -570,8 +578,30 @@ func TestConfirmHandlerSpendsTheFactorBudget(t *testing.T) {
     store, _, _ := pendingFixture(t)
     budget := &countingFactorBudget{allowance: 0}
 
-    if response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, budget), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: "123456"}); nethttp.StatusTooManyRequests != response.StatusCode() || 1 != budget.spent {
+    response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, budget), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: "123456"})
+    if nethttp.StatusTooManyRequests != response.StatusCode() || 1 != budget.spent {
         t.Fatalf("expected 429 after one spend, got %d and %d spends", response.StatusCode(), budget.spent)
+    }
+
+    if "30" != response.Headers().Get("Retry-After") {
+        t.Fatalf("expected the budget's Retry-After on the 429, got %q", response.Headers().Get("Retry-After"))
+    }
+}
+
+func TestConfirmHandlerAnswersABudgetFailureByWhetherItIsAnOutage(t *testing.T) {
+    for name, testCase := range map[string]struct {
+        spendErr error
+        status   int
+    }{
+        "outage":        {spendErr: melodyexception.MarkInfrastructureFailure(errors.New("connection refused")), status: nethttp.StatusServiceUnavailable},
+        "other failure": {spendErr: errors.New("runtime is nil"), status: nethttp.StatusInternalServerError},
+    } {
+        store, _, _ := pendingFixture(t)
+        budget := &countingFactorBudget{spendErr: testCase.spendErr}
+
+        if response := confirmWith(t, ConfirmHandler(fixedStore(store), nil, budget), map[string]string{melodysecurity.DefaultTotpCodeHeaderName: "123456"}); testCase.status != response.StatusCode() {
+            t.Fatalf("%s: expected %d, got %d", name, testCase.status, response.StatusCode())
+        }
     }
 }
 

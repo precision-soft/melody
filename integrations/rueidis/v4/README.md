@@ -6,7 +6,7 @@ Redis-backed building blocks for Melody v4, built on [`rueidis`](https://github.
 - a distributed [`Locker`](./lock.go) implementing the core `lock/contract.Locker`;
 - a [`RedisTokenStore`](./token_store.go) implementing the security `RevocableTokenStore`;
 - a [`NonceGuard`](./nonce_guard.go) implementing the security `NonceGuard` replay guard;
-- a [`RateLimiter`](./rate_limit.go) implementing the HTTP `RateLimiter` / `RuntimeRateLimiter` contracts across instances;
+- a [`RateLimiter`](./rate_limit.go) implementing the HTTP `RateLimiter` contract across instances;
 - a [`ServerSentEventBackplane`](./server_sent_event_backplane.go) that fans Server-Sent Events across instances;
 - a Redis [`cache`](./cache) backend implementing the core `cache/contract.Backend`.
 
@@ -133,25 +133,21 @@ The same guard fits any `security/contract.NonceGuard` slot, for example the TOT
 
 ## Rate limiter
 
-[`NewRateLimiter(client, RateLimiterConfig)`](./rate_limit.go) is a Redis-backed fixed-window limiter shared by every application instance — the distributed drop-in for the in-process limiters of the core `http/middleware` package. It implements both `http/contract.RateLimiter` and `http/contract.RuntimeRateLimiter`, so it goes straight into `middleware.RateLimitMiddleware`: `Allow(key)` bounds its own round trip, `AllowWithRuntime(runtimeInstance, key)` — the method the middleware prefers — caps the request context with the call timeout and reports store failures to the caller, and `Reset(key)` drops one counter best-effort. The counter is incremented atomically in a single Lua round trip, so N instances enforce one shared limit; because the window is fixed rather than sliding, up to twice the limit can pass across a window edge. Keys live under the `melody:rate_limit:` prefix, so the limiter shares a Redis instance with the cache, the lock and the token store without colliding.
+[`NewRateLimiter(client, name, limit, window, RateLimiterConfig)`](./rate_limit.go) is a Redis-backed fixed-window limiter shared by every application instance — the distributed drop-in for the in-process limiters of the core `http/middleware` package. It implements `http/contract.RateLimiter`, so it goes straight into `middleware.RateLimitMiddleware`: `Allow(runtimeInstance, key)` charges one call on the runtime's context capped by the call timeout and answers a `RateLimitDecision`, `Remaining` and `Limit` on every call and `RetryAfter`, the counter's ttl, on a denial, and `Reset(runtimeInstance, key)` drops one counter and answers its failure; `Name()` answers the name it was built with. The counter is incremented atomically in a single Lua round trip, so N instances enforce one shared limit; because the window is fixed rather than sliding, up to twice the limit can pass across a window edge. A counter is keyed `<KeyPrefix><name>:<key>`, under the `melody:rate_limit:` prefix by default, so two limiters over one client never share a counter, a limiter keeps its counters when its limit or window changes, and the limiter shares a Redis instance with the cache, the lock and the token store without colliding. The name is 1 to 64 bytes of `[A-Za-z0-9._-]`, the colon left out so the key splits one way only; a malformed name, a limit below 1 and a window below 1ms panic at construction naming the argument.
 
 ```go
-limiter := rueidis.NewRateLimiter(client, rueidis.RateLimiterConfig{Limit: 60, Window: time.Minute})
+limiter := rueidis.NewRateLimiter(client, "login", 60, time.Minute, rueidis.RateLimiterConfig{})
 
 rateLimit := middleware.RateLimitMiddleware(limiter, middleware.RateLimitConfig{})
 ```
 
-[`RateLimiterConfig`](./rate_limit.go), every field but `Limit` and `Window` being the default when left out, and a value outside its rule panicking at `NewRateLimiter`, naming the field:
+[`RateLimiterConfig`](./rate_limit.go), every field being the default when left out, and a value outside its rule panicking at `NewRateLimiter`, naming the field:
 
-- `Limit` — the calls admitted per `Window`, at least 1, required.
-- `Window` — the span the calls are counted over, at least 1ms, required, as the in-process `LimiterConfig` has them.
-- `KeyPrefix` — the key prefix; empty is the default `melody:rate_limit:`.
+- `KeyPrefix` — the namespace of every counter; empty is the default `melody:rate_limit:`. A prefix ends with its separator, or `app:x` with the name `y` and `app:` with the name `xy` share a counter.
 - `FailureMode` — `FailureModeClosed` when left out, or `FailureModeOpen`; any other value is refused, so a misspelt mode is not read as closed.
-- `OnError` — observes store failures, including the ones `Allow` and `Reset` cannot return.
-- `CallTimeout` — bounds one store round trip: 250ms when left out, at least 1ms, unlimited refused.
-- `Logger` — the journal a store failure is recorded in when the call carries none: `Reset` and the plain `Allow` take no runtime, so without it, or with a typed nil, their failures reach the emergency logger, standard error. `AllowWithRuntime` records on the request's logger first; an `OnError` observer replaces the record either way.
+- `CallTimeout` — bounds one store round trip on top of the runtime's context: 250ms when left out, at least 1ms, unlimited refused.
 
-**The limiter is fail-closed by default.** When Redis cannot be reached, every limited route denies traffic — the right default for login and one-time-password endpoints, where an outage must not lift the limit, but it also means a Redis outage takes those routes down with it. Pick `FailureModeOpen` deliberately for plain traffic shaping, where a store outage must not become an outage of every limited route, and wire `OnError` so the failure is visible either way. A store failure is returned marked with `exception.MarkInfrastructureFailure` under both modes, so under the closed mode the http middleware and `RateLimitGate` answer the denial `503` with the kernel's `Retry-After`, not `429`, and do not call `OnLimitExceeded`; the caller's own cancellation or deadline is not marked. Construction panics on a nil client.
+**The limiter is fail-closed by default.** When Redis cannot be reached, every limited route denies traffic — the right default for login and one-time-password endpoints, where an outage must not lift the limit, but it also means a Redis outage takes those routes down with it. Pick `FailureModeOpen` deliberately for plain traffic shaping, where a store outage must not become an outage of every limited route. A store failure is returned beside the failure mode's decision, marked with `exception.MarkInfrastructureFailure` under both modes and unrecorded, so the http middleware and `RateLimitGate` record it once and, under the closed mode, answer the denial `503` with the kernel's `Retry-After`, not `429`, and do not call `OnLimitExceeded`; the caller's own cancellation or deadline is not marked. A failed `Reset` is returned to its caller, who records it: a failed reset leaves an account's budget spent after a successful login. Construction panics on a nil client.
 
 ## Server-Sent Event backplane
 

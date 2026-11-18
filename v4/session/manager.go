@@ -35,7 +35,7 @@ type Manager struct {
     ttl                bound.Duration
     ownsStorage        bool
     tombstoneRetention time.Duration
-    persistenceTimeout bound.Resolved[time.Duration]
+    storageTimeout     bound.Resolved[time.Duration]
     /* one slot per stripe rather than a mutex, so the wait can be cut by the caller's context */
     sessionStripes [sessionStripeCount]chan struct{}
     /* held for a map read or write only, never across the storage */
@@ -58,8 +58,8 @@ type ManagerConfig struct {
     /* TombstoneRetention is how long a deleted id keeps refusing a write-back from a request that loaded it before the delete: 5m by default, at least 1s, unlimited refused. */
     TombstoneRetention bound.Duration
 
-    /* PersistenceTimeout bounds the end-of-request save or delete and the read after a failed removal: 5s by default, at least 1ms, unlimited for no bound; the bound is cooperative. */
-    PersistenceTimeout bound.Duration
+    /* StorageTimeout bounds every call the http kernel makes to the storage, the load, the mint after a miss and the rotation on the request's context, the save and the delete detached from it, and the read after a failed removal: 5s by default, at least 1ms, unlimited for no bound; the bound is cooperative. */
+    StorageTimeout bound.Duration
 
     /* Clock is where every instant of the tombstone record is read; nil is the system clock. */
     Clock clockcontract.Clock
@@ -81,13 +81,13 @@ var managerTombstoneRetentionRule = bound.Rule[time.Duration]{
     Minimum: bound.TtlMinimum,
 }
 
-/* DefaultPersistenceTimeout bounds the end-of-request persistence when ManagerConfig.PersistenceTimeout is left out or a manager answers an absent bound. */
-const DefaultPersistenceTimeout = 5 * time.Second
+/* DefaultStorageTimeout bounds every storage call when ManagerConfig.StorageTimeout is left out or a manager answers an absent bound. */
+const DefaultStorageTimeout = 5 * time.Second
 
-/* PersistenceTimeoutRule resolves ManagerConfig.PersistenceTimeout and judges every manager's PersistenceTimeout. */
-var PersistenceTimeoutRule = bound.Rule[time.Duration]{
-    Name:              "ManagerConfig.PersistenceTimeout",
-    Default:           DefaultPersistenceTimeout,
+/* StorageTimeoutRule resolves ManagerConfig.StorageTimeout and judges every manager's StorageTimeout. */
+var StorageTimeoutRule = bound.Rule[time.Duration]{
+    Name:              "ManagerConfig.StorageTimeout",
+    Default:           DefaultStorageTimeout,
     Minimum:           bound.TimeoutMinimum,
     UnlimitedAdmitted: true,
 }
@@ -108,9 +108,9 @@ func NewManager(storage sessioncontract.Storage, config ManagerConfig) *Manager 
         exception.Panic(exception.FromError(tombstoneRetentionErr))
     }
 
-    persistenceTimeout, persistenceTimeoutErr := bound.Resolve(config.PersistenceTimeout, PersistenceTimeoutRule)
-    if nil != persistenceTimeoutErr {
-        exception.Panic(exception.FromError(persistenceTimeoutErr))
+    storageTimeout, storageTimeoutErr := bound.Resolve(config.StorageTimeout, StorageTimeoutRule)
+    if nil != storageTimeoutErr {
+        exception.Panic(exception.FromError(storageTimeoutErr))
     }
 
     clockInstance := config.Clock
@@ -124,7 +124,7 @@ func NewManager(storage sessioncontract.Storage, config ManagerConfig) *Manager 
         ttl:                ttl.Limit(),
         ownsStorage:        config.OwnsStorage,
         tombstoneRetention: tombstoneRetention.Value,
-        persistenceTimeout: persistenceTimeout,
+        storageTimeout:     storageTimeout,
         deletedAtById:      make(map[string]time.Time),
         rotatedAwayIds:     make(map[string]bool),
     }
@@ -136,18 +136,18 @@ func NewManager(storage sessioncontract.Storage, config ManagerConfig) *Manager 
     return manager
 }
 
-/* PersistenceTimeout answers the bound resolved at construction. */
-func (instance *Manager) PersistenceTimeout() bound.Duration {
-    return instance.persistenceTimeout.Limit()
+/* StorageTimeout answers the bound resolved at construction. */
+func (instance *Manager) StorageTimeout() bound.Duration {
+    return instance.storageTimeout.Limit()
 }
 
-/* ResolvePersistenceTimeout judges a declared bound by PersistenceTimeoutRule: absent is the default, a refused bound an error naming the field. */
-func ResolvePersistenceTimeout(manager sessioncontract.Manager) (bound.Resolved[time.Duration], error) {
+/* ResolveStorageTimeout judges a declared bound by StorageTimeoutRule: absent is the default, a refused bound an error naming the field. */
+func ResolveStorageTimeout(manager sessioncontract.Manager) (bound.Resolved[time.Duration], error) {
     if true == internal.IsNilInterface(manager) {
         return bound.Resolved[time.Duration]{}, exception.NewError("session manager is nil", nil, nil)
     }
 
-    return bound.Resolve(manager.PersistenceTimeout(), PersistenceTimeoutRule)
+    return bound.Resolve(manager.StorageTimeout(), StorageTimeoutRule)
 }
 
 /* Session answers the stored session, nil when the id names none; a storage outage carries exception.MarkInfrastructureFailure. */
@@ -499,11 +499,11 @@ func (instance *Manager) entryWentAfterFailedRemoval(ctx context.Context, sessio
 func (instance *Manager) burialContext(ctx context.Context) (context.Context, context.CancelFunc) {
     detached := context.WithoutCancel(ctx)
 
-    if true == instance.persistenceTimeout.Unlimited {
+    if true == instance.storageTimeout.Unlimited {
         return detached, func() {}
     }
 
-    return context.WithTimeout(detached, instance.persistenceTimeout.Value)
+    return context.WithTimeout(detached, instance.storageTimeout.Value)
 }
 
 func (instance *Manager) sessionStripeOf(sessionId string) chan struct{} {

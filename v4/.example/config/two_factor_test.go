@@ -16,8 +16,7 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
-    melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    melodyexception "github.com/precision-soft/melody/v4/exception"
     "github.com/redis/rueidis"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
@@ -97,18 +96,7 @@ func TestRegisterTwoFactorStoreService_RegistersNothingWithoutADatabase(t *testi
     }
 }
 
-/* budgetFailureLogger keeps the error records the budget's limiter writes; every other level falls to the embedded nop logger */
-type budgetFailureLogger struct {
-    melodyloggingcontract.Logger
-    messageList []string
-}
-
-func (instance *budgetFailureLogger) Error(message string, context melodyloggingcontract.Context) {
-    instance.messageList = append(instance.messageList, message)
-}
-
-/* a failed release of the budget carries no request, so the redis limiter records it on the application's logger the module hands it, inside the configured journal rather than on standard error */
-func TestBuildSecondFactorBudgetLimiter_RecordsAFailedReleaseInTheConfiguredJournal(t *testing.T) {
+func TestBuildSecondFactorBudgetLimiter_AFailedReleaseIsReturnedMarked(t *testing.T) {
     address := os.Getenv("REDIS_ADDRESS")
     if "" == address {
         t.Skip("REDIS_ADDRESS not set; skipping the redis second factor budget test")
@@ -120,36 +108,33 @@ func TestBuildSecondFactorBudgetLimiter_RecordsAFailedReleaseInTheConfiguredJour
     }
     client.Close()
 
-    logger := &budgetFailureLogger{Logger: melodylogging.NewNopLogger()}
+    limiter := (&Module{redisClient: client}).buildSecondFactorBudgetLimiter(melodyclock.NewSystemClock())
 
-    limiter := (&Module{redisClient: client}).buildSecondFactorBudgetLimiter(melodyclock.NewSystemClock(), logger)
-    limiter.Reset("account:user-2")
-
-    if 1 != len(logger.messageList) || "rate limiter store failure" != logger.messageList[0] {
-        t.Fatalf("expected the failed release recorded once in the configured journal, got %v", logger.messageList)
+    if resetErr := limiter.Reset(configTestRuntime(), "account:user-2"); false == melodyexception.AnswersUnavailable(resetErr) {
+        t.Fatalf("expected the failed release returned marked, got %v", resetErr)
     }
 }
 
 func TestBuildSecondFactorBudgetLimiter_GivesTheSlotOfTheAccountSeenLongestAgoPastItsCeiling(t *testing.T) {
-    limiter := (&Module{}).buildSecondFactorBudgetLimiter(melodyclock.NewFrozenClock(time.Unix(1700000000, 0)), nil)
+    limiter := (&Module{}).buildSecondFactorBudgetLimiter(melodyclock.NewFrozenClock(time.Unix(1700000000, 0)))
 
     for account := 0; account < inProcessWriteThrottleMaxAddresses; account++ {
         for attempt := 0; attempt < secondFactorBudgetAllowance; attempt++ {
-            if false == limiter.Allow(fmt.Sprintf("account-%d", account)) {
+            if false == allowedBy(limiter, fmt.Sprintf("account-%d", account)) {
                 t.Fatalf("expected account %d attempt %d admitted below the ceiling", account, attempt)
             }
         }
     }
 
-    if true == limiter.Allow("account-1") {
+    if true == allowedBy(limiter, "account-1") {
         t.Fatal("expected a tracked account to keep its spent budget")
     }
 
-    if false == limiter.Allow("account-past-the-ceiling") {
+    if false == allowedBy(limiter, "account-past-the-ceiling") {
         t.Fatalf("expected an unseen account admitted once %d accounts are tracked", inProcessWriteThrottleMaxAddresses)
     }
 
-    if false == limiter.Allow("account-0") {
+    if false == allowedBy(limiter, "account-0") {
         t.Fatal("expected the account seen longest ago evicted and back with a full budget")
     }
 }

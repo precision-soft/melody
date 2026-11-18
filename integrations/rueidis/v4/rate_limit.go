@@ -2,9 +2,6 @@ package rueidis
 
 import (
     "context"
-    "errors"
-    "fmt"
-    "reflect"
     "strconv"
     "time"
 
@@ -12,8 +9,6 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    "github.com/precision-soft/melody/v4/logging"
-    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/redis/rueidis"
 )
@@ -22,12 +17,16 @@ const defaultRateLimiterPrefix = "melody:rate_limit:"
 
 const defaultRateLimiterCallTimeout = 250 * time.Millisecond
 
-/* rateLimiterScript is the atomic fixed-window counter: one INCR per call, with the window expiry armed in the same round trip by the call that creates the counter and by any later call that finds the key without an expiry. A key that reached the store without a ttl, through a PERSIST, an eviction policy or a hand-written value, would otherwise never lapse and, under the fail-closed default, refuse its requests permanently; reading the ttl inside the script keeps the check and the arming atomic. */
+/* rateLimiterScript is the atomic fixed-window counter: one INCR per call, answering the count and the counter's ttl, with the window expiry armed in the same round trip by the call that creates the counter and by any later call that finds the key without an expiry. A key that reached the store without a ttl, through a PERSIST, an eviction policy or a hand-written value, would otherwise never lapse and, under the fail-closed default, refuse its requests permanently. */
 var rateLimiterScript = rueidis.NewLuaScript(`local count = redis.call("incr", KEYS[1])
-if count == 1 or redis.call("pttl", KEYS[1]) < 0 then
+local ttl = -1
+if count ~= 1 then
+    ttl = redis.call("pttl", KEYS[1])
+end
+if count == 1 or ttl < 0 then
     redis.call("pexpire", KEYS[1], tonumber(ARGV[1]))
 end
-return count`)
+return {count, ttl}`)
 
 type RateLimiterFailureMode string
 
@@ -39,40 +38,29 @@ const (
     FailureModeOpen RateLimiterFailureMode = "open"
 )
 
-/* RateLimiterConfig declares the limiter. Limit and Window are required, as the in-process limiter's LimiterConfig has them; the rest has a default. */
+/* RateLimiterConfig declares the limiter beside its name, limit and window; every field has a default. */
 type RateLimiterConfig struct {
-    /* Limit is the calls admitted per Window, at least 1; a limit of 0 or below is refused, since a distributed limit disarmed by an unset environment key would be disarmed on every instance. */
-    Limit int
-
-    /* Window is the span the calls are counted over, at least 1ms, the resolution of the counter's expiry. */
-    Window time.Duration
-
-    /* KeyPrefix is the namespace of every counter, melody:rate_limit: when empty. */
+    /* KeyPrefix is the namespace of every counter, melody:rate_limit: when empty; a counter is keyed <KeyPrefix><name>:<key>, so a prefix ends with its separator, or two limiters can share a counter. */
     KeyPrefix string
 
     /* FailureMode is the answer when the store cannot be reached, FailureModeClosed when left out; any other value is refused, so a misspelt mode is not read as closed. */
     FailureMode RateLimiterFailureMode
 
-    /* OnError observes store failures from the plain Allow path, which has no error return; AllowWithRuntime reports them to the caller as well. It replaces the record the limiter writes when no observer is given: the failure is handed over untouched and unmarked, since an observer may be a metric rather than a journal. */
-    OnError func(error)
-
-    /* Logger is the journal a store failure is recorded in when the call carries none: Reset and the plain Allow path take no runtime, so without it their failures reach the emergency logger, standard error, outside the application's journal. AllowWithRuntime records on the request's own logger first; nil or a typed nil is the emergency logger. An OnError observer replaces the record either way. */
-    Logger loggingcontract.Logger
-
-    /* CallTimeout bounds the store round trip on both entry points: the plain Allow path, which carries no request context, and AllowWithRuntime, where it caps the runtime context so a request without a deadline, as melody's http kernel leaves it, fails fast, which fail-closed login and OTP routes depend on. 250ms by default, at least 1ms, unlimited refused. */
+    /* CallTimeout caps every round trip on top of the caller's runtime context, so a request without a deadline, as melody's http kernel leaves it, fails fast, which fail-closed login and OTP routes depend on. 250ms by default, at least 1ms, unlimited refused. */
     CallTimeout bound.Duration
 }
 
 var rateLimiterCallTimeoutRule = callTimeoutRule("RateLimiterConfig.CallTimeout", defaultRateLimiterCallTimeout)
 
-/* NewRateLimiter returns a Redis-backed fixed-window limiter shared by every application instance, implementing httpcontract.RateLimiter and httpcontract.RuntimeRateLimiter as the distributed drop-in for the in-process limiters. The counter is one atomic Lua round trip, so N instances enforce one limit, and the fixed window admits up to twice the limit across a window edge; store failures follow the failure mode. The configuration is resolved once; a nil client or a value outside its rule panics naming the field. */
-func NewRateLimiter(client rueidis.Client, config RateLimiterConfig) *RateLimiter {
+/* NewRateLimiter returns a Redis-backed fixed-window limiter shared by every application instance, the distributed drop-in for the in-process limiters. The counter is one atomic Lua round trip, so N instances enforce one limit, and the fixed window admits up to twice the limit across a window edge; store failures follow the failure mode. The name keys the counters, so two limiters over one client never share one and a limiter keeps its counters when its limit or window changes: 1 to 64 bytes of [A-Za-z0-9._-]. A nil client, a malformed name, a limit below 1, a window below 1ms or a configuration value outside its rule panics naming the argument or the field. */
+func NewRateLimiter(client rueidis.Client, name string, limit int, window time.Duration, config RateLimiterConfig) *RateLimiter {
     if nil == client {
         exception.Panic(exception.NewError("redis rate limiter client is nil", nil, nil))
     }
 
-    refuseBelowMinimum(1 > config.Limit, "RateLimiterConfig.Limit", strconv.Itoa(config.Limit), "1")
-    refuseBelowMinimum(bound.TimeoutMinimum > config.Window, "RateLimiterConfig.Window", config.Window.String(), bound.TimeoutMinimum.String())
+    refuseMalformedLimiterName(name)
+    refuseArgumentBelowMinimum(1 > limit, "limit", name, strconv.Itoa(limit), "1")
+    refuseArgumentBelowMinimum(bound.TimeoutMinimum > window, "window", name, window.String(), bound.TimeoutMinimum.String())
 
     failureMode := config.FailureMode
     if "" == failureMode {
@@ -105,18 +93,47 @@ func NewRateLimiter(client rueidis.Client, config RateLimiterConfig) *RateLimite
 
     return &RateLimiter{
         client:      client,
-        limit:       config.Limit,
-        window:      config.Window,
+        name:        name,
+        limit:       limit,
+        window:      window,
         prefix:      prefix,
         failureMode: failureMode,
-        onError:     config.OnError,
-        logger:      config.Logger,
         callTimeout: callTimeout.Value,
     }
 }
 
-/* the context keys are bound.Resolve's, so a required value is refused in the form a bound is */
-func refuseBelowMinimum(isBelow bool, field string, value string, minimum string) {
+const limiterNameMaximumLength = 64
+
+/* the colon is left out so a counter key <name>:<key> splits one way only */
+func refuseMalformedLimiterName(name string) {
+    wellFormed := 0 < len(name) && limiterNameMaximumLength >= len(name)
+
+    for index := 0; true == wellFormed && index < len(name); index++ {
+        character := name[index]
+        wellFormed = ('a' <= character && 'z' >= character) ||
+            ('A' <= character && 'Z' >= character) ||
+            ('0' <= character && '9' >= character) ||
+            '.' == character || '_' == character || '-' == character
+    }
+
+    if true == wellFormed {
+        return
+    }
+
+    exception.Panic(
+        exception.NewError(
+            "the limiter name is malformed",
+            exceptioncontract.Context{
+                "argument": "name",
+                "value":    name,
+                "grammar":  "[A-Za-z0-9._-]{1,64}",
+            },
+            nil,
+        ),
+    )
+}
+
+func refuseArgumentBelowMinimum(isBelow bool, argument string, name string, value string, minimum string) {
     if false == isBelow {
         return
     }
@@ -125,9 +142,10 @@ func refuseBelowMinimum(isBelow bool, field string, value string, minimum string
         exception.NewError(
             "the limit is below its minimum",
             exceptioncontract.Context{
-                "field":   field,
-                "value":   value,
-                "minimum": minimum,
+                "argument": argument,
+                "limiter":  name,
+                "value":    value,
+                "minimum":  minimum,
             },
             nil,
         ),
@@ -136,143 +154,112 @@ func refuseBelowMinimum(isBelow bool, field string, value string, minimum string
 
 type RateLimiter struct {
     client      rueidis.Client
+    name        string
     limit       int
     window      time.Duration
     prefix      string
     failureMode RateLimiterFailureMode
-    onError     func(error)
-    logger      loggingcontract.Logger
     callTimeout time.Duration
 }
 
-func (instance *RateLimiter) Allow(key string) bool {
-    callContext, cancel := context.WithTimeout(context.Background(), instance.callTimeout)
-    defer cancel()
-
-    allowed, allowErr := instance.allow(context.Background(), callContext, key)
-    if nil != allowErr {
-        instance.reportError(nil, allowErr)
-    }
-
-    return allowed
+func (instance *RateLimiter) Name() string {
+    return instance.name
 }
 
-func (instance *RateLimiter) AllowWithRuntime(runtimeInstance runtimecontract.Runtime, key string) (bool, error) {
-    /* cap the runtime context with the call timeout; context.WithTimeout keeps the earlier deadline, so a tighter request deadline still wins */
-    callContext, cancel := context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
-    defer cancel()
-
-    allowed, allowErr := instance.allow(runtimeInstance.Context(), callContext, key)
-    if nil != allowErr {
-        allowErr = instance.reportError(logging.LoggerFromRuntime(runtimeInstance), allowErr)
+/* Allow charges one call to the key under the runtime's context, capped by CallTimeout. On a store failure the decision is the failure mode's, answered beside the error. */
+func (instance *RateLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+    if refusalErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+        return httpcontract.RateLimitDecision{Limit: instance.limit}, refusalErr
     }
 
-    return allowed, allowErr
-}
-
-/* Reset drops the counter for one key best-effort. It returns nothing, so a store failure reports through the error observer, or a record in the limiter's logger when none was given, since a failed reset leaves an account locked after a successful login. */
-func (instance *RateLimiter) Reset(key string) {
-    callContext, cancel := context.WithTimeout(context.Background(), instance.callTimeout)
+    parentContext := runtimeInstance.Context()
+    callContext, cancel := context.WithTimeout(parentContext, instance.callTimeout)
     defer cancel()
 
-    command := instance.client.B().Del().Key(instance.prefix + key).Build()
-    if resultErr := instance.client.Do(callContext, command).Error(); nil != resultErr {
-        instance.reportError(
-            nil,
-            exception.NewError("redis rate limiter reset failed", map[string]any{"key": key}, resultErr),
-        )
-    }
-}
-
-/* errCallerDeadline marks a round trip the caller's own deadline ended, told apart from a store failure by reportError. */
-var errCallerDeadline = errors.New("the caller's deadline ended the rate limiter call")
-
-/* allow runs the window script under callContext; parentContext is the caller's own, read to tell its deadline from the call timeout. On a store failure the allowed value is the failure-mode default, answered beside the error. */
-func (instance *RateLimiter) allow(parentContext context.Context, callContext context.Context, key string) (bool, error) {
     milliseconds := strconv.FormatInt(instance.window.Milliseconds(), 10)
 
-    result := rateLimiterScript.Exec(callContext, instance.client, []string{instance.prefix + key}, []string{milliseconds})
+    reply, resultErr := rateLimiterScript.Exec(callContext, instance.client, []string{instance.counterKey(key)}, []string{milliseconds}).AsIntSlice()
+    if nil == resultErr && 2 != len(reply) {
+        resultErr = exception.NewError("redis rate limiter script answered an unexpected reply", map[string]any{"length": len(reply)}, nil)
+    }
 
-    count, resultErr := result.AsInt64()
     if nil != resultErr {
-        return FailureModeOpen == instance.failureMode, instance.allowFailure(parentContext, key, resultErr)
-    }
-
-    return count <= int64(instance.limit), nil
-}
-
-func (instance *RateLimiter) allowFailure(parentContext context.Context, key string, resultErr error) error {
-    /* the caller's own cancellation is not a store failure: a client that disconnected mid-round-trip surfaces as the context's cancellation and is named so, not as a redis outage. The failure-mode answer applies either way; the call-timeout deadline stays a store failure, since that budget exists to catch a slow store. */
-    if true == exception.ChainIs(resultErr, context.Canceled) {
-        return exception.NewError(
-            "redis rate limiter call cancelled by the caller",
-            map[string]any{"key": key, "failureMode": string(instance.failureMode)},
+        failureErr := instance.failure(
+            parentContext,
+            callContext,
+            key,
             resultErr,
-        )
-    }
-
-    /* the caller's own deadline, tighter than the call timeout, ends the round trip with DeadlineExceeded too; the parent context says whose it was, and it is not a store failure */
-    if true == exception.ChainIs(resultErr, context.DeadlineExceeded) && nil != parentContext.Err() {
-        return exception.NewError(
+            "redis rate limiter call cancelled by the caller",
             "redis rate limiter call ended by the caller's deadline",
-            map[string]any{"key": key, "failureMode": string(instance.failureMode)},
-            fmt.Errorf("%w: %w", errCallerDeadline, resultErr),
+            "redis rate limiter store failure",
         )
+
+        return httpcontract.RateLimitDecision{Allowed: FailureModeOpen == instance.failureMode, Limit: instance.limit}, failureErr
     }
 
-    /* a store that could not answer is marked an infrastructure failure under both modes, so a closed-mode denial is answered 503 with Retry-After, not 429 */
-    return exception.NewError(
-        "redis rate limiter store failure",
-        map[string]any{"key": key, "failureMode": string(instance.failureMode)},
-        exception.MarkInfrastructureFailure(resultErr),
-    )
+    count := reply[0]
+    if int64(instance.limit) >= count {
+        return httpcontract.RateLimitDecision{Allowed: true, Remaining: instance.limit - int(count), Limit: instance.limit}, nil
+    }
+
+    return httpcontract.RateLimitDecision{RetryAfter: time.Duration(max(reply[1], 0)) * time.Millisecond, Limit: instance.limit}, nil
 }
 
-/* reportError delivers a store failure and answers the error the caller should carry on with. An observer given by the application gets the failure untouched and not marked logged, since it may be a counter rather than a journal; a store failure carries the infrastructure mark either way. With no observer the failure is recorded here, on the call's logger, else the limiter's, else the emergency logger, because Allow answers a bool and Reset nothing, so an outage would otherwise reach no channel; the record takes the level the http middleware picks, a caller's own cancellation not being an outage. The error is then marked already-logged, the framework's mark the exception listener and the http kernel honour, so the middleware files nothing a second time. */
-func (instance *RateLimiter) reportError(logger loggingcontract.Logger, err error) error {
-    if nil != instance.onError {
-        instance.onError(err)
-
-        return err
+/* Reset drops the key's counter under the runtime's context, capped by CallTimeout, and answers a failure to do so: a failed reset leaves an account locked after a successful login. */
+func (instance *RateLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
+    if refusalErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+        return refusalErr
     }
 
-    /* a typed nil, a nil pointer behind the interface, is read as absent: called, it would panic inside a best-effort release that runs after an accepted sign-in */
-    if true == isAbsentLogger(logger) {
-        logger = instance.logger
+    parentContext := runtimeInstance.Context()
+    callContext, cancel := context.WithTimeout(parentContext, instance.callTimeout)
+    defer cancel()
+
+    command := instance.client.B().Del().Key(instance.counterKey(key)).Build()
+    if resultErr := instance.client.Do(callContext, command).Error(); nil != resultErr {
+        return instance.failure(
+            parentContext,
+            callContext,
+            key,
+            resultErr,
+            "redis rate limiter reset cancelled by the caller",
+            "redis rate limiter reset ended by the caller's deadline",
+            "redis rate limiter reset failed",
+        )
     }
 
-    if true == isAbsentLogger(logger) {
-        logger = logging.EmergencyLogger()
+    return nil
+}
+
+func (instance *RateLimiter) counterKey(key string) string {
+    return instance.prefix + instance.name + ":" + key
+}
+
+/* the caller's own cancellation or deadline is not a store failure and stays unmarked; the call timeout's deadline is, since that budget exists to catch a slow store */
+func (instance *RateLimiter) failure(
+    parentContext context.Context,
+    callContext context.Context,
+    key string,
+    resultErr error,
+    cancelledMessage string,
+    deadlineMessage string,
+    storeMessage string,
+) error {
+    errorContext := map[string]any{"key": key, "limiter": instance.name, "failureMode": string(instance.failureMode)}
+
+    if true == exception.ChainIs(resultErr, context.Canceled) {
+        return exception.NewError(cancelledMessage, errorContext, resultErr)
     }
 
-    /* the key and the failure mode already travel in the error's own context, put there where the call was made */
-    recordContext := exception.LogContext(err, exception.LogContextConfig{})
-
-    if true == exception.ChainIs(err, errCallerDeadline) {
-        logger.Warning("rate limiter call ended by the caller's deadline", recordContext)
-    } else if true == exception.ChainIs(err, context.Canceled) {
-        logger.Warning("rate limiter call cancelled", recordContext)
-    } else {
-        logger.Error("rate limiter store failure", recordContext)
+    if true == exception.ChainIs(resultErr, context.DeadlineExceeded) && (nil != parentContext.Err() || true == deadlinePassed(parentContext)) {
+        return exception.NewError(deadlineMessage, errorContext, resultErr)
     }
 
-    return exception.MarkLogged(err)
+    if true == exception.ChainIs(resultErr, context.DeadlineExceeded) && true == deadlinePassed(callContext) {
+        errorContext["bound"] = rateLimiterCallTimeoutRule.Name
+    }
+
+    return exception.NewError(storeMessage, errorContext, exception.MarkInfrastructureFailure(resultErr))
 }
 
 var _ httpcontract.RateLimiter = (*RateLimiter)(nil)
-var _ httpcontract.RuntimeRateLimiter = (*RateLimiter)(nil)
-
-/* isAbsentLogger answers whether a logger is nil, the nil interface or a nil value of a nilable kind behind it */
-func isAbsentLogger(logger loggingcontract.Logger) bool {
-    if nil == logger {
-        return true
-    }
-
-    value := reflect.ValueOf(logger)
-    switch value.Kind() {
-    case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
-        return value.IsNil()
-    default:
-        return false
-    }
-}

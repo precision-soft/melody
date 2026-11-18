@@ -77,9 +77,9 @@ var environmentKeyAliasMap = map[string][]string{
         HttpSessionTombstoneRetentionKey,
         KernelHttpSessionTombstoneRetention,
     },
-    HttpSessionPersistenceTimeoutKey: {
-        HttpSessionPersistenceTimeoutKey,
-        KernelHttpSessionPersistenceTimeout,
+    HttpSessionStorageTimeoutKey: {
+        HttpSessionStorageTimeoutKey,
+        KernelHttpSessionStorageTimeout,
     },
     HttpSessionMaxSessionsKey: {
         HttpSessionMaxSessionsKey,

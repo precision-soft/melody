@@ -1,10 +1,17 @@
 package security
 
 import (
+    "context"
     "errors"
     "testing"
+    "time"
 
+    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodyexception "github.com/precision-soft/melody/v4/exception"
+    melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
+    melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
@@ -52,7 +59,9 @@ func TestSecondFactorBudget_ReleaseGivesTheAccountItsBudgetBack(t *testing.T) {
         _, _ = budget.Authenticate(budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName))
     }
 
-    budget.Release("user-editor")
+    if releaseErr := budget.Release(plainRequest(t).RuntimeInstance(), "user-editor"); nil != releaseErr {
+        t.Fatalf("unexpected release failure: %v", releaseErr)
+    }
 
     if _, authenticateErr := budget.Authenticate(budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName)); nil != authenticateErr {
         t.Fatalf("expected the released budget to allow a code, got %v", authenticateErr)
@@ -75,30 +84,67 @@ func TestSecondFactorBudget_KeepsOneBudgetPerAccount(t *testing.T) {
     }
 }
 
-/* scriptedRuntimeLimiter answers AllowWithRuntime as scripted and records the key; its plain Allow fails the test, since a runtime limiter is asked through the runtime door */
 type scriptedRuntimeLimiter struct {
-    t        *testing.T
-    allowed  bool
-    allowErr error
-    keyList  []string
+    t          *testing.T
+    allowed    bool
+    retryAfter time.Duration
+    allowErr   error
+    resetErr   error
+    keyList    []string
 }
 
-func (instance *scriptedRuntimeLimiter) Allow(key string) bool {
-    instance.t.Fatalf("expected the runtime door asked, the plain Allow was asked for %q", key)
-
-    return false
-}
-
-func (instance *scriptedRuntimeLimiter) AllowWithRuntime(runtimeInstance melodyruntimecontract.Runtime, key string) (bool, error) {
+func (instance *scriptedRuntimeLimiter) Allow(runtimeInstance melodyruntimecontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
     instance.keyList = append(instance.keyList, key)
 
-    return instance.allowed, instance.allowErr
+    return melodyhttpcontract.RateLimitDecision{Allowed: instance.allowed, RetryAfter: instance.retryAfter}, instance.allowErr
 }
 
-func (instance *scriptedRuntimeLimiter) Reset(key string) {}
+func (instance *scriptedRuntimeLimiter) Reset(runtimeInstance melodyruntimecontract.Runtime, key string) error {
+    instance.keyList = append(instance.keyList, key)
+
+    return instance.resetErr
+}
+
+func TestSecondFactorBudget_AFailedReleaseIsReturned(t *testing.T) {
+    resetErr := melodyexception.MarkInfrastructureFailure(errors.New("connection refused"))
+    limiter := &scriptedRuntimeLimiter{t: t, allowed: true, resetErr: resetErr}
+
+    releaseErr := budgetOverPasswordWithLimiter(limiter).Release(plainRequest(t).RuntimeInstance(), "user-editor")
+    if false == errors.Is(releaseErr, resetErr) {
+        t.Fatalf("expected the limiter's reset failure returned, got %v", releaseErr)
+    }
+
+    if 1 != len(limiter.keyList) || "account:user-editor" != limiter.keyList[0] {
+        t.Fatalf("expected the account's key reset once, got %v", limiter.keyList)
+    }
+}
+
+func TestSecondFactorBudget_AnOpenLimiterThatCannotBeReadIsJournaled(t *testing.T) {
+    journal := &budgetJournalLogger{Logger: melodylogging.NewNopLogger()}
+    request := budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName)
+    request.RuntimeInstance().Scope().MustOverrideProtectedInstance(melodylogging.ServiceLogger, journal, melodycontainer.OverrideOptions{})
+
+    limiter := &scriptedRuntimeLimiter{t: t, allowed: true, allowErr: errors.New("connection refused")}
+    if _, authenticateErr := budgetOverPasswordWithLimiter(limiter).Authenticate(request); nil != authenticateErr {
+        t.Fatalf("expected the fail-open budget to let the code be read, got %v", authenticateErr)
+    }
+
+    if 1 != journal.errors {
+        t.Fatalf("expected the unreadable budget journaled once, got %d", journal.errors)
+    }
+}
+
+type budgetJournalLogger struct {
+    melodyloggingcontract.Logger
+    errors int
+}
+
+func (instance *budgetJournalLogger) Error(message string, context melodyloggingcontract.Context) {
+    instance.errors++
+}
 
 func TestSecondFactorBudget_RefusesWithUnavailableWhenAClosedLimiterCannotBeRead(t *testing.T) {
-    storeErr := melodyexception.MarkLogged(melodyexception.NewError("redis rate limiter store failure", nil, errors.New("connection refused")))
+    storeErr := melodyexception.NewError("redis rate limiter store failure", nil, melodyexception.MarkInfrastructureFailure(errors.New("connection refused")))
     limiter := &scriptedRuntimeLimiter{t: t, allowed: false, allowErr: storeErr}
 
     token, authenticateErr := budgetOverPasswordWithLimiter(limiter).Authenticate(budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName))
@@ -111,8 +157,8 @@ func TestSecondFactorBudget_RefusesWithUnavailableWhenAClosedLimiterCannotBeRead
         t.Fatalf("expected an unreadable budget not answered as a spent one, got %v", authenticateErr)
     }
 
-    if false == melodyexception.IsAlreadyLogged(authenticateErr) {
-        t.Fatalf("expected the limiter's already-logged mark to stay readable through the refusal")
+    if false == melodyexception.AnswersUnavailable(authenticateErr) {
+        t.Fatalf("expected the refusal answered as unavailable")
     }
 
     if 1 != len(limiter.keyList) || "account:user-editor" != limiter.keyList[0] {
@@ -143,5 +189,40 @@ func TestSecondFactorBudget_RefusesASpentBudgetThroughTheRuntimeLimiter(t *testi
     token, authenticateErr := budgetOverPasswordWithLimiter(allowing).Authenticate(budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName))
     if nil != authenticateErr || nil == token || false == token.IsAuthenticated() {
         t.Fatalf("expected a budget with room to let the code be read, got %v %v", token, authenticateErr)
+    }
+}
+
+func TestSecondFactorBudget_ASpentBudgetCarriesTheDecisionsRetryAfter(t *testing.T) {
+    limiter := &scriptedRuntimeLimiter{t: t, allowed: false, retryAfter: 42 * time.Second}
+
+    _, spentErr := budgetOverPasswordWithLimiter(limiter).Authenticate(budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName))
+
+    var refusal *SecondFactorBudgetSpentError
+    if false == errors.As(spentErr, &refusal) || 42*time.Second != refusal.RetryAfter || false == errors.Is(spentErr, ErrSecondFactorBudgetSpent) {
+        t.Fatalf("expected the spent refusal carrying the decision's 42s, got %v", spentErr)
+    }
+
+    if ErrSecondFactorBudgetSpent.Error() != spentErr.Error() {
+        t.Fatalf("expected the refusal to read as the spent budget, got %q", spentErr.Error())
+    }
+}
+
+func TestSecondFactorBudget_AnUnmarkedErrorBesideADenialIsReturnedUnmarked(t *testing.T) {
+    allowErr := melodyexception.NewError("rate limiter call ended by the caller's deadline", nil, context.DeadlineExceeded)
+    limiter := &scriptedRuntimeLimiter{t: t, allowed: false, allowErr: allowErr}
+
+    _, authenticateErr := budgetOverPasswordWithLimiter(limiter).Authenticate(budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName))
+
+    if false == errors.Is(authenticateErr, allowErr) || true == melodyexception.AnswersUnavailable(authenticateErr) || true == errors.Is(authenticateErr, ErrSecondFactorBudgetUnavailable) {
+        t.Fatalf("expected the limiter's unmarked error returned as it is, got %v", authenticateErr)
+    }
+}
+
+func TestSecondFactorBudget_SpendWithoutARuntimeIsNotAnOutage(t *testing.T) {
+    budget := budgetOverPasswordWithLimiter(melodyhttpmiddleware.NewFixedWindowLimiter("test", 1, time.Minute, melodyhttpmiddleware.LimiterConfig{}))
+
+    spendErr := budget.Spend(nil, "user-editor")
+    if nil == spendErr || true == melodyexception.AnswersUnavailable(spendErr) {
+        t.Fatalf("expected the nil runtime refused unmarked, got %v", spendErr)
     }
 }

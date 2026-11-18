@@ -43,7 +43,7 @@ func TestRegisterRateLimitRequestListener_AnswersTooManyRequestsOnceTheBudgetIsG
 
     RegisterRateLimitRequestListener(
         dispatcher,
-        NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}),
+        NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
         RateLimitConfig{},
     )
 
@@ -75,9 +75,9 @@ func TestRegisterRateLimitRequestListener_ATypedNilLimitResponseStillAnswers429(
 
     RegisterRateLimitRequestListener(
         dispatcher,
-        NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}),
+        NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
         RateLimitConfig{
-            OnLimitExceeded: func(request httpcontract.Request) (httpcontract.Response, error) {
+            OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
                 return (*http.Response)(nil), nil
             },
         },
@@ -105,7 +105,7 @@ func TestRegisterRateLimitRequestListener_LeavesAnAnsweredRequestAloneAndUncharg
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
     extractorCalls := 0
-    limiter := NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{})
     config := RateLimitConfig{
         KeyExtractor: func(request httpcontract.Request) string {
             extractorCalls++
@@ -141,7 +141,7 @@ func TestRegisterRateLimitRequestListener_ChargesTheBudgetBeforeTheSecurityChain
 
     RegisterRateLimitRequestListener(
         dispatcher,
-        NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}),
+        NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
         RateLimitConfig{},
     )
 
@@ -237,7 +237,7 @@ func TestRegisterRateLimitRequestListener_ATypedNilRequestIsLeftAlone(t *testing
 
     RegisterRateLimitRequestListener(
         dispatcher,
-        NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}),
+        NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
         RateLimitConfig{},
     )
 
@@ -260,13 +260,14 @@ func TestRegisterRateLimitRequestListener_ATypedNilRequestIsLeftAlone(t *testing
 func TestRegisterRateLimitRequestListener_TheRefusalCarriesTheLimitHandlersError(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
-    limitErr := exception.TooManyRequests("slow down")
+    limitCause := errors.New("budget spent")
+    limitErr := exception.NewHttpError(nethttp.StatusTooManyRequests, exception.HttpErrorConfig{Message: "slow down", Cause: limitCause})
 
     RegisterRateLimitRequestListener(
         dispatcher,
-        NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}),
+        NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
         RateLimitConfig{
-            OnLimitExceeded: func(request httpcontract.Request) (httpcontract.Response, error) {
+            OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
                 return nil, limitErr
             },
         },
@@ -284,7 +285,8 @@ func TestRegisterRateLimitRequestListener_TheRefusalCarriesTheLimitHandlersError
         t.Fatalf("expected the refusal rather than a dispatch error, got %v", secondErr)
     }
 
-    if false == errors.Is(secondEvent.Refusal(), limitErr) || nil != secondEvent.Response() {
+    refusal := exception.AsHttpException(secondEvent.Refusal())
+    if nil == refusal || "slow down" != refusal.Message() || false == errors.Is(refusal, limitCause) || nil != secondEvent.Response() {
         t.Fatalf("expected the limit handler's error as the refusal, got %v, %#v", secondEvent.Refusal(), secondEvent.Response())
     }
 }
@@ -294,9 +296,9 @@ func TestRegisterRateLimitRequestListener_ATypedNilLimitErrorFallsBackTo429(t *t
 
     RegisterRateLimitRequestListener(
         dispatcher,
-        NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}),
+        NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
         RateLimitConfig{
-            OnLimitExceeded: func(request httpcontract.Request) (httpcontract.Response, error) {
+            OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
                 return nil, (*exception.HttpException)(nil)
             },
         },
@@ -322,7 +324,7 @@ func TestRegisterRateLimitRequestListener_ATypedNilLimitErrorFallsBackTo429(t *t
 func TestRegisterRateLimitRequestListener_StandsAsideOnARefusal(t *testing.T) {
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 
-    limiter := NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute})
+    limiter := NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{})
     RegisterRateLimitRequestListener(dispatcher, limiter, RateLimitConfig{})
 
     runtimeInstance := newRateLimitListenerTestRuntime()
@@ -351,7 +353,7 @@ func TestRegisterRateLimitRequestListener_AnIpv6ClientSharesOneBudgetAcrossItsSl
 
     RegisterRateLimitRequestListener(
         dispatcher,
-        NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}),
+        NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
         RateLimitConfig{},
     )
 
@@ -401,9 +403,9 @@ func TestRegisterRateLimitRequestListener_AResponseBesideALimitErrorIsClosed(t *
 
     RegisterRateLimitRequestListener(
         dispatcher,
-        NewFixedWindowLimiter(LimiterConfig{Limit: 1, Window: time.Minute}),
+        NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
         RateLimitConfig{
-            OnLimitExceeded: func(request httpcontract.Request) (httpcontract.Response, error) {
+            OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
                 response := http.EmptyResponse(nethttp.StatusTeapot)
                 response.SetBodyReader(body)
 
@@ -431,7 +433,7 @@ func TestRateLimitGate_AMarkedDenialRefusesWithTheMarkedErrorAndSkipsTheLimitHan
 
     limitHandlerCalls := 0
     gate := NewRateLimitGate(&fakeRuntimeRateLimiter{allowed: false, err: storeErr}, RateLimitConfig{
-        OnLimitExceeded: func(request httpcontract.Request) (httpcontract.Response, error) {
+        OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
             limitHandlerCalls++
 
             return nil, exception.TooManyRequests("too many")

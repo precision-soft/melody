@@ -11,6 +11,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/http"
@@ -481,7 +482,7 @@ func TestLoginDoor_AnExhaustedLimiterAnswers429BeforeAuthenticating(t *testing.T
 
     fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
         config.LoginAuthenticator = authenticator
-        config.LoginRateLimit = httpmiddleware.NewRateLimitGate(httpmiddleware.NewFixedWindowLimiter(httpmiddleware.LimiterConfig{Limit: 1, Window: 60_000_000_000}), httpmiddleware.RateLimitConfig{})
+        config.LoginRateLimit = httpmiddleware.NewRateLimitGate(httpmiddleware.NewFixedWindowLimiter("test", 1, 60_000_000_000, httpmiddleware.LimiterConfig{}), httpmiddleware.RateLimitConfig{})
     })
 
     fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil)
@@ -489,6 +490,10 @@ func TestLoginDoor_AnExhaustedLimiterAnswers429BeforeAuthenticating(t *testing.T
 
     if nethttp.StatusTooManyRequests != recorder.Code || 1 != authenticator.calls {
         t.Fatalf("expected 429 with the authenticator run only once, got %d and %d", recorder.Code, authenticator.calls)
+    }
+
+    if "60" != recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected the window's remainder as Retry-After on the wire, got %q", recorder.Header().Get("Retry-After"))
     }
 }
 
@@ -623,6 +628,10 @@ func TestLogoutDoor_AFailedSuccessListenerStillEndsTheSession(t *testing.T) {
 
     if nethttp.StatusInternalServerError != recorder.Code {
         t.Fatalf("expected the listener's error answered, got %d", recorder.Code)
+    }
+
+    if cookie := doorSessionCookie(recorder); nil == cookie || 0 <= cookie.MaxAge {
+        t.Fatalf("expected the error answer to keep the expired cookie, got %+v", cookie)
     }
 
     if stored := mustSession(sessionManager.Session(context.Background(), live.Id())); false == internal.IsNilInterface(stored) {
@@ -1463,5 +1472,204 @@ func TestRequestSessionAtFirewallDoor_AnApplicationsUnavailableSessionOverAnUnma
     sessionInstance, sessionErr := requestSessionAtFirewallDoor(request)
     if nil != sessionInstance || false == errors.Is(sessionErr, cause) || false == exception.AnswersUnavailable(sessionErr) {
         t.Fatalf("expected the cause answered as an outage, got %v %v", sessionInstance, sessionErr)
+    }
+}
+
+type deleteFailingSessionManager struct {
+    sessioncontract.Manager
+    failures int
+    err      error
+    hang     bool
+}
+
+func (instance *deleteFailingSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
+    if 0 < instance.failures {
+        instance.failures--
+
+        if true == instance.hang {
+            <-ctx.Done()
+
+            return ctx.Err()
+        }
+
+        return instance.err
+    }
+
+    return instance.Manager.DeleteSession(ctx, sessionId)
+}
+
+type logoutEventRecord struct {
+    successes      int
+    failures       []error
+    storedAtSignal []bool
+}
+
+func recordLogoutEvents(fixture *doorFixture, sessionManager sessioncontract.Manager, sessionId string) *logoutEventRecord {
+    record := &logoutEventRecord{}
+
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutSuccess, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        record.successes++
+
+        stored, _ := sessionManager.Session(context.Background(), sessionId)
+        record.storedAtSignal = append(record.storedAtSignal, false == internal.IsNilInterface(stored))
+
+        return nil
+    }, 0)
+
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutFailure, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        if failureEvent, isFailureEvent := eventValue.Payload().(*LogoutFailureEvent); true == isFailureEvent {
+            record.failures = append(record.failures, failureEvent.Error())
+        }
+
+        return nil
+    }, 0)
+
+    return record
+}
+
+type storedLogoutSession struct {
+    container containercontract.Container
+    manager   *deleteFailingSessionManager
+    sessionId string
+}
+
+func newStoredLogoutSession(t *testing.T, fixture *doorFixture, failures int) *storedLogoutSession {
+    t.Helper()
+
+    serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
+    manager := &deleteFailingSessionManager{
+        Manager:  session.SessionMustFromContainer(t.Context(), serviceContainer),
+        failures: failures,
+        err:      exception.MarkInfrastructureFailure(exception.NewError("session store is down", nil, nil)),
+    }
+    serviceContainer.MustOverrideProtectedInstance(session.ServiceSessionManager, manager, container.OverrideOptions{})
+
+    live := mustSession(manager.NewSession(context.Background()))
+    live.Set("identity", "u1")
+    if saveErr := manager.SaveSession(context.Background(), live); nil != saveErr {
+        t.Fatalf("unexpected save error: %v", saveErr)
+    }
+
+    return &storedLogoutSession{container: serviceContainer, manager: manager, sessionId: live.Id()}
+}
+
+func (instance *storedLogoutSession) serve(fixture *doorFixture) *httptest.ResponseRecorder {
+    request := httptest.NewRequest(nethttp.MethodPost, doorLogoutPath, nil)
+    request.Header.Set("Accept", "application/json")
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: instance.sessionId})
+
+    recorder := httptest.NewRecorder()
+    fixture.kernel.httpKernel.ServeHttp(instance.container).ServeHTTP(recorder, request)
+
+    return recorder
+}
+
+func TestLogoutDoor_RaisesTheSuccessOnceTheDeleteLanded(t *testing.T) {
+    fixture := newDoorFixture(t, nil)
+    stored := newStoredLogoutSession(t, fixture, 0)
+    record := recordLogoutEvents(fixture, stored.manager, stored.sessionId)
+
+    recorder := stored.serve(fixture)
+
+    if nethttp.StatusNoContent != recorder.Code {
+        t.Fatalf("expected 204, got %d", recorder.Code)
+    }
+
+    if 1 != record.successes || 0 != len(record.failures) {
+        t.Fatalf("expected one success and no failure, got %d and %v", record.successes, record.failures)
+    }
+
+    if true == record.storedAtSignal[0] {
+        t.Fatalf("expected the entry deleted before the success was raised")
+    }
+}
+
+func TestLogoutDoor_ADeleteTheStorageCouldNotAnswerRaisesTheFailure(t *testing.T) {
+    fixture := newDoorFixture(t, nil)
+    stored := newStoredLogoutSession(t, fixture, 1)
+    record := recordLogoutEvents(fixture, stored.manager, stored.sessionId)
+
+    recorder := stored.serve(fixture)
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "" == recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected 503 with Retry-After, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+
+    if 0 != record.successes || 1 != len(record.failures) {
+        t.Fatalf("expected no success and one failure, got %d and %v", record.successes, record.failures)
+    }
+
+    if false == exception.AnswersUnavailable(record.failures[0]) {
+        t.Fatalf("expected the failure to carry the delete's outage, got %v", record.failures[0])
+    }
+
+    if cookie := doorSessionCookie(recorder); nil != cookie {
+        t.Fatalf("expected the cookie kept, got %+v", cookie)
+    }
+}
+
+type shortBoundSessionManager struct {
+    *deleteFailingSessionManager
+}
+
+func (instance *shortBoundSessionManager) StorageTimeout() bound.Duration {
+    return bound.Of(20 * time.Millisecond)
+}
+
+func TestLogoutDoor_ADeleteTheBoundCutRaisesTheFailure(t *testing.T) {
+    fixture := newDoorFixture(t, nil)
+    stored := newStoredLogoutSession(t, fixture, 1)
+    stored.manager.hang = true
+    stored.container.MustOverrideProtectedInstance(session.ServiceSessionManager, &shortBoundSessionManager{deleteFailingSessionManager: stored.manager}, container.OverrideOptions{})
+    record := recordLogoutEvents(fixture, stored.manager, stored.sessionId)
+
+    recorder := stored.serve(fixture)
+
+    if nethttp.StatusServiceUnavailable != recorder.Code {
+        t.Fatalf("expected the cut delete answered 503, got %d", recorder.Code)
+    }
+
+    if 0 != record.successes || 1 != len(record.failures) || false == exception.AnswersUnavailable(record.failures[0]) {
+        t.Fatalf("expected no success and one failure carrying the cut, got %d and %v", record.successes, record.failures)
+    }
+}
+
+func TestLogoutDoor_A503ThenARetryRaisesOneSuccess(t *testing.T) {
+    fixture := newDoorFixture(t, nil)
+    stored := newStoredLogoutSession(t, fixture, 1)
+    record := recordLogoutEvents(fixture, stored.manager, stored.sessionId)
+
+    if recorder := stored.serve(fixture); nethttp.StatusServiceUnavailable != recorder.Code {
+        t.Fatalf("expected the first logout answered 503, got %d", recorder.Code)
+    }
+
+    if recorder := stored.serve(fixture); nethttp.StatusNoContent != recorder.Code {
+        t.Fatalf("expected the retry answered 204, got %d", recorder.Code)
+    }
+
+    if 1 != record.successes || 1 != len(record.failures) {
+        t.Fatalf("expected one success over the 503 and its retry, got %d successes and %d failures", record.successes, len(record.failures))
+    }
+
+    if remaining := mustSession(stored.manager.Session(context.Background(), stored.sessionId)); false == internal.IsNilInterface(remaining) {
+        t.Fatalf("expected the retry to remove the session, got %+v", remaining)
+    }
+}
+
+func TestLogoutDoor_AFailedFailureListenerKeepsTheStoragesAnswer(t *testing.T) {
+    fixture := newDoorFixture(t, nil)
+    stored := newStoredLogoutSession(t, fixture, 1)
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutFailure, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        return errors.New("audit unavailable")
+    }, 0)
+
+    recorder := stored.serve(fixture)
+
+    if nethttp.StatusServiceUnavailable != recorder.Code || "" == recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected the storage's 503 with Retry-After kept, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
+    }
+
+    if 1 != fixture.recordsAt(loggingcontract.LevelError, "security logout failure event dispatch failed") {
+        t.Fatalf("expected the listener's failure logged once")
     }
 }

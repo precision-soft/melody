@@ -29,7 +29,10 @@ func (instance *LoginAuthentication) Authenticate(request melodyhttpcontract.Req
     }
 
     if nil != instance.budget && true == token.IsAuthenticated() && true == instance.budget.carriesSecondFactor(request) {
-        instance.budget.Release(token.UserIdentifier())
+        /* a failed release never refuses the sign-in it follows */
+        if releaseErr := instance.budget.Release(request.RuntimeInstance(), token.UserIdentifier()); nil != releaseErr {
+            journalBudgetFailure(request.RuntimeInstance(), "second factor budget release failed", releaseErr)
+        }
     }
 
     return token, nil

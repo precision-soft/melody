@@ -38,6 +38,35 @@ func markSessionUnavailable(err error) error {
     return &sessionUnavailableError{cause: err}
 }
 
+/* on the request's own context, so a client that left still stops the call */
+func storageCallContext(requestContext context.Context, manager sessioncontract.Manager) (context.Context, context.CancelFunc, error) {
+    timeout, timeoutErr := session.ResolveStorageTimeout(manager)
+    if nil != timeoutErr {
+        return requestContext, func() {}, timeoutErr
+    }
+
+    if true == timeout.Unlimited {
+        return requestContext, func() {}, nil
+    }
+
+    callContext, cancel := context.WithTimeout(requestContext, timeout.Value)
+
+    return callContext, cancel, nil
+}
+
+/* a call the bound cut while the request was live is an outage naming the bound; the request's own end stays the manager's answer */
+func namedStorageBound(requestContext context.Context, callContext context.Context, err error) error {
+    if true == storageBoundExpired(requestContext) || false == storageBoundExpired(callContext) {
+        return err
+    }
+
+    return exception.NewError(
+        "the session storage call was cut by its bound",
+        exceptioncontract.Context{"bound": session.StorageTimeoutRule.Name},
+        exception.MarkInfrastructureFailure(err),
+    )
+}
+
 /* loaded at most once: a failed load answers the same filed error to every later read */
 type requestSession struct {
     mutex          sync.Mutex
@@ -82,15 +111,21 @@ func (instance *requestSession) load() (sessioncontract.Session, error) {
     }
 
     var sessionInstance sessioncontract.Session
-    var loadErr error
 
-    if true == instance.cookiePresent {
-        sessionInstance, loadErr = instance.manager.Session(instance.requestContext, instance.cookieValue)
+    loadContext, releaseLoadContext, loadErr := storageCallContext(instance.requestContext, instance.manager)
+    defer releaseLoadContext()
+
+    if nil == loadErr && true == instance.cookiePresent {
+        sessionInstance, loadErr = instance.manager.Session(loadContext, instance.cookieValue)
     }
 
     /* a replaceable manager may answer a typed-nil session or a typed-nil error, which a bare comparison misreads */
     if true == internal.IsNilInterface(loadErr) && true == internal.IsNilInterface(sessionInstance) {
-        sessionInstance, loadErr = instance.manager.NewSession(instance.requestContext)
+        sessionInstance, loadErr = instance.manager.NewSession(loadContext)
+    }
+
+    if false == internal.IsNilInterface(loadErr) {
+        loadErr = namedStorageBound(instance.requestContext, loadContext, loadErr)
     }
 
     if false == internal.IsNilInterface(loadErr) {

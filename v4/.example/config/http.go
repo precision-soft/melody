@@ -27,7 +27,6 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyopenapi "github.com/precision-soft/melody/v4/openapi"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     bun "github.com/uptrace/bun"
@@ -78,11 +77,8 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     secondFactorReplayGuard := instance.buildSecondFactorReplayGuard(kernelInstance.Clock())
 
-    /* the logger the second-factor budget records a failure the request does not carry in, a failed release of the budget; a container without one leaves the limiter on the emergency logger */
-    secondFactorBudgetLogger, _ := melodylogging.LoggerFromResolver(kernelInstance.Context(), kernelInstance.ServiceContainer())
-
     /* the sign-in door is declared in RegisterSecurity, before the kernel-built parts of its chain exist, so they are handed over here */
-    loginAuthentication := instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard, secondFactorBudgetLogger)
+    loginAuthentication := instance.buildLoginAuthentication(kernelInstance.Clock(), secondFactorReplayGuard)
     instance.loginDoorAuthenticator.Bind(loginAuthentication)
 
     /* handed over as the interface only when there is one, so a sign-in without a budget is no typed nil behind it */
@@ -183,9 +179,7 @@ var _ melodyapplicationcontract.HttpModule = (*Module)(nil)
 
 /* buildCatalogWriteThrottle prepares the shared budget the nomenclature's write endpoints sit behind. The counter lives in redis, so several replicas enforce one limit rather than each allowing its own, and the client key is resolved trusted-proxy-aware: behind the compose load balancer the X-Forwarded-For client is used, a direct hit falls back to the peer address, and a spoofed header from an untrusted peer is ignored. With redis unreachable the limiter fails closed, so a write is refused rather than let through uncounted. */
 func (instance *Module) buildCatalogWriteThrottle() {
-    limiter := melodyrueidis.NewRateLimiter(instance.redisClient, melodyrueidis.RateLimiterConfig{
-        Limit:     catalogWriteAllowance,
-        Window:    catalogWriteWindow,
+    limiter := melodyrueidis.NewRateLimiter(instance.redisClient, catalogWriteLimiterName, catalogWriteAllowance, catalogWriteWindow, melodyrueidis.RateLimiterConfig{
         KeyPrefix: redisRateLimitKeyPrefix,
     })
 
@@ -198,9 +192,7 @@ func (instance *Module) buildCatalogWriteThrottle() {
 
 /* buildInProcessCatalogWriteThrottle arms the write budget of a process that runs without redis: a sliding window per client address held in this process, bounded in the addresses it tracks. It limits this process only — behind a balancer every replica would allow a budget of its own, which is why a deployment runs the redis budget — but a single process keeps its writes and its sign-ins throttled rather than unthrottled. Past 10,000 addresses an unseen address takes the slot of the address seen longest ago, which comes back with a full budget: a caller varying its address gains nothing a fresh address does not already give it; the redis budget has no such table. */
 func (instance *Module) buildInProcessCatalogWriteThrottle(clockInstance melodyclockcontract.Clock) {
-    limiter := melodyhttpmiddleware.NewSlidingWindowLimiter(melodyhttpmiddleware.LimiterConfig{
-        Limit:   catalogWriteAllowance,
-        Window:  catalogWriteWindow,
+    limiter := melodyhttpmiddleware.NewSlidingWindowLimiter(catalogWriteLimiterName, catalogWriteAllowance, catalogWriteWindow, melodyhttpmiddleware.LimiterConfig{
         MaxKeys: melodybound.Of(inProcessWriteThrottleMaxAddresses),
         Clock:   clockInstance,
     })
@@ -230,20 +222,12 @@ func (instance *lateBoundRateLimiter) bind(limiter melodyhttpcontract.RateLimite
     instance.limiter = limiter
 }
 
-func (instance *lateBoundRateLimiter) Allow(key string) bool {
-    return instance.limiter.Allow(key)
+func (instance *lateBoundRateLimiter) Allow(runtimeInstance melodyruntimecontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
+    return instance.limiter.Allow(runtimeInstance, key)
 }
 
-func (instance *lateBoundRateLimiter) Reset(key string) {
-    instance.limiter.Reset(key)
+func (instance *lateBoundRateLimiter) Reset(runtimeInstance melodyruntimecontract.Runtime, key string) error {
+    return instance.limiter.Reset(runtimeInstance, key)
 }
 
-func (instance *lateBoundRateLimiter) AllowWithRuntime(runtimeInstance melodyruntimecontract.Runtime, key string) (bool, error) {
-    if runtimeLimiter, isRuntimeLimiter := instance.limiter.(melodyhttpcontract.RuntimeRateLimiter); true == isRuntimeLimiter {
-        return runtimeLimiter.AllowWithRuntime(runtimeInstance, key)
-    }
-
-    return instance.limiter.Allow(key), nil
-}
-
-var _ melodyhttpcontract.RuntimeRateLimiter = (*lateBoundRateLimiter)(nil)
+var _ melodyhttpcontract.RateLimiter = (*lateBoundRateLimiter)(nil)

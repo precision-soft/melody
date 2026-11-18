@@ -1368,7 +1368,7 @@ func (instance *erroringSessionManager) DeleteSession(ctx context.Context, sessi
     return instance.inner.DeleteSession(ctx, sessionId)
 }
 
-func (instance *erroringSessionManager) PersistenceTimeout() bound.Duration {
+func (instance *erroringSessionManager) StorageTimeout() bound.Duration {
     return bound.Duration{}
 }
 
@@ -2303,7 +2303,7 @@ func (instance *typedNilReturningSessionManager) DeleteSession(ctx context.Conte
     return instance.delegate.DeleteSession(ctx, sessionId)
 }
 
-func (instance *typedNilReturningSessionManager) PersistenceTimeout() bound.Duration {
+func (instance *typedNilReturningSessionManager) StorageTimeout() bound.Duration {
     return bound.Duration{}
 }
 
@@ -2703,14 +2703,14 @@ func (instance *failingSaveSessionManager) RegenerateSession(ctx context.Context
 }
 
 func (instance *failingSaveSessionManager) SaveSession(ctx context.Context, sessionInstance sessioncontract.Session) error {
-    return exception.NewError("session backend is down", nil, nil)
+    return exception.NewError("session backend is down", nil, exception.MarkInfrastructureFailure(errors.New("connection refused")))
 }
 
 func (instance *failingSaveSessionManager) DeleteSession(ctx context.Context, sessionId string) error {
     return instance.inner.DeleteSession(ctx, sessionId)
 }
 
-func (instance *failingSaveSessionManager) PersistenceTimeout() bound.Duration {
+func (instance *failingSaveSessionManager) StorageTimeout() bound.Duration {
     return bound.Duration{}
 }
 
@@ -5695,9 +5695,9 @@ func TestKernel_AClientHangupBeforePersistenceStillStoresTheSave(t *testing.T) {
     }
 }
 
-func TestKernel_AHungSaveIsCutByThePersistenceTimeout(t *testing.T) {
+func TestKernel_AHungSaveIsCutByTheStorageTimeout(t *testing.T) {
     storage := newContextBlockingSessionStorage()
-    manager := session.NewManager(storage, session.ManagerConfig{PersistenceTimeout: bound.Of(30 * time.Millisecond)})
+    manager := session.NewManager(storage, session.ManagerConfig{StorageTimeout: bound.Of(30 * time.Millisecond)})
     sessionId, _ := seedStoredSession(t, manager)
     storage.blockSave.Store(true)
 
@@ -5732,9 +5732,9 @@ func TestKernel_AHungSaveIsCutByThePersistenceTimeout(t *testing.T) {
     }
 }
 
-func TestKernel_AHungDeleteIsCutByThePersistenceTimeoutAndTheCookieStillExpires(t *testing.T) {
+func TestKernel_ALogoutWhoseDeleteWasCutAnswers503AndKeepsTheCookie(t *testing.T) {
     storage := newContextBlockingSessionStorage()
-    manager := session.NewManager(storage, session.ManagerConfig{PersistenceTimeout: bound.Of(30 * time.Millisecond)})
+    manager := session.NewManager(storage, session.ManagerConfig{StorageTimeout: bound.Of(30 * time.Millisecond)})
     sessionId, _ := seedStoredSession(t, manager)
     storage.blockDelete.Store(true)
 
@@ -5760,19 +5760,154 @@ func TestKernel_AHungDeleteIsCutByThePersistenceTimeoutAndTheCookieStillExpires(
     }()
     awaitClosed(t, done, "the hung delete to be cut")
 
-    cookies := recorder.Result().Cookies()
-    if 1 != len(cookies) || 0 <= cookies[0].MaxAge {
-        t.Fatalf("expected the expiring cookie, got %v", cookies)
+    if nethttp.StatusServiceUnavailable != recorder.Code || "" == recorder.Header().Get("Retry-After") {
+        t.Fatalf("expected the cut logout answered 503 with Retry-After, got %d %q", recorder.Code, recorder.Header().Get("Retry-After"))
     }
 
-    if _, recorded := recordingLogger.errorContextFor("failed to delete session"); false == recorded {
-        t.Fatalf("expected one error record of the failed delete")
+    if cookies := recorder.Result().Cookies(); 0 != len(cookies) {
+        t.Fatalf("expected the cookie kept, so the retry names the session, got %v", cookies)
+    }
+
+    recordContext, recorded := recordingLogger.errorContextFor("failed to delete session")
+    if false == recorded || session.StorageTimeoutRule.Name != recordContext["bound"] {
+        t.Fatalf("expected one error record of the failed delete naming the bound, got %v", recordContext)
     }
 }
 
-func TestKernel_APersistenceWaitingOnAHeldStripeIsCutByThePersistenceTimeout(t *testing.T) {
+func TestKernel_ARetriedLogoutAfterThe503RemovesTheSession(t *testing.T) {
     storage := newContextBlockingSessionStorage()
-    manager := session.NewManager(storage, session.ManagerConfig{PersistenceTimeout: bound.Of(30 * time.Millisecond)})
+    manager := session.NewManager(storage, session.ManagerConfig{StorageTimeout: bound.Of(30 * time.Millisecond)})
+    sessionId, _ := seedStoredSession(t, manager)
+    storage.blockDelete.Store(true)
+
+    handler, _ := persistenceTestKernel(t, manager, "/logout", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        sessionInstance, sessionErr := RequestSession(request)
+        if nil != sessionErr {
+            return nil, sessionErr
+        }
+
+        sessionInstance.Clear()
+
+        return TextResponse(nethttp.StatusOK, "bye"), nil
+    })
+
+    logout := func() *httptest.ResponseRecorder {
+        request := httptest.NewRequest(nethttp.MethodGet, "/logout", nil)
+        request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionId})
+
+        recorder := httptest.NewRecorder()
+        done := make(chan struct{})
+        go func() {
+            defer close(done)
+            handler.ServeHTTP(recorder, request)
+        }()
+        awaitClosed(t, done, "the logout to answer")
+
+        return recorder
+    }
+
+    if first := logout(); nethttp.StatusServiceUnavailable != first.Code || 0 != len(first.Result().Cookies()) {
+        t.Fatalf("expected the cut logout answered 503 keeping the cookie, got %d %v", first.Code, first.Result().Cookies())
+    }
+
+    storage.blockDelete.Store(false)
+
+    second := logout()
+    if cookies := second.Result().Cookies(); nethttp.StatusOK != second.Code || 1 != len(cookies) || 0 <= cookies[0].MaxAge {
+        t.Fatalf("expected the retried logout answered 200 with the expiring cookie, got %d %v", second.Code, cookies)
+    }
+
+    if stored, loadErr := manager.Session(context.Background(), sessionId); nil != loadErr || nil != stored {
+        t.Fatalf("expected the retried logout to remove the session, got %v %v", stored, loadErr)
+    }
+}
+
+func TestKernel_ASessionPersistedCallbackSeesTheDeleteTheBoundCut(t *testing.T) {
+    storage := newContextBlockingSessionStorage()
+    manager := session.NewManager(storage, session.ManagerConfig{StorageTimeout: bound.Of(30 * time.Millisecond)})
+    sessionId, _ := seedStoredSession(t, manager)
+    storage.blockDelete.Store(true)
+
+    persistErrs := []error{}
+    handler, _ := persistenceTestKernel(t, manager, "/logout", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        sessionInstance, sessionErr := RequestSession(request)
+        if nil != sessionErr {
+            return nil, sessionErr
+        }
+
+        sessionInstance.Clear()
+
+        registerErr := OnSessionPersisted(request, func(persistErr error) error {
+            persistErrs = append(persistErrs, persistErr)
+
+            return nil
+        })
+
+        return TextResponse(nethttp.StatusOK, "bye"), registerErr
+    })
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/logout", nil)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionId})
+
+    recorder := httptest.NewRecorder()
+    done := make(chan struct{})
+    go func() {
+        defer close(done)
+        handler.ServeHTTP(recorder, request)
+    }()
+    awaitClosed(t, done, "the hung delete to be cut")
+
+    if nethttp.StatusServiceUnavailable != recorder.Code {
+        t.Fatalf("expected the cut logout answered 503, got %d", recorder.Code)
+    }
+
+    if 1 != len(persistErrs) || false == exception.AnswersUnavailable(persistErrs[0]) {
+        t.Fatalf("expected one callback with the cut delete's outage, got %v", persistErrs)
+    }
+}
+
+func TestKernel_ASessionPersistedCallbackErrorIsRaisedAsAHandlerError(t *testing.T) {
+    storage := newContextBlockingSessionStorage()
+    manager := session.NewManager(storage, session.ManagerConfig{})
+    sessionId, _ := seedStoredSession(t, manager)
+
+    handler, recordingLogger := persistenceTestKernel(t, manager, "/logout", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        sessionInstance, sessionErr := RequestSession(request)
+        if nil != sessionErr {
+            return nil, sessionErr
+        }
+
+        sessionInstance.Clear()
+
+        registerErr := OnSessionPersisted(request, func(persistErr error) error {
+            return exception.NewError("audit unavailable", nil, nil)
+        })
+
+        return TextResponse(nethttp.StatusOK, "bye"), registerErr
+    })
+
+    request := httptest.NewRequest(nethttp.MethodGet, "/logout", nil)
+    request.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionId})
+
+    recorder := httptest.NewRecorder()
+    handler.ServeHTTP(recorder, request)
+
+    if nethttp.StatusInternalServerError != recorder.Code {
+        t.Fatalf("expected the callback's error answered 500, got %d", recorder.Code)
+    }
+
+    if cookies := recorder.Result().Cookies(); 1 != len(cookies) || 0 <= cookies[0].MaxAge {
+        t.Fatalf("expected the expiring cookie kept, got %v", cookies)
+    }
+
+    if _, recorded := recordingLogger.errorContextFor("session persisted callback error"); false == recorded {
+        t.Fatal("expected the callback's error filed as a handler error")
+    }
+}
+
+func TestKernel_APersistenceWaitingOnAHeldStripeIsCutByTheStorageTimeout(t *testing.T) {
+    storage := newContextBlockingSessionStorage()
+    manager := session.NewManager(storage, session.ManagerConfig{StorageTimeout: bound.Of(30 * time.Millisecond)})
     sessionId, holderCopy := seedStoredSession(t, manager)
     storage.blockSave.Store(true)
 
