@@ -31,6 +31,8 @@ type Parameter struct {
     valueMutex sync.RWMutex
     value      any
     isDefault  bool
+    /* set when the application's override rewrote the template; written at construction or at the key's declaration, under the configuration lock */
+    overridden bool
     /* atomic because MarkSecret marks under the configuration lock while a consumer holding the pointer asks IsSecret without it */
     isSecret atomic.Bool
     /* deferred marks a parameter whose template referenced a name not yet defined when the constructor resolved placeholders, left for the boot resolution. Atomic because the boot clears it under the configuration write lock while a consumer reads through loadValue without it. */
@@ -46,12 +48,17 @@ func (instance *Parameter) diagnosticContext() map[string]any {
         context["parameterName"] = instance.name
     }
 
+    if true == instance.overridden {
+        context["overridden"] = true
+    }
+
     return context
 }
 
-/* conversionName is the identity the shared parsers stamp into their error context: the environment key where one exists, the registration name otherwise. */
+/* conversionName is the identity the shared parsers stamp into their error context: the environment key where one feeds the parameter, the registration name otherwise. */
 func (instance *Parameter) conversionName() string {
-    if "" != instance.environmentKey {
+    /* an overridden parameter does not read its key, so its name identifies it */
+    if "" != instance.environmentKey && false == instance.overridden {
         return instance.environmentKey
     }
 
@@ -104,9 +111,13 @@ func (instance *Parameter) Value() any {
     return instance.loadValue()
 }
 
-/* IsDefault reports whether the declared default spoke: no artifact set the parameter's key, or, under the key's rule, set it blank */
+/* IsDefault reports whether the declared default spoke: no artifact set the parameter's key, or, under the key's rule, set it blank; an overridden parameter reads no default */
 func (instance *Parameter) IsDefault() bool {
-    return instance.isDefault
+    return false == instance.overridden && true == instance.isDefault
+}
+
+func (instance *Parameter) IsOverridden() bool {
+    return instance.overridden
 }
 
 /* IsSecret reports whether the parameter was declared as holding a credential, either directly or by resolving a template that reads one. Commands that render the configuration redact such a parameter; the value itself is untouched. */

@@ -91,8 +91,14 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.bootModuleEnvironmentKeys()
 
+    /* after the declarations, the last that could consume an override */
+    instance.refuseUnappliedParameterOverrides()
+
     /* after the declarations, which carry the modules' retired spellings, and before any hook reads a value */
     instance.refuseRetiredEnvironmentKeys()
+
+    /* after the retired spellings, so a renamed key is named by its successor first */
+    instance.refuseOverriddenEnvironmentKeys()
 
     instance.bootModulesPreConfigurationResolve()
 

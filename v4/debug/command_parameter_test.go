@@ -83,18 +83,29 @@ var _ configcontract.EnvironmentSource = (*parameterTestEnvironmentSource)(nil)
 func newParameterTestRuntime(t *testing.T) *testRuntime {
     t.Helper()
 
+    return newParameterTestRuntimeWith(t, map[string]string{}, config.ConfigurationConfig{})
+}
+
+func newParameterTestRuntimeWith(t *testing.T, values map[string]string, configurationConfig config.ConfigurationConfig) *testRuntime {
+    t.Helper()
+
+    environmentValues := map[string]string{
+        config.EnvironmentNameKey: config.EnvironmentDevelopment,
+    }
+    for key, value := range values {
+        environmentValues[key] = value
+    }
+
     environment, environmentErr := config.NewEnvironment(context.Background(), 
         &parameterTestEnvironmentSource{
-            value: map[string]string{
-                config.EnvironmentNameKey: config.EnvironmentDevelopment,
-            },
+            value: environmentValues,
         },
     )
     if nil != environmentErr {
         t.Fatalf("failed to build the test environment: %v", environmentErr)
     }
 
-    applicationConfiguration, configurationErr := config.NewConfiguration(environment, "/tmp/melody", config.ConfigurationConfig{})
+    applicationConfiguration, configurationErr := config.NewConfiguration(environment, "/tmp/melody", configurationConfig)
     if nil != configurationErr {
         t.Fatalf("failed to build the test configuration: %v", configurationErr)
     }
@@ -468,5 +479,73 @@ func TestDebugParameters_TemplateColumn(t *testing.T) {
 
     if false == seenKeyed || false == seenSecret {
         t.Fatalf("expected both rows, keyed=%v secret=%v", seenKeyed, seenSecret)
+    }
+}
+
+func parameterItemsByName(t *testing.T, rendered string) map[string]map[string]any {
+    t.Helper()
+
+    envelope := struct {
+        Data struct {
+            Items []map[string]any `json:"items"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &envelope); nil != decodeErr {
+        t.Fatalf("failed to decode: %v", decodeErr)
+    }
+
+    items := make(map[string]map[string]any)
+    for _, item := range envelope.Data.Items {
+        items[item["name"].(string)] = item
+    }
+
+    return items
+}
+
+func TestDebugParameters_ShowsOverrideAndTheKeyItStoppedReading(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ParameterCommand{},
+        newParameterTestRuntimeWith(t, map[string]string{config.HttpAddressKey: ":8080"}, config.ConfigurationConfig{ParameterOverrides: map[string]string{config.KernelHttpAddress: ":9090"}}),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    items := parameterItemsByName(t, rendered)
+
+    overridden, keyRow := items[config.KernelHttpAddress], items[config.HttpAddressKey]
+    if nil == overridden || true != overridden["isOverridden"] || config.HttpAddressKey != overridden["environmentKey"] || ":9090" != overridden["template"] || "" != overridden["aliases"] {
+        t.Fatalf("expected the overridden row keeping its key, got %v", overridden)
+    }
+
+    if nil == keyRow || false != keyRow["isOverridden"] || ":8080" != keyRow["value"] {
+        t.Fatalf("expected the key's own row reading the line, got %v", keyRow)
+    }
+}
+
+func TestDebugParameters_SecretOverrideIsRedacted(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ParameterCommand{},
+        newParameterTestRuntimeWith(
+            t,
+            map[string]string{"APP_PASSWORD": "P4ssPhrase"},
+            config.ConfigurationConfig{
+                EnvironmentKeys:    []configcontract.EnvironmentKey{{Key: "APP_PASSWORD", Parameter: "app.password", Field: "ApplicationConfig.EnvironmentKeys", Secret: true}},
+                ParameterOverrides: map[string]string{config.KernelLogsDirectory: "/var/%env(APP_PASSWORD)%"},
+            },
+        ),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    if true == strings.Contains(rendered, "P4ssPhrase") {
+        t.Fatalf("expected the secret redacted, got %s", rendered)
+    }
+
+    if row := parameterItemsByName(t, rendered)[config.KernelLogsDirectory]; nil == row || true != row["isOverridden"] || true != row["isSecret"] {
+        t.Fatalf("expected the overridden row secret, got %v", row)
     }
 }

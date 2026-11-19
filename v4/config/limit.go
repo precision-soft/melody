@@ -147,10 +147,8 @@ func parameterLimit[T bound.Unit](parameter configcontract.Parameter, environmen
     if unmarshalErr := limit.UnmarshalText([]byte(text)); nil != unmarshalErr {
         return bound.Limit[T]{}, exception.NewError(
             "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": environmentKey,
-            },
-            unmarshalErr,
+            limitRefusalContext(parameter, environmentKey),
+            limitRefusalCause(parameter, unmarshalErr),
         )
     }
 
@@ -167,10 +165,8 @@ func resolveParameter[T bound.Unit](parameter configcontract.Parameter, environm
     if nil != resolveErr {
         return bound.Resolved[T]{}, exception.NewError(
             "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": environmentKey,
-            },
-            resolveErr,
+            limitRefusalContext(parameter, environmentKey),
+            limitRefusalCause(parameter, resolveErr),
         )
     }
 
@@ -190,10 +186,8 @@ func checkedParameterLimit[T bound.Unit](parameter configcontract.Parameter, env
     if _, resolveErr := bound.Resolve(limit, rule); nil != resolveErr {
         return bound.Limit[T]{}, exception.NewError(
             "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": environmentKey,
-            },
-            resolveErr,
+            limitRefusalContext(parameter, environmentKey),
+            limitRefusalCause(parameter, resolveErr),
         )
     }
 
@@ -209,10 +203,8 @@ func checkedUnavailableRetryAfter(parameter configcontract.Parameter) (bound.Dur
     if _, resolveErr := ResolveUnavailableRetryAfter(limit, UnavailableRetryAfterRule.Name); nil != resolveErr {
         return bound.Duration{}, exception.NewError(
             "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": HttpUnavailableRetryAfterKey,
-            },
-            resolveErr,
+            limitRefusalContext(parameter, HttpUnavailableRetryAfterKey),
+            limitRefusalCause(parameter, resolveErr),
         )
     }
 
@@ -229,12 +221,33 @@ func checkedParameterSwitch(parameter configcontract.Parameter, environmentKey s
     if nil != parseErr {
         return configcontract.Switch{}, exception.NewError(
             "invalid environment value",
-            exceptioncontract.Context{
-                "environmentKey": environmentKey,
-            },
-            parseErr,
+            limitRefusalContext(parameter, environmentKey),
+            limitRefusalCause(parameter, parseErr),
         )
     }
 
     return configcontract.Switch{Value: switchValue, IsSet: isSet}, nil
+}
+
+/* an overridden parameter does not read its key, so the refusal names the parameter the override wrote */
+func limitRefusalContext(parameter configcontract.Parameter, environmentKey string) exceptioncontract.Context {
+    context := exceptioncontract.Context{
+        "environmentKey": environmentKey,
+    }
+
+    if configParameter, isConfigParameter := parameter.(*Parameter); true == isConfigParameter && true == configParameter.overridden {
+        context["parameterName"] = configParameter.name
+        context["overridden"] = true
+    }
+
+    return context
+}
+
+/* the cause quotes the value, and an override may feed a limit from a secret key */
+func limitRefusalCause(parameter configcontract.Parameter, causeErr error) error {
+    if true == parameter.IsSecret() {
+        return nil
+    }
+
+    return causeErr
 }

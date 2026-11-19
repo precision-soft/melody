@@ -281,3 +281,54 @@ func TestNewApplication_EnvironmentKeysReachTheConfiguration(t *testing.T) {
         t.Fatalf("expected the application key's default through its parameter, got %v", parameter)
     }
 }
+
+func TestNewApplication_AnOverrideReachesTheContainerAndTheRuntimeFlags(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{
+        EnvironmentFiles:   testhelper.NewEmbeddedEnvironmentFs(),
+        PublicFiles:        testhelper.NewEmbeddedStaticFs(),
+        ParameterOverrides: map[string]string{"kernel.container_creation_waiters": "1", "kernel.default_mode": "cli"},
+    })
+    serviceContainer := applicationInstance.kernel.ServiceContainer()
+    defer func() {
+        _ = serviceContainer.CloseWithContext(context.Background())
+    }()
+
+    if "cli" != applicationInstance.runtimeFlags.Mode() {
+        t.Fatalf("expected the overridden default mode, got %q", applicationInstance.runtimeFlags.Mode())
+    }
+
+    providerEntered := make(chan struct{})
+    releaseProvider := make(chan struct{})
+    defer close(releaseProvider)
+
+    container.MustRegister[*creationWaitersProbe](serviceContainer, "app.creation.waiters", func(resolver containercontract.Resolver) (*creationWaitersProbe, error) {
+        close(providerEntered)
+        <-releaseProvider
+
+        return &creationWaitersProbe{}, nil
+    }, container.RegisterOptions{})
+
+    results := make(chan error, 3)
+    go func() {
+        _, getErr := serviceContainer.Get(t.Context(), "app.creation.waiters")
+        results <- getErr
+    }()
+
+    <-providerEntered
+
+    for waiter := 0; waiter < 2; waiter++ {
+        go func() {
+            _, getErr := serviceContainer.Get(t.Context(), "app.creation.waiters")
+            results <- getErr
+        }()
+    }
+
+    select {
+    case getErr := <-results:
+        if false == errors.Is(getErr, container.ErrCreationWaitersExceeded) {
+            t.Fatalf("expected the waiter past the overridden bound of 1 to be refused, got %v", getErr)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatalf("expected the overridden bound to refuse the second waiter")
+    }
+}

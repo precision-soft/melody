@@ -23,7 +23,7 @@ import (
     "github.com/precision-soft/melody/v4/logging"
 )
 
-/* ApplicationConfig is what an application is built from. A field left out takes its default: no embedded env files, no embedded public files, and the framework defaults of the limits, a 15s read timeout, a 5s read header timeout, a 30s write timeout, a 60s idle timeout, a 1 MiB header cap, a 10s teardown budget, 1,024 container creation waiters and a 5s unavailable retry after. Each limit is the application's own default for the configuration key of the same name, MELODY_HTTP_READ_TIMEOUT, MELODY_HTTP_READ_HEADER_TIMEOUT, MELODY_HTTP_WRITE_TIMEOUT, MELODY_HTTP_IDLE_TIMEOUT, MELODY_HTTP_MAX_HEADER_BYTES, MELODY_TEARDOWN_TIMEOUT, MELODY_CONTAINER_CREATION_WAITERS and MELODY_HTTP_UNAVAILABLE_RETRY_AFTER: a key the deployment sets wins over the field. */
+/* ApplicationConfig is what an application is built from. A field left out takes its default: no embedded env files, no embedded public files, and the framework defaults of the limits, a 15s read timeout, a 5s read header timeout, a 30s write timeout, a 60s idle timeout, a 1 MiB header cap, a 10s teardown budget, 1,024 container creation waiters and a 5s unavailable retry after. Each limit is the application's own default for the configuration key of the same name, MELODY_HTTP_READ_TIMEOUT, MELODY_HTTP_READ_HEADER_TIMEOUT, MELODY_HTTP_WRITE_TIMEOUT, MELODY_HTTP_IDLE_TIMEOUT, MELODY_HTTP_MAX_HEADER_BYTES, MELODY_TEARDOWN_TIMEOUT, MELODY_CONTAINER_CREATION_WAITERS and MELODY_HTTP_UNAVAILABLE_RETRY_AFTER: the field is the default of its kernel.* parameter, which reads that key unless ParameterOverrides rewrites the parameter. */
 type ApplicationConfig struct {
     /* Version is the application's own version; empty is undeclared, <unknown> in a table and --version, "" in json. */
     Version string
@@ -48,17 +48,20 @@ type ApplicationConfig struct {
 
     /* ContainerCreationWaiters bounds the resolutions that may wait on one in-flight creation: 1,024 when left out, at least 1, unlimited admitted. */
     ContainerCreationWaiters bound.Count
-    /* UnavailableRetryAfter is the Retry-After of the 503 the error renderer answers an infrastructure failure with outside a firewall, a marked error an application's storage, cache or handler returns: 5s when left out, 1s to 1h in whole seconds, unlimited refused; MELODY_HTTP_UNAVAILABLE_RETRY_AFTER wins over it when set. A firewall answers with its own delay. */
+    /* UnavailableRetryAfter is the Retry-After of the 503 the error renderer answers an infrastructure failure with outside a firewall, a marked error an application's storage, cache or handler returns: 5s when left out, 1s to 1h in whole seconds, unlimited refused; the field is the default of kernel.http.unavailable_retry_after, which reads MELODY_HTTP_UNAVAILABLE_RETRY_AFTER unless overridden. A firewall answers with its own delay. */
     UnavailableRetryAfter bound.Duration
 
-    /* ContainerTeardownSequential closes the container's services one after the other instead of in waves, for services whose Close methods touch shared external state the container cannot see; MELODY_CONTAINER_TEARDOWN_SEQUENTIAL wins over it when set. */
+    /* ContainerTeardownSequential closes the container's services one after the other instead of in waves, for services whose Close methods touch shared external state the container cannot see; the field is the default of kernel.container_teardown_sequential, which reads MELODY_CONTAINER_TEARDOWN_SEQUENTIAL unless overridden. */
     ContainerTeardownSequential bool
 
-    /* SessionEmptyOnOutage answers a reader of the session an empty, unavailable session when the session storage cannot answer, where the default is a 503 with Retry-After: nothing of it is saved and no cookie is written; the firewall's sign-in and sign-out doors still refuse 503. MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE wins over it when set. */
+    /* SessionEmptyOnOutage answers a reader of the session an empty, unavailable session when the session storage cannot answer, where the default is a 503 with Retry-After: nothing of it is saved and no cookie is written; the firewall's sign-in and sign-out doors still refuse 503. The field is the default of kernel.http.session_empty_on_outage, which reads MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE unless overridden. */
     SessionEmptyOnOutage bool
 
     /* EnvironmentKeys are the .env keys the application owns, outside the MELODY_ namespace, each with the default, rule, secret mark, retired spellings and refusals of a module's key. They are declared when the application is built, before any parameter is read. A key in the MELODY_ namespace is refused. */
     EnvironmentKeys []configcontract.EnvironmentKey
+
+    /* ParameterOverrides rewrites, by parameter name, the template of a framework (kernel.*) parameter or of a parameter a module's key feeds: "%env(APP_Y)%", "%app.param%", a literal, or any mix. The override is the parameter's one source: the key that would feed it is not read, and a .env artifact that still sets that key refuses the boot naming the override, unless the override itself reads it. kernel.environment and kernel.project_directory are refused. An override of a kernel.* parameter is resolved when the application is built, so it reads keys, literals and other kernel.* parameters only; a name no framework or module key feeds refuses the boot. */
+    ParameterOverrides map[string]string
 }
 
 func NewApplication(
@@ -94,7 +97,7 @@ func NewApplication(
         )
     }
 
-    configuration, newConfigurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{EnvironmentKeys: applicationConfig.EnvironmentKeys})
+    configuration, newConfigurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{EnvironmentKeys: applicationConfig.EnvironmentKeys, ParameterOverrides: applicationConfig.ParameterOverrides})
     if nil != newConfigurationErr {
         /* the wrap names construction, not resolution: NewConfiguration also fails on validation and on building its views, and a resolve failure already carries its own message */
         exception.Panic(

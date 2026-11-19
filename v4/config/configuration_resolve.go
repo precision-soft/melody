@@ -89,6 +89,10 @@ func (instance *Configuration) resolveAll(deferUnresolvedReferences bool) error 
                 failureContext["environmentKey"] = parameter.environmentKey
             }
 
+            if true == parameter.overridden {
+                failureContext["overridden"] = true
+            }
+
             return exception.NewError(
                 "failed to resolve parameter",
                 failureContext,

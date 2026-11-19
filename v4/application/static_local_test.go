@@ -301,3 +301,45 @@ func newStaticPublicDirectoryTestConfiguration(t *testing.T, projectDirectory st
 
     return configuration
 }
+
+func TestNewApplication_AnOverrideReachesTheStaticServer(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{
+        EnvironmentFiles:   testhelper.NewEmbeddedEnvironmentFs(),
+        PublicFiles:        testhelper.NewEmbeddedStaticFs(),
+        ParameterOverrides: map[string]string{"kernel.static.index_file": "home.html"},
+    })
+    defer func() {
+        _ = applicationInstance.kernel.ServiceContainer().CloseWithContext(context.Background())
+    }()
+
+    if "home.html" != applicationInstance.httpMiddlewares.staticConfig.IndexFile {
+        t.Fatalf("expected the overridden index file, got %q", applicationInstance.httpMiddlewares.staticConfig.IndexFile)
+    }
+}
+
+func TestNewStaticFileServerConfig_AnOverriddenMissingPublicDirectoryNamesTheOverride(t *testing.T) {
+    projectDirectory := t.TempDir()
+
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{}})
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{ParameterOverrides: map[string]string{config.KernelPublicDirectory: "absent"}})
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    defer func() {
+        refusal, isRefusal := recover().(*exception.Error)
+        if false == isRefusal || "the public directory does not exist" != refusal.Message() {
+            t.Fatalf("expected the missing directory refused, got %v", refusal)
+        }
+
+        if config.KernelPublicDirectory != refusal.Context()["parameterName"] || true != refusal.Context()["overridden"] {
+            t.Fatalf("expected the override named, got %v", refusal.Context())
+        }
+    }()
+
+    newStaticFileServerConfig(nil, configuration)
+}

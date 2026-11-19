@@ -20,6 +20,13 @@ type RetiredEnvironmentKey struct {
     Owner     string
 }
 
+/* OverriddenEnvironmentKey is one key the .env artifacts set whose parameter the application overrode with a template that does not read it, with the owner that declared the key. */
+type OverriddenEnvironmentKey struct {
+    Key       string
+    Parameter string
+    Owner     string
+}
+
 /* EnvironmentKeyRule judges the resolved text of a key; an error names field. Describe is the rule in words, for the documentation of a module. */
 type EnvironmentKeyRule interface {
     Check(text string, field string) error
@@ -40,4 +47,13 @@ type EnvironmentKeyDeclarer interface {
 
     /* RetiredEnvironmentKeySuccessor answers the key that replaced a retired spelling, the framework's or a declared one, whether or not an artifact sets it. */
     RetiredEnvironmentKeySuccessor(key string) (string, bool)
+
+    /* OverriddenEnvironmentKeys answers, sorted by key, every key the .env artifacts set whose parameter the application overrode with a template that does not read it; presence counts, an empty line included. */
+    OverriddenEnvironmentKeys() []OverriddenEnvironmentKey
+
+    /* UnappliedParameterOverrides answers, sorted, every override name no declared key's parameter consumed; asked once the modules declared. */
+    UnappliedParameterOverrides() []string
+
+    /* EnvironmentKeyParameter answers the parameter a declared key feeds, the framework's keys included. */
+    EnvironmentKeyParameter(key string) (string, bool)
 }

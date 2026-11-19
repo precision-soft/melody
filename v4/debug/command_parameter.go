@@ -9,6 +9,7 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/internal"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
@@ -84,7 +85,8 @@ func (instance *ParameterCommand) Run(
 
     sort.Strings(keys)
 
-    environmentAliases := make(map[string][]string)
+    /* by identity: an overridden parameter and the key it stopped reading are two parameters under one key */
+    environmentAliases := make(map[configcontract.Parameter][]string)
 
     for _, name := range keys {
         parameter := applicationConfiguration.Get(name)
@@ -92,19 +94,11 @@ func (instance *ParameterCommand) Run(
             continue
         }
 
-        environmentKey := parameter.EnvironmentKey()
-        if "" == environmentKey {
+        if "" == parameter.EnvironmentKey() {
             continue
         }
 
-        aliasNames, exists := environmentAliases[environmentKey]
-        if false == exists {
-            aliasNames = []string{}
-        }
-
-        aliasNames = append(aliasNames, name)
-
-        environmentAliases[environmentKey] = aliasNames
+        environmentAliases[parameter] = append(environmentAliases[parameter], name)
     }
 
     items := make([]parameterListItem, 0, len(keys))
@@ -119,7 +113,7 @@ func (instance *ParameterCommand) Run(
 
         environmentKey := parameter.EnvironmentKey()
         if "" != environmentKey {
-            aliasNames, exists := environmentAliases[environmentKey]
+            aliasNames, exists := environmentAliases[parameter]
 
             if true == exists && 1 < len(aliasNames) && key == environmentKey {
                 continue
@@ -152,6 +146,7 @@ func (instance *ParameterCommand) Run(
                 Template:         redactedParameterValue(parameter.Template(), isSecret),
                 ValueString:      redactedParameterValue(parameter.Value(), isSecret),
                 IsDefault:        parameter.IsDefault(),
+                IsOverridden:     parameter.IsOverridden(),
                 IsSecret:         isSecret,
                 Aliases:          aliases,
             },
@@ -188,7 +183,7 @@ func (instance *ParameterCommand) Run(
 
         block := builder.AddBlock(
             "PARAMETERS",
-            []string{"parameter", "environmentKey", "template", "value", "default", "secret", "aliases"},
+            []string{"parameter", "environmentKey", "template", "value", "default", "overridden", "secret", "aliases"},
         )
 
         for _, item := range items {
@@ -198,6 +193,7 @@ func (instance *ParameterCommand) Run(
                 item.Template,
                 item.ValueString,
                 fmt.Sprintf("%t", item.IsDefault),
+                fmt.Sprintf("%t", item.IsOverridden),
                 fmt.Sprintf("%t", item.IsSecret),
                 item.Aliases,
             )
@@ -244,6 +240,7 @@ type parameterListItem struct {
     Template         string `json:"template"`
     ValueString      string `json:"value"`
     IsDefault        bool   `json:"isDefault"`
+    IsOverridden     bool   `json:"isOverridden"`
     IsSecret         bool   `json:"isSecret"`
     Aliases          string `json:"aliases"`
 }

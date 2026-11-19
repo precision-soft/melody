@@ -22,6 +22,14 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Config: a framework or module parameter is overridable, and its key then refuses
+
+**What changed.** [`ApplicationConfig.ParameterOverrides`](../application/application_new.go) rewrites, by parameter name, the template of a `kernel.*` parameter or of a parameter a module's key feeds, and the override is the parameter's one source: the key that fed it is no longer read, so a `.env` artifact that still sets it refuses the boot, unless the override reads it. A `kernel.*` override is resolved when the application is built and reads keys, literals and other `kernel.*` parameters only; `kernel.environment` and `kernel.project_directory` are not overridable. [`Parameter`](../config/contract/parameter.go) gains `IsOverridden()`, and [`EnvironmentKeyDeclarer`](../config/contract/environment_key.go) gains `OverriddenEnvironmentKeys`, `UnappliedParameterOverrides` and `EnvironmentKeyParameter`.
+
+**Symptom.** `the environment key … is set and reads nothing: the application overrides …; remove the line`; `a parameter override names a parameter no framework or module key feeds`; an out-of-tree `configcontract.Parameter` or `EnvironmentKeyDeclarer` no longer compiles.
+
+**Remedy.** Remove the line, or the override; name a parameter a framework or module key feeds; implement the new methods.
+
 ### Config: `NewConfiguration` takes a `ConfigurationConfig`, and an application declares its keys
 
 **What changed.** [`config.NewConfiguration`](../config/configuration.go) takes a third argument, a [`ConfigurationConfig`](../config/configuration.go), which carries the application's keys; [`ApplicationConfig.EnvironmentKeys`](../application/application_new.go) hands them to it, so an application declares its `.env` keys as a module does, with a default, a rule, a secret mark and retired spellings, before any parameter is read. An application's key is any name of upper-case letters, digits and underscores starting with a letter outside the `MELODY_` namespace, which is refused, and may retire a `MELODY_` spelling; a module's key stays in the namespace, and a module may not be named `the framework` or `the application`. The declaration refusals name no module: the declaring owner is under the context key `owner`, the owner of a colliding key under `holder`, and a value a declared key's rule refuses after the resolve fails the boot with `a declared environment key is refused`.

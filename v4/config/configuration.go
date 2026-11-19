@@ -26,6 +26,9 @@ var (
 type ConfigurationConfig struct {
     /* EnvironmentKeys are the application's declared keys, entered into the key table after the framework's and before the first resolve, owned by the application. */
     EnvironmentKeys []configcontract.EnvironmentKey
+
+    /* ParameterOverrides are the application's parameter overrides, by parameter name: a kernel.* one applied at construction, any other held for the module that declares the key feeding it. */
+    ParameterOverrides map[string]string
 }
 
 func NewConfiguration(
@@ -58,6 +61,11 @@ func NewConfiguration(
     declareApplicationEnvironmentKeysErr := configuration.declareApplicationEnvironmentKeys(configurationConfig.EnvironmentKeys)
     if nil != declareApplicationEnvironmentKeysErr {
         return nil, declareApplicationEnvironmentKeysErr
+    }
+
+    applyParameterOverridesErr := configuration.applyParameterOverrides(configurationConfig.ParameterOverrides)
+    if nil != applyParameterOverridesErr {
+        return nil, applyParameterOverridesErr
     }
 
     resolvePlaceholdersErr := configuration.resolvePlaceholders()
@@ -113,6 +121,9 @@ type Configuration struct {
 
     /* keyed by the retired spelling, holding the declared key that replaced it */
     declaredRetiredEnvironmentKeys map[string]string
+
+    /* overrides of a parameter no key declared at construction feeds, by parameter name, consumed by the declaration of its key */
+    pendingParameterOverrides map[string]string
 }
 
 /* MarkServing ends the wiring phase: Resolve is refused from then on, and a parameter registered later resolves on registration. */
@@ -523,8 +534,8 @@ func (instance *Configuration) buildCliConfiguration() error {
     }
 
     cliConfigurationInstance, newCliConfigurationErr := newCliConfiguration(
-        instance.MustGet(CliNameKey).MustString(),
-        instance.MustGet(CliDescriptionKey).MustString(),
+        instance.MustGet(KernelCliName).MustString(),
+        instance.MustGet(KernelCliDescription).MustString(),
         splitConfigurationList(instance.MustGet(KernelCliBootWarningsIgnored).MustString()),
         bootWarningsDisabled.Value,
     )

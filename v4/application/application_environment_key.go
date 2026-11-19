@@ -91,6 +91,61 @@ func retiredEnvironmentKeysMessage(retiredKeys []configcontract.RetiredEnvironme
     return strings.Join(parts, "; ")
 }
 
+func (instance *Application) refuseUnappliedParameterOverrides() {
+    declarer, isDeclarer := instance.configuration.(configcontract.EnvironmentKeyDeclarer)
+    if false == isDeclarer {
+        return
+    }
+
+    names := declarer.UnappliedParameterOverrides()
+    if 0 == len(names) {
+        return
+    }
+
+    exception.Panic(exception.NewError(
+        "a parameter override names a parameter no framework or module key feeds",
+        exceptioncontract.Context{"parameterNames": strings.Join(names, ", ")},
+        nil,
+    ))
+}
+
+/* names keys and parameters only, never a value; one refusal for all of them */
+func (instance *Application) refuseOverriddenEnvironmentKeys() {
+    declarer, isDeclarer := instance.configuration.(configcontract.EnvironmentKeyDeclarer)
+    if false == isDeclarer {
+        return
+    }
+
+    overriddenKeys := declarer.OverriddenEnvironmentKeys()
+    if 0 == len(overriddenKeys) {
+        return
+    }
+
+    exception.Panic(exception.NewError(
+        overriddenEnvironmentKeysMessage(overriddenKeys),
+        exceptioncontract.Context{"overriddenEnvironmentKeys": overriddenEnvironmentKeysContext(overriddenKeys)},
+        nil,
+    ))
+}
+
+func overriddenEnvironmentKeysContext(overriddenKeys []configcontract.OverriddenEnvironmentKey) []map[string]string {
+    entries := make([]map[string]string, 0, len(overriddenKeys))
+    for _, overriddenKey := range overriddenKeys {
+        entries = append(entries, map[string]string{"key": overriddenKey.Key, "parameter": overriddenKey.Parameter, "owner": overriddenKey.Owner})
+    }
+
+    return entries
+}
+
+func overriddenEnvironmentKeysMessage(overriddenKeys []configcontract.OverriddenEnvironmentKey) string {
+    parts := make([]string, 0, len(overriddenKeys))
+    for _, overriddenKey := range overriddenKeys {
+        parts = append(parts, "the environment key "+overriddenKey.Key+" is set and reads nothing: the application overrides "+overriddenKey.Parameter+"; remove the line")
+    }
+
+    return strings.Join(parts, "; ")
+}
+
 /* after the resolve, so a templated value is judged as its readers get it */
 func (instance *Application) refuseModuleEnvironmentKeys() {
     declarer, isDeclarer := instance.configuration.(configcontract.EnvironmentKeyDeclarer)

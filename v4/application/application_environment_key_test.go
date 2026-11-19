@@ -94,6 +94,12 @@ func newEnvironmentKeyBootApplicationIn(t *testing.T, values map[string]string, 
 func newEnvironmentKeyBootApplicationWithKeysIn(t *testing.T, values map[string]string, applicationKeys []configcontract.EnvironmentKey, projectDirectory string) *Application {
     t.Helper()
 
+    return newEnvironmentKeyBootApplicationWithOverridesIn(t, values, applicationKeys, nil, projectDirectory)
+}
+
+func newEnvironmentKeyBootApplicationWithOverridesIn(t *testing.T, values map[string]string, applicationKeys []configcontract.EnvironmentKey, overrides map[string]string, projectDirectory string) *Application {
+    t.Helper()
+
     bootValues := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}
     for key, value := range values {
         bootValues[key] = value
@@ -104,7 +110,7 @@ func newEnvironmentKeyBootApplicationWithKeysIn(t *testing.T, values map[string]
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{EnvironmentKeys: applicationKeys})
+    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{EnvironmentKeys: applicationKeys, ParameterOverrides: overrides})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -610,4 +616,117 @@ func TestRetiredEnvironmentKeysMessage_JoinsInTheGivenOrder(t *testing.T) {
     if "the environment key MELODY_A is retired: rename it to MELODY_A_NEW; the environment key MELODY_B is retired: rename it to MELODY_B_NEW" != message {
         t.Fatalf("unexpected message %q", message)
     }
+}
+
+func bootOverrideChild(t *testing.T, values map[string]string, overrides map[string]string, modules ...applicationcontract.Module) (string, string, bool) {
+    t.Helper()
+
+    if projectDirectory := os.Getenv(retiredEnvironmentKeyChildVariable); "" != projectDirectory {
+        applicationInstance := newEnvironmentKeyBootApplicationWithOverridesIn(t, values, nil, overrides, projectDirectory)
+        applicationInstance.modules = modules
+
+        applicationInstance.Boot()
+
+        return "", "", true
+    }
+
+    childProjectDirectory := t.TempDir()
+    command := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
+    command.Env = append(os.Environ(), retiredEnvironmentKeyChildVariable+"="+childProjectDirectory)
+
+    output, runErr := command.CombinedOutput()
+    if nil == runErr {
+        t.Fatalf("expected the child's boot refused, got: %s", output)
+    }
+
+    journal, _ := os.ReadFile(filepath.Join(childProjectDirectory, "var", "log", "dev.log"))
+
+    return string(output), string(journal), false
+}
+
+func TestBoot_SetKeyOfAnOverriddenParameterRefuses_NamingTheOverride(t *testing.T) {
+    output, journal, isChild := bootOverrideChild(
+        t,
+        map[string]string{"MELODY_HTTP_ADDRESS": "s3cr3t-address", "MELODY_X_TEXT": "s3cr3t-text"},
+        map[string]string{"kernel.http_address": ":9090", "melody.x.text": "literal"},
+        &environmentKeyTestModule{name: "x", keys: []configcontract.EnvironmentKey{environmentKeyText()}},
+    )
+    if true == isChild {
+        return
+    }
+
+    expected := "after unrecovered error: the environment key MELODY_HTTP_ADDRESS is set and reads nothing: the application overrides kernel.http_address; remove the line; the environment key MELODY_X_TEXT is set and reads nothing: the application overrides melody.x.text; remove the line"
+    if false == strings.Contains(output, expected) {
+        t.Fatalf("expected one refusal naming both keys, got: %s", output[max(0, len(output)-1500):])
+    }
+
+    expectedContext := `"context":{"overriddenEnvironmentKeys":[{"key":"MELODY_HTTP_ADDRESS","owner":"the framework","parameter":"kernel.http_address"},{"key":"MELODY_X_TEXT","owner":"x","parameter":"melody.x.text"}]}`
+    if false == strings.Contains(journal, expectedContext) {
+        t.Fatalf("expected the journal context %s, got: %s", expectedContext, journal)
+    }
+
+    if true == strings.Contains(output+journal, "s3cr3t") {
+        t.Fatalf("expected no value in the refusal, got: %s %s", output, journal)
+    }
+}
+
+func TestBoot_RetiredKeyIsRefusedBeforeTheOverriddenKey(t *testing.T) {
+    output, _, isChild := bootOverrideChild(
+        t,
+        map[string]string{"MELODY_PUBLIC_DIR": "web", "MELODY_HTTP_ADDRESS": ":8080"},
+        map[string]string{"kernel.http_address": ":9090"},
+    )
+    if true == isChild {
+        return
+    }
+
+    if false == strings.Contains(output, "after unrecovered error: the environment key MELODY_PUBLIC_DIR is retired: rename it to MELODY_PUBLIC_DIRECTORY") || true == strings.Contains(output, "is set and reads nothing") {
+        t.Fatalf("expected the retired spelling refused first, got: %s", output[max(0, len(output)-1500):])
+    }
+}
+
+func TestBoot_OverrideOfANameNoKeyFeedsRefuses(t *testing.T) {
+    output, journal, isChild := bootOverrideChild(t, map[string]string{}, map[string]string{"app.typo": "x", "melody.no.such": "y"})
+    if true == isChild {
+        return
+    }
+
+    if false == strings.Contains(output, "after unrecovered error: a parameter override names a parameter no framework or module key feeds") || false == strings.Contains(journal, `"parameterNames":"app.typo, melody.no.such"`) {
+        t.Fatalf("expected the unapplied overrides refused by name, got: %s", output[max(0, len(output)-1500):])
+    }
+}
+
+func TestBoot_ModuleParameterOverrideIsJudgedAfterTheModulesDeclare(t *testing.T) {
+    output, _, isChild := bootOverrideChild(
+        t,
+        map[string]string{"MELODY_PUBLIC_DIR": "web"},
+        map[string]string{"melody.x.text": "literal"},
+        &environmentKeyTestModule{name: "x", keys: []configcontract.EnvironmentKey{environmentKeyText()}},
+    )
+    if true == isChild {
+        return
+    }
+
+    if true == strings.Contains(output, "no framework or module key feeds") || false == strings.Contains(output, "MELODY_PUBLIC_DIR is retired") {
+        t.Fatalf("expected the consumed override admitted and the boot to reach the next refusal, got: %s", output[max(0, len(output)-1500):])
+    }
+}
+
+func TestRefuseCliBootWarningKeysInHttp_AnOverrideOfTheCliSwitchesIsNotRefused(t *testing.T) {
+    applicationInstance := newEnvironmentKeyBootApplicationWithOverridesIn(
+        t,
+        map[string]string{},
+        nil,
+        map[string]string{config.KernelCliBootWarningsDisabled: "true"},
+        t.TempDir(),
+    )
+    applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeHttp})
+
+    defer func() {
+        if recovered := recover(); nil != recovered {
+            t.Fatalf("expected an override of the cli switches ignored by an http process, got %v", recovered)
+        }
+    }()
+
+    applicationInstance.refuseCliBootWarningKeysInHttp()
 }

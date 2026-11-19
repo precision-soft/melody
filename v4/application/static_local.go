@@ -71,10 +71,7 @@ func refuseAnExplicitPublicDirectoryThatIsNotADirectory(configuration configcont
         exception.Panic(
             exception.NewError(
                 message,
-                exceptioncontract.Context{
-                    "environmentKey":  config.PublicDirectoryKey,
-                    "publicDirectory": publicDirectory,
-                },
+                publicDirectoryRefusalContext(parameter, publicDirectory),
                 publicDirectoryErr,
             ),
         )
@@ -84,12 +81,23 @@ func refuseAnExplicitPublicDirectoryThatIsNotADirectory(configuration configcont
         exception.Panic(
             exception.NewError(
                 "the public directory is a file",
-                exceptioncontract.Context{
-                    "environmentKey":  config.PublicDirectoryKey,
-                    "publicDirectory": publicDirectory,
-                },
+                publicDirectoryRefusalContext(parameter, publicDirectory),
                 nil,
             ),
         )
     }
+}
+
+func publicDirectoryRefusalContext(parameter configcontract.Parameter, publicDirectory string) exceptioncontract.Context {
+    context := exceptioncontract.Context{
+        "environmentKey":  config.PublicDirectoryKey,
+        "publicDirectory": publicDirectory,
+    }
+
+    if true == parameter.IsOverridden() {
+        context["parameterName"] = config.KernelPublicDirectory
+        context["overridden"] = true
+    }
+
+    return context
 }
