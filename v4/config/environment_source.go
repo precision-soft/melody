@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "bufio"
     "bytes"
     "io/fs"
@@ -46,7 +47,12 @@ type dotEnvProvenance struct {
     assembledFrom map[string][]string
 }
 
-func (instance *EnvironmentSource) Load() (map[string]string, error) {
+func (instance *EnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
+    /* the files are read without waiting on anything, so the context is judged once, before the first read */
+    if contextErr := ctx.Err(); nil != contextErr {
+        return nil, contextErr
+    }
+
     values := make(map[string]string)
 
     environmentName, loadDotEnvFilesErr := instance.loadDotEnvFiles(values)

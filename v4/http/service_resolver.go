@@ -16,16 +16,16 @@ const (
     ServiceRequestContext = "service.http.request.context"
 )
 
-func RouteRegistryMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) httpcontract.RouteRegistry {
-    return container.MustFromResolver[httpcontract.RouteRegistry](ctx, serviceContainer, ServiceRouteRegistry)
+func RouteRegistryMustFromResolver(ctx context.Context, resolver containercontract.Resolver) httpcontract.RouteRegistry {
+    return container.MustFromResolver[httpcontract.RouteRegistry](ctx, resolver, ServiceRouteRegistry)
 }
 
-func UrlGeneratorMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) httpcontract.UrlGenerator {
-    return container.MustFromResolver[httpcontract.UrlGenerator](ctx, serviceContainer, ServiceUrlGenerator)
+func UrlGeneratorMustFromResolver(ctx context.Context, resolver containercontract.Resolver) httpcontract.UrlGenerator {
+    return container.MustFromResolver[httpcontract.UrlGenerator](ctx, resolver, ServiceUrlGenerator)
 }
 
-func RouterMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) httpcontract.Router {
-    return container.MustFromResolver[httpcontract.Router](ctx, serviceContainer, ServiceRouter)
+func RouterMustFromResolver(ctx context.Context, resolver containercontract.Resolver) httpcontract.Router {
+    return container.MustFromResolver[httpcontract.Router](ctx, resolver, ServiceRouter)
 }
 
 /* RequestContextMustFromResolver resolves the current request's context, its id and start moment. It takes a resolver, since the kernel installs the service on each request scope only: resolved from the root container or a console process it panics with the service not registered. */

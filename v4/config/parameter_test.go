@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "errors"
     "fmt"
     "strings"
@@ -434,7 +435,7 @@ func TestParameter_Bool_KeepsASecretValueOutOfTheCause(t *testing.T) {
 func TestParameter_IntReadsTheSameGrammarItsSiblingsRead(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
-    environment, environmentErr := NewEnvironment(source)
+    environment, environmentErr := NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("new environment error: %v", environmentErr)
     }

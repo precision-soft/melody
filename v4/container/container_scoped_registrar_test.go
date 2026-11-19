@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "reflect"
     "testing"
@@ -450,7 +451,7 @@ func scopedNameProbeProvider() containercontract.Provider[*providerContractProbe
 func TestContainer_RegisterScopedRefusedAfterClose(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

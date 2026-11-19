@@ -196,7 +196,7 @@ func copyStringList(values []string) []string {
 
 func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) nethttp.Handler {
     /* in the kernel rather than at boot, so a bare kernel and Boot's kernel under another server answer alike */
-    installBuiltInExceptionListener(event.EventDispatcherMustFromContainer(context.Background(), serviceContainer))
+    installBuiltInExceptionListener(event.EventDispatcherMustFromResolver(context.Background(), serviceContainer))
 
     /* the freeze is not a lock: a mutator already past its check is not caught */
     instance.serving.Store(true)
@@ -300,7 +300,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
             serviceContainer,
         )
 
-        configuration := config.ConfigMustFromContainer(request.Context(), serviceContainer)
+        configuration := config.ConfigMustFromResolver(request.Context(), serviceContainer)
         defaultLocale := configuration.Http().DefaultLocale()
         debugMode := config.EnvironmentDevelopment == configuration.Kernel().Environment()
 
@@ -458,7 +458,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         /* the recovery defer reads this before finalResponse is assigned */
         chainResponse := (httpcontract.Response)(nil)
 
-        eventDispatcher := event.EventDispatcherMustFromContainer(request.Context(), serviceContainer)
+        eventDispatcher := event.EventDispatcherMustFromResolver(request.Context(), serviceContainer)
 
         var sessionManager sessioncontract.Manager
 
@@ -548,7 +548,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }()
 
         /* resolved below the recovery defer, since a replaceable container may panic */
-        sessionManager = session.SessionMustFromContainer(request.Context(), serviceContainer)
+        sessionManager = session.SessionMustFromResolver(request.Context(), serviceContainer)
 
         cookieValue := ""
         cookie, _ := request.Cookie(session.SessionCookieName)
@@ -934,7 +934,7 @@ func (instance *Kernel) requestIdLogger(
 ) (loggingcontract.Logger, string, error) {
     requestId := logging.GenerateProcessId()
 
-    baseLogger := logging.LoggerMustFromContainer(ctx, serviceContainer)
+    baseLogger := logging.LoggerMustFromResolver(ctx, serviceContainer)
     if nil == baseLogger {
         return nil, requestId, exception.NewError("failed to get base logger", nil, nil)
     }

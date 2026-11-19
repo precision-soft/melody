@@ -604,7 +604,6 @@ func serveUrlEncodedFormUnderALimit(t *testing.T, bodyLimitBytes int, valueBytes
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/form",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             postedValueBytes = len(request.HttpRequest().PostForm.Get("value"))
@@ -614,6 +613,7 @@ func serveUrlEncodedFormUnderALimit(t *testing.T, bodyLimitBytes int, valueBytes
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(

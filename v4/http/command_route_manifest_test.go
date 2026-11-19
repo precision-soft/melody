@@ -23,7 +23,7 @@ import (
 type manifestCommandEmptyEnvironmentSource struct {
 }
 
-func (instance *manifestCommandEmptyEnvironmentSource) Load() (map[string]string, error) {
+func (instance *manifestCommandEmptyEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return map[string]string{}, nil
 }
 
@@ -31,7 +31,7 @@ func newManifestCommandRuntime(t *testing.T, projectDirectory string) runtimecon
     t.Helper()
 
     router := NewRouter()
-    router.HandleWithOptions(
+    router.Handle(
         "/products",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
@@ -39,7 +39,7 @@ func newManifestCommandRuntime(t *testing.T, projectDirectory string) runtimecon
         RouteOptions{Name: "products.list", Methods: []string{nethttp.MethodGet}, Attributes: ExposedRouteAttributes(RouteZoneFrontend)},
     )
 
-    environment, environmentErr := config.NewEnvironment(&manifestCommandEmptyEnvironmentSource{})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &manifestCommandEmptyEnvironmentSource{})
     if nil != environmentErr {
         t.Fatalf("new environment: %v", environmentErr)
     }

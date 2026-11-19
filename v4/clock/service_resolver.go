@@ -14,16 +14,6 @@ const (
     ServiceClock = "service.clock"
 )
 
-func ClockMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) clockcontract.Clock {
-    if true == internal.IsNilInterface(serviceContainer) {
-        exception.Panic(
-            exception.NewError("container may not be nil", nil, nil),
-        )
-    }
-
-    return container.MustFromResolver[clockcontract.Clock](ctx, serviceContainer, ServiceClock)
-}
-
 func ClockMustFromResolver(ctx context.Context, resolver containercontract.Resolver) clockcontract.Clock {
     if true == internal.IsNilInterface(resolver) {
         exception.Panic(

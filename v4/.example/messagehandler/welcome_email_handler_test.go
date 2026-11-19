@@ -34,7 +34,7 @@ func runtimeWithMailer(t *testing.T, transport melodymailercontract.Transport) m
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     if nil != transport {
         mailer := melodymailer.NewManager(transport)

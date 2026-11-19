@@ -90,7 +90,7 @@ func example() int64 {
         )
     }
 
-    containerCloseErr := serviceContainer.Close()
+    containerCloseErr := serviceContainer.CloseWithContext(context.Background())
     if nil != containerCloseErr {
         exception.Panic(
             exception.NewError("failed to close container", nil, containerCloseErr),

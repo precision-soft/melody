@@ -40,16 +40,16 @@ import (
 func TestKernel_ResponseListenerReplacesResponseOnSuccessPath(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/hello",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "original"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -83,16 +83,16 @@ func TestKernel_ResponseListenerReplacesResponseOnSuccessPath(t *testing.T) {
 func TestKernel_ResponseListenerReplacesResponseOnPanicRecoveryPath(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/boom",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             panic("boom")
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -128,7 +128,6 @@ func TestKernel_ClosesHandlerReturnedBodyWhenHandlerAlreadyStreamed(t *testing.T
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/stream-then-return",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             writer.WriteHeader(nethttp.StatusOK)
@@ -139,6 +138,7 @@ func TestKernel_ClosesHandlerReturnedBodyWhenHandlerAlreadyStreamed(t *testing.T
                 bodyReader: body,
             }, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -158,7 +158,6 @@ func TestKernel_ClosesDiscardedResponseBodyWhenResponseListenerSwapsResponse(t *
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/file-then-swap",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return &Response{
@@ -167,11 +166,12 @@ func TestKernel_ClosesDiscardedResponseBodyWhenResponseListenerSwapsResponse(t *
                 bodyReader: body,
             }, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -205,7 +205,6 @@ func TestKernel_ClosesDiscardedResponseBodyWhenResponseListenerSwapsResponse(t *
 func TestKernel_DoesNotWriteDefaultResponseWhenHandlerAlreadyStreamed(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/stream",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             writer.WriteHeader(nethttp.StatusOK)
@@ -217,6 +216,7 @@ func TestKernel_DoesNotWriteDefaultResponseWhenHandlerAlreadyStreamed(t *testing
 
             return nil, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -240,7 +240,6 @@ func TestKernel_PreservesHijackerForWrappedResponseWriter(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/ws",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             hijacker, isHijacker := writer.(nethttp.Hijacker)
@@ -255,6 +254,7 @@ func TestKernel_PreservesHijackerForWrappedResponseWriter(t *testing.T) {
 
             return nil, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -283,7 +283,6 @@ func TestKernel_PreservesHijackerForWrappedResponseWriter(t *testing.T) {
 func TestKernel_WritesDefaultResponseWhenHijackFails(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/ws",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             hijacker, isHijacker := writer.(nethttp.Hijacker)
@@ -293,6 +292,7 @@ func TestKernel_WritesDefaultResponseWhenHijackFails(t *testing.T) {
 
             return nil, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -313,7 +313,6 @@ func TestKernel_WritesDefaultResponseWhenHijackFails(t *testing.T) {
 func TestKernel_DoesNotRewriteResponseWhenHandlerStreamedThenPanicked(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/stream-panic",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             writer.WriteHeader(nethttp.StatusOK)
@@ -325,6 +324,7 @@ func TestKernel_DoesNotRewriteResponseWhenHandlerStreamedThenPanicked(t *testing
 
             panic("boom after streaming")
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -349,7 +349,6 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/save",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -361,6 +360,7 @@ func TestKernel_DoesNotDoublePersistSessionWhenWriteFailsAfterCommit(t *testing.
 
             return TextResponse(nethttp.StatusOK, "body"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorage(storage)
@@ -416,18 +416,18 @@ func TestKernel_FailsClosedWhenKernelRequestDispatchErrors(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/guarded",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             handlerRan = true
 
             return TextResponse(nethttp.StatusOK, "handled"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -473,18 +473,18 @@ func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/guarded",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             handlerRan = true
 
             return TextResponse(nethttp.StatusOK, "handled"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
     dispatcher.AddListener(
         kernelcontract.EventKernelController,
@@ -527,16 +527,16 @@ func TestKernel_FailsClosedWhenKernelControllerDispatchErrors(t *testing.T) {
 func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/denied",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "handled"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -568,16 +568,16 @@ func TestKernel_KernelRequestListenerResponseStillWinsOverDispatchError(t *testi
 func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/admin",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "handled"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
     requiredRegistration := dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -629,16 +629,16 @@ func TestKernel_KernelRequestStoppingListenerThatAnswersStillFailsClosedBeforeAR
 func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/admin",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "handled"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
     requiredRegistration := dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -691,16 +691,16 @@ func TestKernel_KernelRequestFailingMaySkipListenerThatAnswersStillFailsClosedBe
 func TestKernel_KernelControllerStoppingListenerThatAnswersStillFailsClosedBeforeARequiredListener(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/admin",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "handled"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
     requiredRegistration := dispatcher.AddListener(
         kernelcontract.EventKernelController,
@@ -752,16 +752,16 @@ func TestKernel_KernelControllerStoppingListenerThatAnswersStillFailsClosedBefor
 func TestKernel_ResponseListenerErrorDoesNotDropResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/still-served",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "served"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -807,7 +807,6 @@ func (instance *failingSessionStorage) CloseWithContext(closeContext context.Con
 func TestKernel_SessionSaveFailureAnswersServiceUnavailable(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/session-write",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -818,6 +817,7 @@ func TestKernel_SessionSaveFailureAnswersServiceUnavailable(t *testing.T) {
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorage(&failingSessionStorage{})
@@ -845,7 +845,6 @@ func TestKernel_SessionSaveFailureAnswersServiceUnavailable(t *testing.T) {
 func TestKernel_SessionSaveFailureAnswersTheKernelsRetryAfter(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/session-write",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -856,6 +855,7 @@ func TestKernel_SessionSaveFailureAnswersTheKernelsRetryAfter(t *testing.T) {
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorage(&failingSessionStorage{})
@@ -873,7 +873,6 @@ func TestKernel_SessionSaveFailureAnswersTheKernelsRetryAfter(t *testing.T) {
 func TestKernel_SessionSaveFailureOnPanicRecoveryPathStillDeliversAResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/session-write-boom",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, _ := RequestSession(request)
@@ -881,6 +880,7 @@ func TestKernel_SessionSaveFailureOnPanicRecoveryPathStillDeliversAResponse(t *t
 
             panic("handler exploded after touching the session")
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorage(&failingSessionStorage{})
@@ -922,11 +922,11 @@ func (instance *errorCountingLogger) Emergency(message string, context loggingco
 func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/logged-once",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     countingLogger := &errorCountingLogger{}
@@ -934,7 +934,7 @@ func TestKernel_HandlerPathResponseDispatchErrorRespectsAlreadyLogged(t *testing
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -1002,7 +1002,6 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/file",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -1019,6 +1018,7 @@ func TestKernel_PanicRecoveryClosesTheDiscardedFileBackedResponse(t *testing.T) 
 
             return response, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorage(storage)
@@ -1041,7 +1041,6 @@ func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/file-then-exit",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -1057,12 +1056,13 @@ func TestKernel_PanicRecoveryClosesTheDiscardedResponseWhenAListenerLeavesByExit
                 bodyReader: original,
             }, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorage(storage)
 
     publishes := 0
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -1107,7 +1107,6 @@ func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedO
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/file-then-swap",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -1123,12 +1122,13 @@ func TestKernel_PanicRecoveryClosesTheResponseAListenerSwappedInNotTheDiscardedO
                 bodyReader: original,
             }, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorage(storage)
 
     swappedOnce := false
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -1173,7 +1173,6 @@ func TestKernel_PanicRecoveryDoesNotCloseAResponseTheRepublishHandsBack(t *testi
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/file-then-swap-always",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -1189,6 +1188,7 @@ func TestKernel_PanicRecoveryDoesNotCloseAResponseTheRepublishHandsBack(t *testi
                 bodyReader: original,
             }, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorage(storage)
@@ -1200,7 +1200,7 @@ func TestKernel_PanicRecoveryDoesNotCloseAResponseTheRepublishHandsBack(t *testi
     }
 
     publishes := 0
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -1242,11 +1242,11 @@ func TestKernel_AbortHandlerPanicClosesTheConnectionWithoutAResponse(t *testing.
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodGet,
         "/abort",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             panic(nethttp.ErrAbortHandler)
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -1268,7 +1268,6 @@ func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
     observedScheme := ""
 
     router.Handle(
-        nethttp.MethodGet,
         "/scheme",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             if schemeValue, exists := request.Attributes().Get(RequestAttributeScheme); true == exists {
@@ -1279,6 +1278,7 @@ func TestKernel_PublishesThePolicyResolvedSchemeOnTheRequest(t *testing.T) {
 
             return TextResponse(200, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     kernelInstance := NewKernel(router, KernelConfig{})
@@ -1393,7 +1393,6 @@ func serveOverSessionManager(t *testing.T, sessionManager sessioncontract.Manage
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/page",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             served.handlerCalls = served.handlerCalls + 1
@@ -1407,15 +1406,16 @@ func serveOverSessionManager(t *testing.T, sessionManager sessioncontract.Manage
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
     router.Handle(
-        nethttp.MethodGet,
         "/quiet",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             served.handlerCalls = served.handlerCalls + 1
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     countingLogger := &errorCountingLogger{}
@@ -1423,7 +1423,7 @@ func serveOverSessionManager(t *testing.T, sessionManager sessioncontract.Manage
     serviceContainer := newHttpTestContainerWithSessionManager(sessionManager)
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
 
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelTerminate,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             served.terminateCalls = served.terminateCalls + 1
@@ -1531,13 +1531,13 @@ func TestKernel_AnUnmarkedManagerErrorAnswers500(t *testing.T) {
 func TestKernel_ASessionStorageOutageReachesTheExceptionListenersRecordedOnce(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/page",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             _, sessionReadErr := RequestSession(request)
 
             return nil, sessionReadErr
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     countingLogger := &errorCountingLogger{}
@@ -1548,7 +1548,7 @@ func TestKernel_ASessionStorageOutageReachesTheExceptionListenersRecordedOnce(t 
 
     listenerCalls := 0
     listenerSawUnavailable := false
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             exceptionEvent := eventValue.Payload().(*KernelExceptionEvent)
@@ -1629,18 +1629,18 @@ func TestKernel_ASessionAnsweredBesideALoadErrorIsNotSavedWhenTheResponsePathPan
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/page",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             _, sessionReadErr := RequestSession(request)
 
             return nil, sessionReadErr
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
     serviceContainer := newHttpTestContainerWithSessionManager(sessionManager)
 
     responsePanics := true
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             if true == responsePanics {
@@ -1669,13 +1669,12 @@ func TestKernel_ASessionAnsweredBesideALoadErrorIsNotSavedWhenTheResponsePathPan
 
 func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
+    sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
     republishedId := ""
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/republish",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             replacement := mustSession(sessionManager.NewSession(context.Background()))
@@ -1687,6 +1686,7 @@ func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) 
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -1707,14 +1707,13 @@ func TestKernel_EmitsTheCookieOfTheSessionRepublishedOnTheRequest(t *testing.T) 
 
 func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
+    sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
     preRotationId := ""
     rotatedId := ""
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/login",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -1742,6 +1741,7 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -1783,7 +1783,7 @@ func TestKernel_RotatedSessionEmitsTheNewIdAndDropsTheOldEntry(t *testing.T) {
 
 func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
+    sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
     existingSession := mustSession(sessionManager.NewSession(context.Background()))
     existingSession.Set("userId", "anonymous")
@@ -1797,7 +1797,6 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/login-without-republish",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -1814,6 +1813,7 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -1847,7 +1847,6 @@ func TestKernel_RotationWithoutRepublishingClearsTheAbandonedSession(t *testing.
 func TestKernel_SessionCookiePolicyWithoutSameSiteKeepsTheLaxDefault(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/session-write",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -1859,6 +1858,7 @@ func TestKernel_SessionCookiePolicyWithoutSameSiteKeepsTheLaxDefault(t *testing.
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     kernelInstance := NewKernel(router, KernelConfig{})
@@ -1894,7 +1894,7 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
     observedScheme := ""
     observedSessionIsSession := false
 
-    router.HandleWithOptions(
+    router.Handle(
         "/owned",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             if schemeValue, exists := request.Attributes().Get(RequestAttributeScheme); true == exists {
@@ -1935,11 +1935,11 @@ func TestKernel_RouteAttributesCannotReplaceTheKernelOwnedAttributes(t *testing.
 func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodDelete,
         "/nothing",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodDelete}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -1947,7 +1947,7 @@ func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.
     dispatchCount := 0
     observedStatusCode := -1
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -1997,16 +1997,16 @@ func TestKernel_DispatchesResponseEventForHandlerReturningNoResponse(t *testing.
 func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/nothing",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -2041,11 +2041,11 @@ func TestKernel_ResponseListenerMayReplaceTheSynthesizedEmptyResponse(t *testing
 func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/boom",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             panic("handler exploded")
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     recordingLogger := &errorContextRecordingLogger{}
@@ -2083,7 +2083,7 @@ func TestKernel_PanicRecoveryLogsPanicSiteStack(t *testing.T) {
 func newContainerWithPanickingExceptionListener(t *testing.T, serviceContainer containercontract.Container) containercontract.Container {
     t.Helper()
 
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             panic("listener exploded")
@@ -2099,7 +2099,6 @@ func TestKernel_AListenerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *test
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/fail-with-open-body",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             response := &Response{
@@ -2110,6 +2109,7 @@ func TestKernel_AListenerPanicOnHandlerErrorPathClosesBodyAndDelivers500(t *test
 
             return response, exception.NewError("handler failed after opening the body", nil, nil)
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     kernel := NewKernel(router, KernelConfig{})
@@ -2165,7 +2165,6 @@ func TestKernel_AListenerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testing.
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/session-write-then-file",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, _ := RequestSession(request)
@@ -2179,6 +2178,7 @@ func TestKernel_AListenerPanicOnRecoveryPathClosesBodyAndDelivers500(t *testing.
 
             return response, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     kernel := NewKernel(router, KernelConfig{})
@@ -2204,13 +2204,13 @@ func TestKernel_OversizedUrlencodedFormIsRefusedWith413(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/form",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             handlerInvoked = true
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -2251,13 +2251,13 @@ func TestKernel_BrokenUrlencodedBodyIsRefusedWith400(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/form",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             handlerInvoked = true
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -2314,7 +2314,6 @@ func (instance *typedNilReturningSessionManager) CloseWithContext(closeContext c
 func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/session",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             publishedSession, sessionReadErr := RequestSession(request)
@@ -2326,6 +2325,7 @@ func TestKernel_MintsASessionWhenTheManagerAnswersWithATypedNil(t *testing.T) {
 
             return TextResponse(nethttp.StatusOK, publishedSession.Id()), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     storage := session.NewInMemoryStorage(session.InMemoryStorageConfig{})
@@ -2436,11 +2436,11 @@ func TestKernel_TheNoRouteRecordRedactsQueryValues(t *testing.T) {
 func TestKernel_TheMethodNotAllowedRecordRedactsQueryValues(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/only-post",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "posted"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     recordingLogger := &warningRecordingLogger{}
@@ -2475,7 +2475,6 @@ func TestKernel_TheMethodNotAllowedRecordRedactsQueryValues(t *testing.T) {
 func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/stream",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             writer.WriteHeader(nethttp.StatusOK)
@@ -2487,6 +2486,7 @@ func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
 
             return nil, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     recordingLogger := &warningRecordingLogger{}
@@ -2509,16 +2509,16 @@ func TestKernel_LogsWhenACommittedResponseDropsARotatedSession(t *testing.T) {
 func TestKernel_ServesTheResponseOfAStoppingListenerWhenNothingRequiredWasSkipped(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/hello",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "handler"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -2577,16 +2577,16 @@ func TestKernel_ServeHttpAnswersARouterThatReportsNoMatchWithANilResult(t *testi
 func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/hello",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "handler"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelTerminate,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             panic("terminate listener")
@@ -2609,20 +2609,20 @@ func TestKernel_ServeHttpAnswersARequestWhoseTerminateListenerPanics(t *testing.
 func TestKernel_ServeHttpAnswersATypedNilResponseFromAHandlerWithTheEmptyDefault(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/hello",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             var unassignedResponse *Response
 
             return unassignedResponse, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
 
     responseSeenByListener := false
 
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             responseEvent, ok := eventValue.Payload().(*KernelResponseEvent)
@@ -2664,7 +2664,6 @@ func TestKernel_ServeHttpClosesTheChainResponseWhenTheErrorLogPanics(t *testing.
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/hello",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             response := EmptyResponse(nethttp.StatusOK)
@@ -2672,6 +2671,7 @@ func TestKernel_ServeHttpClosesTheChainResponseWhenTheErrorLogPanics(t *testing.
 
             return response, &explodingError{}
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -2727,7 +2727,6 @@ func TestKernel_ASessionSaveOutageReachesTerminateAsTheStatusTheClientReceived(t
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/login",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -2738,10 +2737,11 @@ func TestKernel_ASessionSaveOutageReachesTerminateAsTheStatusTheClientReceived(t
 
             return TextResponse(nethttp.StatusOK, "welcome"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     terminateStatus := -1
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelTerminate,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -2776,7 +2776,6 @@ func TestKernel_AnOuterMiddlewarePanicAfterNextClosesTheChainResponse(t *testing
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/stream",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             response := EmptyResponse(nethttp.StatusOK)
@@ -2784,6 +2783,7 @@ func TestKernel_AnOuterMiddlewarePanicAfterNextClosesTheChainResponse(t *testing
 
             return response, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     panickingOuterMiddleware := func(next httpcontract.Handler) httpcontract.Handler {
@@ -2815,18 +2815,18 @@ func TestKernel_AnOuterMiddlewarePanicAfterNextClosesTheChainResponse(t *testing
 func TestKernel_ErrorResponseCarriesTheRequestIdOnce(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/fail",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, exception.NewError("kernel test failure", nil, nil)
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
     router.Handle(
-        nethttp.MethodGet,
         "/ok",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -3000,7 +3000,7 @@ func serveAndCountErrorRecords(t *testing.T, handler httpcontract.Handler) *reco
     t.Helper()
 
     router := NewRouter()
-    router.Handle(nethttp.MethodGet, "/subject", handler)
+    router.Handle("/subject", handler, RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     countingLogger := &recordCountingLogger{}
 
@@ -3101,11 +3101,11 @@ func TestLogHandlerError_TheRecordNamesTheMethod(t *testing.T) {
 func TestKernel_SetMethodPolicyReachesTheAutomaticOptionsAnswer(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/articles",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "articles"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -3131,11 +3131,11 @@ func TestKernel_SetMethodPolicyReachesTheAutomaticOptionsAnswer(t *testing.T) {
 func TestKernel_MethodPolicyKeepsTheAutomaticOptionsAnswerByDefault(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/articles",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "articles"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -3185,7 +3185,6 @@ func TestKernel_OpenRequestScopesRisesWhileARequestIsServedAndFallsWhenItsScopeC
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/slow",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             close(handlerEntered)
@@ -3193,6 +3192,7 @@ func TestKernel_OpenRequestScopesRisesWhileARequestIsServedAndFallsWhenItsScopeC
 
             return TextResponse(nethttp.StatusOK, "served"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -3229,11 +3229,11 @@ func TestKernel_OpenRequestScopesRisesWhileARequestIsServedAndFallsWhenItsScopeC
 func TestKernel_OpenRequestScopesIsReleasedWhenTheHandlerPanics(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/boom",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             panic("boom")
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     kernelInstance := NewKernel(router, KernelConfig{})
@@ -3252,12 +3252,12 @@ func TestKernel_RefusesNonCanonicalRequestPathBeforeTheHandler(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/admin/*path...",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             handlerRan = true
             return TextResponse(nethttp.StatusOK, "admin"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -3283,12 +3283,12 @@ func TestKernel_RefusesAWhitespacePaddedRequestPathBeforeTheHandler(t *testing.T
 
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/*path...",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 handlerRan = true
                 return TextResponse(nethttp.StatusOK, "admin"), nil
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         serviceContainer := newHttpTestContainer()
@@ -3315,12 +3315,12 @@ func TestKernel_RefusesALeadingWhitespacePathAHandlerInFrontHandedIt(t *testing.
 
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/*path...",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 handlerRan = true
                 return TextResponse(nethttp.StatusOK, "public"), nil
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         serviceContainer := newHttpTestContainer()
@@ -3356,20 +3356,20 @@ func TestKernel_AsksTheCanonicalQuestionOfThePathAsSpelled(t *testing.T) {
 
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/public",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 reached = "public"
                 return TextResponse(nethttp.StatusOK, "public"), nil
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
         router.Handle(
-            nethttp.MethodGet,
             "/*path...",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 reached = "catch-all"
                 return TextResponse(nethttp.StatusOK, "catch-all"), nil
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -3392,12 +3392,12 @@ func TestKernel_ServesCanonicalRequestPathThroughToTheHandler(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/admin/*path...",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             handlerRan = true
             return TextResponse(nethttp.StatusOK, "admin"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -3493,12 +3493,12 @@ func TestKernel_RefusesARouteRegisteredAfterItStartedServing(t *testing.T) {
     router := NewRouter()
     kernel := NewKernel(router, KernelConfig{})
 
-    router.Handle(nethttp.MethodGet, "/before", routeRegistryTestHandler())
+    router.Handle("/before", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     _ = kernel.ServeHttp(newHttpTestContainer())
 
     testhelper.AssertPanicsWithError(t, func() {
-        router.Handle(nethttp.MethodGet, "/after", routeRegistryTestHandler())
+        router.Handle("/after", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
     }, "may not register a route after the http kernel started serving")
 }
 
@@ -3506,7 +3506,7 @@ func TestKernel_LeavesTheRouteTableReadableAfterItStartedServing(t *testing.T) {
     router := NewRouter()
     kernel := NewKernel(router, KernelConfig{})
 
-    router.HandleWithOptions("/articles/:id", routeRegistryTestHandler(), RouteOptions{Name: "article.show", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/articles/:id", routeRegistryTestHandler(), RouteOptions{Name: "article.show", Methods: []string{nethttp.MethodGet}})
 
     _ = kernel.ServeHttp(newHttpTestContainer())
 
@@ -3521,13 +3521,13 @@ func TestKernel_LeavesTheRouteTableReadableAfterItStartedServing(t *testing.T) {
 
 func TestKernel_ServesWhileAConfigurationDoorIsRefused(t *testing.T) {
     router := NewRouter()
-    router.Handle(nethttp.MethodGet, "/slow", func(
+    router.Handle("/slow", func(
         runtimeInstance runtimecontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
         return NewResponse(nethttp.StatusOK, []byte("ok")), nil
-    })
+    }, RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     kernel := NewKernel(router, KernelConfig{})
     handler := kernel.ServeHttp(newHttpTestContainer())
@@ -3568,7 +3568,6 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodGet,
         "/file",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             response := &Response{}
@@ -3578,6 +3577,7 @@ func TestKernel_AbortHandlerPanicStillClosesTheResponseInFlight(t *testing.T) {
 
             return response, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     kernel := NewKernel(router, KernelConfig{})
@@ -3620,7 +3620,7 @@ func TestKernel_MatchesTheRouteOnThePathAsSpelled(t *testing.T) {
     reached := ""
 
     router := NewRouter()
-    router.Handle(nethttp.MethodGet, "/admin/users", func(
+    router.Handle("/admin/users", func(
         runtimeInstance runtimecontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
@@ -3628,8 +3628,8 @@ func TestKernel_MatchesTheRouteOnThePathAsSpelled(t *testing.T) {
         reached = "two-segment"
 
         return NewResponse(nethttp.StatusOK, []byte("ok")), nil
-    })
-    router.Handle(nethttp.MethodGet, "/:name", func(
+    }, RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/:name", func(
         runtimeInstance runtimecontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
@@ -3637,7 +3637,7 @@ func TestKernel_MatchesTheRouteOnThePathAsSpelled(t *testing.T) {
         reached = "one-segment:" + request.Parameters()["name"]
 
         return NewResponse(nethttp.StatusOK, []byte("ok")), nil
-    })
+    }, RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
@@ -3662,7 +3662,7 @@ func TestKernel_RefusesARawPathAFrontHandlerLeftStale(t *testing.T) {
     reached := ""
 
     router := NewRouter()
-    router.Handle(nethttp.MethodGet, "/admin/users", func(
+    router.Handle("/admin/users", func(
         runtimeInstance runtimecontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
@@ -3670,8 +3670,8 @@ func TestKernel_RefusesARawPathAFrontHandlerLeftStale(t *testing.T) {
         reached = "two-segment"
 
         return NewResponse(nethttp.StatusOK, []byte("ok")), nil
-    })
-    router.Handle(nethttp.MethodGet, "/:name", func(
+    }, RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/:name", func(
         runtimeInstance runtimecontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
@@ -3679,7 +3679,7 @@ func TestKernel_RefusesARawPathAFrontHandlerLeftStale(t *testing.T) {
         reached = "one-segment:" + request.Parameters()["name"]
 
         return NewResponse(nethttp.StatusOK, []byte("ok")), nil
-    })
+    }, RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     kernelHandler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
@@ -3705,7 +3705,7 @@ func TestKernel_RefusesARawPathAFrontHandlerLeftStale(t *testing.T) {
 
 func TestKernel_ARefusedStaleRawPathCarriesNoRouteAndLogsTheRawPath(t *testing.T) {
     router := NewRouter()
-    router.HandleWithOptions("/admin/users", routeRegistryTestHandler(), RouteOptions{Name: "admin_users", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/admin/users", routeRegistryTestHandler(), RouteOptions{Name: "admin_users", Methods: []string{nethttp.MethodGet}})
 
     recordingLogger := &warningRecordingLogger{}
 
@@ -3713,7 +3713,7 @@ func TestKernel_ARefusedStaleRawPathCarriesNoRouteAndLogsTheRawPath(t *testing.T
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
     responseRouteName := "unread"
-    dispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     dispatcher.AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -3755,7 +3755,7 @@ func TestKernel_ARefusedStaleRawPathCarriesNoRouteAndLogsTheRawPath(t *testing.T
 
 func TestKernel_AStaleRawPathLeavesOnlyTheRefusalWarning(t *testing.T) {
     router := NewRouter()
-    router.HandleWithOptions("/admin/users", routeRegistryTestHandler(), RouteOptions{Name: "admin_users", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/admin/users", routeRegistryTestHandler(), RouteOptions{Name: "admin_users", Methods: []string{nethttp.MethodGet}})
 
     recordingLogger := &warningRecordingLogger{}
 
@@ -3783,8 +3783,8 @@ func TestKernel_AStaleRawPathLeavesOnlyTheRefusalWarning(t *testing.T) {
 func TestRouter_EqualPriorityIsWonByTheFirstRegistration(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions("/users/:id", routeRegistryTestHandler(), RouteOptions{Name: "first", Methods: []string{nethttp.MethodGet}})
-    router.HandleWithOptions("/users/new", routeRegistryTestHandler(), RouteOptions{Name: "second", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/users/:id", routeRegistryTestHandler(), RouteOptions{Name: "first", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/users/new", routeRegistryTestHandler(), RouteOptions{Name: "second", Methods: []string{nethttp.MethodGet}})
 
     _, parameters, attributes := router.match(nethttp.MethodGet, "/users/new", "", "https")
 
@@ -3802,11 +3802,11 @@ func serveNegotiatedKernelProbe(t *testing.T, method string, target string, acce
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/only-post",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "posted"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -3897,7 +3897,7 @@ func servedLoggedMarkKernel(handler httpcontract.Handler) (nethttp.Handler, *rec
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
     router := NewRouter()
-    router.Handle(nethttp.MethodGet, "/fail", handler)
+    router.Handle("/fail", handler, RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     return NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer), capture
 }
@@ -4024,7 +4024,7 @@ func TestKernel_AnApplicationListenerReadsTheMarkOfTheOccurrenceTheKernelFiled(t
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
-    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     eventDispatcher.AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -4042,11 +4042,11 @@ func TestKernel_AnApplicationListenerReadsTheMarkOfTheOccurrenceTheKernelFiled(t
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/fail",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, loggedMarkSentinelErr
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -4095,11 +4095,11 @@ func TestKernel_TheDebugPayloadShowsTheCoordinatesOfTheOccurrence(t *testing.T) 
     serviceContainer := newHttpTestContainer()
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/fail",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, sharedErr
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     recorder := httptest.NewRecorder()
@@ -4167,11 +4167,11 @@ func TestKernel_AnErrorTheApplicationErrorHandlerDeclinesKeepsItsOwnStatus(t *te
 
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/declined",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return nil, handlerErr
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         kernel := NewKernel(router, KernelConfig{})
@@ -4187,11 +4187,11 @@ func TestKernel_AnErrorTheApplicationErrorHandlerDeclinesKeepsItsOwnStatus(t *te
 func TestKernel_APanicCarryingAnHttpExceptionNoListenerAnswersKeepsItsStatus(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/panics",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             panic(exception.Conflict("taken"))
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     kernel := NewKernel(router, KernelConfig{})
@@ -4229,11 +4229,11 @@ func TestKernel_AnAutomaticOptionsIsNotJournaledAsAMethodNotAllowed(t *testing.T
     } {
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/resource",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return TextResponse(nethttp.StatusOK, "resource"), nil
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         recordingLogger := &warningRecordingLogger{}
@@ -4330,11 +4330,11 @@ func TestKernel_AnUnroutedRequestBoundsItsMethodAndHostInTheNoRouteRecord(t *tes
 func newKernelConfigTestRouter() *Router {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/articles",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "articles"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     return router
@@ -4357,7 +4357,7 @@ func TestNewKernel_TheZeroConfigServesHeadThroughTheGetRoute(t *testing.T) {
 
 func TestNewKernel_ARouteDeclaredWithALowercaseMethodServesHeadAndAdvertisesTheMethodInUpperCase(t *testing.T) {
     router := NewRouter()
-    router.HandleWithOptions(
+    router.Handle(
         "/articles",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "articles"), nil
@@ -4485,11 +4485,11 @@ func TestNewKernel_AppliesTheMiddlewaresInOrder(t *testing.T) {
 func newFailingKernelTestRouter(failure error) *Router {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/fail",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, failure
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     return router
@@ -4499,7 +4499,7 @@ func TestKernel_ABuiltInListenerAnswersWhenNoApplicationListenerDid(t *testing.T
     serviceContainer := newHttpTestContainer()
 
     observed := 0
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             observed++
@@ -4530,7 +4530,7 @@ func TestKernel_AnObserverAtAHigherPrioritySeesTheErrorBeforeTheBuiltInAnswers(t
     observedResponseSet := true
     var observedErr error
 
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             exceptionEvent := eventValue.Payload().(*KernelExceptionEvent)
@@ -4559,7 +4559,7 @@ func TestKernel_AnObserverAtAHigherPrioritySeesTheErrorBeforeTheBuiltInAnswers(t
 func TestKernel_AnApplicationListenerAnswersAheadOfTheBuiltIn(t *testing.T) {
     serviceContainer := newHttpTestContainer()
 
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.Payload().(*KernelExceptionEvent).SetResponse(TextResponse(nethttp.StatusTeapot, "application body"))
@@ -4587,7 +4587,7 @@ func TestKernel_AListenerThatPanicsAfterSettingAResponseDoesNotGetItServed(t *te
 
     bodyReader := &closeTrackingReader{}
 
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             response := &Response{
@@ -4665,7 +4665,7 @@ func TestKernel_APanickingListenerLeavesTheOriginalStatus(t *testing.T) {
 func TestKernel_APropagationStopWithoutAResponseIsRenderedByTheKernel(t *testing.T) {
     serviceContainer := newHttpTestContainer()
 
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.StopPropagation()
@@ -4688,7 +4688,7 @@ func TestKernel_APropagationStopWithoutAResponseIsRenderedByTheKernel(t *testing
 func TestKernel_ARequiredListenerSkippedByTheResponderDropsTheAnswer(t *testing.T) {
     serviceContainer := newHttpTestContainer()
 
-    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     eventDispatcher.AddListener(
         kernelcontract.EventKernelException,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -4752,7 +4752,7 @@ func TestRenderExceptionSafely_ARendererThatPanicsAnswersTheStatic500(t *testing
 
 func TestKernel_ServeHttpInstallsTheBuiltInListenerOnce(t *testing.T) {
     serviceContainer := newHttpTestContainer()
-    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
 
     kernelInstance := NewKernel(NewRouter(), KernelConfig{})
     kernelInstance.ServeHttp(serviceContainer)
@@ -4784,7 +4784,7 @@ func TestKernel_ServeHttpReservesTheExceptionFloor(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+            event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
                 kernelcontract.EventKernelException,
                 func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
@@ -4807,7 +4807,7 @@ func newRefusingKernelRequestListener(refusal error) eventcontract.EventListener
 func TestKernel_ARefusedRequestNeverReachesItsHandler(t *testing.T) {
     serviceContainer := newHttpTestContainer()
 
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelRequest,
         newRefusingKernelRequestListener(exception.Forbidden("not you")),
         0,
@@ -4817,13 +4817,13 @@ func TestKernel_ARefusedRequestNeverReachesItsHandler(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/guarded",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             handlerRan++
 
             return TextResponse(nethttp.StatusOK, "served"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     recorder := httptest.NewRecorder()
@@ -4842,7 +4842,7 @@ func TestKernel_ARefusalIsRenderedThroughTheExceptionListeners(t *testing.T) {
     serviceContainer := newHttpTestContainer()
     refusal := exception.Forbidden("not you")
 
-    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), 0)
 
     var observedErr error
@@ -4879,7 +4879,7 @@ func TestKernel_ARefusalIsRecordedEvenWhenAnApplicationListenerAnswersFirst(t *t
 
     refusal := exception.Forbidden("not you")
 
-    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), 0)
     eventDispatcher.AddListener(
         kernelcontract.EventKernelException,
@@ -4918,7 +4918,7 @@ func TestKernel_ARefusalAlreadyLoggedIsNotFiledAgain(t *testing.T) {
     refusal := exception.NewError("already filed", nil, nil)
     _ = exception.MarkLogged(refusal)
 
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), 0)
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(refusal), 0)
 
     NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
 
@@ -4932,7 +4932,7 @@ func TestKernel_ARefusalAlreadyLoggedIsNotFiledAgain(t *testing.T) {
 func TestKernel_ARefusalStandsOverALaterListenersFailure(t *testing.T) {
     serviceContainer := newHttpTestContainer()
 
-    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     eventDispatcher.AddListener(kernelcontract.EventKernelRequest, newRefusingKernelRequestListener(exception.Forbidden("not you")), 10)
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
@@ -4953,7 +4953,7 @@ func TestKernel_ARefusalStandsOverALaterListenersFailure(t *testing.T) {
 func TestKernel_ARefusalBesideASkippedRequiredListenerFailsClosed(t *testing.T) {
     serviceContainer := newHttpTestContainer()
 
-    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
@@ -5001,7 +5001,7 @@ func TestKernel_AListenerThatAnswersAndRefusesFailsClosed(t *testing.T) {
     } {
         serviceContainer := newHttpTestContainer()
 
-        event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(kernelcontract.EventKernelRequest, listener, 0)
+        event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(kernelcontract.EventKernelRequest, listener, 0)
 
         recorder := httptest.NewRecorder()
         NewKernel(NewRouter(), KernelConfig{}).ServeHttp(serviceContainer).ServeHTTP(recorder, httptest.NewRequest(nethttp.MethodGet, "/guarded", nil))
@@ -5019,7 +5019,7 @@ func TestKernel_AListenerThatRecoversTheRefusalOfASecondDecisionFailsClosed(t *t
     } {
         serviceContainer := newHttpTestContainer()
 
-        event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
             kernelcontract.EventKernelRequest,
             func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
                 defer func() { _ = recover() }()
@@ -5035,13 +5035,13 @@ func TestKernel_AListenerThatRecoversTheRefusalOfASecondDecisionFailsClosed(t *t
 
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/guarded",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 handlerRan++
 
                 return TextResponse(nethttp.StatusOK, "served"), nil
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         recorder := httptest.NewRecorder()
@@ -5067,7 +5067,7 @@ func TestKernel_AListenerThatAnswersAndRefusesHasTheResponseClosed(t *testing.T)
         serviceContainer := newHttpTestContainer()
         bodyReader := &closeTrackingReader{}
 
-        event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+        event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
             kernelcontract.EventKernelRequest,
             func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
                 decide(eventValue.Payload().(*KernelRequestEvent), &Response{statusCode: nethttp.StatusTeapot, headers: make(nethttp.Header), bodyReader: bodyReader})
@@ -5121,7 +5121,7 @@ func TestKernel_ARendererBrokenByItsSerializerStillAnswersThroughTheResponsePath
     )
 
     responseDispatches := 0
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelResponse,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             responseDispatches++
@@ -5135,11 +5135,11 @@ func TestKernel_ARendererBrokenByItsSerializerStillAnswersThroughTheResponsePath
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/fail",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return &Response{statusCode: nethttp.StatusOK, headers: make(nethttp.Header), bodyReader: bodyReader}, exception.NotFound("no such article")
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     recorder := httptest.NewRecorder()
@@ -5162,11 +5162,11 @@ func TestKernel_ACyclicChainFromAHandlerIsAnsweredWithAFiveHundred(t *testing.T)
     for _, environment := range []string{config.EnvironmentProduction, config.EnvironmentDevelopment} {
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/cycle",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return nil, newCyclicChainError()
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerInEnvironment(environment))
@@ -5186,13 +5186,13 @@ func TestKernel_ACyclicChainFromAStreamedHandlerAfterItsHeaderIsAnswered(t *test
     for _, environment := range []string{config.EnvironmentProduction, config.EnvironmentDevelopment} {
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/cycle",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 writer.WriteHeader(nethttp.StatusAccepted)
 
                 return nil, newCyclicChainError()
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerInEnvironment(environment))
@@ -5212,11 +5212,11 @@ func TestKernel_ACyclicChainFromTheRequestBodyIsAnsweredWithABadRequest(t *testi
     for _, environment := range []string{config.EnvironmentProduction, config.EnvironmentDevelopment} {
         router := NewRouter()
         router.Handle(
-            nethttp.MethodPost,
             "/cycle",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return TextResponse(nethttp.StatusOK, "served"), nil
             },
+            RouteOptions{Methods: []string{nethttp.MethodPost}},
         )
 
         handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerInEnvironment(environment))
@@ -5238,7 +5238,7 @@ func TestKernel_ACyclicChainFromTheRequestBodyIsAnsweredWithABadRequest(t *testi
 func TestKernel_ARefusalCarryingRetryAfterIsServedWithTheHeader(t *testing.T) {
     serviceContainer := newHttpTestContainer()
 
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelRequest,
         newRefusingKernelRequestListener(exception.NewHttpError(nethttp.StatusServiceUnavailable, exception.HttpErrorConfig{Message: "down", RetryAfter: 3 * time.Second})),
         0,
@@ -5257,7 +5257,7 @@ func TestKernel_ARefusalCarryingRetryAfterIsServedWithTheHeader(t *testing.T) {
 func TestKernel_TheFinalStepKeepsTheRetryAfterHeader(t *testing.T) {
     serviceContainer := newHttpTestContainer()
 
-    eventDispatcher := event.EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    eventDispatcher := event.EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
         newRefusingKernelRequestListener(exception.NewHttpError(nethttp.StatusServiceUnavailable, exception.HttpErrorConfig{Message: "down", RetryAfter: 3 * time.Second})),
@@ -5285,16 +5285,16 @@ func TestKernel_AHandlerReturningAMarkedErrorAnswers503WithTheKernelDelay(t *tes
     for name, throughTheFinalStep := range map[string]bool{"the final step": true, "the built-in listener": false} {
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/page",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return nil, exception.MarkInfrastructureFailure(errors.New("cache is down"))
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         serviceContainer := newHttpTestContainer()
         if true == throughTheFinalStep {
-            event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+            event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
                 kernelcontract.EventKernelException,
                 func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
                     panic("listener exploded")
@@ -5354,11 +5354,11 @@ func TestKernel_APanicCarryingTheMarkAnswers503(t *testing.T) {
     } {
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/page",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 panic(value)
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         recorder := httptest.NewRecorder()
@@ -5440,13 +5440,13 @@ func TestKernel_ARouteThatNeverReadsTheSessionCostsTheStorageNothing(t *testing.
 func TestKernel_ASessionStorageOutageFilesOneRecordForTwoReaders(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/page",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             _, sessionReadErr := RequestSession(request)
 
             return nil, sessionReadErr
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     countingLogger := &errorCountingLogger{}
@@ -5456,7 +5456,7 @@ func TestKernel_ASessionStorageOutageFilesOneRecordForTwoReaders(t *testing.T) {
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, countingLogger, container.OverrideOptions{})
 
     listenerSawError := false
-    event.EventDispatcherMustFromContainer(t.Context(), serviceContainer).AddListener(
+    event.EventDispatcherMustFromResolver(t.Context(), serviceContainer).AddListener(
         kernelcontract.EventKernelRequest,
         func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent := eventValue.Payload().(*KernelRequestEvent)
@@ -5518,7 +5518,6 @@ func TestKernel_EmptyOnOutageServesTheRouteAndAnswersNoCookie(t *testing.T) {
 
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/page",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 sessionInstance, sessionErr := RequestSession(request)
@@ -5540,6 +5539,7 @@ func TestKernel_EmptyOnOutageServesTheRouteAndAnswersNoCookie(t *testing.T) {
 
                 return TextResponse(nethttp.StatusOK, "ok"), nil
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         countingLogger := &errorCountingLogger{}
@@ -5578,7 +5578,7 @@ func persistenceTestKernel(t *testing.T, manager sessioncontract.Manager, path s
     t.Helper()
 
     router := NewRouter()
-    router.Handle(nethttp.MethodGet, path, handlerFunc)
+    router.Handle(path, handlerFunc, RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
     recordingLogger := &errorContextRecordingLogger{}

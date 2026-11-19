@@ -2,6 +2,7 @@ package security
 
 import (
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -22,16 +23,16 @@ func (instance *LoginAuthentication) Budget() *SecondFactorBudget {
 }
 
 /* Authenticate answers the manager's token; an authenticated one that presented a second factor gives its account the budget back. */
-func (instance *LoginAuthentication) Authenticate(request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
-    token, _, authenticateErr := instance.manager.Authenticate(request)
+func (instance *LoginAuthentication) Authenticate(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+    token, _, authenticateErr := instance.manager.Authenticate(runtimeInstance, request)
     if nil != authenticateErr {
         return nil, authenticateErr
     }
 
     if nil != instance.budget && true == token.IsAuthenticated() && true == instance.budget.carriesSecondFactor(request) {
         /* a failed release never refuses the sign-in it follows */
-        if releaseErr := instance.budget.Release(request.RuntimeInstance(), token.UserIdentifier()); nil != releaseErr {
-            journalBudgetFailure(request.RuntimeInstance(), "second factor budget release failed", releaseErr)
+        if releaseErr := instance.budget.Release(runtimeInstance, token.UserIdentifier()); nil != releaseErr {
+            journalBudgetFailure(runtimeInstance, "second factor budget release failed", releaseErr)
         }
     }
 

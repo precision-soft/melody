@@ -35,7 +35,7 @@ func (instance *levelRecordingLogger) Warning(message string, context melodylogg
 func TestSecurityAuthenticationEventSubscriber_JournalsAFailureAsAWarningAtTheEventsInstant(t *testing.T) {
     logger := &levelRecordingLogger{Logger: melodylogging.NewNopLogger()}
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,
@@ -60,7 +60,7 @@ func TestSecurityAuthenticationEventSubscriber_JournalsAFailureAsAWarningAtTheEv
 func TestSecurityAuthenticationEventSubscriber_JournalsASuccessAtInfoAtTheEventsInstant(t *testing.T) {
     logger := &levelRecordingLogger{Logger: melodylogging.NewNopLogger()}
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,

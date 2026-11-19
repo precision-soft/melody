@@ -10,10 +10,6 @@ import (
 
 const ServiceStorage = "service.storage.storage"
 
-func StorageMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) storagecontract.Storage {
-    return container.MustFromResolver[storagecontract.Storage](ctx, serviceContainer, ServiceStorage)
-}
-
 func StorageMustFromResolver(ctx context.Context, resolver containercontract.Resolver) storagecontract.Storage {
     return container.MustFromResolver[storagecontract.Storage](ctx, resolver, ServiceStorage)
 }

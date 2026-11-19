@@ -329,7 +329,7 @@ func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *
     server.Config.WriteTimeout = writeTimeout
     server.Start()
     t.Cleanup(server.Close)
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     return server, hub, logger
 }

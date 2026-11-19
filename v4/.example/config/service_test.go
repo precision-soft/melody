@@ -178,7 +178,7 @@ func TestRegisterArchiveStorageService_PublishesAHandlelessStorageWithoutAnArchi
 func TestGeneratedServices_ConcurrentScopesKeepRequestStateSeparate(t *testing.T) {
     serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     defer func() {
-        if closeErr := serviceContainer.Close(); nil != closeErr {
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
             t.Errorf("close: %v", closeErr)
         }
     }()

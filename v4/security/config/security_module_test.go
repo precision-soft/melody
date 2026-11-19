@@ -135,14 +135,14 @@ func TestBuilder_RoleHierarchy_AutoUpgradesRoleVoterToRoleHierarchyVoter(t *test
 
     adminToken := &testRoleToken{roles: []string{"ROLE_ADMIN"}}
 
-    err := dm.DecideAll(adminToken, []string{"ROLE_USER"}, nil)
+    err := dm.DecideAll(nil, adminToken, []string{"ROLE_USER"}, nil)
     if nil != err {
         t.Fatalf("expected ROLE_ADMIN to be granted ROLE_USER via hierarchy, got: %v", err)
     }
 
     userToken := &testRoleToken{roles: []string{"ROLE_USER"}}
 
-    err = dm.DecideAll(userToken, []string{"ROLE_ADMIN"}, nil)
+    err = dm.DecideAll(nil, userToken, []string{"ROLE_ADMIN"}, nil)
     if nil == err {
         t.Fatalf("expected ROLE_USER to be denied ROLE_ADMIN")
     }

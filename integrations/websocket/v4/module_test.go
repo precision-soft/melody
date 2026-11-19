@@ -19,7 +19,7 @@ type spyRouter struct {
     handled []string
 }
 
-func (instance *spyRouter) HandleWithOptions(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) {
+func (instance *spyRouter) Handle(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) {
     instance.handled = append(instance.handled, options.Name+" "+strings.Join(options.Methods, ",")+" "+pattern)
 }
 

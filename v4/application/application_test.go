@@ -49,7 +49,7 @@ type dynamicRouteModule struct {
 }
 
 func (instance dynamicRouteModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
-    kernelInstance.HttpRouter().Handle(nethttp.MethodGet, "/users/:id", applicationBootRouteHandler())
+    kernelInstance.HttpRouter().Handle("/users/:id", applicationBootRouteHandler(), httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}})
 }
 
 /* the root's /users/me must not be dispatched as the module's /users/:id with id="me": the router breaks a priority tie on registration order */
@@ -95,7 +95,7 @@ func (instance *servingProbeApplicationCommand) Run(
 ) error {
     instance.ran = true
 
-    configuration := config.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    configuration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
     instance.resolveErr = configuration.Resolve()
 
     return nil
@@ -285,7 +285,7 @@ func newFailingCloseApplication(t *testing.T) *Application {
 func TestClose_DoesNotRereportAFailureSomebodyElseDiscovered(t *testing.T) {
     applicationInstance := newFailingCloseApplication(t)
 
-    firstCloseErr := applicationInstance.kernel.ServiceContainer().Close()
+    firstCloseErr := applicationInstance.kernel.ServiceContainer().CloseWithContext(context.Background())
     if nil == firstCloseErr {
         t.Fatalf("expected the discovering close to report the failure")
     }
@@ -385,7 +385,7 @@ func TestResolveExitLogger_FallsBackWhenTheContainerLoggerIsClosed(t *testing.T)
         t.Fatalf("the container logger must be preferred before the teardown, or the fallback assertion below is vacuous")
     }
 
-    if closeErr := applicationInstance.kernel.ServiceContainer().Close(); nil != closeErr {
+    if closeErr := applicationInstance.kernel.ServiceContainer().CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected container close error: %v", closeErr)
     }
 
@@ -537,7 +537,7 @@ func TestProcessRole_AnswersTheResolvedRole(t *testing.T) {
 func newEnvironmentRefusalApplication(t *testing.T, mode string, environmentValues map[string]string) *Application {
     t.Helper()
 
-    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: environmentValues})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: environmentValues})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
@@ -616,7 +616,7 @@ func TestRefuseBootWithDefaultedEnvironment_AdmitsANameSetByTheDevelopmentFile(t
         ".env.dev": &fstest.MapFile{Data: []byte("MELODY_ENV=dev\n")},
     }})
 
-    environment, environmentErr := config.NewEnvironment(source)
+    environment, environmentErr := config.NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
@@ -645,7 +645,7 @@ func TestBoot_RefusesTheDefaultedEnvironmentNameAfterTheZeroKeyRefusal(t *testin
             mode = config.ModeCli
         }
 
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -733,7 +733,7 @@ func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *
     projectDirectory := os.Getenv(runPanicPathProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -854,7 +854,7 @@ func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
     projectDirectory := os.Getenv(bootPanicTeardownProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -923,7 +923,7 @@ func TestBoot_RefusesADeclaredTeardownDependencyNamingNoService(t *testing.T) {
     projectDirectory := os.Getenv(bootDanglingDeclarationProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -976,7 +976,7 @@ func TestBoot_RefusesALazyLockerOverAContainerWithNoLocker(t *testing.T) {
     projectDirectory := os.Getenv(bootDanglingLazyHandleProbeMarker)
 
     if "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -1045,7 +1045,7 @@ func TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrACliBootWarningKey(t 
             values[key] = value
         }
 
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -1358,7 +1358,7 @@ func TestCloseAndExitOnFailure_AnUnlimitedBudgetReachesTheShieldAsNoDeadline(t *
 func newTeardownTimeoutTestApplication(t *testing.T, teardownTimeout string) *Application {
     t.Helper()
 
-    environment, environmentErr := config.NewEnvironment(
+    environment, environmentErr := config.NewEnvironment(context.Background(), 
         &mapEnvironmentSource{
             values: map[string]string{
                 config.TeardownTimeoutKey: teardownTimeout,

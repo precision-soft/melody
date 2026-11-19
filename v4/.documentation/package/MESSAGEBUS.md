@@ -42,7 +42,6 @@ The message bus is opt-in. Unlike core services, it is not wired by the applicat
 - Provide container resolver helpers:
     - [`ServiceBus`](../../messagebus/service_resolver.go)
     - [`ServiceHandlerLocator`](../../messagebus/service_resolver.go)
-    - [`BusMustFromContainer`](../../messagebus/service_resolver.go)
     - [`BusMustFromResolver`](../../messagebus/service_resolver.go)
 
 ## How dispatch flows
@@ -82,7 +81,7 @@ bus := messagebus.BusMustFromResolver(runtimeInstance.Context(), resolver)
 bus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1}, nil)
 ```
 
-`BusMustFromContainer` is the equivalent from a `Container` (for example `runtimeInstance.Container()` inside a handler). The factory result is cached, so every resolver shares the one configured bus — configure it once, dispatch from many places. The example application wires this end-to-end: the bus is registered in [`.example/config/service.go`](../../.example/config/service.go) and resolved in the [`/messagebus/dispatch`](../../.example/handler/welcome_email_dispatch_handler.go) HTTP handler. Set `AMQP_DSN` before launching the example to route the bus over RabbitMQ via the [`amqp`](../../../integrations/amqp/v4) integration instead of the in-process transport: without a broker the HTTP dispatch door answers `503` naming `AMQP_DSN`, since nothing in the process would consume what it accepted, while the `messagebus:dispatch` console command dispatches over the in-process transport.
+`BusMustFromResolver` takes a `Container` as it takes a scope (for example `runtimeInstance.Container()` inside a handler). The factory result is cached, so every resolver shares the one configured bus — configure it once, dispatch from many places. The example application wires this end-to-end: the bus is registered in [`.example/config/service.go`](../../.example/config/service.go) and resolved in the [`/messagebus/dispatch`](../../.example/handler/welcome_email_dispatch_handler.go) HTTP handler. Set `AMQP_DSN` before launching the example to route the bus over RabbitMQ via the [`amqp`](../../../integrations/amqp/v4) integration instead of the in-process transport: without a broker the HTTP dispatch door answers `503` naming `AMQP_DSN`, since nothing in the process would consume what it accepted, while the `messagebus:dispatch` console command dispatches over the in-process transport.
 
 ## Usage
 
@@ -217,9 +216,7 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 
 - [`const ServiceBus`](../../messagebus/service_resolver.go)
 - [`const ServiceHandlerLocator`](../../messagebus/service_resolver.go)
-- [`BusMustFromContainer(context.Context, containercontract.Container) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
 - [`BusMustFromResolver(context.Context, containercontract.Resolver) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
-- [`HandlerLocatorMustFromContainer(context.Context, containercontract.Container) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)
 - [`HandlerLocatorMustFromResolver(context.Context, containercontract.Resolver) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)
 - [`const ServiceTransportsCloser`](../../messagebus/service_resolver.go)
 - [`type TransportsCloser`](../../messagebus/service_resolver.go) — owns the shutdown of every transport `RegisterTransports` registered; its `CloseWithContext(context.Context) error` is what the container's ordered teardown reaches, under the teardown's budget, closing the transports in name order and joining failures with the transport named in each. The application builds it at boot and declares it a teardown dependency of the buses registered under `ServiceBus` and `ServiceConsumeBus`, so every service that publishes through a bus closes before the bus, and the bus before the transports it routes to, under the waves and the sequential teardown alike: a bus routes through transport values its module captured, which no resolution records, and nothing has to be declared by hand

@@ -161,7 +161,7 @@ func TestModule_RegisterServicesForwardsTheLockerConfig(t *testing.T) {
         Locker:   LockerConfig{CallTimeout: bound.Of(750 * time.Millisecond)},
     }).RegisterServices(registrar)
 
-    locker := melodylock.LockerMustFromContainer(t.Context(), serviceContainer).(*Locker)
+    locker := melodylock.LockerMustFromResolver(t.Context(), serviceContainer).(*Locker)
     if 750*time.Millisecond != locker.callTimeout {
         t.Fatalf("expected the module to hand its locker config to the registered locker, got %v", locker.callTimeout)
     }

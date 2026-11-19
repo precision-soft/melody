@@ -22,6 +22,15 @@ import (
 
 /* NewProvider resolves the configuration once and keeps it: a limit outside its rule panics naming the field, before any database is opened. */
 func NewProvider(config ProviderConfig) *Provider {
+    /* an explicit TLS session and a plaintext opt-out cannot both be meant, so neither is read over the other */
+    if true == config.Insecure && nil != config.TlsConfig {
+        exception.Panic(exception.NewError(
+            "bunorm provider: Insecure and TlsConfig are both set; drop Insecure to dial the TLS session, or TlsConfig to dial plaintext",
+            map[string]any{"fields": []string{"ProviderConfig.Insecure", "ProviderConfig.TlsConfig"}},
+            nil,
+        ))
+    }
+
     resolved, resolveErr := resolveProviderConfig(config)
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))

@@ -295,7 +295,7 @@ func TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs(t *testing.T) {
             config.CliBootWarningsIgnoredKey: map[string]string{"moduleCode": "test.module.hazard", "unknownCode": "test.nobody.writes"}[probe],
         }
 
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -421,7 +421,7 @@ func TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord(t *t
             values[config.CliBootWarningsDisabledKey] = "true"
         }
 
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
         if nil != environmentErr {
             os.Exit(91)
         }
@@ -510,7 +510,7 @@ const runRefusalBootWarningsProbeMarker = "MELODY_TEST_RUN_REFUSAL_BOOT_WARNINGS
 /* runHttp refuses a scope teardown outlasting the http shutdown before it writes the boot warnings, so Run's exit handler writes them */
 func TestRun_AnHttpRunRefusedBeforeItsWriterWritesTheBootWarningsBeforeItsExitRecord(t *testing.T) {
     if projectDirectory := os.Getenv(runRefusalBootWarningsProbeMarker); "" != projectDirectory {
-        environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{
+        environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{
             config.EnvironmentNameKey:      config.EnvironmentDevelopment,
             config.HttpAddressKey:          "127.0.0.1:34526",
             config.ScopeTeardownTimeoutKey: "1h",

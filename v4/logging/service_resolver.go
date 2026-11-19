@@ -54,14 +54,6 @@ func LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.
     return loggerInstance
 }
 
-func LoggerMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) loggingcontract.Logger {
-    return container.MustFromResolver[loggingcontract.Logger](ctx, serviceContainer, ServiceLogger)
-}
-
-func LoggerFromContainer(ctx context.Context, serviceContainer containercontract.Container) (loggingcontract.Logger, error) {
-    return container.FromResolver[loggingcontract.Logger](ctx, serviceContainer, ServiceLogger)
-}
-
 func LoggerMustFromResolver(ctx context.Context, resolver containercontract.Resolver) loggingcontract.Logger {
     return container.MustFromResolver[loggingcontract.Logger](ctx, resolver, ServiceLogger)
 }

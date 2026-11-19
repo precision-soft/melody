@@ -491,7 +491,7 @@ func TestLazyService_AContainerBackedHandleTurnsTerminalAfterContainerClose(t *t
 
     _ = lazyService.Get(t.Context())
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -529,7 +529,7 @@ func TestLazyService_AHandleOverAContainerProvidersResolverAnswersTheContainersS
         t.Fatalf("expected the live container to serve the value, got %v", resolveErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -582,7 +582,7 @@ func TestLazyService_AContainerBackedHandleServesTheClosingServiceDuringTheTeard
     }, RegisterOptions{})
     MustFromResolver[*lazyTeardownReader](t.Context(), serviceContainer, "app.reader")
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -623,7 +623,7 @@ func TestLazyService_AProviderResolverBackedHandleServesTheClosingServiceDuringT
         t.Fatalf("unexpected resolve error before the teardown: %v", resolveErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

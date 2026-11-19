@@ -223,7 +223,7 @@ type corsListenerTestEnvironmentSource struct {
     values map[string]string
 }
 
-func (instance *corsListenerTestEnvironmentSource) Load() (map[string]string, error) {
+func (instance *corsListenerTestEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return instance.values, nil
 }
 
@@ -241,7 +241,7 @@ func newCorsListenerTestContainer() containercontract.Container {
     serviceContainer.MustRegister(
         config.ServiceConfig,
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
-            environment, err := config.NewEnvironment(
+            environment, err := config.NewEnvironment(context.Background(), 
                 &corsListenerTestEnvironmentSource{
                     values: map[string]string{
                         config.EnvironmentNameKey: config.EnvironmentDevelopment,
@@ -307,14 +307,14 @@ func newAccessControlledCorsKernel(registerListenerDoors bool) nethttp.Handler {
 
     router := http.NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/api/item",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return http.TextResponse(nethttp.StatusCreated, "created"), nil
         },
+        http.RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
-    dispatcher := event.EventDispatcherMustFromContainer(context.Background(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(context.Background(), serviceContainer)
 
     registry := security.NewFirewallRegistry(
         security.NewCompiledConfiguration(
@@ -426,5 +426,62 @@ func TestRegisterRequestListener_LeavesARefusedPreflightToTheKernel(t *testing.T
 
     if nil != requestEvent.Response() {
         t.Fatalf("expected no response on a refused preflight, got %#v", requestEvent.Response())
+    }
+}
+
+func pathRecordingService(paths *[]string) *Service {
+    return NewService(Config{AllowOrigin: func(request httpcontract.Request, origin string) bool {
+        *paths = append(*paths, request.HttpRequest().URL.Path)
+
+        return true
+    }})
+}
+
+func TestMiddleware_And_Listener_PassTheRequestOfTheCall(t *testing.T) {
+    var paths []string
+    service := pathRecordingService(&paths)
+
+    next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return http.EmptyResponse(nethttp.StatusOK), nil
+    }
+    handler := Middleware(service)(next)
+
+    if _, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/middleware/preflight"))); nil != err {
+        t.Fatalf("middleware preflight: %v", err)
+    }
+
+    simple := httptest.NewRequest(nethttp.MethodGet, "/middleware/simple", nil)
+    simple.Header.Set("Origin", "https://app.example.com")
+    if _, err := handler(nil, httptest.NewRecorder(), testhelper.NewHttpTestRequestFromHttpRequest(simple)); nil != err {
+        t.Fatalf("middleware simple: %v", err)
+    }
+
+    dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
+    RegisterRequestListener(dispatcher, service)
+    RegisterResponseListener(dispatcher, service)
+
+    requestEvent := http.NewKernelRequestEvent(newTestRuntime(), testhelper.NewHttpTestRequestFromHttpRequest(newPreflightTestRequest("/listener/preflight")))
+    if _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelRequest, requestEvent); nil != err {
+        t.Fatalf("request listener: %v", err)
+    }
+
+    served := httptest.NewRequest(nethttp.MethodGet, "/listener/response", nil)
+    served.Header.Set("Origin", "https://app.example.com")
+    responseEvent := http.NewKernelResponseEvent(testhelper.NewHttpTestRequestFromHttpRequest(served), http.EmptyResponse(nethttp.StatusOK))
+    if _, err := dispatcher.DispatchName(newTestRuntime(), kernelcontract.EventKernelResponse, responseEvent); nil != err {
+        t.Fatalf("response listener: %v", err)
+    }
+
+    for _, expected := range []string{"/middleware/preflight", "/middleware/simple", "/listener/preflight", "/listener/response"} {
+        found := false
+        for _, path := range paths {
+            if expected == path {
+                found = true
+            }
+        }
+
+        if false == found {
+            t.Fatalf("expected the function handed the request served at %s, saw %v", expected, paths)
+        }
     }
 }

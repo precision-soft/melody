@@ -52,7 +52,7 @@ func TestScope_GetDelegatesToContainerAndCachesPerScope(t *testing.T) {
     }
 }
 
-func TestScope_OverrideInstance_IsolatedFromContainer(t *testing.T) {
+func TestScope_OverrideInstance_IsolatedFromResolver(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     err := serviceContainer.Register(

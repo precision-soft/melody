@@ -138,7 +138,7 @@ func TestRequireShorthands_EachNamesItsOwnCharacterClass(t *testing.T) {
 func TestRequireShorthands_AreEnforcedByTheRouter(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions(
+    router.Handle(
         "/articles/:id",
         routeRegistryTestHandler(),
         RouteOptions{
@@ -167,7 +167,7 @@ func TestRequireShorthands_AreEnforcedByTheRouter(t *testing.T) {
 func TestRequireAlphaLowercase_RefusesAnUppercaseSpelling(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions(
+    router.Handle(
         "/pages/:slug",
         routeRegistryTestHandler(),
         RouteOptions{
@@ -196,7 +196,7 @@ func TestRequireAlphaLowercase_RefusesAnUppercaseSpelling(t *testing.T) {
 func TestRequirement_IsAnchoredToTheWholeParameterValue(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions(
+    router.Handle(
         "/:locale/home",
         routeRegistryTestHandler(),
         RouteOptions{

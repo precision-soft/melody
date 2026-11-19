@@ -14,7 +14,7 @@ func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
     group := NewRouteGroup(nil, GroupConfig{PathPrefix: "/api"})
 
     testhelper.AssertPanicsWithError(t, func() {
-        group.HandleWithOptions(
+        group.Handle(
             "/x",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return EmptyResponse(200), nil
@@ -36,7 +36,7 @@ func TestRouteGroup_JoinsPathAndPrefixesName(t *testing.T) {
         }
     }()
 
-    group.HandleWithOptions(
+    group.Handle(
         "/user/:id",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -74,7 +74,7 @@ func TestRouteGroup_MergesDefaultsAndDoesNotOverrideRouteDefault(t *testing.T) {
         }
     }()
 
-    group.HandleWithOptions(
+    group.Handle(
         "/:locale?/list/:page",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -117,7 +117,7 @@ func TestRouteGroup_MergesRequirementsAndDoesNotOverrideRouteRequirement(t *test
         }
     }()
 
-    group.HandleWithOptions(
+    group.Handle(
         "/user/:id",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -149,7 +149,7 @@ func TestRouteGroup_RejectsAnOptionalSegmentInThePrefix(t *testing.T) {
     assertPanicWithExceptionMessage(
         t,
         func() {
-            group.HandleWithOptions(
+            group.Handle(
                 "/list",
                 func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                     return EmptyResponse(200), nil
@@ -161,7 +161,7 @@ func TestRouteGroup_RejectsAnOptionalSegmentInThePrefix(t *testing.T) {
     )
 }
 
-func TestRouteGroup_HandleWithOptions_LeavesTheCallersOptionsUntouched(t *testing.T) {
+func TestRouteGroup_Handle_LeavesTheCallersOptionsUntouched(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
 
@@ -185,7 +185,7 @@ func TestRouteGroup_HandleWithOptions_LeavesTheCallersOptionsUntouched(t *testin
         return TextResponse(200, "users"), nil
     }
 
-    group.HandleWithOptions("/users/:id", handler, options)
+    group.Handle("/users/:id", handler, options)
 
     if "users.show" != options.Name {
         t.Fatalf("expected the caller's options to keep its own name, got %q", options.Name)
@@ -213,7 +213,7 @@ func TestRouteGroup_HandleWithOptions_LeavesTheCallersOptionsUntouched(t *testin
     assertPanicWithExceptionMessage(
         t,
         func() {
-            group.HandleWithOptions("/users/:id/edit", handler, options)
+            group.Handle("/users/:id/edit", handler, options)
         },
         "route name already exists",
     )
@@ -229,7 +229,7 @@ func TestRouteGroup_TheZeroConfigRegistersThePatternAndTheNameAsGiven(t *testing
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
 
-    router.Group(GroupConfig{}).HandleWithOptions("/plain/:id", newRouteGroupTestHandler(), RouteOptions{Name: "plain", Methods: []string{nethttp.MethodGet}})
+    router.Group(GroupConfig{}).Handle("/plain/:id", newRouteGroupTestHandler(), RouteOptions{Name: "plain", Methods: []string{nethttp.MethodGet}})
 
     pathValue, err := NewUrlGenerator(routeRegistry).GeneratePath("plain", map[string]string{"id": "1"})
     if nil != err {
@@ -244,7 +244,7 @@ func TestRouteGroup_TheZeroConfigRegistersThePatternAndTheNameAsGiven(t *testing
 func TestRouteGroup_AnUnnamedRouteStaysUnnamedUnderANamePrefix(t *testing.T) {
     router := NewRouter()
 
-    router.Group(GroupConfig{PathPrefix: "/api", NamePrefix: "api."}).Handle(nethttp.MethodGet, "/ping", newRouteGroupTestHandler())
+    router.Group(GroupConfig{PathPrefix: "/api", NamePrefix: "api."}).Handle("/ping", newRouteGroupTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     for _, routeDefinition := range router.RouteDefinitions() {
         if "" != routeDefinition.Name() {
@@ -265,7 +265,7 @@ func TestRouteGroup_KeepsItsOwnCopyOfTheMaps(t *testing.T) {
     requirements["id"] = "[a-z]+"
     defaults["page"] = "9"
 
-    group.HandleWithOptions("/user/:id/:page?", newRouteGroupTestHandler(), RouteOptions{Name: "user", Methods: []string{nethttp.MethodGet}})
+    group.Handle("/user/:id/:page?", newRouteGroupTestHandler(), RouteOptions{Name: "user", Methods: []string{nethttp.MethodGet}})
 
     _, err := NewUrlGenerator(routeRegistry).GeneratePath("user", map[string]string{"id": "abc"})
     if nil == err {

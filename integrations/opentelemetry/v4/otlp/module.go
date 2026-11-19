@@ -2,14 +2,12 @@ package otlp
 
 import (
     "context"
-    "time"
 
     "go.opentelemetry.io/otel/propagation"
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
     opentelemetry "github.com/precision-soft/melody/integrations/opentelemetry/v4"
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
-    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -27,15 +25,6 @@ type ModuleConfig struct {
     Config     Config
     TracerName string
     Propagator propagation.TextMapPropagator
-
-    /* ShutdownTimeout bounds the provider's shutdown when its close is reached with no deadline of the teardown's: 5s by default, at least 1ms, unlimited refused. A close that carries a deadline is honoured whole; an operator who needs the export finished raises the teardown budget. It is refused at RegisterServices, naming the field. */
-    ShutdownTimeout bound.Duration
-}
-
-var shutdownTimeoutRule = bound.Rule[time.Duration]{
-    Name:    "ModuleConfig.ShutdownTimeout",
-    Default: 5 * time.Second,
-    Minimum: bound.TimeoutMinimum,
 }
 
 func NewModule(config ModuleConfig) *Module {
@@ -56,11 +45,6 @@ func (instance *Module) Description() string {
 
 /* RegisterServices registers the tracer provider as a container service, built once and closed by the container's shutdown, which flushes the batch span processor. The container reaches the handle through CloseWithContext, so the flush runs under the teardown's deadline. */
 func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRegistrar) {
-    shutdownTimeout, shutdownTimeoutErr := bound.Resolve(instance.config.ShutdownTimeout, shutdownTimeoutRule)
-    if nil != shutdownTimeoutErr {
-        exception.Panic(exception.FromError(shutdownTimeoutErr))
-    }
-
     registrar.RegisterService(
         ServiceTracerProvider,
         func(resolver containercontract.Resolver) (*providerHandle, error) {
@@ -69,7 +53,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
                 return nil, providerErr
             }
 
-            return &providerHandle{provider: provider, shutdownTimeout: shutdownTimeout.Value}, nil
+            return &providerHandle{provider: provider}, nil
         },
         container.RegisterOptions{},
     )
@@ -92,11 +76,9 @@ func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Ke
 /* providerHandle adapts the OTLP TracerProvider's Shutdown to CloseWithContext, the one door the container's teardown closes a service through. */
 type providerHandle struct {
     provider *sdktrace.TracerProvider
-    /* the bound of a close reached with no deadline at all, on whichever door */
-    shutdownTimeout time.Duration
 }
 
-/* CloseWithContext hands the teardown's own deadline to the provider's Shutdown. A context already spent is not handed on: the sdk's Shutdown (go.opentelemetry.io/otel/sdk trace/provider.go) latches isShutdown by compare-and-swap before its loop, returns at the loop's first ctx.Done() read with the span processors still registered, and answers nil to every later Shutdown, which would leave the provider unclosable with its batch goroutine, ticker and exporter connection running. Refusing the call keeps it closable by whatever comes next, and the container's failure map names this service either way. A remainder too small for one processor to shut down inside still latches. */
+/* CloseWithContext hands the teardown's own context to the provider's Shutdown, deadline or none: a declared unlimited teardown stays unlimited. A context already spent is not handed on: the sdk's Shutdown (go.opentelemetry.io/otel/sdk trace/provider.go) latches isShutdown by compare-and-swap before its loop, returns at the loop's first ctx.Done() read with the span processors still registered, and answers nil to every later Shutdown, which would leave the provider unclosable with its batch goroutine, ticker and exporter connection running. Refusing the call keeps it closable by whatever comes next, and the container's failure map names this service either way. A remainder too small for one processor to shut down inside still latches. */
 func (instance *providerHandle) CloseWithContext(closeContext context.Context) error {
     if nil != closeContext.Err() {
         return exception.NewError(
@@ -104,13 +86,6 @@ func (instance *providerHandle) CloseWithContext(closeContext context.Context) e
             map[string]any{"service": ServiceTracerProvider},
             closeContext.Err(),
         )
-    }
-
-    if _, hasDeadline := closeContext.Deadline(); false == hasDeadline {
-        boundedContext, cancel := context.WithTimeout(closeContext, instance.shutdownTimeout)
-        defer cancel()
-
-        return instance.provider.Shutdown(boundedContext)
     }
 
     return instance.provider.Shutdown(closeContext)

@@ -31,7 +31,7 @@ func (instance *countingConnector) Driver() driver.Driver {
 func TestOutboxStoreFactory_EnsuresTheSchemaUnderTheProcessContext(t *testing.T) {
     connector := &countingConnector{}
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
         return bun.NewDB(sql.OpenDB(connector), mysqldialect.New()), nil
     }, melodycontainer.RegisterOptions{Closer: registryOwnedDatabaseCloser})

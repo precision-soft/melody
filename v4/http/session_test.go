@@ -21,14 +21,13 @@ import (
 
 func TestRegenerateRequestSession_RotatesAndRepublishesInOneCall(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
+    sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
     preRotationId := ""
     rotatedId := ""
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/login",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -56,6 +55,7 @@ func TestRegenerateRequestSession_RotatesAndRepublishesInOneCall(t *testing.T) {
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -141,7 +141,7 @@ func TestRegenerateRequestSession_ReturnsErrorWhenTheSessionManagerIsNotRegister
 
 func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
+    sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
     existingSession := mustSession(sessionManager.NewSession(context.Background()))
     existingSession.Set("userId", "anonymous")
@@ -155,7 +155,6 @@ func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *t
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/login-writing-the-original",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
@@ -171,6 +170,7 @@ func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *t
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)
@@ -223,7 +223,7 @@ func TestRegenerateRequestSession_RefusesATypedNilRequest(t *testing.T) {
 
 func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionStorage(session.NewInMemoryStorage(session.InMemoryStorageConfig{}))
-    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
+    sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
     existingSession := mustSession(sessionManager.NewSession(context.Background()))
     existingSession.Set("userId", "u-7")
@@ -238,7 +238,6 @@ func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/rotate-after-logout",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             if _, readErr := RequestSession(request); nil != readErr {
@@ -256,6 +255,7 @@ func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(serviceContainer)

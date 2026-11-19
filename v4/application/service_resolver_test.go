@@ -10,7 +10,7 @@ import (
 )
 
 /* the process role is what a background worker consults before it starts doing work — a web process that read it as "worker" would run the cron dispatch of every replica — and the service NAME is the contract every such caller reaches it by. */
-func TestProcessRoleMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t *testing.T) {
+func TestProcessRoleMustFromResolver_ResolveTheDeclaredServiceName(t *testing.T) {
     if "service.application.process_role" != ServiceProcessRole {
         t.Fatalf("the process role service name is a cross-package contract, got %q", ServiceProcessRole)
     }
@@ -28,7 +28,7 @@ func TestProcessRoleMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if config.RoleWorker != ProcessRoleMustFromContainer(t.Context(), serviceContainer) {
+    if config.RoleWorker != ProcessRoleMustFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the container door to resolve the declared role")
     }
 

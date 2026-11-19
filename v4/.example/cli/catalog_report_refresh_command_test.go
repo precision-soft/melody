@@ -291,7 +291,7 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
         melodycontainer.MustRegister(serviceContainer, persistence.ServiceArchiveLocker, lockerProvider, melodycontainer.RegisterOptions{TypeRegistrationDisabled: true})
     }
 
-    t.Cleanup(func() { _ = serviceContainer.Close() })
+    t.Cleanup(func() { _ = serviceContainer.CloseWithContext(context.Background()) })
 
     fixture.runtime = melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 

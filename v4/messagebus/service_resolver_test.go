@@ -76,7 +76,7 @@ func TestRetryPolicyFromResolver_AbsentThenPresent(t *testing.T) {
     }
 }
 
-func TestNewConsumeCommandFromContainer_HydratesBusTransportsAndRetryThenConsumes(t *testing.T) {
+func TestNewConsumeCommandFromResolver_HydratesBusTransportsAndRetryThenConsumes(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
@@ -178,7 +178,7 @@ func TestRegisterTransports_TransportsJoinTheContainerTeardown(t *testing.T) {
         t.Fatalf("expected the registered transport to resolve")
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected container close error: %v", closeErr)
     }
 

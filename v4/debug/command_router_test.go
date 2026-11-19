@@ -31,7 +31,7 @@ func newRouterTestRuntime(routeCount int) *testRuntime {
     router := http.NewRouter()
 
     for index := 0; index < routeCount; index++ {
-        router.HandleWithOptions(
+        router.Handle(
             fmt.Sprintf("/route/%02d", index),
             func(
                 runtimeInstance runtimecontract.Runtime,
@@ -372,12 +372,12 @@ func TestRouterCommand_RendersThePriorityAndTheRegistrationOrder(t *testing.T) {
         return nil, nil
     }
 
-    router.HandleWithOptions(
+    router.Handle(
         "/overlap",
         handler,
         http.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
-    router.HandleWithOptions(
+    router.Handle(
         "/overlap",
         handler,
         http.RouteOptions{Methods: []string{nethttp.MethodGet}, Priority: 10},
@@ -430,7 +430,7 @@ func TestRouterCommand_CarriesTheDiscriminatorsInJsonAndVerboseTable(t *testing.
         return nil, nil
     }
 
-    router.HandleWithOptions(
+    router.Handle(
         "/detail/:id",
         handler,
         http.RouteOptions{
@@ -514,7 +514,7 @@ func TestRouterCommand_TiedPatternAndMethodsRowsKeepTheRegistrationOrder(t *test
     router := http.NewRouter()
 
     for index := 0; index < 16; index++ {
-        router.HandleWithOptions(
+        router.Handle(
             "/tied",
             func(
                 runtimeInstance runtimecontract.Runtime,
@@ -565,7 +565,7 @@ func TestRouterCommand_TiedPatternAndMethodsRowsKeepTheRegistrationOrder(t *test
 /* a route attribute is arbitrary any from userland, and one value the encoder cannot represent made the whole envelope fail to marshal: the printer has no fallback, so the command answered ZERO bytes and the caller was left with an empty stream indistinguishable from a missing binary. The value that cannot be represented degrades to the rendering the verbose table already prints; every value that CAN be represented keeps its json type, or the methods attribute would arrive as a string where the consumer keyed a list. */
 func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *testing.T) {
     router := http.NewRouter()
-    router.HandleWithOptions(
+    router.Handle(
         "/probe",
         func(
             runtimeInstance runtimecontract.Runtime,
@@ -641,7 +641,7 @@ func TestRouterCommand_ACyclicAttributeIsRenderedAsAMarkerRatherThanKillingThePr
     cyclicAttribute["self"] = cyclicAttribute
 
     router := http.NewRouter()
-    router.HandleWithOptions(
+    router.Handle(
         "/probe",
         func(
             runtimeInstance runtimecontract.Runtime,
@@ -711,7 +711,7 @@ func TestRouterCommand_TiedRowsFollowTheRegistrationOrderAndNotTheName(t *testin
     router := http.NewRouter()
 
     for index := 0; index < 8; index++ {
-        router.HandleWithOptions(
+        router.Handle(
             "/tied-reversed",
             func(
                 runtimeInstance runtimecontract.Runtime,

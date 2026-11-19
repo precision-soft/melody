@@ -25,7 +25,7 @@ OpenAPI generation is opt-in. The generator reads route metadata from the [`http
 - Serve the document from a live route (e.g. `GET /openapi.json`):
     - [`SpecificationHandler`](../../openapi/spec_handler.go) (reuses `Generate` against the running router, so every load-balanced instance serves the same spec)
 - Resolve the registry as a container service:
-    - [`ServiceOpenApiRegistry`, `RegistryMustFromContainer`, `RegistryMustFromResolver`](../../openapi/service_resolver.go)
+    - [`ServiceOpenApiRegistry`, `RegistryMustFromResolver`](../../openapi/service_resolver.go)
 
 ## How generation works
 
@@ -184,5 +184,5 @@ The example application registers a registry (`config/openapi.go`) and the comma
 - [`NewGenerateCommand(info Info, registry *Registry) *GenerateCommand`](../../openapi/generate_command.go)
 - [`NewGenerateCommandFromContainer() *GenerateCommand`](../../openapi/generate_command.go) — the auto-registered form, resolving the `Info` and the `Registry` from the container at run time
 - [`SpecificationHandler(info Info, registry *Registry) httpcontract.Handler`](../../openapi/spec_handler.go)
-- [`RegistryMustFromContainer(...)`, `RegistryMustFromResolver(...)`](../../openapi/service_resolver.go) — resolve the registry registered under `ServiceOpenApiRegistry`
+- [`RegistryMustFromResolver(...)`](../../openapi/service_resolver.go) — resolve the registry registered under `ServiceOpenApiRegistry`
 - [`InfoFromResolver(ctx context.Context, resolver containercontract.Resolver) Info`](../../openapi/service_resolver.go) — the tolerant reader of `ServiceOpenApiInfo`, answering an empty `Info` when none is registered

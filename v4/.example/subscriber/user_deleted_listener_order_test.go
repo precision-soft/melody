@@ -29,7 +29,7 @@ func deletionRuntime(t *testing.T, cacheInstance melodycachecontract.Cache) melo
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(containerInstance, melodycache.ServiceCache, func(resolver melodycontainercontract.Resolver) (melodycachecontract.Cache, error) {
         return cacheInstance, nil
     }, melodycontainer.RegisterOptions{})

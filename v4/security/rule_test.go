@@ -54,7 +54,7 @@ func TestApiKeyHeaderRule_Check_ATypedNilRequestIsForbidden(t *testing.T) {
 
     var unassignedRequest *http.Request
 
-    err := rule.Check(unassignedRequest)
+    err := rule.Check(nil, unassignedRequest)
     if nil == err {
         t.Fatalf("expected a typed nil request to be refused")
     }

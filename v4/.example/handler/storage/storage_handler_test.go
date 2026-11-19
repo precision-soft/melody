@@ -210,7 +210,7 @@ func getObject(t *testing.T, storage *melodyawss3.Storage) (int, []string) {
 
     logger := &errorRecordingLogger{Logger: melodylogging.NewNopLogger()}
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return logger, nil
     }, melodycontainer.RegisterOptions{})

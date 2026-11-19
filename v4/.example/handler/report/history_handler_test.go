@@ -117,7 +117,7 @@ func TestHistoryLimitOf_TakesTheFirstValueOfARepeatedKey(t *testing.T) {
    service is the cheapest such failure. */
 func TestApiHistoryHandler_RendersAnArchiveFailureThroughThePresenter(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,
@@ -182,7 +182,7 @@ func historyDoorOver(t *testing.T, cacheInstance melodycachecontract.Cache) map[
     }
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegisterType(containerInstance, func(resolver melodycontainercontract.Resolver) (*reporting.CatalogReportService, error) {
         return reportService, nil
     }, melodycontainer.RegisterOptions{})

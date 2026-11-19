@@ -76,7 +76,7 @@ func productListRuntimeOver(t *testing.T, requestContext context.Context, journa
     productService := service.NewProductService(stores.products, categoryService, currencyService, cacheInstance, nil, clockInstance)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return melodylogging.NewJsonLogger(journal, melodylogging.JsonLoggerConfig{MinLevel: melodyloggingcontract.LevelDebug}), nil

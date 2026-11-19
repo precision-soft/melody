@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "testing"
 
     melodyconfig "github.com/precision-soft/melody/v4/config"
@@ -14,7 +15,7 @@ func TestModuleEnvironmentValue(t *testing.T) {
         "APP_MULTI":   "a%%b%%c",
     }}
 
-    environment, environmentErr := melodyconfig.NewEnvironment(source)
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("new environment: %v", environmentErr)
     }

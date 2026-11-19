@@ -33,17 +33,17 @@ func (instance *ApplicationInformationCommand) Flags() []melodyclicontract.Flag 
 func (instance *ApplicationInformationCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     writer := commandContext.Writer
 
-    configuration := melodyconfig.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    configuration := melodyconfig.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
     fmt.Fprintln(writer, "env:", configuration.Kernel().Environment())
 
-    processRole := melodyapplication.ProcessRoleMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    processRole := melodyapplication.ProcessRoleMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
     fmt.Fprintln(writer, "process_role:", processRole)
     fmt.Fprintln(writer, "background_work:", melodyconfig.RoleAllowsBackgroundWork(processRole))
     fmt.Fprintln(writer, "http_address:", configuration.Http().Address())
     fmt.Fprintln(writer, "public_directory:", configuration.Http().PublicDirectory())
     fmt.Fprintln(writer, "static_index_file:", configuration.Http().StaticIndexFile())
 
-    router := melodyhttp.RouterMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    router := melodyhttp.RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
     fmt.Fprintln(writer, "routes:", len(router.RouteDefinitions()))
 
     container := runtimeInstance.Container()

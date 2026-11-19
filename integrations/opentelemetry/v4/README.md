@@ -110,7 +110,7 @@ app.RegisterModule(otlp.NewModule(otlp.ModuleConfig{
 | `Insecure`       | skip transport security — for a collector on the local network                                                  | `false`           |
 | `BatchTimeout`   | batch span processor flush interval, a `bound.Duration`: at least 1ms, unlimited refused                        | `5s`              |
 
-`ModuleConfig` additionally takes `TracerName` (default `melody`), `Propagator` (nil selects W3C TraceContext) and `ShutdownTimeout`, the bound on the provider's shutdown when its close carries no deadline of the teardown's (5s, at least 1ms, unlimited refused, refused at `RegisterServices` naming the field). The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them. `Config` redacts `Headers` in every `fmt` rendering (`String`/`Format`), since that field carries the collector auth token: a config dropped into a log or an error context prints `Headers:[redacted N]` beside its safe fields, never the token.
+`ModuleConfig` additionally takes `TracerName` (default `melody`) and `Propagator` (nil selects W3C TraceContext). The provider's shutdown runs under the teardown's own context, `MELODY_TEARDOWN_TIMEOUT`, deadline or none. The endpoint and its credentials are deployment-owned, so read them from a parameter or `.env` rather than hardcoding them. `Config` redacts `Headers` in every `fmt` rendering (`String`/`Format`), since that field carries the collector auth token: a config dropped into a log or an error context prints `Headers:[redacted N]` beside its safe fields, never the token.
 
 ### Register as a module
 

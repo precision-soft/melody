@@ -24,7 +24,6 @@ A `Configuration` instance is created early (typically at application bootstrap)
 - Resolve templated parameters via [`(*Configuration).Resolve()`](../../config/configuration_resolve.go)
 - Provide container access helpers:
     - [`ServiceConfig`](../../config/service_resolver.go)
-    - [`ConfigMustFromContainer`](../../config/service_resolver.go)
 
 ## Configuration
 
@@ -328,7 +327,7 @@ The package defines the service name:
 
 - [`ServiceConfig`](../../config/service_resolver.go) (`"service.config"`)
 
-If you want other services to resolve a configuration from the container, register `ServiceConfig` as a `configcontract.Configuration` provider and use `ConfigMustFromContainer`.
+If you want other services to resolve a configuration from the container, register `ServiceConfig` as a `configcontract.Configuration` provider and use `ConfigMustFromResolver`.
 
 ## Usage
 
@@ -416,7 +415,6 @@ func example() configcontract.Configuration {
 
 ## Footguns & caveats
 
-- `ConfigMustFromContainer` is a fail-fast helper and will panic if `ServiceConfig` is missing or has an invalid type.
 - `Application.Boot()` calls `Resolve()` after all runtime parameters are registered via `Application.RegisterParameter`.
 - The boot `Resolve()` passes through any parameter whose value is not a string — which is what a runtime parameter registered with a native value is; a runtime parameter registered with a string template is resolved like any other, eagerly at registration once the boot resolution has run.
 - A template reference (e.g., `%kernel.project_directory%`, `%env(MELODY_ENV)%`) resolves only against a parameter whose value is a string; a parameter registered after construction is deferred by the constructor's tolerant pass and settled by the boot `Resolve()`, so the composition root may reference what it registers before boot. The deferral is **not** transparent while it lasts: between construction and boot every value accessor on a deferred parameter panics naming it, because the alternative is handing out the raw `%app.user%` template as though it were the value; `EnvironmentValue` alone answers the raw template, as it does for every parameter. Read such a parameter after `Resolve()` has run. A runtime registration made before boot is deferred only when its value carries a template construct — a doubled percent, an `%env(...)%`, a `%name%` reference or a name-shaped run a percent opened; a literal such as `Coverage 95%` is its own resolved value and reads at once.
@@ -453,8 +451,7 @@ func example() configcontract.Configuration {
 ### Container helpers (`config`)
 
 - [`const ServiceConfig`](../../config/service_resolver.go)
-- [`ConfigMustFromContainer(context.Context, containercontract.Container) configcontract.Configuration`](../../config/service_resolver.go)
-- [`ConfigMustFromResolver(context.Context, containercontract.Resolver) configcontract.Configuration`](../../config/service_resolver.go) — the door a provider comes through, since a provider is handed a `Resolver` and not a `Container`; the form above delegates to it
+- [`ConfigMustFromResolver(context.Context, containercontract.Resolver) configcontract.Configuration`](../../config/service_resolver.go) — the door a provider comes through, since a provider is handed a `Resolver`; it takes the container as it takes a scope
 
 ### Environment variable keys (`config`)
 

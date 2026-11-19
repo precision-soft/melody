@@ -97,7 +97,7 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
     dispatcher.AddSubscriber(enrollmentSubscriber)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{MaxItems: melodybound.Of(128), CleanupInterval: melodybound.Of(time.Minute), Clock: clockInstance})
     cacheInstance := &refusingCache{Cache: melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{OwnsBackend: true})}
     melodycontainer.MustRegister(

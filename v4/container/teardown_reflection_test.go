@@ -25,7 +25,7 @@ func TestContainer_Close_WavesAHeldCollaboratorIsClosedAfterTheServiceHoldingIt(
 
     registerCapturingPair(t, serviceContainer, recorder)
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -82,7 +82,7 @@ func TestContainer_Close_SequentialAHeldCollaboratorIsClosedBeforeTheServiceHold
 
     registerCapturingPair(t, serviceContainer, recorder)
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -177,7 +177,7 @@ func TestContainer_Close_WavesAMutuallyHeldPairGainsNoEdgeAndReportsNoCycle(t *t
 
     buildEveryRegisteredService(t, serviceContainer, "app.parent", "app.child")
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("a mutually held pair reported a failure over a teardown that closed both: %v", closeErr)
     }
 
@@ -780,7 +780,7 @@ func TestContainer_Close_WavesARingOfHeldCollaboratorsLongerThanTheWalkGainsNoCy
         }
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("a ring of held collaborators reported a failure over a teardown that closed every node: %v", closeErr)
     }
 
@@ -846,7 +846,7 @@ func TestContainer_Close_WavesAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testi
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("a held edge against a resolved one reported a failure: %v", closeErr)
     }
 
@@ -945,7 +945,7 @@ func TestHeldPointerIdentities_DoesNotReadASliceHandedToTheValueByAnotherOwner(t
             t.Fatalf("unexpected get error: %v", getErr)
         }
 
-        if closeErr := serviceContainer.Close(); nil != closeErr {
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
             t.Fatalf("unexpected close error: %v", closeErr)
         }
     }
@@ -1028,7 +1028,7 @@ func TestContainer_Close_WavesAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
         t.Fatalf("expected the holder in a wave before the member it holds, got %v", waveOf)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1161,7 +1161,7 @@ func TestContainer_Close_WavesAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNo
             t.Fatalf("unexpected resolution by type error: %v", getErr)
         }
 
-        if closeErr := serviceContainer.Close(); nil != closeErr {
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
             t.Fatalf("round %d: a held edge against a resolved edge, one alias away, was written and reported as a cycle: %v", round, closeErr)
         }
 
@@ -1209,7 +1209,7 @@ func TestContainer_Close_ReleasesTheHeldIdentityRecords(t *testing.T) {
     case <-time.After(50 * time.Millisecond):
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1268,7 +1268,7 @@ func TestContainer_TeardownPlan_DoesNotWriteAnInferredEdgeIntoTheGraph(t *testin
         t.Fatalf("unexpected late resolution error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("an inference the view had written into the graph closed a ring with a later resolution: %v", closeErr)
     }
 
@@ -1782,7 +1782,7 @@ func TestContainer_Close_WavesTwoListenersHoldingTheirBusBackStillCloseTogether(
         t.Fatalf("expected the listener's walk to record the bus it holds, got %v", listenerRecord)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2209,7 +2209,7 @@ func TestContainer_Waves_ABusyServiceRegisteredWithTeardownReflectionDisabledIsN
 
     MustFromResolver[*reflectionBusyHolder](t.Context(), serviceContainer, "app.busy.holder")
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 }

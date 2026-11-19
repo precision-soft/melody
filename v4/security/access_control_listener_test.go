@@ -29,16 +29,18 @@ type accessControlListenerTestAccessDecisionManager struct {
     decideAnyErr     error
     calledMethod     string
     calledAttributes []string
+    calledRuntime    runtimecontract.Runtime
 }
 
-func (instance *accessControlListenerTestAccessDecisionManager) DecideAll(token securitycontract.Token, attributes []string, subject any) error {
+func (instance *accessControlListenerTestAccessDecisionManager) DecideAll(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
     instance.calledMethod = "DecideAll"
+    instance.calledRuntime = runtimeInstance
     instance.calledAttributes = append([]string{}, attributes...)
 
     return instance.decideAllErr
 }
 
-func (instance *accessControlListenerTestAccessDecisionManager) DecideAny(token securitycontract.Token, attributes []string, subject any) error {
+func (instance *accessControlListenerTestAccessDecisionManager) DecideAny(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
     instance.calledMethod = "DecideAny"
     instance.calledAttributes = append([]string{}, attributes...)
 
@@ -1540,7 +1542,7 @@ func newDecisionOutageFixture(decisionManager securitycontract.AccessDecisionMan
     return fixture
 }
 
-func TestAccessControlListener_AFallibleVotersOutageIsRefusedWith503AndTheFirewallDelay(t *testing.T) {
+func TestAccessControlListener_AVotersOutageIsRefusedWith503AndTheFirewallDelay(t *testing.T) {
     decisionManager := NewAccessDecisionManager(
         securitycontract.DecisionStrategyAffirmative,
         []securitycontract.Voter{
@@ -1654,5 +1656,38 @@ func TestAccessControlListener_AFailedDeniedDispatchForAnOutageIsTheListenersErr
 
     if nethttp.StatusInternalServerError != recorder.Code || "" != recorder.Header().Get("Retry-After") || true == handled || 0 != fixture.deniedHandler.calls {
         t.Fatalf("expected the failed dispatch answered 500, as every denial dispatch failure is, with no handler call, got %d %q handled=%v calls=%d", recorder.Code, recorder.Header().Get("Retry-After"), handled, fixture.deniedHandler.calls)
+    }
+}
+
+func TestAccessControlListener_HandsItsRuntimeToTheDecisionManager(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    decisionManager := &accessControlListenerTestAccessDecisionManager{}
+
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:                        "main",
+        Matcher:                     NewPathPrefixMatcher("/"),
+        MatcherDescription:          "m",
+        AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
+        AccessDecisionManager:       decisionManager,
+        LoginPath:                   "/admin/login",
+        LogoutPath:                  "/admin/logout",
+        RoleHierarchySource:         SourceFirewall,
+        AccessDecisionManagerSource: SourceFirewall,
+        AccessControlSource:         SourceFirewall,
+    })
+
+    SecurityContextSetOnRuntime(runtimeInstance, NewSecurityContext(firewall, NewAuthenticatedToken("user", []string{"ROLE_ADMIN"}, nil)))
+
+    RegisterKernelAccessControlListener(kernel, NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil)))
+
+    request := newSecurityTestRequest("GET", "/admin", nil, newTestRuntime())
+    if _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", httpPkg.NewKernelRequestEvent(runtimeInstance, request)); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if runtimeInstance != decisionManager.calledRuntime {
+        t.Fatalf("expected the decision manager handed the listener's runtime, not the request's")
     }
 }

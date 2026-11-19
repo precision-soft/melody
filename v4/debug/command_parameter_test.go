@@ -1,6 +1,7 @@
 package debug
 
 import (
+    "context"
     "encoding/json"
     "fmt"
     "strings"
@@ -73,7 +74,7 @@ type parameterTestEnvironmentSource struct {
     value map[string]string
 }
 
-func (instance *parameterTestEnvironmentSource) Load() (map[string]string, error) {
+func (instance *parameterTestEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return instance.value, nil
 }
 
@@ -82,7 +83,7 @@ var _ configcontract.EnvironmentSource = (*parameterTestEnvironmentSource)(nil)
 func newParameterTestRuntime(t *testing.T) *testRuntime {
     t.Helper()
 
-    environment, environmentErr := config.NewEnvironment(
+    environment, environmentErr := config.NewEnvironment(context.Background(), 
         &parameterTestEnvironmentSource{
             value: map[string]string{
                 config.EnvironmentNameKey: config.EnvironmentDevelopment,
@@ -398,7 +399,7 @@ func (instance *zzTypedNilParameterConfiguration) Get(name string) configcontrac
 /* the listing walks every name the configuration reports and reads each one back, and the configuration is the application's: a decorator that answers a lookup with a nil *config.Parameter hands a Parameter that is not nil, so a skip that tested the interface for nil would call EnvironmentKey() on the nil receiver. The command that exists to show the wiring would then be the one that dies of it, over a name that is the operator's own. */
 func TestParameterCommand_ATypedNilParameterIsSkippedRatherThanDereferenced(t *testing.T) {
     baseRuntime := newParameterTestRuntime(t)
-    baseConfiguration := config.ConfigMustFromContainer(baseRuntime.Context(), baseRuntime.Container())
+    baseConfiguration := config.ConfigMustFromResolver(baseRuntime.Context(), baseRuntime.Container())
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(

@@ -352,7 +352,7 @@ func TestContainer_RegisterAndOverrideRefusedAfterClose(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1643,7 +1643,7 @@ func TestContainer_CloseWithContextRefusesANilContextAndLeavesTheTeardownToALate
         t.Fatalf("expected the nil context refused, got %v", closeErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

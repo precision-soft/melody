@@ -463,7 +463,7 @@ type closeCountingContainer struct {
 func (instance *closeCountingContainer) Close() error {
     instance.closeCalls++
 
-    return instance.Container.Close()
+    return instance.Container.CloseWithContext(context.Background())
 }
 
 func newCloseCountingRuntime() *testRuntime {
@@ -815,7 +815,7 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
             _ = runtimeInstance.Container().MustGet(runtimeInstance.Context(), "test.failing-close")
 
             /* the command takes the teardown failure into its own hands: the close error is its to fold into the result */
-            closeErr := runtimeInstance.Container().Close()
+            closeErr := runtimeInstance.Container().CloseWithContext(context.Background())
             if nil == closeErr {
                 t.Fatalf("expected the container close to fail through the registered service")
             }

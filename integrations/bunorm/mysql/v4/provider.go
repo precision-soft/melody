@@ -22,6 +22,15 @@ import (
 
 /* NewProvider resolves the configuration once and keeps it: a limit outside its rule panics naming the field, before any database is opened. */
 func NewProvider(config ProviderConfig) *Provider {
+    /* an explicit TLS session and a plaintext opt-out cannot both be meant, so neither is read over the other */
+    if true == config.Insecure && nil != config.TlsConfig {
+        exception.Panic(exception.NewError(
+            "bunorm provider: Insecure and TlsConfig are both set; drop Insecure to dial the TLS session, or TlsConfig to dial plaintext",
+            map[string]any{"fields": []string{"ProviderConfig.Insecure", "ProviderConfig.TlsConfig"}},
+            nil,
+        ))
+    }
+
     resolved, resolveErr := resolveProviderConfig(config)
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
@@ -195,7 +204,7 @@ func (instance *Provider) openWithRetry(ctx context.Context, parameters bunorm.C
     }
 }
 
-/* connectionTlsConfig answers the TLS configuration the connector is built with, or nil for a plaintext connection. TlsConfig wins outright; Insecure means nil, the one plaintext path; the default is a VERIFYING config rather than the driver's convenience spellings — `TLSConfig = "skip-verify"` negotiates TLS but never checks the server certificate, and AllowFallbackToPlaintext would silently drop to an unencrypted session against a server that speaks no TLS, the very downgrade a secure default exists to refuse. The default is the system roots with the configured host as the name to verify against, so a server that speaks no TLS fails the dial and the operator arms Insecure deliberately rather than getting plaintext by surprise. */
+/* connectionTlsConfig answers the TLS configuration the connector is built with, or nil for a plaintext connection. TlsConfig is the session when set; Insecure means nil, the one plaintext path, the two refused together at construction; the default is a VERIFYING config rather than the driver's convenience spellings — `TLSConfig = "skip-verify"` negotiates TLS but never checks the server certificate, and AllowFallbackToPlaintext would silently drop to an unencrypted session against a server that speaks no TLS, the very downgrade a secure default exists to refuse. The default is the system roots with the configured host as the name to verify against, so a server that speaks no TLS fails the dial and the operator arms Insecure deliberately rather than getting plaintext by surprise. */
 func (instance *Provider) connectionTlsConfig(host string) *tls.Config {
     if nil != instance.tlsConfig {
         return instance.tlsConfig

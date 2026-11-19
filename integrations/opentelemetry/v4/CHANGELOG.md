@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Removed
 
+- **Breaking** — `otlp/module.go`: `ModuleConfig.ShutdownTimeout` is removed; the provider's shutdown runs under the teardown's context, deadline or none, so `MELODY_TEARDOWN_TIMEOUT` is the one bound and a declared unlimited teardown stays unlimited.
 - **Breaking** — `prometheus.go`: `NewMetricsMiddlewareWithPrometheus` is removed; `NewPrometheusMeter`, `NewMetricsMiddleware` and `MetricsHandler` compose the same three parts.
 
 ### Fixed

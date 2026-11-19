@@ -12,12 +12,8 @@ const (
     ServiceConfig = "service.config"
 )
 
-func ConfigFromContainer(ctx context.Context, serviceContainer containercontract.Container) (configcontract.Configuration, error) {
-    return container.FromResolver[configcontract.Configuration](ctx, serviceContainer, ServiceConfig)
-}
-
-func ConfigMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) configcontract.Configuration {
-    return ConfigMustFromResolver(ctx, serviceContainer)
+func ConfigFromResolver(ctx context.Context, resolver containercontract.Resolver) (configcontract.Configuration, error) {
+    return container.FromResolver[configcontract.Configuration](ctx, resolver, ServiceConfig)
 }
 
 func ConfigMustFromResolver(ctx context.Context, resolver containercontract.Resolver) configcontract.Configuration {

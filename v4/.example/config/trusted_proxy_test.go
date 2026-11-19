@@ -386,7 +386,7 @@ func TestTrustedProxyResolver_ReportsAnEntryThatNamesNothingToTheRequestsLogger(
 
     journal := &bytes.Buffer{}
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,

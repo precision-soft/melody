@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "os"
     "path/filepath"
     "slices"
@@ -279,7 +280,7 @@ func TestRetiredEnvironmentKeys_EnvironmentFiles_OnlyTheSelectedEnvironmentJudge
         }
     }
 
-    environment, environmentErr := NewEnvironment(NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: os.DirFS(directory)}))
+    environment, environmentErr := NewEnvironment(context.Background(), NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: os.DirFS(directory)}))
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }

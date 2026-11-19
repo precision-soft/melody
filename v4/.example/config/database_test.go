@@ -296,7 +296,7 @@ func databaseServicesOver(t *testing.T, archiveWired bool) (melodycontainercontr
     loggerResolutions := 0
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     containerInstance.MustRegister(
         melodylogging.ServiceLogger,
         func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
@@ -433,7 +433,7 @@ func TestBuildDatabase_DeclaresTheCatalogueWithoutOpeningIt(t *testing.T) {
 /* the catalogue's locker resolves the handle at its first use, through the handle's own service, rather than capturing one at registration */
 func TestRegisterLockerService_ResolvesTheCatalogueHandleAtFirstUse(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     resolutions := 0
     containerInstance.MustRegister(serviceDatabase, func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {

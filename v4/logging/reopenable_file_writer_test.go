@@ -407,7 +407,7 @@ func TestReopenableFileWriter_TheContainerClosesItThroughItsContextDoor(t *testi
 
     container.MustFromResolver[*ReopenableFileWriter](context.Background(), serviceContainer, "app.log.writer")
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

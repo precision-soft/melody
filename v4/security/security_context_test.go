@@ -1,6 +1,7 @@
 package security
 
 import (
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -11,7 +12,7 @@ func TestSecurityContext_IsGranted_TypedNilTokenAnswersFalse(t *testing.T) {
     firewall := NewCompiledFirewall(CompiledFirewallConfig{
         Name:                        "main",
         Matcher:                     NewPathPrefixMatcher("/"),
-        TokenSource:                 NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token { return nil }),
+        TokenSource:                 NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) { return nil, nil }),
         AccessControl:               NewAccessControl(nil),
         AccessDecisionManager:       NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}),
         AccessDecisionManagerSource: SourceFirewall,
@@ -39,14 +40,14 @@ func TestSecurityContext_IsGranted_RefusesAnUnauthenticatedTokenTheVotersRefuse(
     firewall := NewCompiledFirewall(CompiledFirewallConfig{
         Name:                        "main",
         Matcher:                     NewPathPrefixMatcher("/"),
-        TokenSource:                 NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token { return token }),
+        TokenSource:                 NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) { return token, nil }),
         AccessControl:               NewAccessControl(nil),
         AccessDecisionManager:       accessDecisionManager,
         AccessDecisionManagerSource: SourceFirewall,
         AccessControlSource:         SourceFirewall,
     })
 
-    if nil == accessDecisionManager.DecideAll(token, []string{"ROLE_ADMIN"}, nil) {
+    if nil == accessDecisionManager.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil) {
         t.Fatalf("the premise of this test is gone: the voters now grant ROLE_ADMIN to a token answering IsAuthenticated false")
     }
 

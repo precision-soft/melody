@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "errors"
     "strings"
     "testing"
@@ -11,7 +12,7 @@ import (
 )
 
 func newConfigurationFromValues(values map[string]string) (*Configuration, error) {
-    environment, err := NewEnvironment(&testEnvironmentSource{values: values})
+    environment, err := NewEnvironment(context.Background(), &testEnvironmentSource{values: values})
     if nil != err {
         return nil, err
     }
@@ -240,7 +241,7 @@ func assertLimitRefusal(t *testing.T, err error, environmentKey string, field st
 func TestConfigurationHttpStaticExcludedPathsDefaultsToEmpty(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -267,7 +268,7 @@ func TestConfigurationHttpStaticExcludedPathsAreReadAsACommaSeparatedList(t *tes
         },
     }
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -298,7 +299,7 @@ func TestConfigurationHttpStaticExcludedPathsAreReadThroughTheKernelAlias(t *tes
         },
     }
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -320,7 +321,7 @@ func TestConfigurationHttpStaticExcludedPathsAreCopiedOnRead(t *testing.T) {
         },
     }
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -350,7 +351,7 @@ func TestConfigurationHttpStaticExcludedPathsRefuseAnEntryThatIsNotAPath(t *test
             },
         }
 
-        environment, err := NewEnvironment(source)
+        environment, err := NewEnvironment(context.Background(), source)
         if nil != err {
             t.Fatalf("new environment error: %v", err)
         }
@@ -364,7 +365,7 @@ func TestConfigurationHttpStaticExcludedPathsRefuseAnEntryThatIsNotAPath(t *test
 
 func TestConfigurationHttpStaticExcludedPathsRefuseAnEntryHoldingAPercentEscapeOtherThanTheSeparator(t *testing.T) {
     for mode, value := range map[string]string{ModeHttp: "/api,/a%20b", ModeCli: "/api,/a%20b"} {
-        environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{DefaultModeKey: mode, StaticExcludedPathsKey: value}})
+        environment, err := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{DefaultModeKey: mode, StaticExcludedPathsKey: value}})
         if nil != err {
             t.Fatalf("new environment error: %v", err)
         }
@@ -387,7 +388,7 @@ func TestConfigurationHttpStaticExcludedPathsRefuseAnEntryHoldingAPercentEscapeO
         }
     }
 
-    environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{StaticExcludedPathsKey: "/café,/files/a%2Fb,/100%"}})
+    environment, err := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{StaticExcludedPathsKey: "/café,/files/a%2Fb,/100%"}})
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -404,7 +405,7 @@ func TestConfigurationHttpStaticExcludedPathsAcceptAWhitespaceOnlyValueAsNoList(
         },
     }
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }

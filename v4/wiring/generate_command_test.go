@@ -31,7 +31,7 @@ const (
 type emptyEnvironmentSource struct {
 }
 
-func (instance *emptyEnvironmentSource) Load() (map[string]string, error) {
+func (instance *emptyEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return map[string]string{}, nil
 }
 
@@ -88,7 +88,7 @@ func newCommandFixtureProject(t *testing.T) string {
 func newCommandFixtureRuntime(t *testing.T, projectDirectory string) runtimecontract.Runtime {
     t.Helper()
 
-    environment, environmentErr := config.NewEnvironment(&emptyEnvironmentSource{})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &emptyEnvironmentSource{})
     if nil != environmentErr {
         t.Fatalf("new environment: %v", environmentErr)
     }

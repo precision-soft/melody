@@ -586,7 +586,7 @@ func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependency(t 
 
     MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "service.b")
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -630,7 +630,7 @@ func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependencyByT
 
     MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "service.b")
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

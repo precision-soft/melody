@@ -58,10 +58,6 @@ func ClientMustFromResolver(ctx context.Context, resolver containercontract.Reso
     return container.MustFromResolver[rueidis.Client](ctx, resolver, ServiceClient)
 }
 
-func ClientMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) rueidis.Client {
-    return container.MustFromResolver[rueidis.Client](ctx, serviceContainer, ServiceClient)
-}
-
 /* RegisterLockerService builds the locker at the call, so a configuration outside its rule fails the boot rather than the first resolve. */
 func RegisterLockerService(registrar ServiceRegistrar, client rueidis.Client, config LockerConfig) {
     locker := NewLocker(client, config)
@@ -108,10 +104,6 @@ func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client
 
 func TokenStoreMustFromResolver(ctx context.Context, resolver containercontract.Resolver) securitycontract.RevocableTokenStore {
     return container.MustFromResolver[securitycontract.RevocableTokenStore](ctx, resolver, ServiceTokenStore)
-}
-
-func TokenStoreMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) securitycontract.RevocableTokenStore {
-    return container.MustFromResolver[securitycontract.RevocableTokenStore](ctx, serviceContainer, ServiceTokenStore)
 }
 
 func EpochRevocableTokenStoreMustFromResolver(ctx context.Context, resolver containercontract.Resolver) securitycontract.EpochRevocableTokenStore {

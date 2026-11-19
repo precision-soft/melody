@@ -13,8 +13,6 @@ type Container interface {
 
     Names() []string
 
-    Close() error
-
-    /* CloseWithContext is Close under the caller's deadline, handed to every service the teardown closes. */
+    /* CloseWithContext tears the container down once, under the caller's deadline, handed to every service the teardown closes. */
     CloseWithContext(closeContext context.Context) error
 }

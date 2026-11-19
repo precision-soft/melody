@@ -20,7 +20,7 @@ func TestClockServiceResolvers(t *testing.T) {
         container.RegisterOptions{},
     )
 
-    clockFromContainer := ClockMustFromContainer(t.Context(), serviceContainer)
+    clockFromContainer := ClockMustFromResolver(t.Context(), serviceContainer)
     if nil == clockFromContainer {
         t.Fatalf("expected clock from container")
     }
@@ -36,22 +36,22 @@ func TestClockServiceResolvers(t *testing.T) {
     }
 }
 
-func TestClockMustFromContainer_RefusesNilContainer(t *testing.T) {
+func TestClockMustFromResolver_RefusesANilResolver(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            _ = ClockMustFromContainer(t.Context(), nil)
+            _ = ClockMustFromResolver(t.Context(), nil)
         },
-        "container may not be nil",
+        "resolver may not be nil",
     )
 
     var typedNil *serviceResolverTestContainer
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            _ = ClockMustFromContainer(t.Context(), typedNil)
+            _ = ClockMustFromResolver(t.Context(), typedNil)
         },
-        "container may not be nil",
+        "resolver may not be nil",
     )
 }
 

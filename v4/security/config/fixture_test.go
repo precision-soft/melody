@@ -61,7 +61,7 @@ type noopAuthenticator struct{}
 
 func (instance *noopAuthenticator) Supports(request httpcontract.Request) bool { return false }
 
-func (instance *noopAuthenticator) Authenticate(request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *noopAuthenticator) Authenticate(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     return nil, nil
 }
 

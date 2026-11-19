@@ -52,11 +52,11 @@ func TestStoreAndRelayReaders_AnswerWhatTheRegistrarsRegistered(t *testing.T) {
         return relay, nil
     }, container.RegisterOptions{})
 
-    if store != StoreMustFromContainer(t.Context(), serviceContainer) {
+    if store != StoreMustFromResolver(t.Context(), serviceContainer) {
         t.Fatal("expected the registered store from the container")
     }
 
-    if relay != RelayMustFromContainer(t.Context(), serviceContainer) {
+    if relay != RelayMustFromResolver(t.Context(), serviceContainer) {
         t.Fatal("expected the registered relay from the container")
     }
 
@@ -78,9 +78,9 @@ func TestStoreAndRelayReaders_PanicWhenUnregistered(t *testing.T) {
         name string
         read func()
     }{
-        {name: "store container", read: func() { _ = StoreMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
+        {name: "store container", read: func() { _ = StoreMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
         {name: "store resolver", read: func() { _ = StoreMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) }},
-        {name: "relay container", read: func() { _ = RelayMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
+        {name: "relay container", read: func() { _ = RelayMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
         {name: "relay resolver", read: func() { _ = RelayMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {

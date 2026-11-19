@@ -73,7 +73,7 @@ func TestRegisterBackendService_ResolutionOrdersTheConnectionIntoTheTeardown(t *
         t.Fatalf("expected the backend to resolve")
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("container close: %v", closeErr)
     }
 

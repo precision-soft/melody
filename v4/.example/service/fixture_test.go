@@ -299,7 +299,7 @@ func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatc
     dispatcher := newRecordingDispatcher(clockInstance, event.CurrencyUpdatedEventName)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     melodycontainer.MustRegister(
         containerInstance,
@@ -459,7 +459,7 @@ func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
     logger := &errorRecordingLogger{Logger: melodylogging.NewNopLogger()}
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     melodycontainer.MustRegister(
         containerInstance,
@@ -544,7 +544,7 @@ func newUserServiceUnderTest(t *testing.T, dispatcherOf func(melodyeventcontract
     }
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,

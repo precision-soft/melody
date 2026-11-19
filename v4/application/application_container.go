@@ -279,7 +279,7 @@ func (instance *Application) bootContainer() {
     instance.registerSecurity()
 
     /* resolved eagerly so a failing provider fails the boot step that owns it */
-    _, loggerProbeErr := logging.LoggerFromContainer(instance.ctx, serviceContainer)
+    _, loggerProbeErr := logging.LoggerFromResolver(instance.ctx, serviceContainer)
     if nil != loggerProbeErr {
         exception.Panic(
             exception.NewError(

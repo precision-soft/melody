@@ -53,7 +53,7 @@ func resolvedBudgetKey(t *testing.T, trustedProxyList []string, peer string, for
 func moduleWithEnvironment(t *testing.T, values map[string]string) *Module {
     t.Helper()
 
-    environment, environmentErr := melodyconfig.NewEnvironment(&stubEnvironmentSource{values: values})
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), &stubEnvironmentSource{values: values})
     if nil != environmentErr {
         t.Fatalf("new environment: %v", environmentErr)
     }
@@ -70,7 +70,7 @@ type stubEnvironmentSource struct {
     values map[string]string
 }
 
-func (instance *stubEnvironmentSource) Load() (map[string]string, error) {
+func (instance *stubEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return instance.values, nil
 }
 

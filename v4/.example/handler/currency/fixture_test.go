@@ -38,7 +38,7 @@ type stubEnvironmentSource struct {
     values map[string]string
 }
 
-func (instance *stubEnvironmentSource) Load() (map[string]string, error) {
+func (instance *stubEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return instance.values, nil
 }
 
@@ -51,7 +51,7 @@ type currencyDoorFixture struct {
 func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
     t.Helper()
 
-    environment, environmentErr := melodyconfig.NewEnvironment(&stubEnvironmentSource{
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), &stubEnvironmentSource{
         values: map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentProduction},
     })
     if nil != environmentErr {

@@ -33,7 +33,7 @@ import (
 
 type emptyEnvironmentSource struct{}
 
-func (instance emptyEnvironmentSource) Load() (map[string]string, error) {
+func (instance emptyEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return map[string]string{}, nil
 }
 
@@ -55,7 +55,7 @@ func callAccessTokenDoor(t *testing.T, call accessTokenDoorCall) int {
     }
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(containerInstance, repository.ServiceUserRepository, func(resolver melodycontainercontract.Resolver) (repository.UserRepository, error) {
         return userRepository, nil
     }, melodycontainer.RegisterOptions{})
@@ -69,7 +69,7 @@ func callAccessTokenDoor(t *testing.T, call accessTokenDoorCall) int {
         return melodyclock.NewSystemClock(), nil
     }, melodycontainer.RegisterOptions{})
 
-    environment, environmentErr := melodyconfig.NewEnvironment(emptyEnvironmentSource{})
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), emptyEnvironmentSource{})
     if nil != environmentErr {
         t.Fatalf("new environment: %v", environmentErr)
     }

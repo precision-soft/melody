@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "fmt"
     "io/fs"
     "os"
@@ -38,7 +39,7 @@ func TestPreprocessDotEnvContent_KeepsMultilineQuotedValues(t *testing.T) {
         ".env": "OTHER=plain # trailing comment\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -161,7 +162,7 @@ func TestPreprocessDotEnvContent_WhitespacePrecededHashIsComment(t *testing.T) {
         ".env": "KEY=value # trailing comment\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -188,7 +189,7 @@ func TestLoad_EmptyValueFollowedByAComment_ReadsEmpty(t *testing.T) {
             ".env": oneCase.line + "\n",
         })
 
-        values, loadErr := source.Load()
+        values, loadErr := source.Load(context.Background())
         if nil != loadErr {
             t.Fatalf("%q: load error: %v", oneCase.line, loadErr)
         }
@@ -204,7 +205,7 @@ func TestLoad_DollarInsideTheCommentOfAnEmptyValueIsNotAReference(t *testing.T) 
         ".env": "APP_SECRET=   # set to $SECRET_VALUE\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("expected the comment to be cut before its dollar is read as a reference, got: %v", loadErr)
     }
@@ -227,7 +228,7 @@ func TestPreprocessDotEnvContent_HashGluedToTheSeparatorIsData(t *testing.T) {
         ".env": "KEY=#glued\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -242,7 +243,7 @@ func TestLoad_UnterminatedQuotedValueContainingNearCarriesNoFileContent(t *testi
         ".env": "PASSWORD=\"hunter2 near the door\n",
     })
 
-    _, loadErr := source.Load()
+    _, loadErr := source.Load(context.Background())
     if nil == loadErr {
         t.Fatalf("expected the unterminated quoted value to fail the parse")
     }
@@ -261,7 +262,7 @@ func TestLoad_CommentCutMatchesGodotenv(t *testing.T) {
         ".env": "GREETING=hello # world # x\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -275,7 +276,7 @@ func TestLoad_PreservesNonUtf8BytesInQuotedValues(t *testing.T) {
         ".env": "DB_PASSWORD='caf\xe9'\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("load error: %v", loadErr)
     }
@@ -304,7 +305,7 @@ func TestLoad_RefusesAnUnquotedValueThatIsNotUtf8(t *testing.T) {
         files := map[string]string{".env": "MELODY_ENV=dev\n"}
         files[testCase.file] = files[testCase.file] + testCase.content
 
-        _, loadErr := writeDotEnvFiles(t, files).Load()
+        _, loadErr := writeDotEnvFiles(t, files).Load(context.Background())
 
         refusal := findEnvironmentSourceError(loadErr, "an unquoted env value is not valid UTF-8")
         if nil == refusal || "["+testCase.key+"]" != fmt.Sprint(refusal.Context()["keys"]) {
@@ -327,7 +328,7 @@ func TestLoad_AdmitsWhatGodotenvDoesNotRewrite(t *testing.T) {
         ".env": "MELODY_ENV=dev\nAPP_NAME=shop # caf\xe9\n# caf\xe9\nDB_PASSWORD='caf\xe9' # caf\xe9\nAPP_MARK=\ufffd\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("expected the file admitted, got %v", loadErr)
     }
@@ -362,7 +363,7 @@ func TestLoad_RefusesAnEnvironmentFileThatRenamesTheEnvironment(t *testing.T) {
             file:   "MELODY_ENV=dev\n",
         })
 
-        _, loadErr := source.Load()
+        _, loadErr := source.Load(context.Background())
 
         refusal := findEnvironmentSourceError(loadErr, "a per-environment env file renames the environment")
         if nil == refusal {
@@ -386,7 +387,7 @@ func TestLoad_AdmitsAnEnvironmentFileThatRepeatsTheName(t *testing.T) {
         ".env.prod.local": "MELODY_ENV= prod\n",
     })
 
-    if _, loadErr := source.Load(); nil != loadErr {
+    if _, loadErr := source.Load(context.Background()); nil != loadErr {
         t.Fatalf("expected the same name admitted, got %v", loadErr)
     }
 }
@@ -397,7 +398,7 @@ func TestLoad_RefusesARenameOfADefaultedName(t *testing.T) {
         ".env.dev": "MELODY_ENV=prod\n",
     })
 
-    _, loadErr := source.Load()
+    _, loadErr := source.Load(context.Background())
 
     refusal := findEnvironmentSourceError(loadErr, "a per-environment env file renames the environment")
     if nil == refusal || "dev" != refusal.Context()["selectedEnvironment"] || "prod" != refusal.Context()["overwritingEnvironment"] {
@@ -409,7 +410,7 @@ func TestLoad_RefusesARenameOfADefaultedName(t *testing.T) {
         ".env.dev": "MELODY_ENV=dev\n",
     })
 
-    if _, admittedErr := admitted.Load(); nil != admittedErr {
+    if _, admittedErr := admitted.Load(context.Background()); nil != admittedErr {
         t.Fatalf("expected .env.dev naming dev admitted, got %v", admittedErr)
     }
 }
@@ -420,7 +421,7 @@ func TestLoad_ComparesTheTrimmedEnvironmentName(t *testing.T) {
         ".env.prod": "MELODY_ENV=\" prod \"\n",
     })
 
-    if _, loadErr := source.Load(); nil != loadErr {
+    if _, loadErr := source.Load(context.Background()); nil != loadErr {
         t.Fatalf("expected a padded repeat of the name admitted, got %v", loadErr)
     }
 }
@@ -432,7 +433,7 @@ func TestLoad_ReportsAReferencedRenameByItsKeys(t *testing.T) {
         ".env.prod": "MELODY_ENV=${DB_PASSWORD}\n",
     })
 
-    _, loadErr := source.Load()
+    _, loadErr := source.Load(context.Background())
 
     refusal := findEnvironmentSourceError(loadErr, "a per-environment env file renames the environment")
     if nil == refusal || "[DB_PASSWORD]" != fmt.Sprint(refusal.Context()["overwritingEnvironmentAssembledFrom"]) {
@@ -450,7 +451,7 @@ func TestLoad_ReportsAnEmptiedNameAsEmpty(t *testing.T) {
         ".env.prod": "MELODY_ENV=\n",
     })
 
-    _, loadErr := source.Load()
+    _, loadErr := source.Load(context.Background())
 
     refusal := findEnvironmentSourceError(loadErr, "a per-environment env file renames the environment")
     if nil == refusal || "" != refusal.Context()["overwritingEnvironment"] {
@@ -465,7 +466,7 @@ func TestLoad_ComparesTheEnvironmentNameAfterTheReferencesAreExpanded(t *testing
             ".env.prod": "MELODY_ENV=${TARGET}\nTARGET=" + target + "\n",
         })
 
-        _, loadErr := source.Load()
+        _, loadErr := source.Load(context.Background())
         if refused != (nil != findEnvironmentSourceError(loadErr, "a per-environment env file renames the environment")) {
             t.Fatalf("TARGET=%s: expected refused %v, got %v", target, refused, loadErr)
         }
@@ -477,7 +478,7 @@ func TestLoad_RefusesMalformedBracedReference(t *testing.T) {
         ".env": "DSN=mysql://root:${DB-PASS}@db/app\n",
     })
 
-    _, loadErr := source.Load()
+    _, loadErr := source.Load(context.Background())
     if nil == loadErr {
         t.Fatalf("expected the malformed braced reference to be refused")
     }
@@ -494,7 +495,7 @@ func TestLoad_ParseFailureCarriesNoFileContent(t *testing.T) {
         ".env": "BROKEN$KEY=x\nDB_PASSWORD=hunter2\n",
     })
 
-    _, loadErr := source.Load()
+    _, loadErr := source.Load(context.Background())
     if nil == loadErr {
         t.Fatalf("expected the malformed variable name to fail the parse")
     }
@@ -515,7 +516,7 @@ func TestLoad_EnvironmentNameWindowIsNamed(t *testing.T) {
         ".env.prod": "PICKED_ENV=prod\n",
     })
 
-    _, loadErr := source.Load()
+    _, loadErr := source.Load(context.Background())
     if nil == loadErr {
         t.Fatalf("expected the out-of-window reference to be refused")
     }
@@ -546,7 +547,7 @@ func TestEnvironmentSource_ResolvesReferenceAcrossFiles(t *testing.T) {
         ".env.local": "DSN=postgres://${DB_USER}:${DB_PASS}@db/app\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -562,7 +563,7 @@ func TestEnvironmentSource_ResolvesForwardReferenceAcrossFiles(t *testing.T) {
         ".env.local": "DB_USER=app\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -577,7 +578,7 @@ func TestEnvironmentSource_FailsOnUndefinedReference(t *testing.T) {
         ".env": "DSN=postgres://${DB_USER}@db/app\n",
     })
 
-    _, loadErr := source.Load()
+    _, loadErr := source.Load(context.Background())
     if nil == loadErr {
         t.Fatalf("expected an undefined reference to fail the boot")
     }
@@ -592,7 +593,7 @@ func TestEnvironmentSource_FailsOnSelfReference(t *testing.T) {
         ".env": "PATH_LIST=${PATH_LIST}:/opt/bin\n",
     })
 
-    _, loadErr := source.Load()
+    _, loadErr := source.Load(context.Background())
     if nil == loadErr {
         t.Fatalf("expected a self reference to fail the boot")
     }
@@ -608,7 +609,7 @@ func TestEnvironmentSource_FailsOnMutualReference(t *testing.T) {
         ".env.local": "RIGHT=${LEFT}\n",
     })
 
-    _, loadErr := source.Load()
+    _, loadErr := source.Load(context.Background())
     if nil == loadErr {
         t.Fatalf("expected a mutual reference to fail the boot")
     }
@@ -623,7 +624,7 @@ func TestEnvironmentSource_KeepsEscapedDollarAsData(t *testing.T) {
         ".env": "PASSWORD=pa\\$sword\nQUOTED=\"pa\\$s2\"\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -642,7 +643,7 @@ func TestEnvironmentSource_LeavesSingleQuotedValueLiteral(t *testing.T) {
         ".env": "DB_USER=app\nTEMPLATE='${DB_USER}'\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -657,7 +658,7 @@ func TestEnvironmentSource_KeepsDollarThatOpensNoReference(t *testing.T) {
         ".env": "AMOUNT=100$\nPRICE=$ 20\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -677,7 +678,7 @@ func TestEnvironmentSource_ResolvesBareAndChainedReferences(t *testing.T) {
         ".env.local": "DSN=postgres://${AUTHORITY}/app\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -697,7 +698,7 @@ func TestEnvironmentSource_ResolvesReferenceInsideTheEnvironmentName(t *testing.
         ".env.prod": "APP_TAG=production\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -717,7 +718,7 @@ func TestEnvironmentSource_KeepsALowerCaseDollarSequenceAsData(t *testing.T) {
         ".env": "DB_PASSWORD=pa$sword\nPRICE=$1.50\nMIXED=pa$sWORD\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("a value carrying a literal dollar failed the load: %s", loadErr.Error())
     }
@@ -740,7 +741,7 @@ func TestEnvironmentSource_StillResolvesAnUpperCaseReference(t *testing.T) {
         ".env": "DB_USER=app\nBARE=$DB_USER\nBRACED=${DB_USER}-1\n",
     })
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(context.Background())
     if nil != loadErr {
         t.Fatalf("unexpected load error: %s", loadErr.Error())
     }
@@ -760,7 +761,7 @@ type testEnvironmentSource struct {
     err    error
 }
 
-func (instance *testEnvironmentSource) Load() (map[string]string, error) {
+func (instance *testEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     if nil != instance.err {
         return nil, instance.err
     }
@@ -778,7 +779,7 @@ func TestMarkSecret_ReachesADotEnvValueAssembledFromTheMarkedKey(t *testing.T) {
         ".env": "DB_PASSWORD=hunter2\nDB_HOST=db\nDSN=mysql://app:${DB_PASSWORD}@${DB_HOST}/app\nDSN_COPY=${DSN}\nOTHER=plain\n",
     })
 
-    environment, environmentErr := NewEnvironment(source)
+    environment, environmentErr := NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("environment error: %v", environmentErr)
     }
@@ -827,7 +828,7 @@ func TestNewEnvironmentSource_EmptyBaseDirectoryReadsTheRootAndBaseDirectoryName
     }
 
     for baseDirectory, expected := range map[string]string{"": "root", ".": "root", "nested": "nested"} {
-        values, loadErr := NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: os.DirFS(directory), BaseDirectory: baseDirectory}).Load()
+        values, loadErr := NewEnvironmentSource(EnvironmentSourceConfig{FileSystem: os.DirFS(directory), BaseDirectory: baseDirectory}).Load(context.Background())
         if nil != loadErr {
             t.Fatalf("base dir %q: load: %s", baseDirectory, loadErr.Error())
         }

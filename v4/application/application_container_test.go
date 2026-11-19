@@ -306,7 +306,7 @@ func newSessionTtlTestApplication(t *testing.T, sessionTtl string) *Application 
 func newSessionTestApplicationFromValues(t *testing.T, values map[string]string) *Application {
     t.Helper()
 
-    environment, environmentErr := config.NewEnvironment(
+    environment, environmentErr := config.NewEnvironment(context.Background(), 
         &mapEnvironmentSource{
             values: values,
         },
@@ -345,7 +345,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTtlToTheManager(t *tes
     registerSessionCollaborators(applicationInstance)
     applicationInstance.registerHttpSession()
 
-    manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
+    manager := session.SessionMustFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
 
     sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set("key", "value")
@@ -365,7 +365,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTtlToTheManager(t *tes
 }
 
 func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndTheKernelClockToTheManager(t *testing.T) {
-    environment, environmentErr := config.NewEnvironment(
+    environment, environmentErr := config.NewEnvironment(context.Background(), 
         &mapEnvironmentSource{
             values: map[string]string{
                 config.HttpSessionTombstoneRetentionKey: "1h",
@@ -397,7 +397,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
     registerSessionCollaborators(applicationInstance)
     applicationInstance.registerHttpSession()
 
-    manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
+    manager := session.SessionMustFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
 
     sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set("identity", "alice")
@@ -447,7 +447,7 @@ func TestApplicationRegisterHttpSession_HandsAnUnlimitedTtlToTheStorageAsNoExpir
     registerSessionCollaborators(applicationInstance)
     applicationInstance.registerHttpSession()
 
-    manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
+    manager := session.SessionMustFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
 
     sessionInstance := mustSession(manager.NewSession(context.Background()))
     sessionInstance.Set("key", "value")
@@ -595,7 +595,7 @@ func TestBootContainer_TheApplicationsOwnLoggerIsSubstitutedNotCollided(t *testi
 
     kernelInstance := applicationInstance.Boot()
 
-    resolved, resolveErr := logging.LoggerFromContainer(t.Context(), kernelInstance.ServiceContainer())
+    resolved, resolveErr := logging.LoggerFromResolver(t.Context(), kernelInstance.ServiceContainer())
     if nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
@@ -882,7 +882,7 @@ func TestBoot_TheRegisteredTransportsAreClosedByAProcessThatNeverResolvesTheMap(
 
     kernelInstance := applicationInstance.Boot()
 
-    if closeErr := kernelInstance.ServiceContainer().Close(); nil != closeErr {
+    if closeErr := kernelInstance.ServiceContainer().CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected container close error: %v", closeErr)
     }
 
@@ -909,7 +909,7 @@ func TestBoot_ResolvingTheTransportsMapStillOrdersTheTeardownAfterTheBootBuild(t
         t.Fatalf("expected the registered transport to resolve")
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected container close error: %v", closeErr)
     }
 
@@ -936,11 +936,11 @@ func TestBootContainer_TheJournalOfAConsoleProcessReopensOnSighup(t *testing.T) 
     applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: "dev", config.LogPathKey: logPath})
     applicationInstance.bootContainer()
 
-    logger, resolveErr := logging.LoggerFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
+    logger, resolveErr := logging.LoggerFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
     if nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
-    defer func() { _ = applicationInstance.kernel.ServiceContainer().Close() }()
+    defer func() { _ = applicationInstance.kernel.ServiceContainer().CloseWithContext(context.Background()) }()
 
     logger.Emergency("before rotation", nil)
 
@@ -977,11 +977,11 @@ func TestBootContainer_ARelativeLogPathIsAnchoredToTheProjectDirectoryUnderACrea
     applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: "dev", config.LogPathKey: relativePath})
     applicationInstance.bootContainer()
 
-    logger, resolveErr := logging.LoggerFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
+    logger, resolveErr := logging.LoggerFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
     if nil != resolveErr {
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
-    defer func() { _ = applicationInstance.kernel.ServiceContainer().Close() }()
+    defer func() { _ = applicationInstance.kernel.ServiceContainer().CloseWithContext(context.Background()) }()
 
     logger.Emergency("anchored", nil)
 
@@ -1022,7 +1022,7 @@ func TestBoot_TheRegisteredBusesCloseBeforeTheTransportsTheyRouteTo(t *testing.T
     }
 
     serviceContainer := applicationInstance.Boot().ServiceContainer()
-    defer func() { _ = serviceContainer.Close() }()
+    defer func() { _ = serviceContainer.CloseWithContext(context.Background()) }()
 
     for _, busName := range []string{messagebus.ServiceBus, messagebus.ServiceConsumeBus} {
         _ = container.MustFromResolver[messagebuscontract.Bus](t.Context(), serviceContainer, busName)
@@ -1190,13 +1190,13 @@ func TestBootContainer_TheConsoleJournalOfACommandIsStandardError(t *testing.T) 
         applicationInstance := newEnvironmentRefusalApplication(t, testCase.mode, map[string]string{config.EnvironmentNameKey: "dev", config.LogPathKey: ""})
         applicationInstance.bootContainer()
 
-        logger, resolveErr := logging.LoggerFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
+        logger, resolveErr := logging.LoggerFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
         if nil == resolveErr {
             logger.Emergency("console journal probe", nil)
         }
 
         os.Stdout, os.Stderr = originalStdout, originalStderr
-        _ = applicationInstance.kernel.ServiceContainer().Close()
+        _ = applicationInstance.kernel.ServiceContainer().CloseWithContext(context.Background())
         _ = stdoutWrite.Close()
         _ = stderrWrite.Close()
 
@@ -1216,7 +1216,7 @@ func TestBootContainer_TheConsoleJournalOfACommandIsStandardError(t *testing.T) 
 func TestBootContainer_TheFrameworkProvidersResolveTheirKernelValues(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
     serviceContainer := applicationInstance.Boot().ServiceContainer()
-    defer func() { _ = serviceContainer.Close() }()
+    defer func() { _ = serviceContainer.CloseWithContext(context.Background()) }()
 
     expectedDependencies := map[string][]string{
         logging.ServiceLogger:         {clock.ServiceClock, config.ServiceConfig},
@@ -1292,7 +1292,7 @@ func TestApplication_WiresTheSessionStorageTimeoutFromTheEnvironment(t *testing.
             registerSessionCollaborators(applicationInstance)
             applicationInstance.registerHttpSession()
 
-            manager := session.SessionMustFromContainer(t.Context(), applicationInstance.kernel.ServiceContainer())
+            manager := session.SessionMustFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
 
             resolved, resolveErr := session.ResolveStorageTimeout(manager)
             if nil != resolveErr || false == row.check(resolved) {

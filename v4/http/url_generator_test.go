@@ -24,7 +24,7 @@ func TestGeneratePath_MissingRequiredParameter(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/article/:id",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -43,7 +43,7 @@ func TestGeneratePath_OptionalParameterIsSkippedWhenMissingAndNoDefault(t *testi
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/page/:slug?",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -66,7 +66,7 @@ func TestGeneratePath_DefaultIsUsedWhenParameterMissing(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/page/:slug",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -93,7 +93,7 @@ func TestGeneratePath_RequirementFailure(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/article/:id",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -116,7 +116,7 @@ func TestGeneratePath_WildcardNamed_MissingValue(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/asset/*file/x",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -135,7 +135,7 @@ func TestGeneratePath_WildcardNamed_RejectsSlashInValue(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/asset/*file/x",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -154,7 +154,7 @@ func TestGeneratePath_CatchAllSplitsSegmentsAndTrimsSlashes(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/download/*path...",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -177,7 +177,7 @@ func TestGeneratePath_EscapesParameterSpecialCharacters(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/article/:slug",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -201,7 +201,7 @@ func TestGeneratePath_RejectsSlashInParameter(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/file/:name",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -220,7 +220,7 @@ func TestGenerateUrl_AddsQueryParametersAndIgnoresEmptyKey(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/hello",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -251,7 +251,7 @@ func TestGeneratePath_CatchAllRequirementFailure(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/files/*path...",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -279,7 +279,7 @@ func TestGeneratePath_CatchAllRequirementMatchesEmittedRemainder(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/files/*path...",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -307,7 +307,7 @@ func TestGeneratePath_NonTerminalCatchAllDropsTrailingLiterals(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     urlGenerator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/m/*p.../view",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -344,7 +344,7 @@ func TestGeneratePath_RejectsAnEmptyRequiredParameter(t *testing.T) {
     router := NewRouterWithRouteRegistry(routeRegistry)
     generator := NewUrlGenerator(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/users/:id/profile",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
@@ -380,12 +380,12 @@ func TestGeneratePath_ASingleSegmentWildcardSuppliedEmptyTakesTheDefaultOrIsRefu
         return EmptyResponse(200), nil
     }
 
-    router.HandleWithOptions(
+    router.Handle(
         "/files/*name/edit",
         handler,
         RouteOptions{Name: "file_edit", Methods: []string{nethttp.MethodGet}},
     )
-    router.HandleWithOptions(
+    router.Handle(
         "/folders/*name/edit",
         handler,
         RouteOptions{Name: "folder_edit", Methods: []string{nethttp.MethodGet}, Defaults: map[string]string{"name": "index"}},
@@ -416,8 +416,8 @@ func TestGeneratePath_RefusesAPathTheKernelWouldRefuseAsNonCanonical(t *testing.
     handler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return EmptyResponse(200), nil
     }
-    router.HandleWithOptions("/file/:name", handler, RouteOptions{Name: "file", Methods: []string{nethttp.MethodGet}})
-    router.HandleWithOptions("/tree/*rest...", handler, RouteOptions{Name: "tree", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/file/:name", handler, RouteOptions{Name: "file", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/tree/*rest...", handler, RouteOptions{Name: "tree", Methods: []string{nethttp.MethodGet}})
 
     for _, testCase := range []struct {
         routeName  string

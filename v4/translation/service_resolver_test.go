@@ -15,7 +15,7 @@ func TestTranslatorServiceName_IsTheRegisteredName(t *testing.T) {
     }
 }
 
-func TestTranslatorMustFromContainerAndResolver_AnswerTheRegisteredService(t *testing.T) {
+func TestTranslatorMustFromResolver_AnswerTheRegisteredService(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     expected := NewManager(nil, "en", nil)
@@ -28,7 +28,7 @@ func TestTranslatorMustFromContainerAndResolver_AnswerTheRegisteredService(t *te
         container.RegisterOptions{},
     )
 
-    if expected != TranslatorMustFromContainer(t.Context(), serviceContainer) {
+    if expected != TranslatorMustFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the registered service from the container")
     }
 
@@ -39,12 +39,12 @@ func TestTranslatorMustFromContainerAndResolver_AnswerTheRegisteredService(t *te
 }
 
 /* the strict readers are the boot-time ones: they panic rather than hand back a nil the caller would dereference later, at a point where nothing names the missing registration */
-func TestTranslatorMustFromContainerAndResolver_PanicWhenUnregistered(t *testing.T) {
+func TestTranslatorMustFromResolver_PanicWhenUnregistered(t *testing.T) {
     for _, probe := range []struct {
         name string
         read func()
     }{
-        {name: "container", read: func() { _ = TranslatorMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
+        {name: "container", read: func() { _ = TranslatorMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
         {name: "resolver", read: func() { _ = TranslatorMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {

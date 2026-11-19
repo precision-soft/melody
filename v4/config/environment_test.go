@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "errors"
     "testing"
 )
@@ -11,7 +12,7 @@ func TestNewEnvironmentPropagatesSourceError(t *testing.T) {
         err:    errors.New("load failed"),
     }
 
-    _, err := NewEnvironment(source)
+    _, err := NewEnvironment(context.Background(), source)
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -24,7 +25,7 @@ func TestEmptyStringIsPresentValue(t *testing.T) {
         },
     }
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -50,5 +51,40 @@ func TestEnvironment_TheDirectoryNamesAreSpelledOut(t *testing.T) {
         if expected != constant {
             t.Fatalf("expected %q, got %q", expected, constant)
         }
+    }
+}
+
+type contextRecordingEnvironmentSource struct {
+    seen context.Context
+}
+
+func (instance *contextRecordingEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
+    instance.seen = ctx
+
+    return map[string]string{}, nil
+}
+
+type contextKeyForEnvironment struct{}
+
+func TestNewEnvironment_HandsItsContextToTheSourceAndRefusesNone(t *testing.T) {
+    source := &contextRecordingEnvironmentSource{}
+    ctx := context.WithValue(context.Background(), contextKeyForEnvironment{}, "marker")
+
+    if _, err := NewEnvironment(ctx, source); nil != err || nil == source.seen || "marker" != source.seen.Value(contextKeyForEnvironment{}) {
+        t.Fatalf("expected the source handed the context NewEnvironment was handed, got %v (%v)", source.seen, err)
+    }
+
+    //nolint:staticcheck // the nil context is the input under test
+    if _, err := NewEnvironment(nil, source); nil == err {
+        t.Fatalf("expected a nil context refused")
+    }
+}
+
+func TestEnvironmentSource_ADoneContextIsRefusedBeforeAFileIsRead(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, err := writeDotEnvFiles(t, map[string]string{".env": "APP_KEY=value\n"}).Load(ctx); false == errors.Is(err, context.Canceled) {
+        t.Fatalf("expected the done context refused, got %v", err)
     }
 }

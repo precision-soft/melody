@@ -808,7 +808,7 @@ func TestEventDispatcher_Dispatch_UsesListenerSnapshot(t *testing.T) {
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
 
-    containerCloseErr := serviceContainer.Close()
+    containerCloseErr := serviceContainer.CloseWithContext(context.Background())
     if nil != containerCloseErr {
         t.Fatalf("unexpected container close error: %v", containerCloseErr)
     }

@@ -44,10 +44,10 @@ func newRoutingServiceContainer() (containercontract.Container, *RouteRegistry, 
     return serviceContainer, routeRegistry, router
 }
 
-func TestRouteRegistryMustFromContainer_ResolvesTheRegisteredRegistry(t *testing.T) {
+func TestRouteRegistryMustFromResolver_ResolvesTheRegisteredRegistry(t *testing.T) {
     serviceContainer, routeRegistry, _ := newRoutingServiceContainer()
 
-    resolved := RouteRegistryMustFromContainer(t.Context(), serviceContainer)
+    resolved := RouteRegistryMustFromResolver(t.Context(), serviceContainer)
 
     if nil == resolved {
         t.Fatalf("expected the registry to resolve")
@@ -58,12 +58,12 @@ func TestRouteRegistryMustFromContainer_ResolvesTheRegisteredRegistry(t *testing
     }
 }
 
-func TestUrlGeneratorMustFromContainer_ResolvesTheRegisteredGenerator(t *testing.T) {
+func TestUrlGeneratorMustFromResolver_ResolvesTheRegisteredGenerator(t *testing.T) {
     serviceContainer, _, router := newRoutingServiceContainer()
 
-    router.HandleWithOptions("/articles/:id", routeRegistryTestHandler(), RouteOptions{Name: "article.show", Methods: []string{"GET"}})
+    router.Handle("/articles/:id", routeRegistryTestHandler(), RouteOptions{Name: "article.show", Methods: []string{"GET"}})
 
-    resolved := UrlGeneratorMustFromContainer(t.Context(), serviceContainer)
+    resolved := UrlGeneratorMustFromResolver(t.Context(), serviceContainer)
 
     if nil == resolved {
         t.Fatalf("expected the url generator to resolve")
@@ -79,10 +79,10 @@ func TestUrlGeneratorMustFromContainer_ResolvesTheRegisteredGenerator(t *testing
     }
 }
 
-func TestRouterMustFromContainer_ResolvesTheRegisteredRouter(t *testing.T) {
+func TestRouterMustFromResolver_ResolvesTheRegisteredRouter(t *testing.T) {
     serviceContainer, _, router := newRoutingServiceContainer()
 
-    resolved := RouterMustFromContainer(t.Context(), serviceContainer)
+    resolved := RouterMustFromResolver(t.Context(), serviceContainer)
 
     if nil == resolved {
         t.Fatalf("expected the router to resolve")
@@ -90,6 +90,14 @@ func TestRouterMustFromContainer_ResolvesTheRegisteredRouter(t *testing.T) {
 
     if router != resolved {
         t.Fatalf("expected the resolver to hand back the registered router")
+    }
+}
+
+func TestRouterMustFromResolver_ResolvesTheRegisteredRouterThroughAScope(t *testing.T) {
+    serviceContainer, _, router := newRoutingServiceContainer()
+
+    if router != RouterMustFromResolver(t.Context(), serviceContainer.NewScope()) {
+        t.Fatalf("expected a scope to resolve the container's router")
     }
 }
 

@@ -263,7 +263,7 @@ func authenticateAtLoginDoor(
     var token securitycontract.Token = NewAnonymousToken()
 
     if true == firewall.loginAuthenticator.Supports(request) {
-        authenticatedToken, authenticateErr := firewall.loginAuthenticator.Authenticate(request)
+        authenticatedToken, authenticateErr := firewall.loginAuthenticator.Authenticate(runtimeInstance, request)
         if nil != authenticateErr {
             if true == exception.AnswersUnavailable(authenticateErr) {
                 return nil, refuseUnavailableAtLoginDoor(runtimeInstance, requestEvent, firewall, authenticateErr)

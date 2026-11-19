@@ -9,7 +9,7 @@ import (
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
 )
 
-func TestEventServiceResolver_MustFromContainerAndResolver(t *testing.T) {
+func TestEventServiceResolver_MustFromResolver(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     dispatcher := NewEventDispatcher(clock.NewSystemClock())
@@ -25,7 +25,7 @@ func TestEventServiceResolver_MustFromContainerAndResolver(t *testing.T) {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    resolvedFromContainer := EventDispatcherMustFromContainer(t.Context(), serviceContainer)
+    resolvedFromContainer := EventDispatcherMustFromResolver(t.Context(), serviceContainer)
     if nil == resolvedFromContainer {
         t.Fatalf("expected dispatcher")
     }

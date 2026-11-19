@@ -78,7 +78,7 @@ func TestApplicationClose_AFailureSomebodyElseAlreadyCarriedAwayIsNotReportedAga
     }
 
     /* the first close is somebody else's — the shape the cli action leaves behind */
-    firstCloseErr := serviceContainer.Close()
+    firstCloseErr := serviceContainer.CloseWithContext(context.Background())
     if nil == firstCloseErr {
         t.Fatalf("expected the failing service to fail the first close")
     }

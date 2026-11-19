@@ -296,7 +296,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
                 return nil
             }
 
-            decisionErr := accessDecisionManager.DecideAll(token, attributes, requestEvent.Request())
+            decisionErr := accessDecisionManager.DecideAll(runtimeInstance, token, attributes, requestEvent.Request())
             if nil == decisionErr {
                 _, eventSecurityAuthorizationGrantedErr := eventDispatcher.DispatchName(
                     runtimeInstance,

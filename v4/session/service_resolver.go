@@ -13,12 +13,8 @@ const (
     ServiceSessionStorage = "service.session.storage"
 )
 
-func SessionMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) sessioncontract.Manager {
-    return container.MustFromResolver[sessioncontract.Manager](ctx, serviceContainer, ServiceSessionManager)
-}
-
-func SessionStorageMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) sessioncontract.Storage {
-    return container.MustFromResolver[sessioncontract.Storage](ctx, serviceContainer, ServiceSessionStorage)
+func SessionMustFromResolver(ctx context.Context, resolver containercontract.Resolver) sessioncontract.Manager {
+    return container.MustFromResolver[sessioncontract.Manager](ctx, resolver, ServiceSessionManager)
 }
 
 func SessionStorageMustFromResolver(ctx context.Context, resolver containercontract.Resolver) sessioncontract.Storage {

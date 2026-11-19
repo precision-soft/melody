@@ -1578,11 +1578,11 @@ func TestWriteResponse_TheBranchDecisionFollowsTheSnapshotNotTheAccessors(t *tes
 func TestWriteResponse_AnOutOfRangeStatusCodeAnswersTheRenderedServerError(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/bad",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(99), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -2355,7 +2355,6 @@ func serveALogout(t *testing.T, storage *deleteCountingSessionStorage, cookieVal
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/logout",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, _ := RequestSession(request)
@@ -2363,6 +2362,7 @@ func serveALogout(t *testing.T, storage *deleteCountingSessionStorage, cookieVal
 
             return EmptyResponse(nethttp.StatusNoContent), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     request := httptest.NewRequest(nethttp.MethodPost, "/logout", nil)

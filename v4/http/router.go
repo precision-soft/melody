@@ -34,17 +34,7 @@ func (instance *Router) RouteRegistry() httpcontract.RouteRegistry {
     return instance.routeRegistry
 }
 
-func (instance *Router) Handle(method string, pattern string, handler httpcontract.Handler) {
-    instance.HandleWithOptions(
-        pattern,
-        handler,
-        RouteOptions{
-            Methods: []string{method},
-        },
-    )
-}
-
-func (instance *Router) HandleWithOptions(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) {
+func (instance *Router) Handle(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) {
     instance.addRoute(pattern, handler, options)
 }
 

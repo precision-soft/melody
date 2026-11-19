@@ -39,7 +39,7 @@ func signedIn(t *testing.T, userId string, roles []string) melodysecuritycontrac
     sessionInstance.Set(SessionKeySecurityRoles, roles)
     withCurrentCredential(sessionInstance)
 
-    return SessionTokenResolver(currentAccountLookup)(request)
+    return resolveToken(SessionTokenResolver(currentAccountLookup), request)
 }
 
 func TestSessionTokenResolverAnswersTheSignedInIdentity(t *testing.T) {
@@ -100,7 +100,7 @@ func TestSessionTokenResolverKeepsAnIdentityAcrossARestart(t *testing.T) {
     request := plainRequest(t)
     _ = melodyhttp.SetRequestSession(request, restoredSession)
 
-    token := SessionTokenResolver(currentAccountLookup)(request)
+    token := resolveToken(SessionTokenResolver(currentAccountLookup), request)
 
     if false == token.IsAuthenticated() {
         t.Fatal("a session restored from a file-backed storage left the request anonymous")
@@ -121,7 +121,7 @@ func TestSessionTokenResolverAcceptsARestoredRoleList(t *testing.T) {
     sessionInstance.Set(SessionKeySecurityRoles, []any{"ROLE_USER", "ROLE_EDITOR"})
     withCurrentCredential(sessionInstance)
 
-    token := SessionTokenResolver(currentAccountLookup)(request)
+    token := resolveToken(SessionTokenResolver(currentAccountLookup), request)
 
     if false == token.IsAuthenticated() {
         t.Fatal("a restored role list left the request anonymous")
@@ -135,17 +135,17 @@ func TestSessionTokenResolverAcceptsARestoredRoleList(t *testing.T) {
 func TestSessionTokenResolverFailsClosed(t *testing.T) {
     for name, resolve := range map[string]func(*testing.T) melodysecuritycontract.Token{
         "no request at all": func(t *testing.T) melodysecuritycontract.Token {
-            return SessionTokenResolver(currentAccountLookup)(nil)
+            return resolveToken(SessionTokenResolver(currentAccountLookup), nil)
         },
         "no session published on the request": func(t *testing.T) melodysecuritycontract.Token {
-            return SessionTokenResolver(currentAccountLookup)(plainRequest(t))
+            return resolveToken(SessionTokenResolver(currentAccountLookup), plainRequest(t))
         },
         "a session with no user id": func(t *testing.T) melodysecuritycontract.Token {
             request, sessionInstance := requestCarryingSession(t)
             sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_USER"})
             withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver(currentAccountLookup)(request)
+            return resolveToken(SessionTokenResolver(currentAccountLookup), request)
         },
         "a user id that is not a string": func(t *testing.T) melodysecuritycontract.Token {
             request, sessionInstance := requestCarryingSession(t)
@@ -153,7 +153,7 @@ func TestSessionTokenResolverFailsClosed(t *testing.T) {
             sessionInstance.Set(SessionKeySecurityRoles, []string{"ROLE_USER"})
             withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver(currentAccountLookup)(request)
+            return resolveToken(SessionTokenResolver(currentAccountLookup), request)
         },
         "an empty user id": func(t *testing.T) melodysecuritycontract.Token {
             return signedIn(t, "", []string{"ROLE_USER"})
@@ -163,7 +163,7 @@ func TestSessionTokenResolverFailsClosed(t *testing.T) {
             sessionInstance.Set(SessionKeySecurityUserId, "user-1")
             withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver(currentAccountLookup)(request)
+            return resolveToken(SessionTokenResolver(currentAccountLookup), request)
         },
         "roles that are neither spelling": func(t *testing.T) melodysecuritycontract.Token {
             request, sessionInstance := requestCarryingSession(t)
@@ -171,7 +171,7 @@ func TestSessionTokenResolverFailsClosed(t *testing.T) {
             sessionInstance.Set(SessionKeySecurityRoles, "ROLE_USER")
             withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver(currentAccountLookup)(request)
+            return resolveToken(SessionTokenResolver(currentAccountLookup), request)
         },
         "an empty role list": func(t *testing.T) melodysecuritycontract.Token {
             return signedIn(t, "user-1", []string{})
@@ -182,7 +182,7 @@ func TestSessionTokenResolverFailsClosed(t *testing.T) {
             sessionInstance.Set(SessionKeySecurityRoles, []any{"ROLE_USER", 7})
             withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver(currentAccountLookup)(request)
+            return resolveToken(SessionTokenResolver(currentAccountLookup), request)
         },
         "an empty restored role list": func(t *testing.T) melodysecuritycontract.Token {
             request, sessionInstance := requestCarryingSession(t)
@@ -190,7 +190,7 @@ func TestSessionTokenResolverFailsClosed(t *testing.T) {
             sessionInstance.Set(SessionKeySecurityRoles, []any{})
             withCurrentCredential(sessionInstance)
 
-            return SessionTokenResolver(currentAccountLookup)(request)
+            return resolveToken(SessionTokenResolver(currentAccountLookup), request)
         },
     } {
         t.Run(name, func(t *testing.T) {
@@ -310,7 +310,7 @@ func TestSessionTokenResolverAnswersTheAccountsCurrentAuthority(t *testing.T) {
                 return scenario.account(userId)
             }
 
-            token := SessionTokenResolver(lookup)(request)
+            token := resolveToken(SessionTokenResolver(lookup), request)
 
             if scenario.authenticated != token.IsAuthenticated() {
                 t.Fatalf("expected authenticated %v, got %v with roles %v", scenario.authenticated, token.IsAuthenticated(), token.Roles())
@@ -370,9 +370,9 @@ func TestSessionTokenResolver_AFailedLookupIsUnavailableAndKeepsTheSession(t *te
     sessionInstance.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion("original-hash"))
 
     lookupErr := errors.New("the account repository is unavailable")
-    token := SessionTokenResolver(func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+    token := resolveToken(SessionTokenResolver(func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
         return nil, false, lookupErr
-    })(request)
+    }), request)
 
     if true == token.IsAuthenticated() || false == sessionInstance.Has(SessionKeySecurityUserId) {
         t.Fatalf("expected a not authenticated answer over a kept session, got authenticated %v, kept %v", token.IsAuthenticated(), sessionInstance.Has(SessionKeySecurityUserId))
@@ -392,9 +392,9 @@ func TestSessionTokenResolver_AFailedLookupIsUnavailableAndKeepsTheSession(t *te
     notFoundSession.Set(SessionKeySecurityRoles, []string{"ROLE_EDITOR"})
     notFoundSession.Set(SessionKeySecurityCredentialVersion, SessionCredentialVersion("original-hash"))
 
-    _ = SessionTokenResolver(func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
+    _ = resolveToken(SessionTokenResolver(func(request melodyhttpcontract.Request, userId string) (*entity.User, bool, error) {
         return nil, false, nil
-    })(notFoundRequest)
+    }), notFoundRequest)
 
     if 0 != len(notFoundJournal.messageList) || true == notFoundSession.Has(SessionKeySecurityUserId) {
         t.Fatalf("expected an account not found cleared without a record, got %v, kept %v", notFoundJournal.messageList, notFoundSession.Has(SessionKeySecurityUserId))
@@ -403,7 +403,7 @@ func TestSessionTokenResolver_AFailedLookupIsUnavailableAndKeepsTheSession(t *te
 
 type outageEnvironmentSource struct{}
 
-func (instance *outageEnvironmentSource) Load() (map[string]string, error) {
+func (instance *outageEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentDevelopment}, nil
 }
 
@@ -421,7 +421,7 @@ func TestSessionTokenResolver_ASessionOutageAnswersTheUnavailableToken(t *testin
         return melodylogging.NewNopLogger(), nil
     }, melodycontainer.RegisterOptions{})
     containerInstance.MustRegister(melodyconfig.ServiceConfig, func(resolver melodycontainercontract.Resolver) (melodyconfigcontract.Configuration, error) {
-        environment, environmentErr := melodyconfig.NewEnvironment(&outageEnvironmentSource{})
+        environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), &outageEnvironmentSource{})
         if nil != environmentErr {
             return nil, environmentErr
         }
@@ -437,11 +437,11 @@ func TestSessionTokenResolver_ASessionOutageAnswersTheUnavailableToken(t *testin
 
     var token melodysecuritycontract.Token
     router := melodyhttp.NewRouter()
-    router.Handle(nethttp.MethodGet, "/", func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        token = SessionTokenResolver(currentAccountLookup)(request)
+    router.Handle("/", func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        token = resolveToken(SessionTokenResolver(currentAccountLookup), request)
 
         return melodyhttp.TextResponse(nethttp.StatusOK, "ok"), nil
-    })
+    }, melodyhttp.RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     for _, withCookie := range []bool{true, false} {
         token = nil
@@ -469,7 +469,7 @@ func TestSessionTokenResolver_AnUnavailableSessionAnswersTheUnavailableToken(t *
         t.Fatalf("unexpected publish error: %v", publishErr)
     }
 
-    token := SessionTokenResolver(currentAccountLookup)(request)
+    token := resolveToken(SessionTokenResolver(currentAccountLookup), request)
 
     cause, unavailable := melodysecurity.AuthenticationUnavailableCause(token)
     if nil == token || true == token.IsAuthenticated() || false == unavailable || false == errors.Is(cause, outage) {

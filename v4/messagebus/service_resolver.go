@@ -27,10 +27,6 @@ type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
 }
 
-func BusMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) messagebuscontract.Bus {
-    return container.MustFromResolver[messagebuscontract.Bus](ctx, serviceContainer, ServiceBus)
-}
-
 func BusMustFromResolver(ctx context.Context, resolver containercontract.Resolver) messagebuscontract.Bus {
     return container.MustFromResolver[messagebuscontract.Bus](ctx, resolver, ServiceBus)
 }
@@ -157,10 +153,6 @@ func RetryPolicyFromResolver(ctx context.Context, resolver containercontract.Res
     }
 
     return container.MustFromResolver[RetryPolicy](ctx, resolver, ServiceRetryPolicy), true
-}
-
-func HandlerLocatorMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) messagebuscontract.HandlerLocator {
-    return container.MustFromResolver[messagebuscontract.HandlerLocator](ctx, serviceContainer, ServiceHandlerLocator)
 }
 
 func HandlerLocatorMustFromResolver(ctx context.Context, resolver containercontract.Resolver) messagebuscontract.HandlerLocator {

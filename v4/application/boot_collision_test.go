@@ -21,14 +21,14 @@ type mapEnvironmentSource struct {
     values map[string]string
 }
 
-func (instance *mapEnvironmentSource) Load() (map[string]string, error) {
+func (instance *mapEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return instance.values, nil
 }
 
 func newCollisionTestConfiguration(t *testing.T) *config.Configuration {
     t.Helper()
 
-    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{}})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{}})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
@@ -376,8 +376,8 @@ func TestBootCollision_ADuplicateRouteJoinsTheAggregatedReportWhileTheRecorderIs
     application := &Application{routeRegistry: routeRegistry}
     application.armRouteCollisionRecorder()
 
-    router.Handle(nethttp.MethodGet, "/duplicate", bootCollisionTestHandler())
-    router.Handle(nethttp.MethodGet, "/duplicate", bootCollisionTestHandler())
+    router.Handle("/duplicate", bootCollisionTestHandler(), http.RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/duplicate", bootCollisionTestHandler(), http.RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     if 1 != len(application.bootCollisions) {
         t.Fatalf("expected exactly one recorded collision, got %d", len(application.bootCollisions))
@@ -403,6 +403,6 @@ func TestBootCollision_ADuplicateRouteJoinsTheAggregatedReportWhileTheRecorderIs
     application.disarmRouteCollisionRecorder()
 
     testhelper.AssertPanicsWithError(t, func() {
-        router.Handle(nethttp.MethodGet, "/duplicate", bootCollisionTestHandler())
+        router.Handle("/duplicate", bootCollisionTestHandler(), http.RouteOptions{Methods: []string{nethttp.MethodGet}})
     }, "route already registered")
 }

@@ -25,7 +25,7 @@ func (instance *fixedAuthenticator) Supports(_ httpcontract.Request) bool {
     return true
 }
 
-func (instance *fixedAuthenticator) Authenticate(_ httpcontract.Request) (securitycontract.Token, error) {
+func (instance *fixedAuthenticator) Authenticate(_ runtimecontract.Runtime, _ httpcontract.Request) (securitycontract.Token, error) {
     return instance.token, nil
 }
 
@@ -59,7 +59,7 @@ func totpAuthenticator(secret string, enrolled bool, guard securitycontract.Nonc
 }
 
 func TestTotpSecondFactor_NotEnrolledPassesPrimaryThrough(t *testing.T) {
-    token, err := totpAuthenticator("", false, nil).Authenticate(totpRequest(""))
+    token, err := totpAuthenticator("", false, nil).Authenticate(withItsRuntime(totpRequest("")))
     if nil != err {
         t.Fatalf("authenticate: %v", err)
     }
@@ -72,7 +72,7 @@ func TestTotpSecondFactor_NotEnrolledPassesPrimaryThrough(t *testing.T) {
 func TestTotpSecondFactor_EnrolledWithoutCodeIsPending(t *testing.T) {
     secret, _ := totp.GenerateSecret()
 
-    token, _ := totpAuthenticator(secret, true, nil).Authenticate(totpRequest(""))
+    token, _ := totpAuthenticator(secret, true, nil).Authenticate(withItsRuntime(totpRequest("")))
 
     if true == token.IsAuthenticated() {
         t.Fatal("expected an enrolled user without a code to be pending, not authenticated")
@@ -127,7 +127,7 @@ func TestTotpSecondFactor_ValidCodeAuthenticates(t *testing.T) {
     secret, _ := totp.GenerateSecret()
     code, _ := totp.GenerateCodeAt(secret, time.Now(), totp.Config{})
 
-    token, err := totpAuthenticator(secret, true, nil).Authenticate(totpRequest(code))
+    token, err := totpAuthenticator(secret, true, nil).Authenticate(withItsRuntime(totpRequest(code)))
     if nil != err {
         t.Fatalf("authenticate: %v", err)
     }
@@ -141,7 +141,7 @@ func TestTotpSecondFactor_ValidCodeAuthenticates(t *testing.T) {
 func TestTotpSecondFactor_WrongCodeIsPending(t *testing.T) {
     secret, _ := totp.GenerateSecret()
 
-    token, _ := totpAuthenticator(secret, true, nil).Authenticate(totpRequest("000000"))
+    token, _ := totpAuthenticator(secret, true, nil).Authenticate(withItsRuntime(totpRequest("000000")))
 
     if true == token.IsAuthenticated() {
         t.Fatal("expected a wrong code to stay pending")
@@ -158,12 +158,12 @@ func TestTotpSecondFactor_ReplayedCodeIsRejected(t *testing.T) {
 
     authenticator := totpAuthenticator(secret, true, NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
-    first, _ := authenticator.Authenticate(totpRequest(code))
+    first, _ := authenticator.Authenticate(withItsRuntime(totpRequest(code)))
     if false == first.IsAuthenticated() {
         t.Fatal("expected the first use of a valid code to authenticate")
     }
 
-    second, _ := authenticator.Authenticate(totpRequest(code))
+    second, _ := authenticator.Authenticate(withItsRuntime(totpRequest(code)))
     if true == second.IsAuthenticated() {
         t.Fatal("expected a replayed code to be rejected by the guard")
     }
@@ -180,14 +180,14 @@ func TestTotpSecondFactor_ReplayedCodeIsRejectedWhenRespaced(t *testing.T) {
 
     authenticator := totpAuthenticator(secret, true, NewMemoryNonceGuard(MemoryNonceGuardConfig{}))
 
-    first, _ := authenticator.Authenticate(totpRequest(code))
+    first, _ := authenticator.Authenticate(withItsRuntime(totpRequest(code)))
     if false == first.IsAuthenticated() {
         t.Fatal("expected the first use of a valid code to authenticate")
     }
 
     respaced := code[:3] + " " + code[3:]
 
-    second, _ := authenticator.Authenticate(totpRequest(respaced))
+    second, _ := authenticator.Authenticate(withItsRuntime(totpRequest(respaced)))
     if true == second.IsAuthenticated() {
         t.Fatalf("expected the respaced alias %q of an already-used code to be rejected by the guard", respaced)
     }
@@ -200,12 +200,12 @@ func TestTotpSecondFactor_ReplayedCodeIsRejectedByDefaultGuard(t *testing.T) {
 
     authenticator := totpAuthenticator(secret, true, nil)
 
-    first, _ := authenticator.Authenticate(totpRequest(code))
+    first, _ := authenticator.Authenticate(withItsRuntime(totpRequest(code)))
     if false == first.IsAuthenticated() {
         t.Fatal("expected the first use of a valid code to authenticate")
     }
 
-    second, _ := authenticator.Authenticate(totpRequest(code))
+    second, _ := authenticator.Authenticate(withItsRuntime(totpRequest(code)))
     if true == second.IsAuthenticated() {
         t.Fatal("expected a replayed code to be rejected by the default in-process guard")
     }
@@ -257,7 +257,7 @@ func TestTotpSecondFactor_RecoveryCodeAuthenticatesAndIsSingleUse(t *testing.T) 
     store := &recoveryEnrollmentStore{enrolled: true, unused: map[string]bool{"abcde-fghij": true}}
     authenticator := totpAuthenticatorFor(store)
 
-    first, err := authenticator.Authenticate(totpRecoveryRequest("abcde-fghij"))
+    first, err := authenticator.Authenticate(withItsRuntime(totpRecoveryRequest("abcde-fghij")))
     if nil != err {
         t.Fatalf("authenticate: %v", err)
     }
@@ -266,7 +266,7 @@ func TestTotpSecondFactor_RecoveryCodeAuthenticatesAndIsSingleUse(t *testing.T) 
         t.Fatal("expected a valid recovery code to complete authentication")
     }
 
-    second, _ := authenticator.Authenticate(totpRecoveryRequest("abcde-fghij"))
+    second, _ := authenticator.Authenticate(withItsRuntime(totpRecoveryRequest("abcde-fghij")))
     if true == second.IsAuthenticated() {
         t.Fatal("expected a consumed recovery code to be rejected on reuse")
     }
@@ -276,7 +276,7 @@ func TestTotpSecondFactor_RecoveryCodeAuthenticatesAndIsSingleUse(t *testing.T) 
 func TestTotpSecondFactor_UnknownRecoveryCodeIsPending(t *testing.T) {
     store := &recoveryEnrollmentStore{enrolled: true, unused: map[string]bool{"abcde-fghij": true}}
 
-    token, _ := totpAuthenticatorFor(store).Authenticate(totpRecoveryRequest("zzzzz-zzzzz"))
+    token, _ := totpAuthenticatorFor(store).Authenticate(withItsRuntime(totpRecoveryRequest("zzzzz-zzzzz")))
 
     if true == token.IsAuthenticated() {
         t.Fatal("expected an unknown recovery code to stay pending")
@@ -291,7 +291,7 @@ func TestTotpSecondFactor_UnknownRecoveryCodeIsPending(t *testing.T) {
 func TestTotpSecondFactor_RecoveryIgnoredWhenStoreUnsupported(t *testing.T) {
     secret, _ := totp.GenerateSecret()
 
-    token, _ := totpAuthenticator(secret, true, nil).Authenticate(totpRecoveryRequest("abcde-fghij"))
+    token, _ := totpAuthenticator(secret, true, nil).Authenticate(withItsRuntime(totpRecoveryRequest("abcde-fghij")))
 
     if true == token.IsAuthenticated() {
         t.Fatal("expected recovery to be unavailable when the store does not support it")
@@ -320,7 +320,7 @@ func TestTotpSecondFactor_AnonymousPrimaryPassesThrough(t *testing.T) {
         Enrollments: &fixedEnrollmentStore{enrolled: true},
     })
 
-    token, _ := authenticator.Authenticate(totpRequest(""))
+    token, _ := authenticator.Authenticate(withItsRuntime(totpRequest("")))
     if true == token.IsAuthenticated() {
         t.Fatal("expected an anonymous primary result to stay anonymous")
     }
@@ -349,7 +349,7 @@ func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
         t.Fatalf("code: %v", codeErr)
     }
 
-    token, authenticateErr := authenticator.Authenticate(totpRequest(code))
+    token, authenticateErr := authenticator.Authenticate(withItsRuntime(totpRequest(code)))
     if nil != authenticateErr {
         t.Fatalf("authenticate: %v", authenticateErr)
     }
@@ -360,7 +360,7 @@ func TestTotpSecondFactor_VerifiesOnTheInjectedClock(t *testing.T) {
 
     frozen.Advance(10 * time.Minute)
 
-    lateToken, lateErr := authenticator.Authenticate(totpRequest(code))
+    lateToken, lateErr := authenticator.Authenticate(withItsRuntime(totpRequest(code)))
     if nil != lateErr {
         t.Fatalf("authenticate: %v", lateErr)
     }
@@ -391,7 +391,7 @@ func TestTotpSecondFactor_AFailingEnrollmentLookupRefusesInsteadOfPassingThrough
         ReplayGuard: nil,
     })
 
-    token, err := authenticator.Authenticate(totpRequest(""))
+    token, err := authenticator.Authenticate(withItsRuntime(totpRequest("")))
     if nil == err {
         t.Fatalf("expected an unavailable enrollment store to refuse rather than pass the primary token through")
     }
@@ -467,21 +467,21 @@ func TestTotpSecondFactor_MarksItsThreeStoreFailures(t *testing.T) {
         },
     } {
         t.Run(name, func(t *testing.T) {
-            token, err := turn.authenticator.Authenticate(turn.request)
+            token, err := turn.authenticator.Authenticate(withItsRuntime(turn.request))
             if nil != token || false == errors.Is(err, storeErr) || false == exception.IsInfrastructureFailure(err) {
                 t.Fatalf("expected the store failure marked, got %v, %v", token, err)
             }
         })
     }
 
-    wrongCode, wrongErr := totpAuthenticator("JBSWY3DPEHPK3PXP", true, &failingNonceGuard{failure: storeErr}).Authenticate(totpRequest("000000"))
+    wrongCode, wrongErr := totpAuthenticator("JBSWY3DPEHPK3PXP", true, &failingNonceGuard{failure: storeErr}).Authenticate(withItsRuntime(totpRequest("000000")))
     if nil != wrongErr || true == wrongCode.IsAuthenticated() || false == secondFactorRejected(t, wrongCode) {
         t.Fatalf("expected a wrong code to stay a rejected token with no error, got %v, %v", wrongCode, wrongErr)
     }
 }
 
 func TestTotpSecondFactor_ASecretThatCannotBeReadIsNoOutage(t *testing.T) {
-    token, err := totpAuthenticator("not base32!", true, nil).Authenticate(totpRequest("123456"))
+    token, err := totpAuthenticator("not base32!", true, nil).Authenticate(withItsRuntime(totpRequest("123456")))
     if nil != token || nil == err || true == exception.IsInfrastructureFailure(err) {
         t.Fatalf("expected an unmarked refusal for an unreadable secret, got %v, %v", token, err)
     }
@@ -495,7 +495,7 @@ func (instance *failingPrimaryAuthenticator) Supports(_ httpcontract.Request) bo
     return true
 }
 
-func (instance *failingPrimaryAuthenticator) Authenticate(_ httpcontract.Request) (securitycontract.Token, error) {
+func (instance *failingPrimaryAuthenticator) Authenticate(_ runtimecontract.Runtime, _ httpcontract.Request) (securitycontract.Token, error) {
     return nil, instance.err
 }
 
@@ -505,7 +505,7 @@ func TestTotpSecondFactor_ThePrimarysErrorPassesThroughUnmarked(t *testing.T) {
     _, err := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
         Primary:     &failingPrimaryAuthenticator{err: primaryErr},
         Enrollments: &fixedEnrollmentStore{secret: "JBSWY3DPEHPK3PXP", enrolled: true},
-    }).Authenticate(totpRequest(""))
+    }).Authenticate(withItsRuntime(totpRequest("")))
     if false == errors.Is(err, primaryErr) || true == exception.IsInfrastructureFailure(err) {
         t.Fatalf("expected the primary's error untouched, got %v", err)
     }
@@ -518,7 +518,7 @@ func TestTotpSecondFactor_AStoreFailureItsStoreFiledStaysFiled(t *testing.T) {
     _, filedErr := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
         Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
         Enrollments: &failingEnrollmentStore{lookupErr: filed},
-    }).Authenticate(totpRequest(""))
+    }).Authenticate(withItsRuntime(totpRequest("")))
     if false == exception.IsAlreadyLogged(filedErr) || false == exception.IsInfrastructureFailure(filedErr) {
         t.Fatalf("expected a filed store failure to stay filed under the mark, got %v", filedErr)
     }
@@ -526,7 +526,7 @@ func TestTotpSecondFactor_AStoreFailureItsStoreFiledStaysFiled(t *testing.T) {
     _, unfiledErr := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
         Primary:     &fixedAuthenticator{token: NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil)},
         Enrollments: &failingEnrollmentStore{lookupErr: errors.New("enrollment store unavailable")},
-    }).Authenticate(totpRequest(""))
+    }).Authenticate(withItsRuntime(totpRequest("")))
     if true == exception.IsAlreadyLogged(unfiledErr) {
         t.Fatalf("expected an unfiled store failure left to be filed, got %v", unfiledErr)
     }
@@ -538,7 +538,7 @@ func TestTotpSecondFactor_APrimaryThatCouldNotCheckTheCredentialIsPassedThrough(
     token, err := NewTotpSecondFactorAuthenticator(TotpSecondFactorAuthenticatorConfig{
         Primary:     &fixedAuthenticator{token: unavailable},
         Enrollments: &fixedEnrollmentStore{secret: "JBSWY3DPEHPK3PXP", enrolled: true},
-    }).Authenticate(totpRequest(""))
+    }).Authenticate(withItsRuntime(totpRequest("")))
     if nil != err || securitycontract.Token(unavailable) != token {
         t.Fatalf("expected the unavailable token passed through, got %T, %v", token, err)
     }

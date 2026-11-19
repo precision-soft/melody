@@ -16,7 +16,7 @@ type testEnvironmentSource struct {
     values map[string]string
 }
 
-func (instance *testEnvironmentSource) Load() (map[string]string, error) {
+func (instance *testEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     copied := make(map[string]string, len(instance.values))
     for key, value := range instance.values {
         copied[key] = value
@@ -28,7 +28,7 @@ func (instance *testEnvironmentSource) Load() (map[string]string, error) {
 func newTestConfiguration(t *testing.T, environment string) configcontract.Configuration {
     t.Helper()
 
-    environmentInstance, err := config.NewEnvironment(
+    environmentInstance, err := config.NewEnvironment(context.Background(), 
         &testEnvironmentSource{
             values: map[string]string{
                 config.EnvironmentNameKey: environment,

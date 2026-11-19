@@ -66,7 +66,7 @@ func exportRuntime(t *testing.T) melodyruntimecontract.Runtime {
         melodycontainer.RegisterOptions{TypeRegistrationDisabled: true},
     )
 
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 }

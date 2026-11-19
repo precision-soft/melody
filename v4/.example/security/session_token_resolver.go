@@ -6,6 +6,7 @@ import (
     melodyexceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
+    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
@@ -20,45 +21,45 @@ const (
 
 /* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session its storage could not load, or the empty one served for it under MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE, answers the unavailable token; any other error reading the session answers anonymous, its record filed by the read. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers the unavailable token, 503 with Retry-After on a protected page, and leaves the session alone, since the failure says nothing about the account; the framework files the cause at error. */
 func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.TokenResolver {
-    return func(request melodyhttpcontract.Request) melodysecuritycontract.Token {
+    return func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
         sessionInstance, sessionErr := melodyhttp.RequestSession(request)
         if nil != sessionErr {
             /* a session its storage could not load says nothing about the visitor: a public page is served as not signed in, a protected one answers 503 with Retry-After */
             if true == melodyexception.AnswersUnavailable(sessionErr) {
-                return melodysecurity.NewUnavailableToken(sessionErr)
+                return melodysecurity.NewUnavailableToken(sessionErr), nil
             }
 
-            return melodysecurity.NewAnonymousToken()
+            return melodysecurity.NewAnonymousToken(), nil
         }
 
         /* the empty session MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE serves in an outage reads as the outage it stands for, so a signed-in visitor is answered 503 on a protected page, not sent to sign in */
         if cause, isUnavailable := melodysession.SessionUnavailableCause(sessionInstance); true == isUnavailable {
-            return melodysecurity.NewUnavailableToken(cause)
+            return melodysecurity.NewUnavailableToken(cause), nil
         }
 
         userId, ok := getStringFromSession(sessionInstance, SessionKeySecurityUserId)
         if false == ok {
-            return melodysecurity.NewAnonymousToken()
+            return melodysecurity.NewAnonymousToken(), nil
         }
 
         if "" == userId {
-            return melodysecurity.NewAnonymousToken()
+            return melodysecurity.NewAnonymousToken(), nil
         }
 
         roles, ok := getStringSliceFromSession(sessionInstance, SessionKeySecurityRoles)
         if false == ok {
-            return melodysecurity.NewAnonymousToken()
+            return melodysecurity.NewAnonymousToken(), nil
         }
 
         if 0 == len(roles) {
-            return melodysecurity.NewAnonymousToken()
+            return melodysecurity.NewAnonymousToken(), nil
         }
 
         credentialVersion, ok := getStringFromSession(sessionInstance, SessionKeySecurityCredentialVersion)
         if false == ok || "" == credentialVersion {
             sessionInstance.Clear()
 
-            return melodysecurity.NewAnonymousToken()
+            return melodysecurity.NewAnonymousToken(), nil
         }
 
         user, found, lookupErr := lookupUser(request, userId)
@@ -69,20 +70,20 @@ func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.T
                     melodyexceptioncontract.Context{"userId": userId},
                     melodyexception.MarkInfrastructureFailure(lookupErr),
                 ),
-            )
+            ), nil
         }
 
         if false == sessionAccountIsCurrent(user, found, userId, credentialVersion) {
             sessionInstance.Clear()
 
-            return melodysecurity.NewAnonymousToken()
+            return melodysecurity.NewAnonymousToken(), nil
         }
 
         return melodysecurity.NewAuthenticatedToken(
             user.Id,
             user.Roles,
             nil,
-        )
+        ), nil
     }
 }
 

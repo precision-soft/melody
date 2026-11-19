@@ -20,7 +20,6 @@ func TestRequest_BindJsonOversizedBodyReturns413(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/bind",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             concreteRequest := request.(*Request)
@@ -30,6 +29,7 @@ func TestRequest_BindJsonOversizedBodyReturns413(t *testing.T) {
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -61,7 +61,6 @@ func TestRequest_BindJsonMaxIntBodyLimitStillBinds(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/bind",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             concreteRequest := request.(*Request)
@@ -70,6 +69,7 @@ func TestRequest_BindJsonMaxIntBodyLimitStillBinds(t *testing.T) {
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(
@@ -99,7 +99,6 @@ func TestRequest_BindJsonInvalidJsonCarriesTheDecoderCause(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/bind",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             concreteRequest := request.(*Request)
@@ -109,6 +108,7 @@ func TestRequest_BindJsonInvalidJsonCarriesTheDecoderCause(t *testing.T) {
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     serviceContainer := newHttpTestContainer()
@@ -160,7 +160,6 @@ func bindAndValidateOutcome(body string) (error, int, string) {
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodPost,
         "/articles",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             subject := bindAndValidateSubject{}
@@ -172,6 +171,7 @@ func bindAndValidateOutcome(body string) (error, int, string) {
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerWithValidator())
@@ -191,7 +191,6 @@ func TestRequest_BindJsonAndValidateBindsAValidBody(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodPost,
         "/articles",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             if bindErr := request.(*Request).BindJsonAndValidate(&bound); nil != bindErr {
@@ -200,6 +199,7 @@ func TestRequest_BindJsonAndValidateBindsAValidBody(t *testing.T) {
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerWithValidator())
@@ -268,7 +268,6 @@ func TestRequest_BindJsonAndValidateBoundsTheViolationsOfABodyOfManyFailingEleme
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodPost,
         "/articles",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             bindErr = request.(*Request).BindJsonAndValidate(&subject{})
@@ -278,6 +277,7 @@ func TestRequest_BindJsonAndValidateBoundsTheViolationsOfABodyOfManyFailingEleme
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainerWithValidator())
@@ -343,7 +343,6 @@ func serveBindJsonAndValidateIntoAPointer(t *testing.T, body string) (error, int
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/articles",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             var subject *bindAndValidateSubject
@@ -355,6 +354,7 @@ func serveBindJsonAndValidateIntoAPointer(t *testing.T, body string) (error, int
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     recorder := httptest.NewRecorder()
@@ -389,7 +389,6 @@ func TestRequest_BindJsonReturnsOnACyclicChainFromTheBody(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodPost,
         "/bind",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             var target map[string]any
@@ -397,6 +396,7 @@ func TestRequest_BindJsonReturnsOnACyclicChainFromTheBody(t *testing.T) {
 
             return TextResponse(nethttp.StatusOK, "served"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodPost}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())

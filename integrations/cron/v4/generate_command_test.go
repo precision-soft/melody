@@ -3571,7 +3571,7 @@ type generateTestEnvironmentSource struct {
     values map[string]string
 }
 
-func (instance *generateTestEnvironmentSource) Load() (map[string]string, error) {
+func (instance *generateTestEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     copied := make(map[string]string, len(instance.values))
     for key, value := range instance.values {
         copied[key] = value
@@ -3584,6 +3584,7 @@ func newGenerateTestConfiguration(t *testing.T) configcontract.Configuration {
     t.Helper()
 
     environment, environmentErr := melodyconfig.NewEnvironment(
+        context.Background(),
         &generateTestEnvironmentSource{
             values: map[string]string{
                 melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentDevelopment,

@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "errors"
     "fmt"
     "strings"
@@ -1047,7 +1048,7 @@ func TestResolve_TheFailureNamesTheEnvironmentKeyBesideTheInternalAlias(t *testi
         },
     }
 
-    environment, environmentErr := NewEnvironment(source)
+    environment, environmentErr := NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("new environment error: %v", environmentErr)
     }
@@ -1163,7 +1164,7 @@ func TestResolveTemplate_ARefusalInsideAParameterReferencedFromAnEnvironmentValu
 func newConfigurationFromEnvironmentValues(t *testing.T, values map[string]string) error {
     t.Helper()
 
-    environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: values})
+    environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: values})
     if nil != environmentErr {
         t.Fatalf("new environment error: %v", environmentErr)
     }

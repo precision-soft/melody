@@ -139,6 +139,28 @@ func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {
     }
 }
 
+func TestBootHttp_TheApplicationsRouteKeepsTheMethodItDeclared(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
+
+    applicationInstance.RegisterHttpRoute(
+        nethttp.MethodPost,
+        "/boot-http-post-probe",
+        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, nil
+        },
+    )
+
+    applicationInstance.bootHttp()
+
+    if _, matched := applicationInstance.kernel.HttpRouter().Match(nethttp.MethodGet, "/boot-http-post-probe", "", ""); true == matched {
+        t.Fatalf("expected a route declared for POST to stay unmatched by GET")
+    }
+
+    if _, matched := applicationInstance.kernel.HttpRouter().Match(nethttp.MethodPost, "/boot-http-post-probe", "", ""); false == matched {
+        t.Fatalf("expected the route declared for POST to match POST")
+    }
+}
+
 func TestApplicationRegisterHttpMiddlewares_HandsThemToThePipeline(t *testing.T) {
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
@@ -242,7 +264,7 @@ func newCacheWarningTestApplicationOver(t *testing.T, mode string, extraValues m
         values[key] = value
     }
 
-    environment, environmentErr := config.NewEnvironment(
+    environment, environmentErr := config.NewEnvironment(context.Background(), 
         &mapEnvironmentSource{
             values: values,
         },
@@ -319,7 +341,7 @@ func newSessionBoundTestApplication(t *testing.T, mode string, sessionValues map
         }
     }
 
-    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
@@ -520,7 +542,7 @@ func TestAwaitHttpServerEnd_ReportsAServeErrorWhicheverBranchWins(t *testing.T) 
 func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T) {
     logger := &warningRecordingLogger{}
 
-    environment, environmentErr := config.NewEnvironment(
+    environment, environmentErr := config.NewEnvironment(context.Background(), 
         &mapEnvironmentSource{
             values: map[string]string{
                 config.HttpAddressKey:         "127.0.0.1:34519",
@@ -875,7 +897,6 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
     kernelInstance := newTestKernel()
 
     kernelInstance.httpRouter.Handle(
-        nethttp.MethodGet,
         "/upgrade",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             hijacker, ok := writer.(nethttp.Hijacker)
@@ -899,9 +920,10 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
 
             return http.TextResponse(nethttp.StatusOK, "served"), nil
         },
+        http.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
-    environment, environmentErr := config.NewEnvironment(
+    environment, environmentErr := config.NewEnvironment(context.Background(), 
         &mapEnvironmentSource{
             values: map[string]string{
                 config.HttpAddressKey:         "127.0.0.1:34521",
@@ -1022,11 +1044,11 @@ func newServedExceptionTestApplication(t *testing.T) *Application {
     }
 
     kernelInstance.httpRouter.Handle(
-        nethttp.MethodGet,
         "/missing",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, exception.NewHttpException(nethttp.StatusNotFound, "no such product")
         },
+        http.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     kernelInstance.serviceContainer.MustRegister(
@@ -1142,11 +1164,11 @@ func TestServeHttp_AnExceptionListenerAnswersAPanicAndAFailingNotFoundHandler(t 
     }
 
     kernelInstance.httpRouter.Handle(
-        nethttp.MethodGet,
         "/panics",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             panic(exception.NewHttpException(nethttp.StatusNotFound, "the controller panicked"))
         },
+        http.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     applicationInstance.kernel.HttpKernel().SetNotFoundHandler(
@@ -1380,7 +1402,7 @@ func TestApplicationRegisterHttpHandlerDecorator_PanicsAfterBoot(t *testing.T) {
 }
 
 func TestRunHttp_ServesThroughTheRegisteredDecorators(t *testing.T) {
-    environment, environmentErr := config.NewEnvironment(
+    environment, environmentErr := config.NewEnvironment(context.Background(), 
         &mapEnvironmentSource{
             values: map[string]string{
                 config.HttpAddressKey: "127.0.0.1:34523",
@@ -1481,15 +1503,15 @@ func TestServeHttp_AnAsteriskFormTargetAnswersTheRootFirewallsRefusal(t *testing
         return http.EmptyResponse(nethttp.StatusOK), nil
     }
 
-    kernelInstance.httpRouter.Handle(nethttp.MethodGet, "/:slug", markHandler)
+    kernelInstance.httpRouter.Handle("/:slug", markHandler, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
     kernelInstance.httpKernel.SetNotFoundHandler(markHandler)
 
     firewall := security.NewCompiledFirewall(security.CompiledFirewallConfig{
         Name:               "main",
         Matcher:            security.NewPathPrefixMatcher("/"),
         MatcherDescription: "matcher:main",
-        TokenSource: security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
-            return security.NewAnonymousToken()
+        TokenSource: security.NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+            return security.NewAnonymousToken(), nil
         }),
         AccessControl: security.NewAccessControl([]security.AccessControlRule{
             accesscontrol.NewRawPrefixRule("/", accesscontrol.RuleConfig{Attributes: []string{"ROLE_USER"}}),
@@ -1558,14 +1580,14 @@ func TestServeHttp_ASlashLessPathThatFoldsIsRefusedBeforeTheFirewallAndTheRouter
         return http.EmptyResponse(nethttp.StatusOK), nil
     }
 
-    kernelInstance.httpRouter.Handle(nethttp.MethodGet, "/admin/*rest", markHandler)
+    kernelInstance.httpRouter.Handle("/admin/*rest", markHandler, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     firewall := security.NewCompiledFirewall(security.CompiledFirewallConfig{
         Name:               "main",
         Matcher:            security.NewPathPrefixMatcher("/"),
         MatcherDescription: "matcher:main",
-        TokenSource: security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
-            return security.NewAnonymousToken()
+        TokenSource: security.NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+            return security.NewAnonymousToken(), nil
         }),
         AccessControl: security.NewAccessControl([]security.AccessControlRule{
             accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}}),
@@ -1727,7 +1749,7 @@ func TestRunHttp_RefusesAServerLimitTheApplicationConfigSetsBelowItsMinimum(t *t
 }
 
 func TestRunHttp_RefusesAScopeTeardownTimeoutOutlastingTheShutdownBeforeServing(t *testing.T) {
-    environment, environmentErr := config.NewEnvironment(
+    environment, environmentErr := config.NewEnvironment(context.Background(), 
         &mapEnvironmentSource{
             values: map[string]string{
                 config.HttpAddressKey:         "127.0.0.1:34523",
@@ -1768,7 +1790,7 @@ func (instance *refusedBoundSessionManager) StorageTimeout() bound.Duration {
 }
 
 func TestRunHttp_RefusesAManagerDeclaringAStorageTimeoutTheRuleRefusesBeforeServing(t *testing.T) {
-    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: map[string]string{config.HttpAddressKey: "127.0.0.1:34524"}})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.HttpAddressKey: "127.0.0.1:34524"}})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
@@ -1819,11 +1841,11 @@ func TestRunHttp_TheDeploymentsUnavailableDelayOutranksAModulesSetter(t *testing
 
     kernelInstance.httpKernel.SetUnavailableRetryAfter(bound.Of(9 * time.Second))
     kernelInstance.httpRouter.Handle(
-        nethttp.MethodGet,
         "/unavailable",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, exception.MarkInfrastructureFailure(errors.New("cache is down"))
         },
+        http.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     cancelledContext, cancel := context.WithCancel(context.Background())
@@ -1868,7 +1890,6 @@ func prepareSessionReaderOverAnOutage(serviceContainer containercontract.Contain
     )
 
     httpRouter.Handle(
-        nethttp.MethodGet,
         "/reads-the-session",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             if _, sessionErr := http.RequestSession(request); nil != sessionErr {
@@ -1877,6 +1898,7 @@ func prepareSessionReaderOverAnOutage(serviceContainer containercontract.Contain
 
             return http.TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        http.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 }
 
@@ -1903,7 +1925,7 @@ func TestApplication_InstallsTheSessionPolicyOnTheHttpKernel(t *testing.T) {
             t.Fatalf("field %v: expected %d at construction, got %d", field, expected, status)
         }
 
-        _ = serviceContainer.Close()
+        _ = serviceContainer.CloseWithContext(context.Background())
     }
 }
 

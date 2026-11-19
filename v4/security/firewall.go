@@ -4,6 +4,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -33,13 +34,13 @@ type Firewall struct {
     rules []securitycontract.Rule
 }
 
-func (instance *Firewall) Check(request httpcontract.Request) error {
+func (instance *Firewall) Check(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) error {
     for _, rule := range instance.rules {
         if false == rule.Applies(request) {
             continue
         }
 
-        err := rule.Check(request)
+        err := rule.Check(runtimeInstance, request)
         if nil != err {
             return err
         }

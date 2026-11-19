@@ -664,8 +664,8 @@ type doorReachUnknownModule struct {
 }
 
 func (instance *doorReachUnknownModule) RegisterSecurity(builder *securityconfig.Builder) {
-    anonymous := security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
-        return security.NewAnonymousToken()
+    anonymous := security.NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+        return security.NewAnonymousToken(), nil
     })
 
     builder.SetGlobal(securityconfig.GlobalConfig{AccessControl: security.NewAccessControl(nil)})

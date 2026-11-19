@@ -42,7 +42,7 @@ func runtimeServingRoute(t *testing.T, name string, pattern string) melodyruntim
     t.Helper()
 
     router := melodyhttp.NewRouter()
-    router.HandleWithOptions(
+    router.Handle(
         pattern,
         func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
             return melodyhttp.NewResponse(nethttp.StatusOK, []byte("ok")), nil

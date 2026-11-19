@@ -83,7 +83,7 @@ func TestRegisterConnectionService_TheContainerClosesTheConnectionUnderItsDeadli
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     RegisterConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, wedge.connection, ConnectionServiceConfig{})
 
-    if wedge.connection != ConnectionMustFromContainer(t.Context(), serviceContainer) {
+    if wedge.connection != ConnectionMustFromResolver(t.Context(), serviceContainer) {
         t.Fatal("expected the registered connection resolved as itself")
     }
 
@@ -127,7 +127,7 @@ func TestRegisterConnectionService_TheConfiguredCloseTimeoutBoundsTheStretchUnde
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     RegisterConnectionService(&containerRegistrar{serviceContainer: serviceContainer}, wedge.connection, ConnectionServiceConfig{CloseTimeout: bound.Of(100 * time.Millisecond)})
-    ConnectionMustFromContainer(t.Context(), serviceContainer)
+    ConnectionMustFromResolver(t.Context(), serviceContainer)
 
     closed := make(chan error, 1)
     go func() {

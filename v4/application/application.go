@@ -436,7 +436,7 @@ func (instance *Application) resolveExitLogger() loggingcontract.Logger {
         return instance.exitFileLogger(logger)
     }
 
-    containerLogger, loggerErr := logging.LoggerFromContainer(instance.ctx, instance.kernel.ServiceContainer())
+    containerLogger, loggerErr := logging.LoggerFromResolver(instance.ctx, instance.kernel.ServiceContainer())
     if nil != loggerErr || true == internal.IsNilInterface(containerLogger) {
         /* the typed-nil clause keeps the Closed probe below off a nil receiver in the one handler that must not panic */
         return instance.exitFileLogger(logger)

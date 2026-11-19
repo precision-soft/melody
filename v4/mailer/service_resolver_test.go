@@ -15,7 +15,7 @@ func TestMailerServiceName_IsTheRegisteredName(t *testing.T) {
     }
 }
 
-func TestMailerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testing.T) {
+func TestMailerMustFromResolver_AnswerTheRegisteredService(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     expected := NewManager(NewInMemoryTransport())
@@ -28,7 +28,7 @@ func TestMailerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testin
         container.RegisterOptions{},
     )
 
-    if expected != MailerMustFromContainer(t.Context(), serviceContainer) {
+    if expected != MailerMustFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the registered service from the container")
     }
 
@@ -39,12 +39,12 @@ func TestMailerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testin
 }
 
 /* the strict readers are the boot-time ones: they panic rather than hand back a nil the caller would dereference later, at a point where nothing names the missing registration */
-func TestMailerMustFromContainerAndResolver_PanicWhenUnregistered(t *testing.T) {
+func TestMailerMustFromResolver_PanicWhenUnregistered(t *testing.T) {
     for _, probe := range []struct {
         name string
         read func()
     }{
-        {name: "container", read: func() { _ = MailerMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
+        {name: "container", read: func() { _ = MailerMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
         {name: "resolver", read: func() { _ = MailerMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {

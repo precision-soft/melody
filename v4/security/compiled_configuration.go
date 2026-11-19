@@ -379,7 +379,7 @@ func (instance *CompiledFirewall) dispatchLoginSuccess(
     request httpcontract.Request,
     token securitycontract.Token,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,
@@ -395,7 +395,7 @@ func (instance *CompiledFirewall) dispatchLoginFailure(
     request httpcontract.Request,
     failureErr error,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,
@@ -410,7 +410,7 @@ func (instance *CompiledFirewall) dispatchLogoutSuccess(
     runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,
@@ -426,7 +426,7 @@ func (instance *CompiledFirewall) dispatchLogoutFailure(
     request httpcontract.Request,
     failureErr error,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,

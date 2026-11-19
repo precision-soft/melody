@@ -221,7 +221,7 @@ func (instance *demoModule) RegisterServices(
 func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
     router := kernelInstance.HttpRouter()
 
-    router.HandleWithOptions(
+    router.Handle(
         "/health",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             _ = runtimeInstance
@@ -338,7 +338,6 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
 - [`MiddlewarePriorityStatic`](../../application/http_middleware.go)
 - [`MiddlewarePriorityDefault`](../../application/http_middleware.go)
 - [`ServiceProcessRole`](../../application/service_resolver.go) — resolves to the process role string, so a service can gate background work without reaching back to the application instance
-    - [`ProcessRoleMustFromContainer(ctx, serviceContainer)`](../../application/service_resolver.go)
     - [`ProcessRoleMustFromResolver(ctx, resolver)`](../../application/service_resolver.go)
 - [`ServiceProcessContext`](../../application/service_resolver.go) — resolves to the console run's `ProcessContext`. The cli entry point installs it into the run's scope, so it takes a resolver rather than the container
     - [`ProcessContextMustFromResolver(ctx, resolver)`](../../application/service_resolver.go)

@@ -27,7 +27,6 @@ Locking is opt-in. The core defines the contract and an in-memory `Locker` (sing
     - [`NewLazyLocker`](../../lock/lazy_locker.go) — a `Locker` that resolves the registered one at its locks' first use
 - Provide container resolver helpers:
     - [`ServiceLocker`](../../lock/service_resolver.go)
-    - [`LockerMustFromContainer`](../../lock/service_resolver.go)
     - [`LockerMustFromResolver`](../../lock/service_resolver.go)
 
 ## Semantics
@@ -242,6 +241,5 @@ A failed resolution never panics: `CreateLock` resolves nothing and always hands
 ### Container helpers (`lock`)
 
 - [`const ServiceLocker`](../../lock/service_resolver.go) (`"service.lock.locker"`)
-- [`LockerMustFromContainer(context.Context, containercontract.Container) lockcontract.Locker`](../../lock/service_resolver.go)
 - [`LockerMustFromResolver(context.Context, containercontract.Resolver) lockcontract.Locker`](../../lock/service_resolver.go)
 - [`NewLazyLocker(resolver containercontract.Resolver) lockcontract.Locker`](../../lock/lazy_locker.go)

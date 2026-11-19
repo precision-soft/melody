@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "errors"
     "strings"
     "testing"
@@ -13,7 +14,7 @@ import (
 func TestKernelGettersMatchParameterValues(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }

@@ -88,11 +88,11 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 ### Security: an authorization decision that could not be made is 503 with `Retry-After`
 
-**What changed.** A voter whose decision reads a store implements [`securitycontract.FallibleVoter`](../security/contract/voter.go), `VoteWithError` beside `Vote`, and the framework's [`AccessDecisionManager`](../security/access_decision_manager.go) reads it instead of `Vote`: its error ends the decision whatever the strategy, since a missing vote cannot be counted as an abstention, and is returned marked with [`exception.MarkInfrastructureFailure`](../exception/infrastructure_failure.go) unless it answers a `4xx`, the voter's own refusal, or is already marked, so a `5xx` or an error with no status answers `503`. `DecideAny` grants on any attribute granted and otherwise answers the first error `exception.AnswersUnavailable` reads as unavailable, where it answered `403` for every error. When `DecideAll` answers an error [`exception.AnswersUnavailable`](../exception/infrastructure_failure.go) reads as unavailable, a custom decision manager's included, access control does not consult the access denied handler, files one Error record naming the firewall, the method and the path, none when the cause was already filed, raises `security.authorization.denied` with the new reason `authorization_unavailable` and refuses with `503 service unavailable`, the firewall's `Retry-After` and [`security.ErrAuthorizationUnavailable`](../security/unavailable_token.go) in the chain. An unmarked error is refused as it was. See [a store that cannot answer](package/SECURITY.md#a-store-that-cannot-answer).
+**What changed.** A voter's [`Vote`](../security/contract/voter.go) answers an error beside its result, and the framework's [`AccessDecisionManager`](../security/access_decision_manager.go) reads it: the error ends the decision whatever the strategy, since a missing vote cannot be counted as an abstention, and is returned marked with [`exception.MarkInfrastructureFailure`](../exception/infrastructure_failure.go) unless it answers a `4xx`, the voter's own refusal, or is already marked, so a `5xx` or an error with no status answers `503`. `DecideAny` grants on any attribute granted and otherwise answers the first error `exception.AnswersUnavailable` reads as unavailable, where it answered `403` for every error. When `DecideAll` answers an error [`exception.AnswersUnavailable`](../exception/infrastructure_failure.go) reads as unavailable, a custom decision manager's included, access control does not consult the access denied handler, files one Error record naming the firewall, the method and the path, none when the cause was already filed, raises `security.authorization.denied` with the new reason `authorization_unavailable` and refuses with `503 service unavailable`, the firewall's `Retry-After` and [`security.ErrAuthorizationUnavailable`](../security/unavailable_token.go) in the chain. An unmarked error is refused as it was. See [a store that cannot answer](package/SECURITY.md#a-store-that-cannot-answer).
 
 **Symptom.** A custom decision manager returning a marked error gets `503` with `Retry-After` where its access denied handler answered, or the error's status, `500` for a plain one. An audit counting `security.authorization.denied` by reason sees `authorization_unavailable`.
 
-**Remedy.** A voter that reads a policy store implements `VoteWithError` and returns the store's error; `Vote` stays for callers that read the interface alone. Recognise the refusal with `errors.Is(err, security.ErrAuthorizationUnavailable)`. Return an unmarked error, or one answering an http status, from a decision manager where the denial is the intended answer; from a `FallibleVoter`, a `4xx` error is the refusal and anything else is the outage.
+**Remedy.** A voter that reads a policy store returns the store's error from `Vote`. Recognise the refusal with `errors.Is(err, security.ErrAuthorizationUnavailable)`. Return an unmarked error, or one answering an http status, from a decision manager where the denial is the intended answer; from a voter, a `4xx` error is the refusal and anything else is the outage.
 
 ### Security: `security.login.failure` is raised for an error answered 401 or 403, on every sign-in path
 
@@ -143,6 +143,54 @@ A lock store closed by the teardown while the work still winds down now reads as
 **Symptom.** `cacheInstance.Get(ctx, key)` and a `Serializer` or `Cache` of the application's own no longer compile; a callback declared `func(ctx) (any, error)` keeps compiling as `Remember[any]`, and once it names its type the `value.(T)` after the call no longer compiles, `value` being no interface; `cachecontract.StoredValueNormalizer` is undefined; at run time, a key two call sites read as two types is recomputed on every alternation when the serializer refuses one type for the other, and under json, which refuses a mismatch of kind only, a struct written as another struct reads as a hit with the fields they do not share at zero.
 
 **Remedy.** Read through `value, exists, err := cache.Get[T](ctx, cacheInstance, key)`, and declare the callback's result type of `Remember` and drop the assertion that follows it; `cache.Get[any]` and `Remember[any]` keep the generic answer. A serializer implements `Deserialize(payload, target)` by decoding into the target, `json.Unmarshal(payload, target)` for json. A decorator that embeds `cachecontract.Cache` needs nothing; a full implementation adds `RoundTrip` and fills its read targets. Give each type its own key.
+
+### Cors: `AllowOrigin` receives the request
+
+**What changed.** [`cors.Config`](../http/cors/service.go)'s origin function is `AllowOrigin func(request httpcontract.Request, origin string) bool`, where it was `AllowOriginFunc func(origin string) bool`, and `Service.OriginAllowed` takes the request first: `OriginAllowed(request, origin)`. The request's `RuntimeInstance()` reaches the context and the container, so a per-tenant decision reads its store through it; a lookup the function cannot make answers false, refusing the origin. A nil request handed to `OriginAllowed` while a function is configured panics naming `cors.Service.OriginAllowed`.
+
+**Symptom.** A `cors.Config{AllowOriginFunc: …}` literal and a call `service.OriginAllowed(origin)` no longer compile.
+
+**Remedy.** Write `AllowOrigin: func(request httpcontract.Request, origin string) bool { … }`, ignoring the request where the decision does not read it, and pass the request being served to `OriginAllowed`.
+
+### Container: a service is resolved through `…FromResolver` only
+
+**What changed.** Every service accessor named `…FromContainer`, the framework's and the integrations', is removed beside its `…FromResolver` form: a [`Container`](../container/contract/container.go) is a `Resolver`, so `cache.CacheMustFromResolver(ctx, container)` takes the container exactly as it takes a scope. The seven with no resolver form, `validation.ValidatorMustFromContainer`, `validation.ValidatorFromContainer`, `config.ConfigFromContainer`, `session.SessionMustFromContainer`, `http.RouteRegistryMustFromContainer`, `http.UrlGeneratorMustFromContainer` and `http.RouterMustFromContainer`, are renamed `…FromResolver` and take a `containercontract.Resolver`; `ValidatorFromResolver` and `FirewallManagerFromResolver` still answer nil for a service that is not registered. The constructors `messagebus.NewConsumeCommandFromContainer` and `openapi.NewGenerateCommandFromContainer` are unchanged.
+
+**Symptom.** A call of `cache.CacheMustFromContainer(…)`, `logging.LoggerMustFromContainer(…)` or any other `…FromContainer` accessor no longer compiles.
+
+**Remedy.** Replace `FromContainer` with `FromResolver` in the name and keep the argument: `cache.CacheMustFromResolver(ctx, runtimeInstance.Container())`.
+
+### Security: a voter and the decision manager receive the runtime
+
+**What changed.** [`Voter.Vote`](../security/contract/voter.go) is `Vote(runtimeInstance, token, attribute, subject) (VoteResult, error)` and [`AccessDecisionManager`](../security/contract/access_decision_manager.go)'s `DecideAll` and `DecideAny` take the runtime first; the access control listener hands its own runtime. One door answers the vote and its error: `securitycontract.FallibleVoter` and `VoteWithError` are removed, and the framework's manager reads every voter's error by the rules it applied to a fallible one. `Voter.Supports` is unchanged.
+
+**Symptom.** A `Voter` of the application's own no longer satisfies the interface; `securitycontract.FallibleVoter` is undefined; `manager.DecideAll(token, attributes, subject)` reports not enough arguments.
+
+**Remedy.** Add the runtime as the first parameter and `nil` as the second result; a voter that implemented `VoteWithError` renames it `Vote` and deletes the old one; a handler calls `DecideAll(runtimeInstance, token, attributes, subject)`; read a repository through `runtimeInstance.Container()` under `runtimeInstance.Context()` instead of asserting the subject to a request.
+
+### Security: an authenticator, a rule and a token resolver receive the runtime
+
+**What changed.** [`Authenticator.Authenticate`](../security/contract/authenticator.go) is `Authenticate(runtimeInstance, request) (Token, error)`, [`Rule.Check`](../security/contract/rule.go) is `Check(runtimeInstance, request) error` and [`TokenResolver`](../security/contract/token.go) is `func(runtimeInstance, request) (Token, error)`; `AuthenticatorManager.Authenticate` and `Firewall.Check` take the runtime first. The framework hands the runtime of the request it serves, and the TOTP second factor reads its stores through it. A resolver's error is answered as a token source's: refused with its status, `500` for a plain one, and read as unavailable when it carries `exception.MarkInfrastructureFailure`; a typed nil error is no error. `Supports`, `Applies` and `Matches` are unchanged.
+
+**Symptom.** An `Authenticator`, a `Rule` or a `TokenResolver` of the application's own no longer compiles; `request.RuntimeInstance()` inside one keeps compiling and keeps working.
+
+**Remedy.** Add the runtime as the first parameter and read stores through it; a resolver returns `token, nil`, or its store's error (marked with `exception.MarkInfrastructureFailure` for an outage) where it built `security.NewUnavailableToken(err)`, which also stays valid.
+
+### Container: the container closes through `CloseWithContext` only
+
+**What changed.** [`containercontract.Container`](../container/contract/container.go) no longer declares `Close() error`, which was `CloseWithContext(context.Background())`; the container's one close door is `CloseWithContext(closeContext)`, a teardown that runs once and hands what is left of the caller's deadline to every service it closes.
+
+**Symptom.** `serviceContainer.Close()` no longer compiles; a `Container` of the application's own still compiles with its `Close` left on it, but nothing calls it.
+
+**Remedy.** Call `serviceContainer.CloseWithContext(ctx)`, `context.Background()` for no deadline.
+
+### Config: an environment source loads under a context
+
+**What changed.** [`EnvironmentSource.Load`](../config/contract/environment_source.go) is `Load(ctx context.Context) (map[string]string, error)` and [`config.NewEnvironment`](../config/environment.go) is `NewEnvironment(ctx, source)`, a nil context refused naming the door; `NewApplication` hands the context it was given. The framework's file source judges the context once, before it reads, since a file read waits on nothing; a source that reads a remote store bounds its read by it.
+
+**Symptom.** An `EnvironmentSource` of the application's own no longer satisfies the interface; `config.NewEnvironment(source)` reports not enough arguments.
+
+**Remedy.** Add the context as the parameter of `Load` and end a remote read on it; pass a context to `NewEnvironment`, `context.Background()` where none is at hand.
 
 ### Translation: a quoted `#` in a plural branch, and locales matched in BCP 47 case
 
@@ -434,13 +482,13 @@ A `Changes` that is not a json array, an `Entry` built by hand, is written as a 
 
 **Why.** A misspelt key is a configuration the deployment believes it set; and a credential of a module the process does not register is a value nobody marked.
 
-### Http: a route is registered through `Handle` or `HandleWithOptions`
+### Http: a route is registered through `Handle(pattern, handler, RouteOptions)`
 
-**What changed.** [`RouteHandler`](../http/contract/router.go), the registration surface of a router and of a group, declares two doors, `Handle(method, pattern, handler)` and `HandleWithOptions(pattern, handler, RouteOptions)`; `HandleNamed`, `HandleController` and `HandleNamedController` are gone from the interface, `Router` and `RouteGroup`. [`ControllerHandler`](../http/router_utility.go) builds the handler a controller function is registered as, with the argument resolution and the shape refusals the controller doors applied, and refuses a nil controller and a nil function with a panic naming it, where the doors panicked with a reflection error on a nil and admitted a nil function that panicked at each request. [`ServerSentEventHub.ClearBackplaneWithContext`](../http/server_sent_event_hub.go) is named `ClearBackplane`; it had no context-less twin, and it behaves as before.
+**What changed.** [`RouteHandler`](../http/contract/router.go), the registration surface of a router and of a group, declares one door, `Handle(pattern, handler, RouteOptions)`, the three-argument `Handle(method, pattern, handler)` gone and `HandleWithOptions` renamed `Handle`; `RouteOptions{}` registers the route for every method, so a call shortened from the third major names its method in `Methods`; `HandleNamed`, `HandleController` and `HandleNamedController` are gone from the interface, `Router` and `RouteGroup`. [`ControllerHandler`](../http/router_utility.go) builds the handler a controller function is registered as, with the argument resolution and the shape refusals the controller doors applied, and refuses a nil controller and a nil function with a panic naming it, where the doors panicked with a reflection error on a nil and admitted a nil function that panicked at each request. [`ServerSentEventHub.ClearBackplaneWithContext`](../http/server_sent_event_hub.go) is named `ClearBackplane`; it had no context-less twin, and it behaves as before.
 
-**Symptom.** A call of `HandleNamed`, `HandleController`, `HandleNamedController` or `ClearBackplaneWithContext` does not compile. A type that implements `RouteHandler` still compiles with the three doors left on it, but nothing calls them: a double or a decorator that intercepted `HandleNamed` is passed over, and the framework's `HandleWithOptions` reaches what it wraps, a nil embedded router included.
+**Symptom.** A call of `HandleNamed`, `HandleController`, `HandleNamedController`, `HandleWithOptions`, `Handle(method, pattern, handler)` or `ClearBackplaneWithContext` does not compile. A type that implements `RouteHandler` still compiles with the old doors left on it, `HandleWithOptions` included, but nothing calls them: a double or a decorator that intercepted `HandleNamed` is passed over, and the framework's `Handle` reaches what it wraps, a nil embedded router included.
 
-**Remedy.** `router.HandleNamed(name, method, pattern, handler)` is `router.HandleWithOptions(pattern, handler, http.RouteOptions{Name: name, Methods: []string{method}})`; a controller is `router.Handle(method, pattern, http.ControllerHandler(controller))`, or `HandleWithOptions` with its handler built the same way when it is named; `hub.ClearBackplaneWithContext(ctx)` is `hub.ClearBackplane(ctx)`. A double or a decorator of a router intercepts `HandleWithOptions` where it intercepted `HandleNamed`.
+**Remedy.** `router.Handle(method, pattern, handler)` is `router.Handle(pattern, handler, http.RouteOptions{Methods: []string{method}})`, `router.HandleWithOptions(…)` is `router.Handle(…)` and `router.HandleNamed(name, method, pattern, handler)` is `router.Handle(pattern, handler, http.RouteOptions{Name: name, Methods: []string{method}})`; a controller is `router.Handle(pattern, http.ControllerHandler(controller), http.RouteOptions{Methods: []string{method}})`; `hub.ClearBackplaneWithContext(ctx)` is `hub.ClearBackplane(ctx)`. A double or a decorator of a router intercepts `Handle(pattern, handler, options)` where it intercepted `HandleNamed`.
 
 ### Translation: a catalog refuses a select or plural that is not keyword-and-block pairs or is nested past what Trans renders
 
@@ -525,7 +573,7 @@ Publish a replacement with `melodyhttp.SetRequestSession(request, replacement)` 
 
 ```go
 if cause, isUnavailable := melodysession.SessionUnavailableCause(sessionInstance); true == isUnavailable {
-    return melodysecurity.NewUnavailableToken(cause)
+    return melodysecurity.NewUnavailableToken(cause), nil
 }
 ```
 
@@ -752,11 +800,11 @@ The same holds for a value a module was handed and would drop, refused at the ho
 
 ### Storage, translation, cors, static: four constructors refuse what they admitted
 
-**What changed.** Four constructors refuse at construction a value the third major admitted and then dropped or failed on later. `storage.NewLocalStorage` creates and opens its base directory, refusing one it cannot create or open, where the first `Put` failed; each operation still reopens the directory. `translation.NewManager`, handed at least one catalog, refuses an empty default locale and a default or fallback locale no catalog carries, since the lookup asks them by that name (in BCP 47 case); `NewManager(nil, …)` keeps answering raw ids. `cors.NewService` refuses a blank `AllowOrigins` entry, an `AllowOrigins` list beside `AllowOriginFunc`, and `"*"` beside other entries. In a filesystem build, the application refuses at `New`, in every process role, an explicitly set `MELODY_PUBLIC_DIRECTORY` that is not an existing directory, resolved against the project directory as the file server resolves it, a blank value reading as `public`; the default `public` may be absent.
+**What changed.** Four constructors refuse at construction a value the third major admitted and then dropped or failed on later. `storage.NewLocalStorage` creates and opens its base directory, refusing one it cannot create or open, where the first `Put` failed; each operation still reopens the directory. `translation.NewManager`, handed at least one catalog, refuses an empty default locale and a default or fallback locale no catalog carries, since the lookup asks them by that name (in BCP 47 case); `NewManager(nil, …)` keeps answering raw ids. `cors.NewService` refuses a blank `AllowOrigins` entry, an `AllowOrigins` list beside `AllowOrigin`, and `"*"` beside other entries. In a filesystem build, the application refuses at `New`, in every process role, an explicitly set `MELODY_PUBLIC_DIRECTORY` that is not an existing directory, resolved against the project directory as the file server resolves it, a blank value reading as `public`; the default `public` may be absent.
 
 **Symptom.** A construction that passed now panics: "could not create the storage base directory" or "could not open the storage base directory" (`baseDirectory`); "translation default locale is empty", "translation default locale is carried by no catalog" (`defaultLocale`), "translation fallback locale is empty" or "translation fallback locale is carried by no catalog" (`fallbackLocale`, `index`); a cors misconfiguration naming `Config.AllowOrigins` and the `index`, or both fields; "the public directory does not exist", "the public directory cannot be read" or "the public directory is a file" (`MELODY_PUBLIC_DIRECTORY`), in every process role, the cli role included.
 
-**Remedy.** Point the storage at a directory the process can create and open; hand a catalog for every default and fallback locale, or drop the locale; drop the blank entry, keep `AllowOriginFunc` or the list, and spell "allow everything" as `[]string{"*"}` alone; create the public directory, or unset `MELODY_PUBLIC_DIRECTORY` when the application serves no assets.
+**Remedy.** Point the storage at a directory the process can create and open; hand a catalog for every default and fallback locale, or drop the locale; drop the blank entry, keep `AllowOrigin` or the list, and spell "allow everything" as `[]string{"*"}` alone; create the public directory, or unset `MELODY_PUBLIC_DIRECTORY` when the application serves no assets.
 
 ### Security, static: three boot warnings become refusals, and a protected rule needs a decision manager
 
@@ -828,9 +876,9 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Container: the resolver doors take the caller's context first, and a resolution waiting on another goroutine's creation leaves when it ends
 
-**What changed.** [`Resolver`](../container/contract/resolver.go)'s `Get`, `MustGet`, `GetByType` and `MustGetByType` take a `context.Context` first, on the container, a scope and the resolver a provider receives; `Has` and `HasType` do not change. So do [`FromResolver`, `MustFromResolver`, `FromResolverByType`, `MustFromResolverByType`](../container/resolver.go), [`AllImplementing` and `MustAllImplementing`](../container/resolver_implementing.go), a [`LazyService`](../container/lazy.go)'s `Resolve` and `Get` (the `Lazy` and `LazyByType` builders do not), and every framework `*FromContainer` and `*FromResolver` helper, the integrations' included. A resolution parked on a creation another goroutine runs leaves the moment its context ends, answering an error whose cause is `context.Cause(ctx)`; a creation that finished in the same instant is answered as its value, and the provider is never interrupted; a provider's own resolutions wait under its first caller's context, so a provider that waits on a nested creation fails with that caller, and the resolutions coalesced behind it answer the failure. A nil context, a typed nil included, is refused at every one of these doors with `context is required in …` naming the door. `Provider[T]` keeps its signature: the resolver a provider receives carries, while the provider runs, the context of the call whose resolution started the creation, read through the new [`container.ContextOf(resolver)`](../container/resolver.go) and the optional capability [`contract.ResolutionContext`](../container/contract/resolution_context.go); the container, a scope and a resolver without the capability answer `context.Background()`. `runtime.FromRuntime`, `runtime.MustFromRuntime` and the `*FromRuntime` helpers keep their shape and resolve under `runtimeInstance.Context()`. [`kernelcontract.Kernel`](../kernel/contract/kernel.go) declares `Context()`, the application's context, and [`kernel.NewKernel`](../kernel/kernel.go) takes it first, a nil one refused. The encrypt module's `DatabaseFactory` takes the command run's context before the resolver, and `EncryptDatabaseCommandConfig.DatabaseResolver` takes it. The wiring generator writes `FromResolverByType[T](container.ContextOf(resolver), resolver)` and `ConfigMustFromResolver(container.ContextOf(resolver), resolver)`. In the third major no resolution took a context, and a waiter parked until the provider returned whatever its caller had given up on.
+**What changed.** [`Resolver`](../container/contract/resolver.go)'s `Get`, `MustGet`, `GetByType` and `MustGetByType` take a `context.Context` first, on the container, a scope and the resolver a provider receives; `Has` and `HasType` do not change. So do [`FromResolver`, `MustFromResolver`, `FromResolverByType`, `MustFromResolverByType`](../container/resolver.go), [`AllImplementing` and `MustAllImplementing`](../container/resolver_implementing.go), a [`LazyService`](../container/lazy.go)'s `Resolve` and `Get` (the `Lazy` and `LazyByType` builders do not), and every framework `*FromResolver` helper, the integrations' included. A resolution parked on a creation another goroutine runs leaves the moment its context ends, answering an error whose cause is `context.Cause(ctx)`; a creation that finished in the same instant is answered as its value, and the provider is never interrupted; a provider's own resolutions wait under its first caller's context, so a provider that waits on a nested creation fails with that caller, and the resolutions coalesced behind it answer the failure. A nil context, a typed nil included, is refused at every one of these doors with `context is required in …` naming the door. `Provider[T]` keeps its signature: the resolver a provider receives carries, while the provider runs, the context of the call whose resolution started the creation, read through the new [`container.ContextOf(resolver)`](../container/resolver.go) and the optional capability [`contract.ResolutionContext`](../container/contract/resolution_context.go); the container, a scope and a resolver without the capability answer `context.Background()`. `runtime.FromRuntime`, `runtime.MustFromRuntime` and the `*FromRuntime` helpers keep their shape and resolve under `runtimeInstance.Context()`. [`kernelcontract.Kernel`](../kernel/contract/kernel.go) declares `Context()`, the application's context, and [`kernel.NewKernel`](../kernel/kernel.go) takes it first, a nil one refused. The encrypt module's `DatabaseFactory` takes the command run's context before the resolver, and `EncryptDatabaseCommandConfig.DatabaseResolver` takes it. The wiring generator writes `FromResolverByType[T](container.ContextOf(resolver), resolver)` and `ConfigMustFromResolver(container.ContextOf(resolver), resolver)`. In the third major no resolution took a context, and a waiter parked until the provider returned whatever its caller had given up on.
 
-**Symptom.** `serviceContainer.Get("app.service")`, `container.MustFromResolver[T](resolver, name)`, `container.FromResolverByType[T](resolver)`, `container.AllImplementing[T](resolver)`, `handle.Resolve()`, `logging.LoggerMustFromContainer(serviceContainer)`, `config.ConfigMustFromResolver(resolver)` and `kernel.NewKernel(configuration, ...)` no longer compile, nor does a resolver or a kernel of your own that does not declare the new forms. A previously generated `wiring_gen.go` no longer compiles until it is regenerated.
+**Symptom.** `serviceContainer.Get("app.service")`, `container.MustFromResolver[T](resolver, name)`, `container.FromResolverByType[T](resolver)`, `container.AllImplementing[T](resolver)`, `handle.Resolve()`, `logging.LoggerMustFromResolver(serviceContainer)`, `config.ConfigMustFromResolver(resolver)` and `kernel.NewKernel(configuration, ...)` no longer compile, nor does a resolver or a kernel of your own that does not declare the new forms. A previously generated `wiring_gen.go` no longer compiles until it is regenerated.
 
 **Remedy.** Hand the context you hold: `serviceContainer.Get(ctx, "app.service")`. Inside a provider write `ctx := container.ContextOf(resolver)` and pass it on, `container.MustFromResolver[T](ctx, resolver, name)`; in a command or a handler pass `runtimeInstance.Context()`; at boot pass the application's context, or `kernelInstance.Context()` in a module hook. A test passes `t.Context()`. Regenerate the wiring with `go generate ./generated`. A resolver of your own adds the context to its four waiting doors and, where it carries one, answers it through `Context() context.Context`; a kernel of your own declares `Context()`.
 
@@ -884,11 +932,11 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Http: a route declares its options in one struct, and `NewRequirements` takes a slice
 
-**What changed.** [`RouteOptions`](../http/contract/route_option.go) is a struct of nine fields, `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority` and `Attributes`, whose zero value registers a route under no name for every method, host and scheme; `HandleWithOptions` takes it by value and copies its lists and maps at registration, so the value can be reused; `http.RouteOptions` names the same type. The third major declared a twelve-method interface built by `NewRouteOptions` over nine positional arguments. [`NewRequirements`](../http/constraint.go) takes a `[]*Requirement`, nil declaring none.
+**What changed.** [`RouteOptions`](../http/contract/route_option.go) is a struct of nine fields, `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority` and `Attributes`, whose zero value registers a route under no name for every method, host and scheme; `Handle` takes it by value and copies its lists and maps at registration, so the value can be reused; `http.RouteOptions` names the same type. The third major declared a twelve-method interface built by `NewRouteOptions` over nine positional arguments. [`NewRequirements`](../http/constraint.go) takes a `[]*Requirement`, nil declaring none.
 
-**Symptom.** `http.NewRouteOptions(name, methods, ...)`, the accessors and setters (`options.Name()`, `options.SetRequirements(...)`), `HandleWithOptions(pattern, handler, nil)` and `NewRequirements(a, b)` no longer compile.
+**Symptom.** `http.NewRouteOptions(name, methods, ...)`, the accessors and setters (`options.Name()`, `options.SetRequirements(...)`), `Handle(pattern, handler, nil)` and `NewRequirements(a, b)` no longer compile.
 
-**Remedy.** `http.RouteOptions{Name: "api.users", Methods: []string{"GET"}}`, `HandleWithOptions(pattern, handler, http.RouteOptions{})` for a route with no option, a field write where a setter was called, and `NewRequirements([]*http.Requirement{a, b})`.
+**Remedy.** `http.RouteOptions{Name: "api.users", Methods: []string{"GET"}}`, `Handle(pattern, handler, http.RouteOptions{})` for a route with no option, a field write where a setter was called, and `NewRequirements([]*http.Requirement{a, b})`.
 
 ### Http: the server-sent event writer re-arms a 30s write deadline by default, and the hub is built from one struct
 
@@ -932,7 +980,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Http: a credentialed cors service refuses an origin without a scheme
 
-**What changed.** [`cors.NewService`](../http/cors/service.go) panics when a service with `AllowCredentials` and no `AllowOriginFunc` holds an allowed origin without a scheme, `example.com` or `*.example.com`, naming `Config.AllowOrigins` and the entry: such an entry admits its host under any scheme, `http://` included, so a page served in clear text received the credentialed answer. `RestrictiveService` is credentialed and refuses it too. Without credentials, or behind an `AllowOriginFunc`, a scheme-less entry keeps its any-scheme reading. The third major named such an entry in the `cors.credentialedOriginWithoutScheme` boot warning at the service's first request, which is removed.
+**What changed.** [`cors.NewService`](../http/cors/service.go) panics when a service with `AllowCredentials` and no `AllowOrigin` holds an allowed origin without a scheme, `example.com` or `*.example.com`, naming `Config.AllowOrigins` and the entry: such an entry admits its host under any scheme, `http://` included, so a page served in clear text received the credentialed answer. `RestrictiveService` is credentialed and refuses it too. Without credentials, or behind an `AllowOrigin`, a scheme-less entry keeps its any-scheme reading. The third major named such an entry in the `cors.credentialedOriginWithoutScheme` boot warning at the service's first request, which is removed.
 
 **Symptom.** The boot panics with "cors misconfiguration: a credentialed service admits an origin without a scheme under any scheme".
 
@@ -1914,7 +1962,7 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 ### Clock and runtime: the nil refusals read through the interface
 
-**What changed.** `ClockMustFromContainer`, `ClockMustFromResolver`, `runtime.New` and the `runtime` resolvers judge their arguments through the interface rather than with a plain `nil ==` comparison, so a typed nil is refused by name at the door it was handed to. `selectRuntimeResolver` reads the same way: a custom `Runtime` whose `Scope()` yields a typed nil no longer has its healthy container bypassed.
+**What changed.** `ClockMustFromResolver`, `runtime.New` and the `runtime` resolvers judge their arguments through the interface rather than with a plain `nil ==` comparison, so a typed nil is refused by name at the door it was handed to. `selectRuntimeResolver` reads the same way: a custom `Runtime` whose `Scope()` yields a typed nil no longer has its healthy container bypassed.
 
 **Symptom.** A wiring mistake that used to surface as a nil dereference inside the container package — on the request path, with the panic blaming the container — is now refused where it was made, naming the argument.
 
@@ -2383,7 +2431,7 @@ The body is also negotiated: a client that prefers html gets the html error page
 
 **What changed.** `RoleVoter` and `RoleHierarchyVoter` granted a token that carried the role even when it answered `IsAuthenticated()` false; they now deny it, matching the access control listener, which had always checked authentication first. `AccessDecisionManager.DecideAll` over an empty attribute list now refuses instead of granting vacuously, matching `DecideAny`. `SecurityContext.IsGranted` asks the same question before it reads roles, which is what makes the sentence below true: until it did, the voters denied while `IsGranted` still granted, so the firewall refused the route and a handler branching on `IsGranted` rendered the privileged content behind it.
 
-**Symptom.** A handler-level `IsGranted` check on an unauthenticated token that carries roles — a "remembered" or half-logged-in token — now returns false where it used to return true. A direct `DecideAll(token, nil, subject)` caller now receives a refusal.
+**Symptom.** A handler-level `IsGranted` check on an unauthenticated token that carries roles — a "remembered" or half-logged-in token — now returns false where it used to return true. A direct `DecideAll(runtimeInstance, token, nil, subject)` caller now receives a refusal.
 
 **Remedy.** None if you relied on authentication being required, which is the safe reading. A caller that intentionally passed an empty attribute list to `DecideAll` expecting a grant must pass the attributes it means to check.
 
@@ -2953,13 +3001,13 @@ func (instance *CustomHttpConfiguration) StaticExcludedPaths() []string {
 
 ```go
 /* refused at registration: the optional parameter is not the last segment and carries no default */
-router.Handle(nethttp.MethodGet, "/blog/:locale?/posts", blogHandler)
+router.Handle("/blog/:locale?/posts", blogHandler, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
 
 /* accepted: the optional parameter is the last segment */
-router.Handle(nethttp.MethodGet, "/blog/posts/:locale?", blogHandler)
+router.Handle("/blog/posts/:locale?", blogHandler, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
 
 /* accepted: a mid-pattern optional whose non-empty default is always substituted */
-router.HandleWithOptions(
+router.Handle(
     "/blog/:locale?/posts",
     blogHandler,
     http.RouteOptions{
@@ -2970,8 +3018,8 @@ router.HandleWithOptions(
 )
 
 /* accepted: the long and the short pattern registered as two routes */
-router.HandleWithOptions("/blog/posts", blogHandler, http.RouteOptions{Name: "blog.posts", Methods: []string{nethttp.MethodGet}})
-router.HandleWithOptions("/blog/:locale/posts", blogHandler, http.RouteOptions{Name: "blog.posts.locale", Methods: []string{nethttp.MethodGet}})
+router.Handle("/blog/posts", blogHandler, http.RouteOptions{Name: "blog.posts", Methods: []string{nethttp.MethodGet}})
+router.Handle("/blog/:locale/posts", blogHandler, http.RouteOptions{Name: "blog.posts.locale", Methods: []string{nethttp.MethodGet}})
 ```
 
 An empty default does not lift the refusal: it would emit an empty segment, which no longer satisfies a parameter.

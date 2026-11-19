@@ -161,7 +161,7 @@ func TestNewApplication_TheContainerCreationWaitersFieldReachesTheContainer(t *t
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ContainerCreationWaiters: bound.Of(1)})
     serviceContainer := applicationInstance.kernel.ServiceContainer()
     defer func() {
-        _ = serviceContainer.Close()
+        _ = serviceContainer.CloseWithContext(context.Background())
     }()
 
     providerEntered := make(chan struct{})
@@ -221,7 +221,7 @@ func TestNewApplication_TheContainerTeardownSequentialFieldReachesTheContainer(t
             t.Fatalf("expected ContainerTeardownSequential %v to reach the container, got waves %v", sequential, viewed.TeardownRunsInWaves())
         }
 
-        _ = serviceContainer.Close()
+        _ = serviceContainer.CloseWithContext(context.Background())
     }
 }
 
@@ -239,7 +239,7 @@ func TestNewApplication_TheScopeTeardownTimeoutFieldReachesTheContainersScopes(t
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), ScopeTeardownTimeout: bound.UnlimitedDuration()})
     serviceContainer := applicationInstance.kernel.ServiceContainer()
     defer func() {
-        _ = serviceContainer.Close()
+        _ = serviceContainer.CloseWithContext(context.Background())
     }()
 
     container.MustRegisterScoped[*scopeTeardownTimeoutProbe](

@@ -83,7 +83,7 @@ func NewApplication(
         embeddedEnvironmentFiles,
     )
 
-    environment, newEnvironmentErr := config.NewEnvironment(environmentSource)
+    environment, newEnvironmentErr := config.NewEnvironment(ctx, environmentSource)
     if nil != newEnvironmentErr {
         exception.Panic(
             exception.NewError("failed to create environment", nil, newEnvironmentErr),

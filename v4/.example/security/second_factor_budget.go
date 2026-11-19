@@ -58,8 +58,8 @@ func (instance *SecondFactorBudget) Supports(request melodyhttpcontract.Request)
     return instance.primary.Supports(request)
 }
 
-func (instance *SecondFactorBudget) Authenticate(request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
-    token, authenticateErr := instance.primary.Authenticate(request)
+func (instance *SecondFactorBudget) Authenticate(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+    token, authenticateErr := instance.primary.Authenticate(runtimeInstance, request)
     if nil != authenticateErr {
         return nil, authenticateErr
     }
@@ -72,7 +72,7 @@ func (instance *SecondFactorBudget) Authenticate(request melodyhttpcontract.Requ
         return token, nil
     }
 
-    if spendErr := instance.Spend(request.RuntimeInstance(), token.UserIdentifier()); nil != spendErr {
+    if spendErr := instance.Spend(runtimeInstance, token.UserIdentifier()); nil != spendErr {
         return nil, spendErr
     }
 

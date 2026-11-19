@@ -34,10 +34,10 @@ func (instance *PasswordAuthenticator) Supports(request melodyhttpcontract.Reque
     return "" != username && "" != password
 }
 
-func (instance *PasswordAuthenticator) Authenticate(request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+func (instance *PasswordAuthenticator) Authenticate(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
     username, password := loginCredentials(request)
 
-    account, accepted, checkErr := instance.check(request.RuntimeInstance(), username, password)
+    account, accepted, checkErr := instance.check(runtimeInstance, username, password)
     if nil != checkErr {
         return nil, exception.MarkInfrastructureFailure(checkErr)
     }

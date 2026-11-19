@@ -85,7 +85,7 @@ func TestFirewallDoor_AnyRouteThatClaimsItsPathIsReported(t *testing.T) {
             application, router := newFirewallDoorTestApplication(t)
 
             application.declareFirewallDoorRoutes()
-            router.HandleWithOptions(pattern, bootCollisionTestHandler(), http.RouteOptions{Name: "colliding", Methods: []string{nethttp.MethodGet}})
+            router.Handle(pattern, bootCollisionTestHandler(), http.RouteOptions{Name: "colliding", Methods: []string{nethttp.MethodGet}})
             application.recordFirewallDoorRouteCollisions()
 
             if 1 != len(application.bootCollisions) || bootCollisionKindFirewallDoorRoute != application.bootCollisions[0].kind {
@@ -103,7 +103,7 @@ func TestFirewallDoor_ARouteOnAnotherPathIsAdmitted(t *testing.T) {
     application, router := newFirewallDoorTestApplication(t)
 
     application.declareFirewallDoorRoutes()
-    router.HandleWithOptions("/login", bootCollisionTestHandler(), http.RouteOptions{Name: "page", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/login", bootCollisionTestHandler(), http.RouteOptions{Name: "page", Methods: []string{nethttp.MethodGet}})
     application.recordFirewallDoorRouteCollisions()
 
     if 0 != len(application.bootCollisions) {
@@ -123,8 +123,8 @@ func (instance *firewallDoorTestModule) RegisterSecurity(builder *securityconfig
     builder.AddFirewall(
         "main",
         security.NewPathPrefixMatcher("/"),
-        security.NewResolverTokenSource(func(request httpcontract.Request) securitycontract.Token {
-            return security.NewAnonymousToken()
+        security.NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+            return security.NewAnonymousToken(), nil
         }),
         securityconfig.FirewallConfig{Login: securityconfig.LoginConfig{Path: "/login/check", Name: "door.login", Handler: &firewallDoorTestLoginHandler{}}},
     )
@@ -132,7 +132,7 @@ func (instance *firewallDoorTestModule) RegisterSecurity(builder *securityconfig
 
 func (instance *firewallDoorTestModule) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel) {
     if "" != instance.pattern {
-        kernelInstance.HttpRouter().HandleWithOptions(instance.pattern, bootCollisionTestHandler(), http.RouteOptions{Name: "colliding", Methods: []string{nethttp.MethodGet}})
+        kernelInstance.HttpRouter().Handle(instance.pattern, bootCollisionTestHandler(), http.RouteOptions{Name: "colliding", Methods: []string{nethttp.MethodGet}})
     }
 }
 
@@ -176,7 +176,7 @@ func TestInstallHttpMiddlewares_RefusesARouteAFactoryPutOnADoorsPath(t *testing.
     application.RegisterModule(&firewallDoorTestModule{fakeModule: fakeModule{name: "door"}})
     application.RegisterHttpMiddlewareFactories([]applicationcontract.MiddlewareFactory{
         func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
-            kernelInstance.HttpRouter().HandleWithOptions("/login/:step", bootCollisionTestHandler(), http.RouteOptions{Name: "late", Methods: []string{nethttp.MethodGet}})
+            kernelInstance.HttpRouter().Handle("/login/:step", bootCollisionTestHandler(), http.RouteOptions{Name: "late", Methods: []string{nethttp.MethodGet}})
 
             return func(next httpcontract.Handler) httpcontract.Handler {
                 return next

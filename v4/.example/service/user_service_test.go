@@ -155,7 +155,7 @@ func TestUserService_GrantRoleTellsTheListeners(t *testing.T) {
     dispatcher := newRecordingDispatcher(clockInstance, event.UserUpdatedEventName)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,
@@ -213,7 +213,7 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
     refusing := &refusingOnceDispatcher{EventDispatcher: dispatcher.dispatcher}
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,
@@ -261,7 +261,7 @@ func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
     dispatcher := newRecordingDispatcher(clockInstance, event.UserUpdatedEventName)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,
@@ -302,7 +302,7 @@ func TestUserService_UpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
     dispatcher := newRecordingDispatcher(melodyclock.NewSystemClock(), event.UserUpdatedEventName)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(
         containerInstance,
         melodylogging.ServiceLogger,

@@ -4,6 +4,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -45,7 +46,7 @@ func (instance *ApiKeyHeaderRule) Applies(request httpcontract.Request) bool {
     return instance.matcher.Matches(request)
 }
 
-func (instance *ApiKeyHeaderRule) Check(request httpcontract.Request) error {
+func (instance *ApiKeyHeaderRule) Check(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) error {
     if false == instance.Applies(request) {
         return nil
     }

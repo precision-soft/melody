@@ -16,7 +16,7 @@ func TestLockerServiceName_IsTheRegisteredName(t *testing.T) {
     }
 }
 
-func TestLockerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testing.T) {
+func TestLockerMustFromResolver_AnswerTheRegisteredService(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     expected := NewInMemoryLocker(clock.NewSystemClock())
@@ -29,7 +29,7 @@ func TestLockerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testin
         container.RegisterOptions{},
     )
 
-    if expected != LockerMustFromContainer(t.Context(), serviceContainer) {
+    if expected != LockerMustFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the registered service from the container")
     }
 
@@ -40,12 +40,12 @@ func TestLockerMustFromContainerAndResolver_AnswerTheRegisteredService(t *testin
 }
 
 /* the strict readers are the boot-time ones: they panic rather than hand back a nil the caller would dereference later, at a point where nothing names the missing registration */
-func TestLockerMustFromContainerAndResolver_PanicWhenUnregistered(t *testing.T) {
+func TestLockerMustFromResolver_PanicWhenUnregistered(t *testing.T) {
     for _, probe := range []struct {
         name string
         read func()
     }{
-        {name: "container", read: func() { _ = LockerMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
+        {name: "container", read: func() { _ = LockerMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{})) }},
         {name: "resolver", read: func() { _ = LockerMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) }},
     } {
         func() {

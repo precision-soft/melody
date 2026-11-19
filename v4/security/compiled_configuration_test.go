@@ -23,7 +23,7 @@ import (
 type compiledFirewallTestRule struct{}
 
 func (instance *compiledFirewallTestRule) Applies(request httpcontract.Request) bool { return true }
-func (instance *compiledFirewallTestRule) Check(request httpcontract.Request) error  { return nil }
+func (instance *compiledFirewallTestRule) Check(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) error  { return nil }
 
 var _ securitycontract.Rule = (*compiledFirewallTestRule)(nil)
 

@@ -9,7 +9,7 @@ import (
 func TestRouteOptions_ZeroValueRegistersARouteForEveryMethodHostAndScheme(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions("/articles", routeRegistryTestHandler(), RouteOptions{})
+    router.Handle("/articles", routeRegistryTestHandler(), RouteOptions{})
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
 
@@ -31,7 +31,7 @@ func TestRouteOptions_TheCallersMapsWrittenAfterRegistrationDoNotReachTheRoute(t
     requirements := map[string]string{"id": ConstraintNumeric}
     defaults := map[string]string{"format": "json"}
 
-    router.HandleWithOptions(
+    router.Handle(
         "/articles/:id",
         routeRegistryTestHandler(),
         RouteOptions{
@@ -72,7 +72,7 @@ func TestRouteOptions_TheCallersListsWrittenAfterRegistrationDoNotReachTheRoute(
     locales := []string{"en"}
     attributes := map[string]any{"owner": "catalog"}
 
-    router.HandleWithOptions(
+    router.Handle(
         "/:_locale/articles",
         routeRegistryTestHandler(),
         RouteOptions{

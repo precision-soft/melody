@@ -16,7 +16,7 @@ func Middleware(service *Service) httpcontract.Middleware {
     return func(next httpcontract.Handler) httpcontract.Handler {
         return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             origin := service.RequestOrigin(request)
-            allowOrigin := "" != origin && true == service.OriginAllowed(origin)
+            allowOrigin := "" != origin && true == service.OriginAllowed(request, origin)
 
             if true == allowOrigin && true == service.IsPreflight(request) {
                 response := http.EmptyResponse(nethttp.StatusNoContent)

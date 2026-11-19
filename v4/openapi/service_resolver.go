@@ -11,10 +11,6 @@ const ServiceOpenApiRegistry = "service.openapi.registry"
 
 const ServiceOpenApiInfo = "service.openapi.info"
 
-func RegistryMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) *Registry {
-    return container.MustFromResolver[*Registry](ctx, serviceContainer, ServiceOpenApiRegistry)
-}
-
 func RegistryMustFromResolver(ctx context.Context, resolver containercontract.Resolver) *Registry {
     return container.MustFromResolver[*Registry](ctx, resolver, ServiceOpenApiRegistry)
 }

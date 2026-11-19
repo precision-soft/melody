@@ -88,7 +88,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel)
             routeName = defaultStreamRouteName
         }
 
-        kernelInstance.HttpRouter().HandleWithOptions(
+        kernelInstance.HttpRouter().Handle(
             stream.Path,
             handlers[index],
             melodyhttp.RouteOptions{Name: routeName, Methods: []string{"GET"}},

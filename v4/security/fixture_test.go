@@ -421,7 +421,7 @@ func newTestCompiledFirewallWithRoleHierarchy(name string, roleHierarchy *RoleHi
 
 type servedSecurityEnvironmentSource struct{}
 
-func (instance *servedSecurityEnvironmentSource) Load() (map[string]string, error) {
+func (instance *servedSecurityEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return map[string]string{config.EnvironmentNameKey: config.EnvironmentProduction}, nil
 }
 
@@ -440,7 +440,7 @@ func servedSecurityContainer(t *testing.T, kernelInstance *testKernel, logger lo
     serviceContainer.MustRegister(
         config.ServiceConfig,
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
-            environment, environmentErr := config.NewEnvironment(&servedSecurityEnvironmentSource{})
+            environment, environmentErr := config.NewEnvironment(context.Background(), &servedSecurityEnvironmentSource{})
             if nil != environmentErr {
                 return nil, environmentErr
             }
@@ -492,7 +492,7 @@ func serveSecurityRequestThrough(
 
     serviceContainer := servedSecurityContainer(t, kernelInstance, logger)
 
-    kernelInstance.httpRouter.Handle(nethttp.MethodGet, path, handler)
+    kernelInstance.httpRouter.Handle(path, handler, http.RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     request := httptest.NewRequest(nethttp.MethodGet, path, nil)
     request.Header.Set("Accept", "application/json")
@@ -547,21 +547,22 @@ type fallibleTestVoter struct {
     attribute string
     result    securitycontract.VoteResult
     err       error
-    voteCalls int
+    runtimes  []runtimecontract.Runtime
 }
 
 func (instance *fallibleTestVoter) Supports(attribute string, subject any) bool {
     return instance.attribute == attribute
 }
 
-func (instance *fallibleTestVoter) Vote(token securitycontract.Token, attribute string, subject any) securitycontract.VoteResult {
-    instance.voteCalls++
+func (instance *fallibleTestVoter) Vote(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
+    instance.runtimes = append(instance.runtimes, runtimeInstance)
 
-    return securitycontract.VoteGranted
-}
-
-func (instance *fallibleTestVoter) VoteWithError(token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
     return instance.result, instance.err
 }
 
-var _ securitycontract.FallibleVoter = (*fallibleTestVoter)(nil)
+var _ securitycontract.Voter = (*fallibleTestVoter)(nil)
+
+/* withItsRuntime hands a door the request together with the runtime the request carries */
+func withItsRuntime(request httpcontract.Request) (runtimecontract.Runtime, httpcontract.Request) {
+    return request.RuntimeInstance(), request
+}

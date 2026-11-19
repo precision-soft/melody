@@ -21,7 +21,7 @@ func (instance *firewallTestRule) Applies(request httpcontract.Request) bool {
     return instance.appliesCallback(request)
 }
 
-func (instance *firewallTestRule) Check(request httpcontract.Request) error {
+func (instance *firewallTestRule) Check(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) error {
     return instance.checkCallback(request)
 }
 
@@ -62,7 +62,7 @@ func TestFirewall_Check_CallsOnlyApplicableRules(t *testing.T) {
         },
     })
 
-    err := firewall.Check(newFirewallTestRequest("/admin"))
+    err := firewall.Check(withItsRuntime(newFirewallTestRequest("/admin")))
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -98,7 +98,7 @@ func TestFirewall_Check_ReturnsFirstError(t *testing.T) {
         },
     })
 
-    err := firewall.Check(newFirewallTestRequest("/admin"))
+    err := firewall.Check(withItsRuntime(newFirewallTestRequest("/admin")))
     if nil == err {
         t.Fatalf("expected error")
     }

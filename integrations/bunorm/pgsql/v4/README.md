@@ -61,7 +61,7 @@ Opening a connection through this provider routes bun's own diagnostic channel �
 The provider is **secure-by-default**: `pgdriver` negotiates a TLS handshake on every Postgres connection.
 
 - `Insecure` — default `false`. Set `true` to disable TLS entirely and connect over plain TCP (for local development or non-TLS endpoints).
-- `TlsConfig` — forwards a caller-built `*crypto/tls.Config` to `pgdriver.WithTLSConfig(...)`. When set, it takes precedence over `Insecure`.
+- `TlsConfig` — forwards a caller-built `*crypto/tls.Config` to `pgdriver.WithTLSConfig(...)`. Set beside `Insecure: true`, `NewProvider` refuses both.
 
 ```go
 // Connect against a local Postgres that does not expose TLS:

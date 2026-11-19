@@ -75,8 +75,8 @@ func TestNewResolverTokenSource_NilResolverPanics(t *testing.T) {
 
 func TestResolverTokenSource_NameIdentifiesTheSource(t *testing.T) {
     tokenSource := NewResolverTokenSource(
-        func(request httpcontract.Request) securitycontract.Token {
-            return nil
+        func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+            return nil, nil
         },
     )
 
@@ -90,8 +90,8 @@ func TestResolverTokenSource_ResolveAnswersAnonymousWhenTheResolverFindsNobody(t
     runtimeInstance, _ := newTokenSourceTestRuntime(t)
 
     tokenSource := NewResolverTokenSource(
-        func(request httpcontract.Request) securitycontract.Token {
-            return nil
+        func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+            return nil, nil
         },
     )
 
@@ -115,8 +115,8 @@ func TestResolverTokenSource_ResolveAnswersTheResolvedToken(t *testing.T) {
     resolvedToken := NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)
 
     tokenSource := NewResolverTokenSource(
-        func(request httpcontract.Request) securitycontract.Token {
-            return resolvedToken
+        func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+            return resolvedToken, nil
         },
     )
 
@@ -138,10 +138,10 @@ func TestResolverTokenSource_ResolveHandsTheRequestToTheResolver(t *testing.T) {
     seenRequest := httpcontract.Request(nil)
 
     tokenSource := NewResolverTokenSource(
-        func(resolverRequest httpcontract.Request) securitycontract.Token {
+        func(runtimeInstance runtimecontract.Runtime, resolverRequest httpcontract.Request) (securitycontract.Token, error) {
             seenRequest = resolverRequest
 
-            return nil
+            return nil, nil
         },
     )
 
@@ -474,10 +474,10 @@ func recordSecurityLoginEvents(dispatcher eventcontract.EventDispatcher) *[]stri
 /* The resolver is the application's function; a nil pointer of its own token type reaches here as a non-nil interface and, read as a live token, is published into the security context every voter then reads. */
 func TestResolverTokenSource_ResolveReadsATypedNilTokenAsAbsent(t *testing.T) {
     tokenSource := NewResolverTokenSource(
-        func(request httpcontract.Request) securitycontract.Token {
+        func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             var unassignedToken *AuthenticatedToken
 
-            return unassignedToken
+            return unassignedToken, nil
         },
     )
 

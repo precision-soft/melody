@@ -12,7 +12,7 @@ import (
 
 func TestExclusiveTickCommandPrintsIntoTheCommandsWriter(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 

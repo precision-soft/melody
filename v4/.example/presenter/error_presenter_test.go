@@ -35,7 +35,7 @@ type stubEnvironmentSource struct {
     values map[string]string
 }
 
-func (instance *stubEnvironmentSource) Load() (map[string]string, error) {
+func (instance *stubEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return instance.values, nil
 }
 
@@ -48,7 +48,7 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
         },
     }
 
-    environment, environmentErr := melodyconfig.NewEnvironment(source)
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("new environment: %v", environmentErr)
     }

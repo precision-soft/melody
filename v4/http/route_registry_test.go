@@ -14,20 +14,20 @@ import (
 func TestRouteRegistry_RefusesAnExactDispatchDuplicate(t *testing.T) {
     router := NewRouter()
 
-    router.Handle(nethttp.MethodGet, "/health", routeRegistryTestHandler())
+    router.Handle("/health", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     testhelper.AssertPanicsWithError(t, func() {
-        router.Handle(nethttp.MethodGet, "/health", routeRegistryTestHandler())
+        router.Handle("/health", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
     }, "route already registered")
 }
 
 func TestRouteRegistry_RefusesADuplicateThatDiffersOnlyInTheCaseOfItsMethod(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions("/cased", routeRegistryTestHandler(), RouteOptions{Methods: []string{"get"}})
+    router.Handle("/cased", routeRegistryTestHandler(), RouteOptions{Methods: []string{"get"}})
 
     testhelper.AssertPanicsWithError(t, func() {
-        router.HandleWithOptions("/cased", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
+        router.Handle("/cased", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
     }, "route already registered")
 }
 
@@ -35,10 +35,10 @@ func TestRouteRegistry_RefusesADuplicateThatDiffersOnlyInTheCaseOfItsMethod(t *t
 func TestRouteRegistry_RefusesADuplicateThatDiffersOnlyInName(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions("/named", routeRegistryTestHandler(), RouteOptions{Name: "first.name", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/named", routeRegistryTestHandler(), RouteOptions{Name: "first.name", Methods: []string{nethttp.MethodGet}})
 
     testhelper.AssertPanicsWithError(t, func() {
-        router.HandleWithOptions("/named", routeRegistryTestHandler(), RouteOptions{Name: "second.name", Methods: []string{nethttp.MethodGet}})
+        router.Handle("/named", routeRegistryTestHandler(), RouteOptions{Name: "second.name", Methods: []string{nethttp.MethodGet}})
     }, "route already registered")
 }
 
@@ -52,8 +52,8 @@ func TestRouteRegistry_ARecorderDefersTheDispatchDuplicateAndTheFirstRegistratio
         recorded = append(recorded, [2]string{kind, name})
     })
 
-    router.Handle(nethttp.MethodGet, "/health", routeRegistryTestHandler())
-    router.Handle(nethttp.MethodGet, "/health", routeRegistryTestHandler())
+    router.Handle("/health", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/health", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     if 1 != len(recorded) {
         t.Fatalf("expected exactly one recorded collision, got %d", len(recorded))
@@ -74,7 +74,7 @@ func TestRouteRegistry_ARecorderDefersTheDispatchDuplicateAndTheFirstRegistratio
     registry.SetBootCollisionRecorder(nil)
 
     testhelper.AssertPanicsWithError(t, func() {
-        router.Handle(nethttp.MethodGet, "/health", routeRegistryTestHandler())
+        router.Handle("/health", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
     }, "route already registered")
 }
 
@@ -88,8 +88,8 @@ func TestRouteRegistry_ARecorderDefersTheNameDuplicateAndBothRoutesStayDispatcha
         recorded = append(recorded, [2]string{kind, name})
     })
 
-    router.HandleWithOptions("/first", routeRegistryTestHandler(), RouteOptions{Name: "claimed.name", Methods: []string{nethttp.MethodGet}})
-    router.HandleWithOptions("/second", routeRegistryTestHandler(), RouteOptions{Name: "claimed.name", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/first", routeRegistryTestHandler(), RouteOptions{Name: "claimed.name", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/second", routeRegistryTestHandler(), RouteOptions{Name: "claimed.name", Methods: []string{nethttp.MethodGet}})
 
     if 1 != len(recorded) {
         t.Fatalf("expected exactly one recorded collision, got %d", len(recorded))
@@ -122,8 +122,8 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherMethod(t *testing.T) {
     registry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(registry)
 
-    router.Handle(nethttp.MethodGet, "/health", routeRegistryTestHandler())
-    router.Handle(nethttp.MethodPost, "/health", routeRegistryTestHandler())
+    router.Handle("/health", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/health", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodPost}})
 
     if 2 != len(registry.RouteDefinitions()) {
         t.Fatalf("expected both methods to stay registered, got %d routes", len(registry.RouteDefinitions()))
@@ -144,13 +144,13 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherHost(t *testing.T) {
     registry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(registry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/health",
         routeRegistryTestHandler(),
         RouteOptions{Methods: []string{nethttp.MethodGet}, Host: "one.example.test"},
     )
 
-    router.HandleWithOptions(
+    router.Handle(
         "/health",
         routeRegistryTestHandler(),
         RouteOptions{Methods: []string{nethttp.MethodGet}, Host: "two.example.test"},
@@ -175,13 +175,13 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherRequirement(t *testing.T
     registry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(registry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/item/:id",
         routeRegistryTestHandler(),
         RouteOptions{Methods: []string{nethttp.MethodGet}, Requirements: map[string]string{"id": "[0-9]+"}},
     )
 
-    router.HandleWithOptions(
+    router.Handle(
         "/item/:id",
         routeRegistryTestHandler(),
         RouteOptions{Methods: []string{nethttp.MethodGet}, Requirements: map[string]string{"id": "[a-z]+"}},
@@ -212,7 +212,7 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherPriority(t *testing.T) {
     registry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(registry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/ranked",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "declared-first"), nil
@@ -220,7 +220,7 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherPriority(t *testing.T) {
         RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
-    router.HandleWithOptions(
+    router.Handle(
         "/ranked",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "higher-priority"), nil
@@ -332,8 +332,8 @@ func TestDeclareRouteDefinition_RefusesAReservedAttributeAndADuplicateName(t *te
             }
         }()
 
-        router.Handle(nethttp.MethodGet, "/elsewhere", routeRegistryTestHandler())
-        router.HandleWithOptions("/other", routeRegistryTestHandler(), RouteOptions{Name: "door", Methods: []string{nethttp.MethodGet}})
+        router.Handle("/elsewhere", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
+        router.Handle("/other", routeRegistryTestHandler(), RouteOptions{Name: "door", Methods: []string{nethttp.MethodGet}})
     }()
 }
 
@@ -356,12 +356,12 @@ func TestDeclareRouteDefinition_TwoOnOnePathAnswerTheirOwnMethodsAndCarryTheirAt
 func TestRoutesClaimingPath_AnswersEveryRouteThatMatchesWhateverItsMethodHostOrScheme(t *testing.T) {
     router := NewRouter()
     router.DeclareRouteDefinition("/login/check", httpcontract.RouteOptions{Name: "door.login", Methods: []string{nethttp.MethodPost}})
-    router.HandleWithOptions("/login/check/", routeRegistryTestHandler(), RouteOptions{Name: "literal", Methods: []string{nethttp.MethodGet}})
-    router.HandleWithOptions("/login/:step", routeRegistryTestHandler(), RouteOptions{Name: "parameter", Methods: []string{nethttp.MethodPut}})
-    router.HandleWithOptions("/*rest...", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "catchAll", Host: "other.example", Methods: []string{nethttp.MethodGet}})
-    router.HandleWithOptions("/login", routeRegistryTestHandler(), RouteOptions{Name: "elsewhere", Methods: []string{nethttp.MethodGet}})
-    router.HandleWithOptions("/login/:digits", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "constrained", Requirements: map[string]string{"digits": "[0-9]+"}})
-    router.HandleWithOptions("/:_locale/check", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "localized", Locales: []string{"en"}})
+    router.Handle("/login/check/", routeRegistryTestHandler(), RouteOptions{Name: "literal", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/login/:step", routeRegistryTestHandler(), RouteOptions{Name: "parameter", Methods: []string{nethttp.MethodPut}})
+    router.Handle("/*rest...", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "catchAll", Host: "other.example", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/login", routeRegistryTestHandler(), RouteOptions{Name: "elsewhere", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/login/:digits", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "constrained", Requirements: map[string]string{"digits": "[0-9]+"}})
+    router.Handle("/:_locale/check", routeRegistryTestHandler(), httpcontract.RouteOptions{Name: "localized", Locales: []string{"en"}})
 
     names := map[string]bool{}
     for _, definition := range router.RoutesClaimingPath("/login/check") {

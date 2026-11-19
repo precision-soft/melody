@@ -7,7 +7,7 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
-func TestConfigMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t *testing.T) {
+func TestConfigMustFromResolver_ResolveTheDeclaredServiceName(t *testing.T) {
     if "service.config" != ServiceConfig {
         t.Fatalf("the configuration service name is a cross-package contract, got %q", ServiceConfig)
     }
@@ -30,7 +30,7 @@ func TestConfigMustFromContainerAndResolver_ResolveTheDeclaredServiceName(t *tes
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if configuration != ConfigMustFromContainer(t.Context(), serviceContainer) {
+    if configuration != ConfigMustFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the container door to resolve the declared service")
     }
 
@@ -51,10 +51,10 @@ func TestConfigMustFromResolver_PanicsWhenTheConfigurationIsNotRegistered(t *tes
     _ = ConfigMustFromResolver(t.Context(), serviceContainer)
 }
 
-func TestConfigFromContainer_AnswersTheConfigurationAndAnAbsenceAsAnError(t *testing.T) {
+func TestConfigFromResolver_AnswersTheConfigurationAndAnAbsenceAsAnError(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    if _, absentErr := ConfigFromContainer(t.Context(), serviceContainer); nil == absentErr {
+    if _, absentErr := ConfigFromResolver(t.Context(), serviceContainer); nil == absentErr {
         t.Fatalf("expected an absent configuration to answer an error")
     }
 
@@ -71,7 +71,7 @@ func TestConfigFromContainer_AnswersTheConfigurationAndAnAbsenceAsAnError(t *tes
         containercontract.RegisterOptions{},
     )
 
-    resolved, resolveErr := ConfigFromContainer(t.Context(), serviceContainer)
+    resolved, resolveErr := ConfigFromResolver(t.Context(), serviceContainer)
     if nil != resolveErr || configuration != resolved {
         t.Fatalf("expected the registered configuration, got %v, %v", resolved, resolveErr)
     }

@@ -69,7 +69,7 @@ func (instance *GenerateCommand) Run(
     runtimeInstance runtimecontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
-    router := http.RouterMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    router := http.RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
     out := commandContext.String("out")
 
@@ -111,7 +111,7 @@ func (instance *GenerateCommand) Run(
 
     /* a relative path is anchored at the project directory, as the wiring command anchors its --out, so the document lands in one tree whatever directory the process started in */
     if false == filepath.IsAbs(out) {
-        applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+        applicationConfiguration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
         out = filepath.Join(applicationConfiguration.MustGet(config.KernelProjectDirectory).MustString(), out)
     }
 

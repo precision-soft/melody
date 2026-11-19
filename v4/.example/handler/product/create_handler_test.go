@@ -35,7 +35,7 @@ import (
 func editorRuntime(t *testing.T) melodyruntimecontract.Runtime {
     t.Helper()
 
-    environment, environmentErr := melodyconfig.NewEnvironment(&stubEnvironmentSource{
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), &stubEnvironmentSource{
         values: map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentProduction},
     })
     if nil != environmentErr {

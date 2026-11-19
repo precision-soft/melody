@@ -26,7 +26,7 @@ import (
 
 type rateLimitKernelEnvironmentSource struct{}
 
-func (instance *rateLimitKernelEnvironmentSource) Load() (map[string]string, error) {
+func (instance *rateLimitKernelEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return map[string]string{config.EnvironmentNameKey: config.EnvironmentProduction}, nil
 }
 
@@ -49,7 +49,7 @@ func servedRateLimitKernel(t *testing.T, configure func(router *http.Router, dis
     serviceContainer.MustRegister(
         config.ServiceConfig,
         func(resolver containercontract.Resolver) (configcontract.Configuration, error) {
-            environment, environmentErr := config.NewEnvironment(&rateLimitKernelEnvironmentSource{})
+            environment, environmentErr := config.NewEnvironment(context.Background(), &rateLimitKernelEnvironmentSource{})
             if nil != environmentErr {
                 return nil, environmentErr
             }

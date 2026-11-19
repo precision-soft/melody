@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "reflect"
     "testing"
@@ -528,7 +529,7 @@ func TestScopeRegisterScoped_RefusedAfterTheContainerIsClosed(t *testing.T) {
 
     scopeInstance := serviceContainer.NewScope()
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }

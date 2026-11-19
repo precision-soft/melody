@@ -70,7 +70,7 @@ func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAnonymousOnMismatch(t *tes
         nil,
     )
 
-    token, err := auth.Authenticate(request)
+    token, err := auth.Authenticate(request.RuntimeInstance(), request)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -94,7 +94,7 @@ func TestApiKeyHeaderAuthenticator_AuthenticateReturnsAuthenticatedOnMatch(t *te
         nil,
     )
 
-    token, err := auth.Authenticate(request)
+    token, err := auth.Authenticate(request.RuntimeInstance(), request)
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }

@@ -1,6 +1,7 @@
 package wiring
 
 import (
+    "context"
     "errors"
     "go/format"
     "go/parser"
@@ -1002,7 +1003,7 @@ func TestGenerate_ScopedShadowOfANamedContainerServiceBootsOnlyWithTheReplacesOp
     } {
         t.Run(testCase.name, func(t *testing.T) {
             bare := container.NewContainer(container.ContainerConfig{})
-            defer bare.Close()
+            defer bare.CloseWithContext(context.Background())
 
             var bareErr error
             if true == testCase.containerIsFirst {
@@ -1024,7 +1025,7 @@ func TestGenerate_ScopedShadowOfANamedContainerServiceBootsOnlyWithTheReplacesOp
             }
 
             replacing := container.NewContainer(container.ContainerConfig{})
-            defer replacing.Close()
+            defer replacing.CloseWithContext(context.Background())
 
             var replacingErr error
             if true == testCase.containerIsFirst {

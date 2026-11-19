@@ -37,7 +37,7 @@ func TestPasswordAuthenticator_PublishesTheAcceptedAccountUnderItsIdentity(t *te
 
     request := passwordRequest(t, "editor", "secret")
 
-    token, authenticateErr := authenticator.Authenticate(request)
+    token, authenticateErr := authenticator.Authenticate(request.RuntimeInstance(), request)
     if nil != authenticateErr {
         t.Fatalf("authenticate: %v", authenticateErr)
     }
@@ -59,7 +59,7 @@ func TestPasswordAuthenticator_AnswersAnonymousAndPublishesNothingForARefusedPas
 
     request := passwordRequest(t, "editor", "wrong")
 
-    token, authenticateErr := authenticator.Authenticate(request)
+    token, authenticateErr := authenticator.Authenticate(request.RuntimeInstance(), request)
     if nil != authenticateErr {
         t.Fatalf("authenticate: %v", authenticateErr)
     }
@@ -80,8 +80,26 @@ func TestPasswordAuthenticator_AnswersTheCheckFailureAsAnError(t *testing.T) {
         return nil, false, checkErr
     })
 
-    _, authenticateErr := authenticator.Authenticate(passwordRequest(t, "editor", "secret"))
+    _, authenticateErr := authenticator.Authenticate(withItsRuntime(passwordRequest(t, "editor", "secret")))
     if false == errors.Is(authenticateErr, checkErr) {
         t.Fatalf("expected the check failure, got %v", authenticateErr)
+    }
+}
+
+func TestPasswordAuthenticator_ChecksThroughTheRuntimeItWasHanded(t *testing.T) {
+    var checkedRuntime melodyruntimecontract.Runtime
+    authenticator := NewPasswordAuthenticator(func(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
+        checkedRuntime = runtimeInstance
+
+        return nil, false, nil
+    })
+
+    handed := plainRequest(t).RuntimeInstance()
+    if _, authenticateErr := authenticator.Authenticate(handed, passwordRequest(t, "editor", "secret")); nil != authenticateErr {
+        t.Fatalf("authenticate: %v", authenticateErr)
+    }
+
+    if handed != checkedRuntime {
+        t.Fatal("expected the check handed the runtime the authenticator was handed, not the request's")
     }
 }

@@ -25,7 +25,7 @@ Mailing is opt-in. Userland builds a `Mailer` over a `Transport` and registers i
     - [`LogTransport`](../../mailer/log_transport.go), [`NewLogTransport`](../../mailer/log_transport.go)
 - Provide container resolver helpers:
     - [`ServiceMailer`](../../mailer/service_resolver.go)
-    - [`MailerMustFromContainer`](../../mailer/service_resolver.go), [`MailerMustFromResolver`](../../mailer/service_resolver.go)
+    - [`MailerMustFromResolver`](../../mailer/service_resolver.go)
 
 ## Message rendering
 
@@ -108,5 +108,4 @@ Because the deadline is re-armed per step and per payload chunk, `Timeout` measu
 ### Container helpers (`mailer`)
 
 - [`const ServiceMailer`](../../mailer/service_resolver.go)
-- [`MailerMustFromContainer(context.Context, containercontract.Container) mailercontract.Mailer`](../../mailer/service_resolver.go)
 - [`MailerMustFromResolver(context.Context, containercontract.Resolver) mailercontract.Mailer`](../../mailer/service_resolver.go)

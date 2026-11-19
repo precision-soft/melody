@@ -287,12 +287,7 @@ func (instance *container) resolutionsRefused() bool {
     return instance.teardownFinished
 }
 
-/* Close tears the container down exactly once; a concurrent or repeated call blocks until the first teardown finishes and returns its error. A service whose own Close calls back into Close deadlocks the shutdown, so a service that closes defensively asks IsClosed first, which is true for the whole teardown. */
-func (instance *container) Close() error {
-    return instance.CloseWithContext(context.Background())
-}
-
-/* CloseWithContext is Close under the caller's deadline, handed to every service that can observe one. The deadline bounds the teardown as a whole, so each service sees what is left of it. A teardown that runs past it keeps a record of the budget, what it spent, the closers running at the deadline and those reached after it; the record travels in the error of a failed teardown and through TeardownDeadlineOverrun after a clean one, and is never a failure itself. A context with no deadline sets no term. */
+/* CloseWithContext tears the container down exactly once, under the caller's deadline, handed to every service that can observe one; a concurrent or repeated call blocks until the first teardown finishes and returns its error. A service whose own close calls back into CloseWithContext deadlocks the shutdown, so a service that closes defensively asks IsClosed first, which is true for the whole teardown. The deadline bounds the teardown as a whole, so each service sees what is left of it. A teardown that runs past it keeps a record of the budget, what it spent, the closers running at the deadline and those reached after it; the record travels in the error of a failed teardown and through TeardownDeadlineOverrun after a clean one, and is never a failure itself. A context with no deadline sets no term. */
 func (instance *container) CloseWithContext(closeContext context.Context) error {
     /* refused before the once, which a panic inside the teardown would consume, leaving a later Close answering nil with nothing closed */
     if true == internal.IsNilInterface(closeContext) {
@@ -709,10 +704,35 @@ func (instance *container) closeInternal(closeContext context.Context) error {
 
     candidates := make([]closeCandidate, 0, len(closeOrder)+len(instance.replacedBuiltInstances))
 
+    /* an evicted instance a live name still holds closes at that name's place, before what it depends on, through its evicted name's closer */
+    replacedCloserOfPointer := make(map[pointerIdentity]*declaredCloser)
+    replacedCloserOfValue := make(map[any]*declaredCloser)
+    for replacedIndex, replacedValue := range instance.replacedBuiltInstances {
+        replacedCloser := instance.replacedBuiltClosers[replacedIndex]
+        if nil == replacedCloser || false == replacedCloser.takes(replacedValue) {
+            continue
+        }
+
+        if pointerKey, hasPointer := pointerKeyOf(replacedValue); true == hasPointer && false == isZeroSizePointerIdentity(pointerKey) {
+            replacedCloserOfPointer[pointerKey] = replacedCloser
+        } else if false == isZeroSizeValue(replacedValue) && true == isComparableValue(replacedValue) {
+            replacedCloserOfValue[replacedValue] = replacedCloser
+        }
+    }
+
     for _, nodeKey := range closeOrder {
         value, exists := valueOfNodeKey[nodeKey]
         if false == exists {
             continue
+        }
+
+        nodeCloser := instance.closerOfNodeGroupLocked(nodeKey, plan.aliasesOf[nodeKey], value)
+        if nil == nodeCloser {
+            if pointerKey, hasPointer := pointerKeyOf(value); true == hasPointer && false == isZeroSizePointerIdentity(pointerKey) {
+                nodeCloser = replacedCloserOfPointer[pointerKey]
+            } else if false == isZeroSizeValue(value) && true == isComparableValue(value) {
+                nodeCloser = replacedCloserOfValue[value]
+            }
         }
 
         candidates = append(
@@ -721,7 +741,7 @@ func (instance *container) closeInternal(closeContext context.Context) error {
                 nodeKey:   nodeKey,
                 value:     value,
                 waveIndex: closeWaveIndexOf[nodeKey],
-                closer:    instance.closerOfNodeGroupLocked(nodeKey, plan.aliasesOf[nodeKey], value),
+                closer:    nodeCloser,
             },
         )
     }

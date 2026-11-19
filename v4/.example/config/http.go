@@ -40,19 +40,19 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
     applySessionCookieSecure(kernelInstance.HttpKernel(), instance.environmentValue(environmentKeySessionCookieSecure))
 
     /* the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
-    router.HandleWithOptions(
+    router.Handle(
         "/health",
         handler.HealthHandler(instance.applicationVersion),
         melodyhttp.RouteOptions{Name: "example.health", Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
     )
 
-    router.HandleWithOptions(
+    router.Handle(
         "/openapi.json",
         melodyopenapi.SpecificationHandler(instance.openApiDocumentInfo(), instance.openApiRegistry),
         melodyhttp.RouteOptions{Name: "example.openapi", Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
     )
 
-    router.HandleWithOptions("/platform/check", handler.PlatformCheckHandler(), melodyhttp.RouteOptions{Name: "example.platform.check", Methods: []string{"GET"}})
+    router.Handle("/platform/check", handler.PlatformCheckHandler(), melodyhttp.RouteOptions{Name: "example.platform.check", Methods: []string{"GET"}})
 
     /* the write budget is built before the first door it guards */
     if nil != instance.redisClient {
@@ -61,19 +61,19 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         instance.buildInProcessCatalogWriteThrottle(kernelInstance.Clock())
     }
 
-    router.HandleWithOptions("/messagebus/dispatch", instance.throttledWrite(handler.WelcomeEmailDispatchHandler("" != instance.environmentValue(environmentKeyAmqpDsn))), melodyhttp.RouteOptions{Name: "example.messagebus.dispatch", Methods: []string{"POST"}})
+    router.Handle("/messagebus/dispatch", instance.throttledWrite(handler.WelcomeEmailDispatchHandler("" != instance.environmentValue(environmentKeyAmqpDsn))), melodyhttp.RouteOptions{Name: "example.messagebus.dispatch", Methods: []string{"POST"}})
 
     /* the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
 
-    router.HandleWithOptions("/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher), melodyhttp.RouteOptions{Name: "example.encrypt.roundtrip", Methods: []string{"GET"}})
+    router.Handle("/encrypt/roundtrip", handler.EncryptRoundTripHandler(instance.cipher), melodyhttp.RouteOptions{Name: "example.encrypt.roundtrip", Methods: []string{"GET"}})
 
     deviceIdentifierMaximumBytes := instance.deviceIdentifierMaximumBytes()
-    router.HandleWithOptions(route.AccessTokenIssuePattern, accesstoken.IssueHandler(deviceIdentifierMaximumBytes), melodyhttp.RouteOptions{Name: route.AccessTokenIssueName, Methods: []string{"POST"}})
-    router.HandleWithOptions(route.AccessTokenRevokeDevicePattern, accesstoken.RevokeDeviceHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeDeviceName, Methods: []string{"POST"}})
-    router.HandleWithOptions(route.AccessTokenRevokeUserPattern, accesstoken.RevokeUserHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeUserName, Methods: []string{"POST"}})
-    router.HandleWithOptions(route.DeviceIdentityPattern, handlersecure.MeHandler(), melodyhttp.RouteOptions{Name: route.DeviceIdentityName, Methods: []string{"GET"}})
+    router.Handle(route.AccessTokenIssuePattern, accesstoken.IssueHandler(deviceIdentifierMaximumBytes), melodyhttp.RouteOptions{Name: route.AccessTokenIssueName, Methods: []string{"POST"}})
+    router.Handle(route.AccessTokenRevokeDevicePattern, accesstoken.RevokeDeviceHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeDeviceName, Methods: []string{"POST"}})
+    router.Handle(route.AccessTokenRevokeUserPattern, accesstoken.RevokeUserHandler(), melodyhttp.RouteOptions{Name: route.AccessTokenRevokeUserName, Methods: []string{"POST"}})
+    router.Handle(route.DeviceIdentityPattern, handlersecure.MeHandler(), melodyhttp.RouteOptions{Name: route.DeviceIdentityName, Methods: []string{"GET"}})
 
-    router.HandleWithOptions(route.LoginPagePattern, handler.LoginPageHandler(), melodyhttp.RouteOptions{Name: route.LoginPageName, Methods: []string{"GET"}})
+    router.Handle(route.LoginPagePattern, handler.LoginPageHandler(), melodyhttp.RouteOptions{Name: route.LoginPageName, Methods: []string{"GET"}})
 
     secondFactorReplayGuard := instance.buildSecondFactorReplayGuard(kernelInstance.Clock())
 
@@ -87,20 +87,20 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         secondFactorBudget = budget
     }
 
-    router.HandleWithOptions(route.RoutesPattern, handler.RoutesHandler(), frontendRoute(route.RoutesName, "GET"))
-    router.HandleWithOptions(route.CataloguePagePattern, handler.CataloguePageHandler(), frontendRoute(route.CataloguePageName, "GET"))
+    router.Handle(route.RoutesPattern, handler.RoutesHandler(), frontendRoute(route.RoutesName, "GET"))
+    router.Handle(route.CataloguePagePattern, handler.CataloguePageHandler(), frontendRoute(route.CataloguePageName, "GET"))
 
-    router.HandleWithOptions(route.SecureMePattern, handlersecure.MeHandler(), melodyhttp.RouteOptions{Name: route.SecureMeName, Methods: []string{"GET"}})
+    router.Handle(route.SecureMePattern, handlersecure.MeHandler(), melodyhttp.RouteOptions{Name: route.SecureMeName, Methods: []string{"GET"}})
 
-    router.HandleWithOptions(route.InternalWhoamiPattern, handlerinternalauth.WhoamiHandler(), melodyhttp.RouteOptions{Name: route.InternalWhoamiName, Methods: []string{"POST"}})
+    router.Handle(route.InternalWhoamiPattern, handlerinternalauth.WhoamiHandler(), melodyhttp.RouteOptions{Name: route.InternalWhoamiName, Methods: []string{"POST"}})
 
     /* the doors resolve the store at each request (see two_factor.go), so they stand whenever the catalogue does: a store its migration refused answers 503 until it heals, rather than leaving the routes unregistered until the process restarts. The verification door, and the enrollment door when it replaces an enrollment, burn an accepted code in the memory the sign-in reads, as does the confirmation door, so a code is spent once across all of them, and count every presented factor against the account's budget the sign-in spends. */
     if true == instance.catalogueWired {
-        router.HandleWithOptions(route.TwoFactorPagePattern, handlertwofactor.PageHandler(), frontendRoute(route.TwoFactorPageName, "GET"))
-        router.HandleWithOptions(route.TwoFactorEnrollPattern, handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), frontendRoute(route.TwoFactorEnrollName, "POST"))
-        router.HandleWithOptions(route.TwoFactorConfirmPattern, handlertwofactor.ConfirmHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), frontendRoute(route.TwoFactorConfirmName, "POST"))
-        router.HandleWithOptions(route.TwoFactorStatusPattern, handlertwofactor.StatusHandler(twofactor.StoreFromRuntime), frontendRoute(route.TwoFactorStatusName, "GET"))
-        router.HandleWithOptions(route.TwoFactorVerifyPattern, handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), melodyhttp.RouteOptions{Name: route.TwoFactorVerifyName, Methods: []string{"POST"}})
+        router.Handle(route.TwoFactorPagePattern, handlertwofactor.PageHandler(), frontendRoute(route.TwoFactorPageName, "GET"))
+        router.Handle(route.TwoFactorEnrollPattern, handlertwofactor.EnrollHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), frontendRoute(route.TwoFactorEnrollName, "POST"))
+        router.Handle(route.TwoFactorConfirmPattern, handlertwofactor.ConfirmHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), frontendRoute(route.TwoFactorConfirmName, "POST"))
+        router.Handle(route.TwoFactorStatusPattern, handlertwofactor.StatusHandler(twofactor.StoreFromRuntime), frontendRoute(route.TwoFactorStatusName, "GET"))
+        router.Handle(route.TwoFactorVerifyPattern, handlertwofactor.VerifyHandler(twofactor.StoreFromRuntime, secondFactorReplayGuard, secondFactorBudget), melodyhttp.RouteOptions{Name: route.TwoFactorVerifyName, Methods: []string{"POST"}})
     }
 
     /* the outbox handlers hold container.Lazy handles built at route-registration time: the store and relay services (provided by the outbox module's factories, see configure.go) are resolved at the first request, so registering the routes never touches the outbox schema or the transport. */
@@ -110,50 +110,50 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
         catalogueDatabase := melodycontainer.Lazy[*bun.DB](kernelInstance.ServiceContainer(), serviceDatabase)
 
-        router.HandleWithOptions("/outbox/enqueue", instance.throttledWrite(handleroutbox.EnqueueHandler(catalogueDatabase, outboxStore)), melodyhttp.RouteOptions{Name: "example.outbox.enqueue", Methods: []string{"POST"}})
-        router.HandleWithOptions("/outbox/relay", instance.throttledWrite(handleroutbox.RelayHandler(outboxRelay)), melodyhttp.RouteOptions{Name: "example.outbox.relay", Methods: []string{"POST"}})
-        router.HandleWithOptions("/outbox/status", handleroutbox.StatusHandler(catalogueDatabase, outboxStore), melodyhttp.RouteOptions{Name: "example.outbox.status", Methods: []string{"GET"}})
+        router.Handle("/outbox/enqueue", instance.throttledWrite(handleroutbox.EnqueueHandler(catalogueDatabase, outboxStore)), melodyhttp.RouteOptions{Name: "example.outbox.enqueue", Methods: []string{"POST"}})
+        router.Handle("/outbox/relay", instance.throttledWrite(handleroutbox.RelayHandler(outboxRelay)), melodyhttp.RouteOptions{Name: "example.outbox.relay", Methods: []string{"POST"}})
+        router.Handle("/outbox/status", handleroutbox.StatusHandler(catalogueDatabase, outboxStore), melodyhttp.RouteOptions{Name: "example.outbox.status", Methods: []string{"GET"}})
     }
 
     if nil != instance.storage {
-        router.HandleWithOptions("/storage/object", instance.throttledWrite(handlerstorage.PutHandler(instance.storage)), melodyhttp.RouteOptions{Name: "example.storage.put", Methods: []string{"POST"}})
-        router.HandleWithOptions("/storage/object", handlerstorage.GetHandler(instance.storage), melodyhttp.RouteOptions{Name: "example.storage.get", Methods: []string{"GET"}})
-        router.HandleWithOptions("/storage/object/link", handlerstorage.LinkHandler(instance.storage), melodyhttp.RouteOptions{Name: "example.storage.link", Methods: []string{"GET"}})
+        router.Handle("/storage/object", instance.throttledWrite(handlerstorage.PutHandler(instance.storage)), melodyhttp.RouteOptions{Name: "example.storage.put", Methods: []string{"POST"}})
+        router.Handle("/storage/object", handlerstorage.GetHandler(instance.storage), melodyhttp.RouteOptions{Name: "example.storage.get", Methods: []string{"GET"}})
+        router.Handle("/storage/object/link", handlerstorage.LinkHandler(instance.storage), melodyhttp.RouteOptions{Name: "example.storage.link", Methods: []string{"GET"}})
     }
 
-    router.HandleWithOptions(
+    router.Handle(
         route.I18nGreetingPattern,
         handleri18n.GreetingHandler(),
         melodyhttp.RouteOptions{Name: route.I18nGreetingName, Methods: []string{"GET"}, Locales: route.I18nGreetingLocaleList()},
     )
 
-    router.HandleWithOptions(route.EventsStreamPattern, handlerevent.StreamHandler(instance.eventStreamSlots), melodyhttp.RouteOptions{Name: route.EventsStreamName, Methods: []string{"GET"}})
-    router.HandleWithOptions(route.EventsPublishPattern, instance.throttledWrite(handlerevent.PublishHandler(instance.messageBusDispatch)), melodyhttp.RouteOptions{Name: route.EventsPublishName, Methods: []string{"POST"}})
+    router.Handle(route.EventsStreamPattern, handlerevent.StreamHandler(instance.eventStreamSlots), melodyhttp.RouteOptions{Name: route.EventsStreamName, Methods: []string{"GET"}})
+    router.Handle(route.EventsPublishPattern, instance.throttledWrite(handlerevent.PublishHandler(instance.messageBusDispatch)), melodyhttp.RouteOptions{Name: route.EventsPublishName, Methods: []string{"POST"}})
 
     /* every catalog/user route below is exposed in the frontend zone: the admin SPA generates all of their URLs by name from the route manifest (data-route / route(...)), so an unexposed route would make the client throw "unknown route". */
-    router.HandleWithOptions(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))
-    router.HandleWithOptions(route.ReportsApiHistoryPattern, handlerreport.ApiHistoryHandler(), frontendRoute(route.ReportsApiHistoryName, "GET"))
-    router.HandleWithOptions(route.ReportsApiExportPattern, handlerreport.ApiExportHandler(), frontendRoute(route.ReportsApiExportName, "GET"))
+    router.Handle(route.CategoriesApiReadAllPattern, handlercategory.ApiReadAllHandler(), frontendRoute(route.CategoriesApiReadAllName, "GET"))
+    router.Handle(route.ReportsApiHistoryPattern, handlerreport.ApiHistoryHandler(), frontendRoute(route.ReportsApiHistoryName, "GET"))
+    router.Handle(route.ReportsApiExportPattern, handlerreport.ApiExportHandler(), frontendRoute(route.ReportsApiExportName, "GET"))
 
     instance.registerCurrencyApiRoutes(router)
 
-    router.HandleWithOptions(route.ProductsListPagePattern, handlerproduct.ListPageHandler(), frontendRoute(route.ProductsListPageName, "GET"))
-    router.HandleWithOptions(route.ProductsCreatePagePattern, handlerproduct.CreatePageHandler(), frontendRoute(route.ProductsCreatePageName, "GET"))
-    router.HandleWithOptions(route.ProductsUpdatePagePattern, handlerproduct.UpdatePageHandler(), frontendRoute(route.ProductsUpdatePageName, "GET"))
-    router.HandleWithOptions(route.ProductsApiCreatePattern, instance.throttledWrite(handlerproduct.ApiCreateHandler()), frontendRoute(route.ProductsApiCreateName, "POST"))
-    router.HandleWithOptions(route.ProductsApiReadAllPattern, handlerproduct.ApiReadAllHandler(), frontendRoute(route.ProductsApiReadAllName, "GET"))
-    router.HandleWithOptions(route.ProductsApiReadPattern, handlerproduct.ApiReadHandler(), frontendRoute(route.ProductsApiReadName, "GET"))
-    router.HandleWithOptions(route.ProductsApiUpdatePattern, instance.throttledWrite(handlerproduct.ApiUpdateHandler()), frontendRoute(route.ProductsApiUpdateName, "PUT"))
-    router.HandleWithOptions(route.ProductsApiDeletePattern, instance.throttledWrite(handlerproduct.ApiDeleteHandler()), frontendRoute(route.ProductsApiDeleteName, "DELETE"))
+    router.Handle(route.ProductsListPagePattern, handlerproduct.ListPageHandler(), frontendRoute(route.ProductsListPageName, "GET"))
+    router.Handle(route.ProductsCreatePagePattern, handlerproduct.CreatePageHandler(), frontendRoute(route.ProductsCreatePageName, "GET"))
+    router.Handle(route.ProductsUpdatePagePattern, handlerproduct.UpdatePageHandler(), frontendRoute(route.ProductsUpdatePageName, "GET"))
+    router.Handle(route.ProductsApiCreatePattern, instance.throttledWrite(handlerproduct.ApiCreateHandler()), frontendRoute(route.ProductsApiCreateName, "POST"))
+    router.Handle(route.ProductsApiReadAllPattern, handlerproduct.ApiReadAllHandler(), frontendRoute(route.ProductsApiReadAllName, "GET"))
+    router.Handle(route.ProductsApiReadPattern, handlerproduct.ApiReadHandler(), frontendRoute(route.ProductsApiReadName, "GET"))
+    router.Handle(route.ProductsApiUpdatePattern, instance.throttledWrite(handlerproduct.ApiUpdateHandler()), frontendRoute(route.ProductsApiUpdateName, "PUT"))
+    router.Handle(route.ProductsApiDeletePattern, instance.throttledWrite(handlerproduct.ApiDeleteHandler()), frontendRoute(route.ProductsApiDeleteName, "DELETE"))
 
-    router.HandleWithOptions(route.UsersListPagePattern, handleruser.ListPageHandler(), frontendRoute(route.UsersListPageName, "GET"))
-    router.HandleWithOptions(route.UsersCreatePagePattern, handleruser.CreatePageHandler(), frontendRoute(route.UsersCreatePageName, "GET"))
-    router.HandleWithOptions(route.UsersUpdatePagePattern, handleruser.UpdatePageHandler(), frontendRoute(route.UsersUpdatePageName, "GET"))
-    router.HandleWithOptions(route.UsersApiCreatePattern, instance.throttledWrite(handleruser.ApiCreateHandler()), frontendRoute(route.UsersApiCreateName, "POST"))
-    router.HandleWithOptions(route.UsersApiReadAllPattern, handleruser.ApiReadAllHandler(), frontendRoute(route.UsersApiReadAllName, "GET"))
-    router.HandleWithOptions(route.UsersApiReadPattern, handleruser.ApiReadHandler(), frontendRoute(route.UsersApiReadName, "GET"))
-    router.HandleWithOptions(route.UsersApiUpdatePattern, instance.throttledWrite(handleruser.ApiUpdateHandler()), frontendRoute(route.UsersApiUpdateName, "PUT"))
-    router.HandleWithOptions(route.UsersApiDeletePattern, instance.throttledWrite(handleruser.ApiDeleteHandler()), frontendRoute(route.UsersApiDeleteName, "DELETE"))
+    router.Handle(route.UsersListPagePattern, handleruser.ListPageHandler(), frontendRoute(route.UsersListPageName, "GET"))
+    router.Handle(route.UsersCreatePagePattern, handleruser.CreatePageHandler(), frontendRoute(route.UsersCreatePageName, "GET"))
+    router.Handle(route.UsersUpdatePagePattern, handleruser.UpdatePageHandler(), frontendRoute(route.UsersUpdatePageName, "GET"))
+    router.Handle(route.UsersApiCreatePattern, instance.throttledWrite(handleruser.ApiCreateHandler()), frontendRoute(route.UsersApiCreateName, "POST"))
+    router.Handle(route.UsersApiReadAllPattern, handleruser.ApiReadAllHandler(), frontendRoute(route.UsersApiReadAllName, "GET"))
+    router.Handle(route.UsersApiReadPattern, handleruser.ApiReadHandler(), frontendRoute(route.UsersApiReadName, "GET"))
+    router.Handle(route.UsersApiUpdatePattern, instance.throttledWrite(handleruser.ApiUpdateHandler()), frontendRoute(route.UsersApiUpdateName, "PUT"))
+    router.Handle(route.UsersApiDeletePattern, instance.throttledWrite(handleruser.ApiDeleteHandler()), frontendRoute(route.UsersApiDeleteName, "DELETE"))
 }
 
 /* registerCurrencyApiRoutes registers the four currency api doors through one route group, which prefixes their patterns and names; the writes sit behind the catalogue's write budget */
@@ -164,10 +164,10 @@ func (instance *Module) registerCurrencyApiRoutes(router melodyhttpcontract.Rout
             NamePrefix: route.CurrenciesApiGroupNamePrefix,
         },
     )
-    currencyApi.HandleWithOptions(route.CurrenciesApiReadAllRelativePattern, handlercurrency.ApiReadAllHandler(), frontendRoute(route.CurrenciesApiReadAllRelativeName, "GET"))
-    currencyApi.HandleWithOptions(route.CurrenciesApiCreateRelativePattern, instance.throttledWrite(handlercurrency.ApiCreateHandler()), frontendRoute(route.CurrenciesApiCreateRelativeName, "POST"))
-    currencyApi.HandleWithOptions(route.CurrenciesApiUpdateRelativePattern, instance.throttledWrite(handlercurrency.ApiUpdateHandler()), frontendRoute(route.CurrenciesApiUpdateRelativeName, "PUT"))
-    currencyApi.HandleWithOptions(route.CurrenciesApiDeleteRelativePattern, instance.throttledWrite(handlercurrency.ApiDeleteHandler()), frontendRoute(route.CurrenciesApiDeleteRelativeName, "DELETE"))
+    currencyApi.Handle(route.CurrenciesApiReadAllRelativePattern, handlercurrency.ApiReadAllHandler(), frontendRoute(route.CurrenciesApiReadAllRelativeName, "GET"))
+    currencyApi.Handle(route.CurrenciesApiCreateRelativePattern, instance.throttledWrite(handlercurrency.ApiCreateHandler()), frontendRoute(route.CurrenciesApiCreateRelativeName, "POST"))
+    currencyApi.Handle(route.CurrenciesApiUpdateRelativePattern, instance.throttledWrite(handlercurrency.ApiUpdateHandler()), frontendRoute(route.CurrenciesApiUpdateRelativeName, "PUT"))
+    currencyApi.Handle(route.CurrenciesApiDeleteRelativePattern, instance.throttledWrite(handlercurrency.ApiDeleteHandler()), frontendRoute(route.CurrenciesApiDeleteRelativeName, "DELETE"))
 }
 
 /* frontendRoute marks a route as exposed in the frontend zone so its URL is generatable by name from the route manifest (window.melodyRoutes) that the admin SPA resolves data-route / route(...) calls against. */

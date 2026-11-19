@@ -38,7 +38,7 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
             }
 
             origin := service.RequestOrigin(requestEvent.Request())
-            if "" == origin || false == service.OriginAllowed(origin) {
+            if "" == origin || false == service.OriginAllowed(requestEvent.Request(), origin) {
                 return nil
             }
 
@@ -102,7 +102,7 @@ func RegisterResponseListener(eventDispatcher eventcontract.EventDispatcher, ser
                 return nil
             }
 
-            if false == service.OriginAllowed(origin) {
+            if false == service.OriginAllowed(responseEvent.Request(), origin) {
                 return nil
             }
 

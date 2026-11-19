@@ -35,17 +35,7 @@ func copyGroupMap(values map[string]string) map[string]string {
     return copied
 }
 
-func (instance *RouteGroup) Handle(method string, pattern string, handler httpcontract.Handler) {
-    instance.HandleWithOptions(
-        pattern,
-        handler,
-        RouteOptions{
-            Methods: []string{method},
-        },
-    )
-}
-
-func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) {
+func (instance *RouteGroup) Handle(pattern string, handler httpcontract.Handler, options httpcontract.RouteOptions) {
     if nil == instance.router {
         exception.Panic(
             exception.NewError("router is nil", map[string]any{"pattern": pattern}, nil),
@@ -95,7 +85,7 @@ func (instance *RouteGroup) HandleWithOptions(pattern string, handler httpcontra
     groupedOptions.Requirements = requirements
     groupedOptions.Defaults = defaults
 
-    instance.router.HandleWithOptions(groupedPattern, handler, groupedOptions)
+    instance.router.Handle(groupedPattern, handler, groupedOptions)
 }
 
 var _ httpcontract.RouteGroup = (*RouteGroup)(nil)

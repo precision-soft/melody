@@ -162,14 +162,14 @@ func TestSessionLoginHandlerOpensASessionThePasswordChangeRevokes(t *testing.T) 
         t.Fatalf("expected the account's roles in the session, got %v", roles)
     }
 
-    token := SessionTokenResolver(lookup)(request)
+    token := resolveToken(SessionTokenResolver(lookup), request)
     if false == token.IsAuthenticated() || "user-2" != token.UserIdentifier() {
         t.Fatalf("expected the new session to authenticate the account, got %v", token.IsAuthenticated())
     }
 
     account.Password = "replacement-hash"
 
-    if true == SessionTokenResolver(lookup)(request).IsAuthenticated() {
+    if true == resolveToken(SessionTokenResolver(lookup), request).IsAuthenticated() {
         t.Fatal("the session outlived the password change")
     }
 }

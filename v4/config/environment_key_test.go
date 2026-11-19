@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "errors"
     "fmt"
     "strings"
@@ -198,7 +199,7 @@ func TestDeclareEnvironmentKey_AMarkAfterTheResolveReachesAReaderOfEitherSpellin
 
 func TestDeclareEnvironmentKey_ASecretKeyMarksAValueAssembledFromIt(t *testing.T) {
     source := writeDotEnvFiles(t, map[string]string{".env": "MELODY_X_PASSWORD=hunter2\nAPP_DSN=amqp://user:${MELODY_X_PASSWORD}@host\n"})
-    environment, environmentErr := NewEnvironment(source)
+    environment, environmentErr := NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }

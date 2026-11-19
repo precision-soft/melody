@@ -58,10 +58,6 @@ func ConnectionMustFromResolver(ctx context.Context, resolver containercontract.
     return container.MustFromResolver[*amqp091.Connection](ctx, resolver, ServiceConnection)
 }
 
-func ConnectionMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) *amqp091.Connection {
-    return container.MustFromResolver[*amqp091.Connection](ctx, serviceContainer, ServiceConnection)
-}
-
 /* RegisterTransportService registers a pre-built transport under the name given. A transport may already be publishing or redialing when it is filed, rewriting its connection and channels under its own mutex, so the teardown's walk does not enter it; it is closed before ServiceConnection when that is registered, as an optional teardown dependency. */
 func RegisterTransportService(registrar ServiceRegistrar, serviceName string, transport *Transport) {
     registrar.RegisterService(

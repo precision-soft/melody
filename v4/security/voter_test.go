@@ -9,7 +9,7 @@ import (
 func TestRoleVoter_AbstainsWhenAttributeEmpty(t *testing.T) {
     voter := NewRoleVoter()
 
-    result := voter.Vote(NewAuthenticatedToken("u1", []string{"ROLE_A"}, nil), "", nil)
+    result, _ := voter.Vote(nil, NewAuthenticatedToken("u1", []string{"ROLE_A"}, nil), "", nil)
     if securitycontract.VoteAbstain != result {
         t.Fatalf("expected abstain")
     }
@@ -18,7 +18,7 @@ func TestRoleVoter_AbstainsWhenAttributeEmpty(t *testing.T) {
 func TestRoleVoter_DeniesWhenTokenNil(t *testing.T) {
     voter := NewRoleVoter()
 
-    result := voter.Vote(nil, "ROLE_A", nil)
+    result, _ := voter.Vote(nil, nil, "ROLE_A", nil)
     if securitycontract.VoteDenied != result {
         t.Fatalf("expected denied")
     }
@@ -27,7 +27,7 @@ func TestRoleVoter_DeniesWhenTokenNil(t *testing.T) {
 func TestRoleVoter_GrantsWhenRolePresent(t *testing.T) {
     voter := NewRoleVoter()
 
-    result := voter.Vote(NewAuthenticatedToken("u1", []string{"ROLE_A"}, nil), "ROLE_A", nil)
+    result, _ := voter.Vote(nil, NewAuthenticatedToken("u1", []string{"ROLE_A"}, nil), "ROLE_A", nil)
     if securitycontract.VoteGranted != result {
         t.Fatalf("expected granted")
     }
@@ -36,7 +36,7 @@ func TestRoleVoter_GrantsWhenRolePresent(t *testing.T) {
 func TestRoleVoter_DeniesWhenTokenNotAuthenticated(t *testing.T) {
     voter := NewRoleVoter()
 
-    result := voter.Vote(&unauthenticatedRoledToken{roles: []string{"ROLE_ADMIN"}}, "ROLE_ADMIN", nil)
+    result, _ := voter.Vote(nil, &unauthenticatedRoledToken{roles: []string{"ROLE_ADMIN"}}, "ROLE_ADMIN", nil)
 
     if securitycontract.VoteDenied != result {
         t.Fatalf("expected an unauthenticated token carrying the role to be denied, got %v", result)
@@ -51,7 +51,7 @@ func TestRoleVoter_DeniesATypedNilToken(t *testing.T) {
 
     var unassignedToken *AuthenticatedToken
 
-    result := voter.Vote(unassignedToken, "ROLE_A", nil)
+    result, _ := voter.Vote(nil, unassignedToken, "ROLE_A", nil)
     if securitycontract.VoteDenied != result {
         t.Fatalf("expected a typed nil token to be denied, got %v", result)
     }

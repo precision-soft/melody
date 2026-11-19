@@ -29,10 +29,6 @@ func StoreMustFromResolver(ctx context.Context, resolver containercontract.Resol
     return container.MustFromResolver[*Store](ctx, resolver, ServiceStore)
 }
 
-func StoreMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) *Store {
-    return container.MustFromResolver[*Store](ctx, serviceContainer, ServiceStore)
-}
-
 func RegisterRelayService(registrar ServiceRegistrar, relay *Relay) {
     registrar.RegisterService(
         ServiceRelay,
@@ -47,6 +43,3 @@ func RelayMustFromResolver(ctx context.Context, resolver containercontract.Resol
     return container.MustFromResolver[*Relay](ctx, resolver, ServiceRelay)
 }
 
-func RelayMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) *Relay {
-    return container.MustFromResolver[*Relay](ctx, serviceContainer, ServiceRelay)
-}

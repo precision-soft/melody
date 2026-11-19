@@ -29,8 +29,7 @@ The package defines the service ids:
 
 Resolution helpers:
 
-- [`SessionMustFromContainer`](../../session/service_resolver.go)
-- [`SessionStorageMustFromContainer`](../../session/service_resolver.go)
+- [`SessionMustFromResolver`](../../session/service_resolver.go)
 - [`SessionStorageMustFromResolver`](../../session/service_resolver.go)
 
 ## Usage
@@ -52,7 +51,7 @@ func updateSession(
     serviceContainer containercontract.Container,
     sessionId string,
 ) error {
-    manager := session.SessionMustFromContainer(ctx, serviceContainer)
+    manager := session.SessionMustFromResolver(ctx, serviceContainer)
 
     sessionInstance, loadErr := manager.Session(ctx, sessionId)
     if nil != loadErr {
@@ -208,6 +207,5 @@ The returned session is a **new object marked modified**, and the one passed in 
 
 - [`const ServiceSessionManager`](../../session/service_resolver.go)
 - [`const ServiceSessionStorage`](../../session/service_resolver.go)
-- [`SessionMustFromContainer(context.Context, containercontract.Container)`](../../session/service_resolver.go)
-- [`SessionStorageMustFromContainer(context.Context, containercontract.Container)`](../../session/service_resolver.go)
+- [`SessionMustFromResolver(context.Context, containercontract.Resolver)`](../../session/service_resolver.go)
 - [`SessionStorageMustFromResolver(context.Context, containercontract.Resolver)`](../../session/service_resolver.go)

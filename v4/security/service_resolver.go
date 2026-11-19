@@ -16,19 +16,6 @@ const (
     ServiceFirewallManager = "service.security.firewall_manager"
 )
 
-func FirewallManagerMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) securitycontract.FirewallManager {
-    return container.MustFromResolver[securitycontract.FirewallManager](ctx, serviceContainer, ServiceFirewallManager)
-}
-
-func FirewallManagerFromContainer(ctx context.Context, serviceContainer containercontract.Container) securitycontract.FirewallManager {
-    firewallManagerInstance, err := container.FromResolver[securitycontract.FirewallManager](ctx, serviceContainer, ServiceFirewallManager)
-    if nil == firewallManagerInstance || nil != err {
-        return nil
-    }
-
-    return firewallManagerInstance
-}
-
 func FirewallManagerMustFromResolver(ctx context.Context, resolver containercontract.Resolver) securitycontract.FirewallManager {
     return container.MustFromResolver[securitycontract.FirewallManager](ctx, resolver, ServiceFirewallManager)
 }

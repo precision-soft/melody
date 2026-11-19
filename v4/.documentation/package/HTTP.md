@@ -54,9 +54,9 @@ This package covers the HTTP runtime behavior inside Melody:
     - [`ServiceRouteRegistry`](../../http/service_resolver.go)
     - [`ServiceUrlGenerator`](../../http/service_resolver.go)
     - [`ServiceRouter`](../../http/service_resolver.go)
-    - [`RouteRegistryMustFromContainer`](../../http/service_resolver.go)
-    - [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go)
-    - [`RouterMustFromContainer`](../../http/service_resolver.go)
+    - [`RouteRegistryMustFromResolver`](../../http/service_resolver.go)
+    - [`UrlGeneratorMustFromResolver`](../../http/service_resolver.go)
+    - [`RouterMustFromResolver`](../../http/service_resolver.go)
 
 ## Container integration
 
@@ -76,7 +76,7 @@ When a controller function declares a parameter of type
 
 This allows controllers to access request-scoped state via `runtimeInstance.Scope()` without registering `runtimecontract.Runtime` as a service.
 
-A controller is registered as the handler [`ControllerHandler`](../../http/router_utility.go) builds from it: `router.Handle(nethttp.MethodGet, "/articles", http.ControllerHandler(showArticles))`.
+A controller is registered as the handler [`ControllerHandler`](../../http/router_utility.go) builds from it: `router.Handle("/articles", http.ControllerHandler(showArticles), http.RouteOptions{Methods: []string{nethttp.MethodGet}})`.
 
 ## Request body limits
 
@@ -95,7 +95,7 @@ A urlencoded body is buffered before `ParseForm` drains it, so a later reader �
 
 The [`http/cors`](../../http/cors) subpackage provides a dedicated CORS layer:
 
-- [`Service`](../../http/cors/service.go) — policy holder built from a [`Config`](../../http/cors/service.go). A **nil** `AllowOrigins` expresses no preference and is defaulted to the wildcard; an **empty** one is an expressed preference — no origin is allowed — and denies every origin, so a list built from an environment variable that failed to arrive cannot widen into the wildcard. A credentialed configuration holding the defaulted wildcard panics, and so does one holding an empty list, since credentials with nothing to grant them to can only come from a list that failed to load — unless `Config.AllowOriginFunc` decides origins. The list is never consulted once a function is set, so a non-empty list beside one is refused, as are a blank entry and `"*"` beside other entries, which it leaves dead: "allow everything" is `[]string{"*"}` alone. `Config.MaxAge`, a [`bound.Count`](../../bound/limit.go), is written as `Access-Control-Max-Age` on every preflight answer: 86400 left out, at least 0, which tells the browser to cache nothing, unlimited refused. `NewService(Config{})` is the permissive default; [`RestrictiveService`](../../http/cors/service.go)
+- [`Service`](../../http/cors/service.go) — policy holder built from a [`Config`](../../http/cors/service.go). A **nil** `AllowOrigins` expresses no preference and is defaulted to the wildcard; an **empty** one is an expressed preference — no origin is allowed — and denies every origin, so a list built from an environment variable that failed to arrive cannot widen into the wildcard. A credentialed configuration holding the defaulted wildcard panics, and so does one holding an empty list, since credentials with nothing to grant them to can only come from a list that failed to load — unless `Config.AllowOrigin` decides origins. The list is never consulted once a function is set, so a non-empty list beside one is refused, as are a blank entry and `"*"` beside other entries, which it leaves dead: "allow everything" is `[]string{"*"}` alone. `Config.MaxAge`, a [`bound.Count`](../../bound/limit.go), is written as `Access-Control-Max-Age` on every preflight answer: 86400 left out, at least 0, which tells the browser to cache nothing, unlimited refused. `NewService(Config{})` is the permissive default; [`RestrictiveService`](../../http/cors/service.go)
   is the credentialed preset for a named list of origins. The middleware and the three listener doors refuse a nil service by name.
 - [`Middleware`](../../http/cors/middleware.go) — takes the service, a nil one refused, and answers a preflight with `204` and applies CORS headers on the happy path. A preflight is an `OPTIONS` carrying an `Access-Control-Request-Method` ([`Service.IsPreflight`](../../http/cors/service.go)), and the middleware answers it only for an allowed `Origin`; a plain `OPTIONS`, or a preflight from an origin that is not allowed, reaches the router instead. `Vary: Origin` is added to every response the chain produces, including one produced for a rejected origin or for a request carrying no `Origin` at all, so a shared cache cannot hand an origin-less body to an allowed cross-origin requester.
 - [`RegisterRequestListener`](../../http/cors/listener.go) — subscribes to `kernel.request` with [`RequestListenerPriority`](../../http/cors/listener.go) (`100`), ahead of the security resolution listener ([`security.KernelFirewallListenerPriority`](../../security/listener_priority.go), `50`) and access control ([`security.KernelAccessControlListenerPriority`](../../security/listener_priority.go), `20`), and answers a well-formed preflight from an allowed origin there — which is what makes a preflight to a protected path answerable, since a preflight carries no credential. A disallowed origin and a bare `OPTIONS` fall through to the security chain untouched. An already-answered preflight from an allowed origin — a `429` from the rate limiter at priority `200` is the case — keeps the status that earlier listener chose, but is decorated with the cross-origin headers: a browser reads a preflight refusal only if it carries them, and an opaque one reaches the page as a bare network failure
@@ -104,7 +104,7 @@ The [`http/cors`](../../http/cors) subpackage provides a dedicated CORS layer:
 - [`RegisterListeners`](../../http/cors/listener.go) — wires both doors, the preflight answer and the response headers, in one call. The middleware decorates the handler path only.
 
 An allowlist entry is matched by [`OriginAllowed`](../../http/cors/service.go) in this order: `*` allows every origin; an entry that spells a scheme is compared whole, port included (`https://app.example.com`, or the subdomain form `https://*.example.com`, which matches only that scheme); an entry that spells **no** scheme — `example.com`, `*.example.com` — is compared against the request origin's **host with its port**. A scheme-less entry therefore allows that host under **any** scheme, `http://example.com` included, but only on the port it names: `example.com` matches the portless origin alone, and an entry meaning to admit a port writes it (`example.com:8443`). The port is significant because two ports of one host are two origins to a browser, and a grant that spanned them would extend to anything an attacker can get served from another port of an allowed host — with the credentials [`RestrictiveService`](../../http/cors/service.go) pairs with its list. The scheme-agnosticism
-remains: it is the short way to admit a development origin served over plaintext, but it withholds exactly the downgrade protection an allowlist usually exists for, and a credentialed service refuses it: [`NewService`](../../http/cors/service.go) panics on the first scheme-less entry of a service with `AllowCredentials` and no `AllowOriginFunc`, naming `Config.AllowOrigins` and the entry (see [Refused at boot](SECURITY.md#refused-at-boot)). Write the scheme out (`https://example.com`) unless permitting `http://` without credentials is the intent.
+remains: it is the short way to admit a development origin served over plaintext, but it withholds exactly the downgrade protection an allowlist usually exists for, and a credentialed service refuses it: [`NewService`](../../http/cors/service.go) panics on the first scheme-less entry of a service with `AllowCredentials` and no `AllowOrigin`, naming `Config.AllowOrigins` and the entry (see [Refused at boot](SECURITY.md#refused-at-boot)). Write the scheme out (`https://example.com`) unless permitting `http://` without credentials is the intent.
 
 ## Route matching
 
@@ -121,7 +121,7 @@ Registration order is therefore load-bearing, and getting it wrong produces a ro
 A route that must not be shadowed therefore either goes in first, or says so explicitly:
 
 ```go
-router.HandleWithOptions(
+router.Handle(
     "/products/create",
     createProductHandler,
     http.RouteOptions{
@@ -131,7 +131,7 @@ router.HandleWithOptions(
     },
 )
 
-router.HandleWithOptions("/products/:id?", showProductHandler, http.RouteOptions{Name: "product.show", Methods: []string{nethttp.MethodGet}})
+router.Handle("/products/:id?", showProductHandler, http.RouteOptions{Name: "product.show", Methods: []string{nethttp.MethodGet}})
 ```
 
 Two routes may share one **pattern** as long as the matcher can tell them apart. Collisions are checked twice at registration ([`registerRoute`](../../http/route_registry.go)): a duplicate name, and a route identical to a registered one in everything the matcher discriminates on — pattern, methods, host, schemes, locales, requirements and priority — because the later one could never be dispatched and would be shadowed silently. Either collision panics at the registration site, with `route name already exists` or with the refusal naming the identical discriminators; an application that prefers one aggregated report over dying at the first duplicate arms [`RouteRegistry.SetBootCollisionRecorder`](../../http/route_registry.go) for its boot window, under which the first registration wins — and on a name collision the route itself stays registered and dispatchable, only the name keeps pointing at the first claimant. The name and the defaults are not part of the dispatch identity: neither
@@ -146,10 +146,10 @@ participates in matching, so two differently named but otherwise identical route
 
 ```go
 /* works: the pattern binds _locale, so the whitelist has a value to check */
-router.HandleWithOptions("/:_locale/list", listHandler, localizedOptions)
+router.Handle("/:_locale/list", listHandler, localizedOptions)
 
 /* refused at registration: "locale" is not "_locale", so nothing supplies the whitelist */
-router.HandleWithOptions("/:locale/list", listHandler, localizedOptions)
+router.Handle("/:locale/list", listHandler, localizedOptions)
 ```
 
 A wildcard named `*_locale` (single-segment or catch-all) binds it too. A route `defaults` entry now **does** supply it: defaults are merged before the whitelist reads them, in [`match`](../../http/router.go) and in [`AllowedMethods`](../../http/router_matching.go) alike, so a route that declares its locale through `Defaults{"_locale": "en"}` is reachable. It was not before — the gate rejected it sixteen lines before the value meant to satisfy it was filled in, while the kernel read the same map *after* the merge, so the router and the kernel disagreed about whether a default counted. Read the matched value back through [`Request.Locale`](../../http/request.go), which the kernel publishes from that same parameter, falling back to the configured default locale.
@@ -172,7 +172,7 @@ A request target that is not a path is not path-routed at all. net/http hands th
 
 ### Registration is boot-only
 
-Every registration door — `Handle`, `HandleWithOptions`, and the same pair on a [`RouteGroup`](../../http/router_group.go) — is **boot-only**, and refuses by name once [`Kernel.ServeHttp`](../../http/kernel.go) has built the handler. The same holds for the kernel's own configuration doors: `Use`, `SetNotFoundHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy`, `SetMethodPolicy`, `SetSessionPolicy` and `SetUnavailableRetryAfter`.
+The registration door — `Handle(pattern, handler, RouteOptions)`, on a router and on a [`RouteGroup`](../../http/router_group.go) — is **boot-only**, and refuses by name once [`Kernel.ServeHttp`](../../http/kernel.go) has built the handler. The same holds for the kernel's own configuration doors: `Use`, `SetNotFoundHandler`, `SetForwardedHeadersPolicy`, `SetSessionCookiePolicy`, `SetMethodPolicy`, `SetSessionPolicy` and `SetUnavailableRetryAfter`.
 
 The route table is a tree of plain maps that every request goroutine reads, so writing to it while requests are in flight is an unrecoverable fatal error rather than a torn read; the kernel's fields are an unsynchronized read on every request. Configuration is compiled once and then served. The **reading** doors are untouched and stay open for the life of the process — [`RouteDefinitions`](../../http/router_introspection.go), `RouteDefinition`, `RouteRegistry` and the introspection surface are read from inside handlers, which is how the openapi document and the route manifest are served.
 
@@ -299,13 +299,13 @@ func (instance *ExampleHttpModule) RegisterHttpRoutes(kernelInstance kernelcontr
         },
     )
 
-    api.HandleWithOptions(
+    api.Handle(
         "/ping",
         handlePing(),
         http.RouteOptions{Name: "ping", Methods: []string{"GET"}},
     )
 
-    api.HandleWithOptions(
+    api.Handle(
         "/go-to-ping",
         handleRedirectToPing(),
         http.RouteOptions{Name: "redirect_to_ping", Methods: []string{"GET"}},
@@ -338,7 +338,7 @@ func handleRedirectToPing() httpcontract.Handler {
         _ nethttp.ResponseWriter,
         _ httpcontract.Request,
     ) (httpcontract.Response, error) {
-        urlGenerator := http.UrlGeneratorMustFromContainer(
+        urlGenerator := http.UrlGeneratorMustFromResolver(
             runtimeInstance.Context(),
             runtimeInstance.Container(),
         )
@@ -422,7 +422,7 @@ for the url it minted. [`FilterRouteManifestByZone`](../../http/route_manifest.g
 `melody:routes:manifest [--out <path>] [--zone <zone>]`) writes the manifest as JSON to a file or stdout, mirroring the OpenAPI generate command.
 
 ```go
-router.HandleWithOptions(
+router.Handle(
     "/users/:id",
     showUserHandler,
     http.RouteOptions{
@@ -595,7 +595,7 @@ Where the list itself comes from is the application's business — a constant as
 - [`ServerSentEventHub.Broadcast`](../../http/server_sent_event_hub.go) is non-blocking and drops events for subscribers whose buffer is full; delivery is **at-most-once**. Size the subscribe buffer for the expected burst, or treat the stream as best-effort. [`ServerSentEventHub.DroppedEventCount`](../../http/server_sent_event_hub.go) returns the cumulative number of dropped events so the loss can be surfaced as a metric.
 - Route names must be unique. URL generation relies on a [`RouteRegistry`](../../http/contract/route_registry.go) entry for the route name.
 - An optional route parameter (`:param?`) is only legal as the **last** segment of a pattern, unless it carries a **non-empty default** — the default is always substituted, so the segment never drops. An omitted optional without one is dropped wherever it sits, while a match only ever ends early at the tail, so `/blog/:locale?/posts` would let [`UrlGenerator`](../../http/url_generator.go) mint `/blog/posts` — a path this router answers with a `404`. Registering the defaultless shape panics at the definition site; move the optional to the end, give it a non-empty default, or register the two patterns separately.
-- [`UrlGeneratorMustFromContainer`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
+- [`UrlGeneratorMustFromResolver`](../../http/service_resolver.go) is a fail-fast helper and will panic if `ServiceUrlGenerator` is missing or has an invalid type.
 - [`RateLimitMiddleware`](../../http/middleware/rate_limit.go) keys on the client IP alone when [`RateLimitConfig`](../../http/middleware/rate_limit.go) leaves `KeyExtractor` out, so `SimpleRateLimit(QuickLimitConfig{RequestsPerMinute: n})` is a budget of `n` requests per minute per client address (an IPv6 address aggregated to its /64) **across the whole service**, not per route. Set an explicit key extractor for a per-route or per-user budget. The IP comes from the direct peer, so behind a reverse proxy every client collapses onto the proxy's address: pass [`NewForwardedClientIpResolver`](../../http/middleware/client_ip.go) as `ClientIpResolver` — it walks `X-Forwarded-For` against the trusted-proxy policy and falls back to the direct peer whenever the chain cannot be trusted. The three quick doors take the resolver in their struct, [`QuickLimitConfig`](../../http/middleware/rate_limit.go) for `SimpleRateLimit` and `IpRateLimit`, [`UserLimitConfig`](../../http/middleware/rate_limit.go)
   for `UserRateLimit`, where it decides the anonymous fallback key alone, since a request carrying a user id is keyed on that id; `RequestsPerMinute` below 1 is refused.
 - Both doors take the limiter positionally, before the configuration, a nil or typed-nil one refused naming the argument and the door, and read their `RateLimitConfig` once, when they are built: a field written into the caller's value afterwards reaches neither, so a second middleware with another key extractor is a second struct literal. The zero `RateLimitConfig{}` is the default.
@@ -605,7 +605,7 @@ Where the list itself comes from is the application's business — a constant as
 
 - An `OPTIONS` request carrying an `Origin` but no `Access-Control-Request-Method` is **not** a preflight: it reaches the router, so a route registered for `OPTIONS` is served and every middleware inner to cors sees it. A browser sends that header on every real preflight, so no genuine one is lost. See [`Service.IsPreflight`](../../http/cors/service.go).
 - `Vary: Origin` is emitted on **every** response the cors middleware and listener touch, including one produced for a rejected origin or for a request carrying no `Origin` at all, so a shared cache keyed on the url alone cannot hand an origin-less body to an allowed cross-origin requester. The header is added at most once. See [`addVaryOrigin`](../../http/cors/service.go).
-- A credentialed configuration that decides origins through `AllowOriginFunc` is accepted; one with neither an origin list nor a function still panics on the defaulted wildcard, which is the combination the guard exists to prevent. See [`NewService`](../../http/cors/service.go).
+- A credentialed configuration that decides origins through `AllowOrigin` is accepted; one with neither an origin list nor a function still panics on the defaulted wildcard, which is the combination the guard exists to prevent. See [`NewService`](../../http/cors/service.go).
 - **A request path that is not already canonical is not served.** The kernel answers `//css/app.css`, `/css//app.css` and `/./css/app.css` with `400` before any middleware runs, and the static file server declines `/css/app.css/`, which falls through the chain and typically ends as a `404` (the mount root answers the index file under its two canonical spellings, with and without the trailing slash, and under no folded one). The rule closes an access-control bypass — see [Canonical request paths](#canonical-request-paths) — and it has teeth, because **a browser does not normalise a doubled slash: it sends the path verbatim.** A template that concatenates a base path ending in `/` with an asset path beginning with `/` emits `/static//app.css`, that is what goes out on the wire, and the page renders with no stylesheet on a deployment where the same markup worked before. Fix the concatenation; that is the whole remedy, since the kernel refuses a doubled slash before the file server or any
   handler is asked, so no exclusion takes it back.
 - **Only a regular file is served.** A FIFO in the public directory would park the reading goroutine for as long as nobody writes the other end — and os.Open on a FIFO blocks by itself, which is why the mode is refused **before** the open and re-checked on the opened handle after it; a device node or a socket is refused the same way. Directories keep their own dispatch (the index file at the mount root, a refusal elsewhere). See [`dirFileSystem.Open`](../../http/static/utility.go).
@@ -662,7 +662,7 @@ Where the list itself comes from is the application's business — a constant as
     - [`ControllerHandler(controller any) httpcontract.Handler`](../../http/router_utility.go) — a controller function as a handler, its first argument the request, every later one resolved by its type from the runtime scope at each request; a function of another shape is refused with a panic where it is built
     - [`NewRouteRegistry()`](../../http/route_registry.go)
     - [`NewRouteGroup(router httpcontract.Router, groupConfig httpcontract.GroupConfig) httpcontract.RouteGroup`](../../http/router_group.go) — `Router.Group(groupConfig)` is the same door on a router; `PathPrefix`, `NamePrefix`, `Requirements` and `Defaults`, the maps copied, and the group takes no setting once built
-    - [`type RouteOptions`](../../http/contract/route_option.go) — `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority` and `Attributes`, the zero value a route under no name for every method, host and scheme; `HandleWithOptions` takes it by value and copies its lists and maps
+    - [`type RouteOptions`](../../http/contract/route_option.go) — `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority` and `Attributes`, the zero value a route under no name for every method, host and scheme; `Handle` takes it by value and copies its lists and maps
 
 - URL generator:
     - [`NewUrlGenerator(httpcontract.RouteRegistry)`](../../http/url_generator.go)
@@ -713,9 +713,9 @@ Where the list itself comes from is the application's business — a constant as
     - [`const ServiceUrlGenerator`](../../http/service_resolver.go)
     - [`const ServiceRouter`](../../http/service_resolver.go)
     - [`const ServiceRequestContext`](../../http/service_resolver.go)
-    - [`RouteRegistryMustFromContainer(context.Context, containercontract.Container)`](../../http/service_resolver.go)
-    - [`UrlGeneratorMustFromContainer(context.Context, containercontract.Container)`](../../http/service_resolver.go)
-    - [`RouterMustFromContainer(context.Context, containercontract.Container)`](../../http/service_resolver.go)
+    - [`RouteRegistryMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go)
+    - [`UrlGeneratorMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go)
+    - [`RouterMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go)
     - [`RequestContextMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go) / [`RequestContextFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go) — the only accessors of `ServiceRequestContext`, which lives on the request scope and so takes a resolver rather than the container; the second answers nil where the first panics
 
 ### CORS (`http/cors`)

@@ -48,7 +48,7 @@ func (instance *Application) RegisterHttpRoute(
     instance.httpRouteRegistrars = append(
         instance.httpRouteRegistrars,
         func(kernelInstance kernelcontract.Kernel) {
-            kernelInstance.HttpRouter().Handle(method, pattern, handler)
+            kernelInstance.HttpRouter().Handle(pattern, handler, http.RouteOptions{Methods: []string{method}})
         },
     )
 }
@@ -171,7 +171,7 @@ func (instance *Application) runHttp(
 
     applyHttpServerTimeouts(httpServer, serverLimits)
 
-    logger := logging.LoggerMustFromContainer(ctx, instance.kernel.ServiceContainer())
+    logger := logging.LoggerMustFromResolver(ctx, instance.kernel.ServiceContainer())
 
     applyHttpServerErrorLog(httpServer, logger)
 

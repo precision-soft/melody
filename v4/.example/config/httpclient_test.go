@@ -31,7 +31,7 @@ func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t
     t.Cleanup(server.Close)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     moduleWithEnvironment(t, map[string]string{parameterReportExportEndpoint: server.URL + "/sink"}).
         registerReportExportHttpClientService(containerRegistrar{Container: containerInstance})
@@ -101,7 +101,7 @@ func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOf
     t.Cleanup(server.Close)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         parameterRatesBaseUrl:         server.URL + "/v1/",

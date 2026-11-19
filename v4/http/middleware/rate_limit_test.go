@@ -1999,18 +1999,18 @@ func TestClampRetryAfter_HoldsTheDelayWithinTheWindow(t *testing.T) {
 func TestRateLimit_ADenialThroughTheKernelServesRetryAfterOnTheWire(t *testing.T) {
     for name, configure := range map[string]func(router *http.Router, dispatcher eventcontract.EventDispatcher){
         "middleware": func(router *http.Router, dispatcher eventcontract.EventDispatcher) {
-            router.Handle(nethttp.MethodGet, "/limited", RateLimitMiddleware(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 2100 * time.Millisecond}, RateLimitConfig{})(allowingNext()))
+            router.Handle("/limited", RateLimitMiddleware(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 2100 * time.Millisecond}, RateLimitConfig{})(allowingNext()), http.RouteOptions{Methods: []string{nethttp.MethodGet}})
         },
         "listener": func(router *http.Router, dispatcher eventcontract.EventDispatcher) {
-            router.Handle(nethttp.MethodGet, "/limited", allowingNext())
+            router.Handle("/limited", allowingNext(), http.RouteOptions{Methods: []string{nethttp.MethodGet}})
             RegisterRateLimitRequestListener(dispatcher, &fakeRuntimeRateLimiter{allowed: false, retryAfter: 2100 * time.Millisecond}, RateLimitConfig{})
         },
         "handler error": func(router *http.Router, dispatcher eventcontract.EventDispatcher) {
-            router.Handle(nethttp.MethodGet, "/limited", RateLimitMiddleware(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 2100 * time.Millisecond}, RateLimitConfig{
+            router.Handle("/limited", RateLimitMiddleware(&fakeRuntimeRateLimiter{allowed: false, retryAfter: 2100 * time.Millisecond}, RateLimitConfig{
                 OnLimitExceeded: func(request httpcontract.Request, decision httpcontract.RateLimitDecision) (httpcontract.Response, error) {
                     return nil, exception.TooManyRequests("slow down")
                 },
-            })(allowingNext()))
+            })(allowingNext()), http.RouteOptions{Methods: []string{nethttp.MethodGet}})
         },
     } {
         handler := servedRateLimitKernel(t, configure)

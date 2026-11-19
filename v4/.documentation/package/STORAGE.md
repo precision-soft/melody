@@ -21,7 +21,7 @@ Storage is opt-in. Userland builds a `Storage` and registers it under [`ServiceS
     - [`LocalStorage`](../../storage/local.go), [`NewLocalStorage`](../../storage/local.go)
 - Provide container resolver helpers:
     - [`ServiceStorage`](../../storage/service_resolver.go)
-    - [`StorageMustFromContainer`](../../storage/service_resolver.go), [`StorageMustFromResolver`](../../storage/service_resolver.go)
+    - [`StorageMustFromResolver`](../../storage/service_resolver.go)
 
 ## Usage
 
@@ -69,5 +69,4 @@ store := awss3.NewStorage(client, "documents", awss3.StorageConfig{})
 ### Container helpers (`storage`)
 
 - [`const ServiceStorage`](../../storage/service_resolver.go)
-- [`StorageMustFromContainer(context.Context, containercontract.Container) storagecontract.Storage`](../../storage/service_resolver.go)
 - [`StorageMustFromResolver(context.Context, containercontract.Resolver) storagecontract.Storage`](../../storage/service_resolver.go)

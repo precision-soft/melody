@@ -20,7 +20,7 @@ type Service struct {
     exposeHeaders    []string
     allowCredentials bool
     maxAge           int
-    allowOriginFunc  func(origin string) bool
+    allowOrigin      func(request httpcontract.Request, origin string) bool
 
     allowMethodsString  string
     allowHeadersString  string
@@ -39,7 +39,8 @@ type Config struct {
     /* MaxAge is the seconds a browser may cache a preflight answer, written as Access-Control-Max-Age: 86400 by default, at least 0, which tells the browser to cache nothing, unlimited refused. */
     MaxAge bound.Count
 
-    AllowOriginFunc func(origin string) bool
+    /* AllowOrigin decides each origin alone, handed the request it came on, whose runtime is the door to the container and the context; a lookup it cannot make answers false, refusing the origin. It runs at each of the request, the middleware and the response doors, the last after the handler, so a lookup reads a store that answers fast or caches per request. */
+    AllowOrigin func(request httpcontract.Request, origin string) bool
 }
 
 var maxAgeRule = bound.Rule[int]{
@@ -48,7 +49,7 @@ var maxAgeRule = bound.Rule[int]{
     Minimum: 0,
 }
 
-/* NewService builds the service the config grants; a max age the rule refuses panics naming the field, and so does a credentialed service holding an origin without a scheme, which would admit that host under any scheme, http included. A blank origin entry, an origin list beside AllowOriginFunc, which answers alone, and "*" beside other entries, which it leaves dead, are refused too. */
+/* NewService builds the service the config grants; a max age the rule refuses panics naming the field, and so does a credentialed service holding an origin without a scheme, which would admit that host under any scheme, http included. A blank origin entry, an origin list beside AllowOrigin, which answers alone, and "*" beside other entries, which it leaves dead, are refused too. */
 func NewService(config Config) *Service {
     maxAge, maxAgeErr := bound.Resolve(config.MaxAge, maxAgeRule)
     if nil != maxAgeErr {
@@ -67,11 +68,11 @@ func NewService(config Config) *Service {
         }
     }
 
-    if 0 < len(config.AllowOrigins) && nil != config.AllowOriginFunc {
+    if 0 < len(config.AllowOrigins) && nil != config.AllowOrigin {
         exception.Panic(
             exception.NewError(
-                "cors misconfiguration: allowOrigins is never read beside allowOriginFunc, which answers every origin alone",
-                exceptioncontract.Context{"fields": []string{"Config.AllowOrigins", "Config.AllowOriginFunc"}},
+                "cors misconfiguration: allowOrigins is never read beside allowOrigin, which answers every origin alone",
+                exceptioncontract.Context{"fields": []string{"Config.AllowOrigins", "Config.AllowOrigin"}},
                 nil,
             ),
         )
@@ -110,7 +111,7 @@ func NewService(config Config) *Service {
         allowHeaders = defaultAllowHeaderList()
     }
 
-    if true == config.AllowCredentials && nil == config.AllowOriginFunc {
+    if true == config.AllowCredentials && nil == config.AllowOrigin {
         /* credentials with no origin to grant them to is refused at boot */
         if 0 == len(allowOrigins) {
             exception.Panic(
@@ -160,7 +161,7 @@ func NewService(config Config) *Service {
         exposeHeaders:       exposeHeaders,
         allowCredentials:    config.AllowCredentials,
         maxAge:              maxAge.Value,
-        allowOriginFunc:     config.AllowOriginFunc,
+        allowOrigin:         config.AllowOrigin,
         allowMethodsString:  strings.Join(allowMethods, ", "),
         allowHeadersString:  strings.Join(allowHeaders, ", "),
         exposeHeadersString: strings.Join(exposeHeaders, ", "),
@@ -199,9 +200,13 @@ func (instance *Service) AllowHeadersString() string  { return instance.allowHea
 func (instance *Service) ExposeHeadersString() string { return instance.exposeHeadersString }
 
 /* OriginAllowed reads a scheme-less entry, "example.com" or "*.example.com", as admitting that host under any scheme, "http://" included; an entry that writes the scheme out has it compared. The frozen majors read entries identically. */
-func (instance *Service) OriginAllowed(origin string) bool {
-    if nil != instance.allowOriginFunc {
-        return instance.allowOriginFunc(origin)
+func (instance *Service) OriginAllowed(request httpcontract.Request, origin string) bool {
+    if nil != instance.allowOrigin {
+        if true == internal.IsNilInterface(request) {
+            exception.Panic(exception.NewError("cors.Service.OriginAllowed is handed no request", nil, nil))
+        }
+
+        return instance.allowOrigin(request, origin)
     }
 
     normalizedOrigin := normalizeOrigin(origin)

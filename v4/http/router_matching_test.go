@@ -11,9 +11,9 @@ func TestRouter_AllowedMethodsGathersEveryMethodRegisteredOnThePath(t *testing.T
 
     handler := routeRegistryTestHandler()
 
-    router.Handle(nethttp.MethodGet, "/articles", handler)
-    router.Handle(nethttp.MethodPost, "/articles", handler)
-    router.Handle(nethttp.MethodDelete, "/articles/:id", handler)
+    router.Handle("/articles", handler, RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/articles", handler, RouteOptions{Methods: []string{nethttp.MethodPost}})
+    router.Handle("/articles/:id", handler, RouteOptions{Methods: []string{nethttp.MethodDelete}})
 
     allowed := router.AllowedMethods("/articles", "", "")
 
@@ -32,7 +32,7 @@ func TestRouter_AllowedMethodsAreSorted(t *testing.T) {
     handler := routeRegistryTestHandler()
 
     for _, method := range []string{nethttp.MethodPut, nethttp.MethodDelete, nethttp.MethodGet, nethttp.MethodPatch} {
-        router.Handle(method, "/articles", handler)
+        router.Handle("/articles", handler, RouteOptions{Methods: []string{method}})
     }
 
     allowed := router.AllowedMethods("/articles", "", "")
@@ -47,7 +47,7 @@ func TestRouter_AllowedMethodsDropsTheEmptyMethodToken(t *testing.T) {
 
     handler := routeRegistryTestHandler()
 
-    router.HandleWithOptions("/articles", handler, RouteOptions{Methods: []string{"", nethttp.MethodGet}})
+    router.Handle("/articles", handler, RouteOptions{Methods: []string{"", nethttp.MethodGet}})
 
     allowed := router.AllowedMethods("/articles", "", "")
 
@@ -67,12 +67,12 @@ func TestRouter_AllowedMethodsHonoursTheHostBinding(t *testing.T) {
 
     handler := routeRegistryTestHandler()
 
-    router.HandleWithOptions("/articles", handler, RouteOptions{
+    router.Handle("/articles", handler, RouteOptions{
         Methods: []string{nethttp.MethodGet},
         Host:    "api.example.com",
     })
 
-    router.HandleWithOptions("/articles", handler, RouteOptions{
+    router.Handle("/articles", handler, RouteOptions{
         Methods: []string{nethttp.MethodPost},
         Host:    "admin.example.com",
     })
@@ -95,12 +95,12 @@ func TestRouter_AllowedMethodsHonoursTheSchemeBinding(t *testing.T) {
 
     handler := routeRegistryTestHandler()
 
-    router.HandleWithOptions("/checkout", handler, RouteOptions{
+    router.Handle("/checkout", handler, RouteOptions{
         Methods: []string{nethttp.MethodPost},
         Schemes: []string{"https"},
     })
 
-    router.HandleWithOptions("/checkout", handler, RouteOptions{
+    router.Handle("/checkout", handler, RouteOptions{
         Methods: []string{nethttp.MethodGet},
     })
 
@@ -120,7 +120,7 @@ func TestRouter_AllowedMethodsHonoursTheSchemeBinding(t *testing.T) {
 func TestRouter_AllowedMethodsComparesTheSchemeCaseInsensitively(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions("/checkout", routeRegistryTestHandler(), RouteOptions{
+    router.Handle("/checkout", routeRegistryTestHandler(), RouteOptions{
         Methods: []string{nethttp.MethodPost},
         Schemes: []string{"HTTPS"},
     })
@@ -135,7 +135,7 @@ func TestRouter_AllowedMethodsComparesTheSchemeCaseInsensitively(t *testing.T) {
 func TestRouter_AllowedMethodsOnAnUnknownPathIsEmpty(t *testing.T) {
     router := NewRouter()
 
-    router.Handle(nethttp.MethodGet, "/articles", routeRegistryTestHandler())
+    router.Handle("/articles", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     allowed := router.AllowedMethods("/nothing-here", "", "")
 
@@ -149,7 +149,7 @@ func TestRouter_AllowedMethodsSkipsARouteThePathsLocaleExcludes(t *testing.T) {
 
     handler := routeRegistryTestHandler()
 
-    router.HandleWithOptions(
+    router.Handle(
         "/:_locale/articles",
         handler,
         RouteOptions{Name: "articles", Methods: []string{nethttp.MethodGet}, Locales: []string{"en"}},
@@ -170,7 +170,7 @@ func TestRouter_AllowedMethodsAndTheMatcherAgreeOnTheSameLocalePath(t *testing.T
 
     handler := routeRegistryTestHandler()
 
-    router.HandleWithOptions(
+    router.Handle(
         "/:_locale/articles",
         handler,
         RouteOptions{Name: "articles", Methods: []string{nethttp.MethodGet}, Locales: []string{"en"}},

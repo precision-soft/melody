@@ -93,7 +93,7 @@ func newEnvironmentKeyBootApplicationIn(t *testing.T, values map[string]string, 
         bootValues[key] = value
     }
 
-    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: bootValues})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: bootValues})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }

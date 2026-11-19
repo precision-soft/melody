@@ -28,13 +28,13 @@ func TestLoginAuthentication_GivesTheBudgetBackOnlyForAnAcceptedSignInThatPresen
     login := NewLoginAuthentication(melodysecurity.NewAuthenticatorManager([]securitycontract.Authenticator{budget}), budget)
 
     for attempt := 0; attempt < budgetTestAllowance; attempt++ {
-        if _, authenticateErr := login.Authenticate(budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName)); nil != authenticateErr {
+        if _, authenticateErr := login.Authenticate(withItsRuntime(budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName))); nil != authenticateErr {
             t.Fatalf("expected attempt %d to pass and give the budget back, got %v", attempt, authenticateErr)
         }
     }
 
     for attempt := 0; attempt < budgetTestAllowance; attempt++ {
-        if _, authenticateErr := budget.Authenticate(budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName)); nil != authenticateErr {
+        if _, authenticateErr := budget.Authenticate(withItsRuntime(budgetRequestWithHeader(t, "secret", melodysecurity.DefaultTotpCodeHeaderName))); nil != authenticateErr {
             t.Fatalf("expected the budget given back after each accepted sign-in, attempt %d refused: %v", attempt, authenticateErr)
         }
     }

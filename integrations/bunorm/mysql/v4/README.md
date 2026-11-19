@@ -125,7 +125,7 @@ The provider negotiates a **verified TLS handshake by default**: it builds a `tl
 Two `ProviderConfig` fields shape it:
 
 - `Insecure: true` disables TLS entirely, leaving a plaintext connection. It is the deliberate opt-out for a database reached over a trusted network or one that speaks no TLS — the same field, spelled the same way, as the pgsql provider.
-- `TlsConfig` hands the connector an explicit `*tls.Config` — a pinned server certificate, a client certificate — taking precedence over both the default and `Insecure`.
+- `TlsConfig` hands the connector an explicit `*tls.Config` — a pinned server certificate, a client certificate — replacing the default; set beside `Insecure: true`, `NewProvider` refuses both.
 
 ```go
 provider := mysql.NewProvider(mysql.ProviderConfig{

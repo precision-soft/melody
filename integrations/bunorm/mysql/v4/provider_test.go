@@ -1607,3 +1607,19 @@ func TestProvider_OpenReturnsOnACyclicChainFromAPostBuildHook(t *testing.T) {
         }
     })
 }
+
+func TestNewProvider_RefusesInsecureBesideTlsConfig(t *testing.T) {
+    func() {
+        defer func() {
+            recovered := recover()
+            if nil == recovered || false == strings.Contains(fmt.Sprint(recovered), "Insecure and TlsConfig") {
+                t.Fatalf("expected Insecure beside TlsConfig refused naming both, got %v", recovered)
+            }
+        }()
+
+        _ = NewProvider(ProviderConfig{Insecure: true, TlsConfig: &tls.Config{}})
+    }()
+
+    _ = NewProvider(ProviderConfig{Insecure: true})
+    _ = NewProvider(ProviderConfig{TlsConfig: &tls.Config{}})
+}

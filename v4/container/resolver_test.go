@@ -331,7 +331,7 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
         t.Fatalf("expected the beta bus to keep its own value, got %q", betaBus.Region)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected the container with same-string types to close cleanly, got %v", closeErr)
     }
 }
@@ -1106,7 +1106,7 @@ func TestForGoroutine_AViewRetainedPastTheContainersCloseRefusesANewCreation(t *
         t.Fatalf("unexpected worker error: %v", workerErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

@@ -23,7 +23,7 @@ import (
 func newLimitConfiguration(t *testing.T, values map[string]string) configcontract.Configuration {
     t.Helper()
 
-    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
@@ -330,17 +330,17 @@ func TestNewApplication_TheUnavailableRetryAfterFieldReachesTheHttpKernel(t *tes
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), UnavailableRetryAfter: bound.Of(13 * time.Second)})
     serviceContainer := applicationInstance.kernel.ServiceContainer()
     defer func() {
-        _ = serviceContainer.Close()
+        _ = serviceContainer.CloseWithContext(context.Background())
     }()
 
     applicationInstance.Boot()
 
     applicationInstance.kernel.HttpRouter().Handle(
-        nethttp.MethodGet,
         "/unavailable",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, exception.MarkInfrastructureFailure(errors.New("cache is down"))
         },
+        httpcontract.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     recorder := httptest.NewRecorder()

@@ -20,7 +20,7 @@ import (
 /* the liveness probe reports the version the build stamped, the one main hands Configure, beside its status */
 func TestHealthHandler_ReportsTheVersionItWasBuiltWith(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(containerInstance, melodyclock.ServiceClock, func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
         return melodyclock.NewSystemClock(), nil
     }, melodycontainer.RegisterOptions{})

@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "slices"
 
     configcontract "github.com/precision-soft/melody/v4/config/contract"
@@ -101,12 +102,16 @@ type dotEnvProvenanceReader interface {
     dotEnvAssembledFrom() map[string][]string
 }
 
-func NewEnvironment(source configcontract.EnvironmentSource) (*Environment, error) {
+func NewEnvironment(ctx context.Context, source configcontract.EnvironmentSource) (*Environment, error) {
+    if true == internal.IsNilInterface(ctx) {
+        return nil, exception.NewError("config.NewEnvironment was handed no context", nil, nil)
+    }
+
     if true == internal.IsNilInterface(source) {
         return nil, exception.NewError("environment source is required", nil, nil)
     }
 
-    values, loadErr := source.Load()
+    values, loadErr := source.Load(ctx)
     if nil != loadErr {
         return nil, loadErr
     }

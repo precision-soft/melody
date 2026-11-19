@@ -19,7 +19,7 @@ func manifestTestRouter() *Router {
     router := NewRouter()
 
     /* exposed + named + zoned */
-    router.HandleWithOptions(
+    router.Handle(
         "/users/:id",
         manifestTestHandler,
         RouteOptions{
@@ -31,14 +31,14 @@ func manifestTestRouter() *Router {
     )
 
     /* named but not exposed → excluded */
-    router.HandleWithOptions(
+    router.Handle(
         "/internal/health",
         manifestTestHandler,
         RouteOptions{Name: "health", Methods: []string{nethttp.MethodGet}},
     )
 
     /* exposed + named, different zone */
-    router.HandleWithOptions(
+    router.Handle(
         "/account",
         manifestTestHandler,
         RouteOptions{Name: "account_show", Methods: []string{nethttp.MethodGet}, Attributes: ExposedRouteAttributes(RouteZoneClient)},
@@ -78,7 +78,7 @@ func TestRouterRegistration_RefusesAnExposedRouteWithNoName(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            NewRouter().HandleWithOptions(
+            NewRouter().Handle(
                 "/anonymous",
                 manifestTestHandler,
                 RouteOptions{Methods: []string{nethttp.MethodGet}, Attributes: ExposedRouteAttributes(RouteZoneFrontend)},
@@ -92,7 +92,7 @@ func TestRouterRegistration_RefusesAnExposeAttributeThatIsNotABool(t *testing.T)
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            NewRouter().HandleWithOptions(
+            NewRouter().Handle(
                 "/typo",
                 manifestTestHandler,
                 RouteOptions{Name: "typo", Methods: []string{nethttp.MethodGet}, Attributes: map[string]any{RouteAttributeExpose: "true"}},
@@ -106,7 +106,7 @@ func TestRouterRegistration_RefusesAZoneThatIsNotDeclared(t *testing.T) {
     testhelper.AssertPanicsWithError(
         t,
         func() {
-            NewRouter().HandleWithOptions(
+            NewRouter().Handle(
                 "/typo",
                 manifestTestHandler,
                 RouteOptions{Name: "typo", Methods: []string{nethttp.MethodGet}, Attributes: map[string]any{RouteAttributeExpose: true, RouteAttributeZone: "frontent"}},
@@ -118,7 +118,7 @@ func TestRouterRegistration_RefusesAZoneThatIsNotDeclared(t *testing.T) {
 
 func TestBuildRouteManifest_CarriesEveryMatchDiscriminatorAGeneratedUrlMustSatisfy(t *testing.T) {
     router := NewRouter()
-    router.HandleWithOptions(
+    router.Handle(
         "/:_locale/blog",
         manifestTestHandler,
         RouteOptions{

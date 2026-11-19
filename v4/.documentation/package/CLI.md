@@ -187,7 +187,7 @@ func main() {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     /* a container built by hand is closed by the hand that built it: there is no exit handler here to close it */
     defer func() {
-        _ = serviceContainer.Close()
+        _ = serviceContainer.CloseWithContext(context.Background())
     }()
 
     scope := serviceContainer.NewScope()

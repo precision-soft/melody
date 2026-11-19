@@ -18,7 +18,7 @@ type ProviderConfig struct {
     /* Insecure dials a plaintext connection where the default dials a verifying TLS session: the deliberate opt-out for a database reached over a trusted network or one that speaks no TLS. */
     Insecure bool
 
-    /* TlsConfig is an explicit TLS session, to pin a server certificate or present a client one; it wins over Insecure. */
+    /* TlsConfig is an explicit TLS session, to pin a server certificate or present a client one; set beside Insecure, NewProvider refuses both. */
     TlsConfig *tls.Config
 }
 

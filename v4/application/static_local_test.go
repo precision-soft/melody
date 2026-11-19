@@ -27,7 +27,7 @@ import (
 func newStaticExclusionTestConfiguration(t *testing.T, values map[string]string) configcontract.Configuration {
     t.Helper()
 
-    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
@@ -289,7 +289,7 @@ func TestNewStaticFileServerConfig_AdmitsTheDefaultPublicDirectoryAbsentAndAnExi
 func newStaticPublicDirectoryTestConfiguration(t *testing.T, projectDirectory string, values map[string]string) configcontract.Configuration {
     t.Helper()
 
-    environment, environmentErr := config.NewEnvironment(&mapEnvironmentSource{values: values})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: values})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }

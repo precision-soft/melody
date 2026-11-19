@@ -93,13 +93,7 @@ Two hazards belong to what is stored rather than to how long it lives, and neith
 
 ## Container integration
 
-The cache package exposes retrieval helpers for the three services (see [`cache/service_resolver.go`](../../cache/service_resolver.go)):
-
-- `cache.CacheMustFromContainer(ctx, container)`
-- `cache.CacheBackendMustFromContainer(ctx, container)`
-- `cache.CacheSerializerMustFromContainer(ctx, container)`
-
-Use the resolver variants when you already have a `container/contract.Resolver`:
+The cache package exposes retrieval helpers for the three services (see [`cache/service_resolver.go`](../../cache/service_resolver.go)); each takes the container as it takes a scope:
 
 - `cache.CacheMustFromResolver(ctx, resolver)`
 - `cache.CacheBackendMustFromResolver(ctx, resolver)`
@@ -190,7 +184,7 @@ func loadUserProfile(
     ctx context.Context,
     runtimeInstance runtimecontract.Runtime,
 ) (userProfile, error) {
-    cacheInstance := cache.CacheMustFromContainer(
+    cacheInstance := cache.CacheMustFromResolver(
         ctx,
         runtimeInstance.Container(),
     )
@@ -293,10 +287,6 @@ type Cache interface {
 - `cache.NewItem(key string, payload []byte, createdAt time.Time, expiresAt *time.Time) *cache.Item` ([`cache/item.go`](../../cache/item.go))
 
 ### Retrieval helpers
-
-- `cache.CacheMustFromContainer(ctx, container) cachecontract.Cache`
-- `cache.CacheBackendMustFromContainer(ctx, container) cachecontract.Backend`
-- `cache.CacheSerializerMustFromContainer(ctx, container) cachecontract.Serializer`
 
 - `cache.CacheMustFromResolver(ctx, resolver) cachecontract.Cache`
 - `cache.CacheBackendMustFromResolver(ctx, resolver) cachecontract.Backend`

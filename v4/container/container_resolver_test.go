@@ -48,7 +48,7 @@ func TestResolve_AfterCloseFailsInsteadOfCreating(t *testing.T) {
         RegisterOptions{},
     )
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -95,7 +95,7 @@ func TestResolve_DuringCloseClosesTheCreatedValueInsteadOfLeakingIt(t *testing.T
 
     <-providerStarted
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -140,7 +140,7 @@ func TestResolve_DuringCloseClosesACreatedValueThatCarriesOnlyCloseWithContext(t
 
     <-providerStarted
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -279,7 +279,7 @@ func TestResolve_DuringCloseContainsAPanickingCloseOfTheDiscardedValue(t *testin
 
     <-providerStarted
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -358,7 +358,7 @@ func TestResolve_DuringCloseCarriesTheFailedCloseOfTheDiscardedValueOnTheRefusal
 
         <-providerStarted
 
-        if closeErr := serviceContainer.Close(); nil != closeErr {
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
             t.Fatalf("close: %v", closeErr)
         }
 
@@ -1324,7 +1324,7 @@ func TestCreationGuard_ContainerCloseReleasesAParkedWaiterBeforeTheProviderRetur
 
     closeDone := make(chan error, 1)
     go func() {
-        closeDone <- serviceContainer.Close()
+        closeDone <- serviceContainer.CloseWithContext(context.Background())
     }()
 
     select {
@@ -1407,7 +1407,7 @@ func TestCreationGuard_AResolutionReachingAnInFlightCreationDuringTheTeardownIsR
 
     closeDone := make(chan error, 1)
     go func() {
-        closeDone <- serviceContainer.Close()
+        closeDone <- serviceContainer.CloseWithContext(context.Background())
     }()
 
     <-blockingClose.entered
@@ -1800,7 +1800,7 @@ func TestCreationGuard_AWaiterReleasedByTheContainerAndItsScopeAnswersTheContain
 
     closeDone := make(chan error, 1)
     go func() {
-        closeDone <- serviceContainer.Close()
+        closeDone <- serviceContainer.CloseWithContext(context.Background())
     }()
 
     deadline := time.Now().Add(creationWaiterBudget)
@@ -2297,7 +2297,7 @@ func TestResolve_AValueBuiltAfterCloseIsClosedUnderTheContextOfTheResolutionThat
 
     <-providerStarted
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 

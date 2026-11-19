@@ -11,7 +11,7 @@ func newIntrospectedRouter(t *testing.T) *Router {
 
     router := NewRouter()
 
-    router.HandleWithOptions(
+    router.Handle(
         "/:_locale/articles/:id",
         routeRegistryTestHandler(),
         RouteOptions{

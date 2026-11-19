@@ -37,7 +37,7 @@ type stubEnvironmentSource struct {
     values map[string]string
 }
 
-func (instance *stubEnvironmentSource) Load() (map[string]string, error) {
+func (instance *stubEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return instance.values, nil
 }
 
@@ -66,7 +66,7 @@ func newProductDoorFixture(t *testing.T) *productDoorFixture {
 func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores) productDoorStores) *productDoorFixture {
     t.Helper()
 
-    environment, environmentErr := melodyconfig.NewEnvironment(&stubEnvironmentSource{
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), &stubEnvironmentSource{
         values: map[string]string{melodyconfig.EnvironmentNameKey: melodyconfig.EnvironmentProduction},
     })
     if nil != environmentErr {
@@ -113,7 +113,7 @@ func newProductDoorFixtureOver(t *testing.T, wrap func(stores productDoorStores)
     productService := service.NewProductService(stores.products, categoryService, currencyService, cacheInstance, dispatcher, clockInstance)
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     melodycontainer.MustRegister(
         containerInstance,

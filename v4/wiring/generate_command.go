@@ -99,7 +99,7 @@ func (instance *GenerateCommand) Run(
         return exception.NewError("the wiring generate command requires a bind set", nil, nil)
     }
 
-    applicationConfiguration := config.ConfigMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    applicationConfiguration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
     projectDirectory := applicationConfiguration.MustGet(config.KernelProjectDirectory).MustString()
 

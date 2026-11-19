@@ -14,20 +14,8 @@ const (
     ServiceCacheSerializer = "service.cache.serializer"
 )
 
-func CacheMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) cachecontract.Cache {
-    return CacheMustFromResolver(ctx, serviceContainer)
-}
-
 func CacheMustFromResolver(ctx context.Context, resolver containercontract.Resolver) cachecontract.Cache {
     return container.MustFromResolver[cachecontract.Cache](ctx, resolver, ServiceCache)
-}
-
-func CacheBackendMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) cachecontract.Backend {
-    return container.MustFromResolver[cachecontract.Backend](ctx, serviceContainer, ServiceCacheBackend)
-}
-
-func CacheSerializerMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) cachecontract.Serializer {
-    return container.MustFromResolver[cachecontract.Serializer](ctx, serviceContainer, ServiceCacheSerializer)
 }
 
 func CacheBackendMustFromResolver(ctx context.Context, resolver containercontract.Resolver) cachecontract.Backend {

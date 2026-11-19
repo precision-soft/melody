@@ -1,9 +1,11 @@
 package http
 
 import (
+    "context"
     "errors"
     nethttp "net/http"
     "net/http/httptest"
+    "reflect"
     "strings"
     "sync"
     "testing"
@@ -18,7 +20,7 @@ type testEnvironmentSource struct {
     values map[string]string
 }
 
-func (instance *testEnvironmentSource) Load() (map[string]string, error) {
+func (instance *testEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     copied := make(map[string]string, len(instance.values))
     for key, value := range instance.values {
         copied[key] = value
@@ -31,11 +33,11 @@ func TestRouter_HandleAndServeHttp_HappyPath(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodGet,
         "/hello",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -57,11 +59,11 @@ func TestRouter_MethodNotAllowed(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodGet,
         "/hello",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -95,12 +97,12 @@ func TestRouter_PanicConvertedTo500(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodGet,
         "/panic",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             exception.Panic(exception.NewError("boom", nil, nil))
             return nil, nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -119,11 +121,11 @@ func TestRouter_HandlerErrorConvertedTo500(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodGet,
         "/err",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, errors.New("handler error")
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -142,7 +144,6 @@ func TestRouter_ParameterExtraction(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodGet,
         "/user/:id",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             value, exists := request.Parameter("id")
@@ -152,6 +153,7 @@ func TestRouter_ParameterExtraction(t *testing.T) {
 
             return TextResponse(200, value), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -172,7 +174,7 @@ func TestRouter_ParameterExtraction(t *testing.T) {
 func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions(
+    router.Handle(
         "/shop/:locale/list",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "ok"), nil
@@ -210,7 +212,7 @@ func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
 func TestRouter_RequirementIsEnforcedOnCatchAllWildcard(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions(
+    router.Handle(
         "/files/*path",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "ok"), nil
@@ -241,11 +243,11 @@ func TestRouter_Match_WhitespacePaddedRequestPathDoesNotAliasTheRoute(t *testing
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodGet,
         "/admin",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "admin"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     for _, requestPath := range []string{"/admin ", "/admin\t", "/admin\n", "/admin\u00a0", " /admin"} {
@@ -263,11 +265,11 @@ func TestRouter_Match_EmptySegmentDoesNotSatisfyNamedParameter(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodGet,
         "/users/:id/profile",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "profile"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     if _, matched := router.Match(nethttp.MethodGet, "/users//profile", "", ""); true == matched {
@@ -292,11 +294,11 @@ func TestRouter_AddRoute_RejectsOptionalSegmentBeforeAnotherSegment(t *testing.T
             t,
             func() {
                 router.Handle(
-                    nethttp.MethodGet,
                     pattern,
                     func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                         return TextResponse(200, "blog"), nil
                     },
+                    RouteOptions{Methods: []string{nethttp.MethodGet}},
                 )
             },
             "optional route parameter must be the last pattern segment unless it has a default",
@@ -308,7 +310,7 @@ func TestRouter_AddRoute_AcceptsANonTrailingOptionalSegmentThatHasADefault(t *te
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/:locale?/list/:page",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "list"), nil
@@ -341,11 +343,11 @@ func TestRouter_AddRoute_AcceptsOptionalSegmentAtTheTail(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodGet,
         "/blog/posts/:locale?",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "blog"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     for _, requestPath := range []string{"/blog/posts", "/blog/posts/en"} {
@@ -359,7 +361,7 @@ func TestRouter_AddRoute_NonTrailingOptionalWithADefaultSurvivesASuppliedEmptyVa
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/:locale?/list/:page",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "list"), nil
@@ -417,7 +419,7 @@ func TestRouter_AddRoute_NonTrailingOptionalWithAGroupSuppliedDefaultSurvivesASu
         },
     )
 
-    group.HandleWithOptions(
+    group.Handle(
         "/:locale?/list/:page",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "list"), nil
@@ -452,7 +454,7 @@ func TestRouter_AddRoute_RejectsANonTrailingOptionalWhoseDefaultIsEmpty(t *testi
     assertPanicWithExceptionMessage(
         t,
         func() {
-            router.HandleWithOptions(
+            router.Handle(
                 "/:locale?/list/:page",
                 func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                     return TextResponse(200, "list"), nil
@@ -473,7 +475,7 @@ func TestRouter_AddRoute_ServesATrailingOptionalReachedThroughTheRoot(t *testing
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/:page?",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "home"), nil
@@ -509,11 +511,11 @@ func TestRouter_Match_NeverAdvertisesAnEmptyAllowedMethod(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
-        "",
         "/empty-method",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "never"), nil
         },
+        RouteOptions{Methods: []string{""}},
     )
 
     matchResult, matched := router.Match(nethttp.MethodGet, "/empty-method", "", "")
@@ -542,11 +544,11 @@ func TestRouter_AllowHeaderRespectsMethodPolicy(t *testing.T) {
     newGetOnlyKernel := func() *Kernel {
         router := NewRouter()
         router.Handle(
-            nethttp.MethodGet,
             "/hello",
             func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return TextResponse(200, "ok"), nil
             },
+            RouteOptions{Methods: []string{nethttp.MethodGet}},
         )
 
         return NewKernel(router, KernelConfig{})
@@ -592,11 +594,11 @@ func TestControllerHandler_RegistersTheControllerUnderItsMethod(t *testing.T) {
     router := NewRouter()
 
     router.Handle(
-        nethttp.MethodGet,
         "/articles",
         ControllerHandler(func(request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "from the controller"), nil
         }),
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())
@@ -623,7 +625,7 @@ func TestControllerHandler_RegistersTheControllerUnderItsMethod(t *testing.T) {
 func TestControllerHandler_ANamedRouteServesTheControllerUnderTheNameTheGeneratorResolves(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions(
+    router.Handle(
         "/articles/:id",
         ControllerHandler(func(request httpcontract.Request) (httpcontract.Response, error) {
             identifier, _ := request.Parameter("id")
@@ -656,7 +658,7 @@ func TestRouter_RouteRegistryIsTheOneItRegistersInto(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
 
-    router.HandleWithOptions("/articles", routeRegistryTestHandler(), RouteOptions{Name: "article.show", Methods: []string{nethttp.MethodGet}})
+    router.Handle("/articles", routeRegistryTestHandler(), RouteOptions{Name: "article.show", Methods: []string{nethttp.MethodGet}})
 
     if routeRegistry != router.RouteRegistry() {
         t.Fatalf("expected the router to report the registry it was built with")
@@ -670,11 +672,11 @@ func TestRouter_RouteRegistryIsTheOneItRegistersInto(t *testing.T) {
 func TestRouter_MatchHandsOutACopyOfTheRouteAttributes(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/aliased",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     firstResult, matched := router.Match(nethttp.MethodGet, "/aliased", "", "http")
@@ -708,11 +710,11 @@ func TestRouterRegistration_RefusesADuplicateParameterName(t *testing.T) {
         t,
         func() {
             NewRouter().Handle(
-                nethttp.MethodGet,
                 "/orgs/:id/members/:id",
                 func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                     return nil, nil
                 },
+                RouteOptions{Methods: []string{nethttp.MethodGet}},
             )
         },
         "route parameter name is declared twice in one pattern",
@@ -728,14 +730,14 @@ func TestRouterRegistration_RefusesAParameterDeclaredTwiceThroughAnOptionalOrACa
         testhelper.AssertPanicsWithError(
             t,
             func() {
-                NewRouter().Handle(nethttp.MethodGet, pattern, handler)
+                NewRouter().Handle(pattern, handler, RouteOptions{Methods: []string{nethttp.MethodGet}})
             },
             "route parameter name is declared twice in one pattern",
         )
     }
 
     for _, pattern := range []string{"/a/:id/b/:other?", "/a/:id/*rest..."} {
-        NewRouter().Handle(nethttp.MethodGet, pattern, handler)
+        NewRouter().Handle(pattern, handler, RouteOptions{Methods: []string{nethttp.MethodGet}})
     }
 }
 
@@ -745,11 +747,11 @@ func TestRouterRegistration_RefusesAParameterWithNoName(t *testing.T) {
         t,
         func() {
             NewRouter().Handle(
-                nethttp.MethodGet,
                 "/orgs/:",
                 func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                     return nil, nil
                 },
+                RouteOptions{Methods: []string{nethttp.MethodGet}},
             )
         },
         "route parameter must be named",
@@ -760,11 +762,11 @@ func TestRouterRegistration_RefusesAParameterWithNoName(t *testing.T) {
 func TestRouterRegistration_AcceptsAnUnnamedCatchAll(t *testing.T) {
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/files/*...",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     if _, matched := router.Match(nethttp.MethodGet, "/files/a/b", "", "http"); false == matched {
@@ -776,14 +778,14 @@ func TestRouterRegistration_RefusesBraceParameterSyntax(t *testing.T) {
     router := NewRouter()
 
     testhelper.AssertPanicsWithError(t, func() {
-        router.Handle(nethttp.MethodGet, "/users/{id}", routeRegistryTestHandler())
+        router.Handle("/users/{id}", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
     }, "route parameter must be written as :name, not {name}")
 }
 
 func TestRouterRegistration_AcceptsALiteralSegmentThatOnlyOpensABrace(t *testing.T) {
     router := NewRouter()
 
-    router.Handle(nethttp.MethodGet, "/users/{id", routeRegistryTestHandler())
+    router.Handle("/users/{id", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     handler, _, _ := router.match(nethttp.MethodGet, "/users/{id", "", "https")
     if nil == handler {
@@ -795,7 +797,7 @@ func TestRouterRegistration_RefusesLocalesWithoutALocaleParameter(t *testing.T) 
     router := NewRouter()
 
     testhelper.AssertPanicsWithError(t, func() {
-        router.HandleWithOptions(
+        router.Handle(
             "/articles",
             routeRegistryTestHandler(),
             RouteOptions{Name: "article.list", Methods: []string{nethttp.MethodGet}, Locales: []string{"en", "de"}},
@@ -806,7 +808,7 @@ func TestRouterRegistration_RefusesLocalesWithoutALocaleParameter(t *testing.T) 
 func TestRouterRegistration_AcceptsLocalesSuppliedByADefault(t *testing.T) {
     router := NewRouter()
 
-    router.HandleWithOptions(
+    router.Handle(
         "/articles",
         routeRegistryTestHandler(),
         RouteOptions{
@@ -831,14 +833,14 @@ func TestRouterRegistration_RefusesALocaleParameterWithNoLocaleList(t *testing.T
     router := NewRouter()
 
     testhelper.AssertPanicsWithError(t, func() {
-        router.Handle(nethttp.MethodGet, "/:_locale/articles", routeRegistryTestHandler())
+        router.Handle("/:_locale/articles", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
     }, "route pattern carries _locale but declares no locales to validate it against")
 }
 
 func TestRouterRegistration_AnEmptyPatternRegistersTheRootRoute(t *testing.T) {
     router := NewRouter()
 
-    router.Handle(nethttp.MethodGet, "", routeRegistryTestHandler())
+    router.Handle("", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     handler, _, _ := router.match(nethttp.MethodGet, "/", "", "https")
     if nil == handler {
@@ -849,7 +851,7 @@ func TestRouterRegistration_AnEmptyPatternRegistersTheRootRoute(t *testing.T) {
 func TestRouterMatch_AnEmptyPathReachesTheRootRoute(t *testing.T) {
     router := NewRouter()
 
-    router.Handle(nethttp.MethodGet, "/", routeRegistryTestHandler())
+    router.Handle("/", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     handler, _, _ := router.match(nethttp.MethodGet, "", "", "https")
     if nil == handler {
@@ -860,7 +862,7 @@ func TestRouterMatch_AnEmptyPathReachesTheRootRoute(t *testing.T) {
 func TestRouterMatch_TheAsteriskFormIsNotPathRouted(t *testing.T) {
     router := NewRouter()
 
-    router.Handle(nethttp.MethodOptions, "/:anything", routeRegistryTestHandler())
+    router.Handle("/:anything", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodOptions}})
 
     handler, parameters, _ := router.match(nethttp.MethodOptions, "*", "", "https")
     if nil != handler {
@@ -875,8 +877,8 @@ func TestRouterMatch_TheAsteriskFormIsNotPathRouted(t *testing.T) {
 func TestRouterMatch_AnEncodedSlashDoesNotSplitASegment(t *testing.T) {
     router := NewRouter()
 
-    router.Handle(nethttp.MethodGet, "/admin/users", routeRegistryTestHandler())
-    router.Handle(nethttp.MethodGet, "/:name", routeRegistryTestHandler())
+    router.Handle("/admin/users", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/:name", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     handler, parameters, _ := router.match(nethttp.MethodGet, "/admin%2Fusers", "", "https")
     if nil == handler {
@@ -891,7 +893,7 @@ func TestRouterMatch_AnEncodedSlashDoesNotSplitASegment(t *testing.T) {
 func TestRouterMatch_AnEncodedSegmentIsUnescapedForTheHandler(t *testing.T) {
     router := NewRouter()
 
-    router.Handle(nethttp.MethodGet, "/article/:slug", routeRegistryTestHandler())
+    router.Handle("/article/:slug", routeRegistryTestHandler(), RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     _, parameters, _ := router.match(nethttp.MethodGet, "/article/hello%20world", "", "https")
     if "hello world" != parameters["slug"] {
@@ -912,9 +914,9 @@ func TestRouterAddRoute_ADeclinedDuplicateDoesNotEnterTheMatchingTree(t *testing
         recordedCollisions = append(recordedCollisions, name)
     })
 
-    router.Handle(nethttp.MethodGet, "/alpha", handler)
-    router.Handle(nethttp.MethodGet, "/beta", handler)
-    router.Handle(nethttp.MethodGet, "/alpha", handler)
+    router.Handle("/alpha", handler, RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/beta", handler, RouteOptions{Methods: []string{nethttp.MethodGet}})
+    router.Handle("/alpha", handler, RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     if 1 != len(recordedCollisions) {
         t.Fatalf("expected the duplicate to be recorded once, got %v", recordedCollisions)
@@ -938,7 +940,7 @@ func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
 
     captured := make([]string, 0, 2)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/files/*path",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             pathValue, _ := request.Parameter("path")
@@ -977,7 +979,7 @@ func TestRouter_CatchAllBindsALiteralEncodedSeparatorAsTheEncodedSeparator(t *te
 
     captured := make([]string, 0, 2)
 
-    router.HandleWithOptions(
+    router.Handle(
         "/files/*path",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             pathValue, _ := request.Parameter("path")
@@ -1070,9 +1072,25 @@ func TestRouter_RefusesAReservedAttributeKeyAtRegistration(t *testing.T) {
                 }
             }()
 
-            NewRouter().HandleWithOptions("/attributes", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            NewRouter().Handle("/attributes", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return nil, nil
             }, httpcontract.RouteOptions{Attributes: map[string]any{key: "value"}})
         }()
+    }
+}
+
+func TestRouteHandler_DeclaresOneRegistrationDoor(t *testing.T) {
+    routeHandlerType := reflect.TypeFor[httpcontract.RouteHandler]()
+    if 1 != routeHandlerType.NumMethod() {
+        t.Fatalf("expected one registration door, got %d methods", routeHandlerType.NumMethod())
+    }
+
+    method := routeHandlerType.Method(0)
+    if "Handle" != method.Name || 3 != method.Type.NumIn() {
+        t.Fatalf("expected Handle(pattern, handler, options), got %s %s", method.Name, method.Type)
+    }
+
+    if reflect.TypeFor[string]() != method.Type.In(0) || reflect.TypeFor[httpcontract.Handler]() != method.Type.In(1) || reflect.TypeFor[httpcontract.RouteOptions]() != method.Type.In(2) {
+        t.Fatalf("expected Handle(string, Handler, RouteOptions), got %s", method.Type)
     }
 }

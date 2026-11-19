@@ -47,12 +47,15 @@ func (instance *resolutionListenerTestMatcher) Matches(request httpcontract.Requ
 }
 
 type resolutionListenerTestRule struct {
-    err error
+    err      error
+    runtimes []runtimecontract.Runtime
 }
 
 func (instance *resolutionListenerTestRule) Applies(request httpcontract.Request) bool { return true }
 
-func (instance *resolutionListenerTestRule) Check(request httpcontract.Request) error {
+func (instance *resolutionListenerTestRule) Check(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) error {
+    instance.runtimes = append(instance.runtimes, runtimeInstance)
+
     return instance.err
 }
 
@@ -887,5 +890,32 @@ func TestSecurityResolutionListener_AnUnavailableCauseItsProducerFiledIsNotFiled
     expectUnavailableToken(t, published)
     if 0 != len(logger.recordsAtLevel(loggingcontract.LevelError)) {
         t.Fatalf("expected no second record for a cause already filed, got %v", logger.records)
+    }
+}
+
+func TestSecurityResolutionListener_HandsItsRuntimeToTheFirewallRules(t *testing.T) {
+    kernel := newTestKernel()
+    runtimeInstance := newTestRuntime()
+
+    rule := &resolutionListenerTestRule{}
+    firewall := NewCompiledFirewall(CompiledFirewallConfig{
+        Name:               "main",
+        Matcher:            &resolutionListenerTestMatcher{matches: true},
+        MatcherDescription: "matcher:main",
+        Rules:              []securitycontract.Rule{rule},
+        TokenSource:        &resolutionListenerTestTokenSource{resolveToken: NewAuthenticatedToken("user", []string{"ROLE_USER"}, nil)},
+        LoginPath:          "/admin/login",
+        LogoutPath:         "/admin/logout",
+    })
+
+    RegisterKernelSecurityResolutionListener(kernel, NewFirewallRegistry(NewCompiledConfiguration([]*CompiledFirewall{firewall}, nil)))
+
+    request := newSecurityTestRequest("GET", "/admin", nil, newTestRuntime())
+    if _, err := kernel.EventDispatcher().DispatchName(runtimeInstance, "kernel.request", httpPkg.NewKernelRequestEvent(runtimeInstance, request)); nil != err {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    if 1 != len(rule.runtimes) || runtimeInstance != rule.runtimes[0] {
+        t.Fatalf("expected the rule handed the listener's runtime, not the request's, got %v", rule.runtimes)
     }
 }

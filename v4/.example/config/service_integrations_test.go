@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "database/sql"
     "os"
     "path/filepath"
@@ -86,7 +87,7 @@ func TestLocalStorageDirectory_ReadsItsKey(t *testing.T) {
         {value: " var/storage ", expected: "/tmp/melody/var/storage"},
         {value: "", expected: filepath.Join(os.TempDir(), "melody-example-storage")},
     } {
-        environment, environmentErr := melodyconfig.NewEnvironment(&stubEnvironmentSource{values: map[string]string{"APP_LOCAL_STORAGE_DIRECTORY": testCase.value}})
+        environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), &stubEnvironmentSource{values: map[string]string{"APP_LOCAL_STORAGE_DIRECTORY": testCase.value}})
         if nil != environmentErr {
             t.Fatalf("new environment: %v", environmentErr)
         }
@@ -107,7 +108,7 @@ func assertInProcessLockerExpiresOnTheContainersClock(t *testing.T, register fun
 
     clockInstance := melodyclock.NewFrozenClock(time.Date(2026, time.November, 16, 12, 0, 0, 0, time.UTC))
     serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = serviceContainer.Close() })
+    t.Cleanup(func() { _ = serviceContainer.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister[melodyclockcontract.Clock](serviceContainer, melodyclock.ServiceClock, func(melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
         return clockInstance, nil
     }, melodycontainer.RegisterOptions{})
@@ -141,7 +142,7 @@ func assertInProcessLockerRefusesWithoutAClock(t *testing.T, register func(*Modu
     t.Helper()
 
     serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = serviceContainer.Close() })
+    t.Cleanup(func() { _ = serviceContainer.CloseWithContext(context.Background()) })
 
     register(&Module{}, &containerRegistrar{Container: serviceContainer})
 

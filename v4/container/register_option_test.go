@@ -188,7 +188,7 @@ func TestRegisterOptionsCloser_AServiceWithoutTheOptionIsClosedThroughItsOwnClos
 
     _ = MustFromResolver[*foreignClosingService](t.Context(), serviceContainer, "app.foreign")
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -222,7 +222,7 @@ func TestRegisterOptionsCloser_AnInstanceAnOverrideEvictedIsClosedThroughTheClos
         t.Fatalf("override: %v", overrideErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -266,7 +266,7 @@ func TestRegisterOptionsCloser_AnOverrideOfATypeTheCloserDoesNotTakeIsClosedThro
         t.Fatalf("override: %v", overrideErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -302,7 +302,7 @@ func TestRegisterOptionsCloser_AnOverrideOfTheTypeTheCloserTakesIsClosedThroughT
         t.Fatalf("override: %v", overrideErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -404,7 +404,7 @@ func TestRegisterOptionsCloser_AValueBuiltByTypeWhileCloseRanIsClosedThroughTheC
 
     <-providerStarted
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 

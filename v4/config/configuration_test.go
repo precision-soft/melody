@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "errors"
     "fmt"
     "io"
@@ -21,7 +22,7 @@ import (
 func TestConfigurationDefaultsAndTemplateResolution(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -59,7 +60,7 @@ func TestConfigurationEnvironmentOverridesDefaultsWhenNonEmpty(t *testing.T) {
         },
     }
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -81,7 +82,7 @@ func TestConfigurationEnvironmentOverridesDefaultsWhenNonEmpty(t *testing.T) {
 func TestConfigurationMustGetMissingPanics(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -103,7 +104,7 @@ func TestConfigurationMustGetMissingPanics(t *testing.T) {
 func TestConfigurationRegisterRuntimeValidationPanics(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -148,7 +149,7 @@ func TestConfigurationRegisterRuntimeValidationPanics(t *testing.T) {
 func TestConfigurationRegisterRuntime_SuccessfullyRegisters(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -173,7 +174,7 @@ func TestConfigurationRegisterRuntime_SuccessfullyRegisters(t *testing.T) {
 func TestConfigurationRegisterRuntime_PreBootTemplateIsDeferredThenResolves(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{"APP_URL": "https://example.test"}}
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -212,7 +213,7 @@ func TestConfigurationRegisterRuntime_PreBootTemplateIsDeferredThenResolves(t *t
 /* a percent the scan treats as data carries no template, so the value is its own resolved form and a module may read it before boot */
 func TestConfigurationRegisterRuntime_PreBootLiteralPercentIsReadable(t *testing.T) {
     for _, literal := range []string{"Coverage 95%", "a%2Fb", "50% off"} {
-        environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{}})
+        environment, err := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{}})
         if nil != err {
             t.Fatalf("new environment error: %v", err)
         }
@@ -240,7 +241,7 @@ func TestConfigurationRegisterRuntime_PreBootLiteralPercentIsReadable(t *testing
 
 /* the doubled percent is a template construct: the raw value is not the resolved one, so it stays deferred until the boot pass folds it */
 func TestConfigurationRegisterRuntime_PreBootDoubledPercentIsDeferredThenResolves(t *testing.T) {
-    environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{}})
+    environment, err := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{}})
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -273,7 +274,7 @@ func TestConfigurationRegisterRuntime_PreBootDoubledPercentIsDeferredThenResolve
 
 /* a %name% reference registered before the parameter it names is the case the deferral exists for: refused until boot, settled by the batch resolution whichever order the composition root registered in */
 func TestConfigurationRegisterRuntime_PreBootParameterReferenceIsDeferredThenResolves(t *testing.T) {
-    environment, err := NewEnvironment(&testEnvironmentSource{values: map[string]string{}})
+    environment, err := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{}})
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -309,7 +310,7 @@ func TestConfigurationRegisterRuntime_PreBootParameterReferenceIsDeferredThenRes
 func TestConfigurationRegisterRuntime_ConcurrentCallsDoNotPanic(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -341,7 +342,7 @@ func TestConfigurationRegisterRuntime_ConcurrentCallsDoNotPanic(t *testing.T) {
 func TestConfiguration_ConcurrentRegisterAndReadIsRaceFree(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -385,7 +386,7 @@ func TestConfiguration_ConcurrentRegisterAndReadIsRaceFree(t *testing.T) {
 func TestRegisterRuntimeAddsValue(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
-    environment, err := NewEnvironment(source)
+    environment, err := NewEnvironment(context.Background(), source)
     if nil != err {
         t.Fatalf("new environment error: %v", err)
     }
@@ -436,7 +437,7 @@ func TestConfiguration_EscapedPercentLiteralDoesNotFailValidation(t *testing.T) 
         CliDescriptionKey: "%%APP_NAME%% stays literal",
     }}
 
-    environment, environmentErr := NewEnvironment(source)
+    environment, environmentErr := NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("new environment error: %v", environmentErr)
     }
@@ -456,7 +457,7 @@ func TestConfiguration_EscapedPercentLiteralDoesNotFailValidation(t *testing.T) 
 func TestRegisterRuntime_AfterResolveResolvesTheTemplate(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{"MAIL_HOST": "smtp.example.com"}}
 
-    environment, environmentErr := NewEnvironment(source)
+    environment, environmentErr := NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
@@ -481,7 +482,7 @@ func TestRegisterRuntime_AfterResolveResolvesTheTemplate(t *testing.T) {
 func TestRegisterRuntime_BeforeBootLeavesAForwardReferenceForTheBootPass(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{}}
 
-    environment, environmentErr := NewEnvironment(source)
+    environment, environmentErr := NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
@@ -961,7 +962,7 @@ func TestConfigurationTeardownTimeoutRejectsAValueBelowTheMinimum(t *testing.T) 
     for _, value := range []string{"-1s", "0", "999us"} {
         source := &testEnvironmentSource{values: map[string]string{TeardownTimeoutKey: value}}
 
-        environment, environmentErr := NewEnvironment(source)
+        environment, environmentErr := NewEnvironment(context.Background(), source)
         if nil != environmentErr {
             t.Fatalf("new environment error: %v", environmentErr)
         }
@@ -984,7 +985,7 @@ func TestConfigurationTeardownTimeoutReadsUnlimitedAsNoDeadline(t *testing.T) {
 func TestConfigurationTeardownTimeoutRejectsAnUnparsableValue(t *testing.T) {
     source := &testEnvironmentSource{values: map[string]string{TeardownTimeoutKey: "soon"}}
 
-    environment, environmentErr := NewEnvironment(source)
+    environment, environmentErr := NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("new environment error: %v", environmentErr)
     }
@@ -998,7 +999,7 @@ func TestConfigurationTeardownTimeoutRejectsAnUnparsableValue(t *testing.T) {
 func newTeardownTimeoutConfiguration(t *testing.T, values map[string]string) *Configuration {
     t.Helper()
 
-    environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: values})
+    environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: values})
     if nil != environmentErr {
         t.Fatalf("new environment error: %v", environmentErr)
     }
@@ -1038,7 +1039,7 @@ func TestConfigurationContainerCreationWaitersIsReadFromTheEnvironment(t *testin
 
 func TestConfigurationContainerCreationWaitersRejectsAValueBelowTheMinimumNamingTheKey(t *testing.T) {
     for _, value := range []string{"-1", "0", "soon"} {
-        environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: map[string]string{ContainerCreationWaitersKey: value}})
+        environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{ContainerCreationWaitersKey: value}})
         if nil != environmentErr {
             t.Fatalf("new environment error: %v", environmentErr)
         }
@@ -1076,7 +1077,7 @@ func TestConfigurationContainerTeardownSequentialIsUnsetWhenLeftOutAndReadFromTh
 }
 
 func TestConfigurationContainerTeardownSequentialRejectsAValueThatIsNoBooleanNamingTheKey(t *testing.T) {
-    environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: map[string]string{ContainerTeardownSequentialKey: "sometimes"}})
+    environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{ContainerTeardownSequentialKey: "sometimes"}})
     if nil != environmentErr {
         t.Fatalf("new environment error: %v", environmentErr)
     }
@@ -1112,7 +1113,7 @@ func TestConfigurationScopeTeardownTimeoutIsAbsentWhenLeftOutAndReadFromTheEnvir
 
 func TestConfigurationScopeTeardownTimeoutRejectsAValueOutsideItsRuleNamingTheKey(t *testing.T) {
     for _, value := range []string{"-1s", "0s", "soon"} {
-        environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: map[string]string{ScopeTeardownTimeoutKey: value}})
+        environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{ScopeTeardownTimeoutKey: value}})
         if nil != environmentErr {
             t.Fatalf("new environment error: %v", environmentErr)
         }
@@ -1151,7 +1152,7 @@ func TestConfigurationSessionEmptyOnOutageIsASwitch(t *testing.T) {
         t.Fatalf("expected the kernel alias to carry the value")
     }
 
-    environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: map[string]string{HttpSessionEmptyOnOutageKey: "maybe"}})
+    environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{HttpSessionEmptyOnOutageKey: "maybe"}})
     if nil != environmentErr {
         t.Fatalf("new environment error: %v", environmentErr)
     }
@@ -1175,7 +1176,7 @@ func TestConfigurationStaticEnableCacheReadsAnEmptyLineAsUnset(t *testing.T) {
         }
     }
 
-    environment, environmentErr := NewEnvironment(&testEnvironmentSource{values: map[string]string{StaticEnableCacheKey: "maybe"}})
+    environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: map[string]string{StaticEnableCacheKey: "maybe"}})
     if nil != environmentErr {
         t.Fatalf("new environment error: %v", environmentErr)
     }

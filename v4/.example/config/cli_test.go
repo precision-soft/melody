@@ -35,7 +35,7 @@ func TestRegisterCliCommands_HandsTheTotpCodeCommandTheStandardInput(t *testing.
     t.Cleanup(func() { os.Stdin = standardInput })
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     instant := time.Date(2026, time.November, 16, 12, 0, 0, 0, time.UTC)
     melodycontainer.MustRegister(containerInstance, melodyclock.ServiceClock, func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {

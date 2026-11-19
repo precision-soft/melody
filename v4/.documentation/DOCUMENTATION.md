@@ -189,7 +189,7 @@ Functions, types, and errors should be grouped consistently within the package�
 ### Constructors vs retrieval helpers (strict separation)
 
 - Constructors (`NewXxx`, factories) are documented alongside their associated types.
-- Retrieval helpers such as `XxxFromContainer`, `MustXxxFromContainer`, `XxxFromScope`, `XxxFromRuntime`
+- Retrieval helpers such as `XxxFromResolver`, `XxxMustFromResolver`, `XxxFromRuntime`
   are not constructors and must be documented in a dedicated section (for example: “Container / Scope / Runtime access”).
 
 If a feature can be both constructed and retrieved from container/scope/runtime, document both approaches.

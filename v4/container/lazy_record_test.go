@@ -1,6 +1,7 @@
 package container
 
 import (
+    "context"
     "errors"
     "fmt"
     goruntime "runtime"
@@ -236,7 +237,7 @@ func TestVerifyLazyNames_RefusesUnderTheSequentialTeardown(t *testing.T) {
 func TestVerifyLazyNames_AClosedContainerRefusesTheDoor(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

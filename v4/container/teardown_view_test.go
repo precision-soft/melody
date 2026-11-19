@@ -128,7 +128,7 @@ func TestContainer_TeardownPlan_AServiceFiledUnderItsNameAndTypeHoldingItselfLis
             t.Fatalf("round %d: expected a service holding itself to be ordered against nothing, got %v", round, entries[0].Dependencies)
         }
 
-        if closeErr := serviceContainer.Close(); nil != closeErr {
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
             t.Fatalf("round %d: unexpected close error: %v", round, closeErr)
         }
     }
@@ -150,7 +150,7 @@ func TestContainer_VerifyDeclaredTeardownDependencies_RefusesAClosedContainer(t 
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 

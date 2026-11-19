@@ -9,6 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/security/totp"
@@ -116,8 +117,8 @@ func (instance *TotpSecondFactorAuthenticator) Supports(request httpcontract.Req
     return instance.primary.Supports(request)
 }
 
-func (instance *TotpSecondFactorAuthenticator) Authenticate(request httpcontract.Request) (securitycontract.Token, error) {
-    token, authenticateErr := instance.primary.Authenticate(request)
+func (instance *TotpSecondFactorAuthenticator) Authenticate(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+    token, authenticateErr := instance.primary.Authenticate(runtimeInstance, request)
     if nil != authenticateErr {
         return nil, authenticateErr
     }
@@ -131,8 +132,6 @@ func (instance *TotpSecondFactorAuthenticator) Authenticate(request httpcontract
         return token, nil
     }
 
-    runtimeInstance := request.RuntimeInstance()
-
     secret, enrolled, findErr := instance.enrollments.FindTotpSecret(runtimeInstance, token.UserIdentifier())
     if nil != findErr {
         return nil, storeFailure("could not look up two-factor enrollment", findErr)
@@ -144,10 +143,10 @@ func (instance *TotpSecondFactorAuthenticator) Authenticate(request httpcontract
 
     code := request.Header(instance.codeHeaderName)
     if "" != code {
-        return instance.authenticateWithTotpCode(request, token, secret, code)
+        return instance.authenticateWithTotpCode(runtimeInstance, request, token, secret, code)
     }
 
-    if redeemed, supplied, recoveryErr := instance.tryRecoveryCode(request, token); nil != recoveryErr {
+    if redeemed, supplied, recoveryErr := instance.tryRecoveryCode(runtimeInstance, request, token); nil != recoveryErr {
         return nil, recoveryErr
     } else if true == redeemed {
         return token, nil
@@ -161,6 +160,7 @@ func (instance *TotpSecondFactorAuthenticator) Authenticate(request httpcontract
 
 /* authenticateWithTotpCode verifies a supplied TOTP code and, on success, enforces single use through the replay guard before authenticating. A wrong or replayed code yields a rejected pending token so the caller re-prompts and the refusal is announced as a login failure. */
 func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
+    runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
     token securitycontract.Token,
     secret string,
@@ -175,7 +175,7 @@ func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
         return NewTwoFactorRejectedToken(token), nil
     }
 
-    if reused, replayErr := instance.codeAlreadyUsed(request, token.UserIdentifier(), code); nil != replayErr {
+    if reused, replayErr := instance.codeAlreadyUsed(runtimeInstance, token.UserIdentifier(), code); nil != replayErr {
         return nil, replayErr
     } else if true == reused {
         return NewTwoFactorRejectedToken(token), nil
@@ -186,6 +186,7 @@ func (instance *TotpSecondFactorAuthenticator) authenticateWithTotpCode(
 
 /* tryRecoveryCode redeems a single-use recovery code supplied on the recovery header when the enrollment store implements TwoFactorRecoveryStore, and reports whether one was accepted and consumed and whether one was supplied. A store without that door answers neither: the header is not read, so the caller answers the plain challenge rather than the rejected form. The store enforces single use atomically, so no replay-guard entry is recorded. */
 func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
+    runtimeInstance runtimecontract.Runtime,
     request httpcontract.Request,
     token securitycontract.Token,
 ) (bool, bool, error) {
@@ -200,7 +201,7 @@ func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
     }
 
     redeemed, redeemErr := recoveryStore.RedeemRecoveryCode(
-        request.RuntimeInstance(),
+        runtimeInstance,
         token.UserIdentifier(),
         recoveryCode,
     )
@@ -213,13 +214,13 @@ func (instance *TotpSecondFactorAuthenticator) tryRecoveryCode(
 
 /* codeAlreadyUsed records an accepted code through the replay guard and reports whether it was already used within its validity window. It relies on the constructor always installing a guard, so a literal without one fails loudly instead of disabling replay protection. The nonce keys on the normalized code, as Verify compares it, so a captured code cannot be replayed by re-spacing it. */
 func (instance *TotpSecondFactorAuthenticator) codeAlreadyUsed(
-    request httpcontract.Request,
+    runtimeInstance runtimecontract.Runtime,
     userIdentifier string,
     code string,
 ) (bool, error) {
     nonce := "2fa:" + userIdentifier + ":" + totp.NormalizeCode(code)
 
-    seen, rememberErr := instance.replayGuard.Remember(request.RuntimeInstance(), nonce, bound.Of(instance.codeValidityWindow))
+    seen, rememberErr := instance.replayGuard.Remember(runtimeInstance, nonce, bound.Of(instance.codeValidityWindow))
     if nil != rememberErr {
         return false, storeFailure("two-factor replay guard failed", rememberErr)
     }

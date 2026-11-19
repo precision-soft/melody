@@ -51,17 +51,17 @@ func TestCacheServiceResolvers_HappyPath(t *testing.T) {
         t.Fatalf("register cache error: %v", err)
     }
 
-    resolvedBackend := CacheBackendMustFromContainer(t.Context(), serviceContainer)
+    resolvedBackend := CacheBackendMustFromResolver(t.Context(), serviceContainer)
     if nil == resolvedBackend {
         t.Fatalf("expected backend")
     }
 
-    resolvedSerializer := CacheSerializerMustFromContainer(t.Context(), serviceContainer)
+    resolvedSerializer := CacheSerializerMustFromResolver(t.Context(), serviceContainer)
     if nil == resolvedSerializer {
         t.Fatalf("expected serializer")
     }
 
-    resolvedCache := CacheMustFromContainer(t.Context(), serviceContainer)
+    resolvedCache := CacheMustFromResolver(t.Context(), serviceContainer)
     if nil == resolvedCache {
         t.Fatalf("expected cache")
     }

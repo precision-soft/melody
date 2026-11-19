@@ -53,7 +53,7 @@ type stubAuthenticationEnvironmentSource struct {
     values map[string]string
 }
 
-func (instance *stubAuthenticationEnvironmentSource) Load() (map[string]string, error) {
+func (instance *stubAuthenticationEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return instance.values, nil
 }
 
@@ -82,7 +82,7 @@ func loginRuntimeForEnvironmentRecordingFailures(t *testing.T, environmentName s
         },
     }
 
-    environment, environmentErr := melodyconfig.NewEnvironment(source)
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), source)
     if nil != environmentErr {
         t.Fatalf("new environment: %v", environmentErr)
     }
@@ -1220,7 +1220,7 @@ func TestLoginHandler_AnswersAnUnavailableSecondFactorStoreWith503RetryAfterAndO
 
 type strangerTokenAuthenticator struct{}
 
-func (instance *strangerTokenAuthenticator) Authenticate(request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+func (instance *strangerTokenAuthenticator) Authenticate(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
     return melodysecurity.NewAuthenticatedToken("user-9", []string{"ROLE_USER"}, nil), nil
 }
 
@@ -1361,8 +1361,8 @@ func landingPageRouter() *melodyhttp.Router {
         return nil, nil
     }
 
-    router.HandleWithOptions(route.ProductsListPagePattern, landingPage, melodyhttp.RouteOptions{Name: route.ProductsListPageName, Methods: []string{"GET"}})
-    router.HandleWithOptions(route.CataloguePagePattern, landingPage, melodyhttp.RouteOptions{Name: route.CataloguePageName, Methods: []string{"GET"}})
+    router.Handle(route.ProductsListPagePattern, landingPage, melodyhttp.RouteOptions{Name: route.ProductsListPageName, Methods: []string{"GET"}})
+    router.Handle(route.CataloguePagePattern, landingPage, melodyhttp.RouteOptions{Name: route.CataloguePageName, Methods: []string{"GET"}})
 
     return router
 }

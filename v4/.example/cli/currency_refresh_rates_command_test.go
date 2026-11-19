@@ -70,7 +70,7 @@ func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(
     t.Cleanup(func() { _ = client.CloseWithContext(context.Background()) })
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return melodylogging.NewNopLogger(), nil

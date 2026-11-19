@@ -20,6 +20,7 @@ import (
     melodyruntime "github.com/precision-soft/melody/v4/runtime"
     melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
+    melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -176,4 +177,23 @@ func mustSession(sessionInstance melodysessioncontract.Session, sessionErr error
     }
 
     return sessionInstance
+}
+
+/* withItsRuntime hands a door the request together with the runtime the request carries */
+func withItsRuntime(request melodyhttpcontract.Request) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
+    if nil == request {
+        return nil, nil
+    }
+
+    return request.RuntimeInstance(), request
+}
+
+/* resolveToken answers the resolver's token; the example's resolver answers its outages through the unavailable token, so an error is a defect of the test */
+func resolveToken(resolver melodysecuritycontract.TokenResolver, request melodyhttpcontract.Request) melodysecuritycontract.Token {
+    token, resolveErr := resolver(withItsRuntime(request))
+    if nil != resolveErr {
+        panic(resolveErr)
+    }
+
+    return token
 }

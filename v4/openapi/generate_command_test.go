@@ -28,7 +28,7 @@ import (
 type commandEmptyEnvironmentSource struct {
 }
 
-func (instance *commandEmptyEnvironmentSource) Load() (map[string]string, error) {
+func (instance *commandEmptyEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return map[string]string{}, nil
 }
 
@@ -37,7 +37,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpe
     t.Helper()
 
     router := melodyhttp.NewRouter()
-    router.HandleWithOptions(
+    router.Handle(
         "/products/api/create/",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
@@ -45,7 +45,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpe
         melodyhttp.RouteOptions{Name: "products.create", Methods: []string{"POST"}},
     )
 
-    environment, environmentErr := config.NewEnvironment(&commandEmptyEnvironmentSource{})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &commandEmptyEnvironmentSource{})
     if nil != environmentErr {
         t.Fatalf("new environment: %v", environmentErr)
     }
@@ -482,7 +482,7 @@ var _ loggingcontract.Logger = (*recordingOpenApiLogger)(nil)
 type commandStdoutJournalEnvironmentSource struct {
 }
 
-func (instance *commandStdoutJournalEnvironmentSource) Load() (map[string]string, error) {
+func (instance *commandStdoutJournalEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return map[string]string{config.LogPathKey: ""}, nil
 }
 
@@ -492,7 +492,7 @@ func TestGenerateCommand_AStdoutJournalDoesNotCarryTheWarningAheadOfTheDocument(
 
     withoutInfo := newCommandFixtureRuntime(t, projectDirectory, true, false)
 
-    environment, environmentErr := config.NewEnvironment(&commandStdoutJournalEnvironmentSource{})
+    environment, environmentErr := config.NewEnvironment(context.Background(), &commandStdoutJournalEnvironmentSource{})
     if nil != environmentErr {
         t.Fatalf("new environment: %v", environmentErr)
     }

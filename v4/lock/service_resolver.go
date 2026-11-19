@@ -10,10 +10,6 @@ import (
 
 const ServiceLocker = "service.lock.locker"
 
-func LockerMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) lockcontract.Locker {
-    return container.MustFromResolver[lockcontract.Locker](ctx, serviceContainer, ServiceLocker)
-}
-
 func LockerMustFromResolver(ctx context.Context, resolver containercontract.Resolver) lockcontract.Locker {
     return container.MustFromResolver[lockcontract.Locker](ctx, resolver, ServiceLocker)
 }

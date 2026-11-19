@@ -7,16 +7,16 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
-func TestValidatorFromContainer_ReturnsNilWhenMissing(t *testing.T) {
+func TestValidatorFromResolver_ReturnsNilWhenMissing(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    validatorInstance := ValidatorFromContainer(t.Context(), serviceContainer)
+    validatorInstance := ValidatorFromResolver(t.Context(), serviceContainer)
     if nil != validatorInstance {
         t.Fatalf("expected nil")
     }
 }
 
-func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
+func TestValidatorMustFromResolver_PanicsWhenMissing(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     defer func() {
@@ -25,10 +25,10 @@ func TestValidatorMustFromContainer_PanicsWhenMissing(t *testing.T) {
         }
     }()
 
-    _ = ValidatorMustFromContainer(t.Context(), serviceContainer)
+    _ = ValidatorMustFromResolver(t.Context(), serviceContainer)
 }
 
-func TestValidatorFromContainer_AnswersTheRegisteredValidator(t *testing.T) {
+func TestValidatorFromResolver_AnswersTheRegisteredValidator(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registeredValidator := NewValidator(ValidatorConfig{})
@@ -44,11 +44,11 @@ func TestValidatorFromContainer_AnswersTheRegisteredValidator(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    if registeredValidator != ValidatorFromContainer(t.Context(), serviceContainer) {
+    if registeredValidator != ValidatorFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the registered validator to be handed back")
     }
 
-    if registeredValidator != ValidatorMustFromContainer(t.Context(), serviceContainer) {
+    if registeredValidator != ValidatorMustFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the must resolver to hand back the same instance")
     }
 }

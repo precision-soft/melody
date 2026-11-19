@@ -350,7 +350,7 @@ func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
                 values[key] = value
             }
 
-            environment, err := config.NewEnvironment(
+            environment, err := config.NewEnvironment(context.Background(), 
                 &testEnvironmentSource{
                     values: values,
                 },

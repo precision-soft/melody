@@ -16,7 +16,7 @@ import (
 
 func TestWelcomeEmailDispatchHandler_AnswersWithoutATransport503NamingTheKey(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/messagebus/dispatch", nil), nil, runtimeInstance, melodyhttp.NewRequestContext("dispatch-test", time.Now()))

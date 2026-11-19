@@ -45,7 +45,7 @@ func userUpdateUnderTest(t *testing.T) (*deleteCountingCache, melodyruntimecontr
     cacheInstance := &deleteCountingCache{Cache: manager, deletes: map[string]int{}}
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(
         containerInstance,
         melodycache.ServiceCache,

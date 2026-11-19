@@ -28,7 +28,6 @@ Translation is opt-in. Like the message bus, it is not wired by the application 
     - [`NewJsonDirectoryLoader`](../../translation/json_loader.go)
 - Provide container resolver helpers:
     - [`ServiceTranslator`](../../translation/service_resolver.go)
-    - [`TranslatorMustFromContainer`](../../translation/service_resolver.go)
     - [`TranslatorMustFromResolver`](../../translation/service_resolver.go)
 
 ## Locale resolution
@@ -81,7 +80,7 @@ func buildTranslator() *translation.Manager {
 From a handler, resolve the service and translate with the request locale:
 
 ```go
-translator := translation.TranslatorMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+translator := translation.TranslatorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
 greeting := translator.Trans("greeting", map[string]any{"name": "Ada"}, "messages", "ro")
 ```
@@ -129,5 +128,4 @@ The example application wires a translator (`config/translation.go`) and exposes
 ### Container helpers (`translation`)
 
 - [`const ServiceTranslator`](../../translation/service_resolver.go)
-- [`TranslatorMustFromContainer(context.Context, containercontract.Container) translationcontract.Translator`](../../translation/service_resolver.go)
 - [`TranslatorMustFromResolver(context.Context, containercontract.Resolver) translationcontract.Translator`](../../translation/service_resolver.go)

@@ -18,7 +18,7 @@ import (
 
 func TestSpecificationHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
     router := melodyhttp.NewRouter()
-    router.HandleWithOptions(
+    router.Handle(
         "/products/api/create/",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil

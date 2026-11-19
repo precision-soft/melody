@@ -100,14 +100,16 @@ type doorAuthenticator struct {
     unsupported bool
     token       securitycontract.Token
     err         error
+    runtimes    []runtimecontract.Runtime
 }
 
 func (instance *doorAuthenticator) Supports(request httpcontract.Request) bool {
     return false == instance.unsupported
 }
 
-func (instance *doorAuthenticator) Authenticate(request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *doorAuthenticator) Authenticate(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     instance.calls++
+    instance.runtimes = append(instance.runtimes, runtimeInstance)
 
     return instance.token, instance.err
 }
@@ -130,13 +132,13 @@ type countingDecisionManager struct {
     calls int
 }
 
-func (instance *countingDecisionManager) DecideAll(token securitycontract.Token, attributes []string, subject any) error {
+func (instance *countingDecisionManager) DecideAll(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
     instance.calls++
 
     return nil
 }
 
-func (instance *countingDecisionManager) DecideAny(token securitycontract.Token, attributes []string, subject any) error {
+func (instance *countingDecisionManager) DecideAny(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
     instance.calls++
 
     return nil
@@ -552,7 +554,7 @@ func TestLogoutDoor_EndsTheSessionEvenWhenTheHandlerDidNot(t *testing.T) {
     fixture := newDoorFixture(t, nil)
 
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
-    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
+    sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
     live := mustSession(sessionManager.NewSession(context.Background()))
     live.Set("identity", "u1")
@@ -611,7 +613,7 @@ func TestLogoutDoor_AFailedSuccessListenerStillEndsTheSession(t *testing.T) {
     }, 0)
 
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
-    sessionManager := session.SessionMustFromContainer(t.Context(), serviceContainer)
+    sessionManager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
     live := mustSession(sessionManager.NewSession(context.Background()))
     live.Set("identity", "u1")
@@ -1021,7 +1023,7 @@ func serveDoorUnderRequestContext(t *testing.T, requestContext context.Context, 
     if nil != wrap {
         serviceContainer.MustOverrideProtectedInstance(
             session.ServiceSessionManager,
-            wrap(session.SessionMustFromContainer(t.Context(), serviceContainer)),
+            wrap(session.SessionMustFromResolver(t.Context(), serviceContainer)),
             container.OverrideOptions{},
         )
     }
@@ -1283,7 +1285,7 @@ func TestLogoutDoor_EndsTheSessionItsHandlerRotated(t *testing.T) {
     fixture.logout.rotate = true
 
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
-    manager := session.SessionMustFromContainer(t.Context(), serviceContainer)
+    manager := session.SessionMustFromResolver(t.Context(), serviceContainer)
 
     stored, mintErr := manager.NewSession(context.Background())
     if nil != mintErr {
@@ -1538,7 +1540,7 @@ func newStoredLogoutSession(t *testing.T, fixture *doorFixture, failures int) *s
 
     serviceContainer := servedSecurityContainer(t, fixture.kernel, fixture.logger)
     manager := &deleteFailingSessionManager{
-        Manager:  session.SessionMustFromContainer(t.Context(), serviceContainer),
+        Manager:  session.SessionMustFromResolver(t.Context(), serviceContainer),
         failures: failures,
         err:      exception.MarkInfrastructureFailure(exception.NewError("session store is down", nil, nil)),
     }
@@ -1671,5 +1673,21 @@ func TestLogoutDoor_AFailedFailureListenerKeepsTheStoragesAnswer(t *testing.T) {
 
     if 1 != fixture.recordsAt(loggingcontract.LevelError, "security logout failure event dispatch failed") {
         t.Fatalf("expected the listener's failure logged once")
+    }
+}
+
+func TestLoginDoor_HandsItsRuntimeToTheAuthenticator(t *testing.T) {
+    authenticator := &doorAuthenticator{token: NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)}
+
+    fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
+        config.LoginAuthenticator = authenticator
+    })
+
+    if recorder := fixture.serve(t, nethttp.MethodPost, doorLoginPath, nil); nethttp.StatusOK != recorder.Code {
+        t.Fatalf("expected 200, got %d", recorder.Code)
+    }
+
+    if 1 != len(authenticator.runtimes) || nil == authenticator.runtimes[0] {
+        t.Fatalf("expected the authenticator handed the door's runtime, got %v", authenticator.runtimes)
     }
 }

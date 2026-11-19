@@ -9,6 +9,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/exception"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
 )
 
@@ -17,7 +18,7 @@ func TestService_OriginAllowed_CaseInsensitiveExactMatch(t *testing.T) {
         AllowOrigins: []string{"http://Example.COM"},
     })
 
-    if false == service.OriginAllowed("http://example.com") {
+    if false == service.OriginAllowed(nil, "http://example.com") {
         t.Fatalf("expected case-insensitive match for origin")
     }
 }
@@ -27,7 +28,7 @@ func TestService_OriginAllowed_CaseInsensitiveExactMatch_Reversed(t *testing.T) 
         AllowOrigins: []string{"http://example.com"},
     })
 
-    if false == service.OriginAllowed("http://Example.COM") {
+    if false == service.OriginAllowed(nil, "http://Example.COM") {
         t.Fatalf("expected case-insensitive match for origin with uppercase request")
     }
 }
@@ -37,7 +38,7 @@ func TestService_OriginAllowed_NoMatchForDifferentOrigin(t *testing.T) {
         AllowOrigins: []string{"http://example.com"},
     })
 
-    if true == service.OriginAllowed("http://other.com") {
+    if true == service.OriginAllowed(nil, "http://other.com") {
         t.Fatalf("expected no match for different origin")
     }
 }
@@ -47,7 +48,7 @@ func TestService_OriginAllowed_WildcardMatchesAll(t *testing.T) {
         AllowOrigins: []string{"*"},
     })
 
-    if false == service.OriginAllowed("http://anything.example.com") {
+    if false == service.OriginAllowed(nil, "http://anything.example.com") {
         t.Fatalf("expected wildcard to match any origin")
     }
 }
@@ -57,11 +58,11 @@ func TestService_OriginAllowed_SubdomainWildcard(t *testing.T) {
         AllowOrigins: []string{"*.example.com"},
     })
 
-    if false == service.OriginAllowed("http://api.example.com") {
+    if false == service.OriginAllowed(nil, "http://api.example.com") {
         t.Fatalf("expected subdomain wildcard to match")
     }
 
-    if true == service.OriginAllowed("http://api.other.com") {
+    if true == service.OriginAllowed(nil, "http://api.other.com") {
         t.Fatalf("expected subdomain wildcard not to match different domain")
     }
 }
@@ -71,15 +72,15 @@ func TestService_OriginAllowed_SchemeQualifiedSubdomainWildcard(t *testing.T) {
         AllowOrigins: []string{"https://*.example.com"},
     })
 
-    if false == service.OriginAllowed("https://sub.example.com") {
+    if false == service.OriginAllowed(nil, "https://sub.example.com") {
         t.Fatalf("expected scheme-qualified wildcard to match same scheme and subdomain")
     }
 
-    if true == service.OriginAllowed("http://sub.example.com") {
+    if true == service.OriginAllowed(nil, "http://sub.example.com") {
         t.Fatalf("expected scheme-qualified wildcard not to match on scheme mismatch")
     }
 
-    if true == service.OriginAllowed("https://sub.evil.com") {
+    if true == service.OriginAllowed(nil, "https://sub.evil.com") {
         t.Fatalf("expected scheme-qualified wildcard not to match a different suffix")
     }
 }
@@ -90,25 +91,51 @@ func TestService_OriginAllowed_ExplicitlyEmptyOriginListDeniesEveryOrigin(t *tes
         AllowOrigins: []string{},
     })
 
-    if true == service.OriginAllowed("http://example.com") {
+    if true == service.OriginAllowed(nil, "http://example.com") {
         t.Fatalf("expected an explicitly empty allow list to deny every origin")
     }
 }
 
-func TestService_OriginAllowed_AllowOriginFunc(t *testing.T) {
+func corsTestRequest(host string) httpcontract.Request {
+    request := httptest.NewRequest(nethttp.MethodGet, "http://"+host+"/x", nil)
+
+    return testhelper.NewHttpTestRequestFromHttpRequest(request)
+}
+
+func TestService_OriginAllowed_HandsTheRequestToAllowOrigin(t *testing.T) {
+    var seenRequest httpcontract.Request
     service := NewService(Config{
-        AllowOriginFunc: func(origin string) bool {
-            return "http://custom.com" == origin
+        AllowOrigin: func(request httpcontract.Request, origin string) bool {
+            seenRequest = request
+
+            return "http://custom.com" == origin && "tenant.example.com" == request.HttpRequest().Host
         },
     })
 
-    if false == service.OriginAllowed("http://custom.com") {
-        t.Fatalf("expected custom func to allow origin")
+    tenantRequest := corsTestRequest("tenant.example.com")
+    if false == service.OriginAllowed(tenantRequest, "http://custom.com") || tenantRequest != seenRequest {
+        t.Fatalf("expected the function to decide on the request it was handed")
     }
 
-    if true == service.OriginAllowed("http://other.com") {
-        t.Fatalf("expected custom func to deny origin")
+    if true == service.OriginAllowed(corsTestRequest("other.example.com"), "http://custom.com") {
+        t.Fatalf("expected one origin refused on another host")
     }
+
+    if true == service.OriginAllowed(tenantRequest, "http://other.com") {
+        t.Fatalf("expected the function to deny the origin")
+    }
+}
+
+func TestService_OriginAllowed_RefusesANilRequestBesideAFunction(t *testing.T) {
+    service := NewService(Config{AllowOrigin: func(request httpcontract.Request, origin string) bool { return true }})
+
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected a nil request refused")
+        }
+    }()
+
+    service.OriginAllowed(nil, "http://custom.com")
 }
 
 func TestNewService_PanicsWhenCredentialsWithWildcard(t *testing.T) {
@@ -137,7 +164,7 @@ func TestNewService_DoesNotPanicWhenCredentialsWithSpecificOrigin(t *testing.T) 
     })
 }
 
-func TestNewService_DoesNotPanicWhenCredentialsWithAllowOriginFunc(t *testing.T) {
+func TestNewService_DoesNotPanicWhenCredentialsWithAllowOrigin(t *testing.T) {
     defer func() {
         if nil != recover() {
             t.Fatalf("did not expect panic when AllowCredentials is true with an allow origin func")
@@ -146,16 +173,16 @@ func TestNewService_DoesNotPanicWhenCredentialsWithAllowOriginFunc(t *testing.T)
 
     service := NewService(Config{
         AllowCredentials: true,
-        AllowOriginFunc: func(origin string) bool {
+        AllowOrigin: func(request httpcontract.Request, origin string) bool {
             return "https://example.com" == origin
         },
     })
 
-    if false == service.OriginAllowed("https://example.com") {
+    if false == service.OriginAllowed(corsTestRequest("example.com"), "https://example.com") {
         t.Fatalf("expected the allow origin func to decide the origin")
     }
 
-    if true == service.OriginAllowed("https://other.com") {
+    if true == service.OriginAllowed(corsTestRequest("example.com"), "https://other.com") {
         t.Fatalf("expected the allow origin func to deny the origin")
     }
 }
@@ -189,17 +216,17 @@ func TestNewService_AdmitsTheSchemelessEntryOutsideCredentials(t *testing.T) {
         AllowOrigins:     []string{"https://secure.example.com", "https://*.example.net", "http://localhost:8080", "HTTPS://upper.example.com"},
         AllowCredentials: true,
     })
-    if false == credentialed.OriginAllowed("https://secure.example.com") {
+    if false == credentialed.OriginAllowed(nil, "https://secure.example.com") {
         t.Fatalf("expected the scheme-qualified entry admitted")
     }
 
     withoutCredentials := NewService(Config{AllowOrigins: []string{"example.com"}})
-    if false == withoutCredentials.OriginAllowed("http://example.com") {
+    if false == withoutCredentials.OriginAllowed(nil, "http://example.com") {
         t.Fatalf("expected the schemeless entry to admit any scheme without credentials")
     }
 }
 
-func TestNewService_PanicsWhenCredentialsWithoutOriginsOrAllowOriginFunc(t *testing.T) {
+func TestNewService_PanicsWhenCredentialsWithoutOriginsOrAllowOrigin(t *testing.T) {
     defer func() {
         if nil == recover() {
             t.Fatalf("expected panic when AllowCredentials is true without origins and without an allow origin func")
@@ -255,7 +282,7 @@ func TestNewService_NilHeaderAndMethodListsTakeTheDefaultLists(t *testing.T) {
 func TestNewService_TheZeroConfigIsTheDefaultService(t *testing.T) {
     service := NewService(Config{})
 
-    if false == service.OriginAllowed("https://any.example.com") {
+    if false == service.OriginAllowed(nil, "https://any.example.com") {
         t.Fatalf("expected the zero config to allow every origin")
     }
 
@@ -290,7 +317,7 @@ func TestNewService_AnEmptyMethodOrHeaderListStaysTheExpressedPreference(t *test
 func TestService_NilAllowOriginsKeepsThePermissiveDefault(t *testing.T) {
     service := NewService(Config{})
 
-    if false == service.OriginAllowed("http://anything.test") {
+    if false == service.OriginAllowed(nil, "http://anything.test") {
         t.Fatalf("expected a nil allow list to keep the permissive wildcard default")
     }
 }
@@ -315,11 +342,11 @@ func TestService_SchemelessEntryIsPortSignificant(t *testing.T) {
         AllowOrigins: []string{"app.example.com"},
     })
 
-    if false == service.OriginAllowed("https://app.example.com") {
+    if false == service.OriginAllowed(nil, "https://app.example.com") {
         t.Fatalf("expected the portless origin to match the portless entry")
     }
 
-    if true == service.OriginAllowed("https://app.example.com:8443") {
+    if true == service.OriginAllowed(nil, "https://app.example.com:8443") {
         t.Fatalf("expected a ported origin not to match the portless entry")
     }
 }
@@ -329,15 +356,15 @@ func TestService_PortedSchemelessEntryMatchesOnlyThatPort(t *testing.T) {
         AllowOrigins: []string{"app.example.com:8443"},
     })
 
-    if false == service.OriginAllowed("https://app.example.com:8443") {
+    if false == service.OriginAllowed(nil, "https://app.example.com:8443") {
         t.Fatalf("expected the ported origin to match the ported entry")
     }
 
-    if true == service.OriginAllowed("https://app.example.com") {
+    if true == service.OriginAllowed(nil, "https://app.example.com") {
         t.Fatalf("expected the portless origin not to match the ported entry")
     }
 
-    if true == service.OriginAllowed("https://app.example.com:9000") {
+    if true == service.OriginAllowed(nil, "https://app.example.com:9000") {
         t.Fatalf("expected a different port not to match the ported entry")
     }
 }
@@ -347,11 +374,11 @@ func TestService_WildcardEntriesArePortSignificant(t *testing.T) {
         AllowOrigins: []string{"*.example.com"},
     })
 
-    if false == service.OriginAllowed("http://api.example.com") {
+    if false == service.OriginAllowed(nil, "http://api.example.com") {
         t.Fatalf("expected the portless subdomain to match the wildcard")
     }
 
-    if true == service.OriginAllowed("http://api.example.com:8080") {
+    if true == service.OriginAllowed(nil, "http://api.example.com:8080") {
         t.Fatalf("expected a ported subdomain not to match the portless wildcard")
     }
 
@@ -359,11 +386,11 @@ func TestService_WildcardEntriesArePortSignificant(t *testing.T) {
         AllowOrigins: []string{"https://*.example.com:8443"},
     })
 
-    if false == portedService.OriginAllowed("https://sub.example.com:8443") {
+    if false == portedService.OriginAllowed(nil, "https://sub.example.com:8443") {
         t.Fatalf("expected the ported subdomain to match the ported scheme wildcard")
     }
 
-    if true == portedService.OriginAllowed("https://sub.example.com") {
+    if true == portedService.OriginAllowed(nil, "https://sub.example.com") {
         t.Fatalf("expected the portless subdomain not to match the ported scheme wildcard")
     }
 }
@@ -375,11 +402,11 @@ func TestRestrictiveService_PairsCredentialsWithTheNamedOrigins(t *testing.T) {
         t.Fatalf("expected the restrictive service to allow credentials")
     }
 
-    if false == service.OriginAllowed("https://app.example.com") {
+    if false == service.OriginAllowed(nil, "https://app.example.com") {
         t.Fatalf("expected the named origin to be allowed")
     }
 
-    if true == service.OriginAllowed("https://other.example.com") {
+    if true == service.OriginAllowed(nil, "https://other.example.com") {
         t.Fatalf("expected an origin the caller did not name to be refused")
     }
 
@@ -461,7 +488,7 @@ func TestService_SliceAccessorsHandOutACopy(t *testing.T) {
     service.AllowHeaders()[0] = "Authorization"
     service.ExposeHeaders()[0] = "X-Other"
 
-    if true == service.OriginAllowed("https://attacker.example") {
+    if true == service.OriginAllowed(nil, "https://attacker.example") {
         t.Fatalf("expected a mutation of the returned allow list not to reach the policy")
     }
 
@@ -632,7 +659,7 @@ func TestService_ApplyPreflightHeaders_APositiveMaxAgeIsAdvertised(t *testing.T)
 }
 
 func TestNewService_RefusesAnOriginListItWouldNotReadWhole(t *testing.T) {
-    allowEverything := func(origin string) bool { return true }
+    allowEverything := func(request httpcontract.Request, origin string) bool { return true }
 
     cases := map[string]struct {
         config  Config
@@ -653,10 +680,10 @@ func TestNewService_RefusesAnOriginListItWouldNotReadWhole(t *testing.T) {
             0,
         },
         "list beside the func": {
-            Config{AllowOrigins: []string{"https://app.example.com"}, AllowOriginFunc: allowEverything},
-            "cors misconfiguration: allowOrigins is never read beside allowOriginFunc, which answers every origin alone",
+            Config{AllowOrigins: []string{"https://app.example.com"}, AllowOrigin: allowEverything},
+            "cors misconfiguration: allowOrigins is never read beside allowOrigin, which answers every origin alone",
             "fields",
-            "[Config.AllowOrigins Config.AllowOriginFunc]",
+            "[Config.AllowOrigins Config.AllowOrigin]",
         },
         "wildcard beside an entry": {
             Config{AllowOrigins: []string{"https://app.example.com", " * "}},
@@ -689,15 +716,15 @@ func TestNewService_RefusesAnOriginListItWouldNotReadWhole(t *testing.T) {
 }
 
 func TestNewService_AdmitsTheWildcardAloneAndTheFuncAlone(t *testing.T) {
-    if false == NewService(Config{AllowOrigins: []string{"*"}}).OriginAllowed("https://any.example.com") {
+    if false == NewService(Config{AllowOrigins: []string{"*"}}).OriginAllowed(nil, "https://any.example.com") {
         t.Fatalf("expected the wildcard alone to admit every origin")
     }
 
     withFunction := NewService(Config{
-        AllowOrigins:    []string{},
-        AllowOriginFunc: func(origin string) bool { return "https://example.com" == origin },
+        AllowOrigins: []string{},
+        AllowOrigin:  func(request httpcontract.Request, origin string) bool { return "https://example.com" == origin },
     })
-    if false == withFunction.OriginAllowed("https://example.com") {
+    if false == withFunction.OriginAllowed(corsTestRequest("example.com"), "https://example.com") {
         t.Fatalf("expected the origin func beside an empty list to decide")
     }
 }

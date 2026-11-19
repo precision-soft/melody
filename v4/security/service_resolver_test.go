@@ -186,13 +186,13 @@ func TestSecurityContextFromRuntime_AnswersNotFoundOnAnEmptyScope(t *testing.T) 
 }
 
 /* the soft container reader answers nil rather than panicking when the firewall manager was never registered, which is what lets a caller decide instead of dying */
-func TestFirewallManagerFromContainer_AnswersNilWhenUnregistered(t *testing.T) {
-    if nil != FirewallManagerFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{})) {
+func TestFirewallManagerFromResolver_AnswersNilWhenUnregistered(t *testing.T) {
+    if nil != FirewallManagerFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{})) {
         t.Fatalf("expected nil when no firewall manager is registered")
     }
 }
 
-func TestFirewallManagerFromContainer_AnswersTheRegisteredManager(t *testing.T) {
+func TestFirewallManagerFromResolver_AnswersTheRegisteredManager(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     manager := NewFirewallManager(NewCompiledConfiguration(nil, nil))
@@ -208,28 +208,27 @@ func TestFirewallManagerFromContainer_AnswersTheRegisteredManager(t *testing.T) 
         t.Fatalf("unexpected error: %v", registerErr)
     }
 
-    if manager != FirewallManagerFromContainer(t.Context(), serviceContainer) {
+    if manager != FirewallManagerFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the registered firewall manager to be answered")
     }
 
-    if manager != FirewallManagerMustFromContainer(t.Context(), serviceContainer) {
+    if manager != FirewallManagerMustFromResolver(t.Context(), serviceContainer) {
         t.Fatalf("expected the strict reader to answer the registered firewall manager")
     }
 }
 
 /* the strict reader is the boot-time one: it panics rather than handing back a nil the caller would dereference later */
-func TestFirewallManagerMustFromContainer_PanicsWhenUnregistered(t *testing.T) {
+func TestFirewallManagerMustFromResolver_PanicsWhenUnregistered(t *testing.T) {
     defer func() {
         if nil == recover() {
             t.Fatalf("expected the strict reader to panic when no firewall manager is registered")
         }
     }()
 
-    _ = FirewallManagerMustFromContainer(t.Context(), container.NewContainer(container.ContainerConfig{}))
+    _ = FirewallManagerMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}))
 }
 
-/* the Resolver-taking pair exists only on v3, where a scoped service reads the firewall manager through the scope it was built in rather than through the container: the container doors above answer a Container, and a Scope is not one. */
-func TestFirewallManagerFromResolver_AnswersNilWhenUnregistered(t *testing.T) {
+func TestFirewallManagerFromResolver_AnswersNilWhenUnregisteredThroughAScope(t *testing.T) {
     if nil != FirewallManagerFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()) {
         t.Fatalf("expected nil when no firewall manager is registered")
     }
@@ -263,7 +262,7 @@ func TestFirewallManagerFromResolver_AnswersTheRegisteredManagerThroughAScope(t 
 }
 
 /* the strict reader is the boot-time one: it panics rather than handing back a nil the caller would dereference later */
-func TestFirewallManagerMustFromResolver_PanicsWhenUnregistered(t *testing.T) {
+func TestFirewallManagerMustFromResolver_PanicsWhenUnregisteredThroughAScope(t *testing.T) {
     defer func() {
         if nil == recover() {
             t.Fatalf("expected the strict reader to panic when no firewall manager is registered")

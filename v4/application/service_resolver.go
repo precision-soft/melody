@@ -12,10 +12,6 @@ import (
 /* ServiceProcessRole resolves to the process role string (config.RoleWeb, config.RoleWorker or config.RoleAll) so services can gate background work without reaching back to the application instance. */
 const ServiceProcessRole = "service.application.process_role"
 
-func ProcessRoleMustFromContainer(ctx context.Context, serviceContainer containercontract.Container) string {
-    return container.MustFromResolver[string](ctx, serviceContainer, ServiceProcessRole)
-}
-
 func ProcessRoleMustFromResolver(ctx context.Context, resolver containercontract.Resolver) string {
     return container.MustFromResolver[string](ctx, resolver, ServiceProcessRole)
 }

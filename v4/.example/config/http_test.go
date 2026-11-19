@@ -195,7 +195,7 @@ func TestRegisterHttpRoutes_PutsTheBackendSpendingDoorsBehindTheWriteBudget(t *t
 
     router := melodyhttp.NewRouter()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
 
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
@@ -266,7 +266,7 @@ func TestRegisterHttpRoutes_RegistersEachNamedDoorUnderItsPatternAndMethod(t *te
 
     router := melodyhttp.NewRouter()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
 
     doors := []struct {
@@ -329,7 +329,7 @@ func TestRegisterHttpRoutes_HoldsTheIssueDoorToTheConfiguredBoundAndTheRevokeDoo
 
     router := melodyhttp.NewRouter()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(containerInstance, melodyrueidis.ServiceTokenStore, func(resolver melodycontainercontract.Resolver) (melodysecuritycontract.EpochRevocableTokenStore, error) {
         return melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{}), nil
     }, melodycontainer.RegisterOptions{})

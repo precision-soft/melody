@@ -1,6 +1,7 @@
 package cron
 
 import (
+    "context"
     "errors"
     "fmt"
     "os"
@@ -18,14 +19,14 @@ type stubEnvironmentSource struct {
     values map[string]string
 }
 
-func (instance *stubEnvironmentSource) Load() (map[string]string, error) {
+func (instance *stubEnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
     return instance.values, nil
 }
 
 func newDeclaringConfiguration(t *testing.T, values map[string]string, defaults KeyDefaults) *melodyconfig.Configuration {
     t.Helper()
 
-    environment, environmentErr := melodyconfig.NewEnvironment(&stubEnvironmentSource{values: values})
+    environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), &stubEnvironmentSource{values: values})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }

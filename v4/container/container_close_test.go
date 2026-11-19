@@ -70,7 +70,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByServiceName(t *tes
         t.Fatalf("unexpected get error: %v", err)
     }
 
-    err = serviceContainer.Close()
+    err = serviceContainer.CloseWithContext(context.Background())
     if nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
@@ -135,7 +135,7 @@ func TestContainer_TheSequentialCloseOrderInterleavesTheWaves(t *testing.T) {
         }
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -204,7 +204,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByTypeResolution(t *
         t.Fatalf("unexpected get by type error: %v", err)
     }
 
-    err = serviceContainer.Close()
+    err = serviceContainer.CloseWithContext(context.Background())
     if nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
@@ -254,7 +254,7 @@ func TestContainer_Close_ValueTypeServiceClosedOnce(t *testing.T) {
     _ = MustFromResolver[valueCloser](t.Context(), serviceContainer, "value.closer")
     _ = MustFromResolverByType[valueCloser](t.Context(), serviceContainer)
 
-    if err := serviceContainer.Close(); nil != err {
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
 
@@ -299,7 +299,7 @@ func TestContainer_Close_ValueTypeServiceWithUnhashableContentDoesNotPanicAndClo
     _ = MustFromResolver[unhashableValueCloser](t.Context(), serviceContainer, "unhashable.value.closer")
     _ = MustFromResolverByType[unhashableValueCloser](t.Context(), serviceContainer)
 
-    if err := serviceContainer.Close(); nil != err {
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
 
@@ -344,7 +344,7 @@ func TestContainer_Close_NonComparableValueTypeServiceClosedOnce(t *testing.T) {
     _ = MustFromResolver[nonComparableValueCloser](t.Context(), serviceContainer, "non.comparable.value.closer")
     _ = MustFromResolverByType[nonComparableValueCloser](t.Context(), serviceContainer)
 
-    if err := serviceContainer.Close(); nil != err {
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
 
@@ -400,7 +400,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_NamedServiceDependsB
         t.Fatalf("unexpected get error: %v", err)
     }
 
-    err = serviceContainer.Close()
+    err = serviceContainer.CloseWithContext(context.Background())
     if nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
@@ -541,7 +541,7 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
         t.Fatalf("unexpected get error: %v", err)
     }
 
-    err = serviceContainer.Close()
+    err = serviceContainer.CloseWithContext(context.Background())
     if nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
@@ -599,7 +599,7 @@ func TestContainer_Close_OverrideProtectedInstanceWithTypeRegistrationDisabledCl
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    if err := serviceContainer.Close(); nil != err {
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
 
@@ -629,14 +629,14 @@ func TestClose_ConcurrentCallersShareTheResult(t *testing.T) {
 
     firstDone := make(chan error, 1)
     go func() {
-        firstDone <- serviceContainer.Close()
+        firstDone <- serviceContainer.CloseWithContext(context.Background())
     }()
 
     <-closeObserved
 
     secondDone := make(chan error, 1)
     go func() {
-        secondDone <- serviceContainer.Close()
+        secondDone <- serviceContainer.CloseWithContext(context.Background())
     }()
 
     select {
@@ -721,7 +721,7 @@ func TestContainer_Close_PanickingServiceCloseIsRecordedAndSiblingsStillClose(t 
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the panicking Close to surface as a close failure")
     }
@@ -744,7 +744,7 @@ func TestContainer_Close_PanickingServiceCloseIsRecordedAndSiblingsStillClose(t 
         t.Fatalf("expected the sibling service to still close after the panic, got %v", closeSequence)
     }
 
-    repeatedErr := serviceContainer.Close()
+    repeatedErr := serviceContainer.CloseWithContext(context.Background())
     if closeErr != repeatedErr {
         t.Fatalf("expected a repeated Close to report the same teardown error, got %v and %v", closeErr, repeatedErr)
     }
@@ -781,7 +781,7 @@ func TestContainer_Close_PanickingErrorMessageIsContainedAndRecorded(t *testing.
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the panicking error message to surface as a close failure")
     }
@@ -800,7 +800,7 @@ func TestContainer_Close_PanickingErrorMessageIsContainedAndRecorded(t *testing.
         t.Fatalf("expected the contained panic message, got %+v", failures)
     }
 
-    repeatedErr := serviceContainer.Close()
+    repeatedErr := serviceContainer.CloseWithContext(context.Background())
     if closeErr != repeatedErr {
         t.Fatalf("expected a repeated Close to report the same teardown error, got %v and %v", closeErr, repeatedErr)
     }
@@ -852,7 +852,7 @@ func TestContainer_Close_DistinctZeroSizeServicesEachClose(t *testing.T) {
     _ = MustFromResolver[*zeroSizeCloserOne](t.Context(), serviceContainer, "zero.size.one")
     _ = MustFromResolver[*zeroSizeCloserTwo](t.Context(), serviceContainer, "zero.size.two")
 
-    if err := serviceContainer.Close(); nil != err {
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
 
@@ -924,7 +924,7 @@ func TestContainer_Close_FirstFieldPointerAliasEachClose(t *testing.T) {
     _ = MustFromResolver[*firstFieldOuterCloser](t.Context(), serviceContainer, "first.field.outer")
     _ = MustFromResolver[*firstFieldInnerCloser](t.Context(), serviceContainer, "first.field.inner")
 
-    if err := serviceContainer.Close(); nil != err {
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
 
@@ -974,7 +974,7 @@ func TestContainer_Close_DistinctServicesOfOneZeroSizeTypeEachClose(t *testing.T
     _ = MustFromResolver[*sameTypeZeroSizeCloser](t.Context(), serviceContainer, "same.type.zero.size.first")
     _ = MustFromResolver[*sameTypeZeroSizeCloser](t.Context(), serviceContainer, "same.type.zero.size.second")
 
-    if err := serviceContainer.Close(); nil != err {
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
 
@@ -1009,7 +1009,7 @@ func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
 
     _ = MustFromResolver[*sameTypeZeroSizeCloser](t.Context(), serviceContainer, "zero.size.alias")
 
-    if err := serviceContainer.Close(); nil != err {
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
 
@@ -1069,7 +1069,7 @@ func TestContainer_Close_ReplacedBuiltInstanceIsClosed(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1151,7 +1151,7 @@ func TestContainer_Close_TwoFailingReplacedInstancesAreBothRecorded(t *testing.T
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the two failing replaced closes to be reported")
     }
@@ -1215,7 +1215,7 @@ func TestContainer_Close_ReplacedOverrideIsNotClosed(t *testing.T) {
         t.Fatalf("unexpected override error: %v", secondOverrideErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1261,7 +1261,7 @@ func TestContainer_Close_CycleFailureNamesTheNodes(t *testing.T) {
     serviceContainer.registerDependencyLocked("service:app.cycle.second", "service:app.cycle.first")
     serviceContainer.mutex.Unlock()
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the failing close to be reported")
     }
@@ -1299,7 +1299,7 @@ func TestContainerIsClosed_FlipsExactlyAtClose(t *testing.T) {
         t.Fatalf("expected a fresh container to report not closed")
     }
 
-    if closeErr := containerInstance.Close(); nil != closeErr {
+    if closeErr := containerInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1367,7 +1367,7 @@ func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptReso
         t.Fatalf("expected the lazy handle to resolve the service")
     }
 
-    if err := serviceContainer.Close(); nil != err {
+    if err := serviceContainer.CloseWithContext(context.Background()); nil != err {
         t.Fatalf("unexpected close error: %v", err)
     }
 
@@ -1443,7 +1443,7 @@ func TestContainer_Close_CarriesTheFailureDetailsOfAPanickingCloseBesideItsLine(
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the panicking close to be reported")
     }
@@ -1474,7 +1474,7 @@ func TestContainer_Close_AFailureThatSaysNothingBeyondItsLineAddsNoDetailsMap(t 
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
 
     var typedError *exception.Error
     if false == errors.As(closeErr, &typedError) {
@@ -1515,7 +1515,7 @@ func TestContainer_Close_TheDuplicateDropTakesOnlyTheSeededMessage(t *testing.T)
     }
 
     var typedError *exception.Error
-    if false == errors.As(serviceContainer.Close(), &typedError) {
+    if false == errors.As(serviceContainer.CloseWithContext(context.Background()), &typedError) {
         t.Fatalf("expected a melody error")
     }
 
@@ -1571,7 +1571,7 @@ func TestContainer_Close_TheRecoveredValueOfAPanickingCloseIsBounded(t *testing.
     }
 
     var typedError *exception.Error
-    if false == errors.As(serviceContainer.Close(), &typedError) {
+    if false == errors.As(serviceContainer.CloseWithContext(context.Background()), &typedError) {
         t.Fatalf("expected a melody error")
     }
 
@@ -1620,7 +1620,7 @@ func TestContainer_Close_TheFramesOfAPanickingCloseAreBounded(t *testing.T) {
     }
 
     var typedError *exception.Error
-    if false == errors.As(serviceContainer.Close(), &typedError) {
+    if false == errors.As(serviceContainer.CloseWithContext(context.Background()), &typedError) {
         t.Fatalf("expected a melody error")
     }
 
@@ -1658,7 +1658,7 @@ func TestContainer_Close_ACloseErrorWhoseUnwrapPanicsDoesNotEndTheTeardown(t *te
     }
 
     var typedError *exception.Error
-    if false == errors.As(serviceContainer.Close(), &typedError) {
+    if false == errors.As(serviceContainer.CloseWithContext(context.Background()), &typedError) {
         t.Fatalf("expected the failed close to be reported rather than ending the process")
     }
 
@@ -1755,7 +1755,7 @@ func TestContainer_Close_ClosesTheEarliestCreatedServiceLast(t *testing.T) {
             t.Fatalf("unexpected get error: %v", getErr)
         }
 
-        if closeErr := serviceContainer.Close(); nil != closeErr {
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
             t.Fatalf("unexpected close error: %v", closeErr)
         }
 
@@ -1809,7 +1809,7 @@ func TestContainer_Close_ADeclaredEdgeIsHonoured(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1870,7 +1870,7 @@ func TestContainer_Close_AServiceStillResolvesDuringTheTeardown(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1903,7 +1903,7 @@ func TestContainer_Get_RefusesAfterTheTeardownFinished(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1943,7 +1943,7 @@ func TestContainer_GetByType_RefusesAfterTheTeardownFinished(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -1990,7 +1990,7 @@ func TestScope_Get_RefusesAfterTheContainerTeardownFinished(t *testing.T) {
         t.Fatalf("unexpected warm get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2049,7 +2049,7 @@ func TestContainer_Close_AnEvictedOverrideAfterABuiltInstanceIsNotClosed(t *test
         t.Fatalf("unexpected override error: %v", secondOverrideErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2108,7 +2108,7 @@ func TestContainer_Close_ADeclaredTeardownDependencyBeatsTheCreationOrder(t *tes
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2156,7 +2156,7 @@ func TestContainer_Close_TheCreationOrderAloneClosesTheDependencyFirst(t *testin
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2201,7 +2201,7 @@ func TestContainer_Close_ADeclaredTeardownDependencyOnAnUnbuiltServiceIsDropped(
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2291,7 +2291,7 @@ func TestContainer_Close_ASharedDependencyWaitsForEveryDependent(t *testing.T) {
         t.Fatalf("expected the second handle to resolve the shared service")
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2360,7 +2360,7 @@ func TestContainer_Close_AnAliasGroupIsAsOldAsItsOldestMember(t *testing.T) {
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2417,7 +2417,7 @@ func TestContainer_Close_TheCycleRemainderClosesLatestFirst(t *testing.T) {
     serviceContainer.registerDependencyLocked("service:app.cycle.late", "service:app.cycle.early")
     serviceContainer.mutex.Unlock()
 
-    if closeErr := serviceContainer.Close(); nil == closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil == closeErr {
         t.Fatalf("expected the dependency cycle to be reported")
     }
 
@@ -2528,7 +2528,7 @@ func TestContainer_Close_ReachesTheContextTakingDoorWithoutADeadline(t *testing.
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -2603,7 +2603,7 @@ func TestContainer_Close_WavesTheServicesOfOneWaveCloseAtOnce(t *testing.T) {
 
     registerWaveMatePair(t, serviceContainer, time.Second)
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected both services of the wave to be closing at the same moment, got: %v", closeErr)
     }
 }
@@ -2614,7 +2614,7 @@ func TestContainer_Close_SequentialTheServicesOfOneWaveCloseOneAfterTheOther(t *
 
     registerWaveMatePair(t, serviceContainer, 50*time.Millisecond)
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the serial teardown to report a service that waited for a mate that had not started")
     }
@@ -3061,7 +3061,7 @@ func TestContainer_Close_ADeclaredTeardownDependencyKeyedByTypeOrdersTheTeardown
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -3149,7 +3149,7 @@ func TestContainer_Close_ADeclarationOnAnAmbiguousTypeOrdersNothingAndReportsNoC
     registerAmbiguousTypeWiring(t, serviceContainer, recorder)
     buildEveryRegisteredService(t, serviceContainer, "app.fallback", "app.primary", "app.router")
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("a declaration on an ambiguous type reported a failure over a teardown that closed everything: %v", closeErr)
     }
 
@@ -3296,7 +3296,7 @@ func TestContainer_Close_WavesTheCycleRemainderClosesOneAfterTheOther(t *testing
 
     buildEveryRegisteredService(t, serviceContainer, "cycle.a", "cycle.b", "cycle.c")
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "dependency cycle detected") {
         t.Fatalf("expected the cycle to still be reported, got %v", closeErr)
     }
@@ -3336,7 +3336,7 @@ func TestContainer_Close_WavesEachRingClosesOneAfterTheOther(t *testing.T) {
 
     buildEveryRegisteredService(t, serviceContainer, "ring.a", "ring.b", "ring.e", "ring.f")
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if nil == closeErr || false == strings.Contains(closeErr.Error(), "dependency cycle detected") {
         t.Fatalf("expected the two rings to be reported, got %v", closeErr)
     }
@@ -3384,7 +3384,7 @@ func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
 
     writeDependencyRingEdge(t, serviceContainer, "cycle.b", "cycle.a")
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if nil == closeErr {
         t.Fatalf("expected the ring to be reported")
     }
@@ -3480,7 +3480,7 @@ func TestContainer_Close_WavesTheReplacedInstancesCloseOneAfterTheOther(t *testi
         }
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -3531,7 +3531,7 @@ func TestContainer_Close_WavesAMutuallyHeldPairClosesOneAfterTheOther(t *testing
 
     buildEveryRegisteredService(t, serviceContainer, "app.mutual.holder", "app.mutual.collaborator")
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -3590,7 +3590,7 @@ func TestContainer_Close_WavesTwoUnrelatedMutuallyHeldPairsCloseAtOnce(t *testin
         }
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected the two groups to be closing at the same moment, got: %v", closeErr)
     }
 }
@@ -3941,7 +3941,7 @@ func TestContainer_Close_WithoutADeadlineLeavesNoDeadlineRecord(t *testing.T) {
     serviceContainer.MustRegister("app.eater", func(_ containercontract.Resolver) (*budgetSleeper, error) { return &budgetSleeper{sleep: 20 * time.Millisecond, label: "eater"}, nil }, RegisterOptions{})
     MustFromResolver[*budgetSleeper](t.Context(), serviceContainer, "app.eater")
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -4043,7 +4043,7 @@ func TestContainer_ADeclarationOnATypeRefusesTheTypeResolutionClosingARing(t *te
         t.Fatalf("expected the type resolution closing the ring with the declaration refused, got %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected a clean teardown, got %v", closeErr)
     }
 }
@@ -4096,7 +4096,7 @@ func TestContainer_Close_WavesACapturedPointerBackAgainstATypeDeclarationIsNoRin
             }
         }
 
-        if closeErr := serviceContainer.Close(); nil != closeErr {
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
             t.Fatalf("byType=%v: expected a clean teardown in waves, got %v", byType, closeErr)
         }
     }
@@ -4176,7 +4176,7 @@ func TestContainer_Close_TheViewLeavesNoExpandedTypeEdgeBehindOnTheSequentialPat
 
     MustFromResolver[*sharedPoolService](t.Context(), serviceContainer, "app.pool.second")
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected a clean teardown once the declaration turned ambiguous, got %v", closeErr)
     }
 }
@@ -4259,7 +4259,7 @@ func TestContainerClose_ATypedNilCloseErrorIsReadAsASuccessfulClose(t *testing.T
         t.Fatalf("resolve: %v", resolveErr)
     }
 
-    if closeErr := containerInstance.Close(); nil != closeErr {
+    if closeErr := containerInstance.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected the typed nil to read as a successful close, got %v", closeErr)
     }
 
@@ -4359,7 +4359,7 @@ func TestContainer_Close_APanicValueWhoseRenderingPanicsIsRecordedInsteadOfEscap
 
     MustFromResolver[*doublyPanickingCloseService](t.Context(), serviceContainer, "service.doubly.panics")
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
 
     typedError, isTyped := closeErr.(*exception.Error)
     if false == isTyped {
@@ -4405,7 +4405,7 @@ func TestContainer_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClos
         t.Fatalf("expected the plan to hold no cycle, got %v", cycleNodeKeys)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected a clean teardown, got %v", closeErr)
     }
 
@@ -4441,7 +4441,7 @@ func TestContainer_ADeclaredEdgeRefusesTheLazyResolutionThatWouldCloseARing(t *t
                 t.Fatalf("expected the resolution closing the declared ring refused with ErrCircularDependency, got %v", resolveErr)
             }
 
-            if closeErr := serviceContainer.Close(); nil != closeErr {
+            if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
                 t.Fatalf("expected a clean teardown, got %v", closeErr)
             }
         })
@@ -4467,7 +4467,7 @@ func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
         t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("expected a clean teardown, got %v", closeErr)
     }
 
@@ -4753,7 +4753,7 @@ func TestContainer_DeclareTeardownDependency_OrdersAServiceAgainstOneItCaptured(
         t.Fatalf("unexpected declare error: %v", declareErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -4796,7 +4796,7 @@ func TestContainer_DeclareTeardownDependency_RefusesWhatTheOptionRefuses(t *test
         t.Fatalf("expected the verification to refuse a dependency nothing registered, got %v", verifyErr)
     }
 
-    if closeErr := serviceContainer.Close(); false == errors.Is(closeErr, ErrTeardownDependencyWasNeverRegistered) {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); false == errors.Is(closeErr, ErrTeardownDependencyWasNeverRegistered) {
         t.Fatalf("expected the teardown to report the dependency nothing registered, got %v", closeErr)
     }
 
@@ -4842,7 +4842,7 @@ func TestContainer_DeclareTeardownDependency_NilDeclaresNothingAndARefusedSliceR
                 t.Fatalf("expected %v, got %v", testCase.expectedCause, declareErr)
             }
 
-            if closeErr := serviceContainer.Close(); nil != closeErr {
+            if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
                 t.Fatalf("unexpected close error: %v", closeErr)
             }
 
@@ -4950,7 +4950,7 @@ func TestRegister_ACloseOnlyTypeIsAdmittedWithACloserAndClosedThroughIt(t *testi
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -4971,7 +4971,7 @@ func TestRegister_ATypeCarryingBothDoorsIsAdmittedAndClosedThroughTheContextDoor
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
     if 1 != service.contextCalls || 0 != service.plainCalls {
@@ -5043,7 +5043,7 @@ func TestResolve_ACloseOnlyValueBehindAnInterfaceProviderIsRefusedAtCreationAndC
         t.Fatalf("expected the refused value closed exactly once, got %d values", len(built))
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -5080,7 +5080,7 @@ func TestResolve_ACloseOnlyValueBehindAnInterfaceProviderIsAdmittedWhenTheCloser
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -5150,7 +5150,7 @@ func TestContainer_Close_ADanglingDeclarationClosesSequentiallyAndReportsTheRefu
     )
     MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if false == errors.Is(closeErr, ErrTeardownDependencyWasNeverRegistered) {
         t.Fatalf("expected the teardown to carry the refusal of the dangling declaration, got %v", closeErr)
     }
@@ -5177,7 +5177,7 @@ func TestContainer_Close_ADanglingDeclarationAloneIsTheAnswerAndEveryServiceClos
     MustFromResolver[*closeOrderServiceA](t.Context(), serviceContainer, "app.reporter")
     MustFromResolver[*closeOrderServiceB](t.Context(), serviceContainer, "app.storage")
 
-    closeErr := serviceContainer.Close()
+    closeErr := serviceContainer.CloseWithContext(context.Background())
     if false == errors.Is(closeErr, ErrTeardownDependencyWasNeverRegistered) {
         t.Fatalf("expected the refusal as the teardown's answer, got %v", closeErr)
     }
@@ -5205,7 +5205,7 @@ func TestContainer_TeardownSequential_AdmitsADanglingDeclaration(t *testing.T) {
 
     verifyDeclaredTeardownDependencies(t, serviceContainer)
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -5248,7 +5248,7 @@ func TestContainer_Register_AnOptionalTeardownDependencyOnARegisteredServiceOrde
                 t.Fatalf("expected the reporter ordered before the storage, got %v", dependencies)
             }
 
-            if closeErr := serviceContainer.Close(); nil != closeErr {
+            if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
                 t.Fatalf("unexpected close error: %v", closeErr)
             }
 
@@ -5280,7 +5280,7 @@ func TestContainer_VerifyDeclaredTeardownDependencies_AdmitsAnOptionalDependency
         t.Fatalf("expected the optional declarations to order nothing")
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
@@ -5375,7 +5375,7 @@ func TestContainer_VerifyDeclaredTeardownDependencies_RefusesAnOptionalDeclarati
             t.Fatalf("expected the verification to refuse the optional declaration on a scoped service, got %v", verifyErr)
         }
 
-        if closeErr := serviceContainer.Close(); false == errors.Is(closeErr, ErrTeardownDependencyIsScoped) {
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); false == errors.Is(closeErr, ErrTeardownDependencyIsScoped) {
             t.Fatalf("expected the teardown to report the optional declaration on a scoped service, got %v", closeErr)
         }
     }
@@ -5424,7 +5424,7 @@ func TestContainerClose_AClosersRegistrationDoesNotHangOnHowTheNamesOfOneInstanc
             }
         }
 
-        if closeErr := serviceContainer.Close(); nil != closeErr {
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
             t.Fatalf("names %v: unexpected close error: %v", names, closeErr)
         }
 
@@ -5525,12 +5525,12 @@ func closeAnEvictedInstanceHeldUnderASecondName(t *testing.T, config ContainerCo
         t.Fatalf("override: %v", overrideErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
-    if fmt.Sprint([]string{"override", "original"}) != fmt.Sprint(closed) {
-        t.Fatalf("expected the override then the evicted instance closed once each through the declared closer, got %v", closed)
+    if fmt.Sprint([]string{"original", "override"}) != fmt.Sprint(closed) {
+        t.Fatalf("expected the evicted instance closed at its live name's place, then the override, once each through the declared closer, got %v", closed)
     }
 }
 
@@ -5561,7 +5561,7 @@ func TestClose_ACollapsedNodeUsesTheCloserThatTakesItsValueWhateverTheNamesSort(
         t.Fatalf("override: %v", overrideErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -5612,7 +5612,7 @@ func TestClose_ADeclaredCloserWinsOverTheDoorASecondNameReachesTheValueBy(t *tes
         t.Fatalf("override: %v", overrideErr)
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -5647,7 +5647,7 @@ func TestClose_EachNameOfARelaxedTypeClosesThroughItsOwnCloser(t *testing.T) {
         }
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
@@ -5683,7 +5683,7 @@ func TestClose_ACollapsedNodeUsesTheCloserThatTakesItsValueInEitherSortOrder(t *
             t.Fatalf("%v: override: %v", names, overrideErr)
         }
 
-        if closeErr := serviceContainer.Close(); nil != closeErr {
+        if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
             t.Fatalf("%v: close: %v", names, closeErr)
         }
 
@@ -5731,11 +5731,76 @@ func TestClose_ANameWithoutACloserIsNotClosedThroughTheTypeNodesCloser(t *testin
         }
     }
 
-    if closeErr := serviceContainer.Close(); nil != closeErr {
+    if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
         t.Fatalf("close: %v", closeErr)
     }
 
     if fmt.Sprint([]string{"b"}) != fmt.Sprint(closedByB) {
         t.Fatalf("expected b's closer to close b alone, got %v", closedByB)
+    }
+}
+
+func TestClose_AnEvictedInstanceASecondNameHoldsClosesBeforeWhatItDependsOn(t *testing.T) {
+    for _, sequential := range []bool{false, true} {
+        t.Run(fmt.Sprintf("sequential=%v", sequential), func(t *testing.T) {
+            serviceContainer := NewContainer(ContainerConfig{TeardownSequential: sequential})
+            original := &closerlessService{name: "original"}
+
+            var bookMutex sync.Mutex
+            closed := make([]string, 0)
+            recordingCloser := NewCloser(func(_ context.Context, value *closerlessService) error {
+                bookMutex.Lock()
+                defer bookMutex.Unlock()
+
+                closed = append(closed, value.name)
+
+                return nil
+            })
+
+            MustRegister[*closerlessService](serviceContainer, "dependency", func(_ containercontract.Resolver) (*closerlessService, error) {
+                return &closerlessService{name: "dependency"}, nil
+            }, RegisterOptions{TypeRegistrationDisabled: true, Closer: recordingCloser})
+            MustRegister[*closerlessService](serviceContainer, "a", func(resolver containercontract.Resolver) (*closerlessService, error) {
+                if _, getErr := resolver.Get(t.Context(), "dependency"); nil != getErr {
+                    return nil, getErr
+                }
+
+                return original, nil
+            }, RegisterOptions{TypeRegistrationDisabled: true, Closer: recordingCloser})
+            MustRegister[*closerlessService](serviceContainer, "b", func(resolver containercontract.Resolver) (*closerlessService, error) {
+                value, getErr := resolver.Get(t.Context(), "a")
+                if nil != getErr {
+                    return nil, getErr
+                }
+
+                return value.(*closerlessService), nil
+            }, RegisterOptions{TypeRegistrationDisabled: true})
+
+            if _, getErr := serviceContainer.Get(t.Context(), "b"); nil != getErr {
+                t.Fatalf("build b: %v", getErr)
+            }
+
+            if overrideErr := serviceContainer.OverrideInstance("a", &closerlessService{name: "override"}, containercontract.OverrideOptions{}); nil != overrideErr {
+                t.Fatalf("override: %v", overrideErr)
+            }
+
+            if closeErr := serviceContainer.CloseWithContext(context.Background()); nil != closeErr {
+                t.Fatalf("close: %v", closeErr)
+            }
+
+            originalAt, dependencyAt := -1, -1
+            for index, name := range closed {
+                switch name {
+                case "original":
+                    originalAt = index
+                case "dependency":
+                    dependencyAt = index
+                }
+            }
+
+            if -1 == originalAt || -1 == dependencyAt || originalAt > dependencyAt || 3 != len(closed) {
+                t.Fatalf("expected the evicted instance closed once through the closer before what it depends on, got %v", closed)
+            }
+        })
     }
 }

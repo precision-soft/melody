@@ -710,9 +710,9 @@ func TestConfinedFileResponse_AServedRefusalAnswers404WithNoServerPathInTheBody(
     rootDirectory := t.TempDir()
 
     router := NewRouter()
-    router.Handle(nethttp.MethodGet, "/download", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    router.Handle("/download", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return ConfinedFileResponse(200, rootDirectory, request.HttpRequest().URL.Query().Get("name"))
-    })
+    }, RouteOptions{Methods: []string{nethttp.MethodGet}})
 
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), containercontract.OverrideOptions{})

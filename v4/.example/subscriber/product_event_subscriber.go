@@ -46,7 +46,7 @@ func (instance *ProductEventSubscriber) onProductCreated() melodyeventcontract.E
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
         productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
             service.CacheKeyProductById(payloadInstance.Product().Id),
@@ -81,7 +81,7 @@ func (instance *ProductEventSubscriber) onProductUpdated() melodyeventcontract.E
         }
 
         logger := melodylogging.LoggerMustFromRuntime(runtimeInstance)
-        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
         productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
             service.CacheKeyProductById(payloadInstance.Product().Id),
@@ -129,7 +129,7 @@ func (instance *ProductEventSubscriber) onProductDeleted() melodyeventcontract.E
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
 
         productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
             service.CacheKeyProductById(payloadInstance.ProductId()),

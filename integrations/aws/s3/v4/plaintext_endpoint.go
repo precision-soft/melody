@@ -109,7 +109,7 @@ func (instance *plaintextEndpointWarning) write(runtimeInstance runtimecontract.
 
 /* a storage used outside an application finds no configuration and writes; an http process refuses both keys at boot, so they only ever narrow what a command writes */
 func silencedByCliBootWarningKeys(runtimeInstance runtimecontract.Runtime) bool {
-    configuration, configurationErr := config.ConfigFromContainer(runtimeInstance.Context(), runtimeInstance.Container())
+    configuration, configurationErr := config.ConfigFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
     if nil != configurationErr || nil == configuration {
         return false
     }

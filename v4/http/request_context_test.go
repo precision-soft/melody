@@ -42,7 +42,6 @@ func TestRequestContext_ReachesTheHandlerThroughTheRequest(t *testing.T) {
 
     router := NewRouter()
     router.Handle(
-        nethttp.MethodGet,
         "/articles",
         func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             if nil != request.RequestContext() {
@@ -51,6 +50,7 @@ func TestRequestContext_ReachesTheHandlerThroughTheRequest(t *testing.T) {
 
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
+        RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     handler := NewKernel(router, KernelConfig{}).ServeHttp(newHttpTestContainer())

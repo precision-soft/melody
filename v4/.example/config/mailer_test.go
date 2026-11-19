@@ -129,7 +129,7 @@ func TestBuildMailer_WiresTheLogTransportWithoutAnAddress(t *testing.T) {
 
     logger := &mailRecordingLogger{Logger: melodylogging.NewNopLogger()}
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return logger, nil
     }, melodycontainer.RegisterOptions{})
@@ -211,7 +211,7 @@ func sendThroughBuiltMailer(t *testing.T, environment map[string]string) error {
     module.buildMailer()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    t.Cleanup(func() { _ = containerInstance.Close() })
+    t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return melodylogging.NewNopLogger(), nil
     }, melodycontainer.RegisterOptions{})

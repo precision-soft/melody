@@ -29,7 +29,6 @@ The event dispatcher is used by framework components (for example, the HTTP kern
     - [`NewEventDispatcherAdapter`](../../event/event_dispatcher_adapter.go)
 - Provide container resolver helpers:
     - [`ServiceEventDispatcher`](../../event/service_resolver.go)
-    - [`EventDispatcherMustFromContainer`](../../event/service_resolver.go)
     - [`EventDispatcherMustFromResolver`](../../event/service_resolver.go)
 
 ## Container integration
@@ -63,7 +62,7 @@ func dispatchProductCreated(
     serviceContainer containercontract.Container,
     productId string,
 ) {
-    dispatcher := event.EventDispatcherMustFromContainer(runtimeInstance.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), serviceContainer)
 
     _, dispatchErr := dispatcher.DispatchName(
         runtimeInstance,
@@ -164,5 +163,4 @@ A listener receives the event and writes to its payload, and the payload has no 
 ### Container helpers (`event`)
 
 - [`const ServiceEventDispatcher`](../../event/service_resolver.go)
-- [`EventDispatcherMustFromContainer(context.Context, containercontract.Container) eventcontract.EventDispatcher`](../../event/service_resolver.go)
 - [`EventDispatcherMustFromResolver(context.Context, containercontract.Resolver) eventcontract.EventDispatcher`](../../event/service_resolver.go)
