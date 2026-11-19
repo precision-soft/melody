@@ -164,7 +164,7 @@ func TestBootModuleEnvironmentKeys_TheDeclarationStandsOverAHandRegistrationInAP
         t.Fatalf("expected the hand registration recorded as the duplicate, got %+v", applicationInstance.bootCollisions)
     }
 
-    if "declared" != applicationInstance.configuration.Get("melody.x.text").EnvironmentValue() {
+    if "declared" != applicationInstance.configuration.Get("melody.x.text").String() {
         t.Fatalf("expected the declaration to stand")
     }
 }

@@ -1,103 +1,43 @@
 package config
 
 import (
+    "strings"
     "testing"
-
-    "github.com/precision-soft/melody/v4/logging"
 )
 
-func TestConfiguration_AddAliasedParameterFromEnvironment_SharesSinglePointerAcrossAliases(t *testing.T) {
-    configuration := &Configuration{
-        environment: nil,
-        parameters:  make(ParameterMap),
-        logger:      logging.NewDefaultLogger(logging.DefaultLoggerConfig{}),
+func TestFrameworkEnvironmentKeys_EachKeyFeedsOneKernelParameter(t *testing.T) {
+    keys := frameworkEnvironmentKeys()
+    if 33 != len(keys) || len(keys) != len(frameworkEnvironmentKeyIndex) {
+        t.Fatalf("expected 33 distinct framework keys, got %d listed and %d indexed", len(keys), len(frameworkEnvironmentKeyIndex))
     }
 
-    err := configuration.addAliasedParameterFromEnvironment(
-        []string{
-            "primaryKey",
-            "aliasKey",
-        },
-        "ENV_KEY",
-        "ENV_VALUE",
-    )
-    if nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
+    parameters := make(map[string]bool, len(keys))
+    for _, key := range keys {
+        if false == strings.HasPrefix(key.Key, environmentKeyNamespace) || false == strings.HasPrefix(key.Parameter, "kernel.") || key.Key != key.Field || nil != key.Rule {
+            t.Fatalf("unexpected framework declaration %+v", key)
+        }
 
-    primary := configuration.parameters["primaryKey"]
-    alias := configuration.parameters["aliasKey"]
-
-    if nil == primary || nil == alias {
-        t.Fatalf("expected both parameters to exist")
-    }
-
-    if primary != alias {
-        t.Fatalf("expected alias to point to the same parameter instance")
+        if true == parameters[key.Parameter] {
+            t.Fatalf("expected %s fed by one key", key.Parameter)
+        }
+        parameters[key.Parameter] = true
     }
 }
 
-func TestConfiguration_AddAliasedParameterFromEnvironment_SkipsWhatCannotBeNamed(t *testing.T) {
-    configuration := &Configuration{
-        environment: nil,
-        parameters:  make(ParameterMap),
-        logger:      logging.NewDefaultLogger(logging.DefaultLoggerConfig{}),
+func TestFrameworkEnvironmentKeys_AKeyIsOneParameterUnderBothNames_AnUndeclaredLineUnderItsOwn(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{EnvironmentNameKey: EnvironmentProduction, "APP_UNKNOWN_KEY": "x"})
+
+    byKey, byParameter := configuration.Get(EnvironmentNameKey), configuration.Get(KernelEnvironment)
+    if nil == byKey || byKey != byParameter || EnvironmentProduction != byParameter.String() {
+        t.Fatalf("expected one parameter under the key and the kernel name, got %v and %v", byKey, byParameter)
     }
 
-    if err := configuration.addAliasedParameterFromEnvironment(nil, "ENV_KEY", "ENV_VALUE"); nil != err {
-        t.Fatalf("unexpected error: %v", err)
+    if frameworkEnvironmentKeyOwner != configuration.declaredEnvironmentKeys[EnvironmentNameKey].owner {
+        t.Fatalf("expected the framework to own its key in the key table")
     }
 
-    if err := configuration.addAliasedParameterFromEnvironment([]string{}, "ENV_KEY", "ENV_VALUE"); nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-
-    if 0 != len(configuration.parameters) {
-        t.Fatalf("expected no parameter to be registered without a name, got %d", len(configuration.parameters))
-    }
-
-    if err := configuration.addAliasedParameterFromEnvironment([]string{"", "named"}, "ENV_KEY", "ENV_VALUE"); nil != err {
-        t.Fatalf("unexpected error: %v", err)
-    }
-
-    if 1 != len(configuration.parameters) {
-        t.Fatalf("expected only the spellable name to be registered, got %d", len(configuration.parameters))
-    }
-
-    if nil == configuration.parameters["named"] {
-        t.Fatalf("expected the named parameter to be registered")
-    }
-}
-
-func TestConfiguration_MapEnvironmentKeyToParameterNames_CollapsesTheBuiltInAliases(t *testing.T) {
-    configuration := &Configuration{
-        environment: nil,
-        parameters:  make(ParameterMap),
-        logger:      logging.NewDefaultLogger(logging.DefaultLoggerConfig{}),
-    }
-
-    names := configuration.mapEnvironmentKeyToParameterNames(EnvironmentNameKey)
-    if 2 != len(names) {
-        t.Fatalf("expected the built-in key to answer under both spellings, got %#v", names)
-    }
-
-    foundShort := false
-    foundKernel := false
-    for _, name := range names {
-        if EnvironmentNameKey == name {
-            foundShort = true
-        }
-        if KernelEnvironment == name {
-            foundKernel = true
-        }
-    }
-
-    if false == foundShort || false == foundKernel {
-        t.Fatalf("expected both the environment key and the kernel name, got %#v", names)
-    }
-
-    unknownNames := configuration.mapEnvironmentKeyToParameterNames("APP_UNKNOWN_KEY")
-    if 1 != len(unknownNames) || "APP_UNKNOWN_KEY" != unknownNames[0] {
-        t.Fatalf("expected an unknown key to answer under itself alone, got %#v", unknownNames)
+    unknown := configuration.Get("APP_UNKNOWN_KEY")
+    if nil == unknown || "x" != unknown.String() || "x" != unknown.Template() {
+        t.Fatalf("expected an undeclared line to answer under itself, holding its line, got %v", unknown)
     }
 }

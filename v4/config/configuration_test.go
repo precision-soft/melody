@@ -1186,3 +1186,26 @@ func TestConfigurationStaticEnableCacheReadsAnEmptyLineAsUnset(t *testing.T) {
         t.Fatalf("expected the value refused naming the key, got %v", configurationErr)
     }
 }
+
+func TestSecretKey_MarksReaderOfEnvPlaceholder(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_PASSWORD": "hunter2"})
+    configuration.RegisterRuntime("app.dsn", "amqp://user:%env(MELODY_X_PASSWORD)%@host")
+    mustDeclare(t, configuration, "x", secretKey())
+    mustResolve(t, configuration)
+
+    if false == configuration.Get("app.dsn").IsSecret() {
+        t.Fatalf("expected the reader of the secret key marked")
+    }
+}
+
+func TestSecretKey_MarksAReaderRegisteredAfterTheResolve(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_PASSWORD": "hunter2"})
+    mustDeclare(t, configuration, "x", secretKey())
+    mustResolve(t, configuration)
+
+    configuration.RegisterRuntime("app.late_dsn", "amqp://user:%env(MELODY_X_PASSWORD)%@host")
+
+    if false == configuration.Get("app.late_dsn").IsSecret() {
+        t.Fatalf("expected a reader registered after the resolve marked by the key it reads")
+    }
+}

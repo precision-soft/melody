@@ -16,7 +16,7 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
         ProcessRoleKey:               RoleAll,
         EnvironmentNameKey:           EnvironmentDevelopment,
         HttpAddressKey:               ":8080",
-        HttpMaxRequestBodyBytesKey:   1048576,
+        HttpMaxRequestBodyBytesKey:   "1048576",
         HttpSessionTtlKey:            DefaultSessionTtl.String(),
         HttpShutdownTimeoutKey:       DefaultHttpShutdownTimeout.String(),
         TeardownTimeoutKey:           "",
@@ -32,8 +32,8 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
         DefaultLocaleKey:             "en",
         PublicDirectoryKey:           "public",
         StaticIndexFileKey:           "index.html",
-        StaticEnableCacheKey:         true,
-        StaticCacheMaxAgeKey:         3600,
+        StaticEnableCacheKey:         "true",
+        StaticCacheMaxAgeKey:         "3600",
     } {
         parameter := configuration.Get(key)
         if nil == parameter {
@@ -99,5 +99,34 @@ func TestRegisterDefaultParameters_AnEnvironmentValueWinsOverTheDefault(t *testi
     /* a default the environment said nothing about is untouched by the two that were overridden */
     if "melody" != configuration.Get(CliNameKey).String() {
         t.Fatalf("expected the untouched default to survive, got %q", configuration.Get(CliNameKey).String())
+    }
+}
+
+func TestFrameworkDefault_IsTextAndReadsLikeASetKey(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{})
+
+    for name, expected := range map[string]int{
+        KernelHttpMaxRequestBodyBytes: 1048576,
+        KernelHttpSessionMaxSessions:  100000,
+        KernelStaticCacheMaxAge:       3600,
+    } {
+        parameter := configuration.Get(name)
+        if _, isText := parameter.Value().(string); false == isText {
+            t.Fatalf("%s: expected the default as text, got %T", name, parameter.Value())
+        }
+
+        intValue, intErr := parameter.Int()
+        if nil != intErr || expected != intValue {
+            t.Fatalf("%s: expected %d, got %d (%v)", name, expected, intValue, intErr)
+        }
+    }
+
+    enableCache := configuration.Get(KernelStaticEnableCache)
+    if _, isText := enableCache.Value().(string); false == isText {
+        t.Fatalf("expected the static cache switch default as text, got %T", enableCache.Value())
+    }
+
+    if boolValue, boolErr := enableCache.Bool(); nil != boolErr || true != boolValue {
+        t.Fatalf("expected true, got %v (%v)", boolValue, boolErr)
     }
 }

@@ -96,11 +96,11 @@ func TestRetiredEnvironmentKeyMap_EverySuccessorIsAFrameworkKey_NoRetiredSpellin
     }
 
     for retiredKey, successor := range retiredEnvironmentKeyMap {
-        if _, isFrameworkKey := environmentKeyAliasMap[successor]; false == isFrameworkKey {
+        if _, isFrameworkKey := frameworkEnvironmentKeyIndex[successor]; false == isFrameworkKey {
             t.Fatalf("expected the successor %s of %s a framework key", successor, retiredKey)
         }
 
-        if _, isFrameworkKey := environmentKeyAliasMap[retiredKey]; true == isFrameworkKey {
+        if _, isFrameworkKey := frameworkEnvironmentKeyIndex[retiredKey]; true == isFrameworkKey {
             t.Fatalf("expected the retired spelling %s no framework key", retiredKey)
         }
 

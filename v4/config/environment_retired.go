@@ -86,7 +86,7 @@ func refuseRetiredEnvironmentKeyShape(key configcontract.EnvironmentKey, context
         }
         seen[retiredKey] = true
 
-        if _, isFrameworkKey := environmentKeyAliasMap[retiredKey]; true == isFrameworkKey {
+        if _, isFrameworkKey := frameworkEnvironmentKeyIndex[retiredKey]; true == isFrameworkKey {
             context["owner"] = frameworkEnvironmentKeyOwner
 
             return exception.NewError("a module retired an environment key another owner holds", context, nil)

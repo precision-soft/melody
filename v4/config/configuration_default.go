@@ -3,104 +3,56 @@ package config
 import (
     "path/filepath"
 
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/internal"
-    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
 func (instance *Configuration) registerDefaultParameters(
     projectDirectory string,
 ) {
-    instance.setDefaultParameter(KernelProjectDirectory, projectDirectory)
-    instance.setDefaultParameter(KernelLogsDirectory, filepath.Join("%"+KernelProjectDirectory+"%", "var", "log"))
-    instance.setDefaultParameter(KernelCacheDirectory, filepath.Join("%"+KernelProjectDirectory+"%", "var", "cache"))
+    instance.registerKeylessParameter(KernelProjectDirectory, projectDirectory)
+    instance.registerKeylessParameter(KernelLogsDirectory, filepath.Join("%"+KernelProjectDirectory+"%", "var", "log"))
+    instance.registerKeylessParameter(KernelCacheDirectory, filepath.Join("%"+KernelProjectDirectory+"%", "var", "cache"))
 
-    instance.setDefaultParameter(DefaultModeKey, ModeHttp)
-    instance.setDefaultParameter(ProcessRoleKey, RoleAll)
-    instance.setDefaultParameter(EnvironmentNameKey, EnvironmentDevelopment)
-
-    instance.setDefaultParameter(HttpAddressKey, ":8080")
-    instance.setDefaultParameter(HttpMaxRequestBodyBytesKey, DefaultHttpMaxRequestBodyBytes)
-
-    instance.setDefaultParameter(HttpSessionTtlKey, DefaultSessionTtl.String())
-
-    instance.setDefaultParameter(HttpSessionTombstoneRetentionKey, DefaultSessionTombstoneRetention.String())
-
-    instance.setDefaultParameter(HttpSessionStorageTimeoutKey, DefaultSessionStorageTimeout.String())
-
-    instance.setDefaultParameter(HttpSessionMaxSessionsKey, DefaultSessionMaxSessions)
-
-    instance.setDefaultParameter(HttpShutdownTimeoutKey, DefaultHttpShutdownTimeout.String())
-
-    /* empty so ApplicationConfig and then the framework default fill them */
-    instance.setDefaultParameter(TeardownTimeoutKey, "")
-    instance.setDefaultParameter(ScopeTeardownTimeoutKey, "")
-    instance.setDefaultParameter(ContainerCreationWaitersKey, "")
-    instance.setDefaultParameter(ContainerTeardownSequentialKey, "")
-    instance.setDefaultParameter(HttpReadTimeoutKey, "")
-    instance.setDefaultParameter(HttpReadHeaderTimeoutKey, "")
-    instance.setDefaultParameter(HttpWriteTimeoutKey, "")
-    instance.setDefaultParameter(HttpIdleTimeoutKey, "")
-    instance.setDefaultParameter(HttpMaxHeaderBytesKey, "")
-    instance.setDefaultParameter(HttpUnavailableRetryAfterKey, "")
-    instance.setDefaultParameter(HttpSessionEmptyOnOutageKey, "")
-
-    instance.setDefaultParameter(CliNameKey, "melody")
-
-    instance.setDefaultParameter(CliDescriptionKey, "")
-
-    instance.setDefaultParameter(CliBootWarningsIgnoredKey, "")
-    instance.setDefaultParameter(CliBootWarningsDisabledKey, "")
-
-    instance.setDefaultParameter(LogPathKey, filepath.Join("%"+KernelLogsDirectory+"%", "%"+KernelEnvironment+"%.log"))
-    instance.setDefaultParameter(LogLevelKey, string(loggingcontract.LevelDebug))
-
-    instance.setDefaultParameter(DefaultLocaleKey, "en")
-
-    instance.setDefaultParameter(PublicDirectoryKey, "public")
-
-    instance.setDefaultParameter(StaticIndexFileKey, "index.html")
-    instance.setDefaultParameter(StaticEnableCacheKey, true)
-    instance.setDefaultParameter(StaticCacheMaxAgeKey, DefaultStaticCacheMaxAge)
-
-    instance.setDefaultParameter(StaticExcludedPathsKey, "")
+    for _, key := range frameworkEnvironmentKeys() {
+        instance.registerFrameworkEnvironmentKey(key)
+    }
 }
 
-func (instance *Configuration) setDefaultParameter(
-    environmentKey string,
-    defaultValue any,
-) {
-    parameterNames := instance.mapEnvironmentKeyToParameterNames(environmentKey)
-    if nil == parameterNames || 0 == len(parameterNames) {
+func (instance *Configuration) registerKeylessParameter(name string, template string) {
+    instance.refuseDuplicateDefault(name, name)
+
+    instance.parameters[name] = NewParameter(name, template, template, true)
+}
+
+/* the key's name stays a second name of its parameter, as a module key's does */
+func (instance *Configuration) registerFrameworkEnvironmentKey(key configcontract.EnvironmentKey) {
+    instance.refuseDuplicateDefault(key.Parameter, key.Key)
+    instance.refuseDuplicateDefault(key.Key, key.Key)
+
+    _, isSet := instance.environment.Get(key.Key)
+
+    parameter := NewParameter(key.Key, environmentPlaceholder(key.Key), nil, false == isSet)
+
+    instance.parameters[key.Parameter] = parameter
+    instance.parameters[key.Key] = parameter
+
+    instance.recordEnvironmentKeyDeclarationLocked(frameworkEnvironmentKeyOwner, key)
+}
+
+func (instance *Configuration) refuseDuplicateDefault(name string, environmentKey string) {
+    if nil == instance.getInternalParameter(name) {
         return
     }
 
-    parameter := NewParameter(
-        environmentKey,
-        defaultValue,
-        defaultValue,
-        true,
+    exception.Panic(
+        exception.NewError(
+            "duplicate parameter name when setting defaults",
+            map[string]any{
+                "parameterName":  name,
+                "environmentKey": environmentKey,
+            },
+            nil,
+        ),
     )
-
-    for _, name := range parameterNames {
-        if "" == name {
-            continue
-        }
-
-        existingParameter := instance.Get(name)
-        if false == internal.IsNilInterface(existingParameter) {
-            exception.Panic(
-                exception.NewError(
-                    "duplicate parameter name when setting defaults",
-                    map[string]any{
-                        "parameterName":  name,
-                        "environmentKey": environmentKey,
-                    },
-                    nil,
-                ),
-            )
-        }
-
-        instance.parameters[name] = parameter
-    }
 }

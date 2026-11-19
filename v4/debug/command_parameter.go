@@ -149,7 +149,7 @@ func (instance *ParameterCommand) Run(
             parameterListItem{
                 Name:             key,
                 EnvironmentKey:   parameter.EnvironmentKey(),
-                EnvironmentValue: redactedParameterValue(parameter.EnvironmentValue(), isSecret),
+                Template:         redactedParameterValue(parameter.Template(), isSecret),
                 ValueString:      redactedParameterValue(parameter.Value(), isSecret),
                 IsDefault:        parameter.IsDefault(),
                 IsSecret:         isSecret,
@@ -188,14 +188,14 @@ func (instance *ParameterCommand) Run(
 
         block := builder.AddBlock(
             "PARAMETERS",
-            []string{"parameter", "environmentKey", "environmentValue", "value", "default", "secret", "aliases"},
+            []string{"parameter", "environmentKey", "template", "value", "default", "secret", "aliases"},
         )
 
         for _, item := range items {
             block.AddRow(
                 item.Name,
                 item.EnvironmentKey,
-                item.EnvironmentValue,
+                item.Template,
                 item.ValueString,
                 fmt.Sprintf("%t", item.IsDefault),
                 fmt.Sprintf("%t", item.IsSecret),
@@ -241,7 +241,7 @@ func redactedParameterValue(value any, isSecret bool) string {
 type parameterListItem struct {
     Name             string `json:"name"`
     EnvironmentKey   string `json:"environmentKey"`
-    EnvironmentValue string `json:"environmentValue"`
+    Template         string `json:"template"`
     ValueString      string `json:"value"`
     IsDefault        bool   `json:"isDefault"`
     IsSecret         bool   `json:"isSecret"`

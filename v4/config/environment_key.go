@@ -1,6 +1,7 @@
 package config
 
 import (
+    "errors"
     "fmt"
     "regexp"
     "sort"
@@ -21,7 +22,7 @@ type declaredEnvironmentKey struct {
     declaration configcontract.EnvironmentKey
 }
 
-/* DeclareEnvironmentKey makes a key the owner holds one parameter under the key and under its Parameter name: the .env value when a file set the key, its Default otherwise. It is refused once the boot resolve ran, for a key outside the MELODY_ namespace or held or retired by the framework or another declaration, for a retired spelling outside the namespace, equal to the key or held or retired by another owner, for a parameter name already registered, for a secret key with a default and for a literal default its own rule refuses. */
+/* DeclareEnvironmentKey enters an owner's key into the key table and resolves its parameter at once; only a reference to a parameter registered later waits for the boot pass. Refused once the boot resolve ran, for a key outside the MELODY_ namespace or held or retired by another owner, for a retired spelling outside the namespace or held by another owner, for a parameter already registered or fed, for a secret key with a default, for a literal default its own rule refuses and for a text that cannot be resolved. */
 func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcontract.EnvironmentKey) error {
     context := exceptioncontract.Context{
         "module":         owner,
@@ -38,8 +39,8 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
         return retiredShapeErr
     }
 
-    if _, isFrameworkKey := environmentKeyAliasMap[key.Key]; true == isFrameworkKey {
-        context["owner"] = "the framework"
+    if _, isFrameworkKey := frameworkEnvironmentKeyIndex[key.Key]; true == isFrameworkKey {
+        context["owner"] = frameworkEnvironmentKeyOwner
 
         return exception.NewError("a module declared an environment key another owner already holds", context, nil)
     }
@@ -83,36 +84,80 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
         return exception.NewError("the parameter a module's environment key feeds is already registered", context, nil)
     }
 
-    parameter := instance.getInternalParameter(key.Key)
-    if nil != parameter && key.Key != parameter.environmentKey {
+    loadedParameter := instance.getInternalParameter(key.Key)
+    if nil != loadedParameter && key.Key != loadedParameter.environmentKey {
         return exception.NewError("a parameter under the name of a module's environment key is already registered", context, nil)
     }
 
-    /* under a rule an empty line is absent, so it takes the declared default as a framework key takes its application field */
-    emptyLineMarkedSecret := false
-    if text, isText := parameterEnvironmentText(parameter); nil != parameter && true == isText && "" == strings.TrimSpace(text) && false == internal.IsNilInterface(key.Rule) {
-        emptyLineMarkedSecret = parameter.isSecret.Load()
-        parameter = nil
-    }
+    instance.recordEnvironmentKeyDeclarationLocked(owner, key)
 
+    /* under a rule a blank line is unset */
+    line, isSet := "", false
+    if nil != instance.environment {
+        line, isSet = instance.environment.Get(key.Key)
+    }
+    speaksDefault := false == isSet || (false == internal.IsNilInterface(key.Rule) && "" == strings.TrimSpace(line))
+
+    parameter := loadedParameter
     if nil == parameter {
-        parameter = NewParameter(key.Key, key.Default, key.Default, true)
-        parameter.isSecret.Store(emptyLineMarkedSecret)
-
-        /* a templated default waits for the boot pass, as a deferred registration does */
-        if true == templateCarriesConstruct(key.Default) {
-            parameter.deferred.Store(true)
-        }
-
-        instance.parameters[key.Key] = parameter
+        parameter = NewParameter(key.Key, environmentPlaceholder(key.Key), nil, speaksDefault)
+    } else {
+        /* declared, it reads the key, so a blank line under a rule reaches the default */
+        parameter.template = environmentPlaceholder(key.Key)
+        parameter.isDefault = speaksDefault
     }
 
+    /* registered before the resolution, so a secret it reads marks it */
+    instance.parameters[key.Key] = parameter
     instance.parameters[key.Parameter] = parameter
 
+    resolvedValue, resolveErr := instance.resolveTemplate(
+        environmentPlaceholder(key.Key),
+        key.Parameter,
+        make(map[string]bool),
+        make(map[string]bool),
+    )
+    if nil != resolveErr && false == errors.Is(resolveErr, errUndefinedParameterReference) && false == errors.Is(resolveErr, errUndefinedEnvironmentKey) {
+        instance.forgetEnvironmentKeyDeclarationLocked(key)
+
+        delete(instance.parameters, key.Parameter)
+        if nil == loadedParameter {
+            delete(instance.parameters, key.Key)
+        } else {
+            loadedParameter.template = line
+            loadedParameter.isDefault = false
+        }
+
+        return exception.NewError("a module's environment key could not be resolved at its declaration", context, resolveErr)
+    }
+
+    if nil == resolveErr {
+        parameter.storeValue(resolvedValue)
+        parameter.deferred.Store(false)
+    } else {
+        /* a parameter registered later settles it at the boot pass */
+        parameter.deferred.Store(true)
+    }
+
+    if true == key.Secret {
+        if nil == instance.secretEnvironmentKeys {
+            instance.secretEnvironmentKeys = make(map[string]bool)
+        }
+
+        instance.secretEnvironmentKeys[key.Key] = true
+        parameter.isSecret.Store(true)
+        instance.propagateSecretMarkLocked(key.Key)
+    }
+
+    return nil
+}
+
+func (instance *Configuration) recordEnvironmentKeyDeclarationLocked(owner string, key configcontract.EnvironmentKey) {
     if nil == instance.declaredEnvironmentKeys {
         instance.declaredEnvironmentKeys = make(map[string]declaredEnvironmentKey)
         instance.declaredEnvironmentParameters = make(map[string]string)
         instance.declaredRetiredEnvironmentKeys = make(map[string]string)
+        instance.secretEnvironmentKeys = make(map[string]bool)
     }
 
     instance.declaredEnvironmentKeys[key.Key] = declaredEnvironmentKey{owner: owner, declaration: key}
@@ -121,13 +166,15 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
     for _, retiredKey := range key.Retired {
         instance.declaredRetiredEnvironmentKeys[retiredKey] = key.Key
     }
+}
 
-    if true == key.Secret {
-        parameter.isSecret.Store(true)
-        instance.propagateSecretMarkLocked(key.Key)
+func (instance *Configuration) forgetEnvironmentKeyDeclarationLocked(key configcontract.EnvironmentKey) {
+    delete(instance.declaredEnvironmentKeys, key.Key)
+    delete(instance.declaredEnvironmentParameters, key.Parameter)
+
+    for _, retiredKey := range key.Retired {
+        delete(instance.declaredRetiredEnvironmentKeys, retiredKey)
     }
-
-    return nil
 }
 
 func refuseEnvironmentKeyShape(key configcontract.EnvironmentKey, context exceptioncontract.Context) error {
@@ -167,8 +214,9 @@ func (instance *Configuration) CheckEnvironmentKeys() error {
     declarations := make([]declaredEnvironmentKey, 0, len(keys))
     parameters := make([]*Parameter, 0, len(keys))
     for _, key := range keys {
-        declarations = append(declarations, instance.declaredEnvironmentKeys[key])
-        parameters = append(parameters, instance.getInternalParameter(key))
+        declared := instance.declaredEnvironmentKeys[key]
+        declarations = append(declarations, declared)
+        parameters = append(parameters, instance.getInternalParameter(declared.declaration.Parameter))
     }
 
     instance.mutex.RUnlock()
@@ -230,7 +278,7 @@ func (instance *Configuration) UndeclaredEnvironmentKeys() []string {
             continue
         }
 
-        if _, isFrameworkKey := environmentKeyAliasMap[key]; true == isFrameworkKey {
+        if _, isFrameworkKey := frameworkEnvironmentKeyIndex[key]; true == isFrameworkKey {
             continue
         }
 
@@ -247,13 +295,3 @@ func (instance *Configuration) UndeclaredEnvironmentKeys() []string {
 }
 
 var _ configcontract.EnvironmentKeyDeclarer = (*Configuration)(nil)
-
-func parameterEnvironmentText(parameter *Parameter) (string, bool) {
-    if nil == parameter {
-        return "", false
-    }
-
-    text, isText := parameter.environmentValue.(string)
-
-    return text, isText
-}

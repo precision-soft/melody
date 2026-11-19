@@ -9,6 +9,7 @@ import (
     "testing"
     "time"
 
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -1209,5 +1210,118 @@ func TestResolveTemplate_AnUndefinedEnvironmentKeyNamesTheReadingParameter(t *te
     refusalContext := contextOfError(t, resolveErr)
     if "app.inner" != refusalContext["parameterName"] || "MISSING_KEY_FOR_THE_PIN" != refusalContext["environmentKey"] {
         t.Fatalf("expected the reading parameter beside the environment key, got %v", refusalContext)
+    }
+}
+
+func switchKey(defaultText string) configcontract.EnvironmentKey {
+    return configcontract.EnvironmentKey{
+        Key:       "MELODY_X_SWITCH",
+        Parameter: "melody.x.switch",
+        Field:     "x.ModuleConfig.Switch",
+        Default:   defaultText,
+        Rule:      SwitchKeyRule(),
+    }
+}
+
+func resolvedReaderOfEnvironmentKey(t *testing.T, values map[string]string, key *configcontract.EnvironmentKey, environmentKey string) string {
+    t.Helper()
+
+    configuration := mustConfigurationFromValues(t, values)
+    configuration.RegisterRuntime("app.reader", "%env("+environmentKey+")%")
+
+    if nil != key {
+        mustDeclare(t, configuration, "x", *key)
+    }
+
+    mustResolve(t, configuration)
+
+    return configuration.Get("app.reader").String()
+}
+
+func TestEnvPlaceholder_ReadsTheDeclaredDefault_WhenNoArtifactSetsTheKey(t *testing.T) {
+    if ":8080" != resolvedReaderOfEnvironmentKey(t, map[string]string{}, nil, HttpAddressKey) {
+        t.Fatalf("expected the framework key's declared default")
+    }
+
+    moduleKey := textKey("fallback")
+    if "fallback" != resolvedReaderOfEnvironmentKey(t, map[string]string{}, &moduleKey, moduleKey.Key) {
+        t.Fatalf("expected the module key's declared default")
+    }
+}
+
+func TestEnvPlaceholder_ArtifactLineWinsOverTheDeclaredDefault(t *testing.T) {
+    moduleKey := textKey("fallback")
+    if "from env" != resolvedReaderOfEnvironmentKey(t, map[string]string{moduleKey.Key: "from env"}, &moduleKey, moduleKey.Key) {
+        t.Fatalf("expected the artifact's line over the module default")
+    }
+
+    if ":9090" != resolvedReaderOfEnvironmentKey(t, map[string]string{HttpAddressKey: ":9090"}, nil, HttpAddressKey) {
+        t.Fatalf("expected the artifact's line over the framework default")
+    }
+}
+
+func TestEnvPlaceholder_BlankLineUnderARuleTakesTheDefault(t *testing.T) {
+    moduleKey := switchKey("true")
+    if "true" != resolvedReaderOfEnvironmentKey(t, map[string]string{moduleKey.Key: ""}, &moduleKey, moduleKey.Key) {
+        t.Fatalf("expected a blank line under a rule to take the declared default")
+    }
+}
+
+func TestEnvPlaceholder_BlankLineWithoutARuleIsTheValue(t *testing.T) {
+    moduleKey := textKey("fallback")
+    if "" != resolvedReaderOfEnvironmentKey(t, map[string]string{moduleKey.Key: ""}, &moduleKey, moduleKey.Key) {
+        t.Fatalf("expected a blank line without a rule to be the empty value")
+    }
+}
+
+func TestEnvPlaceholder_UndeclaredAbsentKeyIsRefused(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{})
+    configuration.RegisterRuntime("app.reader", "%env(APP_ABSENT)%")
+
+    resolveErr := configuration.Resolve()
+
+    for currentErr := resolveErr; nil != currentErr; currentErr = errors.Unwrap(currentErr) {
+        refusal, isRefusal := currentErr.(*exception.Error)
+        if true == isRefusal && "undefined environment key in template" == refusal.Message() {
+            if "APP_ABSENT" != refusal.Context()["environmentKey"] || "app.reader" != refusal.Context()["parameterName"] {
+                t.Fatalf("expected the key and the reader named, got %v", refusal.Context())
+            }
+
+            return
+        }
+    }
+
+    t.Fatalf("expected an undefined environment key refusal, got %v", resolveErr)
+}
+
+func TestTemplatedDefault_IsScanned(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{})
+    configuration.RegisterRuntime("app.reader", "%env("+LogPathKey+")%")
+    mustResolve(t, configuration)
+
+    expected := configuration.Get(KernelLogsDirectory).String() + "/" + configuration.Get(KernelEnvironment).String() + ".log"
+    if expected != configuration.Get("app.reader").String() {
+        t.Fatalf("expected %q, got %q", expected, configuration.Get("app.reader").String())
+    }
+}
+
+func TestEnvPlaceholder_DefaultProcessorSpeaksBeforeTheDeclaredDefault(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{})
+    configuration.RegisterRuntime("app.fallback", "30s")
+    configuration.RegisterRuntime("app.reader", "%env(default:app.fallback:"+HttpReadTimeoutKey+")%")
+    mustResolve(t, configuration)
+
+    if "30s" != configuration.Get("app.reader").String() {
+        t.Fatalf("expected the fallback over the empty declared default, got %q", configuration.Get("app.reader").String())
+    }
+}
+
+func TestKernelParameter_TheBootResolveAgreesWithTheView(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{CliNameKey: "n-%env(default::MELODY_X_TEXT)%"})
+    mustDeclare(t, configuration, "x", textKey("mod"))
+    mustResolve(t, configuration)
+
+    if configuration.Cli().Name() != configuration.Get(KernelCliName).String() {
+        t.Fatalf("expected the view and the parameter to agree, got %q and %q", configuration.Cli().Name(), configuration.Get(KernelCliName).String())
     }
 }

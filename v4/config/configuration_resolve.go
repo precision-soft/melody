@@ -7,10 +7,14 @@ import (
     "strings"
 
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
 /* errUndefinedParameterReference is the cause of the undefined-parameter error, so the constructor's tolerant pass recognizes exactly this failure: the composition root registers its parameters between construction and boot. */
 var errUndefinedParameterReference = errors.New("undefined parameter key")
+
+/* errUndefinedEnvironmentKey is the cause of the undefined-key error, so a declaration reading a key another module declares later waits for the boot pass */
+var errUndefinedEnvironmentKey = errors.New("undefined environment key")
 
 /* Resolve resolves every parameter's template in one order-independent batch and settles the ones the constructor's tolerant pass deferred; a reference that is still undefined here is the error that pass postponed. */
 func (instance *Configuration) Resolve() error {
@@ -45,11 +49,11 @@ func (instance *Configuration) resolveAll(deferUnresolvedReferences bool) error 
             continue
         }
 
-        environmentValue := parameter.environmentValue
+        template := parameter.template
 
-        stringValue, ok := environmentValue.(string)
+        stringValue, ok := template.(string)
         if false == ok {
-            parameter.storeValue(environmentValue)
+            parameter.storeValue(template)
 
             continue
         }
@@ -344,24 +348,24 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
     fallbackParameterKey := submatches[2]
     environmentKey := submatches[3]
 
-    envValue, exists := instance.environment.Get(environmentKey)
-    if true == exists {
-        /* an environment value is itself a template, resolved recursively; the guard turns a self-referential value into an error */
-        if true == resolvingEnvironmentKeys[environmentKey] {
-            return "", 0, exception.NewError(
-                "circular reference detected while resolving placeholders",
-                map[string]any{
-                    "parameterName":  currentKey,
-                    "environmentKey": environmentKey,
-                },
-                nil,
-            )
-        }
+    /* the guard turns a self-referential environment text into an error */
+    if true == resolvingEnvironmentKeys[environmentKey] {
+        return "", 0, exception.NewError(
+            "circular reference detected while resolving placeholders",
+            map[string]any{
+                "parameterName":  currentKey,
+                "environmentKey": environmentKey,
+            },
+            nil,
+        )
+    }
 
+    environmentText, isKnown := instance.environmentKeyText(environmentKey, false == hasDefaultProcessor)
+    if true == isKnown {
         resolvingEnvironmentKeys[environmentKey] = true
 
-        resolvedEnvValue, envValueErr := instance.scanTemplate(
-            envValue,
+        resolvedEnvironmentText, environmentTextErr := instance.scanTemplate(
+            environmentText,
             currentKey,
             resolvingParameters,
             resolvingEnvironmentKeys,
@@ -369,22 +373,22 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
 
         delete(resolvingEnvironmentKeys, environmentKey)
 
-        if nil != envValueErr {
-            nameEnvironmentValueRefusal(envValueErr, environmentKey, currentKey)
+        if nil != environmentTextErr {
+            nameEnvironmentValueRefusal(environmentTextErr, environmentKey, currentKey)
 
-            return "", 0, envValueErr
+            return "", 0, environmentTextErr
         }
 
-        /* a secret marking on the environment key's own parameter travels here as on the parameter branch, so a dsn assembled from the key is redacted too */
+        /* a dsn assembled from a secret key is redacted too */
         environmentParameter := instance.getInternalParameter(environmentKey)
-        if nil != environmentParameter && true == environmentParameter.isSecret.Load() {
+        if true == instance.secretEnvironmentKeys[environmentKey] || (nil != environmentParameter && true == environmentParameter.isSecret.Load()) {
             currentParameter := instance.getInternalParameter(currentKey)
             if nil != currentParameter {
                 currentParameter.isSecret.Store(true)
             }
         }
 
-        return resolvedEnvValue, len(candidate), nil
+        return resolvedEnvironmentText, len(candidate), nil
     }
 
     if false == hasDefaultProcessor {
@@ -395,7 +399,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
                 "parameterName":  currentKey,
                 "environmentKey": environmentKey,
             },
-            nil,
+            errUndefinedEnvironmentKey,
         )
     }
 
@@ -414,6 +418,27 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
     }
 
     return resolvedFallback, len(candidate), nil
+}
+
+/* a blank line under a declared rule is unset, as the framework reads its own limits */
+func (instance *Configuration) environmentKeyText(environmentKey string, includeDeclaredDefault bool) (string, bool) {
+    declared, isDeclared := instance.declaredEnvironmentKeys[environmentKey]
+
+    if nil != instance.environment {
+        line, isSet := instance.environment.Get(environmentKey)
+        if true == isSet {
+            blankUnderARule := true == isDeclared && false == internal.IsNilInterface(declared.declaration.Rule) && "" == strings.TrimSpace(line)
+            if false == blankUnderARule {
+                return line, true
+            }
+        }
+    }
+
+    if true == isDeclared && true == includeDeclaredDefault {
+        return declared.declaration.Default, true
+    }
+
+    return "", false
 }
 
 /* resolveParameterReference resolves one referenced parameter and splices its resolved value in as data. The referenced value is stored only during boot, since a post-boot re-resolution changes nothing. A secret marking travels to the reader, so an assembled dsn is redacted beside its credential. */
@@ -436,14 +461,14 @@ func (instance *Configuration) resolveParameterReference(
         )
     }
 
-    environmentValueString, ok := referencedParameter.environmentValue.(string)
+    templateString, ok := referencedParameter.template.(string)
     if false == ok {
         /* the raw value is not embedded: a non-string parameter may be a signing key, so only its type identifies it */
         return "", exception.NewError(
             "parameter environment value must be string for template resolution",
             map[string]any{
                 "parameterKey":         parameterKey,
-                "environmentValueType": fmt.Sprintf("%T", referencedParameter.environmentValue),
+                "environmentValueType": fmt.Sprintf("%T", referencedParameter.template),
             },
             nil,
         )
@@ -451,11 +476,11 @@ func (instance *Configuration) resolveParameterReference(
 
     /* the project directory is a filesystem path, not a template: a literal percent in it survives a reference */
     if KernelProjectDirectory == parameterKey {
-        return environmentValueString, nil
+        return templateString, nil
     }
 
     resolvedReferencedValue, resolveErr := instance.resolveTemplate(
-        environmentValueString,
+        templateString,
         parameterKey,
         resolvingParameters,
         resolvingEnvironmentKeys,

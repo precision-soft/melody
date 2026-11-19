@@ -469,3 +469,29 @@ func TestParameter_IntReadsTheSameGrammarItsSiblingsRead(t *testing.T) {
         t.Fatal("expected a value that is not a number to stay refused")
     }
 }
+
+func TestParameter_TemplateOfAKeyedParameterIsTheEnvForm(t *testing.T) {
+    for _, values := range []map[string]string{{}, {HttpAddressKey: ":9090"}} {
+        configuration := mustConfigurationFromValues(t, values)
+
+        if "%env("+HttpAddressKey+")%" != configuration.Get(KernelHttpAddress).Template() {
+            t.Fatalf("expected the env form, got %v (values %v)", configuration.Get(KernelHttpAddress).Template(), values)
+        }
+    }
+}
+
+func TestParameter_IsDefault_FollowsTheArtifact(t *testing.T) {
+    if false == mustConfigurationFromValues(t, map[string]string{}).Get(KernelHttpAddress).IsDefault() {
+        t.Fatalf("expected a framework parameter no artifact sets to be the default")
+    }
+
+    if true == mustConfigurationFromValues(t, map[string]string{HttpAddressKey: ":9090"}).Get(KernelHttpAddress).IsDefault() {
+        t.Fatalf("expected a framework parameter an artifact sets not to be the default")
+    }
+
+    configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_SWITCH": ""})
+    mustDeclare(t, configuration, "x", switchKey("true"))
+    if false == configuration.Get("melody.x.switch").IsDefault() {
+        t.Fatalf("expected a blank line under a rule to leave the default speaking")
+    }
+}

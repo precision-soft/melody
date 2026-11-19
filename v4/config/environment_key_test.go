@@ -101,19 +101,27 @@ func TestDeclareEnvironmentKey_APresentKeyWinsOverTheDefault(t *testing.T) {
     }
 }
 
-func TestDeclareEnvironmentKey_ATemplatedDefaultResolvesAtBoot(t *testing.T) {
+func TestDeclareEnvironmentKey_ATemplatedDefaultResolvesAtTheDeclaration_AForwardReferenceAtBoot(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{})
     mustDeclare(t, configuration, "x", textKey("%kernel.logs_directory%/x"))
 
-    if refusal := refusalOfRead(func() { _ = configuration.Get("melody.x.text").String() }); nil == refusal || false == strings.Contains(refusal.Message(), "deferred to boot") {
-        t.Fatalf("expected the read before the boot resolve refused, got %v", refusal)
-    }
-
-    mustResolve(t, configuration)
-
     expected := configuration.Get(KernelLogsDirectory).String() + "/x"
     if expected != configuration.Get("melody.x.text").String() {
-        t.Fatalf("expected %q, got %q", expected, configuration.Get("melody.x.text").String())
+        t.Fatalf("expected %q right after the declaration, got %q", expected, configuration.Get("melody.x.text").String())
+    }
+
+    forward := mustConfigurationFromValues(t, map[string]string{})
+    mustDeclare(t, forward, "x", textKey("%app.later%/x"))
+
+    if refusal := refusalOfRead(func() { _ = forward.Get("melody.x.text").String() }); nil == refusal || false == strings.Contains(refusal.Message(), "deferred to boot") {
+        t.Fatalf("expected the read of a forward reference refused before the boot resolve, got %v", refusal)
+    }
+
+    forward.RegisterRuntime("app.later", "later")
+    mustResolve(t, forward)
+
+    if "later/x" != forward.Get("melody.x.text").String() {
+        t.Fatalf("expected the boot pass to settle the forward reference, got %q", forward.Get("melody.x.text").String())
     }
 }
 
@@ -143,8 +151,10 @@ func TestDeclareEnvironmentKey_AReferenceByKeyOrByParameterResolvesWithoutTheLin
     environmentReader := mustConfigurationFromValues(t, map[string]string{})
     environmentReader.RegisterRuntime("app.by_environment", "%env(MELODY_X_TEXT)%")
     mustDeclare(t, environmentReader, "x", textKey("fallback"))
-    if resolveErr := environmentReader.Resolve(); nil == resolveErr {
-        t.Fatalf("expected %%env(MELODY_X_TEXT)%% to read the environment, where no file set the key")
+    mustResolve(t, environmentReader)
+
+    if "fallback" != environmentReader.Get("app.by_environment").String() {
+        t.Fatalf("expected %%env(MELODY_X_TEXT)%% to read the declared default, where no file set the key, got %q", environmentReader.Get("app.by_environment").String())
     }
 }
 
@@ -218,7 +228,7 @@ func TestDeclareEnvironmentKey_ASecretKeyMarksAValueAssembledFromIt(t *testing.T
 }
 
 func TestDeclareEnvironmentKey_RefusesAKeyTheFrameworkHolds(t *testing.T) {
-    for frameworkKey := range environmentKeyAliasMap {
+    for frameworkKey := range frameworkEnvironmentKeyIndex {
         configuration := mustConfigurationFromValues(t, map[string]string{})
         key := textKey("")
         key.Key = frameworkKey
@@ -560,4 +570,47 @@ func TestNewConfiguration_TwoConfigurationsDoNotShareDeclarations(t *testing.T) 
     }
 
     mustDeclare(t, second, "x", textKey("a"))
+}
+
+func TestDeclareEnvironmentKey_ValueIsReadableBeforeTheBootResolve(t *testing.T) {
+    for values, expected := range map[string]string{"": "fallback", "from env": "from env"} {
+        environmentValues := map[string]string{}
+        if "" != values {
+            environmentValues["MELODY_X_TEXT"] = values
+        }
+
+        configuration := mustConfigurationFromValues(t, environmentValues)
+        mustDeclare(t, configuration, "x", textKey("fallback"))
+
+        if expected != configuration.Get("melody.x.text").String() {
+            t.Fatalf("expected %q right after the declaration, got %q", expected, configuration.Get("melody.x.text").String())
+        }
+    }
+}
+
+func TestDeclareEnvironmentKey_ADefaultReadingAKeyDeclaredLaterSettlesAtBoot(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{})
+    reader := textKey("%env(MELODY_Y_TEXT)%")
+    mustDeclare(t, configuration, "x", reader)
+    mustDeclare(t, configuration, "y", configcontract.EnvironmentKey{Key: "MELODY_Y_TEXT", Parameter: "melody.y.text", Field: "y.ModuleConfig.Text", Default: "y"})
+    mustResolve(t, configuration)
+
+    if "y" != configuration.Get("melody.x.text").String() {
+        t.Fatalf("expected the key declared later read at boot, got %q", configuration.Get("melody.x.text").String())
+    }
+}
+
+func TestDeclareEnvironmentKey_AnUnresolvableTextRefusesAndLeavesTheTables(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_SWITCH": ""})
+    loaded := configuration.Get("MELODY_X_SWITCH")
+
+    declarationRefusal(t, configuration.DeclareEnvironmentKey("x", switchKey("%env(A))%")), "a module's environment key could not be resolved at its declaration")
+
+    if nil != configuration.Get("melody.x.switch") || loaded != configuration.Get("MELODY_X_SWITCH") || "" != loaded.Template() || true == loaded.IsDefault() {
+        t.Fatalf("expected the tables as they were, got %v", configuration.Get("melody.x.switch"))
+    }
+
+    if _, isDeclared := configuration.declaredEnvironmentKeys["MELODY_X_SWITCH"]; true == isDeclared {
+        t.Fatalf("expected the declaration taken back")
+    }
 }

@@ -93,8 +93,11 @@ type Configuration struct {
     /* written and read under the write lock; the atomic is for lock-free readers, not the synchronization */
     serving atomic.Bool
 
+    /* the framework's keys and every declared one */
     declaredEnvironmentKeys       map[string]declaredEnvironmentKey
     declaredEnvironmentParameters map[string]string
+
+    secretEnvironmentKeys map[string]bool
 
     /* keyed by the retired spelling, holding the declared key that replaced it */
     declaredRetiredEnvironmentKeys map[string]string
@@ -292,7 +295,7 @@ func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
                 continue
             }
 
-            templateValue, isString := parameter.environmentValue.(string)
+            templateValue, isString := parameter.template.(string)
             if false == isString {
                 continue
             }
@@ -301,6 +304,17 @@ func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
                 parameter.isSecret.Store(true)
                 markedNames = append(markedNames, instance.aliasesOfName(name)...)
             }
+        }
+
+        /* %env(KEY)% reads a key's line or declared default, so those texts are templates too */
+        for _, readingKey := range instance.environmentKeysReadingLocked(currentName) {
+            readingParameter := instance.getInternalParameter(readingKey)
+            if nil == readingParameter || true == readingParameter.isSecret.Load() {
+                continue
+            }
+
+            readingParameter.isSecret.Store(true)
+            markedNames = append(markedNames, instance.aliasesOfName(readingKey)...)
         }
 
         /* a .env value assembled from ${NAME} carries NAME's credential although no template names it */
@@ -317,6 +331,31 @@ func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
             markedNames = append(markedNames, instance.aliasesOfName(assembledKey)...)
         }
     }
+}
+
+func (instance *Configuration) environmentKeysReadingLocked(name string) []string {
+    candidates := make(map[string]bool)
+    if nil != instance.environment {
+        for key := range instance.environment.values {
+            candidates[key] = true
+        }
+    }
+
+    for key := range instance.declaredEnvironmentKeys {
+        candidates[key] = true
+    }
+
+    readingKeys := make([]string, 0)
+    for key := range candidates {
+        text, isKnown := instance.environmentKeyText(key, true)
+        if true == isKnown && key != name && true == templateReadsName(text, name) {
+            readingKeys = append(readingKeys, key)
+        }
+    }
+
+    sort.Strings(readingKeys)
+
+    return readingKeys
 }
 
 /* a doubled percent is a literal: "a%%%db.pass%" reads db.pass and "a%%db.pass%%" reads nothing */
@@ -650,8 +689,6 @@ func (instance *Configuration) registerEnvironmentParameters() error {
     sort.Strings(environmentKeys)
 
     for _, environmentKey := range environmentKeys {
-        environmentValue := environment[environmentKey]
-
         if true == instance.isReserved(environmentKey) {
             return exception.NewError(
                 "environment key uses reserved parameter prefix",
@@ -662,19 +699,13 @@ func (instance *Configuration) registerEnvironmentParameters() error {
             )
         }
 
-        parameterNames := instance.mapEnvironmentKeyToParameterNames(environmentKey)
-        if nil == parameterNames || 0 == len(parameterNames) {
+        if _, isFrameworkKey := frameworkEnvironmentKeyIndex[environmentKey]; true == isFrameworkKey {
             continue
         }
 
-        addAliasedParameterFromEnvironmentErr := instance.addAliasedParameterFromEnvironment(
-            parameterNames,
-            environmentKey,
-            environmentValue,
-        )
-        if nil != addAliasedParameterFromEnvironmentErr {
-            return addAliasedParameterFromEnvironmentErr
-        }
+        /* the raw line: a dotted key %env(...)% cannot spell may be one */
+        environmentText := environment[environmentKey]
+        instance.parameters[environmentKey] = NewParameter(environmentKey, environmentText, environmentText, false)
     }
 
     return nil

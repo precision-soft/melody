@@ -5,7 +5,7 @@ import "time"
 type Parameter interface {
     EnvironmentKey() string
 
-    EnvironmentValue() any
+    Template() any
 
     Value() any
 

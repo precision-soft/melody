@@ -13,18 +13,18 @@ import (
 
 type ParameterMap map[string]*Parameter
 
-func NewParameter(environmentKey string, environmentValue any, value any, isDefault bool) *Parameter {
+func NewParameter(environmentKey string, template any, value any, isDefault bool) *Parameter {
     return &Parameter{
-        environmentKey:   environmentKey,
-        environmentValue: environmentValue,
-        value:            value,
-        isDefault:        isDefault,
+        environmentKey: environmentKey,
+        template:       template,
+        value:          value,
+        isDefault:      isDefault,
     }
 }
 
 type Parameter struct {
-    environmentKey   string
-    environmentValue any
+    environmentKey string
+    template any
     /* the registration name, which identifies a parameter that has no environment key in an error */
     name string
     /* valueMutex guards value on its own: a service holding the *Parameter reads it without the configuration lock, while Resolve rewrites it under that lock, so writes go through storeValue and reads through loadValue */
@@ -96,14 +96,15 @@ func (instance *Parameter) EnvironmentKey() string {
     return instance.environmentKey
 }
 
-func (instance *Parameter) EnvironmentValue() any {
-    return instance.environmentValue
+func (instance *Parameter) Template() any {
+    return instance.template
 }
 
 func (instance *Parameter) Value() any {
     return instance.loadValue()
 }
 
+/* IsDefault reports whether the declared default spoke: no artifact set the parameter's key, or, under the key's rule, set it blank */
 func (instance *Parameter) IsDefault() bool {
     return instance.isDefault
 }

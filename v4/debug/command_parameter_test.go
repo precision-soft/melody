@@ -425,3 +425,48 @@ func TestParameterCommand_ATypedNilParameterIsSkippedRatherThanDereferenced(t *t
         }
     }
 }
+
+func TestDebugParameters_TemplateColumn(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ParameterCommand{},
+        newParameterTestRuntime(t),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    envelope := struct {
+        Data struct {
+            Items []map[string]any `json:"items"`
+        } `json:"data"`
+    }{}
+    if decodeErr := json.Unmarshal([]byte(rendered), &envelope); nil != decodeErr {
+        t.Fatalf("failed to decode: %v", decodeErr)
+    }
+
+    seenKeyed, seenSecret := false, false
+    for _, item := range envelope.Data.Items {
+        if _, hasOldField := item["environmentValue"]; true == hasOldField {
+            t.Fatalf("expected no environmentValue field, got %v", item)
+        }
+
+        if config.KernelHttpAddress == item["name"] {
+            seenKeyed = true
+            if "%env("+config.HttpAddressKey+")%" != item["template"] {
+                t.Fatalf("expected the env form in the template column, got %v", item["template"])
+            }
+        }
+
+        if "zz.window.secret" == item["name"] {
+            seenSecret = true
+            if "P4ssPhrase" == item["template"] {
+                t.Fatalf("expected the secret template redacted, got %v", item)
+            }
+        }
+    }
+
+    if false == seenKeyed || false == seenSecret {
+        t.Fatalf("expected both rows, keyed=%v secret=%v", seenKeyed, seenSecret)
+    }
+}
