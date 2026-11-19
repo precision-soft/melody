@@ -121,28 +121,62 @@ func TestDeclareEnvironmentKey_RetiredOutsideNamespace_Refused(t *testing.T) {
     }
 }
 
+func applicationRetiringTextKey(retired ...string) configcontract.EnvironmentKey {
+    key := retiringTextKey(retired...)
+    key.Key = "APP_TEXT"
+
+    return key
+}
+
+func TestDeclareEnvironmentKey_ApplicationRetiredLowerCase_Refused(t *testing.T) {
+    for _, retiredKey := range []string{"app_old", "APP_old", "", "APP OLD", "1X"} {
+        configuration := mustConfigurationFromValues(t, map[string]string{})
+
+        refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey(applicationEnvironmentKeyOwner, applicationRetiringTextKey(retiredKey)), "a declared environment key's retired spelling is not an upper-case letter followed by upper-case letters, digits and underscores")
+        if retiredKey != refusal.Context()["retiredEnvironmentKey"] || "APP_TEXT" != refusal.Context()["environmentKey"] {
+            t.Fatalf("expected the spelling and the key named, got %v", refusal.Context())
+        }
+    }
+}
+
+/* both shapes: a spelling of the application's own and a MELODY_ spelling a deployment renames to the application's key */
+func TestDeclareEnvironmentKey_ApplicationRetiredSpellingOutsideAndInsideMelody(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"APP_OLD": "", "MELODY_OLD_TEXT": "x"})
+
+    mustDeclare(t, configuration, applicationEnvironmentKeyOwner, applicationRetiringTextKey("APP_OLD", "MELODY_OLD_TEXT"))
+
+    retiredKeys := configuration.RetiredEnvironmentKeys()
+    expected := []configcontract.RetiredEnvironmentKey{
+        {Key: "APP_OLD", Successor: "APP_TEXT", Owner: applicationEnvironmentKeyOwner},
+        {Key: "MELODY_OLD_TEXT", Successor: "APP_TEXT", Owner: applicationEnvironmentKeyOwner},
+    }
+    if false == slices.Equal(expected, retiredKeys) {
+        t.Fatalf("expected both spellings listed as retired by APP_TEXT, got %+v", retiredKeys)
+    }
+}
+
 func TestDeclareEnvironmentKey_RetiredEqualsKey_Refused(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{})
 
-    declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey("MELODY_X_TEXT")), "a module's environment key retires its own spelling")
+    declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey("MELODY_X_TEXT")), "a declared environment key retires its own spelling")
 }
 
 func TestDeclareEnvironmentKey_RetiredTwiceInOneDeclaration_Refused(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{})
 
-    declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey("MELODY_X_TXT", "MELODY_X_TXT")), "a module's environment key retires one spelling twice")
+    declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey("MELODY_X_TXT", "MELODY_X_TXT")), "a declared environment key retires one spelling twice")
 }
 
 func TestDeclareEnvironmentKey_RetiredIsAFrameworkKey_Refused(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{})
 
-    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey(PublicDirectoryKey)), "a module retired an environment key another owner holds")
-    if "the framework" != refusal.Context()["owner"] {
+    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey(PublicDirectoryKey)), "an environment key is retired that another owner holds")
+    if "the framework" != refusal.Context()["holder"] {
         t.Fatalf("expected the framework named, got %v", refusal.Context())
     }
 
-    refusal = declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey("MELODY_PUBLIC_DIR")), "a module retired an environment key another owner already retired")
-    if "the framework" != refusal.Context()["owner"] {
+    refusal = declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey("MELODY_PUBLIC_DIR")), "an environment key is retired that another owner already retired")
+    if "the framework" != refusal.Context()["holder"] {
         t.Fatalf("expected the framework named, got %v", refusal.Context())
     }
 }
@@ -153,8 +187,8 @@ func TestDeclareEnvironmentKey_KeyTheFrameworkRetired_Refused(t *testing.T) {
     key := textKey("")
     key.Key = "MELODY_PUBLIC_DIR"
 
-    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "a module declared an environment key another owner retired")
-    if "the framework" != refusal.Context()["owner"] {
+    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "an environment key is declared that another owner retired")
+    if "the framework" != refusal.Context()["holder"] {
         t.Fatalf("expected the framework named, got %v", refusal.Context())
     }
 }
@@ -163,8 +197,8 @@ func TestDeclareEnvironmentKey_RetiredHeldByAnotherDeclaration_Refused(t *testin
     configuration := mustConfigurationFromValues(t, map[string]string{})
     mustDeclare(t, configuration, "y", countKey())
 
-    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey("MELODY_X_COUNT")), "a module retired an environment key another owner holds")
-    if "y" != refusal.Context()["owner"] || "MELODY_X_COUNT" != refusal.Context()["retiredEnvironmentKey"] {
+    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey("MELODY_X_COUNT")), "an environment key is retired that another owner holds")
+    if "y" != refusal.Context()["holder"] || "MELODY_X_COUNT" != refusal.Context()["retiredEnvironmentKey"] {
         t.Fatalf("expected the holder named, got %v", refusal.Context())
     }
 }
@@ -173,8 +207,8 @@ func TestDeclareEnvironmentKey_KeyRetiredByAnotherDeclaration_Refused(t *testing
     configuration := mustConfigurationFromValues(t, map[string]string{})
     mustDeclare(t, configuration, "x", retiringTextKey("MELODY_X_COUNT"))
 
-    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("y", countKey()), "a module declared an environment key another owner retired")
-    if "x" != refusal.Context()["owner"] {
+    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("y", countKey()), "an environment key is declared that another owner retired")
+    if "x" != refusal.Context()["holder"] {
         t.Fatalf("expected the retiring owner named, got %v", refusal.Context())
     }
 }
@@ -186,8 +220,8 @@ func TestDeclareEnvironmentKey_RetiredTwiceByTwoOwners_Refused(t *testing.T) {
     key := countKey()
     key.Retired = []string{"MELODY_X_TXT"}
 
-    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("y", key), "a module retired an environment key another owner already retired")
-    if "x" != refusal.Context()["owner"] || "MELODY_X_TXT" != refusal.Context()["retiredEnvironmentKey"] {
+    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("y", key), "an environment key is retired that another owner already retired")
+    if "x" != refusal.Context()["holder"] || "MELODY_X_TXT" != refusal.Context()["retiredEnvironmentKey"] {
         t.Fatalf("expected the first owner named, got %v", refusal.Context())
     }
 
@@ -215,15 +249,15 @@ func TestDeclareEnvironmentKey_RetiredEqualsParameter_Refused(t *testing.T) {
     key := retiringTextKey("MELODY_X_TXT")
     key.Parameter = "MELODY_X_TXT"
 
-    declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "a module's environment key feeds a parameter named like a spelling it retires")
+    declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "a declared environment key feeds a parameter named like a spelling it retires")
 }
 
 func TestDeclareEnvironmentKey_RetiredHeldBySameOwner_RefusedNamingNoOtherOwner(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{})
     mustDeclare(t, configuration, "x", countKey())
 
-    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey("MELODY_X_COUNT")), "a module retired an environment key it holds itself")
-    if _, namesOwner := refusal.Context()["owner"]; true == namesOwner {
+    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", retiringTextKey("MELODY_X_COUNT")), "an environment key is retired that the same owner holds")
+    if _, namesHolder := refusal.Context()["holder"]; true == namesHolder {
         t.Fatalf("expected no other owner named, got %v", refusal.Context())
     }
 }
@@ -232,8 +266,8 @@ func TestDeclareEnvironmentKey_KeyRetiredBySameOwner_RefusedNamingNoOtherOwner(t
     configuration := mustConfigurationFromValues(t, map[string]string{})
     mustDeclare(t, configuration, "x", retiringTextKey("MELODY_X_COUNT"))
 
-    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", countKey()), "a module declared an environment key it retired itself")
-    if _, namesOwner := refusal.Context()["owner"]; true == namesOwner {
+    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", countKey()), "an environment key is declared that the same owner retired")
+    if _, namesHolder := refusal.Context()["holder"]; true == namesHolder {
         t.Fatalf("expected no other owner named, got %v", refusal.Context())
     }
 }
@@ -245,8 +279,8 @@ func TestDeclareEnvironmentKey_RetiredTwiceBySameOwner_RefusedNamingNoOtherOwner
     key := countKey()
     key.Retired = []string{"MELODY_X_TXT"}
 
-    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "a module retired an environment key it already retired itself")
-    if _, namesOwner := refusal.Context()["owner"]; true == namesOwner || "MELODY_X_TXT" != refusal.Context()["retiredEnvironmentKey"] {
+    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "an environment key is retired that the same owner already retired")
+    if _, namesHolder := refusal.Context()["holder"]; true == namesHolder || "MELODY_X_TXT" != refusal.Context()["retiredEnvironmentKey"] {
         t.Fatalf("expected the spelling and no other owner named, got %v", refusal.Context())
     }
 }
@@ -285,7 +319,7 @@ func TestRetiredEnvironmentKeys_EnvironmentFiles_OnlyTheSelectedEnvironmentJudge
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := NewConfiguration(environment, directory)
+    configuration, configurationErr := NewConfiguration(environment, directory, ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }

@@ -54,7 +54,7 @@ func servedRateLimitKernel(t *testing.T, configure func(router *http.Router, dis
                 return nil, environmentErr
             }
 
-            return config.NewConfiguration(environment, t.TempDir())
+            return config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
         },
         container.RegisterOptions{},
     )

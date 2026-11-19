@@ -96,7 +96,7 @@ func newTestConfiguration(t *testing.T, values map[string]string) configcontract
         t.Fatalf("environment: %v", environmentErr)
     }
 
-    configuration, configurationErr := melodyconfig.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, t.TempDir(), melodyconfig.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("configuration: %v", configurationErr)
     }

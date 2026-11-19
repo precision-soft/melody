@@ -445,7 +445,7 @@ func servedSecurityContainer(t *testing.T, kernelInstance *testKernel, logger lo
                 return nil, environmentErr
             }
 
-            return config.NewConfiguration(environment, t.TempDir())
+            return config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
         },
         container.RegisterOptions{},
     )

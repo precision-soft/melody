@@ -273,7 +273,7 @@ func newCacheWarningTestApplicationOver(t *testing.T, mode string, extraValues m
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -346,7 +346,7 @@ func newSessionBoundTestApplication(t *testing.T, mode string, sessionValues map
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -555,7 +555,7 @@ func TestRunHttp_CutsTheShutdownAtTheBudgetTheEnvironmentConfigured(t *testing.T
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -936,7 +936,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -1413,7 +1413,7 @@ func TestRunHttp_ServesThroughTheRegisteredDecorators(t *testing.T) {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -1761,7 +1761,7 @@ func TestRunHttp_RefusesAScopeTeardownTimeoutOutlastingTheShutdownBeforeServing(
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -1795,7 +1795,7 @@ func TestRunHttp_RefusesAManagerDeclaringAStorageTimeoutTheRuleRefusesBeforeServ
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }

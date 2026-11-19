@@ -784,7 +784,7 @@ func TestMarkSecret_ReachesADotEnvValueAssembledFromTheMarkedKey(t *testing.T) {
         t.Fatalf("environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := NewConfiguration(environment, t.TempDir(), ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("configuration error: %v", configurationErr)
     }

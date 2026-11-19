@@ -300,7 +300,7 @@ func TestBoot_JudgesTheCliCodesAfterTheModulesDeclaredTheirs(t *testing.T) {
             os.Exit(91)
         }
 
-        configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+        configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
         if nil != configurationErr {
             os.Exit(92)
         }
@@ -426,7 +426,7 @@ func TestBoot_ARefusedBootWritesTheCollectedBootWarningsBeforeItsExitRecord(t *t
             os.Exit(91)
         }
 
-        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
         if nil != configurationErr {
             os.Exit(92)
         }
@@ -519,7 +519,7 @@ func TestRun_AnHttpRunRefusedBeforeItsWriterWritesTheBootWarningsBeforeItsExitRe
             os.Exit(91)
         }
 
-        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
         if nil != configurationErr {
             os.Exit(92)
         }

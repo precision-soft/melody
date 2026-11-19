@@ -315,7 +315,7 @@ func newSessionTestApplicationFromValues(t *testing.T, values map[string]string)
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -376,7 +376,7 @@ func TestApplicationRegisterHttpSession_HandsTheConfiguredTombstoneRetentionAndT
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }

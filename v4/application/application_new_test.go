@@ -9,6 +9,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -260,5 +261,23 @@ func TestNewApplication_TheScopeTeardownTimeoutFieldReachesTheContainersScopes(t
 
     if true == probe.hasDeadline {
         t.Fatalf("expected the application's unlimited timeout to reach the scope, the close carried a deadline")
+    }
+}
+
+func TestNewApplication_EnvironmentKeysReachTheConfiguration(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{
+        EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(),
+        PublicFiles:      testhelper.NewEmbeddedStaticFs(),
+        EnvironmentKeys: []configcontract.EnvironmentKey{
+            {Key: "APP_GREETING", Parameter: "app.greeting", Field: "ApplicationConfig.EnvironmentKeys", Default: "hello"},
+        },
+    })
+    defer func() {
+        _ = applicationInstance.kernel.ServiceContainer().CloseWithContext(context.Background())
+    }()
+
+    parameter := applicationInstance.Configuration().Get("app.greeting")
+    if nil == parameter || "hello" != parameter.String() {
+        t.Fatalf("expected the application key's default through its parameter, got %v", parameter)
     }
 }

@@ -50,7 +50,7 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpe
         t.Fatalf("new environment: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("new configuration: %v", configurationErr)
     }
@@ -496,7 +496,7 @@ func TestGenerateCommand_AStdoutJournalDoesNotCarryTheWarningAheadOfTheDocument(
     if nil != environmentErr {
         t.Fatalf("new environment: %v", environmentErr)
     }
-    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("new configuration: %v", configurationErr)
     }

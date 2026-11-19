@@ -87,7 +87,7 @@ func loginRuntimeForEnvironmentRecordingFailures(t *testing.T, environmentName s
         t.Fatalf("new environment: %v", environmentErr)
     }
 
-    configuration, configurationErr := melodyconfig.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, t.TempDir(), melodyconfig.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("new configuration: %v", configurationErr)
     }

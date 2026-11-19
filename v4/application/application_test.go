@@ -542,7 +542,7 @@ func newEnvironmentRefusalApplication(t *testing.T, mode string, environmentValu
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -621,7 +621,7 @@ func TestRefuseBootWithDefaultedEnvironment_AdmitsANameSetByTheDevelopmentFile(t
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -650,7 +650,7 @@ func TestBoot_RefusesTheDefaultedEnvironmentNameAfterTheZeroKeyRefusal(t *testin
             os.Exit(91)
         }
 
-        configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+        configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
         if nil != configurationErr {
             os.Exit(92)
         }
@@ -738,7 +738,7 @@ func TestRun_PanicPathWritesTheFatalRecordThroughTheLiveLoggerBeforeTeardown(t *
             os.Exit(91)
         }
 
-        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
         if nil != configurationErr {
             os.Exit(92)
         }
@@ -859,7 +859,7 @@ func TestBoot_PanicPathRunsTheTeardownHook(t *testing.T) {
             os.Exit(91)
         }
 
-        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
         if nil != configurationErr {
             os.Exit(92)
         }
@@ -928,7 +928,7 @@ func TestBoot_RefusesADeclaredTeardownDependencyNamingNoService(t *testing.T) {
             os.Exit(91)
         }
 
-        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
         if nil != configurationErr {
             os.Exit(92)
         }
@@ -981,7 +981,7 @@ func TestBoot_RefusesALazyLockerOverAContainerWithNoLocker(t *testing.T) {
             os.Exit(91)
         }
 
-        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+        configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
         if nil != configurationErr {
             os.Exit(92)
         }
@@ -1050,7 +1050,7 @@ func TestBoot_RefusesAnHttpBootOverAnUnboundedSessionPairOrACliBootWarningKey(t 
             os.Exit(91)
         }
 
-        configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+        configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
         if nil != configurationErr {
             os.Exit(92)
         }
@@ -1369,7 +1369,7 @@ func newTeardownTimeoutTestApplication(t *testing.T, teardownTimeout string) *Ap
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }

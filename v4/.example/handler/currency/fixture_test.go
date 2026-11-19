@@ -58,7 +58,7 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
         t.Fatalf("new environment: %v", environmentErr)
     }
 
-    configuration, configurationErr := melodyconfig.NewConfiguration(environment, "/tmp/melody")
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, "/tmp/melody", melodyconfig.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("new configuration: %v", configurationErr)
     }

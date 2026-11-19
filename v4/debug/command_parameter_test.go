@@ -94,7 +94,7 @@ func newParameterTestRuntime(t *testing.T) *testRuntime {
         t.Fatalf("failed to build the test environment: %v", environmentErr)
     }
 
-    applicationConfiguration, configurationErr := config.NewConfiguration(environment, "/tmp/melody")
+    applicationConfiguration, configurationErr := config.NewConfiguration(environment, "/tmp/melody", config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("failed to build the test configuration: %v", configurationErr)
     }

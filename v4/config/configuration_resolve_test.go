@@ -344,6 +344,7 @@ func TestConfiguration_EnvironmentValueWithLiteralPercentIsWrittenDoubled(t *tes
             },
         },
         "/srv/app",
+        ConfigurationConfig{},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the escaped value to resolve, got %v", newConfigurationErr)
@@ -363,6 +364,7 @@ func TestConfiguration_UnescapedLiteralPercentFailsTheBootResolveWithAnActionabl
             },
         },
         "/srv/app",
+        ConfigurationConfig{},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the constructor to defer the unresolved reference, got %v", newConfigurationErr)
@@ -393,6 +395,7 @@ func TestConfiguration_AForwardReferenceDefersAndTheBootResolveSettlesIt(t *test
             },
         },
         "/srv/app",
+        ConfigurationConfig{},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the constructor to defer the forward reference, got %v", newConfigurationErr)
@@ -419,6 +422,7 @@ func TestConfiguration_ADeferredParameterIsUnreadableUntilTheBootResolveSettlesI
             },
         },
         "/srv/app",
+        ConfigurationConfig{},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the constructor to defer the forward reference, got %v", newConfigurationErr)
@@ -775,6 +779,7 @@ func TestConfiguration_ResolveIsRefusedOnceServing(t *testing.T) {
             },
         },
         "/srv/app",
+        ConfigurationConfig{},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
@@ -812,6 +817,7 @@ func TestConfiguration_RegisterRuntimeStillResolvesOnceServing(t *testing.T) {
             },
         },
         "/srv/app",
+        ConfigurationConfig{},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
@@ -1054,7 +1060,7 @@ func TestResolve_TheFailureNamesTheEnvironmentKeyBesideTheInternalAlias(t *testi
         t.Fatalf("new environment error: %v", environmentErr)
     }
 
-    _, configurationErr := NewConfiguration(environment, t.TempDir())
+    _, configurationErr := NewConfiguration(environment, t.TempDir(), ConfigurationConfig{})
     if nil == configurationErr {
         t.Fatal("expected the undefined reference to fail the construction")
     }
@@ -1170,7 +1176,7 @@ func newConfigurationFromEnvironmentValues(t *testing.T, values map[string]strin
         t.Fatalf("new environment error: %v", environmentErr)
     }
 
-    _, configurationErr := NewConfiguration(environment, t.TempDir())
+    _, configurationErr := NewConfiguration(environment, t.TempDir(), ConfigurationConfig{})
 
     return configurationErr
 }

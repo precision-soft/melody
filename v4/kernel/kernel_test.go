@@ -41,7 +41,7 @@ func newTestConfiguration(t *testing.T, environment string) configcontract.Confi
 
     projectDirectory := t.TempDir()
 
-    configuration, err := config.NewConfiguration(environmentInstance, projectDirectory)
+    configuration, err := config.NewConfiguration(environmentInstance, projectDirectory, config.ConfigurationConfig{})
     if nil != err {
         t.Fatalf("unexpected configuration error: %s", err.Error())
     }

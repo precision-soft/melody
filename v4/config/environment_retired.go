@@ -6,9 +6,10 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
-const frameworkEnvironmentKeyOwner = "the framework"
+const frameworkEnvironmentKeyOwner = internal.EnvironmentKeyOwnerFramework
 
 /* retiredEnvironmentKeyMap is keyed by the retired spelling and holds the successor of every key the framework renamed */
 var retiredEnvironmentKeyMap = map[string]string{
@@ -58,44 +59,49 @@ func (instance *Configuration) RetiredEnvironmentKeySuccessor(key string) (strin
     return successor, isRetired
 }
 
-func refuseRetiredEnvironmentKeyShape(key configcontract.EnvironmentKey, context exceptioncontract.Context) error {
+func refuseRetiredEnvironmentKeyShape(owner string, key configcontract.EnvironmentKey, context exceptioncontract.Context) error {
     if _, isFrameworkRetired := retiredEnvironmentKeyMap[key.Key]; true == isFrameworkRetired {
-        context["owner"] = frameworkEnvironmentKeyOwner
+        context["holder"] = frameworkEnvironmentKeyOwner
 
-        return exception.NewError("a module declared an environment key another owner retired", context, nil)
+        return exception.NewError("an environment key is declared that another owner retired", context, nil)
     }
 
     seen := make(map[string]bool, len(key.Retired))
     for _, retiredKey := range key.Retired {
         context["retiredEnvironmentKey"] = retiredKey
 
-        if false == moduleEnvironmentKeyPattern.MatchString(retiredKey) {
+        /* the application may retire a MELODY_ spelling, so a deployment renames a framework-era key to the application's own */
+        if applicationEnvironmentKeyOwner == owner {
+            if false == applicationEnvironmentKeyPattern.MatchString(retiredKey) {
+                return exception.NewError("a declared environment key's retired spelling is not an upper-case letter followed by upper-case letters, digits and underscores", context, nil)
+            }
+        } else if false == moduleEnvironmentKeyPattern.MatchString(retiredKey) {
             return exception.NewError("a module's retired environment key is not MELODY_ followed by upper-case letters, digits and underscores", context, nil)
         }
 
         if retiredKey == key.Key {
-            return exception.NewError("a module's environment key retires its own spelling", context, nil)
+            return exception.NewError("a declared environment key retires its own spelling", context, nil)
         }
 
         if retiredKey == key.Parameter {
-            return exception.NewError("a module's environment key feeds a parameter named like a spelling it retires", context, nil)
+            return exception.NewError("a declared environment key feeds a parameter named like a spelling it retires", context, nil)
         }
 
         if true == seen[retiredKey] {
-            return exception.NewError("a module's environment key retires one spelling twice", context, nil)
+            return exception.NewError("a declared environment key retires one spelling twice", context, nil)
         }
         seen[retiredKey] = true
 
         if _, isFrameworkKey := frameworkEnvironmentKeyIndex[retiredKey]; true == isFrameworkKey {
-            context["owner"] = frameworkEnvironmentKeyOwner
+            context["holder"] = frameworkEnvironmentKeyOwner
 
-            return exception.NewError("a module retired an environment key another owner holds", context, nil)
+            return exception.NewError("an environment key is retired that another owner holds", context, nil)
         }
 
         if _, isFrameworkRetired := retiredEnvironmentKeyMap[retiredKey]; true == isFrameworkRetired {
-            context["owner"] = frameworkEnvironmentKeyOwner
+            context["holder"] = frameworkEnvironmentKeyOwner
 
-            return exception.NewError("a module retired an environment key another owner already retired", context, nil)
+            return exception.NewError("an environment key is retired that another owner already retired", context, nil)
         }
     }
 
@@ -106,33 +112,33 @@ func refuseRetiredEnvironmentKeyShape(key configcontract.EnvironmentKey, context
 
 func (instance *Configuration) refuseRetiredEnvironmentKeyCollisionLocked(owner string, key configcontract.EnvironmentKey, context exceptioncontract.Context) error {
     if successor, isRetired := instance.declaredRetiredEnvironmentKeys[key.Key]; true == isRetired {
-        return retiredEnvironmentKeyCollision(owner, instance.declaredEnvironmentKeys[successor].owner, "a module declared an environment key", "retired", context)
+        return retiredEnvironmentKeyCollision(owner, instance.declaredEnvironmentKeys[successor].owner, "an environment key is declared", "retired", context)
     }
 
     for _, retiredKey := range key.Retired {
         if declared, isDeclared := instance.declaredEnvironmentKeys[retiredKey]; true == isDeclared {
             context["retiredEnvironmentKey"] = retiredKey
 
-            return retiredEnvironmentKeyCollision(owner, declared.owner, "a module retired an environment key", "holds", context)
+            return retiredEnvironmentKeyCollision(owner, declared.owner, "an environment key is retired", "holds", context)
         }
 
         if successor, isRetired := instance.declaredRetiredEnvironmentKeys[retiredKey]; true == isRetired {
             context["retiredEnvironmentKey"] = retiredKey
 
-            return retiredEnvironmentKeyCollision(owner, instance.declaredEnvironmentKeys[successor].owner, "a module retired an environment key", "already retired", context)
+            return retiredEnvironmentKeyCollision(owner, instance.declaredEnvironmentKeys[successor].owner, "an environment key is retired", "already retired", context)
         }
     }
 
     return nil
 }
 
-/* a collision with a key of the same module names no owner: there is no other module to look in */
+/* a collision with a key of the same owner names no holder: there is no other owner to look in */
 func retiredEnvironmentKeyCollision(owner string, holder string, subject string, verb string, context exceptioncontract.Context) error {
     if holder == owner {
-        return exception.NewError(subject+" it "+verb+" itself", context, nil)
+        return exception.NewError(subject+" that the same owner "+verb, context, nil)
     }
 
-    context["owner"] = holder
+    context["holder"] = holder
 
-    return exception.NewError(subject+" another owner "+verb, context, nil)
+    return exception.NewError(subject+" that another owner "+verb, context, nil)
 }

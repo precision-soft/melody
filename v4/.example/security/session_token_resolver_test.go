@@ -426,7 +426,7 @@ func TestSessionTokenResolver_ASessionOutageAnswersTheUnavailableToken(t *testin
             return nil, environmentErr
         }
 
-        return melodyconfig.NewConfiguration(environment, t.TempDir())
+        return melodyconfig.NewConfiguration(environment, t.TempDir(), melodyconfig.ConfigurationConfig{})
     }, melodycontainer.RegisterOptions{})
     containerInstance.MustRegister(melodysession.ServiceSessionManager, func(resolver melodycontainercontract.Resolver) (melodysessioncontract.Manager, error) {
         return melodysession.NewManager(&outageSessionStorage{Storage: melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})}, melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)}), nil

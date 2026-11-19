@@ -14,7 +14,7 @@ func TestConfigMustFromResolver_ResolveTheDeclaredServiceName(t *testing.T) {
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    configuration, newConfigurationErr := NewConfiguration(&Environment{values: map[string]string{}}, "/srv/app")
+    configuration, newConfigurationErr := NewConfiguration(&Environment{values: map[string]string{}}, "/srv/app", ConfigurationConfig{})
     if nil != newConfigurationErr {
         t.Fatalf("unexpected configuration error: %v", newConfigurationErr)
     }
@@ -58,7 +58,7 @@ func TestConfigFromResolver_AnswersTheConfigurationAndAnAbsenceAsAnError(t *test
         t.Fatalf("expected an absent configuration to answer an error")
     }
 
-    configuration, newConfigurationErr := NewConfiguration(&Environment{values: map[string]string{}}, "/srv/app")
+    configuration, newConfigurationErr := NewConfiguration(&Environment{values: map[string]string{}}, "/srv/app", ConfigurationConfig{})
     if nil != newConfigurationErr {
         t.Fatalf("unexpected configuration error: %v", newConfigurationErr)
     }

@@ -88,6 +88,12 @@ func newEnvironmentKeyBootApplication(t *testing.T, values map[string]string) *A
 func newEnvironmentKeyBootApplicationIn(t *testing.T, values map[string]string, projectDirectory string) *Application {
     t.Helper()
 
+    return newEnvironmentKeyBootApplicationWithKeysIn(t, values, nil, projectDirectory)
+}
+
+func newEnvironmentKeyBootApplicationWithKeysIn(t *testing.T, values map[string]string, applicationKeys []configcontract.EnvironmentKey, projectDirectory string) *Application {
+    t.Helper()
+
     bootValues := map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment}
     for key, value := range values {
         bootValues[key] = value
@@ -98,7 +104,7 @@ func newEnvironmentKeyBootApplicationIn(t *testing.T, values map[string]string, 
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{EnvironmentKeys: applicationKeys})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -197,7 +203,7 @@ func TestBoot_RefusesAModuleKeyOutsideItsRule(t *testing.T) {
     output, runErr := command.CombinedOutput()
     text := string(output)
 
-    if nil == runErr || false == strings.Contains(text, "after unrecovered error: a module's environment key is refused") {
+    if nil == runErr || false == strings.Contains(text, "after unrecovered error: a declared environment key is refused") {
         t.Fatalf("expected the boot refused over the module's key, got %v: %s", runErr, text[max(0, len(text)-1500):])
     }
 
@@ -211,7 +217,7 @@ func TestBoot_RefusesAModuleKeyOutsideItsRule(t *testing.T) {
     }
     journal := string(journalBytes)
 
-    for _, expected := range []string{"invalid environment value", `"environmentKey":"MELODY_X_COUNT"`, `"module":"x"`, `"field":"x.ModuleConfig.Count"`, `"parameterName":"melody.x.count"`, `"bootWarning":"` + internal.BootWarningNameEnvironmentUndeclaredKey + `"`} {
+    for _, expected := range []string{"invalid environment value", `"environmentKey":"MELODY_X_COUNT"`, `"owner":"x"`, `"field":"x.ModuleConfig.Count"`, `"parameterName":"melody.x.count"`, `"bootWarning":"` + internal.BootWarningNameEnvironmentUndeclaredKey + `"`} {
         if false == strings.Contains(journal, expected) {
             t.Fatalf("expected the journal to carry %s, got: %s", expected, journal)
         }
@@ -219,6 +225,47 @@ func TestBoot_RefusesAModuleKeyOutsideItsRule(t *testing.T) {
 
     if true == strings.Contains(journal+text, "424242") {
         t.Fatalf("expected the value of the undeclared source nowhere, got: %s", journal)
+    }
+}
+
+const applicationEnvironmentKeyRefusalChildVariable = "MELODY_TEST_APPLICATION_ENVIRONMENT_KEY_REFUSAL_CHILD"
+
+/* the application's keys are judged with the modules' after the resolve, so a value its rule refuses fails the boot naming the application */
+func TestBoot_AnApplicationKeyOutsideItsRuleRefuses(t *testing.T) {
+    if projectDirectory := os.Getenv(applicationEnvironmentKeyRefusalChildVariable); "" != projectDirectory {
+        countKey := environmentKeyCount("")
+        countKey.Key = "APP_COUNT"
+        countKey.Parameter = "app.count"
+        countKey.Field = "ApplicationConfig.EnvironmentKeys"
+
+        applicationInstance := newEnvironmentKeyBootApplicationWithKeysIn(t, map[string]string{"APP_COUNT": "0"}, []configcontract.EnvironmentKey{countKey}, projectDirectory)
+
+        applicationInstance.Boot()
+
+        return
+    }
+
+    childProjectDirectory := t.TempDir()
+    command := exec.Command(os.Args[0], "-test.run=^TestBoot_AnApplicationKeyOutsideItsRuleRefuses$")
+    command.Env = append(os.Environ(), applicationEnvironmentKeyRefusalChildVariable+"="+childProjectDirectory)
+
+    output, runErr := command.CombinedOutput()
+    text := string(output)
+
+    if nil == runErr || false == strings.Contains(text, "after unrecovered error: a declared environment key is refused") {
+        t.Fatalf("expected the boot refused over the application's key, got %v: %s", runErr, text[max(0, len(text)-1500):])
+    }
+
+    journalBytes, readErr := os.ReadFile(filepath.Join(childProjectDirectory, "var", "log", "dev.log"))
+    if nil != readErr {
+        t.Fatalf("expected the child's journal: %v", readErr)
+    }
+    journal := string(journalBytes)
+
+    for _, expected := range []string{"invalid environment value", `"environmentKey":"APP_COUNT"`, `"owner":"the application"`, `"field":"ApplicationConfig.EnvironmentKeys"`, `"parameterName":"app.count"`} {
+        if false == strings.Contains(journal, expected) {
+            t.Fatalf("expected the journal to carry %s, got: %s", expected, journal)
+        }
     }
 }
 
@@ -356,7 +403,7 @@ func TestBoot_AModuleDeclaringOneKeyTwiceIsRefused(t *testing.T) {
         t.Fatalf("expected the second declaration refused naming the module and the key, got %v", refusal)
     }
 
-    if cause := errorChainHolds(refusal, "a module declared an environment key another owner already holds"); nil == cause || "x" != cause.Context()["owner"] {
+    if cause := errorChainHolds(refusal, "an environment key is declared that the same owner already holds"); nil == cause || "x" != cause.Context()["owner"] {
         t.Fatalf("expected the configuration's refusal naming the owner in the chain, got %v", refusal)
     }
 }
@@ -395,8 +442,8 @@ func TestBoot_AHandMappingRegisteredBeforeBootIsRefusedNamingTheKey(t *testing.T
     applicationInstance.modules = []applicationcontract.Module{&environmentKeyTestModule{name: "x", keys: []configcontract.EnvironmentKey{environmentKeyText()}}}
 
     refusal := refusalOf(t, applicationInstance.bootModuleEnvironmentKeys)
-    cause := errorChainHolds(refusal, "the parameter a module's environment key feeds is already registered")
-    if nil == cause || "MELODY_X_TEXT" != cause.Context()["environmentKey"] || "melody.x.text" != cause.Context()["parameterName"] || "x" != cause.Context()["module"] {
+    cause := errorChainHolds(refusal, "the parameter a declared environment key feeds is already registered")
+    if nil == cause || "MELODY_X_TEXT" != cause.Context()["environmentKey"] || "melody.x.text" != cause.Context()["parameterName"] || "x" != cause.Context()["owner"] {
         t.Fatalf("expected the hand mapping refused naming the key, the parameter and the module, got %v", refusal)
     }
 }

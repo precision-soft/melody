@@ -54,6 +54,16 @@ func (instance *Application) registerModuleAtDepth(moduleInstance applicationcon
         )
     }
 
+    if true == strings.EqualFold(internal.EnvironmentKeyOwnerFramework, moduleName) || true == strings.EqualFold(internal.EnvironmentKeyOwnerApplication, moduleName) {
+        exception.Panic(
+            exception.NewError(
+                "module name may not be an owner name the framework reserves",
+                exceptioncontract.Context{"moduleType": fmt.Sprintf("%T", moduleInstance), "moduleName": moduleName},
+                nil,
+            ),
+        )
+    }
+
     /* a module's identity is its name folded to lower case: a second registration under a name already registered in any case, the same instance reached again included, is a duplicate recorded for the aggregated boot report naming both spellings, and neither it nor the modules it provides boots */
     if nil == instance.registeredModuleNames {
         instance.registeredModuleNames = make(map[string]string)

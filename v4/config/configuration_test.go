@@ -28,7 +28,7 @@ func TestConfigurationDefaultsAndTemplateResolution(t *testing.T) {
     }
 
     projectDirectory := filepath.Join("/tmp", "melody")
-    configuration, err := NewConfiguration(environment, projectDirectory)
+    configuration, err := NewConfiguration(environment, projectDirectory, ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -65,7 +65,7 @@ func TestConfigurationEnvironmentOverridesDefaultsWhenNonEmpty(t *testing.T) {
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -87,7 +87,7 @@ func TestConfigurationMustGetMissingPanics(t *testing.T) {
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -109,7 +109,7 @@ func TestConfigurationRegisterRuntimeValidationPanics(t *testing.T) {
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -154,7 +154,7 @@ func TestConfigurationRegisterRuntime_SuccessfullyRegisters(t *testing.T) {
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -179,7 +179,7 @@ func TestConfigurationRegisterRuntime_PreBootTemplateIsDeferredThenResolves(t *t
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -218,7 +218,7 @@ func TestConfigurationRegisterRuntime_PreBootLiteralPercentIsReadable(t *testing
             t.Fatalf("new environment error: %v", err)
         }
 
-        configuration, err := NewConfiguration(environment, "/tmp/melody")
+        configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
         if nil != err {
             t.Fatalf("new configuration error: %v", err)
         }
@@ -246,7 +246,7 @@ func TestConfigurationRegisterRuntime_PreBootDoubledPercentIsDeferredThenResolve
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -279,7 +279,7 @@ func TestConfigurationRegisterRuntime_PreBootParameterReferenceIsDeferredThenRes
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -315,7 +315,7 @@ func TestConfigurationRegisterRuntime_ConcurrentCallsDoNotPanic(t *testing.T) {
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -347,7 +347,7 @@ func TestConfiguration_ConcurrentRegisterAndReadIsRaceFree(t *testing.T) {
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -391,7 +391,7 @@ func TestRegisterRuntimeAddsValue(t *testing.T) {
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -442,7 +442,7 @@ func TestConfiguration_EscapedPercentLiteralDoesNotFailValidation(t *testing.T) 
         t.Fatalf("new environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    configuration, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("a correctly escaped percent literal must not fail configuration validation: %v", configurationErr)
     }
@@ -462,7 +462,7 @@ func TestRegisterRuntime_AfterResolveResolvesTheTemplate(t *testing.T) {
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := NewConfiguration(environment, t.TempDir(), ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -487,7 +487,7 @@ func TestRegisterRuntime_BeforeBootLeavesAForwardReferenceForTheBootPass(t *test
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := NewConfiguration(environment, t.TempDir(), ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -594,7 +594,7 @@ func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
         "DB_PASSWORD": "hunter2",
     }}
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
@@ -623,7 +623,7 @@ func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
 }
 
 func TestMarkSecret_ReadsAReferenceBehindAnEscapedPercent(t *testing.T) {
-    configuration, err := NewConfiguration(&Environment{values: map[string]string{}}, "/tmp/melody")
+    configuration, err := NewConfiguration(&Environment{values: map[string]string{}}, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
@@ -657,7 +657,7 @@ func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T)
         "G6_OUTER":  "y-%env(G6_MIDDLE)%",
     }}
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
@@ -689,7 +689,7 @@ func TestMarkSecret_ReachesAReaderSpelledWithTheKernelAlias(t *testing.T) {
         LogPathKey: "/var/log/app.log",
     }}
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
@@ -721,7 +721,7 @@ func TestMarkSecret_ReachesAReaderSpelledWithTheKernelAlias(t *testing.T) {
 func TestRegisterRuntime_FailedResolutionLeavesNoHalfMadeParameter(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
@@ -754,7 +754,7 @@ func TestRegisterRuntime_FailedResolutionLeavesNoHalfMadeParameter(t *testing.T)
 func TestRegisterRuntime_RefusesWhitespaceNames(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
@@ -791,7 +791,7 @@ func TestRegisterRuntime_RefusesWhitespaceNames(t *testing.T) {
 func TestRuntimeParameter_ConversionErrorNamesTheParameter(t *testing.T) {
     environment := &Environment{values: map[string]string{}}
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
@@ -829,6 +829,7 @@ func newResolvedConfiguration(
     configuration, newConfigurationErr := NewConfiguration(
         &Environment{values: environmentValues},
         "/srv/app",
+        ConfigurationConfig{},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
@@ -881,6 +882,7 @@ func newLateRegistrationConfiguration(t *testing.T) *Configuration {
     configuration, newConfigurationErr := NewConfiguration(
         &Environment{values: map[string]string{"DB_PASSWORD": "s3cr3t"}},
         "/srv/app",
+        ConfigurationConfig{},
     )
     if nil != newConfigurationErr {
         t.Fatalf("could not build the configuration: %v", newConfigurationErr)
@@ -903,7 +905,7 @@ func TestMarkSecret_PropagatesThroughAParameterReference(t *testing.T) {
         "DB_PASSWORD": "hunter2",
     }}
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
@@ -967,7 +969,7 @@ func TestConfigurationTeardownTimeoutRejectsAValueBelowTheMinimum(t *testing.T) 
             t.Fatalf("new environment error: %v", environmentErr)
         }
 
-        _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+        _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
         if nil == configurationErr {
             t.Fatalf("expected the teardown timeout %q to fail the boot", value)
         }
@@ -990,7 +992,7 @@ func TestConfigurationTeardownTimeoutRejectsAnUnparsableValue(t *testing.T) {
         t.Fatalf("new environment error: %v", environmentErr)
     }
 
-    _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil == configurationErr {
         t.Fatalf("expected an unparsable teardown timeout to fail the boot")
     }
@@ -1004,7 +1006,7 @@ func newTeardownTimeoutConfiguration(t *testing.T, values map[string]string) *Co
         t.Fatalf("new environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    configuration, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("new configuration error: %v", configurationErr)
     }
@@ -1044,7 +1046,7 @@ func TestConfigurationContainerCreationWaitersRejectsAValueBelowTheMinimumNaming
             t.Fatalf("new environment error: %v", environmentErr)
         }
 
-        _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+        _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
         if nil == configurationErr {
             t.Fatalf("expected the creation waiters %q to fail the boot", value)
         }
@@ -1082,7 +1084,7 @@ func TestConfigurationContainerTeardownSequentialRejectsAValueThatIsNoBooleanNam
         t.Fatalf("new environment error: %v", environmentErr)
     }
 
-    _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil == configurationErr {
         t.Fatalf("expected the value to fail the configuration")
     }
@@ -1118,7 +1120,7 @@ func TestConfigurationScopeTeardownTimeoutRejectsAValueOutsideItsRuleNamingTheKe
             t.Fatalf("new environment error: %v", environmentErr)
         }
 
-        _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+        _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
         if nil == configurationErr {
             t.Fatalf("expected the scope teardown timeout %q to fail the boot", value)
         }
@@ -1157,7 +1159,7 @@ func TestConfigurationSessionEmptyOnOutageIsASwitch(t *testing.T) {
         t.Fatalf("new environment error: %v", environmentErr)
     }
 
-    _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil == configurationErr || HttpSessionEmptyOnOutageKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
         t.Fatalf("expected the value refused naming the key, got %v", configurationErr)
     }
@@ -1181,7 +1183,7 @@ func TestConfigurationStaticEnableCacheReadsAnEmptyLineAsUnset(t *testing.T) {
         t.Fatalf("new environment error: %v", environmentErr)
     }
 
-    _, configurationErr := NewConfiguration(environment, "/tmp/melody")
+    _, configurationErr := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil == configurationErr || StaticEnableCacheKey != exception.LogContext(configurationErr, exception.LogContextConfig{})["environmentKey"] {
         t.Fatalf("expected the value refused naming the key, got %v", configurationErr)
     }

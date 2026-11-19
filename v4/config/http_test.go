@@ -17,7 +17,7 @@ func newConfigurationFromValues(values map[string]string) (*Configuration, error
         return nil, err
     }
 
-    return NewConfiguration(environment, "/tmp/melody")
+    return NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
 }
 
 func mustConfigurationFromValues(t *testing.T, values map[string]string) *Configuration {
@@ -246,7 +246,7 @@ func TestConfigurationHttpStaticExcludedPathsDefaultsToEmpty(t *testing.T) {
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -273,7 +273,7 @@ func TestConfigurationHttpStaticExcludedPathsAreReadAsACommaSeparatedList(t *tes
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -304,7 +304,7 @@ func TestConfigurationHttpStaticExcludedPathsAreReadThroughTheKernelAlias(t *tes
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -326,7 +326,7 @@ func TestConfigurationHttpStaticExcludedPathsAreCopiedOnRead(t *testing.T) {
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }
@@ -356,7 +356,7 @@ func TestConfigurationHttpStaticExcludedPathsRefuseAnEntryThatIsNotAPath(t *test
             t.Fatalf("new environment error: %v", err)
         }
 
-        _, err = NewConfiguration(environment, "/tmp/melody")
+        _, err = NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
         if nil == err {
             t.Fatalf("expected the excluded path list %q to fail the boot", value)
         }
@@ -370,7 +370,7 @@ func TestConfigurationHttpStaticExcludedPathsRefuseAnEntryHoldingAPercentEscapeO
             t.Fatalf("new environment error: %v", err)
         }
 
-        _, err = NewConfiguration(environment, "/tmp/melody")
+        _, err = NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
 
         var refusal *exception.Error
         for current := err; nil != current; current = errors.Unwrap(current) {
@@ -393,7 +393,7 @@ func TestConfigurationHttpStaticExcludedPathsRefuseAnEntryHoldingAPercentEscapeO
         t.Fatalf("new environment error: %v", err)
     }
 
-    if _, err = NewConfiguration(environment, "/tmp/melody"); nil != err {
+    if _, err = NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{}); nil != err {
         t.Fatalf("expected a decoded entry, %%2F and a stray percent sign admitted, got %v", err)
     }
 }
@@ -410,7 +410,7 @@ func TestConfigurationHttpStaticExcludedPathsAcceptAWhitespaceOnlyValueAsNoList(
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("expected a blank value to read as no list, got %v", err)
     }

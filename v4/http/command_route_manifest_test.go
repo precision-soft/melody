@@ -44,7 +44,7 @@ func newManifestCommandRuntime(t *testing.T, projectDirectory string) runtimecon
         t.Fatalf("new environment: %v", environmentErr)
     }
 
-    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory)
+    configuration, configurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("new configuration: %v", configurationErr)
     }

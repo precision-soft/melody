@@ -99,7 +99,7 @@ func (instance *Application) refuseModuleEnvironmentKeys() {
     }
 
     if checkErr := declarer.CheckEnvironmentKeys(); nil != checkErr {
-        exception.Panic(exception.NewError("a module's environment key is refused", nil, checkErr))
+        exception.Panic(exception.NewError("a declared environment key is refused", nil, checkErr))
     }
 }
 

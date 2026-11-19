@@ -15,58 +15,78 @@ import (
 
 const environmentKeyNamespace = "MELODY_"
 
+/* a module stays in the namespace, so a process that does not register it still warns about and redacts its keys */
 var moduleEnvironmentKeyPattern = regexp.MustCompile(`^MELODY_[A-Z0-9_]+$`)
+
+var applicationEnvironmentKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+const applicationEnvironmentKeyOwner = internal.EnvironmentKeyOwnerApplication
+
+/* in slice order, before the first resolve, so a key's default may read a key declared before it and a framework parameter read at construction sees every default */
+func (instance *Configuration) declareApplicationEnvironmentKeys(keys []configcontract.EnvironmentKey) error {
+    for _, key := range keys {
+        if declareErr := instance.DeclareEnvironmentKey(applicationEnvironmentKeyOwner, key); nil != declareErr {
+            return declareErr
+        }
+    }
+
+    return nil
+}
 
 type declaredEnvironmentKey struct {
     owner       string
     declaration configcontract.EnvironmentKey
 }
 
-/* DeclareEnvironmentKey enters an owner's key into the key table and resolves its parameter at once; only a reference to a parameter registered later waits for the boot pass. Refused once the boot resolve ran, for a key outside the MELODY_ namespace or held or retired by another owner, for a retired spelling outside the namespace or held by another owner, for a parameter already registered or fed, for a secret key with a default, for a literal default its own rule refuses and for a text that cannot be resolved. */
+/* DeclareEnvironmentKey enters an owner's key into the key table and resolves its parameter at once; only a reference to a parameter registered later waits for the boot pass. Refused once the boot resolve ran, for a module's key outside the MELODY_ namespace, for the application's key inside it or not upper-case letters, digits and underscores, for a key held or retired by another owner, for a retired spelling of the wrong shape or held by another owner, for a parameter already registered or fed, for a secret key with a default, for a literal default its own rule refuses and for a text that cannot be resolved. */
 func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcontract.EnvironmentKey) error {
     context := exceptioncontract.Context{
-        "module":         owner,
+        "owner":          owner,
         "environmentKey": key.Key,
         "field":          key.Field,
         "parameterName":  key.Parameter,
     }
 
-    if shapeErr := refuseEnvironmentKeyShape(key, context); nil != shapeErr {
+    if shapeErr := refuseEnvironmentKeyShape(owner, key, context); nil != shapeErr {
         return shapeErr
     }
 
-    if retiredShapeErr := refuseRetiredEnvironmentKeyShape(key, context); nil != retiredShapeErr {
+    if retiredShapeErr := refuseRetiredEnvironmentKeyShape(owner, key, context); nil != retiredShapeErr {
         return retiredShapeErr
     }
 
     if _, isFrameworkKey := frameworkEnvironmentKeyIndex[key.Key]; true == isFrameworkKey {
-        context["owner"] = frameworkEnvironmentKeyOwner
+        context["holder"] = frameworkEnvironmentKeyOwner
 
-        return exception.NewError("a module declared an environment key another owner already holds", context, nil)
+        return exception.NewError("an environment key is declared that another owner already holds", context, nil)
     }
 
     if true == key.Secret && "" != key.Default {
-        return exception.NewError("a module declared a default for a secret environment key", context, nil)
+        return exception.NewError("a default is declared for a secret environment key", context, nil)
     }
 
     if false == internal.IsNilInterface(key.Rule) && false == templateCarriesConstruct(key.Default) {
         if ruleErr := key.Rule.Check(key.Default, key.Field); nil != ruleErr {
-            return exception.NewError("a module's environment key default is refused by its own rule", context, ruleErr)
+            return exception.NewError("a declared environment key's default is refused by its own rule", context, ruleErr)
         }
     }
 
-    /* a rule is a module's code, so it runs outside the lock and may read the configuration */
+    /* a rule is its owner's code, so it runs outside the lock and may read the configuration */
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     if true == instance.resolved || true == instance.serving.Load() {
-        return exception.NewError("a module's environment key is declared after the configuration resolved", context, nil)
+        return exception.NewError("an environment key is declared after the configuration resolved", context, nil)
     }
 
     if declared, isDeclared := instance.declaredEnvironmentKeys[key.Key]; true == isDeclared {
-        context["owner"] = declared.owner
+        if owner == declared.owner {
+            return exception.NewError("an environment key is declared that the same owner already holds", context, nil)
+        }
 
-        return exception.NewError("a module declared an environment key another owner already holds", context, nil)
+        context["holder"] = declared.owner
+
+        return exception.NewError("an environment key is declared that another owner already holds", context, nil)
     }
 
     if retiredCollisionErr := instance.refuseRetiredEnvironmentKeyCollisionLocked(owner, key, context); nil != retiredCollisionErr {
@@ -74,19 +94,19 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
     }
 
     if feedingKey, isFed := instance.declaredEnvironmentParameters[key.Parameter]; true == isFed {
-        context["owner"] = instance.declaredEnvironmentKeys[feedingKey].owner
+        context["holder"] = instance.declaredEnvironmentKeys[feedingKey].owner
         context["feedingEnvironmentKey"] = feedingKey
 
-        return exception.NewError("a module declared a parameter another environment key already feeds", context, nil)
+        return exception.NewError("a declared environment key feeds a parameter another environment key already feeds", context, nil)
     }
 
     if nil != instance.getInternalParameter(key.Parameter) {
-        return exception.NewError("the parameter a module's environment key feeds is already registered", context, nil)
+        return exception.NewError("the parameter a declared environment key feeds is already registered", context, nil)
     }
 
     loadedParameter := instance.getInternalParameter(key.Key)
     if nil != loadedParameter && key.Key != loadedParameter.environmentKey {
-        return exception.NewError("a parameter under the name of a module's environment key is already registered", context, nil)
+        return exception.NewError("a parameter under the name of a declared environment key is already registered", context, nil)
     }
 
     instance.recordEnvironmentKeyDeclarationLocked(owner, key)
@@ -128,7 +148,7 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
             loadedParameter.isDefault = false
         }
 
-        return exception.NewError("a module's environment key could not be resolved at its declaration", context, resolveErr)
+        return exception.NewError("a declared environment key could not be resolved at its declaration", context, resolveErr)
     }
 
     if nil == resolveErr {
@@ -177,31 +197,39 @@ func (instance *Configuration) forgetEnvironmentKeyDeclarationLocked(key configc
     }
 }
 
-func refuseEnvironmentKeyShape(key configcontract.EnvironmentKey, context exceptioncontract.Context) error {
-    if false == moduleEnvironmentKeyPattern.MatchString(key.Key) {
+func refuseEnvironmentKeyShape(owner string, key configcontract.EnvironmentKey, context exceptioncontract.Context) error {
+    if applicationEnvironmentKeyOwner == owner {
+        if true == strings.HasPrefix(key.Key, environmentKeyNamespace) {
+            return exception.NewError("an application's environment key is in the framework's MELODY_ namespace", context, nil)
+        }
+
+        if false == applicationEnvironmentKeyPattern.MatchString(key.Key) {
+            return exception.NewError("a declared environment key is not an upper-case letter followed by upper-case letters, digits and underscores", context, nil)
+        }
+    } else if false == moduleEnvironmentKeyPattern.MatchString(key.Key) {
         return exception.NewError("a module's environment key is not MELODY_ followed by upper-case letters, digits and underscores", context, nil)
     }
 
     if "" == strings.TrimSpace(key.Parameter) || key.Parameter != strings.TrimSpace(key.Parameter) {
-        return exception.NewError("a module's environment key names an empty or padded parameter", context, nil)
+        return exception.NewError("a declared environment key names an empty or padded parameter", context, nil)
     }
 
     if true == strings.HasPrefix(key.Parameter, "kernel.") {
-        return exception.NewError("a module's environment key feeds a parameter in the reserved kernel. namespace", context, nil)
+        return exception.NewError("a declared environment key feeds a parameter in the reserved kernel. namespace", context, nil)
     }
 
     if key.Parameter == key.Key {
-        return exception.NewError("a module's environment key feeds a parameter of its own name", context, nil)
+        return exception.NewError("a declared environment key feeds a parameter of its own name", context, nil)
     }
 
     if "" == strings.TrimSpace(key.Field) || key.Field != strings.TrimSpace(key.Field) {
-        return exception.NewError("a module's environment key names an empty or padded field", context, nil)
+        return exception.NewError("a declared environment key names an empty or padded field", context, nil)
     }
 
     return nil
 }
 
-/* CheckEnvironmentKeys judges every declared key's resolved value against its rule, in key order, and answers the first refusal as the framework refuses its own keys: "invalid environment value" naming the key, the module, the field and the parameter, the rule's error in the chain, withheld for a secret key since it quotes the value. */
+/* CheckEnvironmentKeys judges every declared key's resolved value against its rule, in key order, and answers the first refusal as the framework refuses its own keys: "invalid environment value" naming the key, its owner, the field and the parameter, the rule's error in the chain, withheld for a secret key since it quotes the value. */
 func (instance *Configuration) CheckEnvironmentKeys() error {
     instance.mutex.RLock()
 
@@ -221,7 +249,7 @@ func (instance *Configuration) CheckEnvironmentKeys() error {
 
     instance.mutex.RUnlock()
 
-    /* the rules run outside the lock, since a rule is a module's code and may read the configuration */
+    /* the rules run outside the lock, since a rule is its owner's code and may read the configuration */
     for index, key := range keys {
         declared := declarations[index]
         if true == internal.IsNilInterface(declared.declaration.Rule) {
@@ -252,7 +280,7 @@ func (instance *Configuration) CheckEnvironmentKeys() error {
             "invalid environment value",
             exceptioncontract.Context{
                 "environmentKey": key,
-                "module":         declared.owner,
+                "owner":          declared.owner,
                 "field":          declared.declaration.Field,
                 "parameterName":  declared.declaration.Parameter,
             },
@@ -263,7 +291,7 @@ func (instance *Configuration) CheckEnvironmentKeys() error {
     return nil
 }
 
-/* UndeclaredEnvironmentKeys answers, sorted, every key the .env artifacts loaded in the MELODY_ namespace that is neither the framework's nor declared by a module */
+/* UndeclaredEnvironmentKeys answers, sorted, every key the .env artifacts loaded in the MELODY_ namespace that is neither the framework's nor declared */
 func (instance *Configuration) UndeclaredEnvironmentKeys() []string {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()

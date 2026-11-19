@@ -58,7 +58,7 @@ func moduleWithEnvironment(t *testing.T, values map[string]string) *Module {
         t.Fatalf("new environment: %v", environmentErr)
     }
 
-    configuration, configurationErr := melodyconfig.NewConfiguration(environment, "/tmp/melody")
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, "/tmp/melody", melodyconfig.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("new configuration: %v", configurationErr)
     }

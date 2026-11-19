@@ -19,7 +19,7 @@ func TestKernelGettersMatchParameterValues(t *testing.T) {
         t.Fatalf("new environment error: %v", err)
     }
 
-    configuration, err := NewConfiguration(environment, "/tmp/melody")
+    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("new configuration error: %v", err)
     }

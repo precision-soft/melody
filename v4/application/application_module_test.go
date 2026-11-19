@@ -287,6 +287,19 @@ func TestRegisterModule_RefusesAnEmptyName(t *testing.T) {
     }, "module name may not be empty")
 }
 
+/* the framework and the application own declared environment keys under these names, so a module named like either would be read as that owner */
+func TestRegisterModule_RefusesAReservedOwnerName(t *testing.T) {
+    for _, reservedName := range []string{"the framework", "the application", "The Application"} {
+        testhelper.AssertPanicsWithError(t, func() {
+            (&Application{}).RegisterModule(fakeModule{name: reservedName})
+        }, "module name may not be an owner name the framework reserves")
+
+        testhelper.AssertPanicsWithError(t, func() {
+            (&Application{}).RegisterModuleProvider(bareModuleProvider{children: []applicationcontract.Module{fakeModule{name: reservedName}}})
+        }, "module name may not be an owner name the framework reserves")
+    }
+}
+
 /* a padded name would be a second identity for the same module in every place that prints or keys on it, so it is refused where it is registered, like the empty one */
 func TestRegisterModule_RefusesANamePaddedWithWhitespace(t *testing.T) {
     for _, paddedName := range []string{" twin", "twin ", "twin\t", "   "} {

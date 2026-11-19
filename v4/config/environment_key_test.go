@@ -214,7 +214,7 @@ func TestDeclareEnvironmentKey_ASecretKeyMarksAValueAssembledFromIt(t *testing.T
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := NewConfiguration(environment, t.TempDir(), ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -233,20 +233,44 @@ func TestDeclareEnvironmentKey_RefusesAKeyTheFrameworkHolds(t *testing.T) {
         key := textKey("")
         key.Key = frameworkKey
 
-        refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "a module declared an environment key another owner already holds")
-        if "the framework" != refusal.Context()["owner"] || frameworkKey != refusal.Context()["environmentKey"] {
+        refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "an environment key is declared that another owner already holds")
+        if "the framework" != refusal.Context()["holder"] || frameworkKey != refusal.Context()["environmentKey"] {
             t.Fatalf("%s: expected the framework named, got %v", frameworkKey, refusal.Context())
         }
     }
 }
 
-func TestDeclareEnvironmentKey_RefusesAKeyOutsideTheNamespace(t *testing.T) {
-    for _, invalidKey := range []string{"AMQP_DSN", "melody_x", "MELODY_", "MELODY_a", "MELODY_X-Y", " MELODY_X", ""} {
+func TestDeclareEnvironmentKey_RefusesAModuleKeyOutsideTheNamespace(t *testing.T) {
+    for _, invalidKey := range []string{"AMQP_DSN", "APP_X", "melody_x", "MELODY_", "MELODY_a", "MELODY_X-Y", " MELODY_X", ""} {
         configuration := mustConfigurationFromValues(t, map[string]string{})
         key := textKey("")
         key.Key = invalidKey
 
         declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "a module's environment key is not MELODY_ followed by upper-case letters, digits and underscores")
+    }
+}
+
+func TestDeclareEnvironmentKey_AdmitsAnApplicationNamespace(t *testing.T) {
+    for _, admittedKey := range []string{"APP_X", "AMQP_DSN", "X", "X1_2"} {
+        configuration := mustConfigurationFromValues(t, map[string]string{admittedKey: "v"})
+        key := textKey("")
+        key.Key = admittedKey
+
+        mustDeclare(t, configuration, applicationEnvironmentKeyOwner, key)
+
+        if "v" != configuration.MustGet("melody.x.text").String() {
+            t.Fatalf("%s: expected the line read through the parameter, got %q", admittedKey, configuration.MustGet("melody.x.text").String())
+        }
+    }
+}
+
+func TestDeclareEnvironmentKey_RefusesALowerCaseApplicationKey(t *testing.T) {
+    for _, invalidKey := range []string{"app_x", "1X", "_X", "APP_x", "APP_X-Y", " APP_X", ""} {
+        configuration := mustConfigurationFromValues(t, map[string]string{})
+        key := textKey("")
+        key.Key = invalidKey
+
+        declarationRefusal(t, configuration.DeclareEnvironmentKey(applicationEnvironmentKeyOwner, key), "a declared environment key is not an upper-case letter followed by upper-case letters, digits and underscores")
     }
 }
 
@@ -257,12 +281,12 @@ func TestDeclareEnvironmentKey_RefusesAParameterNameOrAFieldItCannotHold(t *test
         field     string
         expected  string
     }{
-        {"an empty parameter", "", "x.F", "a module's environment key names an empty or padded parameter"},
-        {"a padded parameter", " melody.x.text", "x.F", "a module's environment key names an empty or padded parameter"},
-        {"a kernel parameter", "kernel.x", "x.F", "a module's environment key feeds a parameter in the reserved kernel. namespace"},
-        {"the key itself", "MELODY_X_TEXT", "x.F", "a module's environment key feeds a parameter of its own name"},
-        {"an empty field", "melody.x.text", "", "a module's environment key names an empty or padded field"},
-        {"a padded field", "melody.x.text", "x.F ", "a module's environment key names an empty or padded field"},
+        {"an empty parameter", "", "x.F", "a declared environment key names an empty or padded parameter"},
+        {"a padded parameter", " melody.x.text", "x.F", "a declared environment key names an empty or padded parameter"},
+        {"a kernel parameter", "kernel.x", "x.F", "a declared environment key feeds a parameter in the reserved kernel. namespace"},
+        {"the key itself", "MELODY_X_TEXT", "x.F", "a declared environment key feeds a parameter of its own name"},
+        {"an empty field", "melody.x.text", "", "a declared environment key names an empty or padded field"},
+        {"a padded field", "melody.x.text", "x.F ", "a declared environment key names an empty or padded field"},
     } {
         configuration := mustConfigurationFromValues(t, map[string]string{})
         key := textKey("")
@@ -278,7 +302,7 @@ func TestDeclareEnvironmentKey_RefusesASecretWithADefault(t *testing.T) {
     key := secretKey()
     key.Default = "guest"
 
-    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "a module declared a default for a secret environment key")
+    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "a default is declared for a secret environment key")
     if "MELODY_X_PASSWORD" != refusal.Context()["environmentKey"] || "x.ModuleConfig.Password" != refusal.Context()["field"] {
         t.Fatalf("expected the key and the field named, got %v", refusal.Context())
     }
@@ -293,7 +317,7 @@ func TestDeclareEnvironmentKey_RefusesADefaultItsOwnRuleRefuses(t *testing.T) {
     key := countKey()
     key.Default = "0"
 
-    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "a module's environment key default is refused by its own rule")
+    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("x", key), "a declared environment key's default is refused by its own rule")
     assertLimitRefusal(t, refusal, "MELODY_X_COUNT", "x.ModuleConfig.Count")
 
     templated := mustConfigurationFromValues(t, map[string]string{})
@@ -309,8 +333,17 @@ func TestDeclareEnvironmentKey_RefusesOneKeyDeclaredTwice(t *testing.T) {
         second := textKey("a")
         second.Parameter = "melody.y.text"
 
-        refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey(secondOwner, second), "a module declared an environment key another owner already holds")
-        if "x" != refusal.Context()["owner"] || secondOwner != refusal.Context()["module"] {
+        if "x" == secondOwner {
+            refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey(secondOwner, second), "an environment key is declared that the same owner already holds")
+            if _, namesHolder := refusal.Context()["holder"]; true == namesHolder || "x" != refusal.Context()["owner"] {
+                t.Fatalf("expected the owner named and no holder, got %v", refusal.Context())
+            }
+
+            continue
+        }
+
+        refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey(secondOwner, second), "an environment key is declared that another owner already holds")
+        if "x" != refusal.Context()["holder"] || secondOwner != refusal.Context()["owner"] {
             t.Fatalf("%s: expected both owners named, got %v", secondOwner, refusal.Context())
         }
     }
@@ -323,8 +356,8 @@ func TestDeclareEnvironmentKey_RefusesTwoKeysOfOneParameter(t *testing.T) {
     second := textKey("a")
     second.Key = "MELODY_Y_TEXT"
 
-    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("y", second), "a module declared a parameter another environment key already feeds")
-    if "x" != refusal.Context()["owner"] || "MELODY_X_TEXT" != refusal.Context()["feedingEnvironmentKey"] || "y" != refusal.Context()["module"] {
+    refusal := declarationRefusal(t, configuration.DeclareEnvironmentKey("y", second), "a declared environment key feeds a parameter another environment key already feeds")
+    if "x" != refusal.Context()["holder"] || "MELODY_X_TEXT" != refusal.Context()["feedingEnvironmentKey"] || "y" != refusal.Context()["owner"] {
         t.Fatalf("expected both owners and the feeding key named, got %v", refusal.Context())
     }
 }
@@ -332,21 +365,21 @@ func TestDeclareEnvironmentKey_RefusesTwoKeysOfOneParameter(t *testing.T) {
 func TestDeclareEnvironmentKey_RefusesAParameterAlreadyRegistered(t *testing.T) {
     handMapped := mustConfigurationFromValues(t, map[string]string{"APP_X": "v"})
     handMapped.RegisterRuntime("melody.x.text", "%APP_X%")
-    declarationRefusal(t, handMapped.DeclareEnvironmentKey("x", textKey("")), "the parameter a module's environment key feeds is already registered")
+    declarationRefusal(t, handMapped.DeclareEnvironmentKey("x", textKey("")), "the parameter a declared environment key feeds is already registered")
 
     underTheKey := mustConfigurationFromValues(t, map[string]string{})
     underTheKey.RegisterRuntime("MELODY_X_TEXT", "v")
-    declarationRefusal(t, underTheKey.DeclareEnvironmentKey("x", textKey("")), "a parameter under the name of a module's environment key is already registered")
+    declarationRefusal(t, underTheKey.DeclareEnvironmentKey("x", textKey("")), "a parameter under the name of a declared environment key is already registered")
 }
 
 func TestDeclareEnvironmentKey_RefusedAfterTheBootResolve(t *testing.T) {
     resolved := mustConfigurationFromValues(t, map[string]string{})
     mustResolve(t, resolved)
-    declarationRefusal(t, resolved.DeclareEnvironmentKey("x", textKey("")), "a module's environment key is declared after the configuration resolved")
+    declarationRefusal(t, resolved.DeclareEnvironmentKey("x", textKey("")), "an environment key is declared after the configuration resolved")
 
     serving := mustConfigurationFromValues(t, map[string]string{})
     serving.MarkServing()
-    declarationRefusal(t, serving.DeclareEnvironmentKey("x", textKey("")), "a module's environment key is declared after the configuration resolved")
+    declarationRefusal(t, serving.DeclareEnvironmentKey("x", textKey("")), "an environment key is declared after the configuration resolved")
 }
 
 func refusalWithContextKey(err error, key string) *exception.Error {
@@ -370,7 +403,7 @@ func TestCheckEnvironmentKeys_NamesTheKeyTheModuleAndTheField(t *testing.T) {
     refusal := declarationRefusal(t, checkErr, "invalid environment value")
 
     context := refusal.Context()
-    if "MELODY_X_COUNT" != context["environmentKey"] || "x" != context["module"] || "x.ModuleConfig.Count" != context["field"] || "melody.x.count" != context["parameterName"] {
+    if "MELODY_X_COUNT" != context["environmentKey"] || "x" != context["owner"] || "x.ModuleConfig.Count" != context["field"] || "melody.x.count" != context["parameterName"] {
         t.Fatalf("expected the key, the module, the field and the parameter named, got %v", context)
     }
 
@@ -533,7 +566,7 @@ func TestCheckEnvironmentKeys_FailsOnTheSameKeyEveryRun(t *testing.T) {
         mustDeclare(t, configuration, "w", second)
         mustResolve(t, configuration)
 
-        if refusal := refusalWithContextKey(configuration.CheckEnvironmentKeys(), "module"); nil == refusal || "MELODY_W_COUNT" != refusal.Context()["environmentKey"] {
+        if refusal := refusalWithContextKey(configuration.CheckEnvironmentKeys(), "owner"); nil == refusal || "MELODY_W_COUNT" != refusal.Context()["environmentKey"] {
             t.Fatalf("run %d: expected the first key in sorted order, got %v", run, refusal)
         }
     }
@@ -604,7 +637,7 @@ func TestDeclareEnvironmentKey_AnUnresolvableTextRefusesAndLeavesTheTables(t *te
     configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_SWITCH": ""})
     loaded := configuration.Get("MELODY_X_SWITCH")
 
-    declarationRefusal(t, configuration.DeclareEnvironmentKey("x", switchKey("%env(A))%")), "a module's environment key could not be resolved at its declaration")
+    declarationRefusal(t, configuration.DeclareEnvironmentKey("x", switchKey("%env(A))%")), "a declared environment key could not be resolved at its declaration")
 
     if nil != configuration.Get("melody.x.switch") || loaded != configuration.Get("MELODY_X_SWITCH") || "" != loaded.Template() || true == loaded.IsDefault() {
         t.Fatalf("expected the tables as they were, got %v", configuration.Get("melody.x.switch"))
@@ -612,5 +645,141 @@ func TestDeclareEnvironmentKey_AnUnresolvableTextRefusesAndLeavesTheTables(t *te
 
     if _, isDeclared := configuration.declaredEnvironmentKeys["MELODY_X_SWITCH"]; true == isDeclared {
         t.Fatalf("expected the declaration taken back")
+    }
+}
+
+func newConfigurationWithApplicationKeys(values map[string]string, keys []configcontract.EnvironmentKey) (*Configuration, error) {
+    environment, environmentErr := NewEnvironment(context.Background(), &testEnvironmentSource{values: values})
+    if nil != environmentErr {
+        return nil, environmentErr
+    }
+
+    return NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{EnvironmentKeys: keys})
+}
+
+func applicationKey(key string, parameter string, defaultText string) configcontract.EnvironmentKey {
+    return configcontract.EnvironmentKey{
+        Key:       key,
+        Parameter: parameter,
+        Field:     "ApplicationConfig.EnvironmentKeys",
+        Default:   defaultText,
+    }
+}
+
+func TestNewConfiguration_ApplicationKey_DefaultRuleAndSecretAsAModule(t *testing.T) {
+    countApplicationKey := applicationKey("APP_COUNT", "app.count", "")
+    countApplicationKey.Rule = LimitKeyRule(countKeyRule)
+
+    passwordApplicationKey := applicationKey("APP_PASSWORD", "app.password", "")
+    passwordApplicationKey.Secret = true
+
+    configuration, configurationErr := newConfigurationWithApplicationKeys(
+        map[string]string{"APP_COUNT": "0", "APP_PASSWORD": "application-secret"},
+        []configcontract.EnvironmentKey{
+            applicationKey("APP_FIRST", "app.first", "first-default"),
+            applicationKey("APP_SECOND", "app.second", "%env(APP_FIRST)%"),
+            countApplicationKey,
+            passwordApplicationKey,
+        },
+    )
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    if "first-default" != configuration.MustGet("app.first").String() {
+        t.Fatalf("expected the default through the parameter, got %q", configuration.MustGet("app.first").String())
+    }
+
+    if "first-default" != configuration.MustGet("app.second").String() {
+        t.Fatalf("expected a default reading an earlier application key answered out of the constructor, got %q", configuration.MustGet("app.second").String())
+    }
+
+    if false == configuration.MustGet("app.password").IsSecret() {
+        t.Fatalf("expected the secret application key to mark its parameter")
+    }
+
+    configuration.RegisterRuntime("app.password.reader", "dsn://%env(APP_PASSWORD)%@host")
+    mustResolve(t, configuration)
+    if false == configuration.MustGet("app.password.reader").IsSecret() {
+        t.Fatalf("expected a reader of the secret application key marked")
+    }
+
+    refusal := refusalWithContextKey(configuration.CheckEnvironmentKeys(), "owner")
+    if nil == refusal || "invalid environment value" != refusal.Message() || "APP_COUNT" != refusal.Context()["environmentKey"] || "the application" != refusal.Context()["owner"] || "app.count" != refusal.Context()["parameterName"] {
+        t.Fatalf("expected the rule refusal naming the application key and its owner, got %v", refusal)
+    }
+}
+
+func TestNewConfiguration_ApplicationKeyRefusesMelodyNamespace(t *testing.T) {
+    _, configurationErr := newConfigurationWithApplicationKeys(map[string]string{}, []configcontract.EnvironmentKey{applicationKey("MELODY_APP_X", "app.x", "")})
+
+    refusal := declarationRefusal(t, configurationErr, "an application's environment key is in the framework's MELODY_ namespace")
+    if "MELODY_APP_X" != refusal.Context()["environmentKey"] || "the application" != refusal.Context()["owner"] {
+        t.Fatalf("expected the key and the owner named, got %v", refusal.Context())
+    }
+}
+
+func TestNewConfiguration_ApplicationKeyTwiceIsRefused(t *testing.T) {
+    _, configurationErr := newConfigurationWithApplicationKeys(map[string]string{}, []configcontract.EnvironmentKey{
+        applicationKey("APP_X", "app.x", ""),
+        applicationKey("APP_X", "app.y", ""),
+    })
+
+    refusal := declarationRefusal(t, configurationErr, "an environment key is declared that the same owner already holds")
+    if _, namesHolder := refusal.Context()["holder"]; true == namesHolder || "the application" != refusal.Context()["owner"] {
+        t.Fatalf("expected the application named and no holder, got %v", refusal.Context())
+    }
+}
+
+func TestNewConfiguration_ApplicationKeyFeedingAKernelParameterOrRetiringAFrameworkKeyIsRefused(t *testing.T) {
+    _, configurationErr := newConfigurationWithApplicationKeys(map[string]string{}, []configcontract.EnvironmentKey{applicationKey("APP_X", "kernel.http_address", "")})
+    declarationRefusal(t, configurationErr, "a declared environment key feeds a parameter in the reserved kernel. namespace")
+
+    _, retiredErr := newConfigurationWithApplicationKeys(map[string]string{}, []configcontract.EnvironmentKey{
+        {Key: "APP_X", Parameter: "app.x", Field: "ApplicationConfig.EnvironmentKeys", Retired: []string{"MELODY_HTTP_ADDRESS"}},
+    })
+    refusal := declarationRefusal(t, retiredErr, "an environment key is retired that another owner holds")
+    if "the framework" != refusal.Context()["holder"] {
+        t.Fatalf("expected the framework named as holder, got %v", refusal.Context())
+    }
+}
+
+/* declared before the construction's resolve, an application key's default reaches a .env line that reads it, where a module's key, declared at boot, is refused there */
+func TestNewConfiguration_ALineReadsAnApplicationKeysDefaultAtConstruction(t *testing.T) {
+    configuration, configurationErr := newConfigurationWithApplicationKeys(
+        map[string]string{"APP_LINK": "https://%env(APP_HOST)%/path"},
+        []configcontract.EnvironmentKey{applicationKey("APP_HOST", "app.host", "example.org")},
+    )
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    if "https://example.org/path" != configuration.MustGet("APP_LINK").String() {
+        t.Fatalf("expected the line to read the declared default, got %q", configuration.MustGet("APP_LINK").String())
+    }
+}
+
+func TestDeclareEnvironmentKey_AModuleIsRefusedAKeyTheApplicationHoldsOrRetired(t *testing.T) {
+    applicationKeys := []configcontract.EnvironmentKey{
+        {Key: "APP_TEXT", Parameter: "app.text", Field: "ApplicationConfig.EnvironmentKeys", Retired: []string{"MELODY_X_TEXT"}},
+        applicationKey("APP_OTHER", "melody.x.text", ""),
+    }
+
+    held, heldErr := newConfigurationWithApplicationKeys(map[string]string{}, applicationKeys[:1])
+    if nil != heldErr {
+        t.Fatalf("unexpected configuration error: %v", heldErr)
+    }
+    refusal := declarationRefusal(t, held.DeclareEnvironmentKey("x", textKey("")), "an environment key is declared that another owner retired")
+    if "the application" != refusal.Context()["holder"] || "x" != refusal.Context()["owner"] {
+        t.Fatalf("expected the application named as holder, got %v", refusal.Context())
+    }
+
+    fed, fedErr := newConfigurationWithApplicationKeys(map[string]string{}, applicationKeys[1:])
+    if nil != fedErr {
+        t.Fatalf("unexpected configuration error: %v", fedErr)
+    }
+    refusal = declarationRefusal(t, fed.DeclareEnvironmentKey("x", textKey("")), "a declared environment key feeds a parameter another environment key already feeds")
+    if "the application" != refusal.Context()["holder"] || "APP_OTHER" != refusal.Context()["feedingEnvironmentKey"] {
+        t.Fatalf("expected the application's key named, got %v", refusal.Context())
     }
 }

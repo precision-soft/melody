@@ -155,6 +155,7 @@ func TestParameter_ValueDoesNotRaceResolve(t *testing.T) {
             },
         },
         "/srv/app",
+        ConfigurationConfig{},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the configuration to build, got %v", newConfigurationErr)
@@ -440,7 +441,7 @@ func TestParameter_IntReadsTheSameGrammarItsSiblingsRead(t *testing.T) {
         t.Fatalf("new environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := NewConfiguration(environment, t.TempDir(), ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("new configuration error: %v", configurationErr)
     }

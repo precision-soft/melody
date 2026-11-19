@@ -12,6 +12,7 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/exception"
@@ -55,6 +56,9 @@ type ApplicationConfig struct {
 
     /* SessionEmptyOnOutage answers a reader of the session an empty, unavailable session when the session storage cannot answer, where the default is a 503 with Retry-After: nothing of it is saved and no cookie is written; the firewall's sign-in and sign-out doors still refuse 503. MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE wins over it when set. */
     SessionEmptyOnOutage bool
+
+    /* EnvironmentKeys are the .env keys the application owns, outside the MELODY_ namespace, each with the default, rule, secret mark, retired spellings and refusals of a module's key. They are declared when the application is built, before any parameter is read. A key in the MELODY_ namespace is refused. */
+    EnvironmentKeys []configcontract.EnvironmentKey
 }
 
 func NewApplication(
@@ -90,7 +94,7 @@ func NewApplication(
         )
     }
 
-    configuration, newConfigurationErr := config.NewConfiguration(environment, projectDirectory)
+    configuration, newConfigurationErr := config.NewConfiguration(environment, projectDirectory, config.ConfigurationConfig{EnvironmentKeys: applicationConfig.EnvironmentKeys})
     if nil != newConfigurationErr {
         /* the wrap names construction, not resolution: NewConfiguration also fails on validation and on building its views, and a resolve failure already carries its own message */
         exception.Panic(

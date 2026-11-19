@@ -359,7 +359,7 @@ func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
                 return nil, err
             }
 
-            return config.NewConfiguration(environment, "/tmp/melody")
+            return config.NewConfiguration(environment, "/tmp/melody", config.ConfigurationConfig{})
         },
         container.RegisterOptions{},
     )

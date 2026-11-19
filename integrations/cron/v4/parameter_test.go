@@ -31,7 +31,7 @@ func newDeclaringConfiguration(t *testing.T, values map[string]string, defaults 
         t.Fatalf("unexpected environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := melodyconfig.NewConfiguration(environment, t.TempDir())
+    configuration, configurationErr := melodyconfig.NewConfiguration(environment, t.TempDir(), melodyconfig.ConfigurationConfig{})
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
@@ -167,7 +167,7 @@ func TestEnvironmentKeys_TheBootCheckRefusesARestartPolicyNamingTheField(t *test
 
     checkErr := configuration.CheckEnvironmentKeys()
     refusal, isRefusal := checkErr.(*exception.Error)
-    if false == isRefusal || "invalid environment value" != refusal.Message() || KeyRestartPolicy != refusal.Context()["environmentKey"] || "cron.KeyDefaults.RestartPolicy" != refusal.Context()["field"] || "cron" != refusal.Context()["module"] {
+    if false == isRefusal || "invalid environment value" != refusal.Message() || KeyRestartPolicy != refusal.Context()["environmentKey"] || "cron.KeyDefaults.RestartPolicy" != refusal.Context()["field"] || "cron" != refusal.Context()["owner"] {
         t.Fatalf("expected the restart policy refused naming the key, the field and the module, got %v", checkErr)
     }
 

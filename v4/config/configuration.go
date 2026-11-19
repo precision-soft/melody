@@ -22,9 +22,16 @@ var (
     envPlaceholderPattern = regexp.MustCompile(`%env\((default:([A-Za-z_][A-Za-z0-9_.]*)?:)?([A-Za-z_][A-Za-z0-9_]*)\)%`)
 )
 
+/* ConfigurationConfig is what a configuration is built from beside its environment and project directory; a field left out is empty. */
+type ConfigurationConfig struct {
+    /* EnvironmentKeys are the application's declared keys, entered into the key table after the framework's and before the first resolve, owned by the application. */
+    EnvironmentKeys []configcontract.EnvironmentKey
+}
+
 func NewConfiguration(
     environment *Environment,
     projectDirectory string,
+    configurationConfig ConfigurationConfig,
 ) (*Configuration, error) {
     if nil == environment {
         return nil, exception.NewError("environment is required", nil, nil)
@@ -46,6 +53,11 @@ func NewConfiguration(
     applyEnvironmentOverridesErr := configuration.applyEnvironmentOverrides()
     if nil != applyEnvironmentOverridesErr {
         return nil, applyEnvironmentOverridesErr
+    }
+
+    declareApplicationEnvironmentKeysErr := configuration.declareApplicationEnvironmentKeys(configurationConfig.EnvironmentKeys)
+    if nil != declareApplicationEnvironmentKeysErr {
+        return nil, declareApplicationEnvironmentKeysErr
     }
 
     resolvePlaceholdersErr := configuration.resolvePlaceholders()

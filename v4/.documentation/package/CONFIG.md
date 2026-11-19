@@ -109,9 +109,13 @@ A module owns its `.env` keys through [`EnvironmentKeyModule`](../../application
 
 - **Precedence.** The `.env` line wins, then the default the module declared; a module that takes the value as a config field too passes that field as the default, so the key wins over the field, which wins over the rule's default.
 - **Rules.** [`LimitKeyRule`](../../config/environment_key_rule.go) reads a limit as the [Limit keys](#limit-keys) above are read, [`SwitchKeyRule`](../../config/environment_key_rule.go) a boolean, [`ChoiceKeyRule`](../../config/environment_key_rule.go) one of a list compared exactly. Under any of them a present, empty line is absent and takes the declared default; a free-text key keeps the empty value. The module reads a limit through [`ResolveLimitParameter`](../../config/environment_key_rule.go) and a boolean through [`ParameterSwitch`](../../config/environment_key_rule.go), the parsers the boot check runs.
-- **Refusals at declaration.** The boot fails naming the module, the key and the field for a key that is not `MELODY_` followed by upper-case letters, digits and underscores, a key the framework or another declaration holds or [retired](#retired-keys), a retired spelling the [Retired keys](#retired-keys) section refuses, a parameter name that is empty, padded, in `kernel.` or the key itself, a parameter another key feeds or the application already registered, a secret key with a default and a literal default its own rule refuses. A parameter hook that registers a declared parameter by hand is the duplicate of the aggregated boot report.
-- **Refusal of the value.** After the resolve and the framework's own refusals, every declared key is judged on its resolved value, in every mode and role in which the module is registered: `invalid environment value` naming `environmentKey`, `module`, `field` and `parameterName`, the rule's error in the chain, withheld for a secret key.
+- **Refusals at declaration.** The boot fails naming the owner, the key and the field for a key that is not `MELODY_` followed by upper-case letters, digits and underscores, a key the framework or another declaration holds or [retired](#retired-keys), a retired spelling the [Retired keys](#retired-keys) section refuses, a parameter name that is empty, padded, in `kernel.` or the key itself, a parameter another key feeds or the application already registered, a secret key with a default and a literal default its own rule refuses. A parameter hook that registers a declared parameter by hand is the duplicate of the aggregated boot report.
+- **Refusal of the value.** After the resolve and the framework's own refusals, every declared key is judged on its resolved value, in every mode and role in which the module is registered: `invalid environment value` naming `environmentKey`, `owner`, `field` and `parameterName`, the rule's error in the chain, withheld for a secret key.
 - **Inactive modules.** A module the process does not register declares nothing: its key is a plain parameter of its own name, with no default and no rule.
+
+### Application keys
+
+An application declares the `.env` keys it owns in [`ApplicationConfig.EnvironmentKeys`](../../application/application_new.go), one [`EnvironmentKey`](../../config/contract/environment_key.go) each, with the default, the rule, the secret mark and the retired spellings of a module's key, and every refusal of one. They are declared when the application is built, in slice order, after the framework's keys and before any parameter is read, so a default may read a key declared before it, and every module declares after them. Their owner is `the application`, named under `owner` by a refusal and by `invalid environment value`, which judges them after the resolve with the modules' keys. An application's key is any name of upper-case letters, digits and underscores starting with a letter outside the `MELODY_` namespace, which stays the framework's and the modules', so a process that does not register a module still warns about and redacts its keys; an application's key in the namespace is refused with `an application's environment key is in the framework's MELODY_ namespace`. Since the application's keys are declared before the modules', a default of one that reads a module's key through `%env(...)%` takes that key's `.env` line and is refused at construction when no artifact sets it, as a `.env` line is; a module's default is not read there. A module may not be named `the framework` or `the application`. Outside the application, the keys reach the configuration through [`ConfigurationConfig.EnvironmentKeys`](../../config/configuration.go).
 
 The `MELODY_` namespace belongs to the framework and the modules. Every loaded `MELODY_*` key that is neither the framework's nor declared is named, sorted, in one boot warning `application.environment.undeclaredKey` and marked secret, since it may be misspelt or belong to a module this process does not register.
 
@@ -128,7 +132,7 @@ A key that was renamed refuses the boot naming its successor, whatever its value
 
 `Boot` judges the `.env` artifacts the process loads, embedded or on disk: `.env`, `.env.local` and the selected environment's two files, so a retired key in another environment's files refuses only the boot that selects it. It runs right after the modules declare their keys and before any other module hook, in every process shape, and names every retired key it finds in one refusal, `the environment key <key> is retired: rename it to <successor>`, joined with `; ` in key order; the refusal names keys, successors and owners, under `key`, `successor` and `owner`, and never a value, since a retired key may hold a credential. A process variable of a retired name is not configuration and is not read; the `application.environment.processVariableIgnored` boot warning names it with its `successor`, whatever its value. There is no door: the key's meaning is certain, nothing reads it, and booting on its silent default is the misconfiguration; the remedy is a one-line rename.
 
-A module retires a spelling of its own through `EnvironmentKey.Retired`. A retired spelling outside the `MELODY_` namespace, equal to the key or to its parameter, listed twice, held or retired by the framework or another declaration refuses the declaration, and so does a key the framework or another declaration retired; a module colliding with a key of its own is told so, with no other owner named. `RetiredEnvironmentKeySuccessor` answers the successor of any retired spelling, set or not. The retired key of a module the process does not register stays the `application.environment.undeclaredKey` warning: the framework cannot know a rename nobody declared.
+A module or the application retires a spelling of its own through `EnvironmentKey.Retired`. A module's retired spelling outside the `MELODY_` namespace, the application's that is not upper-case letters, digits and underscores starting with a letter, a retired spelling equal to the key or to its parameter, listed twice, held or retired by the framework or another declaration refuses the declaration, and so does a key the framework or another declaration retired; a module colliding with a key of its own is told so, with no other owner named. `RetiredEnvironmentKeySuccessor` answers the successor of any retired spelling, set or not. The application may retire a `MELODY_` spelling, so a deployment is told to rename a key of the framework's era to the application's own. The retired key of a module the process does not register stays the `application.environment.undeclaredKey` warning: the framework cannot know a rename nobody declared.
 
 ### Environment / mode / role constants
 
@@ -141,7 +145,7 @@ A module retires a spelling of its own through `EnvironmentKey.Retired`. A retir
 A parameter value is a template resolved left to right, positionally. Each percent opens exactly one of:
 
 - `%%` — one literal percent;
-- `%env(KEY)%` — an environment key: the artifact's line when one sets the key, a blank line under a module key's rule counting as unset, else the default the framework or a module declared for it, itself a template; a key nobody declared and no artifact sets fails the boot, so a credential parameter refuses to start rather than degrade to empty;
+- `%env(KEY)%` — an environment key: the artifact's line when one sets the key, a blank line under a declared key's rule counting as unset, else the default the framework, a module or the application declared for it, itself a template; a key nobody declared and no artifact sets fails the boot, so a credential parameter refuses to start rather than degrade to empty;
 - `%env(default:<fallback>:KEY)%` — an optional environment key: `%env(default::KEY)%` falls back to the empty string, `%env(default:some.parameter:KEY)%` to another parameter. A key an artifact sets always wins over the fallback, and the fallback wins over a declared default;
 - `%parameter%` — another parameter, whose fully resolved value is spliced in as data (a percent inside it survives literally, it is never rescanned);
 - anything else — a lone percent is data.
@@ -373,6 +377,7 @@ func registerConfiguration(
     configuration, configurationErr := config.NewConfiguration(
         environment,
         projectDirectory,
+        config.ConfigurationConfig{},
     )
     if nil != configurationErr {
         exception.Panic(
@@ -424,7 +429,7 @@ func example() configcontract.Configuration {
 ### Core types (`config`)
 
 - [`type Configuration`](../../config/configuration.go)
-    - [`NewConfiguration(*Environment, string) (*Configuration, error)`](../../config/configuration.go)
+    - [`NewConfiguration(*Environment, string, ConfigurationConfig) (*Configuration, error)`](../../config/configuration.go)
     - `Get(name string) configcontract.Parameter`
     - `MustGet(name string) configcontract.Parameter`
     - `RegisterRuntime(name string, value any)`
