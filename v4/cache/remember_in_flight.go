@@ -13,7 +13,7 @@ const rememberInFlightShardCount = 64
 
 type rememberInFlightShard struct {
     mutex         sync.Mutex
-    inFlightByKey map[string]*rememberInFlightCall
+    inFlightByKey map[rememberFlightKey]*rememberInFlightCall
 }
 
 var rememberInFlightShardList = buildRememberInFlightShardList()

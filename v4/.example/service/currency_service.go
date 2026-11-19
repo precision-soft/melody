@@ -3,7 +3,6 @@ package service
 import (
     "context"
     "errors"
-    "fmt"
     "math"
     "strconv"
     "time"
@@ -107,7 +106,7 @@ func (instance *CurrencyService) List(ctx context.Context) ([]*entity.Currency, 
         melodycache.RememberConfig{
             Ttl: melodybound.Of(entityCacheTtl),
         },
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) ([]*entity.Currency, error) {
             return instance.currencyRepository.All(ctx)
         },
     )
@@ -115,12 +114,7 @@ func (instance *CurrencyService) List(ctx context.Context) ([]*entity.Currency, 
         return nil, rememberErr
     }
 
-    typed, ok := currencies.([]*entity.Currency)
-    if false == ok {
-        return nil, fmt.Errorf("invalid cache value for currency list")
-    }
-
-    return typed, nil
+    return currencies, nil
 }
 
 func (instance *CurrencyService) FindById(ctx context.Context, id string) (*entity.Currency, bool, error) {
@@ -135,7 +129,7 @@ func (instance *CurrencyService) FindById(ctx context.Context, id string) (*enti
         ctx,
         instance.cache,
         cacheKey,
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) (*entity.Currency, error) {
             currency, found, findErr := instance.currencyRepository.FindById(ctx, id)
             if nil != findErr {
                 return nil, findErr
@@ -157,12 +151,7 @@ func (instance *CurrencyService) FindById(ctx context.Context, id string) (*enti
         return nil, false, nil
     }
 
-    currency, ok := cached.(*entity.Currency)
-    if false == ok {
-        return nil, false, fmt.Errorf("invalid cache value for currency")
-    }
-
-    return currency, true, nil
+    return cached, true, nil
 }
 
 /* Create takes the rate because the schema holds one and a currency with no quote cannot be converted. The instant is the clock's: the caller supplying the number is the reading, and the first provider reading taken after this instant overwrites both; an older one is judged stale. */
@@ -357,14 +346,14 @@ func isOlderReading(quote entity.RateQuote, held entity.RateQuote) bool {
 func (instance *CurrencyService) healCachedCurrency(ctx context.Context, currency *entity.Currency) error {
     byIdKey := CacheKeyCurrencyById(currency.Id)
 
-    cached, exists, getErr := instance.cache.Get(ctx, byIdKey)
+    cached, exists, getErr := melodycache.Get[*entity.Currency](ctx, instance.cache, byIdKey)
     if nil != getErr || (true == exists && false == cachedCurrencyIsRow(cached, currency)) {
         if byIdErr := instance.cache.Delete(ctx, byIdKey); nil != byIdErr {
             return byIdErr
         }
     }
 
-    cachedList, listExists, listErr := instance.cache.Get(ctx, CacheKeyCurrencyList)
+    cachedList, listExists, listErr := melodycache.Get[[]*entity.Currency](ctx, instance.cache, CacheKeyCurrencyList)
     if nil != listErr || (true == listExists && false == cachedListCarriesRow(cachedList, currency)) {
         return instance.cache.Delete(ctx, CacheKeyCurrencyList)
     }
@@ -374,9 +363,8 @@ func (instance *CurrencyService) healCachedCurrency(ctx context.Context, currenc
 
 /* cachedCurrencyIsRow answers whether a cached entry is the row, field for field, the instants at the
    resolution the row holds. */
-func cachedCurrencyIsRow(cached any, currency *entity.Currency) bool {
-    typed, isCurrency := cached.(*entity.Currency)
-    if false == isCurrency || nil == typed {
+func cachedCurrencyIsRow(typed *entity.Currency, currency *entity.Currency) bool {
+    if nil == typed {
         return false
     }
 
@@ -389,13 +377,8 @@ func cachedCurrencyIsRow(cached any, currency *entity.Currency) bool {
 }
 
 /* cachedListCarriesRow answers whether a cached list carries the currency as the row holds it. */
-func cachedListCarriesRow(cached any, currency *entity.Currency) bool {
-    typed, isList := cached.([]*entity.Currency)
-    if false == isList {
-        return false
-    }
-
-    for _, listed := range typed {
+func cachedListCarriesRow(cachedList []*entity.Currency, currency *entity.Currency) bool {
+    for _, listed := range cachedList {
         if nil != listed && currency.Id == listed.Id {
             return true == cachedCurrencyIsRow(listed, currency)
         }

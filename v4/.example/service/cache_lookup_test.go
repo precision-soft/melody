@@ -66,7 +66,7 @@ func TestRememberEntityOrAbsenceBoundsAnAbsence(t *testing.T) {
         context.Background(),
         cacheInstance,
         "absent-key",
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) (*string, error) {
             return nil, nil
         },
     )
@@ -97,15 +97,15 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
         context.Background(),
         cacheInstance,
         "found-key",
-        func(ctx context.Context) (any, error) {
-            return "entity", nil
+        func(ctx context.Context) (*string, error) {
+            return lookupTestEntity(), nil
         },
     )
     if nil != rememberErr {
         t.Fatalf("remember: %v", rememberErr)
     }
 
-    if "entity" != value {
+    if "entity" != lookupTestText(value) {
         t.Fatalf("expected the computed value, got %v", value)
     }
 
@@ -123,7 +123,7 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
 /* the probe is on a hit that found something, because that is the only hit the early return changes: a remembered absence is answered the same way with or without it, since Remember reads the store itself and writes nothing on a hit and a nil computed value is returned before the second write, while a found entity would be re-stored by every reader, one cache write per request served from memory. */
 func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
-    if setErr := cacheInstance.Set(context.Background(), "hit-key", "entity", melodybound.Of(entityCacheTtl)); nil != setErr {
+    if setErr := cacheInstance.Set(context.Background(), "hit-key", lookupTestEntity(), melodybound.Of(entityCacheTtl)); nil != setErr {
         t.Fatalf("seed: %v", setErr)
     }
 
@@ -133,17 +133,19 @@ func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.
         context.Background(),
         cacheInstance,
         "hit-key",
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) (*string, error) {
             loaderCalls++
 
-            return "recomputed", nil
+            recomputed := "recomputed"
+
+            return &recomputed, nil
         },
     )
     if nil != rememberErr {
         t.Fatalf("remember: %v", rememberErr)
     }
 
-    if "entity" != value {
+    if "entity" != lookupTestText(value) {
         t.Fatalf("expected the stored value, got %v", value)
     }
 
@@ -168,7 +170,7 @@ func TestRememberEntityOrAbsenceLeavesARememberedAbsenceUntouched(t *testing.T) 
         context.Background(),
         cacheInstance,
         "absent-hit-key",
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) (*string, error) {
             t.Fatalf("the loader ran over a remembered absence")
 
             return nil, nil
@@ -246,14 +248,14 @@ func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *
                 context.Background(),
                 cacheInstance,
                 "coalesced-key",
-                func(ctx context.Context) (any, error) {
+                func(ctx context.Context) (*string, error) {
                     loaderRuns.Add(1)
                     <-release
 
-                    return "entity", nil
+                    return lookupTestEntity(), nil
                 },
             )
-            if nil != rememberErr || "entity" != value {
+            if nil != rememberErr || "entity" != lookupTestText(value) {
                 t.Errorf("expected every reader to receive the entity, got %v %v", value, rememberErr)
             }
         }()
@@ -322,4 +324,18 @@ func TestTheCatalogueListsAreRememberedUnderTheEntityBound(t *testing.T) {
             t.Fatalf("expected %s remembered under %s, got %+v", key, entityCacheTtl, writes)
         }
     }
+}
+
+func lookupTestEntity() *string {
+    name := "entity"
+
+    return &name
+}
+
+func lookupTestText(value *string) string {
+    if nil == value {
+        return ""
+    }
+
+    return *value
 }

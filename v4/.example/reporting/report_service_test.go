@@ -1,6 +1,8 @@
 package reporting
 
 import (
+    "reflect"
+    melodycache "github.com/precision-soft/melody/v4/cache"
     "context"
     "errors"
     "fmt"
@@ -204,10 +206,17 @@ type readingCache struct {
     ttls   map[string]melodybound.Duration
 }
 
-func (instance *readingCache) Get(ctx context.Context, key string) (any, bool, error) {
+func (instance *readingCache) Get(ctx context.Context, key string, target any) (bool, error) {
     value, exists := instance.values[key]
+    if false == exists {
+        return false, nil
+    }
 
-    return value, exists, nil
+    if assignErr := assignCachedTestValue(key, target, value); nil != assignErr {
+        return false, assignErr
+    }
+
+    return true, nil
 }
 
 func (instance *readingCache) Set(ctx context.Context, key string, value any, ttl melodybound.Duration) error {
@@ -239,15 +248,13 @@ func (instance *readingCache) Clear(ctx context.Context) error {
     return nil
 }
 
-func (instance *readingCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
-    result := map[string]any{}
-    for _, key := range keys {
-        if value, exists := instance.values[key]; true == exists {
-            result[key] = value
-        }
-    }
+func (instance *readingCache) Many(ctx context.Context, keys []string, target any) error {
+    return assignCachedTestValues(keys, target, instance.values)
+}
 
-    return result, nil
+/* this fake holds values, not payloads, so its copy is the value itself */
+func (instance *readingCache) RoundTrip(value any, target any) error {
+    return assignCachedTestValue("", target, value)
 }
 
 func (instance *readingCache) SetMultiple(ctx context.Context, items map[string]any, ttl melodybound.Duration) error {
@@ -279,6 +286,66 @@ func (instance *readingCache) CloseWithContext(closeContext context.Context) err
 }
 
 var _ melodycachecontract.Cache = (*readingCache)(nil)
+
+func assignCachedTestValue(key string, target any, value any) error {
+    targetValue := reflect.ValueOf(target)
+    if reflect.Pointer != targetValue.Kind() || true == targetValue.IsNil() {
+        return fmt.Errorf("cache read target %T is not a non-nil pointer", target)
+    }
+
+    /* a nil pointer is a remembered absence, which gob reads back as the zero value */
+    valueOf := reflect.ValueOf(value)
+    if nil == value || (reflect.Pointer == valueOf.Kind() && true == valueOf.IsNil()) {
+        targetValue.Elem().SetZero()
+
+        return nil
+    }
+
+    if false == valueOf.Type().AssignableTo(targetValue.Elem().Type()) {
+        return melodycache.NewDeserializationError([]string{key}, fmt.Errorf("the cached %T cannot be held by a %s target", value, targetValue.Elem().Type()))
+    }
+
+    targetValue.Elem().Set(valueOf)
+
+    return nil
+}
+
+func assignCachedTestValues(keys []string, target any, values map[string]any) error {
+    targetValue := reflect.ValueOf(target)
+    if reflect.Pointer != targetValue.Kind() || true == targetValue.IsNil() || reflect.Map != targetValue.Elem().Kind() {
+        return fmt.Errorf("cache batch read target %T is not a pointer to a map", target)
+    }
+
+    mapType := targetValue.Elem().Type()
+    result := reflect.MakeMap(mapType)
+    corruptKeys := make([]string, 0)
+    var firstCauseErr error
+    for _, key := range keys {
+        value, exists := values[key]
+        if false == exists {
+            continue
+        }
+
+        element := reflect.New(mapType.Elem())
+        if assignErr := assignCachedTestValue(key, element.Interface(), value); nil != assignErr {
+            corruptKeys = append(corruptKeys, key)
+            if nil == firstCauseErr {
+                firstCauseErr = assignErr
+            }
+            continue
+        }
+
+        result.SetMapIndex(reflect.ValueOf(key), element.Elem())
+    }
+
+    targetValue.Elem().Set(result)
+
+    if 0 < len(corruptKeys) {
+        return melodycache.NewDeserializationError(corruptKeys, firstCauseErr)
+    }
+
+    return nil
+}
 
 type emptyProductRepository struct{}
 
@@ -696,6 +763,27 @@ func TestCatalogReadingTakesAFreshReadingWhenTheCachedInstantDoesNotParse(t *tes
 
     if true == reading.FromCache || false == reading.RecordedAt.Equal(servedAt) {
         t.Fatalf("expected a fresh reading at %s, got FromCache=%v at %s", servedAt.Format(time.RFC3339), reading.FromCache, reading.RecordedAt.Format(time.RFC3339))
+    }
+}
+
+func TestCatalogReadingTakesAFreshReadingOverAnEntryOfAnotherType(t *testing.T) {
+    servedAt := time.Date(2026, time.September, 6, 11, 0, 0, 0, time.UTC)
+    clockInstance := melodyclock.NewFrozenClock(servedAt)
+    cacheInstance := &readingCache{values: map[string]any{catalogReadingCacheKey: 42}}
+
+    reportService := newReportServiceUnderTest(t, clockInstance, cacheInstance)
+
+    reading, readingErr := reportService.Reading(context.Background())
+    if nil != readingErr {
+        t.Fatalf("reading: %v", readingErr)
+    }
+
+    if true == reading.FromCache || false == reading.RecordedAt.Equal(servedAt) {
+        t.Fatalf("expected a fresh reading at %s, got FromCache=%v", servedAt.Format(time.RFC3339), reading.FromCache)
+    }
+
+    if _, isText := cacheInstance.values[catalogReadingCacheKey].(string); false == isText {
+        t.Fatalf("expected the entry overwritten by the fresh reading, got %#v", cacheInstance.values[catalogReadingCacheKey])
     }
 }
 

@@ -2,7 +2,6 @@ package service
 
 import (
     "context"
-    "fmt"
 
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/event"
@@ -50,7 +49,7 @@ func (instance *CategoryService) List(ctx context.Context) ([]*entity.Category, 
         melodycache.RememberConfig{
             Ttl: melodybound.Of(entityCacheTtl),
         },
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) ([]*entity.Category, error) {
             return instance.categoryRepository.All(ctx)
         },
     )
@@ -58,12 +57,7 @@ func (instance *CategoryService) List(ctx context.Context) ([]*entity.Category, 
         return nil, rememberErr
     }
 
-    typed, ok := categories.([]*entity.Category)
-    if false == ok {
-        return nil, fmt.Errorf("invalid cache value for category list")
-    }
-
-    return typed, nil
+    return categories, nil
 }
 
 func (instance *CategoryService) FindById(ctx context.Context, id string) (*entity.Category, bool, error) {
@@ -78,7 +72,7 @@ func (instance *CategoryService) FindById(ctx context.Context, id string) (*enti
         ctx,
         instance.cache,
         cacheKey,
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) (*entity.Category, error) {
             category, found, findErr := instance.categoryRepository.FindById(ctx, id)
             if nil != findErr {
                 return nil, findErr
@@ -100,12 +94,7 @@ func (instance *CategoryService) FindById(ctx context.Context, id string) (*enti
         return nil, false, nil
     }
 
-    category, ok := cached.(*entity.Category)
-    if false == ok {
-        return nil, false, fmt.Errorf("invalid cache value for category")
-    }
-
-    return category, true, nil
+    return cached, true, nil
 }
 
 func (instance *CategoryService) Create(

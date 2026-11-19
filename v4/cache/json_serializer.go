@@ -6,7 +6,7 @@ import (
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
 )
 
-/* NewJsonSerializer stores the value as a bare json document, with no envelope and no schema discriminant, so a document written by one version of the application decodes cleanly in the next, a field added since being an absent key of the decoded document, which Deserialize answers as a generic value, a map for an object, not a typed struct. Where a cached value's shape can change between releases, carry a version inside the value or move the key with the shape. */
+/* NewJsonSerializer stores the value as a bare json document, with no envelope and no schema discriminant, and decodes it into the type the reader names. A field the payload lacks reads as its zero value and a key the type lacks is ignored, so a document written by one version of the application decodes in silence in the next; where a cached value's shape can change between releases, carry a version inside the value or move the key with the shape. */
 func NewJsonSerializer() cachecontract.Serializer {
     return &JsonSerializer{}
 }
@@ -17,14 +17,8 @@ func (instance *JsonSerializer) Serialize(value any) ([]byte, error) {
     return json.Marshal(value)
 }
 
-func (instance *JsonSerializer) Deserialize(payload []byte) (any, error) {
-    var value any
-    unmarshalErr := json.Unmarshal(payload, &value)
-    if nil != unmarshalErr {
-        return nil, unmarshalErr
-    }
-
-    return value, nil
+func (instance *JsonSerializer) Deserialize(payload []byte, target any) error {
+    return json.Unmarshal(payload, target)
 }
 
 var _ cachecontract.Serializer = (*JsonSerializer)(nil)

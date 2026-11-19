@@ -35,7 +35,7 @@ func TestCacheClearCommandEmptiesTheCacheAndSaysWhatItReached(t *testing.T) {
         t.Errorf("expected one clear, got %d", cacheInstance.clears())
     }
 
-    if _, exists, _ := cache.Get(context.Background(), "zz-cached"); true == exists {
+    if _, exists, _ := melodycache.Get[any](context.Background(), cache, "zz-cached"); true == exists {
         t.Errorf("the planted entry survived the clear")
     }
 

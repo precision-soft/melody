@@ -3,6 +3,7 @@ package cache
 import (
     "context"
     "fmt"
+    "reflect"
     "sort"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -54,44 +55,95 @@ func normalizeThirdPartyError(err error) error {
     return err
 }
 
-/* NormalizeStoredValue answers the shape a value stored through this manager reads back as, through one local serializer round-trip, so Remember's computing call and its cached calls answer one shape. */
-func (instance *Manager) NormalizeStoredValue(value any) (any, error) {
+/* a refused target is a programming error, so it is no DeserializationError and Remember does not recompute over it */
+func resolveReadTarget(target any, key string) (reflect.Value, error) {
+    targetValue := reflect.ValueOf(target)
+    if nil == target || reflect.Pointer != targetValue.Kind() || true == targetValue.IsNil() {
+        return reflect.Value{}, exception.NewError(
+            "cache read target is not a non-nil pointer",
+            exceptioncontract.Context{"key": key, "targetType": fmt.Sprintf("%T", target)},
+            nil,
+        )
+    }
+
+    return targetValue, nil
+}
+
+func resolveBatchReadTarget(target any) (reflect.Value, error) {
+    targetValue := reflect.ValueOf(target)
+    if nil == target || reflect.Pointer != targetValue.Kind() || true == targetValue.IsNil() || reflect.Map != targetValue.Elem().Kind() || reflect.String != targetValue.Elem().Type().Key().Kind() {
+        return reflect.Value{}, exception.NewError(
+            "cache batch read target is not a pointer to a map keyed by string",
+            exceptioncontract.Context{"targetType": fmt.Sprintf("%T", target)},
+            nil,
+        )
+    }
+
+    return targetValue, nil
+}
+
+/* a value of its own, so a failed decode leaves the caller's target untouched and a successful one never merges into what it held */
+func (instance *Manager) decodeFresh(payload []byte, valueType reflect.Type) (reflect.Value, error) {
+    fresh := reflect.New(valueType)
+    deserializeErr := normalizeThirdPartyError(instance.serializer.Deserialize(payload, fresh.Interface()))
+
+    return fresh.Elem(), deserializeErr
+}
+
+/* RoundTrip writes into target what value reads back as through this manager, one local serializer round trip with the backend untouched; either half's refusal is answered as the serializer gave it. */
+func (instance *Manager) RoundTrip(value any, target any) error {
+    targetValue, targetErr := resolveReadTarget(target, "")
+    if nil != targetErr {
+        return targetErr
+    }
+
     payload, serializeErr := instance.serializer.Serialize(value)
     serializeErr = normalizeThirdPartyError(serializeErr)
     if nil != serializeErr {
-        return nil, serializeErr
+        return serializeErr
     }
 
-    normalized, deserializeErr := instance.serializer.Deserialize(payload)
-    deserializeErr = normalizeThirdPartyError(deserializeErr)
+    fresh, deserializeErr := instance.decodeFresh(payload, targetValue.Elem().Type())
     if nil != deserializeErr {
-        return nil, deserializeErr
+        return deserializeErr
     }
 
-    return normalized, nil
+    targetValue.Elem().Set(fresh)
+
+    return nil
 }
 
-func (instance *Manager) Get(ctx context.Context, key string) (any, bool, error) {
+func (instance *Manager) Get(ctx context.Context, key string, target any) (bool, error) {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return false, nilErr
+    }
+
+    targetValue, targetErr := resolveReadTarget(target, key)
+    if nil != targetErr {
+        return false, targetErr
+    }
+
     payload, exists, getErr := instance.backend.Get(ctx, key)
     getErr = normalizeThirdPartyError(getErr)
     if nil != getErr {
-        return nil, false, getErr
+        return false, getErr
     }
 
     if false == exists {
-        return nil, false, nil
+        return false, nil
     }
 
-    value, deserializeErr := instance.serializer.Deserialize(payload)
-    deserializeErr = normalizeThirdPartyError(deserializeErr)
+    fresh, deserializeErr := instance.decodeFresh(payload, targetValue.Elem().Type())
     if nil != deserializeErr {
-        return nil, false, NewDeserializationError(
+        return false, NewDeserializationError(
             []string{key},
             deserializeErr,
         )
     }
 
-    return value, true, nil
+    targetValue.Elem().Set(fresh)
+
+    return true, nil
 }
 
 func (instance *Manager) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
@@ -126,15 +178,25 @@ func (instance *Manager) Clear(ctx context.Context) error {
     return normalizeThirdPartyError(instance.backend.Clear(ctx))
 }
 
-/* Many answers the values of the keys that are present. An entry whose payload does not deserialize is left out as an absent key is, and its keys come back in a DeserializationError beside the values that decoded. */
-func (instance *Manager) Many(ctx context.Context, keys []string) (map[string]any, error) {
+/* Many replaces the target's map with the entries of the keys that are present and decode. An entry whose payload does not decode is left out as an absent key is, and its keys come back in a DeserializationError beside the entries that decoded; a backend failure leaves the target untouched. */
+func (instance *Manager) Many(ctx context.Context, keys []string, target any) error {
+    if nilErr := cachecontract.RefuseNilContext(ctx); nil != nilErr {
+        return nilErr
+    }
+
+    targetValue, targetErr := resolveBatchReadTarget(target)
+    if nil != targetErr {
+        return targetErr
+    }
+
     payloadsByKey, manyErr := instance.backend.Many(ctx, keys)
     manyErr = normalizeThirdPartyError(manyErr)
     if nil != manyErr {
-        return nil, manyErr
+        return manyErr
     }
 
-    result := make(map[string]any, len(payloadsByKey))
+    mapType := targetValue.Elem().Type()
+    result := reflect.MakeMapWithSize(mapType, len(payloadsByKey))
 
     corruptKeys := make([]string, 0)
     var firstCauseErr error
@@ -151,8 +213,7 @@ func (instance *Manager) Many(ctx context.Context, keys []string) (map[string]an
             continue
         }
 
-        value, deserializeErr := instance.serializer.Deserialize(payload)
-        deserializeErr = normalizeThirdPartyError(deserializeErr)
+        fresh, deserializeErr := instance.decodeFresh(payload, mapType.Elem())
         if nil != deserializeErr {
             corruptKeys = append(corruptKeys, key)
             if nil == firstCauseErr {
@@ -161,14 +222,16 @@ func (instance *Manager) Many(ctx context.Context, keys []string) (map[string]an
             continue
         }
 
-        result[key] = value
+        result.SetMapIndex(reflect.ValueOf(key).Convert(mapType.Key()), fresh)
     }
+
+    targetValue.Elem().Set(result)
 
     if 0 < len(corruptKeys) {
-        return result, NewDeserializationError(corruptKeys, firstCauseErr)
+        return NewDeserializationError(corruptKeys, firstCauseErr)
     }
 
-    return result, nil
+    return nil
 }
 
 /* serializationErrorText reads the text of a serializer's refusal under a recover, since Serializer is a public contract and the application's Error() may panic; the marker takes the shape the other foreign-error readers use. */
@@ -281,4 +344,3 @@ func (instance *Manager) CloseWithContext(closeContext context.Context) error {
 }
 
 var _ cachecontract.Cache = (*Manager)(nil)
-var _ cachecontract.StoredValueNormalizer = (*Manager)(nil)

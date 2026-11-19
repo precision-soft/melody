@@ -1,6 +1,8 @@
 package service
 
 import (
+    "fmt"
+    "reflect"
     "context"
     "errors"
     "slices"
@@ -67,13 +69,20 @@ func (instance *ttlRecordingCache) writesFor(key string) []cacheWrite {
     return matched
 }
 
-func (instance *ttlRecordingCache) Get(ctx context.Context, key string) (any, bool, error) {
+func (instance *ttlRecordingCache) Get(ctx context.Context, key string, target any) (bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
     value, exists := instance.values[key]
+    if false == exists {
+        return false, nil
+    }
 
-    return value, exists, nil
+    if assignErr := assignCachedTestValue(key, target, value); nil != assignErr {
+        return false, assignErr
+    }
+
+    return true, nil
 }
 
 func (instance *ttlRecordingCache) Set(ctx context.Context, key string, value any, ttl melodybound.Duration) error {
@@ -122,18 +131,16 @@ func (instance *ttlRecordingCache) Clear(ctx context.Context) error {
     return nil
 }
 
-func (instance *ttlRecordingCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
+func (instance *ttlRecordingCache) Many(ctx context.Context, keys []string, target any) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
-    result := map[string]any{}
-    for _, key := range keys {
-        if value, exists := instance.values[key]; true == exists {
-            result[key] = value
-        }
-    }
+    return assignCachedTestValues(keys, target, instance.values)
+}
 
-    return result, nil
+/* this fake holds values, not payloads, so its copy is the value itself */
+func (instance *ttlRecordingCache) RoundTrip(value any, target any) error {
+    return assignCachedTestValue("", target, value)
 }
 
 func (instance *ttlRecordingCache) SetMultiple(ctx context.Context, items map[string]any, ttl melodybound.Duration) error {
@@ -169,6 +176,66 @@ func (instance *ttlRecordingCache) CloseWithContext(closeContext context.Context
 }
 
 var _ melodycachecontract.Cache = (*ttlRecordingCache)(nil)
+
+func assignCachedTestValue(key string, target any, value any) error {
+    targetValue := reflect.ValueOf(target)
+    if reflect.Pointer != targetValue.Kind() || true == targetValue.IsNil() {
+        return fmt.Errorf("cache read target %T is not a non-nil pointer", target)
+    }
+
+    /* a nil pointer is a remembered absence, which gob reads back as the zero value */
+    valueOf := reflect.ValueOf(value)
+    if nil == value || (reflect.Pointer == valueOf.Kind() && true == valueOf.IsNil()) {
+        targetValue.Elem().SetZero()
+
+        return nil
+    }
+
+    if false == valueOf.Type().AssignableTo(targetValue.Elem().Type()) {
+        return melodycache.NewDeserializationError([]string{key}, fmt.Errorf("the cached %T cannot be held by a %s target", value, targetValue.Elem().Type()))
+    }
+
+    targetValue.Elem().Set(valueOf)
+
+    return nil
+}
+
+func assignCachedTestValues(keys []string, target any, values map[string]any) error {
+    targetValue := reflect.ValueOf(target)
+    if reflect.Pointer != targetValue.Kind() || true == targetValue.IsNil() || reflect.Map != targetValue.Elem().Kind() {
+        return fmt.Errorf("cache batch read target %T is not a pointer to a map", target)
+    }
+
+    mapType := targetValue.Elem().Type()
+    result := reflect.MakeMap(mapType)
+    corruptKeys := make([]string, 0)
+    var firstCauseErr error
+    for _, key := range keys {
+        value, exists := values[key]
+        if false == exists {
+            continue
+        }
+
+        element := reflect.New(mapType.Elem())
+        if assignErr := assignCachedTestValue(key, element.Interface(), value); nil != assignErr {
+            corruptKeys = append(corruptKeys, key)
+            if nil == firstCauseErr {
+                firstCauseErr = assignErr
+            }
+            continue
+        }
+
+        result.SetMapIndex(reflect.ValueOf(key), element.Elem())
+    }
+
+    targetValue.Elem().Set(result)
+
+    if 0 < len(corruptKeys) {
+        return melodycache.NewDeserializationError(corruptKeys, firstCauseErr)
+    }
+
+    return nil
+}
 
 type recordingDispatcher struct {
     dispatcher *melodyevent.EventDispatcher
@@ -310,7 +377,7 @@ func assertPaddedIdentifierAnsweredAbsent(t *testing.T, cacheInstance *ttlRecord
         }
     }
 
-    if cached, exists, _ := cacheInstance.Get(context.Background(), cacheKey(id + " ")); true == exists && nil != cached {
+    if cached, exists, _ := melodycache.Get[any](context.Background(), cacheInstance, cacheKey(id + " ")); true == exists && nil != cached {
         t.Fatalf("the padded identifier holds a row in the cache: %+v", cached)
     }
 

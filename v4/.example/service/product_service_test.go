@@ -203,3 +203,23 @@ func TestProductService_TheReadDoorsEndOnTheCallersContext(t *testing.T) {
         return findErr
     })
 }
+
+func TestTheCatalogueListIsAnsweredTypedFromACacheWrittenByAnotherProcess(t *testing.T) {
+    backend := melodycache.NewInMemoryBackend(melodycache.InMemoryBackendConfig{CleanupInterval: melodybound.Of(time.Minute), Clock: melodyclock.NewSystemClock()})
+    t.Cleanup(func() { _ = backend.CloseWithContext(context.Background()) })
+
+    writer := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{})
+    reader := melodycache.NewManager(backend, examplecache.NewGobSerializer(), melodycache.ManagerConfig{})
+
+    instant := time.Date(2026, 11, 18, 23, 0, 0, 0, time.UTC)
+    stored := []*entity.Product{entity.NewProduct("prod-1", "Book", "A book", "cat-1", 12.5, "cur-1", 3, instant, instant)}
+    if setErr := writer.Set(context.Background(), CacheKeyProductList, stored, melodybound.Of(entityCacheTtl)); nil != setErr {
+        t.Fatalf("set: %v", setErr)
+    }
+
+    /* no repository: a read that reached it would panic, so the list can only come from the store */
+    products, listErr := NewProductService(nil, nil, nil, reader, nil, nil).List(context.Background())
+    if nil != listErr || 1 != len(products) || *stored[0] != *products[0] {
+        t.Fatalf("expected the stored list answered typed, got %#v (%v)", products, listErr)
+    }
+}

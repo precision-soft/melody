@@ -89,7 +89,7 @@ func TestRemember_CallsCallbackAndStoresValue(t *testing.T) {
         t.Fatalf("unexpected value")
     }
 
-    storedValue, exists, getErr := cacheInstance.Get(context.Background(), "k")
+    storedValue, exists, getErr := Get[any](context.Background(), cacheInstance, "k")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -131,7 +131,7 @@ func TestRemember_PropagatesCallbackErrorAndDoesNotStore(t *testing.T) {
         t.Fatalf("expected callback error to propagate")
     }
 
-    _, exists, getErr := cacheInstance.Get(context.Background(), "k")
+    _, exists, getErr := Get[any](context.Background(), cacheInstance, "k")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -167,7 +167,7 @@ func TestRemember_AnUnlimitedTtlKeepsTheValue(t *testing.T) {
 
     clockInstance.now = time.Unix(10+3600, 0)
 
-    value, exists, getErr := cacheInstance.Get(context.Background(), "k")
+    value, exists, getErr := Get[any](context.Background(), cacheInstance, "k")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -765,7 +765,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
         t.Fatalf("unexpected value: %v", value)
     }
 
-    storedValue, exists, getErr := cacheManager.Get(context.Background(), "poisoned")
+    storedValue, exists, getErr := Get[any](context.Background(), cacheManager, "poisoned")
     if nil != getErr {
         t.Fatalf("expected the corrupt payload to have been overwritten, got: %v", getErr)
     }
@@ -800,7 +800,7 @@ func TestRemember_CallbackTypedNilErrorIsSuccess(t *testing.T) {
         t.Fatalf("unexpected value: %v", value)
     }
 
-    storedValue, exists, getErr := cacheManager.Get(context.Background(), "typed.nil.callback")
+    storedValue, exists, getErr := Get[any](context.Background(), cacheManager, "typed.nil.callback")
     if nil != getErr || false == exists || "computed" != storedValue.(string) {
         t.Fatalf("expected the computed value to have been stored, got exists=%v value=%v err=%v", exists, storedValue, getErr)
     }
@@ -816,8 +816,8 @@ type testValueKindCache struct {
     inner *Manager
 }
 
-func (instance testValueKindCache) Get(ctx context.Context, key string) (any, bool, error) {
-    return instance.inner.Get(ctx, key)
+func (instance testValueKindCache) Get(ctx context.Context, key string, target any) (bool, error) {
+    return instance.inner.Get(ctx, key, target)
 }
 
 func (instance testValueKindCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
@@ -836,8 +836,12 @@ func (instance testValueKindCache) Clear(ctx context.Context) error {
     return instance.inner.Clear(ctx)
 }
 
-func (instance testValueKindCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
-    return instance.inner.Many(ctx, keys)
+func (instance testValueKindCache) Many(ctx context.Context, keys []string, target any) error {
+    return instance.inner.Many(ctx, keys, target)
+}
+
+func (instance testValueKindCache) RoundTrip(value any, target any) error {
+    return instance.inner.RoundTrip(value, target)
 }
 
 func (instance testValueKindCache) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
@@ -928,8 +932,8 @@ type testPanickingSetCache struct {
     inner *Manager
 }
 
-func (instance *testPanickingSetCache) Get(ctx context.Context, key string) (any, bool, error) {
-    return instance.inner.Get(ctx, key)
+func (instance *testPanickingSetCache) Get(ctx context.Context, key string, target any) (bool, error) {
+    return instance.inner.Get(ctx, key, target)
 }
 
 func (instance *testPanickingSetCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
@@ -948,8 +952,12 @@ func (instance *testPanickingSetCache) Clear(ctx context.Context) error {
     return instance.inner.Clear(ctx)
 }
 
-func (instance *testPanickingSetCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
-    return instance.inner.Many(ctx, keys)
+func (instance *testPanickingSetCache) Many(ctx context.Context, keys []string, target any) error {
+    return instance.inner.Many(ctx, keys, target)
+}
+
+func (instance *testPanickingSetCache) RoundTrip(value any, target any) error {
+    return instance.inner.RoundTrip(value, target)
 }
 
 func (instance *testPanickingSetCache) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
@@ -1015,7 +1023,7 @@ type testScriptedGetResult struct {
     err    error
 }
 
-func (instance *testScriptedCache) Get(ctx context.Context, key string) (any, bool, error) {
+func (instance *testScriptedCache) Get(ctx context.Context, key string, target any) (bool, error) {
     instance.stateMutex.Lock()
     defer instance.stateMutex.Unlock()
 
@@ -1024,12 +1032,19 @@ func (instance *testScriptedCache) Get(ctx context.Context, key string) (any, bo
     instance.getContexts = append(instance.getContexts, ctx)
 
     if index >= len(instance.getResults) {
-        return nil, false, nil
+        return false, nil
     }
 
     result := instance.getResults[index]
+    if nil != result.err || false == result.exists {
+        return false, result.err
+    }
 
-    return result.value, result.exists, result.err
+    if assignErr := assignTestValue(target, result.value); nil != assignErr {
+        return false, NewDeserializationError([]string{key}, assignErr)
+    }
+
+    return true, nil
 }
 
 func (instance *testScriptedCache) Set(ctx context.Context, key string, value any, ttl bound.Duration) error {
@@ -1062,8 +1077,13 @@ func (instance *testScriptedCache) Has(ctx context.Context, key string) (bool, e
 
 func (instance *testScriptedCache) Clear(ctx context.Context) error { return nil }
 
-func (instance *testScriptedCache) Many(ctx context.Context, keys []string) (map[string]any, error) {
-    return map[string]any{}, nil
+func (instance *testScriptedCache) Many(ctx context.Context, keys []string, target any) error {
+    return nil
+}
+
+/* the scripted cache holds values, not payloads, so its copy is the value itself */
+func (instance *testScriptedCache) RoundTrip(value any, target any) error {
+    return assignTestValue(target, value)
 }
 
 func (instance *testScriptedCache) SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error {
@@ -1330,7 +1350,7 @@ func TestRemember_ACallbackPanicIsReportedAsTheCallbacksOnBothPaths(t *testing.T
 
 /* the last waiter of a cancelable flight cancels it, and the guard above that decision covers a call declared cancelable whose cancel function is absent. It is unreachable through Remember — the constructor builds the pair together — and stays as defense for a call assembled by hand: without it the last waiter leaving would dereference a nil function, inside a deferred call on the request path where the panic has no owner. */
 func TestRememberInFlightCall_RemoveWaiterToleratesAnAbsentCancelFunction(t *testing.T) {
-    shard := getRememberInFlightShard("absent.cancel.function")
+    shard := getRememberInFlightShard(rememberFlightKey{key: "absent.cancel.function"})
 
     call := newRememberInFlightCall(true)
     call.cancelFunc = nil
@@ -1473,24 +1493,24 @@ func TestExecuteRememberCallbackSafely_ATypedNilPanicValueIsNotHandedOnAsACause(
 func TestExecuteRememberInFlightLeader_APanickingCacheAccessKeepsItsCauseAndItsStack(t *testing.T) {
     rootCause := errors.New("redis: client is closed")
 
-    shard := getRememberInFlightShard("panicking-key")
+    flightKey := rememberFlightKey{key: "panicking-key"}
+    shard := getRememberInFlightShard(flightKey)
     call := newRememberInFlightCall(false)
     call.AddWaiter()
 
     shard.mutex.Lock()
-    shard.inFlightByKey["panicking-key"] = call
+    shard.inFlightByKey[flightKey] = call
     shard.mutex.Unlock()
 
     go executeRememberInFlightLeader(
-        &panickingRememberCache{panicValue: exception.NewError("cache get exploded", nil, rootCause)},
         shard,
-        "panicking-key",
+        flightKey,
         "report:daily",
         bound.Of(time.Minute),
         call,
-        func(ctx context.Context) (any, error) {
+        testRememberOperations(&panickingRememberCache{panicValue: exception.NewError("cache get exploded", nil, rootCause)}, "report:daily", func(ctx context.Context) (any, error) {
             return "value", nil
-        },
+        }),
     )
 
     _, waitErr := call.Wait(context.Background(), 5*time.Second, "report:daily")
@@ -1525,7 +1545,7 @@ type panickingRememberCache struct {
     panicValue error
 }
 
-func (instance *panickingRememberCache) Get(ctx context.Context, key string) (any, bool, error) {
+func (instance *panickingRememberCache) Get(ctx context.Context, key string, target any) (bool, error) {
     panic(instance.panicValue)
 }
 
@@ -1655,7 +1675,7 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
         t.Fatalf("expected the computed value answered, got %v", rememberErr)
     }
 
-    if _, exists, getErr := cacheManager.Get(context.Background(), "report.uncoalesced"); nil != getErr || false == exists {
+    if _, exists, getErr := Get[any](context.Background(), cacheManager, "report.uncoalesced"); nil != getErr || false == exists {
         t.Fatalf("expected the computed value stored though the caller left, got %v, %v", exists, getErr)
     }
 }
@@ -1700,46 +1720,6 @@ func TestRemember_AValueTheSerializerCannotReadBackIsNotStored(t *testing.T) {
         }
 
         _ = backend.CloseWithContext(t.Context())
-    }
-}
-
-type forwardingNormalizerCache struct {
-    cachecontract.Cache
-    manager *Manager
-}
-
-func (instance *forwardingNormalizerCache) NormalizeStoredValue(value any) (any, error) {
-    return instance.manager.NormalizeStoredValue(value)
-}
-
-/* the normalizer door is asked of the Cache handed to Remember, so a decorator over the manager reaches it only by implementing the door itself */
-func TestRemember_ADecoratorThatForwardsTheNormalizerAnswersOneShape(t *testing.T) {
-    backend := NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Minute), Clock: clock.NewSystemClock()})
-    defer func() { _ = backend.CloseWithContext(context.Background()) }()
-
-    manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
-    decorated := &forwardingNormalizerCache{Cache: manager, manager: manager}
-
-    callback := func(ctx context.Context) (any, error) {
-        return 5, nil
-    }
-
-    missValue, missErr := Remember(context.Background(), decorated, "remember:decorated", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
-    if nil != missErr {
-        t.Fatalf("miss failed: %v", missErr)
-    }
-
-    hitValue, hitErr := Remember(context.Background(), decorated, "remember:decorated", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
-    if nil != hitErr {
-        t.Fatalf("hit failed: %v", hitErr)
-    }
-
-    if reflect.TypeOf(missValue) != reflect.TypeOf(hitValue) {
-        t.Fatalf("expected one shape through the decorator, got %v on the miss and %v on the hit", reflect.TypeOf(missValue), reflect.TypeOf(hitValue))
-    }
-
-    if float64(5) != missValue.(float64) {
-        t.Fatalf("expected the decorated miss to answer the stored shape, got %#v", missValue)
     }
 }
 
@@ -1898,7 +1878,7 @@ func TestRemember_EveryCallerOfOneFlightOwnsItsAnswer(t *testing.T) {
         return map[string]any{"owner": "none"}, nil
     }
 
-    flightKey, _ := rememberSingleFlightKey(cacheManager, "report.shared", true)
+    flightKey, _ := rememberFlightKeyOf(cacheManager, "report.shared", reflect.TypeFor[any](), true)
     shard := getRememberInFlightShard(flightKey)
     waiters := func() int64 {
         shard.mutex.Lock()
@@ -1969,7 +1949,7 @@ func TestRemember_AWaiterNeverReadsTheValueTheCallbackKept(t *testing.T) {
         return kept, nil
     }
 
-    flightKey, _ := rememberSingleFlightKey(cacheManager, "report.kept", true)
+    flightKey, _ := rememberFlightKeyOf(cacheManager, "report.kept", reflect.TypeFor[any](), true)
     shard := getRememberInFlightShard(flightKey)
     waiters := func() int64 {
         shard.mutex.Lock()
@@ -2029,8 +2009,8 @@ type refusingNormalizerScriptedCache struct {
     *testScriptedCache
 }
 
-func (instance *refusingNormalizerScriptedCache) NormalizeStoredValue(value any) (any, error) {
-    return nil, errors.New("the stored shape cannot be read back")
+func (instance *refusingNormalizerScriptedCache) RoundTrip(value any, target any) error {
+    return errors.New("the stored shape cannot be read back")
 }
 
 /* a value the leader finds stored but cannot copy is answered as a hit outside a flight answers it: the first caller takes the value read, and every other caller reads its own, so no two callers share it and the stored bytes do not answer differently because callers coalesced */
@@ -2076,14 +2056,15 @@ func TestRemember_EveryWaiterReadsItsOwnValueTheLeaderCannotCopy(t *testing.T) {
 
     computations := 0
     call := newRememberInFlightCall(false)
-    executeRememberInFlightLeader(scriptedCache, &rememberInFlightShard{inFlightByKey: map[string]*rememberInFlightCall{}}, "key", "key", bound.Of(time.Minute), call, func(ctx context.Context) (any, error) {
+    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, testRememberOperations(scriptedCache, "key", func(ctx context.Context) (any, error) {
         computations++
 
         return "computed", nil
-    })
+    }))
 
-    firstAnswer, firstErr := call.answer()
-    secondAnswer, secondErr := call.answer()
+    firstBoxed, firstErr := call.answer()
+    secondBoxed, secondErr := call.answer()
+    firstAnswer, secondAnswer := unboxTestAnswer(firstBoxed), unboxTestAnswer(secondBoxed)
     if nil != firstErr || nil != secondErr {
         t.Fatalf("expected both callers answered, got %v and %v", firstErr, secondErr)
     }
@@ -2103,12 +2084,12 @@ type mapRefusingScriptedCache struct {
     *testScriptedCache
 }
 
-func (instance *mapRefusingScriptedCache) NormalizeStoredValue(value any) (any, error) {
+func (instance *mapRefusingScriptedCache) RoundTrip(value any, target any) error {
     if _, isMap := value.(map[string]any); true == isMap {
-        return nil, errors.New("the stored shape cannot be read back")
+        return errors.New("the stored shape cannot be read back")
     }
 
-    return value, nil
+    return assignTestValue(target, value)
 }
 
 func TestRemember_AWaiterComputesWhenTheUncopyableEntryVanishedBeforeItsRead(t *testing.T) {
@@ -2123,17 +2104,18 @@ func TestRemember_AWaiterComputesWhenTheUncopyableEntryVanishedBeforeItsRead(t *
 
     computations := 0
     call := newRememberInFlightCall(false)
-    executeRememberInFlightLeader(scriptedCache, &rememberInFlightShard{inFlightByKey: map[string]*rememberInFlightCall{}}, "key", "key", bound.Of(time.Minute), call, func(ctx context.Context) (any, error) {
+    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, testRememberOperations(scriptedCache, "key", func(ctx context.Context) (any, error) {
         computations++
 
         return "computed", nil
-    })
+    }))
 
     if _, firstErr := call.answer(); nil != firstErr {
         t.Fatalf("expected the first caller answered the leader's read, got %v", firstErr)
     }
 
-    secondAnswer, secondErr := call.answer()
+    secondBoxed, secondErr := call.answer()
+    secondAnswer := unboxTestAnswer(secondBoxed)
     if nil != secondErr || "computed" != secondAnswer || 1 != computations || 1 != scriptedCache.setCallCount {
         t.Fatalf("expected the waiter to compute and store over the vanished entry, got %v (%v) after %d computations and %d stores", secondAnswer, secondErr, computations, scriptedCache.setCallCount)
     }
@@ -2282,9 +2264,10 @@ func TestReadOwnStoredValue_ReadsUnderTheFlightContext(t *testing.T) {
     scriptedCache := &testScriptedCache{getResults: []testScriptedGetResult{{value: "stored", exists: true}}}
     flightContext := context.WithValue(context.Background(), rememberContextKey{}, "flight")
 
-    value, readErr := readOwnStoredValue(scriptedCache, "own.read", bound.Of(time.Minute), flightContext, func(ctx context.Context) (any, error) {
+    boxed, readErr := readOwnStoredValue("own.read", bound.Of(time.Minute), flightContext, testRememberOperations(scriptedCache, "own.read", func(ctx context.Context) (any, error) {
         return "computed", nil
-    })
+    }))
+    value := unboxTestAnswer(boxed)
     if nil != readErr || "stored" != value {
         t.Fatalf("expected the stored value, got %v, %v", value, readErr)
     }
@@ -2330,7 +2313,7 @@ func TestRemember_ALeaderWhoseWaitersLeftStillStoresWhatItComputed(t *testing.T)
 
     deadline := time.Now().Add(5 * time.Second)
     for time.Now().Before(deadline) {
-        if _, exists, _ := cacheManager.Get(context.Background(), "report.slow"); true == exists {
+        if _, exists, _ := Get[any](context.Background(), cacheManager, "report.slow"); true == exists {
             return
         }
 
@@ -2338,4 +2321,94 @@ func TestRemember_ALeaderWhoseWaitersLeftStillStoresWhatItComputed(t *testing.T)
     }
 
     t.Fatal("expected the value a callback ignoring the cancellation computed to be stored")
+}
+
+type plainDecoratorCache struct {
+    cachecontract.Cache
+}
+
+func TestRemember_APlainDecoratorKeepsEveryGuarantee(t *testing.T) {
+    backend := NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Minute), Clock: clock.NewSystemClock()})
+    defer func() { _ = backend.CloseWithContext(context.Background()) }()
+
+    decorated := &plainDecoratorCache{Cache: NewManager(backend, NewJsonSerializer(), ManagerConfig{})}
+
+    t.Run("every caller of one flight owns its answer", func(t *testing.T) {
+        releaseCallbackChannel := make(chan struct{})
+        callback := func(ctx context.Context) (any, error) {
+            <-releaseCallbackChannel
+            return map[string]any{"owner": "none"}, nil
+        }
+
+        flightKey, _ := rememberFlightKeyOf(decorated, "decorated.shared", reflect.TypeFor[any](), true)
+        shard := getRememberInFlightShard(flightKey)
+        waiters := func() int64 {
+            shard.mutex.Lock()
+            defer shard.mutex.Unlock()
+
+            call, exists := shard.inFlightByKey[flightKey]
+            if false == exists {
+                return 0
+            }
+
+            return call.waitersCount.Load()
+        }
+
+        callers := 2
+        answers := make(chan map[string]any, callers)
+        for index := 0; index < callers; index++ {
+            go func() {
+                value, _ := Remember(context.Background(), decorated, "decorated.shared", RememberConfig{Ttl: bound.Of(time.Minute)}, callback)
+                answer, _ := value.(map[string]any)
+                answers <- answer
+            }()
+        }
+
+        deadline := time.Now().Add(2 * time.Second)
+        for int64(callers) != waiters() {
+            if true == time.Now().After(deadline) {
+                t.Fatalf("expected %d callers parked on one flight, got %d", callers, waiters())
+            }
+            time.Sleep(time.Millisecond)
+        }
+
+        close(releaseCallbackChannel)
+
+        first := <-answers
+        second := <-answers
+        if nil == first || nil == second {
+            t.Fatalf("expected both callers answered the map, got %v and %v", first, second)
+        }
+
+        first["owner"] = "first"
+        if "none" != second["owner"] {
+            t.Fatalf("expected the second caller to own its answer, the first caller's write reached it: %v", second)
+        }
+    })
+
+    t.Run("the computing call answers the stored shape", func(t *testing.T) {
+        value, rememberErr := Remember(context.Background(), decorated, "decorated.shape", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context) (any, error) {
+            return 5, nil
+        })
+        if nil != rememberErr {
+            t.Fatalf("remember failed: %v", rememberErr)
+        }
+
+        if float64(5) != value {
+            t.Fatalf("expected the computing call to answer what a hit answers, float64(5), got %#v", value)
+        }
+    })
+
+    t.Run("a value that cannot be read back is refused with nothing stored", func(t *testing.T) {
+        _, rememberErr := Remember(context.Background(), decorated, "decorated.unreadable", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context) (any, error) {
+            return deeplyNestedValue(20000), nil
+        })
+        if nil == rememberErr {
+            t.Fatalf("expected the value the cache cannot read back to be refused")
+        }
+
+        if hasValue, _ := decorated.Has(context.Background(), "decorated.unreadable"); true == hasValue {
+            t.Fatalf("expected the refused value to stay out of the store")
+        }
+    })
 }

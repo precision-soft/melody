@@ -125,3 +125,49 @@ func TestLayoutToken_CoversTheUserProfile(t *testing.T) {
         t.Fatal("expected the layout token to cover the user profile")
     }
 }
+
+func TestGobSerializer_DecodesIntoTheEntityTheReaderNames(t *testing.T) {
+    serializer := NewGobSerializer()
+
+    stored := []*entity.Category{entity.NewCategory("category-1", "Books")}
+    payload, serializeErr := serializer.Serialize(stored)
+    if nil != serializeErr {
+        t.Fatalf("serialize error: %v", serializeErr)
+    }
+
+    var categoryList []*entity.Category
+    if deserializeErr := serializer.Deserialize(payload, &categoryList); nil != deserializeErr {
+        t.Fatalf("deserialize error: %v", deserializeErr)
+    }
+
+    if false == reflect.DeepEqual(stored, categoryList) {
+        t.Fatalf("expected the list read back equal, got %#v", categoryList)
+    }
+
+    var category *entity.Category
+    if deserializeErr := serializer.Deserialize(payload, &category); nil == deserializeErr || false == strings.Contains(deserializeErr.Error(), "*entity.Category") {
+        t.Fatalf("expected a list refused by an entity target, naming both types, got %v", deserializeErr)
+    }
+
+    if nil != category {
+        t.Fatalf("expected the refused target untouched, got %#v", category)
+    }
+}
+
+func TestGobSerializer_ARememberedAbsenceReadsBackAsNil(t *testing.T) {
+    serializer := NewGobSerializer()
+
+    payload, serializeErr := serializer.Serialize((*entity.Category)(nil))
+    if nil != serializeErr {
+        t.Fatalf("serialize error: %v", serializeErr)
+    }
+
+    category := entity.NewCategory("stale", "Stale")
+    if deserializeErr := serializer.Deserialize(payload, &category); nil != deserializeErr {
+        t.Fatalf("deserialize error: %v", deserializeErr)
+    }
+
+    if nil != category {
+        t.Fatalf("expected the absence read back as nil, got %#v", category)
+    }
+}

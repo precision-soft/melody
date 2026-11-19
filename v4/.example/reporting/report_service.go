@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
@@ -107,25 +108,23 @@ type CatalogReading struct {
 /* Reading yields the current reading, from the cache when the scheduled refresh left one there; a cached reading keeps the instant it was taken at, so the caller can tell how old the answer is. */
 func (instance *CatalogReportService) Reading(ctx context.Context) (*CatalogReading, error) {
     /* one round trip: Get answers presence and value together, so no entry can expire between two reads */
-    stored, cached, getErr := instance.cache.Get(ctx, catalogReadingCacheKey)
-    if nil != getErr {
+    payload, cached, getErr := melodycache.Get[string](ctx, instance.cache, catalogReadingCacheKey)
+    /* an entry of another type falls through to Refresh, which overwrites it */
+    if nil != getErr && false == melodycache.IsDeserializationError(getErr) {
         return nil, getErr
     }
 
     if true == cached {
-        payload, ok := stored.(string)
-        if true == ok {
-            /* the stamp comes out of the payload, not off the clock, so RecordedAt is the age of the reading; a payload whose stamp cannot be read back falls through to Refresh */
-            recordedAt, readable := recordedAtOf(payload)
-            productCount, counted := payloadCountOf(payload, catalogReadingProductCountField)
-            if true == readable && true == counted {
-                return &CatalogReading{
-                    RecordedAt: recordedAt,
-                    Headline:   instance.Headline(productCount),
-                    Payload:    payload,
-                    FromCache:  true,
-                }, nil
-            }
+        /* the stamp comes out of the payload, not off the clock, so RecordedAt is the age of the reading; a payload whose stamp cannot be read back falls through to Refresh */
+        recordedAt, readable := recordedAtOf(payload)
+        productCount, counted := payloadCountOf(payload, catalogReadingProductCountField)
+        if true == readable && true == counted {
+            return &CatalogReading{
+                RecordedAt: recordedAt,
+                Headline:   instance.Headline(productCount),
+                Payload:    payload,
+                FromCache:  true,
+            }, nil
         }
     }
 

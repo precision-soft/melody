@@ -1,8 +1,12 @@
 package cache
 
 import (
+    "context"
+    "fmt"
+    "reflect"
     "time"
 
+    cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
 )
 
@@ -30,4 +34,36 @@ func (instance *cacheTestClock) NewTicker(interval time.Duration) clockcontract.
     return &cacheTestTicker{
         channel: make(chan time.Time),
     }
+}
+
+func assignTestValue(target any, value any) error {
+    targetValue := reflect.ValueOf(target)
+    if reflect.Pointer != targetValue.Kind() || true == targetValue.IsNil() {
+        return fmt.Errorf("the test target %T is not a non-nil pointer", target)
+    }
+
+    if nil == value {
+        targetValue.Elem().SetZero()
+
+        return nil
+    }
+
+    valueOf := reflect.ValueOf(value)
+    if false == valueOf.Type().AssignableTo(targetValue.Elem().Type()) {
+        return fmt.Errorf("the test value %T cannot be held by a %s target", value, targetValue.Elem().Type())
+    }
+
+    targetValue.Elem().Set(valueOf)
+
+    return nil
+}
+
+func testRememberOperations(cacheInstance cachecontract.Cache, key string, callback func(ctx context.Context) (any, error)) rememberOperations {
+    return newRememberOperations(cacheInstance, key, callback)
+}
+
+func unboxTestAnswer(value any) any {
+    boxed, _ := value.(rememberedValue[any])
+
+    return boxed.value
 }

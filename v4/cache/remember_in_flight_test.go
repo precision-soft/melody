@@ -13,12 +13,12 @@ import (
 
 func TestRememberInFlightCall_RemoveWaiterDoesNotPoisonAConcurrentJoiner(t *testing.T) {
     shard := &rememberInFlightShard{
-        inFlightByKey: make(map[string]*rememberInFlightCall),
+        inFlightByKey: make(map[rememberFlightKey]*rememberInFlightCall),
     }
 
     call := newRememberInFlightCall(true)
     call.AddWaiter()
-    shard.inFlightByKey["k"] = call
+    shard.inFlightByKey[rememberFlightKey{key: "k"}] = call
 
     /* A fresh joiner enters rememberWithStampedeProtection's critical section: it holds the shard mutex, has just found the in-flight call and is about to inspect IsCanceled and AddWaiter. */
     shard.mutex.Lock()

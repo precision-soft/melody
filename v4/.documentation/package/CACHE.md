@@ -113,7 +113,7 @@ The example below demonstrates a typical Melody flow:
 2. Retrieve the cache from the runtime container.
 3. Use `Remember` for cache-aside reads with stampede protection.
 
-This example uses a `map[string]any` payload because the default JSON serializer deserializes into generic Go values (see [`cache/json_serializer.go`](../../cache/json_serializer.go)).
+`Remember` answers the type its callback names, read back through the serializer into that type (see [`cache/json_serializer.go`](../../cache/json_serializer.go)); `Remember[any]` answers the encoding's generic form.
 
 ```go
 package main
@@ -128,13 +128,15 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    "github.com/precision-soft/melody/v4/exception"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const userProfileCacheKey = "example.userProfile:42"
 
-type userProfileMap map[string]any
+type userProfile struct {
+    Id   int64
+    Name string
+}
 
 func registerCacheOverrides(
     register func(
@@ -187,57 +189,41 @@ func registerCacheOverrides(
 func loadUserProfile(
     ctx context.Context,
     runtimeInstance runtimecontract.Runtime,
-) (userProfileMap, error) {
+) (userProfile, error) {
     cacheInstance := cache.CacheMustFromContainer(
         ctx,
         runtimeInstance.Container(),
     )
 
-    value, rememberErr := cache.Remember(
+    return cache.Remember(
         ctx,
         cacheInstance,
         userProfileCacheKey,
         cache.RememberConfig{
             Ttl: bound.Of(30 * time.Minute),
         },
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) (userProfile, error) {
             _ = ctx
 
-            return userProfileMap{
-                "id":   int64(42),
-                "name": "demo",
+            return userProfile{
+                Id:   42,
+                Name: "demo",
             }, nil
         },
     )
-    if nil != rememberErr {
-        return nil, rememberErr
-    }
-
-    profile, ok := value.(map[string]any)
-    if false == ok {
-        return nil, exception.NewError(
-            "cached value has unexpected type",
-            map[string]any{
-                "key": userProfileCacheKey,
-            },
-            nil,
-        )
-    }
-
-    return userProfileMap(profile), nil
 }
 ```
 
 ## Footguns & caveats
 
+- A read names its type through its target, a non-nil pointer, or through `cache.Get[T]`: a hit of `Get` overwrites the target whole, and a miss, a failure or a payload that does not decode leaves it as it was; `Many` replaces the map with the entries that decoded once the store answered. A target that is nil or no pointer is refused before the store is read, by an error that is no `DeserializationError`. One key holds one type. Which types refuse each other is the serializer's: json refuses a mismatch of kind only, so a string read as a struct is a `DeserializationError`, a miss to `Remember` that recomputes and overwrites it, while an object written as one struct reads as another struct with the fields they do not share at zero, a hit; give each type its own key. The json serializer reads a field the payload lacks as its zero value and ignores a key the type lacks, so a cached shape that changes between releases carries a version inside the value or moves the key.
 - `Manager.Get` returns `exists == false` when deserialization fails, and the error is a typed [`DeserializationError`](../../cache/deserialization_error.go) naming the key. `Remember` treats that type as a miss: the callback recomputes and overwrites the corrupt payload, so the key heals; every other error keeps meaning the cache itself failed. A `Cache` implementation of your own inherits the self-healing by wrapping its deserialization failures with `cache.NewDeserializationError`.
 - `Manager.Many` leaves a corrupt entry out of the result the way an absent key is, and returns the good values **beside** a `DeserializationError` naming the corrupt keys in requested order — check the error even when the map is non-empty.
-- Values round-trip through the serializer, and the default `NewJsonSerializer` decodes every JSON number into a `float64`: an integer beyond 2^53 comes back a **different integer**, with no decoding error to notice — the same hazard [`SESSION.md`](SESSION.md) records for its file storage. `Remember` runs the round-trip on its own computing call too, so the miss answers the same shape every hit does, which means the loss is uniform rather than only on the second call: a callback that returns `int64(1<<60)` reads back changed on the cold path as well. The `int64(42)` above is safe because it is under 2^53; a snowflake id, a `bigint` key, a minor-unit amount or a `UnixNano()` is not. Carry a version or a string inside the value, or key such a value so it never decodes through JSON. Every major's default serializer has this shape, v3's included — its `NewJsonSerializer` decodes through the same `json.Unmarshal` into `any` — so carrying the value differently is the remedy, not waiting for
-  the next major. The round-trip runs BEFORE the store: a value the serializer encodes but cannot decode — the JSON serializer has no nesting ceiling on the way in and one of ten thousand on the way out — is refused without being written, so the key stays empty and the caller gets the refusal once per call; stored first, it was read back as a typed miss on every later call, recomputed, rewritten and refused again, a loop no ttl ended.
+- Values round-trip through the serializer, and under `Remember[any]` or `cache.Get[any]` the default `NewJsonSerializer` decodes every JSON number into a `float64`: an integer beyond 2^53 comes back a **different integer**, with no decoding error to notice — the same hazard [`SESSION.md`](SESSION.md) records for its file storage. `Remember` runs the round-trip on its own computing call too, so the miss answers the same shape every hit does, which means the loss is uniform rather than only on the second call: a callback that returns `int64(1<<60)` reads back changed on the cold path as well. The `int64(42)` above is safe because it is under 2^53; a snowflake id, a `bigint` key, a minor-unit amount or a `UnixNano()` is not. Carry a version or a string inside the value, or key such a value so it never decodes through JSON. A read typed as an `int64` keeps the integer whole. The round-trip runs BEFORE the store: a value the serializer encodes but cannot decode — the JSON serializer has no nesting ceiling on the way in and one of ten thousand on the way out — is refused without being written, so the key stays empty and the caller gets the refusal once per call; stored first, it was read back as a typed miss on every later call, recomputed, rewritten and refused again, a loop no ttl ended.
 - `NewManager` builds a manager that does **not** own its backend: `CloseWithContext` leaves the backend open, which is what the container path needs — both are registered services and the container closes each one itself. `ManagerConfig{OwnsBackend: true}` keeps the cascade for the caller that builds both by hand.
 - A closed `InMemoryBackend` refuses every operation with `cache backend is closed`; `CloseWithContext` stays idempotent, and past its deadline answers the deadline's error while the cleanup loop leaves on its own. The key grammar is part of the [`Backend`](../../cache/contract/backend.go) contract: a key is non-empty, carries no spaces or newlines, and is at most 1024 bytes, and a malformed key is refused on every operation by both this backend and the `rueidis` backend, with the same message and in the same order, at the same limit unless the `rueidis` backend's `BackendConfig.MaxKeyLength` moves its own, and both echo the key cut to 128 bytes.
-- `Remember` coalesces concurrent callers per **cache instance, key and cancelability** — the instance is told apart by its pointer. Two managers over one backend are two coalescing units, and a value-kind `Cache` implementation gets no coalescing at all (every caller runs its own callback); implement `Cache` on a pointer receiver to coalesce.
-- Every caller of one flight owns its answer: the first takes the value the flight produced and every later one a copy made through the cache's `StoredValueNormalizer`, a `Manager`'s serializer round trip, so no two callers share a map or a slice. A stored value the leader cannot copy is read again from the store by every caller after the first, as a hit outside a flight reads it, and a caller that finds the entry gone by then, or no longer decoding, computes and stores as a miss outside a flight does; a computed value it cannot copy is refused. A bare backend that is no `StoredValueNormalizer` has no copy to make, and the callers of one flight share its one value.
+- `Remember` coalesces concurrent callers per **cache instance, key, value type and cancelability** — the instance is told apart by its pointer. Two managers over one backend are two coalescing units, and a value-kind `Cache` implementation gets no coalescing at all (every caller runs its own callback); implement `Cache` on a pointer receiver to coalesce.
+- Every caller of one flight owns its answer: the first takes the value the flight produced and every later one a copy made through the cache's `RoundTrip`, a `Manager`'s serializer round trip, so no two callers share a map or a slice, whatever decorator embeds the cache. A stored value the leader cannot copy is read again from the store by every caller after the first, as a hit outside a flight reads it, and a caller that finds the entry gone by then, or no longer decoding, computes and stores as a miss outside a flight does; a computed value it cannot copy is refused. A `Cache` of your own that holds values rather than payloads answers in `RoundTrip` a copy as deep as its reads are; one that assigns hands the callers of one flight one value by its own declaration.
 - The zero `RememberConfig` but for its required `Ttl` is the default: stampede protection on, a 30s wait, a **cancelable** flight. A `WaitTimeout` of `bound.Of(time.Duration(0))` means "no waiting": a result already memoized by the in-flight call is returned, anything still computing answers with the timeout error; `bound.UnlimitedDuration()` waits on the flight and the context alone.
 - Under the **cancelable** default the flight is canceled when its last waiter leaves, the next caller of the key replacing the canceled flight with a fresh leader, so a hung callback does not own its key. `Detached: true` is the **detached** flight: a leader whose waiters have all left keeps running with its final error written into an in-flight record nothing reads anymore, and a callback that never returns pins its single-flight entry for the life of the process: a later detached caller of the key joins it and waits until its own `WaitTimeout` or context ends, never past them, and a cancelable caller does not join it at all. Give long callbacks their own deadlines either way. The two settings compose one way to know: under the cancelable default a `WaitTimeout` **shorter than the callback** never stores — the lone waiter times out, the flight loses its last waiter and is canceled, the callback that honours its context returns the cancellation, and the next call leads a fresh flight to the same end, so the key is never populated. A bounded wait on a slow callback is paired with `Detached: true`, which lets the
   computation finish and store for the callers after.
@@ -263,18 +249,20 @@ func loadUserProfile(
 package main
 
 type Cache interface {
-    Get(ctx context.Context, key string) (any, bool, error)
+    Get(ctx context.Context, key string, target any) (bool, error)
     Set(ctx context.Context, key string, value any, ttl bound.Duration) error
     Delete(ctx context.Context, key string) error
     Has(ctx context.Context, key string) (bool, error)
     Clear(ctx context.Context) error
 
-    Many(ctx context.Context, keys []string) (map[string]any, error)
+    Many(ctx context.Context, keys []string, target any) error
     SetMultiple(ctx context.Context, items map[string]any, ttl bound.Duration) error
     DeleteMultiple(ctx context.Context, keys []string) error
 
     Increment(ctx context.Context, key string, delta int64, options CounterOptions) (int64, error)
     Decrement(ctx context.Context, key string, delta int64, options CounterOptions) (int64, error)
+
+    RoundTrip(value any, target any) error
 
     CloseWithContext(closeContext context.Context) error
 }
@@ -282,12 +270,12 @@ type Cache interface {
 
 - **Backend** ([`cache/contract/backend.go`](../../cache/contract/backend.go))
 - **TtlRule** and **ResolveTtl** ([`cache/contract/ttl.go`](../../cache/contract/ttl.go)) — the reading every backend gives the ttl of a write: absent refused, at least 1s, unlimited answered as 0, no expiry
-- **Serializer** ([`cache/contract/serializer.go`](../../cache/contract/serializer.go))
+- **Serializer** ([`cache/contract/serializer.go`](../../cache/contract/serializer.go)) — `Serialize(value) ([]byte, error)` and `Deserialize(payload, target) error`, decoding into the target, the signature of [`serializer/contract.Serializer`](../../serializer/contract/serializer.go), so `serializer.NewJsonSerializer()` serves as a cache serializer
 
 ### Types
 
 - **cache.Manager** ([`cache/manager.go`](../../cache/manager.go))
-    - [`NormalizeStoredValue(value any) (any, error)`](../../cache/manager.go) — the shape a value stored through this manager reads back as: one serializer round-trip, run locally with no backend involved. `Remember` consults it so the computing call and the cached calls answer one shape — without it a callback's `int` came back `float64` and its struct came back a map, but only from the second call on. The door is [`cache/contract.StoredValueNormalizer`](../../cache/contract/stored_value_normalizer.go), asked of the `Cache` value `Remember` was handed: a decorator over the manager implements it too, forwarding to the decorated manager, or `Remember` through the decorator answers the two shapes again
+    - [`RoundTrip(value, target any) error`](../../cache/manager.go) — what a value stored through this manager reads back as, written into the target: one serializer round trip, run locally with no backend involved. `Remember` gives through it every caller of one flight a value of its own, the computing call the shape every hit answers, and refuses once a value the serializer writes but cannot read back
 - **cache.InMemoryBackend** ([`cache/in_memory.go`](../../cache/in_memory.go))
 - **cache.JsonSerializer** ([`cache/json_serializer.go`](../../cache/json_serializer.go))
 - **cache.InMemoryBackendConfig** ([`cache/in_memory.go`](../../cache/in_memory.go)) — `MaxItems`, `CleanupInterval` and `Clock`, the zero value the default
@@ -318,7 +306,12 @@ type Cache interface {
 
 #### Cache-aside
 
-- `cache.Remember(ctx, cacheInstance, key, config, callback) (any, error)` ([`cache/remember.go`](../../cache/remember.go))
+- `cache.Remember[T](ctx, cacheInstance, key, config, callback) (T, error)` ([`cache/remember.go`](../../cache/remember.go)) — `T` inferred from the callback
+
+#### Typed reads
+
+- `cache.Get[T](ctx, cacheInstance, key) (T, bool, error)` ([`cache/typed.go`](../../cache/typed.go)) — the zero `T` beside any error
+- `cache.Many[T](ctx, cacheInstance, keys) (map[string]T, error)` ([`cache/typed.go`](../../cache/typed.go)) — an empty map on no hit, the undecodable keys in a `DeserializationError` beside the entries that decoded
 
 #### Errors
 

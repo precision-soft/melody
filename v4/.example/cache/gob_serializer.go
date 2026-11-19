@@ -5,6 +5,7 @@ import (
     "crypto/sha256"
     "encoding/gob"
     "encoding/hex"
+    "fmt"
     "reflect"
     "sort"
     "strings"
@@ -94,6 +95,11 @@ func (instance *gobSerializer) Serialize(value any) ([]byte, error) {
 
     var interfaceValue = value
 
+    /* gob refuses a nil pointer inside an interface, and a typed read answers a remembered absence as one, so it travels as the nil interface Deserialize reads back as the zero value */
+    if reflectedValue := reflect.ValueOf(value); reflect.Pointer == reflectedValue.Kind() && true == reflectedValue.IsNil() {
+        interfaceValue = nil
+    }
+
     encodeErr := encoder.Encode(&interfaceValue)
     if nil != encodeErr {
         return nil, encodeErr
@@ -102,17 +108,36 @@ func (instance *gobSerializer) Serialize(value any) ([]byte, error) {
     return buffer.Bytes(), nil
 }
 
-func (instance *gobSerializer) Deserialize(payload []byte) (any, error) {
+func (instance *gobSerializer) Deserialize(payload []byte, target any) error {
+    targetValue := reflect.ValueOf(target)
+    if reflect.Pointer != targetValue.Kind() || true == targetValue.IsNil() {
+        return fmt.Errorf("gob cache target %T is not a non-nil pointer", target)
+    }
+
     buffer := bytes.NewBuffer(payload)
     decoder := gob.NewDecoder(buffer)
 
     var value any
     decodeErr := decoder.Decode(&value)
     if nil != decodeErr {
-        return nil, decodeErr
+        return decodeErr
     }
 
-    return value, nil
+    elementValue := targetValue.Elem()
+    if nil == value {
+        elementValue.SetZero()
+
+        return nil
+    }
+
+    decodedValue := reflect.ValueOf(value)
+    if false == decodedValue.Type().AssignableTo(elementValue.Type()) {
+        return fmt.Errorf("gob cache payload holds %s, which a %s target cannot hold", decodedValue.Type(), elementValue.Type())
+    }
+
+    elementValue.Set(decodedValue)
+
+    return nil
 }
 
 var _ melodycachecontract.Serializer = (*gobSerializer)(nil)

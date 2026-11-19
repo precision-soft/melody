@@ -2,7 +2,6 @@ package service
 
 import (
     "context"
-    "fmt"
 
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/event"
@@ -58,7 +57,7 @@ func (instance *ProductService) List(ctx context.Context) ([]*entity.Product, er
         cache.RememberConfig{
             Ttl: bound.Of(entityCacheTtl),
         },
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) ([]*entity.Product, error) {
             return instance.productRepository.All(ctx)
         },
     )
@@ -66,12 +65,7 @@ func (instance *ProductService) List(ctx context.Context) ([]*entity.Product, er
         return nil, rememberErr
     }
 
-    typed, ok := products.([]*entity.Product)
-    if false == ok {
-        return nil, fmt.Errorf("invalid cache value for product list")
-    }
-
-    return typed, nil
+    return products, nil
 }
 
 func (instance *ProductService) FindById(ctx context.Context, id string) (*entity.Product, bool, error) {
@@ -86,7 +80,7 @@ func (instance *ProductService) FindById(ctx context.Context, id string) (*entit
         ctx,
         instance.cache,
         cacheKey,
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) (*entity.Product, error) {
             product, found, findErr := instance.productRepository.FindById(ctx, id)
             if nil != findErr {
                 return nil, findErr
@@ -108,12 +102,7 @@ func (instance *ProductService) FindById(ctx context.Context, id string) (*entit
         return nil, false, nil
     }
 
-    product, ok := cached.(*entity.Product)
-    if false == ok {
-        return nil, false, fmt.Errorf("invalid cache value for product")
-    }
-
-    return product, true, nil
+    return cached, true, nil
 }
 
 /* refuseUnknownReferences answers the refusal of a write whose category or currency names nothing, read from the repositories rather than the caches. The product table's foreign keys refuse the same write on the database, against a delete that lands between this read and the write; on the configuration without one this read is the check, held with the write under HoldingReferences. */

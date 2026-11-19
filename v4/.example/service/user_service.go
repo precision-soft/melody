@@ -52,7 +52,7 @@ func (instance *UserService) List(ctx context.Context) ([]*entity.UserProfile, e
         melodycache.RememberConfig{
             Ttl: melodybound.Of(entityCacheTtl),
         },
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) ([]*entity.UserProfile, error) {
             users, allErr := instance.userRepository.All(ctx)
             if nil != allErr {
                 return nil, allErr
@@ -72,12 +72,7 @@ func (instance *UserService) List(ctx context.Context) ([]*entity.UserProfile, e
         return nil, rememberErr
     }
 
-    typed, ok := users.([]*entity.UserProfile)
-    if false == ok {
-        return nil, fmt.Errorf("invalid cache value for user list")
-    }
-
-    return typed, nil
+    return users, nil
 }
 
 func (instance *UserService) FindById(ctx context.Context, id string) (*entity.UserProfile, bool, error) {
@@ -92,7 +87,7 @@ func (instance *UserService) FindById(ctx context.Context, id string) (*entity.U
         ctx,
         instance.cache,
         cacheKey,
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) (*entity.UserProfile, error) {
             user, found, findErr := instance.userRepository.FindById(ctx, id)
             if nil != findErr {
                 return nil, findErr
@@ -114,12 +109,7 @@ func (instance *UserService) FindById(ctx context.Context, id string) (*entity.U
         return nil, false, nil
     }
 
-    user, ok := cached.(*entity.UserProfile)
-    if false == ok {
-        return nil, false, fmt.Errorf("invalid cache value for user")
-    }
-
-    return user, true, nil
+    return cached, true, nil
 }
 
 func (instance *UserService) findByUsernameUncached(ctx context.Context, username string) (*entity.User, bool, error) {
@@ -144,7 +134,7 @@ func (instance *UserService) FindByUsername(ctx context.Context, username string
         ctx,
         instance.cache,
         cacheKey,
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context) (*entity.UserProfile, error) {
             user, found, findErr := instance.userRepository.FindByUsername(ctx, normalizedUsername)
             if nil != findErr {
                 return nil, findErr
@@ -165,12 +155,7 @@ func (instance *UserService) FindByUsername(ctx context.Context, username string
         return nil, false, nil
     }
 
-    user, ok := cached.(*entity.UserProfile)
-    if false == ok {
-        return nil, false, fmt.Errorf("invalid cache value for user")
-    }
-
-    return user, true, nil
+    return cached, true, nil
 }
 
 func (instance *UserService) Create(

@@ -62,7 +62,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("set error: %v", setErr)
     }
 
-    value, exists, getErr := cacheInstance.Get(context.Background(), "a")
+    value, exists, getErr := Get[any](context.Background(), cacheInstance, "a")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -81,7 +81,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("expected has true")
     }
 
-    many, manyErr := cacheInstance.Many(context.Background(), []string{"a", "b"})
+    many, manyErr := Many[any](context.Background(), cacheInstance, []string{"a", "b"})
     if nil != manyErr {
         t.Fatalf("many error: %v", manyErr)
     }
@@ -104,7 +104,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("setMultiple error: %v", setMultipleErr)
     }
 
-    many, manyErr = cacheInstance.Many(context.Background(), []string{"a", "b", "c"})
+    many, manyErr = Many[any](context.Background(), cacheInstance, []string{"a", "b", "c"})
     if nil != manyErr {
         t.Fatalf("many error: %v", manyErr)
     }
@@ -120,7 +120,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("deleteMultiple error: %v", deleteMultipleErr)
     }
 
-    _, exists, getErr = cacheInstance.Get(context.Background(), "b")
+    _, exists, getErr = Get[any](context.Background(), cacheInstance, "b")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -133,7 +133,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("delete error: %v", deleteErr)
     }
 
-    _, exists, getErr = cacheInstance.Get(context.Background(), "a")
+    _, exists, getErr = Get[any](context.Background(), cacheInstance, "a")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -151,7 +151,7 @@ func TestManager_SetGetManySetMultipleDeleteMultipleClearDeleteHasClose(t *testi
         t.Fatalf("clear error: %v", clearErr)
     }
 
-    _, exists, getErr = cacheInstance.Get(context.Background(), "x")
+    _, exists, getErr = Get[any](context.Background(), cacheInstance, "x")
     if nil != getErr {
         t.Fatalf("get error: %v", getErr)
     }
@@ -210,7 +210,7 @@ func TestManager_Get_TypesTheDeserializationFailure(t *testing.T) {
         t.Fatalf("set error: %v", setErr)
     }
 
-    _, exists, getErr := manager.Get(context.Background(), "corrupt")
+    _, exists, getErr := Get[any](context.Background(), manager, "corrupt")
     if nil == getErr {
         t.Fatalf("expected a deserialization error")
     }
@@ -240,7 +240,7 @@ func TestManager_Many_SkipsCorruptEntriesAndNamesThem(t *testing.T) {
         t.Fatalf("set error: %v", setErr)
     }
 
-    result, manyErr := manager.Many(context.Background(), []string{"good.one", "corrupt", "good.two", "missing"})
+    result, manyErr := Many[any](context.Background(), manager, []string{"good.one", "corrupt", "good.two", "missing"})
     if nil == manyErr {
         t.Fatalf("expected an error naming the corrupt entry")
     }
@@ -473,7 +473,7 @@ func TestManager_ReadsTypedNilBackendErrorsAsSuccess(t *testing.T) {
         t.Fatalf("expected the typed-nil Set error to read as success, got: %v", setErr)
     }
 
-    value, exists, getErr := manager.Get(context.Background(), "a")
+    value, exists, getErr := Get[any](context.Background(), manager, "a")
     if nil != getErr {
         t.Fatalf("expected the typed-nil Get error to read as success, got: %v", getErr)
     }
@@ -626,7 +626,7 @@ func TestManager_ABackendFailureTravelsOutOfEveryRead(t *testing.T) {
         t.Fatalf("unexpected close error: %v", closeErr)
     }
 
-    value, exists, getErr := manager.Get(context.Background(), "key")
+    value, exists, getErr := Get[any](context.Background(), manager, "key")
     if nil == getErr {
         t.Fatalf("expected Get to report the closed backend, got %v, %t", value, exists)
     }
@@ -637,7 +637,7 @@ func TestManager_ABackendFailureTravelsOutOfEveryRead(t *testing.T) {
         t.Fatalf("unexpected Get error: %v", getErr)
     }
 
-    manyResult, manyErr := manager.Many(context.Background(), []string{"key"})
+    manyResult, manyErr := Many[any](context.Background(), manager, []string{"key"})
     if nil == manyErr {
         t.Fatalf("expected Many to report the closed backend, got %v", manyResult)
     }
@@ -673,7 +673,7 @@ func TestManager_ManyDeserializesARepeatedKeyOnlyOnce(t *testing.T) {
         t.Fatalf("unexpected set error: %v", setErr)
     }
 
-    result, manyErr := manager.Many(context.Background(), []string{"key", "key", "key"})
+    result, manyErr := Many[any](context.Background(), manager, []string{"key", "key", "key"})
     if nil != manyErr {
         t.Fatalf("unexpected many error: %v", manyErr)
     }
@@ -700,10 +700,10 @@ func (instance *cacheTestCountingSerializer) Serialize(value any) ([]byte, error
     return instance.inner.Serialize(value)
 }
 
-func (instance *cacheTestCountingSerializer) Deserialize(payload []byte) (any, error) {
+func (instance *cacheTestCountingSerializer) Deserialize(payload []byte, target any) error {
     instance.deserializeCallCount = instance.deserializeCallCount + 1
 
-    return instance.inner.Deserialize(payload)
+    return instance.inner.Deserialize(payload, target)
 }
 
 /* typedNilBackend and typedNilSerializer embed their interfaces, so a nil pointer of either is a typed nil that still satisfies the contract the constructor is handed */
@@ -808,12 +808,12 @@ func TestManager_EveryDoorHandsTheCallersContextToTheBackend(t *testing.T) {
     cancel()
 
     doors := map[string]func() error{
-        "Get":            func() error { _, _, err := manager.Get(canceledContext, "key"); return err },
+        "Get":            func() error { _, _, err := Get[any](canceledContext, manager, "key"); return err },
         "Set":            func() error { return manager.Set(canceledContext, "key", "value", bound.Of(time.Minute)) },
         "Delete":         func() error { return manager.Delete(canceledContext, "key") },
         "Has":            func() error { _, err := manager.Has(canceledContext, "key"); return err },
         "Clear":          func() error { return manager.Clear(canceledContext) },
-        "Many":           func() error { _, err := manager.Many(canceledContext, []string{"key"}); return err },
+        "Many":           func() error { _, err := Many[any](canceledContext, manager, []string{"key"}); return err },
         "SetMultiple":    func() error { return manager.SetMultiple(canceledContext, map[string]any{"key": "value"}, bound.Of(time.Minute)) },
         "DeleteMultiple": func() error { return manager.DeleteMultiple(canceledContext, []string{"key"}) },
         "Increment":      func() error { _, err := manager.Increment(canceledContext, "counter", 1, cachecontract.CounterOptions{Ttl: bound.UnlimitedDuration()}); return err },
@@ -834,8 +834,8 @@ func (instance refusingSerializer) Serialize(value any) ([]byte, error) {
     return nil, errors.New("serialization refused")
 }
 
-func (instance refusingSerializer) Deserialize(payload []byte) (any, error) {
-    return nil, errors.New("deserialization refused")
+func (instance refusingSerializer) Deserialize(payload []byte, target any) error {
+    return errors.New("deserialization refused")
 }
 
 func TestManager_ANilContextIsRefusedBeforeTheValueIsSerialized(t *testing.T) {
