@@ -18,9 +18,8 @@ import (
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
@@ -161,7 +160,7 @@ func (instance *recordingResetRows) Next(destination []driver.Value) error {
     return nil
 }
 
-func newResetRuntime(t *testing.T, storage *persistence.CatalogStorage) melodyruntimecontract.Runtime {
+func newResetRuntime(t *testing.T, storage *persistence.CatalogStorage) melodycontainercontract.Runtime {
     t.Helper()
 
     runtimeInstance, _ := newResetRuntimeWithArchive(t, storage, persistence.NewArchiveStorage(nil))
@@ -454,7 +453,10 @@ func TestDatabaseResetCommandHonoursTheRuntimeContext(t *testing.T) {
 
     ctx, cancel := context.WithCancel(context.Background())
     cancel()
-    cancelledRuntime := melodyruntime.New(ctx, runtimeInstance.Container().NewScope(), runtimeInstance.Container())
+    cancelledRuntime, childErr := melodyruntime.NewChildRun(runtimeInstance, ctx)
+    if nil != childErr {
+        t.Fatalf("expected the cancelled child run, got %v", childErr)
+    }
 
     runErr := NewDatabaseResetCommand().Run(cancelledRuntime, newBoolFlagContext(databaseResetFlagForce, true, nil))
     if nil == runErr {
@@ -556,7 +558,7 @@ func TestDatabaseResetCommandRefusesBeforeTouchingAnythingWhenTheCacheCannotBeRe
         },
         melodycontainer.RegisterOptions{},
     )
-    runtimeInstance := melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), serviceContainer.NewScope())
 
     runErr := NewDatabaseResetCommand().Run(runtimeInstance, newBoolFlagContext(databaseResetFlagForce, true, &bytes.Buffer{}))
     if nil == runErr {

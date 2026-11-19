@@ -8,8 +8,8 @@ import (
     "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/service"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -25,14 +25,14 @@ type directoryImpersonatedUserResolver struct {
 
 /* ResolveImpersonatedUser denies, with a nil token, an identifier the sign-in would refuse, an id the directory does not hold, an account its own session would not honour (no password, no role) and an account that could itself administer or switch, read through the role hierarchy: the switch role reaches every identity this resolver answers, so taking on such an account would carry its rights. A directory that cannot answer fails closed as an outage. */
 func (instance *directoryImpersonatedUserResolver) ResolveImpersonatedUser(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     identifier string,
 ) (melodysecuritycontract.Token, error) {
     if false == service.CacheSafeIdentifier(identifier) || false == utf8.ValidString(identifier) {
         return nil, nil
     }
 
-    userRepository, resolveErr := melodycontainer.FromResolver[repository.UserRepository](runtimeInstance.Context(), runtimeInstance.Container(), repository.ServiceUserRepository)
+    userRepository, resolveErr := melodycontainer.FromResolver[repository.UserRepository](runtimeInstance.Context(), runtimeInstance.Scope(), repository.ServiceUserRepository)
     if nil != resolveErr {
         return nil, melodyexception.MarkInfrastructureFailure(resolveErr)
     }

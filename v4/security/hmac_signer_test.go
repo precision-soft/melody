@@ -10,9 +10,9 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    "github.com/precision-soft/melody/v4/runtime"
 )
 
 func hmacSignerProbeSecrets() *StaticHmacSecretProvider {
@@ -275,7 +275,7 @@ func TestHmacEnvelopeSigner_AsksTheProviderUnderTheConstructionContextThenTheRun
     }
 
     signContainer := container.NewContainer(container.ContainerConfig{})
-    signRuntime := runtime.New(context.WithValue(context.Background(), hmacSignerContextKey{}, "sign"), signContainer.NewScope(), signContainer)
+    signRuntime := runtime.NewRequest(context.WithValue(context.Background(), hmacSignerContextKey{}, "sign"), signContainer.NewScope())
     if _, signErr := signer.Sign(signRuntime, "GET", "/internal", nil, nil); nil != signErr {
         t.Fatalf("sign: %v", signErr)
     }

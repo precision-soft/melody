@@ -8,13 +8,13 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpPkg "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -26,7 +26,7 @@ type resolutionListenerTestTokenSource struct {
 
 func (instance *resolutionListenerTestTokenSource) Name() string { return "test" }
 
-func (instance *resolutionListenerTestTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *resolutionListenerTestTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     return instance.resolveToken, instance.resolveErr
 }
 
@@ -34,7 +34,7 @@ type resolutionListenerTestPanickingTokenSource struct{}
 
 func (instance *resolutionListenerTestPanickingTokenSource) Name() string { return "panicking" }
 
-func (instance *resolutionListenerTestPanickingTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *resolutionListenerTestPanickingTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     panic("database connection failed")
 }
 
@@ -48,12 +48,12 @@ func (instance *resolutionListenerTestMatcher) Matches(request httpcontract.Requ
 
 type resolutionListenerTestRule struct {
     err      error
-    runtimes []runtimecontract.Runtime
+    runtimes []containercontract.Runtime
 }
 
 func (instance *resolutionListenerTestRule) Applies(request httpcontract.Request) bool { return true }
 
-func (instance *resolutionListenerTestRule) Check(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) error {
+func (instance *resolutionListenerTestRule) Check(runtimeInstance containercontract.Runtime, request httpcontract.Request) error {
     instance.runtimes = append(instance.runtimes, runtimeInstance)
 
     return instance.err
@@ -371,16 +371,15 @@ func (instance *resolutionListenerCaptureLogger) Emergency(message string, conte
 
 var _ loggingcontract.Logger = (*resolutionListenerCaptureLogger)(nil)
 
-func newResolutionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
+func newResolutionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) containercontract.Runtime {
     scope := newTestScope()
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     overrideErr := scope.OverrideInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
     if nil != overrideErr {
         panic(overrideErr)
     }
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
 func TestSecurityResolutionListener_ResolveFailureIsRecordedOnceWithTheRequestCoordinates(t *testing.T) {
@@ -758,7 +757,7 @@ type resolutionListenerTestMarkedPanickingTokenSource struct{}
 
 func (instance *resolutionListenerTestMarkedPanickingTokenSource) Name() string { return "marked-panicking" }
 
-func (instance *resolutionListenerTestMarkedPanickingTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *resolutionListenerTestMarkedPanickingTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     panic(exception.MarkInfrastructureFailure(errors.New("redis is down")))
 }
 

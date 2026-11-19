@@ -14,9 +14,9 @@ import (
     "github.com/precision-soft/melody/v4/.example/message"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
 )
 
 func relayStatusOver(t *testing.T, relayErr error) (int, string) {
@@ -27,7 +27,7 @@ func relayStatusOver(t *testing.T, relayErr error) (int, string) {
     melodycontainer.MustRegister(containerInstance, outboxintegration.ServiceRelay, func(resolver melodycontainercontract.Resolver) (*outboxintegration.Relay, error) {
         return nil, relayErr
     }, melodycontainer.RegisterOptions{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/outbox/relay", nil), nil, runtimeInstance, melodyhttp.NewRequestContext("relay-test", time.Now()))
     relay := melodycontainer.Lazy[*outboxintegration.Relay](containerInstance, outboxintegration.ServiceRelay)

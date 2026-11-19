@@ -3,7 +3,7 @@ package contract
 import (
     "time"
 
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type Claims struct {
@@ -21,5 +21,5 @@ type Claims struct {
 }
 
 type TokenValidator interface {
-    Validate(runtimeInstance runtimecontract.Runtime, tokenString string) (Claims, error)
+    Validate(runtimeInstance containercontract.Runtime, tokenString string) (Claims, error)
 }

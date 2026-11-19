@@ -10,9 +10,9 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
     melodysession "github.com/precision-soft/melody/v4/session"
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -74,7 +74,7 @@ func TestAdmitSession_ChecksAndReleasesUnderTheRequestsContext(t *testing.T) {
     }
 
     requestContext := context.WithValue(context.Background(), admissionPlantedKey{}, "planted")
-    runtimeInstance := melodyruntime.New(requestContext, containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(requestContext, containerInstance.NewScope())
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
 
     index := &callbackInvokingSessionIndex{victimId: victim.Id()}

@@ -16,13 +16,13 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const defaultMaxRateLimitKeys = 1_000_000
@@ -199,8 +199,8 @@ func (instance *FixedWindowLimiter) Name() string {
     return instance.name
 }
 
-func (instance *FixedWindowLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
-    if refusalErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+func (instance *FixedWindowLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
         return httpcontract.RateLimitDecision{Limit: instance.capacity}, refusalErr
     }
 
@@ -254,8 +254,8 @@ func (instance *FixedWindowLimiter) Allow(runtimeInstance runtimecontract.Runtim
     return httpcontract.RateLimitDecision{RetryAfter: clampRetryAfter(instance.window-elapsed, instance.window), Limit: instance.capacity}, nil
 }
 
-func (instance *FixedWindowLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
-    if refusalErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+func (instance *FixedWindowLimiter) Reset(runtimeInstance containercontract.Runtime, key string) error {
+    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
         return refusalErr
     }
 
@@ -346,8 +346,8 @@ func (instance *SlidingWindowLimiter) Name() string {
     return instance.name
 }
 
-func (instance *SlidingWindowLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
-    if refusalErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+func (instance *SlidingWindowLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
         return httpcontract.RateLimitDecision{Limit: instance.limit}, refusalErr
     }
 
@@ -409,8 +409,8 @@ func (instance *SlidingWindowLimiter) Allow(runtimeInstance runtimecontract.Runt
     return httpcontract.RateLimitDecision{Allowed: true, Remaining: instance.limit - len(window.requests), Limit: instance.limit}, nil
 }
 
-func (instance *SlidingWindowLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
-    if refusalErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
+func (instance *SlidingWindowLimiter) Reset(runtimeInstance containercontract.Runtime, key string) error {
+    if refusalErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refusalErr {
         return refusalErr
     }
 
@@ -601,7 +601,7 @@ func RateLimitMiddleware(limiter httpcontract.RateLimiter, config RateLimitConfi
     settings := resolveRateLimitConfig(limiter, config, "limiter is required for rate limit middleware", "RateLimitMiddleware")
 
     return func(next httpcontract.Handler) httpcontract.Handler {
-        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             decision, unavailableErr := allowRequestUnderLimit(settings, runtimeInstance, request)
 
             /* a denial from a store that could not answer is the limiter's outage, not the client's budget: it is answered 503 with Retry-After and the limit handler is not called */
@@ -759,7 +759,7 @@ func withDecisionRetryAfterError(limitErr error, decision httpcontract.RateLimit
 }
 
 /* allowRequestUnderLimit is the metering step the middleware and the listener doors share: the key is extracted, the limiter asked, and a failure recorded once unless already marked logged, at warning when the caller's own context ended it. The decision already reflects the limiter's failure policy; a denial whose error is answered as unavailable is returned beside it, marked logged once recorded, and an unmarked error beside a denial stays a 429. */
-func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (httpcontract.RateLimitDecision, error) {
+func allowRequestUnderLimit(settings rateLimitSettings, runtimeInstance containercontract.Runtime, request httpcontract.Request) (httpcontract.RateLimitDecision, error) {
     key := settings.keyExtractor(request)
 
     decision, allowErr := settings.limiter.Allow(runtimeInstance, key)

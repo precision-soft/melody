@@ -10,13 +10,13 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
 func ApiUpdateHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if false == melodysecurity.IsGranted(runtimeInstance, entity.RoleAdmin) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
         }
@@ -78,7 +78,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
 
         actorUserId, _ := Actor(runtimeInstance)
 
-        updatedUser, updated, updateErr := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container()).Update(
+        updatedUser, updated, updateErr := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Scope()).Update(
             runtimeInstance,
             id,
             change,
@@ -109,7 +109,7 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
     }
 }
 
-func Actor(runtimeInstance melodyruntimecontract.Runtime) (string, []string) {
+func Actor(runtimeInstance melodycontainercontract.Runtime) (string, []string) {
     token, exists := security.TokenFromRuntime(runtimeInstance)
     if false == exists {
         return "", []string{}

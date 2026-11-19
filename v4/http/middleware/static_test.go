@@ -8,20 +8,20 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/http/static"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-func newStaticTestRuntime() runtimecontract.Runtime {
+func newStaticTestRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
 func TestStaticMiddleware_DoesNotDuplicateContentType(t *testing.T) {
@@ -34,7 +34,7 @@ func TestStaticMiddleware_DoesNotDuplicateContentType(t *testing.T) {
     config := static.Config{PublicDirectory: directory, CacheDisabled: true}
 
     handler := StaticMiddleware(config)(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             t.Fatalf("static middleware should have served the file, not called next")
 
             return nil, nil

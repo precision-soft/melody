@@ -18,13 +18,13 @@ import (
     "unicode"
 
     "github.com/precision-soft/melody/v4/config"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -144,7 +144,7 @@ func ControllerHandler(
     }
 
     return func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -159,7 +159,7 @@ func ControllerHandler(
         arguments := make([]reflect.Value, controllerType.NumIn())
         arguments[0] = reflect.ValueOf(request)
 
-        runtimeInterfaceType := reflect.TypeOf((*runtimecontract.Runtime)(nil)).Elem()
+        runtimeInterfaceType := reflect.TypeOf((*containercontract.Runtime)(nil)).Elem()
 
         for index := 1; index < controllerType.NumIn(); index++ {
             paramType := controllerType.In(index)
@@ -229,7 +229,7 @@ func recordResponseAfterHandler(
     handler httpcontract.Handler,
     recordReturnedResponse func(httpcontract.Response),
 ) httpcontract.Handler {
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         response, err := handler(runtimeInstance, writer, request)
         recordReturnedResponse(response)
 
@@ -328,7 +328,7 @@ func requestPathIsCanonical(path string) bool {
 }
 
 func writeResponse(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     writer nethttp.ResponseWriter,
     response httpcontract.Response,
@@ -616,7 +616,7 @@ func storageBoundExpired(ctx context.Context) bool {
 
 /* the request's values without its cancellation, so a client that hung up still has its logout recorded */
 func sessionPersistenceContext(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     sessionManager sessioncontract.Manager,
 ) (context.Context, context.CancelFunc, error) {
@@ -636,7 +636,7 @@ func sessionPersistenceContext(
     return persistenceContext, cancel, nil
 }
 
-func requestContextOf(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) context.Context {
+func requestContextOf(runtimeInstance containercontract.Runtime, request httpcontract.Request) context.Context {
     if false == internal.IsNilInterface(runtimeInstance) && nil != runtimeInstance.Context() {
         return runtimeInstance.Context()
     }
@@ -744,7 +744,7 @@ func resolveSessionCookieSecure(
 
 /* through the named level methods, which a substituted logger overrides */
 func logSessionPersistenceEvent(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     level loggingcontract.Level,
     message string,
     err error,

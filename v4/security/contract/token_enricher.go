@@ -1,9 +1,9 @@
 package contract
 
 import (
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type TokenEnricher interface {
-    Enrich(runtimeInstance runtimecontract.Runtime, claims Claims) (Claims, error)
+    Enrich(runtimeInstance containercontract.Runtime, claims Claims) (Claims, error)
 }

@@ -11,15 +11,15 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func tokenStoreRuntime() runtimecontract.Runtime {
+func tokenStoreRuntime() containercontract.Runtime {
     c := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(context.Background(), c.NewScope(), c)
+    return runtime.NewRequest(context.Background(), c.NewScope())
 }
 
 /* the originating actor must survive the store's claim clone (Put + Lookup), otherwise the opaque-token path silently drops F1 propagation. */
@@ -968,7 +968,7 @@ func TestInMemoryTokenStore_RefusesADoneContextAtEveryDoorMarked(t *testing.T) {
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    cancelledRuntime := runtime.New(cancelledContext, serviceContainer.NewScope(), serviceContainer)
+    cancelledRuntime := runtime.NewRequest(cancelledContext, serviceContainer.NewScope())
 
     for door, call := range map[string]func() error{
         "Lookup": func() error {

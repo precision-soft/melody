@@ -1,11 +1,11 @@
 package reporting
 
 import (
-    "reflect"
-    melodycache "github.com/precision-soft/melody/v4/cache"
     "context"
     "errors"
     "fmt"
+    melodycache "github.com/precision-soft/melody/v4/cache"
+    "reflect"
     "testing"
     "time"
 
@@ -17,9 +17,8 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* stubJournalRepository records what it was asked to write and can be told to refuse, which is the only way to observe what the trail does with a batch that did not land. */
@@ -397,7 +396,7 @@ func newReportServiceWithArchive(
     clockInstance *melodyclock.FrozenClock,
     cacheInstance melodycachecontract.Cache,
     readingRepository repository.CatalogReadingRepository,
-) (*CatalogReportService, melodyruntimecontract.Runtime) {
+) (*CatalogReportService, melodycontainercontract.Runtime) {
     t.Helper()
 
     reportService, buildErr := NewCatalogReportService(
@@ -417,7 +416,7 @@ func newReportServiceWithArchive(
     return reportService, newArchiveRuntime(readingRepository)
 }
 
-func newArchiveRuntime(readingRepository repository.CatalogReadingRepository) melodyruntimecontract.Runtime {
+func newArchiveRuntime(readingRepository repository.CatalogReadingRepository) melodycontainercontract.Runtime {
     serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     if nil != readingRepository {
@@ -431,7 +430,7 @@ func newArchiveRuntime(readingRepository repository.CatalogReadingRepository) me
         )
     }
 
-    return melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return melodyruntime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 /* recordingReadingRepository is the archive as a test can inspect it: what it receives, in order, and a refusal it can be told to answer. It keeps the identity rule the two real implementations keep, one reading per instant, because a double that accepted what they refuse would leave the service's handling of that refusal unproven. */

@@ -14,21 +14,21 @@ import (
     _ "github.com/go-sql-driver/mysql"
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
-    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
 
-func newLockRuntime() runtimecontract.Runtime {
+func newLockRuntime() containercontract.Runtime {
     return newLockRuntimeWithContext(context.Background())
 }
 
-func newLockRuntimeWithContext(ctx context.Context) runtimecontract.Runtime {
+func newLockRuntimeWithContext(ctx context.Context) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(ctx, serviceContainer.NewScope())
 }
 
 /* awaitKilledSessionRelease waits until the server has let go of the named lock a killed session held: KILL only flags the thread, and the lock stays held until that thread notices and ends, so a probe or an acquire issued straight after the KILL races that cleanup. The wait is on the server's own answer, bounded in time. */
@@ -860,10 +860,10 @@ func TestMysqlLock_AnUnlimitedTtlAcquiresAndRefreshes(t *testing.T) {
     }
 }
 
-func newReleaseRuntime(ctx context.Context) runtimecontract.Runtime {
+func newReleaseRuntime(ctx context.Context) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(ctx, serviceContainer.NewScope())
 }
 
 func acquireOnTheRecordingDouble(t *testing.T, connector *releaseRecordingConnector, config LockerConfig) (*mysqlLock, int) {
@@ -1004,13 +1004,13 @@ func TestMysqlLock_ACallerDeadlineAlreadyPassedReleasesOnTheLockersBudget(t *tes
 
 /* typedNilRuntime is a runtime implementation held as a nil pointer, which passes a plain nil comparison and panics on its first call */
 type typedNilRuntime struct {
-    runtimecontract.Runtime
+    containercontract.Runtime
 }
 
 func TestMysqlLock_ANilOrTypedNilRuntimeReleasesOnTheLockersBudget(t *testing.T) {
     var typedNil *typedNilRuntime
 
-    for _, runtimeInstance := range []runtimecontract.Runtime{nil, typedNil} {
+    for _, runtimeInstance := range []containercontract.Runtime{nil, typedNil} {
         connector := &releaseRecordingConnector{}
         lock, _ := acquireOnTheRecordingDouble(t, connector, LockerConfig{})
 

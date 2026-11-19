@@ -17,9 +17,9 @@ import (
     melodyconfig "github.com/precision-soft/melody/v4/config"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodylock "github.com/precision-soft/melody/v4/lock"
     melodylockcontract "github.com/precision-soft/melody/v4/lock/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
 )
@@ -120,7 +120,7 @@ func assertInProcessLockerExpiresOnTheContainersClock(t *testing.T, register fun
         t.Fatalf("resolve %s: %v", serviceName, resolveErr)
     }
 
-    runtimeInstance := melodyruntime.New(t.Context(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := melodyruntime.NewRun(t.Context(), serviceContainer.NewScope())
 
     if acquired, acquireErr := locker.CreateLock("example-lock", melodybound.Of(time.Minute)).Acquire(runtimeInstance); nil != acquireErr || false == acquired {
         t.Fatalf("expected the first acquire to hold the lock, got %t, %v", acquired, acquireErr)

@@ -12,12 +12,12 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v4/serializer"
     serializercontract "github.com/precision-soft/melody/v4/serializer/contract"
     amqp091 "github.com/rabbitmq/amqp091-go"
@@ -208,7 +208,7 @@ type Transport struct {
 }
 
 func (instance *Transport) Send(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) error {
     publishing, buildErr := instance.buildPublishing(envelopeInstance, "")
@@ -222,7 +222,7 @@ func (instance *Transport) Send(
 }
 
 func (instance *Transport) Receive(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
 ) (<-chan messagebuscontract.Envelope, error) {
     channel, generation, deliveries, subscribeErr := instance.subscribeWithRetry(runtimeInstance)
     if nil != subscribeErr {
@@ -241,7 +241,7 @@ func (instance *Transport) Receive(
 }
 
 func (instance *Transport) subscribeWithRetry(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
 ) (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
     backoff := instance.reconnect.initialBackoff
 
@@ -249,7 +249,7 @@ func (instance *Transport) subscribeWithRetry(
 }
 
 func (instance *Transport) Ack(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) error {
     stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance)
@@ -271,7 +271,7 @@ func (instance *Transport) Ack(
 }
 
 func (instance *Transport) Nack(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
     requeue bool,
 ) error {
@@ -956,7 +956,7 @@ func (instance *Transport) subscribe() (*amqp091.Channel, uint64, <-chan amqp091
 
 /* the Add is taken under the mutex closing is set under, so no loop starts after the join counted */
 func (instance *Transport) startConsumeLoop(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     channel *amqp091.Channel,
     generation uint64,
     deliveries <-chan amqp091.Delivery,
@@ -984,7 +984,7 @@ func (instance *Transport) startConsumeLoop(
 }
 
 func (instance *Transport) consumeLoop(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     channel *amqp091.Channel,
     generation uint64,
     deliveries <-chan amqp091.Delivery,
@@ -1145,7 +1145,7 @@ func delayExpirationMilliseconds(delay time.Duration) int64 {
 }
 
 func (instance *Transport) waitForRetry(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     backoff time.Duration,
 ) bool {
     timer := time.NewTimer(backoff)
@@ -1162,7 +1162,7 @@ func (instance *Transport) waitForRetry(
 }
 
 func (instance *Transport) retrySubscribe(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     backoff *time.Duration,
     resetEachAttempt bool,
     logMessage string,
@@ -1196,14 +1196,14 @@ func (instance *Transport) retrySubscribe(
 }
 
 func (instance *Transport) reopenConsume(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     backoff *time.Duration,
 ) (*amqp091.Channel, uint64, <-chan amqp091.Delivery, error) {
     return instance.retrySubscribe(runtimeInstance, backoff, true, "amqp reconnect attempt failed, backing off")
 }
 
 func (instance *Transport) republish(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     channel *amqp091.Channel,
     stamp DeliveryStamp,
     envelopeInstance messagebuscontract.Envelope,
@@ -1244,7 +1244,7 @@ func (instance *Transport) republish(
 const republishAttemptCount = 3
 
 func (instance *Transport) publishRequeue(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     exchange string,
     routingKey string,
     publishing amqp091.Publishing,
@@ -1282,7 +1282,7 @@ func (instance *Transport) publishRequeue(
 }
 
 func (instance *Transport) rejectUncountedRequeue(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     channel *amqp091.Channel,
     stamp DeliveryStamp,
     message string,
@@ -1376,7 +1376,7 @@ func (instance *Transport) currentGeneration() uint64 {
 
 /* stamped with the carrying channel's generation: a closing channel still drains deliveries after a reconnect */
 func (instance *Transport) forwardDeliveries(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     channel *amqp091.Channel,
     generation uint64,
     deliveries <-chan amqp091.Delivery,
@@ -1810,7 +1810,7 @@ func messageTypeName(message any) string {
     return messageType.String()
 }
 
-func (instance *Transport) logError(runtimeInstance runtimecontract.Runtime, message string, err error) {
+func (instance *Transport) logError(runtimeInstance containercontract.Runtime, message string, err error) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil == logger {
         return

@@ -18,15 +18,15 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-func testRuntime() runtimecontract.Runtime {
+func testRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 func TestLocalStorage_PutGetExistsDelete(t *testing.T) {

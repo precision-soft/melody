@@ -1,8 +1,8 @@
 package security
 
 import (
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "errors"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     nethttp "net/http"
     "testing"
 
@@ -20,7 +20,7 @@ func (instance *testAuthenticator) Supports(request httpcontract.Request) bool {
     return instance.supportsCallback(request)
 }
 
-func (instance *testAuthenticator) Authenticate(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *testAuthenticator) Authenticate(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     return instance.authenticateCallback(request)
 }
 

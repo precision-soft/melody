@@ -3,10 +3,10 @@ package mailer
 import (
     "net/mail"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func NewManager(transport mailercontract.Transport) *Manager {
@@ -23,7 +23,7 @@ type Manager struct {
     transport mailercontract.Transport
 }
 
-func (instance *Manager) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
+func (instance *Manager) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) error {
     if "" == message.From.Email {
         return exception.NewError("mailer message has no sender", nil, nil)
     }

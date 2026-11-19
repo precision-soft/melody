@@ -14,11 +14,11 @@ import (
     "go.opentelemetry.io/otel/sdk/trace/tracetest"
 
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "go.opentelemetry.io/otel/codes"
 )
 
@@ -77,7 +77,7 @@ func TestTracingMiddleware_ATypedNilResponseIsReadAsAbsentInsteadOfPanicking(t *
 
     middleware := NewTracingMiddleware(provider.Tracer("melody-typed-nil-test"), nil)
 
-    typedNilHandler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    typedNilHandler := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         var response *typedNilProneResponse
 
         return response, nil
@@ -103,7 +103,7 @@ func TestTracingMiddleware_RecordsTheClientStatusWhenTheHandlerReturnsAnHttpExce
     middleware := NewTracingMiddleware(tracer, nil)
 
     request, runtimeInstance := testRequestAndRuntime()
-    handler := middleware(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := middleware(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return nil, exception.NewHttpException(nethttp.StatusNotFound, "not found")
     })
 
@@ -136,7 +136,7 @@ func tracedHandlerSpan(t *testing.T, handlerErr error) sdktrace.ReadOnlySpan {
     middleware := NewTracingMiddleware(provider.Tracer("melody-status-test"), nil)
 
     request, runtimeInstance := testRequestAndRuntime()
-    handler := middleware(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := middleware(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return nil, handlerErr
     })
 
@@ -270,7 +270,7 @@ func TestTracingMiddleware_RecordsTheStatusAHandlerCommitsDirectly(t *testing.T)
             request, runtimeInstance := testRequestAndRuntime()
             underlying := &streamingTestWriter{ResponseRecorder: httptest.NewRecorder()}
 
-            handler := NewTracingMiddleware(provider.Tracer("direct-write"), nil)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            handler := NewTracingMiddleware(provider.Tracer("direct-write"), nil)(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 if deadlineErr := nethttp.NewResponseController(writer).SetWriteDeadline(time.Now().Add(time.Minute)); nil != deadlineErr {
                     t.Fatalf("set write deadline: %v", deadlineErr)
                 }
@@ -315,7 +315,7 @@ func TestTracingMiddleware_ASpanAlreadyInTheContextStaysTheParentOverATraceparen
     lifecycleContext, lifecycleSpan := tracer.Start(context.Background(), "lifecycle")
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(lifecycleContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRequest(lifecycleContext, serviceContainer.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/orders/42", nil)
     httpRequest.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")

@@ -6,8 +6,8 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/repository"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type CategoryResponse struct {
@@ -16,8 +16,8 @@ type CategoryResponse struct {
 }
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        categoryRepository := repository.MustGetCategoryRepository(runtimeInstance.Context(), runtimeInstance.Container())
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        categoryRepository := repository.MustGetCategoryRepository(runtimeInstance.Context(), runtimeInstance.Scope())
 
         categories, allErr := categoryRepository.All(runtimeInstance.Context())
         if nil != allErr {

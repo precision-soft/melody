@@ -15,13 +15,12 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v4/serializer"
     serializercontract "github.com/precision-soft/melody/v4/serializer/contract"
     amqp091 "github.com/rabbitmq/amqp091-go"
@@ -79,9 +78,9 @@ func (instance *blockingDeserializer) ContentType() string {
 
 var _ serializercontract.Serializer = (*blockingDeserializer)(nil)
 
-func newReconnectRuntime(ctx context.Context) runtimecontract.Runtime {
+func newReconnectRuntime(ctx context.Context) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(ctx, serviceContainer.NewScope())
 }
 
 type logRecord struct {
@@ -139,7 +138,7 @@ func (instance *recordingLogger) errorMessages() []string {
 
 var _ loggingcontract.Logger = (*recordingLogger)(nil)
 
-func newRecordingLoggerRuntime(ctx context.Context) (runtimecontract.Runtime, *recordingLogger) {
+func newRecordingLoggerRuntime(ctx context.Context) (containercontract.Runtime, *recordingLogger) {
     logger := &recordingLogger{}
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -152,7 +151,7 @@ func newRecordingLoggerRuntime(ctx context.Context) (runtimecontract.Runtime, *r
         container.RegisterOptions{},
     )
 
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer), logger
+    return runtime.NewRun(ctx, serviceContainer.NewScope()), logger
 }
 
 func awaitClosedOutput(t *testing.T, out <-chan messagebuscontract.Envelope) {
@@ -239,7 +238,7 @@ func TestTransport_SendReceiveAck(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
     defer transport.CloseWithContext(context.Background())
 
     sent := []testMessage{
@@ -315,7 +314,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
     defer transport.CloseWithContext(context.Background())
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "retry"}, nil)); nil != sendErr {
@@ -378,7 +377,7 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
     defer transport.CloseWithContext(context.Background())
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "delay"}, nil)); nil != sendErr {
@@ -449,7 +448,7 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
     defer transport.CloseWithContext(context.Background())
 
     queue, receiveErr := transport.Receive(runtimeInstance)
@@ -1088,7 +1087,7 @@ func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
 
     body, marshalErr := json.Marshal(closeUnblockMessage{Id: 1})
     if nil != marshalErr {
@@ -1134,7 +1133,7 @@ func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
 
     backoff := 10 * time.Second
     done := make(chan error, 1)
@@ -1311,7 +1310,7 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(closeJoinMessage{Id: 1}, nil)); nil != sendErr {
         t.Fatalf("send: %v", sendErr)
@@ -1397,7 +1396,7 @@ func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
     defer transport.CloseWithContext(context.Background())
 
     firstErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "routable"}, nil))
@@ -1730,7 +1729,7 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
     defer transport.CloseWithContext(context.Background())
 
     queue, receiveErr := transport.Receive(runtimeInstance)
@@ -1921,7 +1920,7 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
     defer transport.CloseWithContext(context.Background())
 
     purgeQueue(t, connection, queueName)
@@ -2256,7 +2255,7 @@ const (
     wedgeWarmupPublishTimeout = 5 * time.Second
 )
 
-func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer func() (*amqp091.Connection, error)) (*Transport, runtimecontract.Runtime) {
+func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer func() (*amqp091.Connection, error)) (*Transport, containercontract.Runtime) {
     t.Helper()
 
     registry := NewMessageRegistry()
@@ -2271,7 +2270,7 @@ func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer 
     })
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "healthy"}, nil)); nil != sendErr {
         t.Fatalf("healthy send: %v", sendErr)
@@ -3067,7 +3066,7 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
 
     queue, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
@@ -3816,7 +3815,7 @@ func TestTransport_SendOverAConnectionThatIsGoneIsMarkedUnavailable(t *testing.T
     provider.Close(connection)
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "gone"}, nil))
     if nil == sendErr || false == exception.IsInfrastructureFailure(sendErr) {

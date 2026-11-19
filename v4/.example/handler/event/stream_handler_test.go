@@ -16,11 +16,10 @@ import (
     "github.com/precision-soft/melody/v4/.example/subscriber"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -76,19 +75,19 @@ func (instance *recordingResponseWriter) CommittedStatusCode() int {
    that skipped the registration would drive the handler down its unavailable branch and every assertion
    below it would be about that branch instead of about the stream. streamRequestWithoutHub is the sister
    that drives it deliberately. */
-func streamRequest(t *testing.T, target string, cancelled bool) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
+func streamRequest(t *testing.T, target string, cancelled bool) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
     return streamRequestOnContainer(t, target, cancelled, true)
 }
 
-func streamRequestWithoutHub(t *testing.T, target string) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
+func streamRequestWithoutHub(t *testing.T, target string) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
     return streamRequestOnContainer(t, target, false, false)
 }
 
-func streamRequestOnContainer(t *testing.T, target string, cancelled bool, withHub bool) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
+func streamRequestOnContainer(t *testing.T, target string, cancelled bool, withHub bool) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -106,7 +105,7 @@ func streamRequestOnContainer(t *testing.T, target string, cancelled bool, withH
         )
     }
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, target, nil)
 
@@ -129,7 +128,7 @@ func streamRequestOnContainer(t *testing.T, target string, cancelled bool, withH
 
 /* streamRequestAs is streamRequest for a caller the firewall authenticated with the roles given — the only caller
    production lets reach this handler, the stream route being ROLE_USER */
-func streamRequestAs(t *testing.T, target string, roles []string) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
+func streamRequestAs(t *testing.T, target string, roles []string) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
     request, runtimeInstance := streamRequest(t, target, true)
@@ -140,7 +139,7 @@ func streamRequestAs(t *testing.T, target string, roles []string) (*melodyhttp.R
 }
 
 /* authenticateOnRuntime publishes the security context the firewall would, for the account and roles given */
-func authenticateOnRuntime(runtimeInstance melodyruntimecontract.Runtime, userId string, roles []string) {
+func authenticateOnRuntime(runtimeInstance melodycontainercontract.Runtime, userId string, roles []string) {
     firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
         Name:               "main",
         Matcher:            melodysecurity.NewPathPrefixMatcher("/"),
@@ -319,7 +318,7 @@ func streamServer(t *testing.T, writeTimeout time.Duration) (*httptest.Server, *
         melodycontainer.RegisterOptions{},
     )
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
     authenticateOnRuntime(runtimeInstance, "reader", []string{entity.RoleUser})
 
     server := httptest.NewUnstartedServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, httpRequest *nethttp.Request) {
@@ -396,7 +395,7 @@ func TestJournalServerSideCut_WarnsOnTheDeadlineAloneWhoeverHoldsTheContext(t *t
         },
         melodycontainer.RegisterOptions{},
     )
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     journalServerSideCut(runtimeInstance, "visitor", "event", errors.New("write: broken pipe"))
     journalServerSideCut(runtimeInstance, "visitor", "event", &net.OpError{Op: "write", Err: errors.New("connection reset by peer")})
@@ -415,7 +414,7 @@ func TestJournalServerSideCut_WarnsOnTheDeadlineAloneWhoeverHoldsTheContext(t *t
 /* a runtime without a logger answers nil through LoggerFromRuntime, so the warning of a server cut goes to the fallback journal */
 func TestJournalServerSideCut_ARuntimeWithoutALoggerDoesNotPanic(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     journalServerSideCut(runtimeInstance, "visitor", "event", &net.OpError{Op: "write", Err: &timeoutError{}})
 }

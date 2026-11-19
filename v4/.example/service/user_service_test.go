@@ -20,11 +20,10 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestUserService_FindByUsernameAnswersANameTheTableCannotHoldAsAbsent(t *testing.T) {
@@ -164,7 +163,7 @@ func TestUserService_GrantRoleTellsTheListeners(t *testing.T) {
         },
         melodycontainer.RegisterOptions{},
     )
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     userService := NewUserService(userRepository, newTtlRecordingCache(), dispatcher.dispatcher)
 
@@ -192,7 +191,7 @@ type refusingOnceDispatcher struct {
     refused bool
 }
 
-func (instance *refusingOnceDispatcher) DispatchName(runtimeInstance melodyruntimecontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
+func (instance *refusingOnceDispatcher) DispatchName(runtimeInstance melodycontainercontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
     if false == instance.refused {
         instance.refused = true
 
@@ -222,7 +221,7 @@ func TestUserService_GrantRoleHealsTheCacheWhenTheRoleIsAlreadyHeld(t *testing.T
         },
         melodycontainer.RegisterOptions{},
     )
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     cacheInstance := newTtlRecordingCache()
     userService := NewUserService(userRepository, cacheInstance, refusing)
@@ -270,7 +269,7 @@ func TestUserService_GrantRoleAlreadyHeldDropsTheListEntryToo(t *testing.T) {
         },
         melodycontainer.RegisterOptions{},
     )
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     cacheInstance := newTtlRecordingCache()
     userService := NewUserService(userRepository, cacheInstance, dispatcher.dispatcher)
@@ -311,7 +310,7 @@ func TestUserService_UpdateStoresACopyOfTheCallersRoleList(t *testing.T) {
         },
         melodycontainer.RegisterOptions{},
     )
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     userService := NewUserService(userRepository, newTtlRecordingCache(), dispatcher.dispatcher)
 

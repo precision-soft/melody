@@ -5,8 +5,8 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/presenter"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -25,7 +25,7 @@ type actorView struct {
 
 /* WhoamiHandler echoes the principal the internal-auth (HMAC) firewall authenticated: the calling service, its registry roles and the originating actor the caller propagated, if any, read from the security context the firewall populated. */
 func WhoamiHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         token, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
         if false == exists {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil

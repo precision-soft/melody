@@ -7,14 +7,14 @@ import (
     "testing"
 
     melodycontainer "github.com/precision-soft/melody/v4/container"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 func TestExclusiveTickCommandPrintsIntoTheCommandsWriter(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     output := &bytes.Buffer{}
     commandContext := newStringFlagContext(map[string]string{"hold": "1ms"}, output)

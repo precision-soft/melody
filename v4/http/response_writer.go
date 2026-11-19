@@ -6,16 +6,16 @@ import (
     "net"
     nethttp "net/http"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func WriteToHttpResponseWriter(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     responseWriter nethttp.ResponseWriter,
     response httpcontract.Response,

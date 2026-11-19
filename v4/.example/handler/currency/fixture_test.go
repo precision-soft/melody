@@ -21,13 +21,12 @@ import (
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodyserializer "github.com/precision-soft/melody/v4/serializer"
     melodyserializercontract "github.com/precision-soft/melody/v4/serializer/contract"
@@ -136,8 +135,8 @@ func newCurrencyDoorFixture(t *testing.T) *currencyDoorFixture {
 }
 
 /* runtimeFor answers a runtime whose security context holds a token carrying the roles given */
-func (instance *currencyDoorFixture) runtimeFor(roles ...string) melodyruntimecontract.Runtime {
-    runtimeInstance := melodyruntime.New(context.Background(), instance.container.NewScope(), instance.container)
+func (instance *currencyDoorFixture) runtimeFor(roles ...string) melodycontainercontract.Runtime {
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), instance.container.NewScope())
 
     firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
         Name:               "main",
@@ -157,7 +156,7 @@ func (instance *currencyDoorFixture) runtimeFor(roles ...string) melodyruntimeco
 func (instance *currencyDoorFixture) call(
     t *testing.T,
     handler melodyhttpcontract.Handler,
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     method string,
     body string,
     params map[string]string,

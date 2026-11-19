@@ -3,10 +3,10 @@ package security
 import (
     nethttp "net/http"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* raisesLoginFailure: only a refused credential, 401 or 403, counts toward a lockout */
@@ -26,7 +26,7 @@ func raisesLoginFailure(err error) bool {
 
 /* fileLoginFailureDispatchError: a 401 or 403 is not recorded at error, so the failed listener would be seen nowhere else */
 func fileLoginFailureDispatchError(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     dispatchErr error,
     statusCode int,
     extra exceptioncontract.Context,

@@ -4,8 +4,8 @@ import (
     "errors"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -28,7 +28,7 @@ func (instance *securityTestVoter) Supports(attribute string, subject any) bool 
     return instance.attribute == attribute
 }
 
-func (instance *securityTestVoter) Vote(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
+func (instance *securityTestVoter) Vote(runtimeInstance containercontract.Runtime, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
     return instance.result, nil
 }
 

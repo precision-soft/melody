@@ -1,7 +1,6 @@
 package encrypt
 
 import (
-    "slices"
     "bytes"
     "context"
     "database/sql"
@@ -10,6 +9,7 @@ import (
     "fmt"
     "io"
     "reflect"
+    "slices"
     "strings"
     "sync"
     "sync/atomic"
@@ -21,11 +21,10 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* installCipher restores the name's previous entry when the test ends, so no cipher leaks into the next test */
@@ -513,8 +512,8 @@ func (instance fakeRuntime) Scope() containercontract.Scope {
     return nil
 }
 
-func (instance fakeRuntime) Container() containercontract.Container {
-    return nil
+func (instance fakeRuntime) Kind() containercontract.Kind {
+    return containercontract.KindRun
 }
 
 /* newRampKey is the 32-byte ramp key the live mysql suites seal with; the sibling newKey fills every byte alike, and the two must stay distinguishable because a rotation test needs two keys that differ in every position. */
@@ -529,14 +528,14 @@ func newRampKey() []byte {
 /* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
 type capturingCommand struct {
     clicontract.Command
-    runtimeInstance runtimecontract.Runtime
+    runtimeInstance containercontract.Runtime
     capturedErr     error
 }
 
 var _ clicontract.Command = (*capturingCommand)(nil)
 
 func (instance *capturingCommand) Run(
-    dispatchedRuntime runtimecontract.Runtime,
+    dispatchedRuntime containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     instance.capturedErr = instance.Command.Run(instance.runtimeInstance, commandContext)
@@ -684,7 +683,7 @@ func runCommandLine(t *testing.T, command *EncryptDatabaseCommand, logger loggin
         t.Fatalf("register: %v", registerErr)
     }
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     var runErr error
     engineCommand := &clicontract.CommandContext{

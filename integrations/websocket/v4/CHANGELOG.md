@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** with the framework: the fourth major's runtime is read from `v4/container/contract` and built through `v4/container/runtime`, a runtime resolving through its scope only; `runtime.New` and `Runtime.Container()` are gone. See the framework's `UPGRADE.md`.
 - websocket: **Breaking**: `Options.SubscribeBuffer` is removed; the stream handler subscribes with the hub's `ServerSentEventHubConfig.SubscriberBuffer`, since the fourth major's `ServerSentEventHub.Subscribe` takes the topic alone.
 - `handler.go`: the log records are built through `exception.LogContext(err, exception.LogContextConfig{...})`, the fourth major's form, which takes the extra context in a struct; nothing of this module's own surface changes.
 - **Breaking** — `module.go`: `ModuleConfig` declares its routes as `Streams []StreamConfig`, each `StreamConfig` carrying the `Hub`, `Options`, `RouteName` and `Path` the module carried, since the framework refuses a second module of one name and two endpoints were two modules; a module with no stream, a stream with a nil hub or an empty path and, on a module of more than one stream, an empty `RouteName` are refused at boot naming the field and the index, every stream judged and its handler built before the first route registers.

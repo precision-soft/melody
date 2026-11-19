@@ -5,6 +5,7 @@ import (
     "fmt"
     nethttp "net/http"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -12,7 +13,6 @@ import (
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/session"
 )
@@ -95,7 +95,7 @@ func RegisterKernelAccessControlListener(kernelInstance kernelcontract.Kernel, r
 
     accessControlRegistration := eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
             if false == ok {
                 return nil

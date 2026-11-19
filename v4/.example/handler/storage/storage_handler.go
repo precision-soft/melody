@@ -14,14 +14,14 @@ import (
     melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
     "github.com/precision-soft/melody/v4/.example/presenter"
     melodybag "github.com/precision-soft/melody/v4/bag"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
 /* PutHandler stores the request body under the given key in the object store. */
 func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         key := melodybag.StringOrDefault(request.Query(), "key", "")
         if "" == key {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "key query parameter is required"), nil
@@ -58,7 +58,7 @@ func PutHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
 
 /* GetHandler answers the object stored under the given key: 404 when the store has no such object, 500 with the cause journaled when the store cannot be read. */
 func GetHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         key := melodybag.StringOrDefault(request.Query(), "key", "")
         if "" == key {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "key query parameter is required"), nil
@@ -132,7 +132,7 @@ var errInvalidLinkTtl = errors.New("ttl must be a whole number of seconds betwee
 
 /* LinkHandler answers a presigned download link to the object stored under the given key, so a client reads the bytes straight from the object store instead of through this application. The object must exist, and the link lives for ?ttl= seconds, five minutes when none is asked. */
 func LinkHandler(storage *melodyawss3.Storage) melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         key := melodybag.StringOrDefault(request.Query(), "key", "")
         if "" == key {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "key query parameter is required"), nil

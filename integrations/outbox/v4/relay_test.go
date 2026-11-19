@@ -14,14 +14,13 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/messagebus"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type logRecord struct {
@@ -94,10 +93,10 @@ func (instance *recordingLogger) errorMessages() []string {
 
 var _ loggingcontract.Logger = (*recordingLogger)(nil)
 
-func relayTestRuntime() runtimecontract.Runtime {
+func relayTestRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 type repoCall struct {
@@ -180,7 +179,7 @@ type fakeTransport struct {
     panicMarked    bool
 }
 
-func (instance *fakeTransport) Send(_ runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *fakeTransport) Send(_ containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     if true == instance.panicMarked {
         panic(exception.MarkInfrastructureFailure(errors.New("send panicked")))
     }
@@ -199,15 +198,15 @@ func (instance *fakeTransport) Send(_ runtimecontract.Runtime, envelope messageb
     return nil
 }
 
-func (instance *fakeTransport) Receive(_ runtimecontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+func (instance *fakeTransport) Receive(_ containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
     return nil, nil
 }
 
-func (instance *fakeTransport) Ack(_ runtimecontract.Runtime, _ messagebuscontract.Envelope) error {
+func (instance *fakeTransport) Ack(_ containercontract.Runtime, _ messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *fakeTransport) Nack(_ runtimecontract.Runtime, _ messagebuscontract.Envelope, _ bool) error {
+func (instance *fakeTransport) Nack(_ containercontract.Runtime, _ messagebuscontract.Envelope, _ bool) error {
     return nil
 }
 
@@ -258,11 +257,11 @@ type fakeLock struct {
     releaseRemaining   time.Duration
 }
 
-func (instance *fakeLock) Acquire(_ runtimecontract.Runtime) (bool, error) {
+func (instance *fakeLock) Acquire(_ containercontract.Runtime) (bool, error) {
     return instance.acquire, nil
 }
 
-func (instance *fakeLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *fakeLock) Release(runtimeInstance containercontract.Runtime) error {
     instance.releaseCalls++
     instance.releaseContextErr = runtimeInstance.Context().Err()
     deadline, hasDeadline := runtimeInstance.Context().Deadline()
@@ -272,7 +271,7 @@ func (instance *fakeLock) Release(runtimeInstance runtimecontract.Runtime) error
     return instance.releaseErr
 }
 
-func (instance *fakeLock) Refresh(_ runtimecontract.Runtime, _ bound.Duration) error {
+func (instance *fakeLock) Refresh(_ containercontract.Runtime, _ bound.Duration) error {
     instance.refreshCalls++
 
     return instance.refreshErr
@@ -645,7 +644,7 @@ func TestRelay_ReleasesLeaseOnAContextThatOutlivesCancellation(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(runContext, serviceContainer.NewScope())
 
     lock := &fakeLock{acquire: true}
     repository := &cancellingRepository{
@@ -695,7 +694,7 @@ func TestRelay_ReportsAFailedLeaseRelease(t *testing.T) {
         container.RegisterOptions{},
     )
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     lock := &fakeLock{acquire: true, releaseErr: errors.New("release script failed")}
 
@@ -746,7 +745,7 @@ type failingCauseTransport struct {
     cause error
 }
 
-func (instance *failingCauseTransport) Send(_ runtimecontract.Runtime, _ messagebuscontract.Envelope) error {
+func (instance *failingCauseTransport) Send(_ containercontract.Runtime, _ messagebuscontract.Envelope) error {
     return exception.NewError("amqp publish failed", nil, instance.cause)
 }
 
@@ -886,11 +885,11 @@ type panickingTransport struct {
     value any
 }
 
-func (instance *panickingTransport) Send(_ runtimecontract.Runtime, _ messagebuscontract.Envelope) error {
+func (instance *panickingTransport) Send(_ containercontract.Runtime, _ messagebuscontract.Envelope) error {
     panic(instance.value)
 }
 
-func relayTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
+func relayTestRuntimeWithLogger(logger loggingcontract.Logger) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     container.MustRegister[loggingcontract.Logger](
         serviceContainer,
@@ -901,11 +900,11 @@ func relayTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.R
         container.RegisterOptions{},
     )
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 /* runOnceContained runs RunOnce under the test's own recover, so a panic that escapes the relay fails the assertion instead of the test binary. */
-func runOnceContained(t *testing.T, relay *Relay, runtimeInstance runtimecontract.Runtime) (published int, runErr error) {
+func runOnceContained(t *testing.T, relay *Relay, runtimeInstance containercontract.Runtime) (published int, runErr error) {
     t.Helper()
 
     defer func() {
@@ -1060,7 +1059,7 @@ type cancellingTransport struct {
     cancel context.CancelFunc
 }
 
-func (instance *cancellingTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *cancellingTransport) Send(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     instance.cancel()
 
     return instance.fakeTransport.Send(runtimeInstance, envelope)
@@ -1071,7 +1070,7 @@ func TestRelay_ASuccessfulSendIsMarkedSentThoughTheRunContextWasCancelled(t *tes
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(runContext, serviceContainer.NewScope())
 
     repository := &contextRecordingRepository{fakeRepository: fakeRepository{due: []Pending{{Id: 1, TypeName: "string", Payload: []byte("a")}}}}
 
@@ -1159,7 +1158,7 @@ type refusingAfterTransport struct {
     attempts int
 }
 
-func (instance *refusingAfterTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *refusingAfterTransport) Send(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     instance.attempts++
     if instance.attempts > instance.okSends {
         return errors.New("broker unreachable")
@@ -1491,7 +1490,7 @@ type cancellingRefusingTransport struct {
     afterSends int
 }
 
-func (instance *cancellingRefusingTransport) Send(_ runtimecontract.Runtime, _ messagebuscontract.Envelope) error {
+func (instance *cancellingRefusingTransport) Send(_ containercontract.Runtime, _ messagebuscontract.Envelope) error {
     if 0 < instance.afterSends {
         instance.afterSends--
 
@@ -1519,7 +1518,7 @@ func TestRelay_ACancelledRunStopsHandingRowsBack(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(runContext, serviceContainer.NewScope())
 
     relay := NewRelay(RelayConfig{Repository: repository, Transport: &cancellingRefusingTransport{cancel: cancel}, Codec: &stringCodec{}})
 
@@ -1551,7 +1550,7 @@ func TestRelay_AMarkedSendCutByTheRunIsDueAtOnceAndCountsNoOutage(t *testing.T) 
             container.MustRegister[loggingcontract.Logger](serviceContainer, logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
                 return logger, nil
             }, container.RegisterOptions{})
-            runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+            runtimeInstance := runtime.NewRun(runContext, serviceContainer.NewScope())
 
             relay := NewRelay(RelayConfig{Repository: repository, Transport: &cancellingRefusingTransport{cancel: cancel, marked: true}, Codec: &stringCodec{}})
 
@@ -1590,7 +1589,7 @@ func TestRelay_AProbeCutByTheRunHandsTheMarkedRowBackDueAtOnce(t *testing.T) {
     container.MustRegister[loggingcontract.Logger](serviceContainer, logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
         return logger, nil
     }, container.RegisterOptions{})
-    runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(runContext, serviceContainer.NewScope())
 
     relay := NewRelay(RelayConfig{Repository: repository, Transport: &cancellingRefusingTransport{cancel: cancel, afterSends: 1}, Codec: &stringCodec{}})
 
@@ -1616,7 +1615,7 @@ func TestRelay_APanickingSendUnderACancelledRunIsCharged(t *testing.T) {
     cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(runContext, serviceContainer.NewScope())
 
     relay := NewRelay(RelayConfig{Repository: repository, Transport: &panickingTransport{value: errors.New("boom")}, Codec: &stringCodec{}})
     relay.RunOnce(runtimeInstance)

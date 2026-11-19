@@ -8,9 +8,9 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/config"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func NewRouteManifestCommand() *RouteManifestCommand {
@@ -45,13 +45,13 @@ func (instance *RouteManifestCommand) Flags() []clicontract.Flag {
 
 /* Run writes the manifest: a relative --out is anchored at the project directory, a target that is not a JSON document is refused rather than overwritten, the write lands through a temp file and a rename, and output goes through the command writer. */
 func (instance *RouteManifestCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     /* the flag is handed over as typed, so FilterRouteManifestByZone is the one reader of a zone; its refusal lands before anything is written */
     zone := commandContext.String("zone")
 
-    router := RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    router := RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
     manifest := BuildRouteManifest(router.RouteDefinitions())
 
@@ -77,7 +77,7 @@ func (instance *RouteManifestCommand) Run(
     }
 
     if false == filepath.IsAbs(out) {
-        applicationConfiguration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        applicationConfiguration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
         out = filepath.Join(applicationConfiguration.MustGet(config.KernelProjectDirectory).MustString(), out)
     }
 

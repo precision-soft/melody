@@ -9,10 +9,10 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/security/totp"
 )
@@ -25,7 +25,7 @@ func (instance *fixedAuthenticator) Supports(_ httpcontract.Request) bool {
     return true
 }
 
-func (instance *fixedAuthenticator) Authenticate(_ runtimecontract.Runtime, _ httpcontract.Request) (securitycontract.Token, error) {
+func (instance *fixedAuthenticator) Authenticate(_ containercontract.Runtime, _ httpcontract.Request) (securitycontract.Token, error) {
     return instance.token, nil
 }
 
@@ -35,7 +35,7 @@ type fixedEnrollmentStore struct {
 }
 
 func (instance *fixedEnrollmentStore) FindTotpSecret(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     _ string,
 ) (string, bool, error) {
     return instance.secret, instance.enrolled, nil
@@ -219,14 +219,14 @@ type recoveryEnrollmentStore struct {
 }
 
 func (instance *recoveryEnrollmentStore) FindTotpSecret(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     _ string,
 ) (string, bool, error) {
     return instance.secret, instance.enrolled, nil
 }
 
 func (instance *recoveryEnrollmentStore) RedeemRecoveryCode(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     _ string,
     code string,
 ) (bool, error) {
@@ -376,7 +376,7 @@ type failingEnrollmentStore struct {
 }
 
 func (instance *failingEnrollmentStore) FindTotpSecret(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     _ string,
 ) (string, bool, error) {
     return "", false, instance.lookupErr
@@ -426,14 +426,14 @@ type failingRecoveryEnrollmentStore struct {
 }
 
 func (instance *failingRecoveryEnrollmentStore) FindTotpSecret(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     userIdentifier string,
 ) (string, bool, error) {
     return "JBSWY3DPEHPK3PXP", true, nil
 }
 
 func (instance *failingRecoveryEnrollmentStore) RedeemRecoveryCode(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     userIdentifier string,
     recoveryCode string,
 ) (bool, error) {
@@ -495,7 +495,7 @@ func (instance *failingPrimaryAuthenticator) Supports(_ httpcontract.Request) bo
     return true
 }
 
-func (instance *failingPrimaryAuthenticator) Authenticate(_ runtimecontract.Runtime, _ httpcontract.Request) (securitycontract.Token, error) {
+func (instance *failingPrimaryAuthenticator) Authenticate(_ containercontract.Runtime, _ httpcontract.Request) (securitycontract.Token, error) {
     return nil, instance.err
 }
 

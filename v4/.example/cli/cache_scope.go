@@ -4,14 +4,14 @@ import (
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* cacheIsProcessLocal answers whether the cache this process writes is its own or the one every process shares. The listeners that clear cached entities run in the process that dispatched the write, so with redis a write made here reaches the running server, and on the in-process fallback a server started beside it keeps serving what it cached until it restarts. It reads the answer off the wiring, because the wiring is what decides. */
-func cacheIsProcessLocal(runtimeInstance melodyruntimecontract.Runtime) bool {
+func cacheIsProcessLocal(runtimeInstance melodycontainercontract.Runtime) bool {
     backend, resolveErr := melodycontainer.FromResolver[melodycachecontract.Backend](
         runtimeInstance.Context(),
-        runtimeInstance.Container(),
+        runtimeInstance.Scope(),
         melodycache.ServiceCacheBackend,
     )
     if nil != resolveErr {
@@ -26,7 +26,7 @@ func cacheIsProcessLocal(runtimeInstance melodyruntimecontract.Runtime) bool {
 /* processLocalCacheNotice is the sentence a writing command adds when the cache is this process's own: a running server on the same fallback will not see the write until it restarts. */
 const processLocalCacheNotice = "the cache is this process's own (no REDIS_ADDRESS): a running server keeps what it cached until it restarts"
 
-func cacheClearedScope(runtimeInstance melodyruntimecontract.Runtime) string {
+func cacheClearedScope(runtimeInstance melodycontainercontract.Runtime) string {
     if true == cacheIsProcessLocal(runtimeInstance) {
         return "this process's own entries; " + processLocalCacheNotice
     }

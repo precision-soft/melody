@@ -11,9 +11,9 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -125,13 +125,13 @@ func (instance *HmacEnvelopeSigner) HeaderName() string {
 
 /* Sign builds the internal-auth header value binding the call to method, path, query string and the given body, optionally propagating an originating actor. The path argument may carry a query string (everything after the first '?'); it is signed separately and matched against the request's raw query at the callee. The path is matched at the callee against the spelling its router matched — each segment decoded on its own, a separator encoded inside a segment kept as "%2F", in upper case whatever case the request line used — so a caller signs "/files/café" for a request line "/files/caf%C3%A9" and "/files/a%2Fb" for the one-segment resource "a/b"; a request whose segment decodes to a literal "%2F" cannot be signed and is refused. Since the argument is cut at its first "?", a request whose path segment decodes to a name carrying "?" cannot be signed either: the signature covers the path before it, and the callee refuses the envelope. The provider is asked under the runtime's context. A provider that could not answer is returned marked as an infrastructure failure; a current key the provider rotated to is judged as the constructor judges it. The returned string is written to HeaderName() on the outgoing request. */
 func (instance *HmacEnvelopeSigner) Sign(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     method string,
     path string,
     body []byte,
     actor securitycontract.Actor,
 ) (string, error) {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return "", runtimeErr
     }
 

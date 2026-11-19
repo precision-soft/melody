@@ -10,13 +10,13 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
 func ApiCreateHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if false == melodysecurity.IsGranted(runtimeInstance, entity.RoleAdmin) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
         }
@@ -55,7 +55,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "role "+unknownRole+" is not one this application knows ("+strings.Join(entity.KnownRoleList(), ", ")+")"), nil
         }
 
-        userService := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container())
+        userService := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Scope())
 
         _, exists, findErr := userService.FindByUsername(runtimeInstance.Context(), normalizedUsername)
         if nil != findErr {

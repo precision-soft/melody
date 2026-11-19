@@ -3,12 +3,12 @@ package messagebus
 import (
     "reflect"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* NewManager builds the bus named name over the middlewares, run in order; nil is a bus with no middleware. A nil middleware is refused by its index. */
@@ -40,7 +40,7 @@ type Manager struct {
 }
 
 func (instance *Manager) Dispatch(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     message any,
     stamps []messagebuscontract.Stamp,
 ) (messagebuscontract.Envelope, error) {
@@ -63,7 +63,7 @@ func (instance *Manager) Dispatch(
 
 /* warnWhenUntouched records a dispatch that succeeded while nothing sent, handled or received the message, a type with no route or a bus with no middlewares: the terminal chain answers success by construction, so otherwise the message ceases to exist with a nil error. A received envelope is exempt, since the handle middleware owns that verdict. */
 func (instance *Manager) warnWhenUntouched(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) {
     if _, sent := LastStampOfType[SentStamp](envelopeInstance); true == sent {
@@ -95,7 +95,7 @@ func (instance *Manager) warnWhenUntouched(
 func (instance *Manager) buildChain(index int) messagebuscontract.StackNext {
     if index >= len(instance.middlewares) {
         return func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             envelopeInstance messagebuscontract.Envelope,
         ) (messagebuscontract.Envelope, error) {
             return envelopeInstance, nil
@@ -106,7 +106,7 @@ func (instance *Manager) buildChain(index int) messagebuscontract.StackNext {
     next := instance.buildChain(index + 1)
 
     return func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         envelopeInstance messagebuscontract.Envelope,
     ) (messagebuscontract.Envelope, error) {
         return middleware(runtimeInstance, envelopeInstance, next)

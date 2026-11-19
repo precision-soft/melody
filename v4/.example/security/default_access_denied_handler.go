@@ -3,9 +3,9 @@ package security
 import (
     "html"
 
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -22,7 +22,7 @@ type defaultAccessDeniedHandler struct {
     logoutPath string
 }
 
-func (instance *defaultAccessDeniedHandler) Handle(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, decisionErr error) (melodyhttpcontract.Response, error) {
+func (instance *defaultAccessDeniedHandler) Handle(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, decisionErr error) (melodyhttpcontract.Response, error) {
     if true == melodyhttp.PrefersHtml(request) {
         return melodyhttp.HtmlResponse(
             403,

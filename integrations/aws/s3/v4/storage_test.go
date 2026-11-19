@@ -22,14 +22,14 @@ import (
     "github.com/precision-soft/melody/v4/bound"
 
     "github.com/precision-soft/melody/v4/container"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-func newRuntime() runtimecontract.Runtime {
+func newRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
@@ -779,7 +779,7 @@ func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T)
     }
 }
 
-func storedObjectShape(t *testing.T, store *Storage, runtimeInstance runtimecontract.Runtime, key string) (int64, byte) {
+func storedObjectShape(t *testing.T, store *Storage, runtimeInstance containercontract.Runtime, key string) (int64, byte) {
     reader, getErr := store.Get(runtimeInstance, key)
     if nil != getErr {
         t.Fatalf("get: %v", getErr)
@@ -986,7 +986,7 @@ func TestObjectStorage_CancelledMultipartPutLeavesNoIncompleteUpload(t *testing.
     defer cancelRequest()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(requestContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(requestContext, serviceContainer.NewScope())
 
     body := &disconnectingBodyReader{
         remaining:   declared,

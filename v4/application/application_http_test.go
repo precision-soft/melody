@@ -22,6 +22,7 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/debug"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
@@ -33,8 +34,6 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -48,7 +47,7 @@ func TestApplicationRegisterHttpRoute_AppendsRegistrarBeforeBoot(t *testing.T) {
     applicationInstance.RegisterHttpRoute(
         nethttp.MethodGet,
         "/test",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
     )
@@ -63,7 +62,7 @@ func TestApplicationRegisterHttpRoute_RefusesDuringTheBootWindow(t *testing.T) {
         (&Application{booting: true}).RegisterHttpRoute(
             nethttp.MethodGet,
             "/late",
-            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return nil, nil
             },
         )
@@ -79,7 +78,7 @@ func TestApplicationRegisterHttpRoute_PanicsAfterBoot(t *testing.T) {
         applicationInstance.RegisterHttpRoute(
             nethttp.MethodGet,
             "/test",
-            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return nil, nil
             },
         )
@@ -120,7 +119,7 @@ func TestBootHttp_HandsEveryDeclaredRouteToTheRouter(t *testing.T) {
     applicationInstance.RegisterHttpRoute(
         nethttp.MethodGet,
         "/boot-http-probe",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
     )
@@ -145,7 +144,7 @@ func TestBootHttp_TheApplicationsRouteKeepsTheMethodItDeclared(t *testing.T) {
     applicationInstance.RegisterHttpRoute(
         nethttp.MethodPost,
         "/boot-http-post-probe",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
     )
@@ -898,7 +897,7 @@ func TestRunHttp_RefusesToReportACleanStopWhileAHijackedHandlerIsStillServed(t *
 
     kernelInstance.httpRouter.Handle(
         "/upgrade",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             hijacker, ok := writer.(nethttp.Hijacker)
             if false == ok {
                 close(handlerHijacked)
@@ -1045,7 +1044,7 @@ func newServedExceptionTestApplication(t *testing.T) *Application {
 
     kernelInstance.httpRouter.Handle(
         "/missing",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, exception.NewHttpException(nethttp.StatusNotFound, "no such product")
         },
         http.RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -1105,7 +1104,7 @@ func TestServeHttp_AnApplicationServingBootsKernelItselfKeepsTheExceptionStatus(
 func addTeapotExceptionListener(applicationInstance *Application) {
     applicationInstance.kernel.EventDispatcher().AddListener(
         kernelcontract.EventKernelException,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.Payload().(*http.KernelExceptionEvent).SetResponse(http.TextResponse(nethttp.StatusTeapot, "rendered by the application"))
 
             return nil
@@ -1165,14 +1164,14 @@ func TestServeHttp_AnExceptionListenerAnswersAPanicAndAFailingNotFoundHandler(t 
 
     kernelInstance.httpRouter.Handle(
         "/panics",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             panic(exception.NewHttpException(nethttp.StatusNotFound, "the controller panicked"))
         },
         http.RouteOptions{Methods: []string{nethttp.MethodGet}},
     )
 
     applicationInstance.kernel.HttpKernel().SetNotFoundHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, exception.NewHttpException(nethttp.StatusNotFound, "the not found handler failed")
         },
     )
@@ -1214,11 +1213,10 @@ func TestRunHttp_ServesWithTheBuiltInExceptionListener(t *testing.T) {
         t.Fatalf("unexpected run http error: %v", runErr)
     }
 
-    runtimeInstance := runtime.New(
+    runtimeInstance := runtime.NewRequest(
         context.Background(),
         applicationInstance.kernel.ServiceContainer().NewScope(),
-        applicationInstance.kernel.ServiceContainer(),
-    )
+)
 
     exceptionEvent := http.NewKernelExceptionEvent(
         runtimeInstance,
@@ -1497,7 +1495,7 @@ func TestServeHttp_AnAsteriskFormTargetAnswersTheRootFirewallsRefusal(t *testing
     }
 
     var handlerRan atomic.Bool
-    markHandler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    markHandler := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         handlerRan.Store(true)
 
         return http.EmptyResponse(nethttp.StatusOK), nil
@@ -1510,7 +1508,7 @@ func TestServeHttp_AnAsteriskFormTargetAnswersTheRootFirewallsRefusal(t *testing
         Name:               "main",
         Matcher:            security.NewPathPrefixMatcher("/"),
         MatcherDescription: "matcher:main",
-        TokenSource: security.NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+        TokenSource: security.NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return security.NewAnonymousToken(), nil
         }),
         AccessControl: security.NewAccessControl([]security.AccessControlRule{
@@ -1574,7 +1572,7 @@ func TestServeHttp_ASlashLessPathThatFoldsIsRefusedBeforeTheFirewallAndTheRouter
     }
 
     var handlerRan atomic.Bool
-    markHandler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    markHandler := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         handlerRan.Store(true)
 
         return http.EmptyResponse(nethttp.StatusOK), nil
@@ -1586,7 +1584,7 @@ func TestServeHttp_ASlashLessPathThatFoldsIsRefusedBeforeTheFirewallAndTheRouter
         Name:               "main",
         Matcher:            security.NewPathPrefixMatcher("/"),
         MatcherDescription: "matcher:main",
-        TokenSource: security.NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+        TokenSource: security.NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return security.NewAnonymousToken(), nil
         }),
         AccessControl: security.NewAccessControl([]security.AccessControlRule{
@@ -1842,7 +1840,7 @@ func TestRunHttp_TheDeploymentsUnavailableDelayOutranksAModulesSetter(t *testing
     kernelInstance.httpKernel.SetUnavailableRetryAfter(bound.Of(9 * time.Second))
     kernelInstance.httpRouter.Handle(
         "/unavailable",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, exception.MarkInfrastructureFailure(errors.New("cache is down"))
         },
         http.RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -1891,7 +1889,7 @@ func prepareSessionReaderOverAnOutage(serviceContainer containercontract.Contain
 
     httpRouter.Handle(
         "/reads-the-session",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             if _, sessionErr := http.RequestSession(request); nil != sessionErr {
                 return nil, sessionErr
             }

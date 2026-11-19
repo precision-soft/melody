@@ -3,10 +3,10 @@ package cors
 import (
     nethttp "net/http"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* Middleware decorates the handler path: it answers a preflight and applies the response headers inside the middleware chain. A response a listener produced never enters the chain, and a preflight to a protected path is refused before it is built; RegisterListeners covers both. A nil service is refused. */
@@ -14,7 +14,7 @@ func Middleware(service *Service) httpcontract.Middleware {
     requireService(service, "cors.Middleware")
 
     return func(next httpcontract.Handler) httpcontract.Handler {
-        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             origin := service.RequestOrigin(request)
             allowOrigin := "" != origin && true == service.OriginAllowed(request, origin)
 

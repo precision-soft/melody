@@ -6,8 +6,8 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/redis/rueidis"
 )
@@ -60,12 +60,12 @@ type NonceGuard struct {
 }
 
 /* callContext caps the request context with the call timeout; context.WithTimeout keeps the earlier deadline, so a tighter request deadline still wins. */
-func (instance *NonceGuard) callContext(runtimeInstance runtimecontract.Runtime) (context.Context, context.CancelFunc) {
+func (instance *NonceGuard) callContext(runtimeInstance containercontract.Runtime) (context.Context, context.CancelFunc) {
     return context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
 }
 
 func (instance *NonceGuard) Remember(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     nonce string,
     ttl bound.Duration,
 ) (bool, error) {

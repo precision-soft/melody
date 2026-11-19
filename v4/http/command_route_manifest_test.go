@@ -15,9 +15,8 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type manifestCommandEmptyEnvironmentSource struct {
@@ -27,13 +26,13 @@ func (instance *manifestCommandEmptyEnvironmentSource) Load(ctx context.Context)
     return map[string]string{}, nil
 }
 
-func newManifestCommandRuntime(t *testing.T, projectDirectory string) runtimecontract.Runtime {
+func newManifestCommandRuntime(t *testing.T, projectDirectory string) containercontract.Runtime {
     t.Helper()
 
     router := NewRouter()
     router.Handle(
         "/products",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
         RouteOptions{Name: "products.list", Methods: []string{nethttp.MethodGet}, Attributes: ExposedRouteAttributes(RouteZoneFrontend)},
@@ -69,12 +68,12 @@ func newManifestCommandRuntime(t *testing.T, projectDirectory string) runtimecon
         container.RegisterOptions{},
     )
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 }
 
 func runRouteManifestCommand(
     t *testing.T,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     arguments ...string,
 ) (string, error) {
     t.Helper()

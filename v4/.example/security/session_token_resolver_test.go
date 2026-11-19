@@ -16,6 +16,7 @@ import (
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -23,8 +24,6 @@ import (
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
@@ -353,7 +352,7 @@ func requestCarryingSessionAndJournal(t *testing.T) (melodyhttpcontract.Request,
         melodycontainer.RegisterOptions{},
     )
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, runtimeInstance, nil)
 
     manager := melodysession.NewManager(melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{}), melodysession.ManagerConfig{Ttl: bound.Of(time.Hour)})
@@ -437,7 +436,7 @@ func TestSessionTokenResolver_ASessionOutageAnswersTheUnavailableToken(t *testin
 
     var token melodysecuritycontract.Token
     router := melodyhttp.NewRouter()
-    router.Handle("/", func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    router.Handle("/", func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         token = resolveToken(SessionTokenResolver(currentAccountLookup), request)
 
         return melodyhttp.TextResponse(nethttp.StatusOK, "ok"), nil

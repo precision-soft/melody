@@ -13,7 +13,7 @@ import (
 
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodyclioutput "github.com/precision-soft/melody/v4/cli/output"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 func NewAuthenticationTokenCommand(secret []byte) *AuthenticationTokenCommand {
@@ -61,7 +61,7 @@ func (instance *AuthenticationTokenCommand) Flags() []melodyclicontract.Flag {
 }
 
 func (instance *AuthenticationTokenCommand) Run(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     commandContext *melodyclicontract.CommandContext,
 ) error {
     user := commandContext.String("user")

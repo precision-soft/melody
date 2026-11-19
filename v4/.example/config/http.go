@@ -23,12 +23,12 @@ import (
     melodybound "github.com/precision-soft/melody/v4/bound"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodyopenapi "github.com/precision-soft/melody/v4/openapi"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     bun "github.com/uptrace/bun"
 )
 
@@ -222,11 +222,11 @@ func (instance *lateBoundRateLimiter) bind(limiter melodyhttpcontract.RateLimite
     instance.limiter = limiter
 }
 
-func (instance *lateBoundRateLimiter) Allow(runtimeInstance melodyruntimecontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
+func (instance *lateBoundRateLimiter) Allow(runtimeInstance melodycontainercontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
     return instance.limiter.Allow(runtimeInstance, key)
 }
 
-func (instance *lateBoundRateLimiter) Reset(runtimeInstance melodyruntimecontract.Runtime, key string) error {
+func (instance *lateBoundRateLimiter) Reset(runtimeInstance melodycontainercontract.Runtime, key string) error {
     return instance.limiter.Reset(runtimeInstance, key)
 }
 

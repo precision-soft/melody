@@ -10,17 +10,17 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
     "github.com/precision-soft/melody/v4/session/contract"
 )
 
 type sessionPersistedProbe struct {
-    runtimeInstance runtimecontract.Runtime
+    runtimeInstance containercontract.Runtime
     logger          *errorContextRecordingLogger
     request         httpcontract.Request
     calls           []error
@@ -41,7 +41,7 @@ func newSessionPersistedProbe(t *testing.T, sessionInstance contract.Session) *s
     request.Attributes().Set(requestAttributeSession, sessionInstance)
 
     return &sessionPersistedProbe{
-        runtimeInstance: runtime.New(context.Background(), scope, serviceContainer),
+        runtimeInstance: runtime.NewRequest(context.Background(), scope),
         logger:          recordingLogger,
         request:         request,
     }

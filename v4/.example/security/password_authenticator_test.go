@@ -5,7 +5,7 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/.example/entity"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 func TestPasswordAuthenticator_SupportsOnlyARequestCarryingBothCredentials(t *testing.T) {
@@ -27,7 +27,7 @@ func TestPasswordAuthenticator_SupportsOnlyARequestCarryingBothCredentials(t *te
 func TestPasswordAuthenticator_PublishesTheAcceptedAccountUnderItsIdentity(t *testing.T) {
     account := entity.NewUser("user-2", "editor", testPasswordHash, []string{"ROLE_EDITOR"})
 
-    authenticator := NewPasswordAuthenticator(func(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
+    authenticator := NewPasswordAuthenticator(func(runtimeInstance melodycontainercontract.Runtime, username string, password string) (*entity.User, bool, error) {
         if "editor" != username || "secret" != password {
             t.Fatalf("expected the credentials the door set, got %q / %q", username, password)
         }
@@ -53,7 +53,7 @@ func TestPasswordAuthenticator_PublishesTheAcceptedAccountUnderItsIdentity(t *te
 }
 
 func TestPasswordAuthenticator_AnswersAnonymousAndPublishesNothingForARefusedPassword(t *testing.T) {
-    authenticator := NewPasswordAuthenticator(func(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
+    authenticator := NewPasswordAuthenticator(func(runtimeInstance melodycontainercontract.Runtime, username string, password string) (*entity.User, bool, error) {
         return nil, false, nil
     })
 
@@ -76,7 +76,7 @@ func TestPasswordAuthenticator_AnswersAnonymousAndPublishesNothingForARefusedPas
 func TestPasswordAuthenticator_AnswersTheCheckFailureAsAnError(t *testing.T) {
     checkErr := errors.New("the account directory is unavailable")
 
-    authenticator := NewPasswordAuthenticator(func(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
+    authenticator := NewPasswordAuthenticator(func(runtimeInstance melodycontainercontract.Runtime, username string, password string) (*entity.User, bool, error) {
         return nil, false, checkErr
     })
 
@@ -87,8 +87,8 @@ func TestPasswordAuthenticator_AnswersTheCheckFailureAsAnError(t *testing.T) {
 }
 
 func TestPasswordAuthenticator_ChecksThroughTheRuntimeItWasHanded(t *testing.T) {
-    var checkedRuntime melodyruntimecontract.Runtime
-    authenticator := NewPasswordAuthenticator(func(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
+    var checkedRuntime melodycontainercontract.Runtime
+    authenticator := NewPasswordAuthenticator(func(runtimeInstance melodycontainercontract.Runtime, username string, password string) (*entity.User, bool, error) {
         checkedRuntime = runtimeInstance
 
         return nil, false, nil

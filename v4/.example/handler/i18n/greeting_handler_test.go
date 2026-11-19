@@ -11,8 +11,8 @@ import (
 
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
     melodytranslation "github.com/precision-soft/melody/v4/translation"
     melodytranslationcontract "github.com/precision-soft/melody/v4/translation/contract"
 )
@@ -35,7 +35,7 @@ func greetingFor(t *testing.T, routeLocale string, query string) GreetingRespons
         melodycontainer.RegisterOptions{},
     )
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/"+routeLocale+"/i18n/greeting/?"+query, nil)
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, melodyhttp.NewRequestContext("greeting-test", time.Now()))

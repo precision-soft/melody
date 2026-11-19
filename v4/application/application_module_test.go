@@ -18,7 +18,6 @@ import (
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
     securityconfig "github.com/precision-soft/melody/v4/security/config"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -668,7 +667,7 @@ func (instance unclaimedDoorMatcher) Matches(request httpcontract.Request) bool 
 
 type answeringLoginHandler struct{}
 
-func (instance answeringLoginHandler) Login(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, input securitycontract.LoginInput) (*securitycontract.LoginResult, error) {
+func (instance answeringLoginHandler) Login(runtimeInstance containercontract.Runtime, request httpcontract.Request, input securitycontract.LoginInput) (*securitycontract.LoginResult, error) {
     return &securitycontract.LoginResult{Token: input.Token}, nil
 }
 
@@ -677,7 +676,7 @@ type doorReachUnknownModule struct {
 }
 
 func (instance *doorReachUnknownModule) RegisterSecurity(builder *securityconfig.Builder) {
-    anonymous := security.NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+    anonymous := security.NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
         return security.NewAnonymousToken(), nil
     })
 

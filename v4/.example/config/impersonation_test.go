@@ -12,14 +12,13 @@ import (
     "github.com/precision-soft/melody/v4/.example/security"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func impersonationRuntime(t *testing.T, userRepository repository.UserRepository) melodyruntimecontract.Runtime {
+func impersonationRuntime(t *testing.T, userRepository repository.UserRepository) melodycontainercontract.Runtime {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -27,7 +26,7 @@ func impersonationRuntime(t *testing.T, userRepository repository.UserRepository
         return userRepository, nil
     }, melodycontainer.RegisterOptions{})
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 }
 
 func seededUserRepository(t *testing.T) repository.UserRepository {
@@ -99,7 +98,7 @@ func TestDirectoryImpersonatedUserResolver_ADirectoryThatCannotAnswerFailsClosed
     }
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    withoutDirectory := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    withoutDirectory := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
     if token, resolveErr := resolver().ResolveImpersonatedUser(withoutDirectory, "user-2"); nil != token || false == melodyexception.IsInfrastructureFailure(resolveErr) {
         t.Fatalf("expected a directory the container cannot resolve marked as an outage, got %v %v", token, resolveErr)
     }

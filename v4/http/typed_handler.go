@@ -5,17 +5,17 @@ import (
     "reflect"
     "runtime/debug"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* JsonHandlerErrorResponder renders the refusals JsonHandler makes before the handler runs. It is handed the failure itself beside the status and the message, whose cause carries the decoder's diagnosis and the validation collection under the validationErrors key. A responder that answers no response leaves the refusal to the framework. */
 type JsonHandlerErrorResponder func(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     status int,
     message string,
@@ -30,7 +30,7 @@ type JsonHandlerConfig struct {
 
 /* JsonHandler binds the request body into Req, validates it and calls handle, reading the body through the door Request.BindJson uses: the configured limit with its 413, the decoder's diagnosis as the refusal's cause, an empty or null body refused. A nil handle is refused at construction. */
 func JsonHandler[Req any](
-    handle func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, body Req) (httpcontract.Response, error),
+    handle func(runtimeInstance containercontract.Runtime, request httpcontract.Request, body Req) (httpcontract.Response, error),
     config JsonHandlerConfig,
 ) httpcontract.Handler {
     if nil == handle {
@@ -39,7 +39,7 @@ func JsonHandler[Req any](
         )
     }
 
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         var body Req
 
         if bindErr := bindJsonBody(request, &body); nil != bindErr {
@@ -81,7 +81,7 @@ func boundBodyIsNil(body any) bool {
 /* jsonHandlerError renders a pre-handler refusal through the application's responder, under a guard. A responder that answers no response, or panics, leaves the original refusal standing. */
 func jsonHandlerError(
     config JsonHandlerConfig,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     refusalErr error,
 ) (httpcontract.Response, error) {
@@ -118,7 +118,7 @@ func jsonHandlerError(
 /* invokeJsonHandlerErrorResponderSafely runs the responder under the kernel's containment, as the kernel's final step does: a panic is recorded with the stack of the recovering site, and the refusal the responder was asked to render stands. */
 func invokeJsonHandlerErrorResponderSafely(
     responder JsonHandlerErrorResponder,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     status int,
     message string,

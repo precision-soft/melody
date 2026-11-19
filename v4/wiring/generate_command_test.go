@@ -16,11 +16,10 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -85,7 +84,13 @@ func newCommandFixtureProject(t *testing.T) string {
     return projectDirectory
 }
 
-func newCommandFixtureRuntime(t *testing.T, projectDirectory string) runtimecontract.Runtime {
+/* commandFixtureRuntime keeps the container the fixture registered on, so a test can register more after the runtime is built: a runtime reaches no container. */
+type commandFixtureRuntime struct {
+    containercontract.Runtime
+    serviceContainer containercontract.Container
+}
+
+func newCommandFixtureRuntime(t *testing.T, projectDirectory string) *commandFixtureRuntime {
     t.Helper()
 
     environment, environmentErr := config.NewEnvironment(context.Background(), &emptyEnvironmentSource{})
@@ -109,7 +114,10 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string) runtimecont
         container.RegisterOptions{},
     )
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return &commandFixtureRuntime{
+        Runtime:          runtime.NewRun(context.Background(), serviceContainer.NewScope()),
+        serviceContainer: serviceContainer,
+    }
 }
 
 /* runGenerateCommand drives the command through the cli library, so a flag the command stops declaring fails here instead of reading its zero value. Unless the caller gives --out, the source goes to a file and the report to the writer; what comes back is the writer followed by the generated source. */
@@ -643,7 +651,7 @@ func TestGenerateCommand_TheStdoutModeJournalsTheReportAndPrintsTheSourceAlone(t
 
     journal := &journalCapturingLogger{Logger: logging.NewNopLogger()}
     container.MustRegister[loggingcontract.Logger](
-        runtimeInstance.Container(),
+        runtimeInstance.serviceContainer,
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return journal, nil
@@ -690,7 +698,7 @@ func TestGenerateCommand_TheStdoutModeJournalsTheCoverageLossesAboveAWarningThre
 
     journal := &bytes.Buffer{}
     container.MustRegister[loggingcontract.Logger](
-        runtimeInstance.Container(),
+        runtimeInstance.serviceContainer,
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return logging.NewJsonLogger(journal, logging.JsonLoggerConfig{MinLevel: loggingcontract.LevelWarning}), nil
@@ -750,7 +758,7 @@ func TestJournalSharesStdout_AnswersFalseWithoutAKernelSection(t *testing.T) {
         },
         container.RegisterOptions{},
     )
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     if true == journalSharesStdout(runtimeInstance) {
         t.Fatalf("expected a configuration without a kernel section to be read as not stdout")

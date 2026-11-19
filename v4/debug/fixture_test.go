@@ -12,7 +12,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func newTestMiddlewareCommandWithEmptyProviders() *MiddlewareCommand {
@@ -48,15 +47,20 @@ func (instance *testRuntime) Scope() containercontract.Scope {
     return instance.scopeValue
 }
 
-func (instance *testRuntime) Container() containercontract.Container {
-    return instance.containerValue
+func (instance *testRuntime) Kind() containercontract.Kind {
+    return containercontract.KindRun
 }
 
-var _ runtimecontract.Runtime = (*testRuntime)(nil)
+var _ containercontract.Runtime = (*testRuntime)(nil)
+
+/* runContainerCommand runs debug:container over the container the test runtime was built on, as the application builds the command over its own. */
+func runContainerCommand(runtimeInstance *testRuntime, arguments []string) (string, error) {
+    return runDebugCommand(NewContainerCommand(runtimeInstance.containerValue), runtimeInstance, arguments)
+}
 
 func runDebugCommand(
     command clicontract.Command,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     arguments []string,
 ) (string, error) {
     buffer := &bytes.Buffer{}

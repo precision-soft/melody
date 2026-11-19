@@ -6,13 +6,13 @@ import (
     "github.com/precision-soft/melody/v4/.example/message"
     "github.com/precision-soft/melody/v4/.example/presenter"
     melodybag "github.com/precision-soft/melody/v4/bag"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func PublishHandler(bus melodymessagebuscontract.Bus) melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         topic := queryStringOr(request, "topic", CatalogTopic)
         text := queryStringOr(request, "text", "hello")
 

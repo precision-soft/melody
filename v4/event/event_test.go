@@ -9,11 +9,10 @@ import (
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func testNewEventDispatcher() (*EventDispatcher, clockcontract.Clock) {
@@ -23,7 +22,7 @@ func testNewEventDispatcher() (*EventDispatcher, clockcontract.Clock) {
     return dispatcher, clockInstance
 }
 
-func newEventDispatcherAdapterTestRuntime(t *testing.T) runtimecontract.Runtime {
+func newEventDispatcherAdapterTestRuntime(t *testing.T) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
@@ -38,7 +37,7 @@ func newEventDispatcherAdapterTestRuntime(t *testing.T) runtimecontract.Runtime 
         t.Fatalf("unexpected error: %v", err)
     }
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRun(context.Background(), scope)
 }
 
 func TestEvent_StopPropagation(t *testing.T) {

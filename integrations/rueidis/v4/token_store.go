@@ -14,8 +14,8 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/redis/rueidis"
 )
@@ -353,12 +353,12 @@ func deadlinePassed(ctx context.Context) bool {
 
 /* Put stores the token under the ttl, read against the contract's TokenTtlRule: an absent ttl and one under a second are refused naming the ttl, since the likeliest caller of a lapsed one computed a remaining lifetime that already elapsed, and unlimited stores it with no expiry. The user identifier must be valid UTF-8. The token is keyed by its SHA-256 digest, which an unkeyed hash makes safe only for a token of at least 128 bits of entropy: a guessable token is found from its digest by whoever reads the keyspace. */
 func (instance *RedisTokenStore) Put(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     tokenString string,
     claims securitycontract.Claims,
     ttl bound.Duration,
 ) error {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return runtimeErr
     }
 
@@ -370,8 +370,8 @@ func (instance *RedisTokenStore) Put(
     return instance.put(runtimeInstance.Context(), tokenString, claims, expiry)
 }
 
-func (instance *RedisTokenStore) Delete(runtimeInstance runtimecontract.Runtime, tokenString string) error {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+func (instance *RedisTokenStore) Delete(runtimeInstance containercontract.Runtime, tokenString string) error {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return runtimeErr
     }
 
@@ -397,8 +397,8 @@ func (instance *RedisTokenStore) Delete(runtimeInstance runtimecontract.Runtime,
 }
 
 /* DeleteByUser reclaims what a revocation made unusable; it is not the revocation itself. SSCAN may miss a member added while the walk runs, so a token issued during the call survives it — RevokeBefore is what ends a user's sessions. A walk the store or the caller's context cut answers what it removed before beside the error. */
-func (instance *RedisTokenStore) DeleteByUser(runtimeInstance runtimecontract.Runtime, userIdentifier string) (int, error) {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+func (instance *RedisTokenStore) DeleteByUser(runtimeInstance containercontract.Runtime, userIdentifier string) (int, error) {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return 0, runtimeErr
     }
 
@@ -472,8 +472,8 @@ func (instance *RedisTokenStore) deleteTokenBatch(parentContext context.Context,
 }
 
 /* PurgeExpired drops the index entries of tokens that already expired, walking every user's index set in bounded batches. A set's own expiry bounds only a set whose members all died, since an account that keeps logging in keeps raising its deadline. The outer SCAN finds the user sets, walked one at a time, and each set is pruned by its own SSCAN, the results sliced to the batch size since the count is a hint, each slice tested by one purge script under DeleteByUser's bound, so no script's hold on the server depends on the largest account; the script drops only the members whose token is gone, a live token keeping its entry. Pruning while scanning is what SSCAN tolerates: a present member is returned at least once, and a re-visit is harmless. A walk the store or the caller's context cut answers what it pruned before beside the error. */
-func (instance *RedisTokenStore) PurgeExpired(runtimeInstance runtimecontract.Runtime) (int, error) {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+func (instance *RedisTokenStore) PurgeExpired(runtimeInstance containercontract.Runtime) (int, error) {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return 0, runtimeErr
     }
 
@@ -586,10 +586,10 @@ func (instance *RedisTokenStore) pruneTokenBatch(parentContext context.Context, 
 }
 
 func (instance *RedisTokenStore) Lookup(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     tokenString string,
 ) (securitycontract.Claims, bool, error) {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return securitycontract.Claims{}, false, runtimeErr
     }
 
@@ -639,12 +639,12 @@ func (instance *RedisTokenStore) Lookup(
 }
 
 func (instance *RedisTokenStore) RevokeBefore(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     userIdentifier string,
     deviceIdentifier string,
     instant time.Time,
 ) error {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return runtimeErr
     }
 
@@ -690,11 +690,11 @@ func (instance *RedisTokenStore) RevokeBefore(
 }
 
 func (instance *RedisTokenStore) RevocationEpoch(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     userIdentifier string,
     deviceIdentifier string,
 ) (time.Time, error) {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return time.Time{}, runtimeErr
     }
 

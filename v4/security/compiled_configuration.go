@@ -6,6 +6,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     melodyconfig "github.com/precision-soft/melody/v4/config"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -14,7 +15,6 @@ import (
     httpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -241,7 +241,7 @@ func (instance *CompiledFirewall) LogoutPath() string {
 
 /* Login runs the firewall's login handler and leaves the session id as it was: the door rotates it first when it authenticated the credentials, and a handler behind a door with no authenticator that writes an identity into the session rotates the id itself, through http.RegenerateRequestSession, since only it knows when the privilege changes; a login that does not rotate is open to session fixation. A handler error raises security.login.failure only when it answers 401 or 403, a refused credential, and a failed dispatch of the event is filed at Error with the refusal kept. */
 func (instance *CompiledFirewall) Login(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
@@ -305,7 +305,7 @@ func (instance *CompiledFirewall) Login(
 
 /* Logout runs the firewall's logout handler. A result beside an error means the handler succeeded and security.logout.success could not be dispatched: the sign-out stands. The logout door runs the handler without this dispatch and raises the event once the session's delete landed. */
 func (instance *CompiledFirewall) Logout(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
@@ -324,7 +324,7 @@ func (instance *CompiledFirewall) Logout(
 
 /* runLogoutHandler raises security.logout.failure for a handler's error and leaves the success to its caller */
 func (instance *CompiledFirewall) runLogoutHandler(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
@@ -375,11 +375,11 @@ func (instance *CompiledFirewall) Sources() (Source, Source, Source, Source, Sou
 }
 
 func (instance *CompiledFirewall) dispatchLoginSuccess(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     token securitycontract.Token,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,
@@ -391,11 +391,11 @@ func (instance *CompiledFirewall) dispatchLoginSuccess(
 }
 
 func (instance *CompiledFirewall) dispatchLoginFailure(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     failureErr error,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,
@@ -407,10 +407,10 @@ func (instance *CompiledFirewall) dispatchLoginFailure(
 }
 
 func (instance *CompiledFirewall) dispatchLogoutSuccess(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,
@@ -422,11 +422,11 @@ func (instance *CompiledFirewall) dispatchLogoutSuccess(
 }
 
 func (instance *CompiledFirewall) dispatchLogoutFailure(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     failureErr error,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,

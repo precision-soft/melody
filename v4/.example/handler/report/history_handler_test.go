@@ -21,11 +21,11 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
 )
 
 /* the limit door reads nothing off the runtime, so the request is built without one: what it needs is the query bag, which NewRequest fills from the url at construction. */
@@ -126,7 +126,7 @@ func TestApiHistoryHandler_RendersAnArchiveFailureThroughThePresenter(t *testing
         },
         melodycontainer.RegisterOptions{},
     )
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     request := melodyhttp.NewRequest(
         httptest.NewRequest(nethttp.MethodGet, "/reports/api/history/", nil),
@@ -189,7 +189,7 @@ func historyDoorOver(t *testing.T, cacheInstance melodycachecontract.Cache) map[
     melodycontainer.MustRegister(containerInstance, repository.ServiceCatalogReadingRepository, func(resolver melodycontainercontract.Resolver) (repository.CatalogReadingRepository, error) {
         return repository.NewCatalogReadingRepository(persistence.NewArchiveStorage(nil))
     }, melodycontainer.RegisterOptions{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/reports/api/history/", nil), map[string]string{}, runtimeInstance, melodyhttp.NewRequestContext("history-current-test", time.Unix(0, 0).UTC()))
 

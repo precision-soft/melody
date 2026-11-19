@@ -10,13 +10,12 @@ import (
 
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
     "github.com/precision-soft/melody/v4/validation"
 )
@@ -26,7 +25,7 @@ type jsonHandlerTestRequest struct {
 }
 
 /* the shared http container carries the configuration the body-reading door resolves the request limit from: JsonHandler binds through the same door Request.BindJson does, so it needs the same services the rest of the request cycle needs rather than a container of its own with fewer */
-func newJsonHandlerRuntime() runtimecontract.Runtime {
+func newJsonHandlerRuntime() containercontract.Runtime {
     serviceContainer := newHttpTestContainer()
 
     serviceContainer.MustRegister(
@@ -37,10 +36,10 @@ func newJsonHandlerRuntime() runtimecontract.Runtime {
         containercontract.RegisterOptions{},
     )
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 }
 
-func newJsonHandlerRuntimeWithBodyLimit(maxRequestBodyBytes int) runtimecontract.Runtime {
+func newJsonHandlerRuntimeWithBodyLimit(maxRequestBodyBytes int) containercontract.Runtime {
     serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(
         session.NewInMemoryStorage(session.InMemoryStorageConfig{}),
         map[string]string{
@@ -56,11 +55,11 @@ func newJsonHandlerRuntimeWithBodyLimit(maxRequestBodyBytes int) runtimecontract
         containercontract.RegisterOptions{},
     )
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 }
 
 /* the panicking-responder mirror needs the journal itself and not a nop: the record is filed at the recovery site, so the only reader that can see it is a logger installed on the runtime the handler is called with */
-func newJsonHandlerRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
+func newJsonHandlerRuntimeWithLogger(logger loggingcontract.Logger) containercontract.Runtime {
     serviceContainer := newHttpTestContainer()
     serviceContainer.MustOverrideProtectedInstance(logging.ServiceLogger, logger, containercontract.OverrideOptions{})
 
@@ -72,7 +71,7 @@ func newJsonHandlerRuntimeWithLogger(logger loggingcontract.Logger) runtimecontr
         containercontract.RegisterOptions{},
     )
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 }
 
 func requireJsonHandlerBadRequest(t *testing.T, handleErr error) {
@@ -96,7 +95,7 @@ func TestJsonHandler_DecodesValidBodyAndCallsHandle(t *testing.T) {
     runtimeInstance := newJsonHandlerRuntime()
 
     var captured jsonHandlerTestRequest
-    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+    handler := JsonHandler(func(currentRuntime containercontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
         captured = body
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
@@ -122,7 +121,7 @@ func TestJsonHandler_DecodesValidBodyAndCallsHandle(t *testing.T) {
 func TestJsonHandler_RejectsInvalidBody(t *testing.T) {
     runtimeInstance := newJsonHandlerRuntime()
 
-    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+    handler := JsonHandler(func(currentRuntime containercontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
         return TextResponse(nethttp.StatusOK, "ok"), nil
     }, JsonHandlerConfig{})
 
@@ -141,7 +140,7 @@ func TestJsonHandler_RejectsTrailingData(t *testing.T) {
     runtimeInstance := newJsonHandlerRuntime()
 
     handled := false
-    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+    handler := JsonHandler(func(currentRuntime containercontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
         handled = true
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
@@ -166,7 +165,7 @@ func TestJsonHandler_RejectsANullBodyForAPointerRequest(t *testing.T) {
 
     handled := false
     receivedNil := false
-    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body *jsonHandlerTestRequest) (httpcontract.Response, error) {
+    handler := JsonHandler(func(currentRuntime containercontract.Runtime, request httpcontract.Request, body *jsonHandlerTestRequest) (httpcontract.Response, error) {
         handled = true
         receivedNil = nil == body
 
@@ -192,7 +191,7 @@ func TestJsonHandler_AcceptsAPointerRequestBody(t *testing.T) {
     runtimeInstance := newJsonHandlerRuntime()
 
     var captured *jsonHandlerTestRequest
-    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body *jsonHandlerTestRequest) (httpcontract.Response, error) {
+    handler := JsonHandler(func(currentRuntime containercontract.Runtime, request httpcontract.Request, body *jsonHandlerTestRequest) (httpcontract.Response, error) {
         captured = body
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
@@ -215,7 +214,7 @@ func TestJsonHandler_RejectsAnEmptyObjectThatFailsValidation(t *testing.T) {
     runtimeInstance := newJsonHandlerRuntime()
 
     handled := false
-    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body *jsonHandlerTestRequest) (httpcontract.Response, error) {
+    handler := JsonHandler(func(currentRuntime containercontract.Runtime, request httpcontract.Request, body *jsonHandlerTestRequest) (httpcontract.Response, error) {
         handled = true
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
@@ -239,7 +238,7 @@ func TestJsonHandler_RejectsAnEmptyObjectThatFailsValidation(t *testing.T) {
 func TestJsonHandler_AnswersAnOversizedBodyWith413RatherThanInvalidJson(t *testing.T) {
     runtimeInstance := newJsonHandlerRuntimeWithBodyLimit(8)
 
-    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+    handler := JsonHandler(func(currentRuntime containercontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
         return TextResponse(nethttp.StatusOK, "ok"), nil
     }, JsonHandlerConfig{})
 
@@ -261,7 +260,7 @@ func TestJsonHandler_AnswersAnOversizedBodyWith413RatherThanInvalidJson(t *testi
 func TestJsonHandler_CarriesTheDecoderDiagnosisAsTheRefusalCause(t *testing.T) {
     runtimeInstance := newJsonHandlerRuntime()
 
-    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+    handler := JsonHandler(func(currentRuntime containercontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
         return TextResponse(nethttp.StatusOK, "ok"), nil
     }, JsonHandlerConfig{})
 
@@ -283,7 +282,7 @@ func TestJsonHandler_CarriesTheDecoderDiagnosisAsTheRefusalCause(t *testing.T) {
 func TestJsonHandler_ServesValidationDetailUnderTheValidationErrorsKey(t *testing.T) {
     runtimeInstance := newJsonHandlerRuntime()
 
-    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+    handler := JsonHandler(func(currentRuntime containercontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
         return TextResponse(nethttp.StatusOK, "ok"), nil
     }, JsonHandlerConfig{})
 
@@ -307,7 +306,7 @@ func TestJsonHandler_RefusesANullBodyBoundToASlice(t *testing.T) {
     runtimeInstance := newJsonHandlerRuntime()
 
     handled := false
-    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body []jsonHandlerTestRequest) (httpcontract.Response, error) {
+    handler := JsonHandler(func(currentRuntime containercontract.Runtime, request httpcontract.Request, body []jsonHandlerTestRequest) (httpcontract.Response, error) {
         handled = true
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
@@ -338,7 +337,7 @@ func jsonHandlerOutcome[T any](t *testing.T, body string) (bool, error) {
     runtimeInstance := newJsonHandlerRuntime()
 
     handled := false
-    handler := JsonHandler(func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, bound T) (httpcontract.Response, error) {
+    handler := JsonHandler(func(currentRuntime containercontract.Runtime, request httpcontract.Request, bound T) (httpcontract.Response, error) {
         handled = true
 
         return TextResponse(nethttp.StatusOK, "ok"), nil
@@ -392,11 +391,11 @@ func TestJsonHandler_KeepsTheRefusalWhenTheResponderAnswersNothing(t *testing.T)
     runtimeInstance := newJsonHandlerRuntime()
 
     handler := JsonHandler(
-        func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+        func(currentRuntime containercontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
         JsonHandlerConfig{ErrorResponder: func(
-            currentRuntime runtimecontract.Runtime,
+            currentRuntime containercontract.Runtime,
             request httpcontract.Request,
             status int,
             message string,
@@ -425,11 +424,11 @@ func TestJsonHandler_ContainsAPanickingResponder(t *testing.T) {
     runtimeInstance := newJsonHandlerRuntimeWithLogger(recordingLogger)
 
     handler := JsonHandler(
-        func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+        func(currentRuntime containercontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
         JsonHandlerConfig{ErrorResponder: func(
-            currentRuntime runtimecontract.Runtime,
+            currentRuntime containercontract.Runtime,
             request httpcontract.Request,
             status int,
             message string,
@@ -474,11 +473,11 @@ func TestJsonHandler_HandsTheResponderTheCauseItNeedsToRenderTheDetail(t *testin
 
     var receivedCause error
     handler := JsonHandler(
-        func(currentRuntime runtimecontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
+        func(currentRuntime containercontract.Runtime, request httpcontract.Request, body jsonHandlerTestRequest) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
         JsonHandlerConfig{ErrorResponder: func(
-            currentRuntime runtimecontract.Runtime,
+            currentRuntime containercontract.Runtime,
             request httpcontract.Request,
             status int,
             message string,

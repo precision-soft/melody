@@ -9,11 +9,11 @@ import (
     "sync"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -27,7 +27,7 @@ func (instance *fixedTokenSource) Name() string {
 }
 
 func (instance *fixedTokenSource) Resolve(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     _ httpcontract.Request,
 ) (securitycontract.Token, error) {
     return instance.token, nil
@@ -39,7 +39,7 @@ type mapUserResolver struct {
 }
 
 func (instance *mapUserResolver) ResolveImpersonatedUser(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     identifier string,
 ) (securitycontract.Token, error) {
     token, exists := instance.usersById[identifier]
@@ -269,7 +269,7 @@ func TestImpersonation_ResolverErrorCarriesItsCauseIntoTheJournal(t *testing.T) 
 type failingUserResolver struct{}
 
 func (instance *failingUserResolver) ResolveImpersonatedUser(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     _ string,
 ) (securitycontract.Token, error) {
     return nil, exception.NewError("user store query failed", nil, exception.MarkInfrastructureFailure(exception.NewError("store is down", nil, nil)))

@@ -8,7 +8,7 @@ import (
     "sync"
 
     "github.com/precision-soft/melody/v4/.example/twofactor"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/feature"
@@ -152,7 +152,7 @@ var _ schema.Dialect = (*renderingDialect)(nil)
 /* fixedTwoFactorStore hands the enrollment release one store whatever the runtime, the source its tests need
    where production resolves the store through the container */
 func fixedTwoFactorStore(store *twofactor.Store) twofactor.StoreSource {
-    return func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime) (*twofactor.Store, error) {
         return store, nil
     }
 }

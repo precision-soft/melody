@@ -3,18 +3,18 @@ package middleware
 import (
     nethttp "net/http"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/http/static"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func StaticMiddleware(config static.Config) httpcontract.Middleware {
     staticServer := static.NewFileServer(config)
 
     return func(next httpcontract.Handler) httpcontract.Handler {
-        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             logger := logging.LoggerMustFromRuntime(runtimeInstance)
 
             statusCode, headers, bodyReader, ok := staticServer.ServeReader(request, logger)

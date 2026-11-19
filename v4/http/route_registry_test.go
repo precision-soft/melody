@@ -5,9 +5,9 @@ import (
     nethttp "net/http"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* registration was the single channel with no duplicate handling: two unnamed routes on one method and pattern were both stored and the later one could never be dispatched — the tie falls to the first registered — so the shadowing was invisible everywhere. */
@@ -214,7 +214,7 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherPriority(t *testing.T) {
 
     router.Handle(
         "/ranked",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "declared-first"), nil
         },
         RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -222,7 +222,7 @@ func TestRouteRegistry_AcceptsTheSamePatternUnderAnotherPriority(t *testing.T) {
 
     router.Handle(
         "/ranked",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "higher-priority"), nil
         },
         RouteOptions{Methods: []string{nethttp.MethodGet}, Priority: 10},

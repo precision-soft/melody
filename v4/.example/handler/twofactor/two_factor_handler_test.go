@@ -1,13 +1,13 @@
 package twofactor
 
 import (
-    "regexp"
     "context"
     "encoding/json"
     "errors"
     "io"
     nethttp "net/http"
     "net/http/httptest"
+    "regexp"
     "strings"
     "testing"
     "time"
@@ -15,9 +15,9 @@ import (
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     store2fa "github.com/precision-soft/melody/v4/.example/twofactor"
     "github.com/precision-soft/melody/v4/bound"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/security/totp"
@@ -152,7 +152,7 @@ func TestVerifyHandlerRedeemsAgainstTheTokensEnrollmentWhateverTheRequestNames(t
 func healingStore(store *store2fa.Store, refusal error) (store2fa.StoreSource, *int) {
     calls := 0
 
-    return func(runtimeInstance melodyruntimecontract.Runtime) (*store2fa.Store, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime) (*store2fa.Store, error) {
         calls = calls + 1
         if 1 == calls {
             return nil, refusal
@@ -350,7 +350,7 @@ type recordingNonceGuard struct {
     ttlList []bound.Duration
 }
 
-func (instance *recordingNonceGuard) Remember(runtimeInstance melodyruntimecontract.Runtime, nonce string, ttl bound.Duration) (bool, error) {
+func (instance *recordingNonceGuard) Remember(runtimeInstance melodycontainercontract.Runtime, nonce string, ttl bound.Duration) (bool, error) {
     instance.ttlList = append(instance.ttlList, ttl)
 
     return false, nil
@@ -396,7 +396,7 @@ type countingFactorBudget struct {
     spendErr  error
 }
 
-func (instance *countingFactorBudget) Spend(melodyruntimecontract.Runtime, string) error {
+func (instance *countingFactorBudget) Spend(melodycontainercontract.Runtime, string) error {
     instance.spent++
     if nil != instance.spendErr {
         return instance.spendErr
@@ -409,7 +409,7 @@ func (instance *countingFactorBudget) Spend(melodyruntimecontract.Runtime, strin
     return nil
 }
 
-func (instance *countingFactorBudget) Release(melodyruntimecontract.Runtime, string) error {
+func (instance *countingFactorBudget) Release(melodycontainercontract.Runtime, string) error {
     instance.releases++
     instance.spent = 0
 

@@ -13,18 +13,18 @@ import (
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     store2fa "github.com/precision-soft/melody/v4/.example/twofactor"
     "github.com/precision-soft/melody/v4/bound"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/security/totp"
 )
 
 /* enrolledIdentifier answers the account both doors act on: the authenticated token's identifier, never a name the request chose, so the enrollment door writes the caller's own row and the verification door reads it. */
-func enrolledIdentifier(runtimeInstance melodyruntimecontract.Runtime) (string, bool) {
+func enrolledIdentifier(runtimeInstance melodycontainercontract.Runtime) (string, bool) {
     token, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
     if false == exists {
         return "", false
@@ -40,7 +40,7 @@ func enrolledIdentifier(runtimeInstance melodyruntimecontract.Runtime) (string, 
 
 /* PageHandler serves the caller's second-factor page: the state, the enrollment with its QR code and recovery codes, and the confirmation. */
 func PageHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         return page.Html(runtimeInstance, request, nethttp.StatusOK, page.TwoFactorHtml), nil
     }
 }
@@ -70,7 +70,7 @@ func EnrollHandler(storeSource store2fa.StoreSource, replayGuard melodysecurityc
         replayGuard = melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{})
     }
 
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         user, authenticated := enrolledIdentifier(runtimeInstance)
         if false == authenticated {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
@@ -117,7 +117,7 @@ func ConfirmHandler(storeSource store2fa.StoreSource, replayGuard melodysecurity
         replayGuard = melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{})
     }
 
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         user, authenticated := enrolledIdentifier(runtimeInstance)
         if false == authenticated {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
@@ -183,7 +183,7 @@ type statusPayload struct {
 
 /* StatusHandler answers whether the caller has an active factor and whether an enrollment waits for its confirmation, for the account page; it opens no sealed column. */
 func StatusHandler(storeSource store2fa.StoreSource) melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         user, authenticated := enrolledIdentifier(runtimeInstance)
         if false == authenticated {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
@@ -209,7 +209,7 @@ func VerifyHandler(storeSource store2fa.StoreSource, replayGuard melodysecurityc
         replayGuard = melodysecurity.NewMemoryNonceGuard(melodysecurity.MemoryNonceGuardConfig{})
     }
 
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         user, authenticated := enrolledIdentifier(runtimeInstance)
         if false == authenticated {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
@@ -243,7 +243,7 @@ const (
 
 /* currentFactor checks the factor the request carries against the caller's enrollment and spends it: a recovery code on X-2FA-Recovery-Code is redeemed atomically, a TOTP code on X-2FA-Code is verified and burned in the replay guard. It answers the factor accepted, or the refusal to send — 401 for a wrong, spent or unenrolled factor, 500 for a store that failed, and what absent builds when the request carries neither header. */
 func currentFactor(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     store *store2fa.Store,
     user string,
@@ -261,13 +261,13 @@ func currentFactor(
 
 /* FactorBudget is the per-account allowance of presented second factors the sign-in spends too, so a session cannot walk the codes at these doors: Spend counts one, Release gives the allowance back once a factor was accepted. */
 type FactorBudget interface {
-    Spend(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string) error
+    Spend(runtimeInstance melodycontainercontract.Runtime, userIdentifier string) error
 
-    Release(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string) error
+    Release(runtimeInstance melodycontainercontract.Runtime, userIdentifier string) error
 }
 
 /* releaseFactorBudget journals a failed release, which never refuses the factor that was accepted */
-func releaseFactorBudget(runtimeInstance melodyruntimecontract.Runtime, budget FactorBudget, user string) {
+func releaseFactorBudget(runtimeInstance melodycontainercontract.Runtime, budget FactorBudget, user string) {
     releaseErr := budget.Release(runtimeInstance, user)
     if nil == releaseErr {
         return
@@ -279,7 +279,7 @@ func releaseFactorBudget(runtimeInstance melodyruntimecontract.Runtime, budget F
 }
 
 /* refuseOverBudget counts the presented factor and answers the refusal of an account past its allowance, 429 with the budget's Retry-After, of a budget whose store could not answer, 503, or of any other failure, 500. */
-func refuseOverBudget(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, user string, budget FactorBudget) melodyhttpcontract.Response {
+func refuseOverBudget(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, user string, budget FactorBudget) melodyhttpcontract.Response {
     if nil == budget {
         return nil
     }
@@ -305,7 +305,7 @@ func refuseOverBudget(runtimeInstance melodyruntimecontract.Runtime, request mel
 }
 
 func presentedFactor(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     store *store2fa.Store,
     user string,
@@ -355,7 +355,7 @@ func presentedFactor(
 
 /* acceptTotpCode verifies a code against a secret and burns it in the replay guard under the nonce the sign-in writes, answering the refusal of a wrong or spent code */
 func acceptTotpCode(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     user string,
     secret string,
@@ -389,7 +389,7 @@ func acceptTotpCode(
 }
 
 /* unavailableStore answers a door whose store could not be resolved with 503 and the cause journaled; the next request resolves the store again. */
-func unavailableStore(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, storeErr error) melodyhttpcontract.Response {
+func unavailableStore(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, storeErr error) melodyhttpcontract.Response {
     return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusServiceUnavailable, "the second factor is unavailable", storeErr)
 }
 

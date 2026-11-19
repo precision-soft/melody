@@ -35,7 +35,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/messagebus"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
     securityconfig "github.com/precision-soft/melody/v4/security/config"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -163,7 +162,7 @@ func (instance *anonymousProbeTokenSource) Name() string {
 }
 
 func (instance *anonymousProbeTokenSource) Resolve(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
 ) (securitycontract.Token, error) {
     return security.NewAnonymousToken(), nil
@@ -848,19 +847,19 @@ type recordingCloseTransport struct {
     closed atomic.Bool
 }
 
-func (instance *recordingCloseTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *recordingCloseTransport) Send(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *recordingCloseTransport) Receive(runtimeInstance runtimecontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+func (instance *recordingCloseTransport) Receive(runtimeInstance containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
     return nil, nil
 }
 
-func (instance *recordingCloseTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *recordingCloseTransport) Ack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *recordingCloseTransport) Nack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+func (instance *recordingCloseTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
     return nil
 }
 
@@ -999,7 +998,7 @@ func TestBootContainer_ARelativeLogPathIsAnchoredToTheProjectDirectoryUnderACrea
 
 type teardownOrderProbeBus struct{}
 
-func (instance *teardownOrderProbeBus) Dispatch(runtimeInstance runtimecontract.Runtime, message any, stamps []messagebuscontract.Stamp) (messagebuscontract.Envelope, error) {
+func (instance *teardownOrderProbeBus) Dispatch(runtimeInstance containercontract.Runtime, message any, stamps []messagebuscontract.Stamp) (messagebuscontract.Envelope, error) {
     return nil, nil
 }
 

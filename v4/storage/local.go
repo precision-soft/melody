@@ -14,9 +14,9 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
@@ -97,7 +97,7 @@ type LocalStorage struct {
 }
 
 func (instance *LocalStorage) Put(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     key string,
     reader io.Reader,
     size int64,
@@ -298,7 +298,7 @@ func createStorageTemporaryFile(root *os.Root, relativeKey string) (string, *os.
 }
 
 func (instance *LocalStorage) Get(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     key string,
 ) (io.ReadCloser, error) {
     relativeKey, keyErr := storageRelativeKey(key)
@@ -338,7 +338,7 @@ func (instance *LocalStorage) Get(
 }
 
 func (instance *LocalStorage) Delete(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     key string,
 ) error {
     relativeKey, keyErr := storageRelativeKey(key)
@@ -370,7 +370,7 @@ func (instance *LocalStorage) Delete(
 }
 
 func (instance *LocalStorage) Exists(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     key string,
 ) (bool, error) {
     relativeKey, keyErr := storageRelativeKey(key)
@@ -408,7 +408,7 @@ func storageObjectAbsent(err error) bool {
 }
 
 func (instance *LocalStorage) PresignedUrl(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     key string,
     expiry time.Duration,
 ) (string, error) {

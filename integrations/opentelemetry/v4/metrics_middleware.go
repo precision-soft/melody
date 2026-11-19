@@ -9,9 +9,9 @@ import (
     "go.opentelemetry.io/otel/attribute"
     "go.opentelemetry.io/otel/metric"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
@@ -38,7 +38,7 @@ func NewMetricsMiddleware(meter metric.Meter) (httpcontract.Middleware, error) {
     }
 
     return func(next httpcontract.Handler) httpcontract.Handler {
-        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             startedAt := time.Now()
 
             /* the wrapped writer captures the status a handler commits directly, the nil-response streaming or proxy shape MetricsRouteHandler and the websocket bridge use, so the per-route instruments record what the handler wrote rather than a default 200 */

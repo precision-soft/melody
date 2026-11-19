@@ -11,9 +11,9 @@ import (
 
     "github.com/precision-soft/melody/v4/bag"
     "github.com/precision-soft/melody/v4/config"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
 )
 
@@ -605,7 +605,7 @@ func serveUrlEncodedFormUnderALimit(t *testing.T, bodyLimitBytes int, valueBytes
     router := NewRouter()
     router.Handle(
         "/form",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             postedValueBytes = len(request.HttpRequest().PostForm.Get("value"))
             if len(request.HttpRequest().FormValue("value")) != postedValueBytes {
                 t.Errorf("expected Form to carry the posted value beside PostForm")

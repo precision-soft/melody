@@ -4,12 +4,12 @@ import (
     "github.com/precision-soft/melody/v4/.example/reporting"
     "github.com/precision-soft/melody/v4/.example/service"
     melodycontainer "github.com/precision-soft/melody/v4/container"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* recordCatalogChange records one change the nomenclature accepted and tells every open page about it, from the event listeners where everything that follows a write is gathered. A change made while serving a request goes into that request's trail, flushed as one batch after the handler chain; a change made outside a request is written at once with an empty request, since only the http kernel installs the request context the trail is built from. The services are resolved per call, since a subscriber is built while the container is still being filled. */
 func recordCatalogChange(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     action string,
     subject string,
     subjectId string,
@@ -33,7 +33,7 @@ func recordCatalogChange(
         }
     }
 
-    journalService := service.MustGetCatalogJournalService(runtimeInstance.Context(), runtimeInstance.Container())
+    journalService := service.MustGetCatalogJournalService(runtimeInstance.Context(), runtimeInstance.Scope())
 
     return journalService.Record(runtimeInstance, action, subject, subjectId)
 }

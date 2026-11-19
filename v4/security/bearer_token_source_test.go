@@ -7,10 +7,10 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -101,7 +101,7 @@ func TestBearerTokenSource_RejectsEmptySubjectOpaqueToken(t *testing.T) {
 
 type scopeRoleEnricher struct{}
 
-func (instance scopeRoleEnricher) Enrich(runtimeInstance runtimecontract.Runtime, claims securitycontract.Claims) (securitycontract.Claims, error) {
+func (instance scopeRoleEnricher) Enrich(runtimeInstance containercontract.Runtime, claims securitycontract.Claims) (securitycontract.Claims, error) {
     role, hasRole := claims.Scope["role"].(string)
     if false == hasRole {
         return claims, exception.NewError("scope has no role", nil, nil)
@@ -165,7 +165,7 @@ type failingTokenStore struct {
 }
 
 func (instance *failingTokenStore) Lookup(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     _ string,
 ) (securitycontract.Claims, bool, error) {
     return securitycontract.Claims{}, false, instance.failure
@@ -220,7 +220,7 @@ func TestBearerTokenSource_BadCredentialStaysAtInfo(t *testing.T) {
 type markingEnricher struct{}
 
 func (instance *markingEnricher) Enrich(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     _ securitycontract.Claims,
 ) (securitycontract.Claims, error) {
     return securitycontract.Claims{}, exception.NewError("roles lookup failed", nil, exception.MarkInfrastructureFailure(errors.New("store is down")))

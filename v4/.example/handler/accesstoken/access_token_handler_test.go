@@ -20,12 +20,11 @@ import (
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodyvalidation "github.com/precision-soft/melody/v4/validation"
@@ -87,7 +86,7 @@ func callAccessTokenDoor(t *testing.T, call accessTokenDoorCall) int {
         return melodyvalidation.NewValidator(melodyvalidation.ValidatorConfig{}), nil
     }, melodycontainer.RegisterOptions{})
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, call.path, strings.NewReader(call.body))
     httpRequest.Header.Set("Content-Type", "application/json")
@@ -161,11 +160,11 @@ type lookupFailingTokenStore struct {
     deletedCount int
 }
 
-func (instance *lookupFailingTokenStore) Lookup(runtimeInstance melodyruntimecontract.Runtime, tokenString string) (melodysecuritycontract.Claims, bool, error) {
+func (instance *lookupFailingTokenStore) Lookup(runtimeInstance melodycontainercontract.Runtime, tokenString string) (melodysecuritycontract.Claims, bool, error) {
     return melodysecuritycontract.Claims{}, false, instance.lookupErr
 }
 
-func (instance *lookupFailingTokenStore) Delete(runtimeInstance melodyruntimecontract.Runtime, tokenString string) error {
+func (instance *lookupFailingTokenStore) Delete(runtimeInstance melodycontainercontract.Runtime, tokenString string) error {
     instance.deletedCount++
 
     if nil != instance.deleteErr {
@@ -180,7 +179,7 @@ type putFailingTokenStore struct {
     putErr error
 }
 
-func (instance *putFailingTokenStore) Put(_ melodyruntimecontract.Runtime, _ string, _ melodysecuritycontract.Claims, _ melodybound.Duration) error {
+func (instance *putFailingTokenStore) Put(_ melodycontainercontract.Runtime, _ string, _ melodysecuritycontract.Claims, _ melodybound.Duration) error {
     return instance.putErr
 }
 
@@ -195,10 +194,10 @@ func heldTokens(t *testing.T, store melodysecuritycontract.RevocableTokenStore, 
     return held
 }
 
-func accessTokenTestRuntime() melodyruntimecontract.Runtime {
+func accessTokenTestRuntime() melodycontainercontract.Runtime {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 }
 
 func TestIssueHandler_AFailedLookupOverAStoreThatCannotDeleteStillAnswersTheLookupError(t *testing.T) {
@@ -382,7 +381,7 @@ func TestWithdrawMintedToken_ACancelledRequestStillWithdrawsTheToken(t *testing.
     cancel()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
-    withdrawMintedToken(melodyruntime.New(cancelledContext, containerInstance.NewScope(), containerInstance), store, "minted")
+    withdrawMintedToken(melodyruntime.NewRequest(cancelledContext, containerInstance.NewScope()), store, "minted")
 
     if _, found, _ := store.Lookup(accessTokenTestRuntime(), "minted"); true == found {
         t.Fatalf("expected the minted token withdrawn although the request was cancelled")

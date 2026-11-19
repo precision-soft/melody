@@ -12,9 +12,9 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* catalogReadingsCsvHeader names the columns in the order every row writes them */
@@ -22,8 +22,8 @@ var catalogReadingsCsvHeader = []string{"taken_at", "headline", "product_count",
 
 /* ApiExportHandler answers the same readings as the history door, newest first and under the same limit, as a csv document a spreadsheet opens: the archive is read into memory, so the file is built here and named through the framework's Content-Disposition builder. */
 func ApiExportHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), runtimeInstance.Container())
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), runtimeInstance.Scope())
         if nil != resolveErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", resolveErr), nil
         }
@@ -43,7 +43,7 @@ func ApiExportHandler() melodyhttpcontract.Handler {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive could not be exported", renderErr), nil
         }
 
-        exportedAt := melodyclock.ClockMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container()).Now()
+        exportedAt := melodyclock.ClockMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()).Now()
 
         response := melodyhttp.NewResponse(nethttp.StatusOK, document)
         response.SetHeaders(nethttp.Header{

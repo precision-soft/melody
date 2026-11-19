@@ -10,14 +10,14 @@ import (
     "time"
 
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
 )
 
 func TestWelcomeEmailDispatchHandler_AnswersWithoutATransport503NamingTheKey(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/messagebus/dispatch", nil), nil, runtimeInstance, melodyhttp.NewRequestContext("dispatch-test", time.Now()))
 

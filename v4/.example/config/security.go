@@ -256,7 +256,7 @@ func sessionUserLookup(request melodyhttpcontract.Request, userId string) (*enti
         return nil, false, errors.New("the request carries no runtime to read the account through")
     }
 
-    userRepository, resolveErr := melodycontainer.FromResolver[repository.UserRepository](runtimeInstance.Context(), runtimeInstance.Container(), repository.ServiceUserRepository)
+    userRepository, resolveErr := melodycontainer.FromResolver[repository.UserRepository](runtimeInstance.Context(), runtimeInstance.Scope(), repository.ServiceUserRepository)
     if nil != resolveErr {
         return nil, false, resolveErr
     }
@@ -271,7 +271,7 @@ func sessionIndexLookup(request melodyhttpcontract.Request) (security.SessionInd
         return nil, errors.New("the request carries no runtime to resolve the session index through")
     }
 
-    return melodycontainer.FromResolver[repository.UserSessionRepository](runtimeInstance.Context(), runtimeInstance.Container(), repository.ServiceUserSessionRepository)
+    return melodycontainer.FromResolver[repository.UserSessionRepository](runtimeInstance.Context(), runtimeInstance.Scope(), repository.ServiceUserSessionRepository)
 }
 
 /* i18nGreetingPublicPattern opens the i18n prefix under each locale the greeting route serves, spelled from the route's own list so the rule and the route cannot drift apart */

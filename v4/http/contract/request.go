@@ -4,7 +4,7 @@ import (
     nethttp "net/http"
 
     bagcontract "github.com/precision-soft/melody/v4/bag/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type Request interface {
@@ -26,7 +26,7 @@ type Request interface {
 
     RoutePattern() string
 
-    RuntimeInstance() runtimecontract.Runtime
+    RuntimeInstance() containercontract.Runtime
 
     RequestContext() RequestContext
 }

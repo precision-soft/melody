@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** with the framework: the fourth major's runtime is read from `v4/container/contract` and built through `v4/container/runtime`, a runtime resolving through its scope only; `runtime.New` and `Runtime.Container()` are gone. See the framework's `UPGRADE.md`.
 - **Breaking** — `provider.go`: `NewProvider` refuses `Insecure: true` beside a non-nil `TlsConfig`, naming both fields, where `TlsConfig` won in silence.
 - `module.go`: **Behavioural change**: `RegisterServices` refuses `AsLocker` with no database, and `Locker` set with `AsLocker` off, naming the field, where it registered nothing.
 - **Breaking** — `provider.go`: `NewProvider` takes one `ProviderConfig`, resolved once, a limit outside its rule panicking naming the field before any database is opened; `ProviderOption`, `WithPoolConfig`, `WithTimeoutConfig`, `WithRetryConfig`, `WithPostBuildHook`, `WithInsecure` and `WithTlsConfig` are removed.

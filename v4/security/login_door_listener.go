@@ -6,13 +6,13 @@ import (
     "net/url"
     "strings"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
@@ -122,7 +122,7 @@ func FirewallDoorPathForm(path string) string {
 
 /* serveFirewallDoor answers a request on one of the firewall's doors; any other request passes on to the rest of the chain. A door is served before access control, which stands aside on what it answered. */
 func serveFirewallDoor(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     requestEvent *http.KernelRequestEvent,
     firewall *CompiledFirewall,
     token securitycontract.Token,
@@ -151,7 +151,7 @@ func serveFirewallDoor(
 }
 
 func serveLoginDoor(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     requestEvent *http.KernelRequestEvent,
     firewall *CompiledFirewall,
     token securitycontract.Token,
@@ -254,7 +254,7 @@ func serveLoginDoor(
 
 /* authenticateAtLoginDoor reads the credentials through the door's authenticator, on the token source's terms: refused credentials and a refused second factor raise security.login.failure, a second factor not yet presented is a challenge announced to nobody, and an authenticator's error is a failed sign-in only when it answers 401 or 403, a refused credential, an outage or a malformed request being none. An outage, a marked error with no http status around the mark or a token carrying securitycontract.AuthenticationUnavailable, is refused 503 with the firewall's Retry-After. */
 func authenticateAtLoginDoor(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     requestEvent *http.KernelRequestEvent,
     firewall *CompiledFirewall,
 ) (securitycontract.Token, error) {
@@ -319,7 +319,7 @@ func authenticateAtLoginDoor(
 
 /* refuseUnavailableAtLoginDoor files the one record of a credential the door could not check, since no resolution listener saw it, unless the cause was already filed */
 func refuseUnavailableAtLoginDoor(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     requestEvent *http.KernelRequestEvent,
     firewall *CompiledFirewall,
     cause error,
@@ -364,7 +364,7 @@ func requestSessionAtFirewallDoor(request httpcontract.Request) (sessioncontract
 
 /* refuseSessionErrorAtFirewallDoor answers a session a door could not load or rotate: a storage that could not answer is refused 503 with the firewall's Retry-After and reason session_unavailable, its cause filed once, and any other error is refused as it is */
 func refuseSessionErrorAtFirewallDoor(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     requestEvent *http.KernelRequestEvent,
     firewall *CompiledFirewall,
     doorName string,
@@ -397,7 +397,7 @@ func refuseSessionErrorAtFirewallDoor(
 }
 
 func serveLogoutDoor(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     requestEvent *http.KernelRequestEvent,
     firewall *CompiledFirewall,
     token securitycontract.Token,
@@ -455,7 +455,7 @@ func serveLogoutDoor(
 
 /* a failure listener's error is logged, not returned, so the storage's 503 and its Retry-After reach the client's retry */
 func logoutOutcomeDispatcher(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     firewall *CompiledFirewall,
 ) http.SessionPersistedCallback {

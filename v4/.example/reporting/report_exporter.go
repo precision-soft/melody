@@ -5,10 +5,10 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/service"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/httpclient"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* the instant layout every document of this application publishes, shared by the export and the command that prints the same reading */
@@ -32,7 +32,7 @@ type exportPayload struct {
 
 /* Export answers whether it sent anything. A status outside the success class is an error, so a sink that did not receive the reading reaches the operator through the command's exit code. */
 func (instance *CatalogReportExporter) Export(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     reading *CatalogReading,
 ) (bool, error) {
     if "" == instance.exportEndpoint {
@@ -45,7 +45,7 @@ func (instance *CatalogReportExporter) Export(
 
     client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](
         runtimeInstance.Context(),
-        runtimeInstance.Container(),
+        runtimeInstance.Scope(),
         service.ServiceReportExportHttpClient,
     )
     if nil != resolveErr {

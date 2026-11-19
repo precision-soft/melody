@@ -6,9 +6,9 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
     melodycache "github.com/precision-soft/melody/v4/cache"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type UserEventSubscriber struct{}
@@ -42,7 +42,7 @@ func (instance *UserEventSubscriber) SubscribedEvents() map[string][]melodyevent
 
 /* the user service drops these keys itself before it dispatches, so a listener that fails cannot leave them standing; the deletes below are a second, free pass */
 func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*event.UserCreatedEvent)
         if false == ok {
@@ -52,7 +52,7 @@ func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventLi
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserById(payloadInstance.User().Id))
         if nil != byIdDeleteErr {
@@ -82,7 +82,7 @@ func (instance *UserEventSubscriber) onUserCreated() melodyeventcontract.EventLi
 }
 
 func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*event.UserUpdatedEvent)
         if false == ok {
@@ -92,7 +92,7 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserById(payloadInstance.User().Id))
         if nil != byIdDeleteErr {
@@ -131,7 +131,7 @@ func (instance *UserEventSubscriber) onUserUpdated() melodyeventcontract.EventLi
 }
 
 func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*event.UserDeletedEvent)
         if false == ok {
@@ -141,7 +141,7 @@ func (instance *UserEventSubscriber) onUserDeleted() melodyeventcontract.EventLi
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyUserById(payloadInstance.UserId()))
         if nil != byIdDeleteErr {

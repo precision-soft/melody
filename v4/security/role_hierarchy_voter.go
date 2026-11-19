@@ -1,9 +1,9 @@
 package security
 
 import (
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -35,7 +35,7 @@ func (instance *RoleHierarchyVoter) Supports(attribute string, subject any) bool
     return instance.delegate.Supports(attribute, subject)
 }
 
-func (instance *RoleHierarchyVoter) Vote(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
+func (instance *RoleHierarchyVoter) Vote(runtimeInstance containercontract.Runtime, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
     /* IsNilInterface: a typed nil token of the application's type answers IsAuthenticated true without its receiver, and Roles() below would dereference it */
     if true == internal.IsNilInterface(token) {
         return securitycontract.VoteDenied, nil

@@ -14,10 +14,9 @@ import (
     melodyconfig "github.com/precision-soft/melody/v4/config"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
@@ -129,10 +128,10 @@ func recoveredRefusal(t *testing.T, step func()) (refusal error) {
     return nil
 }
 
-func configTestRuntime() melodyruntimecontract.Runtime {
+func configTestRuntime() melodycontainercontract.Runtime {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 }
 
 func allowedBy(limiter melodyhttpcontract.RateLimiter, key string) bool {

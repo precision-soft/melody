@@ -6,15 +6,15 @@ import (
     "github.com/precision-soft/melody/v4/.example/event"
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 /* AccessTokenStoreSource answers the token store the device tokens of an account live in, with the revocation epochs the bearer firewall reads beside it */
-type AccessTokenStoreSource func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore
+type AccessTokenStoreSource func(runtimeInstance melodycontainercontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore
 
 /* AccessTokenReleasePriority is the release's place on the deletion event: above every other listener of it. The dispatcher ends a dispatch at the first listener that fails, the release itself included, so a release placed after the two-factor release or the cache listener would be skipped by their outage and leave a deleted account authenticating. The release can fail too: a store outage is the listener's error, so the deletion is reported failed with the row already gone, the listeners after the release are skipped, and the tokens it left are refused by the device firewall, which honours a token only while its account exists (see deviceAccountEnricher). */
 const AccessTokenReleasePriority = 20
@@ -37,7 +37,7 @@ func (instance *AccessTokenReleaseSubscriber) SubscribedEvents() map[string][]me
 }
 
 func (instance *AccessTokenReleaseSubscriber) onUserDeleted() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadInstance, ok := eventValue.Payload().(*event.UserDeletedEvent)
         if false == ok || nil == payloadInstance {
             return nil

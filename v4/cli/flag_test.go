@@ -8,9 +8,9 @@ import (
     "testing"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestPrepareCommandFlags_RefusesADefaultTheDeclaredValidatorRefuses(t *testing.T) {
@@ -259,7 +259,7 @@ func TestDispatchCommand_ASecondDispatchOfAMemoizingCommandReadsFreshState(t *te
             &clicontract.IntFlag{Name: "n", Value: 1, OnlyOnce: true},
             &clicontract.StringFlag{Name: "s"},
         },
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             observedIsSet = append(observedIsSet, commandContext.IsSet("n"))
             observedValue = append(observedValue, commandContext.Int("n"))
 
@@ -292,7 +292,7 @@ func TestDispatchCommand_OverlappingDispatchesOfAMemoizingCommandDoNotShareState
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue:       []clicontract.Flag{&clicontract.IntFlag{Name: "n"}, &clicontract.StringFlag{Name: "s"}},
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             mutex.Lock()
             observed[commandContext.String("s")] = commandContext.Int("n")
             mutex.Unlock()
@@ -338,7 +338,7 @@ func TestDispatchCommand_RefusesADefaultTheDeclaredValidatorRefuses(t *testing.T
                 return nil
             }},
         },
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -363,7 +363,7 @@ func TestDispatchCommand_RunsOnARefusedDefaultWithoutValidateDefaults(t *testing
                 return nil
             }},
         },
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             readLimit = commandContext.Int("limit")
 
             return nil

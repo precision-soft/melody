@@ -28,7 +28,6 @@ import (
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/openapi"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestAssertPanics_UsesRecover(t *testing.T) {
@@ -38,7 +37,7 @@ func TestAssertPanics_UsesRecover(t *testing.T) {
 }
 
 func applicationBootRouteHandler() httpcontract.Handler {
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return nil, nil
     }
 }
@@ -90,12 +89,12 @@ func (instance *servingProbeApplicationCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *servingProbeApplicationCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     instance.ran = true
 
-    configuration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    configuration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
     instance.resolveErr = configuration.Resolve()
 
     return nil
@@ -155,12 +154,12 @@ func (instance *openApiServingProbeApplicationCommand) Flags() []clicontract.Fla
 }
 
 func (instance *openApiServingProbeApplicationCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     instance.ran = true
 
-    registry, getErr := runtimeInstance.Container().Get(runtimeInstance.Context(), openapi.ServiceOpenApiRegistry)
+    registry, getErr := runtimeInstance.Scope().Get(runtimeInstance.Context(), openapi.ServiceOpenApiRegistry)
     if nil != getErr {
         return getErr
     }
@@ -720,7 +719,7 @@ func (instance *panickingProbeApplicationCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *panickingProbeApplicationCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     exception.Panic(exception.NewError("the probe command exploded", nil, nil))

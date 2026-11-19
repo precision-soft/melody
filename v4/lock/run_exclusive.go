@@ -8,13 +8,13 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/precision-soft/melody/v4/logging"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* defaultSessionProbeInterval is the liveness-probe cadence for an unlimited ttl: a session-style locker (MySQL GET_LOCK, PostgreSQL advisory) holds until the session drops, so there is no lease to extend, only a connection to watch. */
@@ -50,11 +50,11 @@ const exclusiveStopRenewalLimitField = "ExclusiveConfig.StopRenewalLimit"
 
 /* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. The configuration is resolved before the lock is created, and a refusal is answered as the error, naming the field. It returns (false, nil) without running callback when another holder owns the lock, so N cron-launched instances run the command exactly once per tick. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled at the lease's demotion instant, a quarter of the ttl before the lease last written lapses, when no renewal has landed by then, so the callback is told to stop before another instance can acquire the lock; a failed refresh is retried once before that instant. An unlimited ttl selects the session-lock behavior: no lease to extend, only a liveness probe at defaultSessionProbeInterval. A stop cancels callback's runtime, not the renewal: the lease is still renewed while callback winds down, up to ExclusiveConfig.StopRenewalLimit, past which the run answers the error naming the limit; a session lock's probe runs until callback returns. */
 func RunExclusive(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     locker lockcontract.Locker,
     name string,
     config ExclusiveConfig,
-    callback func(runtimecontract.Runtime) error,
+    callback func(containercontract.Runtime) error,
 ) (bool, error) {
     if true == internal.IsNilInterface(runtimeInstance) {
         exception.Panic(exception.NewError("run exclusive runtime is nil", nil, nil))
@@ -110,13 +110,13 @@ func RunExclusive(
     childContext, cancel := context.WithCancel(runtimeInstance.Context())
     defer cancel()
 
-    childRuntime := runtime.New(childContext, runtimeInstance.Scope(), runtimeInstance.Container())
+    childRuntime := runtime.WithContext(runtimeInstance, childContext)
 
     /* the renewal is detached from the stop, which ends callback's work and not the lease it holds; the join below is what cancels it */
     renewalContext, cancelRenewal := context.WithCancel(context.WithoutCancel(runtimeInstance.Context()))
     defer cancelRenewal()
 
-    renewalRuntime := runtime.New(renewalContext, runtimeInstance.Scope(), runtimeInstance.Container())
+    renewalRuntime := runtime.WithContext(runtimeInstance, renewalContext)
 
     refreshDone := make(chan struct{})
     var refreshFailure error
@@ -180,7 +180,7 @@ func RunExclusive(
 
 /* refreshWhileHeld extends the lease at half the ttl until done closes or the runtime context ends, returning the failure that cost the lease; an unlimited ttl probes a session lock at defaultSessionProbeInterval. The lease clock demotes the caller, not a single call: once the lease last written reaches its demotion instant, half a cadence before it lapses, with no renewal landed, the caller is demoted — by a timer, whatever the store is doing, with every renewal bounded to that instant — so the callback is told to stop while nobody else can yet acquire the lock. A failed renewal is retried once, halfway to that instant, since the next tick would come too late to save the lease. */
 func refreshWhileHeld(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     lock lockcontract.Lock,
     ttl bound.Resolved[time.Duration],
     acquireIssuedAt time.Time,
@@ -519,7 +519,7 @@ func resolveRefreshTimeout(refreshInterval time.Duration) time.Duration {
 
 /* refreshOnce renews the lease on a runtime whose context carries the renewal deadline, derived from the renewal's own, which the stop does not cancel and the join does. The caller tests its own context to tell the run's end from a lost lease, since the deadline lives only on the child. */
 func refreshOnce(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     lock lockcontract.Lock,
     ttl time.Duration,
     timeout time.Duration,
@@ -527,31 +527,27 @@ func refreshOnce(
     refreshContext, cancel := context.WithTimeout(runtimeInstance.Context(), timeout)
     defer cancel()
 
-    refreshRuntime := runtime.New(refreshContext, runtimeInstance.Scope(), runtimeInstance.Container())
+    refreshRuntime := runtime.WithContext(runtimeInstance, refreshContext)
 
     return lock.Refresh(refreshRuntime, bound.Of(ttl))
 }
 
-/* refuseARuntimeThatCannotBeRewrapped refuses, before any lock is taken, a runtime whose scope or container is a typed nil. The runtime is re-wrapped through runtime.New, which refuses a typed nil, and one of those re-wraps runs the release in a defer, where the refusal would be a second panic with the lock still held. */
-func refuseARuntimeThatCannotBeRewrapped(runtimeInstance runtimecontract.Runtime, door string) {
+/* refuseARuntimeThatCannotBeRewrapped refuses, before any lock is taken, a runtime whose scope is a typed nil. The runtime is re-wrapped through runtime.WithContext, which refuses a typed nil, and one of those re-wraps runs the release in a defer, where the refusal would be a second panic with the lock still held. */
+func refuseARuntimeThatCannotBeRewrapped(runtimeInstance containercontract.Runtime, door string) {
     if true == internal.IsNilInterface(runtimeInstance.Scope()) {
         exception.Panic(exception.NewError(door+" runtime scope is nil", nil, nil))
-    }
-
-    if true == internal.IsNilInterface(runtimeInstance.Container()) {
-        exception.Panic(exception.NewError(door+" runtime container is nil", nil, nil))
     }
 }
 
 /* releaseDetached releases the lock on a runtime detached from the caller's cancellation, which may already have ended, with no deadline of its own: the locker bounds its own release. A release that fails anyway is logged, since the lock then stays held for up to a ttl and every peer's next tick skips. */
-func releaseDetached(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock, name string) {
+func releaseDetached(runtimeInstance containercontract.Runtime, lock lockcontract.Lock, name string) {
     releaseContext := runtimeInstance.Context()
     /* a runtime that answers no context still releases, under one that never ends */
     if true == internal.IsNilInterface(releaseContext) {
         releaseContext = context.Background()
     }
 
-    releaseRuntime := runtime.New(context.WithoutCancel(releaseContext), runtimeInstance.Scope(), runtimeInstance.Container())
+    releaseRuntime := runtime.WithContext(runtimeInstance, context.WithoutCancel(releaseContext))
 
     releaseErr := lock.Release(releaseRuntime)
     if nil == releaseErr {

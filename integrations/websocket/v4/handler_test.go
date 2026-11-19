@@ -19,13 +19,12 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
@@ -39,7 +38,7 @@ func TestStreamHandler_BroadcastReachesClient(t *testing.T) {
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), serviceContainer.NewScope())
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
     }))
@@ -91,7 +90,7 @@ func TestStreamHandler_IdleTimeoutKeepsHealthyClientConnected(t *testing.T) {
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), serviceContainer.NewScope())
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
     }))
@@ -144,7 +143,7 @@ func TestStreamHandler_IdleTimeoutDisconnectsUnresponsiveClient(t *testing.T) {
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), serviceContainer.NewScope())
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
     }))
@@ -225,7 +224,7 @@ func TestPingLoop_ReceivedPongRefreshesTheActivityMark(t *testing.T) {
     defer loopCancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    serverRuntime := runtime.New(loopContext, serviceContainer.NewScope(), serviceContainer)
+    serverRuntime := runtime.NewRequest(loopContext, serviceContainer.NewScope())
 
     go readLoop(loopContext, loopCancel, serverConnection, serverRuntime, Options{}, liveness, newConnectionLogger(serverRuntime))
     go pingLoop(loopContext, loopCancel, serverConnection, interval, time.Second, liveness)
@@ -272,7 +271,7 @@ func TestStreamHandler_TheWriteTimeoutBoundsAWriteTheClientNeverDrains(t *testin
 
     server := httptest.NewUnstartedServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), serviceContainer.NewScope())
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
         close(handlerReturned)
@@ -328,7 +327,7 @@ func TestStreamHandler_SlowClientDrainingOneFrameIsNotDisconnected(t *testing.T)
 
     server := httptest.NewUnstartedServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), serviceContainer.NewScope())
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
     }))
@@ -429,7 +428,7 @@ func TestStreamHandler_UnansweredPingsDisconnectAPeerThatKeepsAcceptingWrites(t 
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), serviceContainer.NewScope())
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
     }))
@@ -481,10 +480,10 @@ func TestStreamHandler_UnansweredPingsDisconnectAPeerThatKeepsAcceptingWrites(t 
 
 func TestDispatchOnMessage_RecoversPanicFromCallback(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
     options := Options{
-        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
             panic("boom from user callback")
         },
     }
@@ -505,7 +504,7 @@ func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T)
     handler := newStreamHandlerPastTheDoor(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
-        OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+        OnMessage: func(runtimeInstance containercontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
             close(callbackEntered)
 
             /* outlive several ping intervals while the read loop cannot answer pongs */
@@ -515,7 +514,7 @@ func TestStreamHandler_SlowOnMessageDoesNotDisconnectHealthyClient(t *testing.T)
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), serviceContainer.NewScope())
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
     }))
@@ -572,14 +571,14 @@ func TestStreamHandler_StuckOnMessageStopsHoldingTheConnection(t *testing.T) {
     handler := newStreamHandlerPastTheDoor(hub, Options{
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
-        OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+        OnMessage: func(runtimeInstance containercontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
             <-releaseCallback
         },
     }, 50*time.Millisecond)
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), serviceContainer.NewScope())
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
     }))
@@ -627,7 +626,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
         TopicResolver:  func(request httpcontract.Request) string { return "demo" },
         OriginPatterns: []string{"*"},
         IdleTimeout:    bound.Of(30 * time.Second),
-        OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+        OnMessage: func(runtimeInstance containercontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
             close(callbackEntered)
 
             /* keep processing briefly, then resolve a service through the scope-backed runtime; a healthy callback must never observe a closed scope */
@@ -647,7 +646,7 @@ func TestStreamHandler_InFlightCallbackDoesNotRaceScopeTeardown(t *testing.T) {
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
         scope := serviceContainer.NewScope()
-        runtimeInstance := runtime.New(request.Context(), scope, serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), scope)
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
         /* mimic the kernel's deferred scope.Close() the instant the handler returns */
@@ -721,7 +720,7 @@ func wedgedCallbackReleaseAfterTeardown(t *testing.T, closeHandshakeGrace bound.
         OriginPatterns:      []string{"*"},
         IdleTimeout:         bound.Of(30 * time.Second),
         CloseHandshakeGrace: closeHandshakeGrace,
-        OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+        OnMessage: func(runtimeInstance containercontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
             close(callbackEntered)
             <-releaseCallback
         },
@@ -729,7 +728,7 @@ func wedgedCallbackReleaseAfterTeardown(t *testing.T, closeHandshakeGrace bound.
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), serviceContainer.NewScope())
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
         close(handlerReturned)
@@ -1007,7 +1006,7 @@ func TestStreamHandler_RefusesAnEmptyResolvedTopicBeforeTheUpgrade(t *testing.T)
     })
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/stream", nil)
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
     recorder := httptest.NewRecorder()
@@ -1060,11 +1059,11 @@ func TestDispatchOnMessage_PreservesThePanickedErrorsCauseChain(t *testing.T) {
     }, container.RegisterOptions{}); nil != registerErr {
         t.Fatalf("register: %v", registerErr)
     }
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
     rootCause := errors.New("db down")
     options := Options{
-        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
             panic(exception.NewError("user failure", nil, rootCause))
         },
     }
@@ -1105,10 +1104,10 @@ func TestDispatchOnMessage_SurvivesAPanicWhoseUnwrapPanics(t *testing.T) {
     }, container.RegisterOptions{}); nil != registerErr {
         t.Fatalf("register: %v", registerErr)
     }
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
     options := Options{
-        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
             panic(unwrapPanickingCallbackError{})
         },
     }
@@ -1138,7 +1137,7 @@ func TestStreamHandler_AnUnlimitedReadLimitDisablesTheDefaultCap(t *testing.T) {
         OriginPatterns: []string{"*"},
         IdleTimeout:    bound.Of(30 * time.Second),
         ReadLimit:      bound.UnlimitedCount(),
-        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, payload []byte) {
+        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, payload []byte) {
             select {
             case received <- len(payload):
             default:
@@ -1148,7 +1147,7 @@ func TestStreamHandler_AnUnlimitedReadLimitDisablesTheDefaultCap(t *testing.T) {
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), serviceContainer.NewScope())
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
     }))
@@ -1189,7 +1188,7 @@ func TestStreamHandler_RefusesAShutDownHubBeforeTheUpgrade(t *testing.T) {
     })
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/stream", nil)
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
     recorder := httptest.NewRecorder()
@@ -1221,7 +1220,7 @@ func TestStreamHandler_BinaryWritesDeliverTheBroadcastAsABinaryFrame(t *testing.
 
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(request.Context(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(request.Context(), serviceContainer.NewScope())
         melodyRequest := melodyhttp.NewRequest(request, nil, runtimeInstance, nil)
         handler(runtimeInstance, writer, melodyRequest)
     }))
@@ -1306,13 +1305,13 @@ func (instance *messageCapturingLogger) hasMessage(message string) bool {
     return false
 }
 
-func runtimeWithLogger(ctx context.Context, logger loggingcontract.Logger) runtimecontract.Runtime {
+func runtimeWithLogger(ctx context.Context, logger loggingcontract.Logger) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(logging.ServiceLogger, func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
         return logger, nil
     }, container.RegisterOptions{})
 
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRequest(ctx, serviceContainer.NewScope())
 }
 
 func TestDispatchOnMessage_APanicRecordCarriesTheStack(t *testing.T) {
@@ -1320,7 +1319,7 @@ func TestDispatchOnMessage_APanicRecordCarriesTheStack(t *testing.T) {
     runtimeInstance := runtimeWithLogger(context.Background(), logger)
 
     options := Options{
-        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
             panic("callback boom")
         },
     }
@@ -1343,7 +1342,7 @@ func TestDispatchOnMessage_APanicAfterTheScopeClosedStillLeavesARecordThroughThe
         return logger, nil
     }, container.RegisterOptions{})
     scope := serviceContainer.NewScope()
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
     captured := newConnectionLogger(runtimeInstance)
 
@@ -1352,7 +1351,7 @@ func TestDispatchOnMessage_APanicAfterTheScopeClosedStillLeavesARecordThroughThe
     }
 
     options := Options{
-        OnMessage: func(_ runtimecontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
+        OnMessage: func(_ containercontract.Runtime, _ coderwebsocket.MessageType, _ []byte) {
             panic("callback boom after the scope closed")
         },
     }
@@ -1393,7 +1392,7 @@ func TestStreamHandler_ADrainingHubAnswers503AndAnEmptyTopic400(t *testing.T) {
         handler := NewStreamHandler(setUp.hub(), Options{IdleTimeout: bound.Of(time.Second), TopicResolver: setUp.resolver})
 
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
         request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/stream", nil), nil, runtimeInstance, nil)
 
         _, handlerErr := handler(runtimeInstance, httptest.NewRecorder(), request)

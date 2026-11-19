@@ -10,10 +10,10 @@ import (
     "sync"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type testEnvironmentSource struct {
@@ -34,7 +34,7 @@ func TestRouter_HandleAndServeHttp_HappyPath(t *testing.T) {
 
     router.Handle(
         "/hello",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "ok"), nil
         },
         RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -60,7 +60,7 @@ func TestRouter_MethodNotAllowed(t *testing.T) {
 
     router.Handle(
         "/hello",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "ok"), nil
         },
         RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -98,7 +98,7 @@ func TestRouter_PanicConvertedTo500(t *testing.T) {
 
     router.Handle(
         "/panic",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             exception.Panic(exception.NewError("boom", nil, nil))
             return nil, nil
         },
@@ -122,7 +122,7 @@ func TestRouter_HandlerErrorConvertedTo500(t *testing.T) {
 
     router.Handle(
         "/err",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, errors.New("handler error")
         },
         RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -145,7 +145,7 @@ func TestRouter_ParameterExtraction(t *testing.T) {
 
     router.Handle(
         "/user/:id",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             value, exists := request.Parameter("id")
             if false == exists {
                 return TextResponse(500, "missing id"), nil
@@ -176,7 +176,7 @@ func TestRouter_RequirementWithAlternationMatchesTheWholeSegment(t *testing.T) {
 
     router.Handle(
         "/shop/:locale/list",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "ok"), nil
         },
         RouteOptions{
@@ -214,7 +214,7 @@ func TestRouter_RequirementIsEnforcedOnCatchAllWildcard(t *testing.T) {
 
     router.Handle(
         "/files/*path",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "ok"), nil
         },
         RouteOptions{
@@ -244,7 +244,7 @@ func TestRouter_Match_WhitespacePaddedRequestPathDoesNotAliasTheRoute(t *testing
 
     router.Handle(
         "/admin",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "admin"), nil
         },
         RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -266,7 +266,7 @@ func TestRouter_Match_EmptySegmentDoesNotSatisfyNamedParameter(t *testing.T) {
 
     router.Handle(
         "/users/:id/profile",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "profile"), nil
         },
         RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -295,7 +295,7 @@ func TestRouter_AddRoute_RejectsOptionalSegmentBeforeAnotherSegment(t *testing.T
             func() {
                 router.Handle(
                     pattern,
-                    func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                    func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                         return TextResponse(200, "blog"), nil
                     },
                     RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -312,7 +312,7 @@ func TestRouter_AddRoute_AcceptsANonTrailingOptionalSegmentThatHasADefault(t *te
 
     router.Handle(
         "/:locale?/list/:page",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "list"), nil
         },
         RouteOptions{
@@ -344,7 +344,7 @@ func TestRouter_AddRoute_AcceptsOptionalSegmentAtTheTail(t *testing.T) {
 
     router.Handle(
         "/blog/posts/:locale?",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "blog"), nil
         },
         RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -363,7 +363,7 @@ func TestRouter_AddRoute_NonTrailingOptionalWithADefaultSurvivesASuppliedEmptyVa
 
     router.Handle(
         "/:locale?/list/:page",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "list"), nil
         },
         RouteOptions{
@@ -421,7 +421,7 @@ func TestRouter_AddRoute_NonTrailingOptionalWithAGroupSuppliedDefaultSurvivesASu
 
     group.Handle(
         "/:locale?/list/:page",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "list"), nil
         },
         RouteOptions{Name: "shop.list", Methods: []string{nethttp.MethodGet}},
@@ -456,7 +456,7 @@ func TestRouter_AddRoute_RejectsANonTrailingOptionalWhoseDefaultIsEmpty(t *testi
         func() {
             router.Handle(
                 "/:locale?/list/:page",
-                func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                     return TextResponse(200, "list"), nil
                 },
                 RouteOptions{
@@ -477,7 +477,7 @@ func TestRouter_AddRoute_ServesATrailingOptionalReachedThroughTheRoot(t *testing
 
     router.Handle(
         "/:page?",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "home"), nil
         },
         RouteOptions{
@@ -512,7 +512,7 @@ func TestRouter_Match_NeverAdvertisesAnEmptyAllowedMethod(t *testing.T) {
 
     router.Handle(
         "/empty-method",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(200, "never"), nil
         },
         RouteOptions{Methods: []string{""}},
@@ -545,7 +545,7 @@ func TestRouter_AllowHeaderRespectsMethodPolicy(t *testing.T) {
         router := NewRouter()
         router.Handle(
             "/hello",
-            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return TextResponse(200, "ok"), nil
             },
             RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -673,7 +673,7 @@ func TestRouter_MatchHandsOutACopyOfTheRouteAttributes(t *testing.T) {
     router := NewRouter()
     router.Handle(
         "/aliased",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
         RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -711,7 +711,7 @@ func TestRouterRegistration_RefusesADuplicateParameterName(t *testing.T) {
         func() {
             NewRouter().Handle(
                 "/orgs/:id/members/:id",
-                func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                     return nil, nil
                 },
                 RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -722,7 +722,7 @@ func TestRouterRegistration_RefusesADuplicateParameterName(t *testing.T) {
 }
 
 func TestRouterRegistration_RefusesAParameterDeclaredTwiceThroughAnOptionalOrACatchAllSegment(t *testing.T) {
-    handler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return nil, nil
     }
 
@@ -748,7 +748,7 @@ func TestRouterRegistration_RefusesAParameterWithNoName(t *testing.T) {
         func() {
             NewRouter().Handle(
                 "/orgs/:",
-                func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                     return nil, nil
                 },
                 RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -763,7 +763,7 @@ func TestRouterRegistration_AcceptsAnUnnamedCatchAll(t *testing.T) {
     router := NewRouter()
     router.Handle(
         "/files/*...",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return TextResponse(nethttp.StatusOK, "ok"), nil
         },
         RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -905,7 +905,7 @@ func TestRouterMatch_AnEncodedSegmentIsUnescapedForTheHandler(t *testing.T) {
 func TestRouterAddRoute_ADeclinedDuplicateDoesNotEnterTheMatchingTree(t *testing.T) {
     router := NewRouter()
 
-    handler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return nil, nil
     }
 
@@ -942,7 +942,7 @@ func TestRouter_CatchAllKeepsAnEncodedSeparatorInsideItsSegment(t *testing.T) {
 
     router.Handle(
         "/files/*path",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             pathValue, _ := request.Parameter("path")
             captured = append(captured, pathValue)
 
@@ -981,7 +981,7 @@ func TestRouter_CatchAllBindsALiteralEncodedSeparatorAsTheEncodedSeparator(t *te
 
     router.Handle(
         "/files/*path",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             pathValue, _ := request.Parameter("path")
             captured = append(captured, pathValue)
 
@@ -1072,7 +1072,7 @@ func TestRouter_RefusesAReservedAttributeKeyAtRegistration(t *testing.T) {
                 }
             }()
 
-            NewRouter().Handle("/attributes", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            NewRouter().Handle("/attributes", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return nil, nil
             }, httpcontract.RouteOptions{Attributes: map[string]any{key: "value"}})
         }()

@@ -8,9 +8,9 @@ import (
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/migrate"
 )
@@ -42,12 +42,12 @@ func (instance *MigrateCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *MigrateCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *MigrateCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runMigrate)
 }
 
 func (instance *MigrateCommand) runMigrate(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) (runErr error) {

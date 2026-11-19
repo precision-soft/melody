@@ -5,10 +5,10 @@ import (
     "fmt"
     "time"
 
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -58,7 +58,7 @@ func (instance *SecondFactorBudget) Supports(request melodyhttpcontract.Request)
     return instance.primary.Supports(request)
 }
 
-func (instance *SecondFactorBudget) Authenticate(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+func (instance *SecondFactorBudget) Authenticate(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
     token, authenticateErr := instance.primary.Authenticate(runtimeInstance, request)
     if nil != authenticateErr {
         return nil, authenticateErr
@@ -80,7 +80,7 @@ func (instance *SecondFactorBudget) Authenticate(runtimeInstance melodyruntimeco
 }
 
 /* Spend counts one presented second factor against the account, at the sign-in and at every other door that reads one, and answers a SecondFactorBudgetSpentError past the allowance; a budget whose store could not answer answers ErrSecondFactorBudgetUnavailable marked as an outage, unless the limiter is fail-open, in which case the code is read uncounted and the failure journaled here, and any other error of the limiter is returned as it is. */
-func (instance *SecondFactorBudget) Spend(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string) error {
+func (instance *SecondFactorBudget) Spend(runtimeInstance melodycontainercontract.Runtime, userIdentifier string) error {
     decision, allowErr := instance.limiter.Allow(runtimeInstance, secondFactorBudgetKey(userIdentifier))
     if nil != allowErr {
         if true == decision.Allowed {
@@ -105,11 +105,11 @@ func (instance *SecondFactorBudget) Spend(runtimeInstance melodyruntimecontract.
 }
 
 /* Release asks the store to give an account its whole budget back once a second factor it presented was accepted, so the codes a user mistyped before the right one do not count against the next sign-in, and returns a failure to do so: the mistyped codes then count until the window lapses. */
-func (instance *SecondFactorBudget) Release(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string) error {
+func (instance *SecondFactorBudget) Release(runtimeInstance melodycontainercontract.Runtime, userIdentifier string) error {
     return instance.limiter.Reset(runtimeInstance, secondFactorBudgetKey(userIdentifier))
 }
 
-func journalBudgetFailure(runtimeInstance melodyruntimecontract.Runtime, message string, failureErr error) {
+func journalBudgetFailure(runtimeInstance melodycontainercontract.Runtime, message string, failureErr error) {
     logger := melodylogging.LoggerFromRuntime(runtimeInstance)
     if nil == logger {
         return

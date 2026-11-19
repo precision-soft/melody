@@ -15,9 +15,9 @@ import (
     "github.com/precision-soft/melody/v4/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const databaseResetFlagForce = "force"
@@ -47,10 +47,10 @@ func (instance *DatabaseResetCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) (runErr error) {
+func (instance *DatabaseResetCommand) Run(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) (runErr error) {
     storage, resolveErr := melodycontainer.FromResolver[*persistence.CatalogStorage](
         runtimeInstance.Context(),
-        runtimeInstance.Container(),
+        runtimeInstance.Scope(),
         persistence.ServiceCatalogStorage,
     )
     if nil != resolveErr {
@@ -60,7 +60,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     /* the archive is resolved BEFORE the plan is printed, not before it is used: the plan has to name the archive's tables when there is an archive, and a plan that named what it would not touch — or stayed silent about what it would — is the one thing this refusal exists to prevent. */
     archiveStorage, archiveResolveErr := melodycontainer.FromResolver[*persistence.ArchiveStorage](
         runtimeInstance.Context(),
-        runtimeInstance.Container(),
+        runtimeInstance.Scope(),
         persistence.ServiceArchiveStorage,
     )
     if nil != archiveResolveErr {
@@ -83,7 +83,7 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodyruntimecontract.
     }
 
     /* the token store's namespace on redis is resolved before the plan is printed, because the plan says whether the device tokens of the removed accounts are released or stay in a server's own memory */
-    tokenNamespace := examplesecurity.TokenNamespaceFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    tokenNamespace := examplesecurity.TokenNamespaceFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
     printDatabaseResetPlan(writer, storage, archiveStorage, tokenNamespace)
 

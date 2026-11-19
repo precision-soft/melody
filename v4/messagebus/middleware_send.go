@@ -3,9 +3,9 @@ package messagebus
 import (
     "reflect"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type transportRouting struct {
@@ -22,7 +22,7 @@ func NewSendMessageMiddleware(routing *Routing) messagebuscontract.Middleware {
     routingByType := routing.build()
 
     return func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         envelopeInstance messagebuscontract.Envelope,
         next messagebuscontract.StackNext,
     ) (messagebuscontract.Envelope, error) {

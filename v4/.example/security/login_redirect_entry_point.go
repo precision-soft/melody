@@ -1,9 +1,9 @@
 package security
 
 import (
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -17,7 +17,7 @@ type loginRedirectEntryPoint struct {
     loginPath string
 }
 
-func (instance *loginRedirectEntryPoint) Start(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+func (instance *loginRedirectEntryPoint) Start(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
     if true == melodyhttp.PrefersHtml(request) {
         return melodyhttp.RedirectFound(instance.loginPath), nil
     }

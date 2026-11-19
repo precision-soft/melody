@@ -12,16 +12,17 @@ import (
 
     urfavecli "github.com/urfave/cli/v3"
 
+    "github.com/precision-soft/melody/v4/cli"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type exitCodedProbeApplicationCommand struct{}
@@ -39,7 +40,7 @@ func (instance *exitCodedProbeApplicationCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *exitCodedProbeApplicationCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     return exception.NewExitError(7, exception.NewError("command asked for an exit code", nil, nil))
@@ -146,7 +147,7 @@ func (instance *paddedNameProbeCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *paddedNameProbeCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     return instance.inner.Run(runtimeInstance, commandContext)
@@ -233,7 +234,7 @@ func (instance *typedNilProbeCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *typedNilProbeCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     return nil
@@ -269,7 +270,7 @@ func (instance *processContextProbeCliCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *processContextProbeCliCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *processContextProbeCliCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     processContext := ProcessContextMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
     instance.seenProcessId = processContext.ProcessId()
@@ -370,7 +371,7 @@ func (instance *providedKeyProbeCliCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *providedKeyProbeCliCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *providedKeyProbeCliCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     logger := logging.LoggerMustFromRuntime(runtimeInstance)
 
     logger.Info("probe record with a caller process id", loggingcontract.Context{"processId": "caller-owned"})
@@ -441,7 +442,7 @@ func (instance *versionProbeCliCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *versionProbeCliCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     option := output.ParseOptionFromCommand(commandContext)
@@ -522,5 +523,51 @@ func TestBootCli_RegistersTheDebugFamilyOnlyInDevelopment(t *testing.T) {
 
     if false == productionNames["debug:router"] {
         t.Fatalf("expected debug:router registered in production too, got %v", productionNames)
+    }
+}
+
+/* the application builds debug:container over its own container: run as registered, it lists that container's services */
+func TestBootCli_TheRegisteredContainerCommandDescribesTheApplicationsContainer(t *testing.T) {
+    applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: config.EnvironmentDevelopment})
+
+    applicationInstance.bootCli()
+
+    var containerCommand clicontract.Command
+    for _, command := range applicationInstance.cliCommands {
+        if "debug:container" == command.Name() {
+            containerCommand = command
+        }
+    }
+
+    if nil == containerCommand {
+        t.Fatalf("expected debug:container registered in development")
+    }
+
+    serviceContainer := applicationInstance.kernel.ServiceContainer()
+    serviceContainer.MustRegister(
+        "test.described.probe",
+        func(resolver containercontract.Resolver) (string, error) {
+            return "probe", nil
+        },
+        containercontract.RegisterOptions{},
+    )
+    scope := serviceContainer.NewScope()
+    defer func() { _ = scope.Close() }()
+
+    buffer := &bytes.Buffer{}
+    dispatchErr := cli.DispatchCommand(
+        context.Background(),
+        containerCommand,
+        runtime.NewRun(context.Background(), scope),
+        []string{"debug:container", "--format=json"},
+        buffer,
+        cli.DispatchConfig{},
+    )
+    if nil != dispatchErr {
+        t.Fatalf("expected the registered command to run, got %v", dispatchErr)
+    }
+
+    if false == strings.Contains(buffer.String(), "test.described.probe") {
+        t.Fatalf("expected the application's services listed, got %s", buffer.String())
     }
 }

@@ -5,16 +5,16 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestDispatch_RunsRegisteredHandler(t *testing.T) {
     locator := NewHandlerLocator()
 
     var handled int
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
         handled = message.TaskId
         return nil
     })
@@ -83,7 +83,7 @@ func TestDispatch_DoesNotWarnWhenTheMessageWasSent(t *testing.T) {
 
 func TestDispatch_DoesNotWarnWhenTheMessageWasHandled(t *testing.T) {
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
         return nil
     })
 

@@ -5,7 +5,7 @@ import (
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* VersionCommand answers three rows: the application's version, melody's and the Go runtime's. The application row reads ApplicationConfig.Version, declared on the root of the command tree. */
@@ -24,7 +24,7 @@ func (instance *VersionCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *VersionCommand) Run(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     startedAt := time.Now()

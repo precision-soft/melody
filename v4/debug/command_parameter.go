@@ -7,8 +7,8 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/config"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -32,7 +32,7 @@ func (instance *ParameterCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *ParameterCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     startedAt := time.Now()
@@ -53,7 +53,7 @@ func (instance *ParameterCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    applicationConfiguration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    applicationConfiguration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
     names := applicationConfiguration.Names()
     if 0 == len(names) {

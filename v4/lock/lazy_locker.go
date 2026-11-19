@@ -10,7 +10,6 @@ import (
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* lazyLocker defers resolving the registered Locker until a lock it handed out is first used, so a command or middleware assembled during boot can hold a Locker before the container is safe to resolve. */
@@ -42,7 +41,7 @@ type deferredLock struct {
 }
 
 /* the Locker is resolved outside the mutex, so a wait on its creation never blocks the lock's other callers */
-func (instance *deferredLock) resolvedLock(runtimeInstance runtimecontract.Runtime) (lockcontract.Lock, error) {
+func (instance *deferredLock) resolvedLock(runtimeInstance containercontract.Runtime) (lockcontract.Lock, error) {
     instance.mutex.Lock()
     lock := instance.lock
     instance.mutex.Unlock()
@@ -88,7 +87,7 @@ func (instance *deferredLock) resolvedLock(runtimeInstance runtimecontract.Runti
     return instance.lock, nil
 }
 
-func (instance *deferredLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *deferredLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     lock, resolveErr := instance.resolvedLock(runtimeInstance)
     if nil != resolveErr {
         return false, resolveErr
@@ -97,7 +96,7 @@ func (instance *deferredLock) Acquire(runtimeInstance runtimecontract.Runtime) (
     return lock.Acquire(runtimeInstance)
 }
 
-func (instance *deferredLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *deferredLock) Release(runtimeInstance containercontract.Runtime) error {
     lock, resolveErr := instance.resolvedLock(runtimeInstance)
     if nil != resolveErr {
         return resolveErr
@@ -106,7 +105,7 @@ func (instance *deferredLock) Release(runtimeInstance runtimecontract.Runtime) e
     return lock.Release(runtimeInstance)
 }
 
-func (instance *deferredLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *deferredLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     lock, resolveErr := instance.resolvedLock(runtimeInstance)
     if nil != resolveErr {
         return resolveErr

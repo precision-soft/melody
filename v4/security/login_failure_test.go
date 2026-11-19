@@ -5,11 +5,11 @@ import (
     nethttp "net/http"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -114,7 +114,7 @@ func TestLoginDoor_AFailedDispatchForAnAuthenticatorsRefusalKeepsTheStatusAndIsF
     })
     fixture.kernel.eventDispatcher.AddListener(
         securitycontract.EventSecurityLoginFailure,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return errors.New("the audit sink refused the record")
         },
         0,
@@ -139,7 +139,7 @@ func TestLoginDoor_AFailedDispatchForAHandlersRefusalKeepsTheStatusAndIsFiled(t 
     fixture.login.err = exception.Forbidden("account locked")
     fixture.kernel.eventDispatcher.AddListener(
         securitycontract.EventSecurityLoginFailure,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return errors.New("the audit sink refused the record")
         },
         0,

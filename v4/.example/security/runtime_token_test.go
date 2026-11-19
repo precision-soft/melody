@@ -5,13 +5,13 @@ import (
     "testing"
 
     melodycontainer "github.com/precision-soft/melody/v4/container"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-func runtimeWithoutSecurityContext(t *testing.T) melodyruntimecontract.Runtime {
+func runtimeWithoutSecurityContext(t *testing.T) melodycontainercontract.Runtime {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -19,10 +19,10 @@ func runtimeWithoutSecurityContext(t *testing.T) melodyruntimecontract.Runtime {
         _ = containerInstance.CloseWithContext(context.Background())
     })
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 }
 
-func runtimeCarryingToken(t *testing.T, token melodysecuritycontract.Token) melodyruntimecontract.Runtime {
+func runtimeCarryingToken(t *testing.T, token melodysecuritycontract.Token) melodycontainercontract.Runtime {
     t.Helper()
 
     runtimeInstance := runtimeWithoutSecurityContext(t)

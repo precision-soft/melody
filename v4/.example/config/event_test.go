@@ -13,12 +13,12 @@ import (
     "github.com/precision-soft/melody/v4/.example/event"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -165,7 +165,7 @@ func TestRegisterRateLimitRequestListener_TheArmedDoorRefusesTheRequestPastTheSw
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     scope := containerInstance.NewScope()
     scope.MustOverrideProtectedInstance(melodylogging.ServiceLogger, melodylogging.NewNopLogger(), melodycontainer.OverrideOptions{})
-    runtimeInstance := melodyruntime.New(context.Background(), scope, containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), scope)
 
     for request := 1; request <= 3; request++ {
         httpRequest := httptest.NewRequest(nethttp.MethodGet, "/", nil)
@@ -252,7 +252,7 @@ func TestRegisterApiExceptionListener_AnswersTheApiPathsAndLeavesTheOthersToTheB
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     scope := containerInstance.NewScope()
     scope.MustOverrideProtectedInstance(melodylogging.ServiceLogger, melodylogging.NewNopLogger(), melodycontainer.OverrideOptions{})
-    runtimeInstance := melodyruntime.New(context.Background(), scope, containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), scope)
 
     dispatchRefusal := func(path string, refusal error) *melodyhttp.KernelExceptionEvent {
         request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, path, nil), nil, runtimeInstance, melodyhttp.NewRequestContext("api-test", time.Now()))

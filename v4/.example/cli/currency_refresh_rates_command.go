@@ -7,7 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type CurrencyRefreshRatesCommand struct{}
@@ -34,8 +34,8 @@ func (instance *CurrencyRefreshRatesCommand) Flags() []melodyclicontract.Flag {
    What it does insist on is a non-zero exit when the provider could not be read. A schedule that treats a
    silent zero as success would report a working refresh over an application whose rates have not moved for
    days, which is the one failure of this command that nobody would otherwise see. */
-func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
-    refreshService := service.MustGetRateRefreshService(runtimeInstance.Context(), runtimeInstance.Container())
+func (instance *CurrencyRefreshRatesCommand) Run(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+    refreshService := service.MustGetRateRefreshService(runtimeInstance.Context(), runtimeInstance.Scope())
 
     outcome, refreshErr := refreshService.Refresh(runtimeInstance)
 

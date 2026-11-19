@@ -17,10 +17,9 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/httpclient"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const rateDocumentBody = `{"base":"EUR","asOf":"2026-09-07T09:00:00Z","rates":{"EUR":1,"USD":1.0842}}`
@@ -260,7 +259,7 @@ func TestRateRefreshServiceRefresh_DoesNothingWithNoProviderConfigured(t *testin
    container under the name the composition root uses, so the refresh resolves it the way production does. The
    clock is frozen at the seed's instant plus a day, so "the future" and "older than stored" are both
    nameable. */
-func rateRefreshUnderTest(t *testing.T, body string) (*RateRefreshService, *CurrencyService, melodyruntimecontract.Runtime, *updateCountingCurrencyRepository) {
+func rateRefreshUnderTest(t *testing.T, body string) (*RateRefreshService, *CurrencyService, melodycontainercontract.Runtime, *updateCountingCurrencyRepository) {
     t.Helper()
 
     return rateRefreshAnsweringInTurn(t, body)
@@ -269,7 +268,7 @@ func rateRefreshUnderTest(t *testing.T, body string) (*RateRefreshService, *Curr
 /* rateRefreshAnsweringInTurn is rateRefreshUnderTest over a provider that answers the bodies given one per
    request, in order, and the last one from then on: what a refresh does is sometimes decided by the reading
    a PREVIOUS run stored. The provider's clock agrees with the refresh's on every answer. */
-func rateRefreshAnsweringInTurn(t *testing.T, bodyList ...string) (*RateRefreshService, *CurrencyService, melodyruntimecontract.Runtime, *updateCountingCurrencyRepository) {
+func rateRefreshAnsweringInTurn(t *testing.T, bodyList ...string) (*RateRefreshService, *CurrencyService, melodycontainercontract.Runtime, *updateCountingCurrencyRepository) {
     t.Helper()
 
     answerList := make([]providerAnswer, 0, len(bodyList))
@@ -291,7 +290,7 @@ type providerAnswer struct {
 }
 
 /* rateRefreshAnswering is rateRefreshAnsweringInTurn with the provider's clock stated per answer. */
-func rateRefreshAnswering(t *testing.T, answerList ...providerAnswer) (*RateRefreshService, *CurrencyService, melodyruntimecontract.Runtime, *updateCountingCurrencyRepository) {
+func rateRefreshAnswering(t *testing.T, answerList ...providerAnswer) (*RateRefreshService, *CurrencyService, melodycontainercontract.Runtime, *updateCountingCurrencyRepository) {
     t.Helper()
 
     clockInstance := &frozenClock{instant: currencyQuoteInstant.Add(24 * time.Hour)}
@@ -320,7 +319,7 @@ func rateRefreshAnswering(t *testing.T, answerList ...providerAnswer) (*RateRefr
 
     client := provider.client(t)
     melodycontainer.MustRegister(
-        runtimeInstance.Container().(melodycontainercontract.Registrar),
+        runtimeInstance.serviceContainer,
         ServiceRatesHttpClient,
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
             return client, nil
@@ -1042,7 +1041,7 @@ func TestRateRefreshServiceRefresh_StopsRetryingOnceTheRunIsCancelled(t *testing
     currencyService, _, baseRuntime := currencyServiceUnderTest(t)
     client := provider.client(t)
     melodycontainer.MustRegister(
-        baseRuntime.Container().(melodycontainercontract.Registrar),
+        baseRuntime.serviceContainer,
         ServiceRatesHttpClient,
         func(resolver melodycontainercontract.Resolver) (*httpclient.HttpClient, error) {
             return client, nil
@@ -1052,7 +1051,7 @@ func TestRateRefreshServiceRefresh_StopsRetryingOnceTheRunIsCancelled(t *testing
 
     refresh := NewRateRefreshService(currencyService, &frozenClock{instant: currencyQuoteInstant.Add(24 * time.Hour)}, provider.server.URL+"/v1/", "eur")
 
-    _, err := refresh.Refresh(melodyruntime.New(runContext, baseRuntime.Scope(), baseRuntime.Container()))
+    _, err := refresh.Refresh(melodyruntime.WithContext(baseRuntime, runContext))
     if false == errors.Is(err, context.Canceled) {
         t.Errorf("a cancelled refresh answered %v, wanted the cancellation", err)
     }
@@ -1081,7 +1080,7 @@ func TestRateRefreshServiceRefresh_ListsTheCatalogueThroughTheRunsContext(t *tes
     t.Cleanup(cancel)
     currencyService.currencyRepository = &cancelingCurrencyRepository{CurrencyRepository: currencyService.currencyRepository, cancel: cancel}
 
-    _, err := refresh.Refresh(melodyruntime.New(ctx, runtimeInstance.Scope(), runtimeInstance.Container()))
+    _, err := refresh.Refresh(melodyruntime.WithContext(runtimeInstance, ctx))
     if false == errors.Is(err, context.Canceled) {
         t.Fatalf("expected the interrupted run to end on its context, got %v", err)
     }

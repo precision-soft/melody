@@ -5,9 +5,9 @@ import (
     "testing"
     "time"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* capturingEventDispatcher records what the registrar hands it instead of dispatching. The listener under test reads nothing off the runtime and nothing off the dispatcher, so driving it directly is both sufficient and the only way to reach it without booting a kernel — and a kernel would supply the very 204 whose absence this pins. */
@@ -42,14 +42,14 @@ func (instance *capturingEventDispatcher) RemoveSubscriber(registration eventcon
 }
 
 func (instance *capturingEventDispatcher) Dispatch(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     event eventcontract.Event,
 ) (eventcontract.Event, error) {
     return event, nil
 }
 
 func (instance *capturingEventDispatcher) DispatchName(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     eventName string,
     payload any,
 ) (eventcontract.Event, error) {

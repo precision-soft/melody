@@ -22,10 +22,9 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* refusingCategoryRepository answers every listing with the failure of a nomenclature that cannot be read */
@@ -43,7 +42,7 @@ type productListStores struct {
     currencies repository.CurrencyRepository
 }
 
-func productListRuntimeOver(t *testing.T, requestContext context.Context, journal io.Writer, wrap func(stores productListStores) productListStores) (melodyruntimecontract.Runtime, melodycachecontract.Cache, productListStores) {
+func productListRuntimeOver(t *testing.T, requestContext context.Context, journal io.Writer, wrap func(stores productListStores) productListStores) (melodycontainercontract.Runtime, melodycachecontract.Cache, productListStores) {
     t.Helper()
 
     storage := persistence.NewCatalogStorage(nil)
@@ -91,7 +90,7 @@ func productListRuntimeOver(t *testing.T, requestContext context.Context, journa
         return currencyService, nil
     }, melodycontainer.RegisterOptions{})
 
-    return melodyruntime.New(requestContext, containerInstance.NewScope(), containerInstance), cacheInstance, seeded
+    return melodyruntime.NewRun(requestContext, containerInstance.NewScope()), cacheInstance, seeded
 }
 
 type refusingCurrencyRepository struct {

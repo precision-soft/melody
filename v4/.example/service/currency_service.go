@@ -19,7 +19,6 @@ import (
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -156,7 +155,7 @@ func (instance *CurrencyService) FindById(ctx context.Context, id string) (*enti
 
 /* Create takes the rate because the schema holds one and a currency with no quote cannot be converted. The instant is the clock's: the caller supplying the number is the reading, and the first provider reading taken after this instant overwrites both; an older one is judged stale. */
 func (instance *CurrencyService) Create(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     currencyId string,
     code string,
     name string,
@@ -180,7 +179,7 @@ func (instance *CurrencyService) Create(
 }
 
 func (instance *CurrencyService) Update(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     currencyId string,
     code string,
     name string,
@@ -256,7 +255,7 @@ func rateUpdateOutcomeName(outcome RateUpdateOutcome) string {
 
 /* UpdateRate is the door the rate refresh writes through. It goes through the service because the currency list and every currency by id are cached, and the listeners that drop those entries subscribe to the updated event it dispatches in the process that dispatched; the http server sees the drop through the shared cache alone. The rate is judged by refuseUnusableRate. The reading already held, the same provider stamp at the same rate, is not written again: the entries that do not serve the row are dropped without an event (see healCachedCurrency). A reading older than the one held on this clock is not written, and instants are compared at the microsecond the columns hold. */
 func (instance *CurrencyService) UpdateRate(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     currencyId string,
     quote entity.RateQuote,
 ) (*entity.Currency, RateUpdateOutcome, error) {
@@ -388,7 +387,7 @@ func cachedListCarriesRow(cachedList []*entity.Currency, currency *entity.Curren
 }
 
 func (instance *CurrencyService) DeleteById(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     currencyId string,
 ) (bool, error) {
     /* the product table's foreign key refuses the delete on the database; the read answers the same refusal on the configuration without one, and names it before the delete is tried */

@@ -9,13 +9,13 @@ import (
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
 func ApiDeleteHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if false == melodysecurity.IsGranted(runtimeInstance, entity.RoleEditor) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
         }
@@ -30,7 +30,7 @@ func ApiDeleteHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
         }
 
-        currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Container())
+        currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Scope())
 
         deleted, deleteErr := currencyService.DeleteById(runtimeInstance, id)
         if true == errors.Is(deleteErr, repository.ErrCurrencyInUse) {

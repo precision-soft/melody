@@ -9,7 +9,7 @@ import (
     "time"
 
     melodyclock "github.com/precision-soft/melody/v4/clock"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -19,7 +19,7 @@ type fixedRevocationEpochStore struct {
 }
 
 func (instance fixedRevocationEpochStore) RevokeBefore(
-    _ melodyruntimecontract.Runtime,
+    _ melodycontainercontract.Runtime,
     _ string,
     _ string,
     _ time.Time,
@@ -27,7 +27,7 @@ func (instance fixedRevocationEpochStore) RevokeBefore(
     return nil
 }
 
-func (instance fixedRevocationEpochStore) RevocationEpoch(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string, deviceIdentifier string) (time.Time, error) {
+func (instance fixedRevocationEpochStore) RevocationEpoch(runtimeInstance melodycontainercontract.Runtime, userIdentifier string, deviceIdentifier string) (time.Time, error) {
     return instance.epoch, nil
 }
 

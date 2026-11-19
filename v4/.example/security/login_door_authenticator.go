@@ -8,15 +8,15 @@ import (
     "strings"
     "time"
 
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 /* LoginChain is what the sign-in door authenticates through: LoginAuthentication, the password and, where it is wired, the second factor in front of the session. */
 type LoginChain interface {
-    Authenticate(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error)
+    Authenticate(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error)
 }
 
 /* LoginDoorAuthenticator reads the sign-in's json body and authenticates it through the chain Bind hands over: the module declares the firewall before the kernel-built parts of the chain exist. */
@@ -34,7 +34,7 @@ func (instance *LoginDoorAuthenticator) Supports(request melodyhttpcontract.Requ
 }
 
 /* Authenticate reads an application/json body alone and refuses any other with 415: a top-level cross-site form can post urlencoded, multipart or text/plain, never json. A malformed request and an outage are errors, which raise no security.login.failure; refused credentials are an unauthenticated token, which does. */
-func (instance *LoginDoorAuthenticator) Authenticate(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+func (instance *LoginDoorAuthenticator) Authenticate(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
     type loginBody struct {
         Username string `json:"username"`
         Password string `json:"password"`

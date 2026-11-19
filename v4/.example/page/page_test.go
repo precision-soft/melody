@@ -12,10 +12,9 @@ import (
 
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -38,13 +37,13 @@ func TestLoadRefusesAFileThatIsNotEmbedded(t *testing.T) {
     }
 }
 
-func runtimeServingRoute(t *testing.T, name string, pattern string) melodyruntimecontract.Runtime {
+func runtimeServingRoute(t *testing.T, name string, pattern string) melodycontainercontract.Runtime {
     t.Helper()
 
     router := melodyhttp.NewRouter()
     router.Handle(
         pattern,
-        func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
             return melodyhttp.NewResponse(nethttp.StatusOK, []byte("ok")), nil
         },
         melodyhttp.RouteOptions{Name: name, Methods: []string{"GET"}, Attributes: melodyhttp.ExposedRouteAttributes(melodyhttp.RouteZonePublic)},
@@ -64,7 +63,7 @@ func runtimeServingRoute(t *testing.T, name string, pattern string) melodyruntim
         t.Fatalf("register the route registry: %v", registerErr)
     }
 
-    return melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return melodyruntime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 func bodyOf(t *testing.T, response melodyhttpcontract.Response) string {
@@ -158,7 +157,7 @@ func TestEveryPageCarriesTheViewerPlaceholder(t *testing.T) {
     }
 }
 
-func runtimeServingRouteAs(t *testing.T, name string, pattern string, roleList []string) melodyruntimecontract.Runtime {
+func runtimeServingRouteAs(t *testing.T, name string, pattern string, roleList []string) melodycontainercontract.Runtime {
     t.Helper()
 
     runtimeInstance := runtimeServingRoute(t, name, pattern)

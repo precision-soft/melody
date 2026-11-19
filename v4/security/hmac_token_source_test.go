@@ -15,12 +15,12 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -745,7 +745,7 @@ type failingNonceGuard struct {
     failure error
 }
 
-func (instance *failingNonceGuard) Remember(_ runtimecontract.Runtime, _ string, _ bound.Duration) (bool, error) {
+func (instance *failingNonceGuard) Remember(_ containercontract.Runtime, _ string, _ bound.Duration) (bool, error) {
     return false, instance.failure
 }
 
@@ -1230,10 +1230,10 @@ func hmacRejectionContext(t *testing.T, logger *recordingLogger) map[string]any 
 
 type recordingHmacApplicationRegistry struct {
     failure      error
-    seenRuntimes []runtimecontract.Runtime
+    seenRuntimes []containercontract.Runtime
 }
 
-func (instance *recordingHmacApplicationRegistry) RolesForApplication(runtimeInstance runtimecontract.Runtime, application string) ([]string, bool, error) {
+func (instance *recordingHmacApplicationRegistry) RolesForApplication(runtimeInstance containercontract.Runtime, application string) ([]string, bool, error) {
     instance.seenRuntimes = append(instance.seenRuntimes, runtimeInstance)
 
     if nil != instance.failure {

@@ -16,9 +16,8 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/httpclient"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* recordingSink stands in for whatever an operator points the export at. It keeps the body it was given,
@@ -51,7 +50,7 @@ func newRecordingSink(t *testing.T, status int) *recordingSink {
 /* exportRuntime carries the one service the exporter resolves, registered under the name the composition
    root registers it under — by NAME and not by type, which is what the application does too, because two
    clients of one concrete type cannot both hold the type. */
-func exportRuntime(t *testing.T) melodyruntimecontract.Runtime {
+func exportRuntime(t *testing.T) melodycontainercontract.Runtime {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -68,7 +67,7 @@ func exportRuntime(t *testing.T) melodyruntimecontract.Runtime {
 
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 }
 
 func exportReading() *CatalogReading {

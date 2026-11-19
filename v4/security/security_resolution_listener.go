@@ -5,6 +5,7 @@ import (
     nethttp "net/http"
     "runtime/debug"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -12,7 +13,6 @@ import (
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -25,7 +25,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
 
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
             if false == ok {
                 return nil
@@ -125,7 +125,7 @@ func RegisterKernelSecurityResolutionListener(kernelInstance kernelcontract.Kern
 }
 
 func setSecurityContextOnRuntime(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     firewall *CompiledFirewall,
     token securitycontract.Token,
 ) {
@@ -136,7 +136,7 @@ func setSecurityContextOnRuntime(
 
 func resolveTokenSourceSafely(
     firewall *CompiledFirewall,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     requestEvent *http.KernelRequestEvent,
 ) (token securitycontract.Token, resolveErr error, panicked bool) {
     tokenSource := firewall.TokenSource()

@@ -10,7 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -72,7 +72,7 @@ func (instance *InternalSignCommand) Flags() []melodyclicontract.Flag {
 }
 
 func (instance *InternalSignCommand) Run(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     commandContext *melodyclicontract.CommandContext,
 ) error {
     method := commandContext.String("method")
@@ -138,7 +138,7 @@ func (instance *InternalSignCommand) Run(
     return writeErr
 }
 
-func (instance *InternalSignCommand) signerFor(runtimeInstance melodyruntimecontract.Runtime, rawTtl string) (*melodysecurity.HmacEnvelopeSigner, error) {
+func (instance *InternalSignCommand) signerFor(runtimeInstance melodycontainercontract.Runtime, rawTtl string) (*melodysecurity.HmacEnvelopeSigner, error) {
     if "" == rawTtl {
         return instance.signer.Resolve(runtimeInstance.Context())
     }

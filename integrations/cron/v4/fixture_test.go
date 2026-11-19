@@ -16,9 +16,9 @@ import (
     melodyconfig "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type fakePlainCommand struct {
@@ -41,7 +41,7 @@ func (instance *fakePlainCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *fakePlainCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *fakePlainCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     return nil
 }
 
@@ -335,7 +335,7 @@ type configuredGenerateCommand struct {
 var _ clicontract.Command = (*configuredGenerateCommand)(nil)
 
 func (instance *configuredGenerateCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     return runWithInjectedConfiguration(instance.GenerateCommand, commandContext, instance.configuration)
@@ -349,7 +349,7 @@ func dispatchGenerateCommand(
     var stdout bytes.Buffer
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     dispatched := &configuredGenerateCommand{
         GenerateCommand: generateCommand,
@@ -371,13 +371,13 @@ func dispatchGenerateCommand(
 /* runnerDispatch drives the runner command through the framework's dispatch door while keeping the Run(ctx, argv) shape the tests around it were written against: the arguments are parsed against the flags the command declares, and the context it reads is the one production hands it. */
 type runnerDispatch struct {
     runner          *RunnerCommand
-    runtimeInstance runtimecontract.Runtime
+    runtimeInstance containercontract.Runtime
     writer          io.Writer
 }
 
 func newRunnerDispatch(
     runner *RunnerCommand,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     writer io.Writer,
 ) *runnerDispatch {
     return &runnerDispatch{

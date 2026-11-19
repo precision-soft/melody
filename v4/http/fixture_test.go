@@ -18,34 +18,33 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-func newTestRuntime() runtimecontract.Runtime {
+func newTestRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
-func newDebugTestRuntime() runtimecontract.Runtime {
+func newDebugTestRuntime() containercontract.Runtime {
     serviceContainer := newHttpTestContainer()
     scope := serviceContainer.NewScope()
 
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
 type writeHeaderCountingResponseWriter struct {
@@ -244,13 +243,13 @@ func (instance *exceptionListenerCaptureLogger) Emergency(message string, contex
 
 var _ loggingcontract.Logger = (*exceptionListenerCaptureLogger)(nil)
 
-func newExceptionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
+func newExceptionListenerTestRuntimeWithLogger(logger loggingcontract.Logger) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
 type errorContextRecordingLogger struct {
@@ -384,7 +383,7 @@ func newHttpTestContainerWithSessionManagerAndEnvironmentValues(
 }
 
 func routeRegistryTestHandler() httpcontract.Handler {
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return TextResponse(200, "ok"), nil
     }
 }

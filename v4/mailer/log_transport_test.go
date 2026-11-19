@@ -5,8 +5,8 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/logging"
-    "github.com/precision-soft/melody/v4/runtime"
 
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
@@ -190,7 +190,7 @@ func TestLogTransport_ATypedNilConstructorLoggerFallsThroughToTheRuntimes(t *tes
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, runtimeLogger, container.OverrideOptions{})
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), scope)
 
     sendErr := NewLogTransport(absentLogger).Send(runtimeInstance, mailercontract.Message{
         From:    mailercontract.Address{Email: "shop@example.com"},

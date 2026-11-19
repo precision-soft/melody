@@ -8,11 +8,10 @@ import (
     "github.com/precision-soft/melody/v4/.example/message"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodymailer "github.com/precision-soft/melody/v4/mailer"
     melodymailercontract "github.com/precision-soft/melody/v4/mailer/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type recordingTransport struct {
@@ -20,7 +19,7 @@ type recordingTransport struct {
     sendErr error
 }
 
-func (instance *recordingTransport) Send(_ melodyruntimecontract.Runtime, messageInstance melodymailercontract.Message) error {
+func (instance *recordingTransport) Send(_ melodycontainercontract.Runtime, messageInstance melodymailercontract.Message) error {
     if nil != instance.sendErr {
         return instance.sendErr
     }
@@ -30,7 +29,7 @@ func (instance *recordingTransport) Send(_ melodyruntimecontract.Runtime, messag
     return nil
 }
 
-func runtimeWithMailer(t *testing.T, transport melodymailercontract.Transport) melodyruntimecontract.Runtime {
+func runtimeWithMailer(t *testing.T, transport melodymailercontract.Transport) melodycontainercontract.Runtime {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -43,7 +42,7 @@ func runtimeWithMailer(t *testing.T, transport melodymailercontract.Transport) m
         }, melodycontainer.RegisterOptions{})
     }
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 }
 
 func TestHandleWelcomeEmail_SendsTheMailThroughTheMailer(t *testing.T) {

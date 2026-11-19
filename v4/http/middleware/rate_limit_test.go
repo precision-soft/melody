@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -25,8 +26,6 @@ import (
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestDefaultClientIp_UsesRemoteAddr(t *testing.T) {
@@ -220,7 +219,7 @@ func TestRateLimitMiddleware_AllowsRequest(t *testing.T) {
     middleware := RateLimitMiddleware(limiter, config)
 
     nextCalled := false
-    next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    next := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         nextCalled = true
         return http.TextResponse(200, "ok"), nil
     }
@@ -250,7 +249,7 @@ func TestRateLimitMiddleware_RejectsWhenLimitExceeded(t *testing.T) {
     config := RateLimitConfig{}
     middleware := RateLimitMiddleware(limiter, config)
 
-    next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    next := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(200, "ok"), nil
     }
 
@@ -592,17 +591,17 @@ type fakeRuntimeRateLimiter struct {
     allowed      bool
     retryAfter   time.Duration
     err          error
-    seenRuntime  runtimecontract.Runtime
+    seenRuntime  containercontract.Runtime
 }
 
-func (instance *fakeRuntimeRateLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *fakeRuntimeRateLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
     instance.allowCalls++
     instance.seenRuntime = runtimeInstance
 
     return httpcontract.RateLimitDecision{Allowed: instance.allowed, RetryAfter: instance.retryAfter, Limit: 1}, instance.err
 }
 
-func (instance *fakeRuntimeRateLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
+func (instance *fakeRuntimeRateLimiter) Reset(runtimeInstance containercontract.Runtime, key string) error {
     return nil
 }
 
@@ -610,7 +609,7 @@ func TestRateLimitMiddleware_HandsTheRequestRuntimeToTheLimiter(t *testing.T) {
     limiter := &fakeRuntimeRateLimiter{allowed: true}
 
     config := RateLimitConfig{}
-    handler := RateLimitMiddleware(limiter, config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := RateLimitMiddleware(limiter, config)(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(200, "ok"), nil
     })
 
@@ -632,7 +631,7 @@ func TestRateLimitMiddleware_HonorsFailurePolicyDenialOnStoreError(t *testing.T)
     limiter := &fakeRuntimeRateLimiter{allowed: false, err: exception.NewError("store unreachable", nil, nil)}
 
     config := RateLimitConfig{}
-    handler := RateLimitMiddleware(limiter, config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := RateLimitMiddleware(limiter, config)(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(200, "ok"), nil
     })
 
@@ -652,7 +651,7 @@ func TestRateLimitMiddleware_HonorsFailurePolicyAllowanceOnStoreError(t *testing
     config := RateLimitConfig{}
 
     nextCalled := false
-    handler := RateLimitMiddleware(limiter, config)(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := RateLimitMiddleware(limiter, config)(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         nextCalled = true
         return http.TextResponse(200, "ok"), nil
     })
@@ -844,7 +843,7 @@ func TestSlidingWindowLimiter_HoldsTheRateWhereTheFixedWindowDoesNot(t *testing.
 }
 
 func allowingNext() httpcontract.Handler {
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(200, "ok"), nil
     }
 }
@@ -1151,7 +1150,7 @@ func TestRateLimitMiddleware_AnswersTheSilentLimitHandlerWith429(t *testing.T) {
     config := RateLimitConfig{OnLimitExceeded: silentHandler}
     middleware := RateLimitMiddleware(limiter, config)
 
-    next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    next := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(200, "ok"), nil
     }
 
@@ -1189,7 +1188,7 @@ func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
     limiter := &cancellingRuntimeLimiter{}
     config := RateLimitConfig{}
@@ -1197,7 +1196,7 @@ func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing
 
     handler := middleware(
         func(
-            innerRuntime runtimecontract.Runtime,
+            innerRuntime containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1215,11 +1214,11 @@ func TestRateLimitMiddleware_ACancelledLimiterCallIsRecordedAtWarning(t *testing
 
 type cancellingRuntimeLimiter struct{}
 
-func (instance *cancellingRuntimeLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *cancellingRuntimeLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
     return httpcontract.RateLimitDecision{Allowed: true}, context.Canceled
 }
 
-func (instance *cancellingRuntimeLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
+func (instance *cancellingRuntimeLimiter) Reset(runtimeInstance containercontract.Runtime, key string) error {
     return nil
 }
 
@@ -1241,11 +1240,11 @@ type alreadyReportingRuntimeLimiter struct {
     allowWithRuntimeCalls int
 }
 
-func (instance *alreadyReportingRuntimeLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
+func (instance *alreadyReportingRuntimeLimiter) Reset(runtimeInstance containercontract.Runtime, key string) error {
     return nil
 }
 
-func (instance *alreadyReportingRuntimeLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *alreadyReportingRuntimeLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
     instance.allowWithRuntimeCalls++
 
     return httpcontract.RateLimitDecision{Allowed: true}, exception.MarkLogged(
@@ -1260,14 +1259,14 @@ func TestRateLimitMiddleware_AFailureTheLimiterAlreadyRecordedIsNotRecordedAgain
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
     limiter := &alreadyReportingRuntimeLimiter{}
     middleware := RateLimitMiddleware(limiter, RateLimitConfig{})
 
     handler := middleware(
         func(
-            innerRuntime runtimecontract.Runtime,
+            innerRuntime containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1470,11 +1469,11 @@ func assertReturnsOnACyclicChain(t *testing.T, callback func()) {
 
 type cyclicRuntimeLimiter struct{}
 
-func (instance *cyclicRuntimeLimiter) Allow(runtimeInstance runtimecontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
+func (instance *cyclicRuntimeLimiter) Allow(runtimeInstance containercontract.Runtime, key string) (httpcontract.RateLimitDecision, error) {
     return httpcontract.RateLimitDecision{Allowed: true}, newCyclicChainError()
 }
 
-func (instance *cyclicRuntimeLimiter) Reset(runtimeInstance runtimecontract.Runtime, key string) error {
+func (instance *cyclicRuntimeLimiter) Reset(runtimeInstance containercontract.Runtime, key string) error {
     return nil
 }
 
@@ -1484,11 +1483,11 @@ func TestRateLimitMiddleware_ACyclicChainFromTheLimiterIsRecordedAsAFailure(t *t
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
     handler := RateLimitMiddleware(&cyclicRuntimeLimiter{}, RateLimitConfig{})(
         func(
-            innerRuntime runtimecontract.Runtime,
+            innerRuntime containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1505,12 +1504,12 @@ func TestRateLimitMiddleware_ACyclicChainFromTheLimiterIsRecordedAsAFailure(t *t
     }
 }
 
-func newRateLimitCaptureRuntime(capture *rateLimitCaptureLogger) runtimecontract.Runtime {
+func newRateLimitCaptureRuntime(capture *rateLimitCaptureLogger) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
 func TestRateLimitMiddleware_AMarkedDenialReturnsTheUnavailableErrorAndSkipsTheLimitHandler(t *testing.T) {
@@ -1525,7 +1524,7 @@ func TestRateLimitMiddleware_AMarkedDenialReturnsTheUnavailableErrorAndSkipsTheL
 
             return nil, exception.TooManyRequests("too many")
         },
-    })(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    })(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         nextCalls++
 
         return http.TextResponse(200, "ok"), nil
@@ -1550,7 +1549,7 @@ func TestRateLimitMiddleware_AMarkedDenialReturnsTheUnavailableErrorAndSkipsTheL
 func TestRateLimitMiddleware_AnUnmarkedDenialBesideAnErrorStays429(t *testing.T) {
     limiter := &fakeRuntimeRateLimiter{allowed: false, err: exception.NewError("store unreachable", nil, nil)}
 
-    handler := RateLimitMiddleware(limiter, RateLimitConfig{})(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := RateLimitMiddleware(limiter, RateLimitConfig{})(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(200, "ok"), nil
     })
 
@@ -1566,7 +1565,7 @@ func TestRateLimitMiddleware_AMarkedErrorBesideAnAllowanceServesTheRequest(t *te
     limiter := &fakeRuntimeRateLimiter{allowed: true, err: exception.MarkInfrastructureFailure(exception.NewError("store unreachable", nil, nil))}
 
     nextCalls := 0
-    handler := RateLimitMiddleware(limiter, RateLimitConfig{})(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := RateLimitMiddleware(limiter, RateLimitConfig{})(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         nextCalls++
 
         return http.TextResponse(200, "ok"), nil
@@ -1581,7 +1580,7 @@ func TestRateLimitMiddleware_AMarkedErrorBesideAnAllowanceServesTheRequest(t *te
 func TestRateLimitMiddleware_AMarkedDenialNobodyRecordedIsNotMarkedLogged(t *testing.T) {
     limiter := &fakeRuntimeRateLimiter{allowed: false, err: exception.MarkInfrastructureFailure(exception.NewError("store unreachable", nil, nil))}
 
-    handler := RateLimitMiddleware(limiter, RateLimitConfig{})(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := RateLimitMiddleware(limiter, RateLimitConfig{})(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.TextResponse(200, "ok"), nil
     })
 
@@ -1686,7 +1685,7 @@ func TestRateLimiter_ADenialAnswersTheRemainderOfTheWindow(t *testing.T) {
 }
 
 type typedNilRuntime struct {
-    runtimecontract.Runtime
+    containercontract.Runtime
 }
 
 func TestRateLimiter_AllowRefusesANilRuntime(t *testing.T) {
@@ -1696,7 +1695,7 @@ func TestRateLimiter_AllowRefusesANilRuntime(t *testing.T) {
         "fixed":   NewFixedWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
         "sliding": NewSlidingWindowLimiter("test", 1, time.Minute, LimiterConfig{}),
     } {
-        for runtimeName, runtimeInstance := range map[string]runtimecontract.Runtime{"nil": nil, "typed nil": typedNil} {
+        for runtimeName, runtimeInstance := range map[string]containercontract.Runtime{"nil": nil, "typed nil": typedNil} {
             decision, allowErr := limiter.Allow(runtimeInstance, "client")
             if nil == allowErr || true == decision.Allowed || true == exception.AnswersUnavailable(allowErr) {
                 t.Fatalf("%s, %s runtime: expected an unmarked refusal and a denial, got %+v %v", name, runtimeName, decision, allowErr)
@@ -1863,7 +1862,7 @@ func TestRateLimitMiddleware_ACallTheCallersOwnContextEndedIsRecordedAtWarning(t
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
     deadlineContext, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
     defer cancel()
-    runtimeInstance := runtime.New(deadlineContext, scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(deadlineContext, scope)
 
     limiter := &fakeRuntimeRateLimiter{allowed: false, err: exception.NewError("deadline", nil, context.DeadlineExceeded)}
     _, _ = RateLimitMiddleware(limiter, RateLimitConfig{})(allowingNext())(runtimeInstance, httptest.NewRecorder(), limitedRequest())

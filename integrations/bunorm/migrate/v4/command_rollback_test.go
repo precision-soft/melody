@@ -10,8 +10,8 @@ import (
     "testing"
     "time"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/uptrace/bun/migrate"
 )
 
@@ -93,7 +93,7 @@ func TestRollbackCommand_AFailedRollbackNamesTheGroupItWasWalking(t *testing.T) 
 
 /* the count of the group a failed rollback was walking is promised on BOTH renderings, and the text block draws a fixed set of keys: a key of the caller's own naming reaches the machine document and is dropped from the block a person reads, silently and with no fallthrough. */
 func TestRollbackCommand_TheFailedGroupCountRendersOnBothRenderings(t *testing.T) {
-    newFailingRollback := func(t *testing.T) (runtimecontract.Runtime, *migrate.Migrations) {
+    newFailingRollback := func(t *testing.T) (containercontract.Runtime, *migrate.Migrations) {
         t.Helper()
 
         database, recorder := newFakeBunDatabase()

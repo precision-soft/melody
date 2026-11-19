@@ -2,7 +2,7 @@ package event
 
 import (
     "github.com/precision-soft/melody/v4/.example/entity"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -15,7 +15,7 @@ var topicRoleRequirement = map[string]string{
 }
 
 /* topicIsReadableBy reports whether the caller may subscribe to the topic the client chose in the query string. A topic this application publishes onto is declared above with the role its content is written behind; any other topic carries only what the publish route, itself behind RoleEditor, put there, and is readable by any caller the stream route's access rule authenticated. */
-func topicIsReadableBy(runtimeInstance melodyruntimecontract.Runtime, topic string) bool {
+func topicIsReadableBy(runtimeInstance melodycontainercontract.Runtime, topic string) bool {
     requiredRole, isPrivileged := topicRoleRequirement[topic]
     if false == isPrivileged {
         return true

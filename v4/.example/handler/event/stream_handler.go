@@ -11,17 +11,17 @@ import (
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/subscriber"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* StreamHandler resolves the hub per request rather than taking it at registration, so the provider that installs the hub's logger runs and the container knows it has a hub to close. The slots are the process's one count of open streams, taken at registration. */
 func StreamHandler(slots *StreamSlots) melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         topic := queryStringOr(request, "topic", CatalogTopic)
 
         /* the client names the topic, so opening a stream is not permission to read the topic asked for. The gate stands ahead of the writer because NewServerSentEventWriter commits the response (headers, 200, flush), and the kernel discards what a handler returns after that. */
@@ -97,7 +97,7 @@ func StreamHandler(slots *StreamSlots) melodyhttpcontract.Handler {
 }
 
 /* acquireStreamSlot takes a slot for the account the request authenticated; the stream route admits authenticated readers alone, so a request without an account takes no slot */
-func acquireStreamSlot(runtimeInstance melodyruntimecontract.Runtime, slots *StreamSlots) (func(), bool) {
+func acquireStreamSlot(runtimeInstance melodycontainercontract.Runtime, slots *StreamSlots) (func(), bool) {
     if nil == slots {
         return nil, false
     }
@@ -143,7 +143,7 @@ func serverWriteTimeoutOf(request melodyhttpcontract.Request) time.Duration {
 }
 
 /* journalServerSideCut tells a client that left, a broken pipe or a reset, from a server cut because the re-armed write deadline expired with a frame in flight, which is a lost frame worth a warning. The two are told apart on the error: net/http cancels the request context on any write error, while only a deadline reports a net.Error whose Timeout is true. */
-func journalServerSideCut(runtimeInstance melodyruntimecontract.Runtime, topic string, frame string, writeErr error) {
+func journalServerSideCut(runtimeInstance melodycontainercontract.Runtime, topic string, frame string, writeErr error) {
     var networkErr net.Error
     if false == errors.As(writeErr, &networkErr) || false == networkErr.Timeout() {
         return

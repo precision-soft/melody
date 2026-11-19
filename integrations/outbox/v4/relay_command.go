@@ -12,12 +12,11 @@ import (
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const defaultPollInterval = 1 * time.Second
@@ -112,7 +111,7 @@ func (instance *RelayCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *RelayCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     interval, intervalErr := parseDurationFlag(commandContext.String("interval"), defaultPollInterval, "interval")
@@ -131,7 +130,7 @@ func (instance *RelayCommand) Run(
     runContext, stop := signal.NotifyContext(runtimeInstance.Context(), os.Interrupt, syscall.SIGTERM)
     defer stop()
 
-    relayRuntime := runtime.New(runContext, runtimeInstance.Scope(), runtimeInstance.Container())
+    relayRuntime := runtime.WithContext(runtimeInstance, runContext)
 
     logger := logging.LoggerFromRuntime(relayRuntime)
 

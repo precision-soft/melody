@@ -8,11 +8,11 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
     melodycache "github.com/precision-soft/melody/v4/cache"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type ProductEventSubscriber struct{}
@@ -36,7 +36,7 @@ func (instance *ProductEventSubscriber) SubscribedEvents() map[string][]melodyev
 }
 
 func (instance *ProductEventSubscriber) onProductCreated() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*event.ProductCreatedEvent)
         if false == ok {
@@ -46,7 +46,7 @@ func (instance *ProductEventSubscriber) onProductCreated() melodyeventcontract.E
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
             service.CacheKeyProductById(payloadInstance.Product().Id),
@@ -70,7 +70,7 @@ func (instance *ProductEventSubscriber) onProductCreated() melodyeventcontract.E
 }
 
 func (instance *ProductEventSubscriber) onProductUpdated() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*event.ProductUpdatedEvent)
         if false == ok {
@@ -81,7 +81,7 @@ func (instance *ProductEventSubscriber) onProductUpdated() melodyeventcontract.E
         }
 
         logger := melodylogging.LoggerMustFromRuntime(runtimeInstance)
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
             service.CacheKeyProductById(payloadInstance.Product().Id),
@@ -119,7 +119,7 @@ func (instance *ProductEventSubscriber) onProductUpdated() melodyeventcontract.E
 }
 
 func (instance *ProductEventSubscriber) onProductDeleted() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*event.ProductDeletedEvent)
         if false == ok {
@@ -129,7 +129,7 @@ func (instance *ProductEventSubscriber) onProductDeleted() melodyeventcontract.E
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         productByIdCacheDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), 
             service.CacheKeyProductById(payloadInstance.ProductId()),

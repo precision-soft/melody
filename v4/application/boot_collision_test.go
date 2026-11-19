@@ -14,7 +14,6 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type mapEnvironmentSource struct {
@@ -70,7 +69,7 @@ func (instance *namedTestCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *namedTestCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     return nil
@@ -363,7 +362,7 @@ func TestBootCollision_OriginNamesTheCallerNotTheFrameworkPlumbing(t *testing.T)
 }
 
 func bootCollisionTestHandler() httpcontract.Handler {
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return nil, nil
     }
 }

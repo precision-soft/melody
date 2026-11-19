@@ -7,9 +7,9 @@ import (
     "encoding/json"
     "strings"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -69,7 +69,7 @@ func encodeHmacHeaderValue(keyId string, envelope hmacEnvelope, secret []byte) (
 
 /* a short resolved secret is the provider's misconfiguration, answered as an infrastructure failure */
 func decodeHmacHeaderValue(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     headerValue string,
     secrets HmacSecretProvider,
     minimumSecretLength int,

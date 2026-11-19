@@ -13,11 +13,11 @@ import (
 
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodymailercontract "github.com/precision-soft/melody/v4/mailer/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
 )
 
 func TestSmtpConfig_CarriesTheCredentialsAndRequiresAuthentication(t *testing.T) {
@@ -134,7 +134,7 @@ func TestBuildMailer_WiresTheLogTransportWithoutAnAddress(t *testing.T) {
         return logger, nil
     }, melodycontainer.RegisterOptions{})
 
-    sendErr := module.mailer.Send(melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), melodymailercontract.Message{
+    sendErr := module.mailer.Send(melodyruntime.NewRun(context.Background(), containerInstance.NewScope()), melodymailercontract.Message{
         From:    melodymailercontract.Address{Email: "catalog@example.test"},
         To:      []melodymailercontract.Address{{Email: "reader@example.test"}},
         Subject: "welcome",
@@ -216,7 +216,7 @@ func sendThroughBuiltMailer(t *testing.T, environment map[string]string) error {
         return melodylogging.NewNopLogger(), nil
     }, melodycontainer.RegisterOptions{})
 
-    return module.mailer.Send(melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), melodymailercontract.Message{
+    return module.mailer.Send(melodyruntime.NewRun(context.Background(), containerInstance.NewScope()), melodymailercontract.Message{
         From:    melodymailercontract.Address{Email: "catalog@example.test"},
         To:      []melodymailercontract.Address{{Email: "reader@example.test"}},
         Subject: "welcome",

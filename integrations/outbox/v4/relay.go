@@ -12,6 +12,8 @@ import (
     "unicode/utf8"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
@@ -19,8 +21,6 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     "github.com/precision-soft/melody/v4/messagebus"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* RelayConfig configures the outbox relay — the loop that drains pending rows to the message transport with retry, exponential backoff and a dead-letter terminal state. Every batch is claimed atomically (FOR UPDATE SKIP LOCKED), so two instances do not claim the same row while its VisibilityTimeout holds, even without a Locker; the relay stays at-least-once — a send still running when the timeout lapses, or a crash between the send and MarkSent, lets the row be claimed and published again —, and this requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). A Locker is still useful as an additional optimization: supply one (for example the Redis locker) so only one instance does any work at a time in a multi-instance deployment. */
@@ -101,7 +101,7 @@ type Relay struct {
 }
 
 /* RunOnce drains one batch of due messages and returns how many were published; when a Locker is configured and another instance holds the lease, it returns 0. The lease is an optimisation: every claimed row carries this run's claim token, so a lease lost mid-batch hands no claimed row to the new holder, and the batch is drained to its end, or to a failed send, with the refresh failure reported after it. A repository failure mid-batch ends the run where it happened, and the visibility timeout re-surfaces the unreached rows. A failed send ends the batch too, the unreached rows handed back uncharged and held until the failed row is tried again; the failed row is charged an attempt, unless the transport marked the failure with exception.MarkInfrastructureFailure and the next row failed too, an outage, which charges it nothing, or the run's cancellation cut the send, which hands the row back due at once, uncharged, and is reported as the run's error. */
-func (instance *Relay) RunOnce(runtimeInstance runtimecontract.Runtime) (int, error) {
+func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, error) {
     release, refresh, acquired, lockErr := instance.acquireLease(runtimeInstance)
     if nil != lockErr {
         return 0, lockErr
@@ -241,7 +241,7 @@ func runContainedWithStack(step func()) (recoveredErr error, panicStack string) 
 }
 
 /* reportContainedPanic writes a contained panic to the runtime's logger with the stack it was raised on, which stays out of last_error, under the same containment, since the logger is one of the collaborators that can panic. The row's last_error carries the same cause, and RunOnce reports nothing for a row it resolved, so this record is the panic's only trace in the process log. */
-func (instance *Relay) reportContainedPanic(runtimeInstance runtimecontract.Runtime, id int64, phase string, panicErr error, panicStack string) {
+func (instance *Relay) reportContainedPanic(runtimeInstance containercontract.Runtime, id int64, phase string, panicErr error, panicStack string) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil == logger {
         return
@@ -315,7 +315,7 @@ func (instance *Relay) holdUnreached(ctx context.Context, failedId int64, failur
 }
 
 /* reportFailedSend writes one ERROR naming a row whose send the transport refused, under the same containment as every other record: the row's last_error carries the cause, and RunOnce reports nothing for a row it resolved, so without this record a broker outage leaves no trace in the process log. It is written once the row's resolution is, and the batch ends at the failed send, so a pass writes at most one such record. */
-func (instance *Relay) reportFailedSend(runtimeInstance runtimecontract.Runtime, pending Pending, attempts int, sendErr error, logContext exceptioncontract.Context) {
+func (instance *Relay) reportFailedSend(runtimeInstance containercontract.Runtime, pending Pending, attempts int, sendErr error, logContext exceptioncontract.Context) {
     logger := logging.LoggerFromRuntime(runtimeInstance)
     if nil == logger {
         return
@@ -332,7 +332,7 @@ func (instance *Relay) reportFailedSend(runtimeInstance runtimecontract.Runtime,
 }
 
 /* deliver publishes one claimed row and resolves it, and answers, beside whether the broker took it, the failed send when the transport refused it, which ends the batch. The codec's decode and the transport's send run contained: a panic in either is charged to the row as the failure the collaborator would have returned — a decode panic dead-letters the row like a decode error and the batch goes on, a send panic takes the retry path like a send error and ends the batch — with the panic in last_error and a record in the process log. The repository's own calls stay uncontained, since a resolution after a repository panic would go to the same repository. */
-func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending Pending) (delivered bool, failure *failedSend, err error) {
+func (instance *Relay) deliver(runtimeInstance containercontract.Runtime, pending Pending) (delivered bool, failure *failedSend, err error) {
     ctx := runtimeInstance.Context()
 
     /* record this delivery attempt — and persist it — before decoding or sending, either of which can hang the relay. Charging the attempt per row at this point (rather than to the whole batch at claim time) means a row that keeps hanging advances only its own poison counter; a batch-mate the relay never reaches is never charged an attempt it never received, so it is never falsely dead-lettered. */
@@ -415,7 +415,7 @@ func (instance *Relay) deliver(runtimeInstance runtimecontract.Runtime, pending 
 }
 
 /* chargeFailedSend charges a failed send an attempt: rescheduled under the growing backoff, or dead-lettered at MaxAttempts. A failure the transport answered about the message proves it reachable, so it ends a running outage. */
-func (instance *Relay) chargeFailedSend(runtimeInstance runtimecontract.Runtime, pending Pending, sendErr error, storedError string, panicked bool) (bool, *failedSend, error) {
+func (instance *Relay) chargeFailedSend(runtimeInstance containercontract.Runtime, pending Pending, sendErr error, storedError string, panicked bool) (bool, *failedSend, error) {
     ctx := runtimeInstance.Context()
     sendPanic := panicked
 
@@ -455,7 +455,7 @@ func (instance *Relay) chargeFailedSend(runtimeInstance runtimecontract.Runtime,
 }
 
 /* handBackCut resolves a send the run's cancellation or deadline cut short, which says nothing about the message or the transport: the row goes back due at once with its attempts unchanged and no outage counted, the recorded delivery attempt kept, so a send that hangs until every run is cut still reaches MaxDeliveryAttempts; the cut is answered as an error, so the run reports it wherever the row stood in the batch. */
-func (instance *Relay) handBackCut(runtimeInstance runtimecontract.Runtime, pending Pending, storedError string, sendErr error) error {
+func (instance *Relay) handBackCut(runtimeInstance containercontract.Runtime, pending Pending, storedError string, sendErr error) error {
     ctx := runtimeInstance.Context()
 
     writeErr := resolutionWriteOutcome(
@@ -472,7 +472,7 @@ func (instance *Relay) handBackCut(runtimeInstance runtimecontract.Runtime, pend
 }
 
 /* handBackUncharged resolves a send that met an unreachable transport: the row goes back uncharged, available at availableAt; the first row of an outage whose write succeeds writes one ERROR record, the later ones none. */
-func (instance *Relay) handBackUncharged(runtimeInstance runtimecontract.Runtime, unavailable unavailableSend, availableAt time.Time, mayReport bool) error {
+func (instance *Relay) handBackUncharged(runtimeInstance containercontract.Runtime, unavailable unavailableSend, availableAt time.Time, mayReport bool) error {
     handBackErr := resolutionWriteOutcome(
         instance.resolve(runtimeInstance.Context(), func(resolutionContext context.Context) error {
             return instance.config.Repository.RescheduleUncharged(resolutionContext, unavailable.pending.Id, availableAt, unavailable.storedError, unavailable.pending.ClaimToken)
@@ -488,7 +488,7 @@ func (instance *Relay) handBackUncharged(runtimeInstance runtimecontract.Runtime
 }
 
 /* resolveUnavailable judges a send the transport marked unreachable against the next row of the batch, sent once as a probe: delivered, the failure was the message's after all and is charged an attempt, so a message a healthy broker refuses on its channel cannot be retried uncharged for ever, and the batch goes on (nil failure); failed too, or with no next row, the outage is counted once, the failed row goes back uncharged, a probe the transport also marked with it, and the batch stops behind them. probed counts the rows the probe consumed. */
-func (instance *Relay) resolveUnavailable(runtimeInstance runtimecontract.Runtime, unavailable unavailableSend, rest []Pending, keepLease func()) (failure *failedSend, probed int, probeDelivered bool, err error) {
+func (instance *Relay) resolveUnavailable(runtimeInstance containercontract.Runtime, unavailable unavailableSend, rest []Pending, keepLease func()) (failure *failedSend, probed int, probeDelivered bool, err error) {
     var probeFailure *failedSend
 
     if 0 < len(rest) {
@@ -531,7 +531,7 @@ func (instance *Relay) resolveUnavailable(runtimeInstance runtimecontract.Runtim
 }
 
 /* handBackOutage counts one outage pass and hands the row back uncharged, for a resolution a repository failure cut short */
-func (instance *Relay) handBackOutage(runtimeInstance runtimecontract.Runtime, unavailable unavailableSend) error {
+func (instance *Relay) handBackOutage(runtimeInstance containercontract.Runtime, unavailable unavailableSend) error {
     passes := instance.outagePasses.Add(1)
 
     return instance.handBackUncharged(runtimeInstance, unavailable, time.Now().Add(instance.outageBackoff(passes)), true)
@@ -553,7 +553,7 @@ func (instance *Relay) outageBackoff(passes int64) time.Duration {
 }
 
 /* endOutage resets the outage passes on a delivered row and, when an outage was running, writes one INFO record that the transport answers again */
-func (instance *Relay) endOutage(runtimeInstance runtimecontract.Runtime) {
+func (instance *Relay) endOutage(runtimeInstance containercontract.Runtime) {
     passes := instance.outagePasses.Swap(0)
     instance.outageReported.Store(false)
 
@@ -580,7 +580,7 @@ func (instance *Relay) resolve(ctx context.Context, write func(resolutionContext
 }
 
 /* markDead dead-letters a row through resolve and, once it is marked, writes one WARNING naming it with the stored error: the row left the at-least-once path, and last_error is otherwise its only trace. The record runs contained, since the logger is the application's collaborator. */
-func (instance *Relay) markDead(runtimeInstance runtimecontract.Runtime, pending Pending, attempts int, storedError string) error {
+func (instance *Relay) markDead(runtimeInstance containercontract.Runtime, pending Pending, attempts int, storedError string) error {
     markErr := instance.resolve(runtimeInstance.Context(), func(resolutionContext context.Context) error {
         return instance.config.Repository.MarkDead(resolutionContext, pending.Id, attempts, storedError, pending.ClaimToken)
     })
@@ -642,9 +642,9 @@ func resolutionWriteOutcome(writeErr error, deliveryError string) error {
     )
 }
 
-func (instance *Relay) acquireLease(runtimeInstance runtimecontract.Runtime) (func(), func(runtimecontract.Runtime) error, bool, error) {
+func (instance *Relay) acquireLease(runtimeInstance containercontract.Runtime) (func(), func(containercontract.Runtime) error, bool, error) {
     noopRelease := func() {}
-    noopRefresh := func(runtimecontract.Runtime) error { return nil }
+    noopRefresh := func(containercontract.Runtime) error { return nil }
 
     if nil == instance.config.Locker {
         return noopRelease, noopRefresh, true, nil
@@ -663,20 +663,20 @@ func (instance *Relay) acquireLease(runtimeInstance runtimecontract.Runtime) (fu
 
     return func() {
             instance.releaseLease(runtimeInstance, lock)
-        }, func(refreshRuntime runtimecontract.Runtime) error {
+        }, func(refreshRuntime containercontract.Runtime) error {
             return lock.Refresh(refreshRuntime, bound.Of(instance.config.LockTtl))
         }, true, nil
 }
 
 /* releaseLease drops the lease on a context detached from the run, with no deadline of its own since the locker bounds its release, then reports a failure: a lease left behind is invisible otherwise, and it holds back every other replica until it expires. */
-func (instance *Relay) releaseLease(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) {
+func (instance *Relay) releaseLease(runtimeInstance containercontract.Runtime, lock lockcontract.Lock) {
     releaseContext := runtimeInstance.Context()
     /* a runtime that answers no context still releases, under one that never ends */
     if nil == releaseContext {
         releaseContext = context.Background()
     }
 
-    releaseRuntime := runtime.New(context.WithoutCancel(releaseContext), runtimeInstance.Scope(), runtimeInstance.Container())
+    releaseRuntime := runtime.WithContext(runtimeInstance, context.WithoutCancel(releaseContext))
 
     releaseErr := lock.Release(releaseRuntime)
     if nil == releaseErr {

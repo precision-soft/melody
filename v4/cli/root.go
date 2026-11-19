@@ -7,7 +7,7 @@ import (
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* Root is the command tree an application dispatches from: it holds the registered commands and runs one of them against a command line. It owns its command list, so the registration can trust what it walks. */
@@ -57,7 +57,7 @@ func (instance *Root) SetErrorWriter(writer io.Writer) {
 }
 
 /* Register appends a command to the tree, as cli.Register does on a root command; the tree's streams reach it whether they are set before or after. */
-func (instance *Root) Register(command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
+func (instance *Root) Register(command clicontract.Command, runtimeInstance containercontract.Runtime) {
     registerCommand(instance.command, command, runtimeInstance)
 }
 

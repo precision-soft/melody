@@ -10,13 +10,13 @@ import (
     "time"
 
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func NewEventDispatcher(clock clockcontract.Clock) *EventDispatcher {
@@ -294,14 +294,14 @@ func (instance *EventDispatcher) removeSubscriberListener(entry subscriberRegist
 }
 
 /* Dispatch runs the listeners of the event's name in priority order and stops at the first that fails: the failure, or the refusal of a required listener it skipped, is returned beside the partially dispatched event. The order of subscribers on one event therefore decides what runs: a release that must happen belongs in the store, a cascade or a transaction, or ahead of every subscriber that may fail. */
-func (instance *EventDispatcher) Dispatch(runtimeInstance runtimecontract.Runtime, event eventcontract.Event) (eventcontract.Event, error) {
+func (instance *EventDispatcher) Dispatch(runtimeInstance containercontract.Runtime, event eventcontract.Event) (eventcontract.Event, error) {
     return instance.dispatchSafely(
         runtimeInstance,
         event,
     )
 }
 
-func (instance *EventDispatcher) DispatchName(runtimeInstance runtimecontract.Runtime, eventName string, payload any) (eventcontract.Event, error) {
+func (instance *EventDispatcher) DispatchName(runtimeInstance containercontract.Runtime, eventName string, payload any) (eventcontract.Event, error) {
     event := NewEvent(
         eventName,
         payload,
@@ -388,7 +388,7 @@ func (instance *EventDispatcher) RegisteredEvents() []eventcontract.RegisteredEv
     return registeredEvents
 }
 
-func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
+func (instance *EventDispatcher) dispatchSafely(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
     defer func() {
         recoveredValue := recover()
         if nil == recoveredValue {
@@ -439,7 +439,7 @@ func (instance *EventDispatcher) dispatchSafely(runtimeInstance runtimecontract.
     )
 }
 
-func (instance *EventDispatcher) dispatch(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
+func (instance *EventDispatcher) dispatch(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
     if true == internal.IsNilInterface(eventValue) {
         exception.Panic(
             exception.NewError("event may not be nil", nil, nil),
@@ -620,7 +620,7 @@ func refuseSkippedRequiredListeners(
 }
 
 func (instance *EventDispatcher) callListenerSafely(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     eventName string,
     eventValue eventcontract.Event,
     listener eventcontract.EventListener,

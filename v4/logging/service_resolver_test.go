@@ -6,8 +6,8 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
 )
 
 /* the container itself refuses a factory handing back a typed nil, so the resolver's own typed-nil branch is LATENT: this pins the whole path, not that branch. */
@@ -25,7 +25,7 @@ func TestLoggerFromRuntime_RefusesATypedNilLogger(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     resolvedLogger := LoggerFromRuntime(runtimeInstance)
 
@@ -93,7 +93,7 @@ func TestLoggerMustFromResolver_WithoutARegisteredLogger_Panics(t *testing.T) {
 func TestLoggerFromRuntime_ResolutionError_AnswersNil(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     if nil != LoggerFromRuntime(runtimeInstance) {
         t.Fatalf("expected nil when the logger cannot be resolved")
@@ -116,7 +116,7 @@ func TestLoggerFromRuntime_FindsTheRegisteredLogger(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     if registeredLogger != LoggerFromRuntime(runtimeInstance) {
         t.Fatalf("expected the registered logger from the soft runtime door")

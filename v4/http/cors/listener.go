@@ -3,11 +3,11 @@ package cors
 import (
     nethttp "net/http"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/http"
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -31,7 +31,7 @@ func RegisterRequestListener(eventDispatcher eventcontract.EventDispatcher, serv
 
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
             if false == ok || nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
@@ -79,7 +79,7 @@ func RegisterResponseListener(eventDispatcher eventcontract.EventDispatcher, ser
 
     eventDispatcher.AddListener(
         kernelcontract.EventKernelResponse,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             responseEvent, ok := eventValue.Payload().(*http.KernelResponseEvent)
             if false == ok || nil == responseEvent {
                 return nil

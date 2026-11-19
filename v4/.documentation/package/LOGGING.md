@@ -73,7 +73,7 @@ import (
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/logging"
-    "github.com/precision-soft/melody/v4/runtime"
+    "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 func runWithScopedLogger(
@@ -93,10 +93,9 @@ func runWithScopedLogger(
         }
     }()
 
-    runtimeInstance := runtime.New(
+    runtimeInstance := runtime.NewRun(
         ctx,
         scope,
-        serviceContainer,
     )
 
     processId := logging.GenerateProcessId()
@@ -215,7 +214,7 @@ Implemented in:
 #### Container/runtime access
 
 - [`const ServiceLogger`](../../logging/service_resolver.go)
-- [`LoggerMustFromRuntime(runtimeInstance runtimecontract.Runtime)`](../../logging/service_resolver.go)
-- [`LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger`](../../logging/service_resolver.go)
+- [`LoggerMustFromRuntime(runtimeInstance containercontract.Runtime)`](../../logging/service_resolver.go)
+- [`LoggerFromRuntime(runtimeInstance containercontract.Runtime) loggingcontract.Logger`](../../logging/service_resolver.go)
 - [`LoggerMustFromResolver(ctx context.Context, resolver containercontract.Resolver)`](../../logging/service_resolver.go)
 - [`LoggerFromResolver(ctx context.Context, resolver containercontract.Resolver) (loggingcontract.Logger, error)`](../../logging/service_resolver.go)

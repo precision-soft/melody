@@ -5,12 +5,12 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* normalizedEventResponse stores a typed-nil response as nil, since every reader of these events asks `nil == Response()`. */
@@ -23,7 +23,7 @@ func normalizedEventResponse(response httpcontract.Response) httpcontract.Respon
 }
 
 func NewKernelRequestEvent(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
 ) *KernelRequestEvent {
     return &KernelRequestEvent{
@@ -35,14 +35,14 @@ func NewKernelRequestEvent(
 
 /* KernelRequestEvent is how a kernel.request listener ends a request before its handler: with a response, its own rendering, or with a refusal, which the kernel renders through kernel.exception so an application's listener decides its body. A listener that does both is a bug, refused by name at the second door, and the kernel answers it fail-closed. */
 type KernelRequestEvent struct {
-    runtimeInstance runtimecontract.Runtime
+    runtimeInstance containercontract.Runtime
     request         httpcontract.Request
     response        httpcontract.Response
     refusal         error
     decisionRefused bool
 }
 
-func (instance *KernelRequestEvent) Runtime() runtimecontract.Runtime {
+func (instance *KernelRequestEvent) Runtime() containercontract.Runtime {
     return instance.runtimeInstance
 }
 
@@ -121,7 +121,7 @@ func (instance *KernelRequestEvent) failClosed(response httpcontract.Response) {
 }
 
 func NewKernelControllerEvent(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
 ) *KernelControllerEvent {
     return &KernelControllerEvent{
@@ -132,12 +132,12 @@ func NewKernelControllerEvent(
 }
 
 type KernelControllerEvent struct {
-    runtime  runtimecontract.Runtime
+    runtime  containercontract.Runtime
     request  httpcontract.Request
     response httpcontract.Response
 }
 
-func (instance *KernelControllerEvent) Runtime() runtimecontract.Runtime {
+func (instance *KernelControllerEvent) Runtime() containercontract.Runtime {
     return instance.runtime
 }
 
@@ -178,7 +178,7 @@ func (instance *KernelResponseEvent) SetResponse(response httpcontract.Response)
 }
 
 func NewKernelTerminateEvent(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     response httpcontract.Response,
 ) *KernelTerminateEvent {
@@ -190,12 +190,12 @@ func NewKernelTerminateEvent(
 }
 
 type KernelTerminateEvent struct {
-    runtime  runtimecontract.Runtime
+    runtime  containercontract.Runtime
     request  httpcontract.Request
     response httpcontract.Response
 }
 
-func (instance *KernelTerminateEvent) Runtime() runtimecontract.Runtime {
+func (instance *KernelTerminateEvent) Runtime() containercontract.Runtime {
     return instance.runtime
 }
 
@@ -214,7 +214,7 @@ type KernelExceptionEventConfig struct {
 
 /* NewKernelExceptionEvent builds the event a kernel dispatches on kernel.exception; a kernel of its own passes the delay it was configured with, so the built-in listener serves it. */
 func NewKernelExceptionEvent(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     err error,
     eventConfig KernelExceptionEventConfig,
@@ -234,7 +234,7 @@ func NewKernelExceptionEvent(
 }
 
 type KernelExceptionEvent struct {
-    runtime               runtimecontract.Runtime
+    runtime               containercontract.Runtime
     request               httpcontract.Request
     err                   error
     response              httpcontract.Response
@@ -246,7 +246,7 @@ func (instance *KernelExceptionEvent) UnavailableRetryAfter() time.Duration {
     return instance.unavailableRetryAfter
 }
 
-func (instance *KernelExceptionEvent) Runtime() runtimecontract.Runtime {
+func (instance *KernelExceptionEvent) Runtime() containercontract.Runtime {
     return instance.runtime
 }
 

@@ -1,7 +1,7 @@
 package config
 
 import (
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -12,7 +12,7 @@ func newScopeRoleEnricher() scopeRoleEnricher {
 }
 
 func (instance scopeRoleEnricher) Enrich(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     claims melodysecuritycontract.Claims,
 ) (melodysecuritycontract.Claims, error) {
     rawRoles, hasRoles := claims.Scope["roles"]

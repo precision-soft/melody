@@ -6,17 +6,17 @@ import (
     nethttp "net/http"
     "time"
 
+    examplejournal "github.com/precision-soft/melody/v4/.example/journal"
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/repository"
-    examplejournal "github.com/precision-soft/melody/v4/.example/journal"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/service"
     "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -47,7 +47,7 @@ type revokeUserRequest struct {
 }
 
 func IssueHandler(deviceIdentifierMaximumBytes int) melodyhttpcontract.Handler {
-    return melodyhttp.JsonHandler(func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, body issueRequest) (melodyhttpcontract.Response, error) {
+    return melodyhttp.JsonHandler(func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, body issueRequest) (melodyhttpcontract.Response, error) {
         principal, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
         if false == exists {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
@@ -56,7 +56,7 @@ func IssueHandler(deviceIdentifierMaximumBytes int) melodyhttpcontract.Handler {
         if false == validDeviceIdentifier(body.DeviceIdentifier, deviceIdentifierMaximumBytes) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, deviceIdentifierRefusal(deviceIdentifierMaximumBytes)), nil
         }
-        store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         tokenString, tokenErr := newOpaqueToken()
         if nil != tokenErr {
@@ -77,7 +77,7 @@ func IssueHandler(deviceIdentifierMaximumBytes int) melodyhttpcontract.Handler {
         }
 
         /* a deletion between the session's resolution and the write released the tokens before this one existed */
-        account, accountFound, accountErr := repository.MustGetUserRepository(runtimeInstance.Context(), runtimeInstance.Container()).FindById(runtimeInstance.Context(), principal.UserIdentifier())
+        account, accountFound, accountErr := repository.MustGetUserRepository(runtimeInstance.Context(), runtimeInstance.Scope()).FindById(runtimeInstance.Context(), principal.UserIdentifier())
         if nil != accountErr {
             withdrawMintedToken(runtimeInstance, store, tokenString)
 
@@ -113,7 +113,7 @@ func IssueHandler(deviceIdentifierMaximumBytes int) melodyhttpcontract.Handler {
 
 /* the revoke-device door holds the identifier to the ceiling rather than the configured bound, so a token issued before the bound was lowered stays revocable per device */
 func RevokeDeviceHandler() melodyhttpcontract.Handler {
-    return melodyhttp.JsonHandler(func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, body revokeDeviceRequest) (melodyhttpcontract.Response, error) {
+    return melodyhttp.JsonHandler(func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, body revokeDeviceRequest) (melodyhttpcontract.Response, error) {
         token, exists := examplesecurity.TokenFromRuntime(runtimeInstance)
         if false == exists {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
@@ -130,7 +130,7 @@ func RevokeDeviceHandler() melodyhttpcontract.Handler {
 }
 
 func RevokeUserHandler() melodyhttpcontract.Handler {
-    return melodyhttp.JsonHandler(func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, body revokeUserRequest) (melodyhttpcontract.Response, error) {
+    return melodyhttp.JsonHandler(func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, body revokeUserRequest) (melodyhttpcontract.Response, error) {
         if "" == body.UserIdentifier {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "userIdentifier is required"), nil
         }
@@ -144,12 +144,12 @@ func RevokeUserHandler() melodyhttpcontract.Handler {
 }
 
 func publishBoundary(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     userIdentifier string,
     deviceIdentifier string,
 ) (melodyhttpcontract.Response, error) {
-    store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
-    instant := melodyclock.ClockMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container()).Now()
+    store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    instant := melodyclock.ClockMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()).Now()
 
     if revokeErr := store.RevokeBefore(runtimeInstance, userIdentifier, deviceIdentifier, instant); nil != revokeErr {
         return nil, revokeErr
@@ -168,7 +168,7 @@ func publishBoundary(
 }
 
 func withdrawMintedToken(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     store melodysecuritycontract.RevocableTokenStore,
     tokenString string,
 ) {

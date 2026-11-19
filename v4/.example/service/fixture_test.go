@@ -1,10 +1,10 @@
 package service
 
 import (
-    "fmt"
-    "reflect"
     "context"
     "errors"
+    "fmt"
+    "reflect"
     "slices"
     "sync"
     "sync/atomic"
@@ -23,12 +23,11 @@ import (
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type ttlRecordingCache struct {
@@ -250,7 +249,7 @@ func newRecordingDispatcher(clockInstance melodyclockcontract.Clock, eventNames 
         observed := eventName
         recorder.dispatcher.AddListener(
             eventName,
-            func(runtimeInstance melodyruntimecontract.Runtime, event melodyeventcontract.Event) error {
+            func(runtimeInstance melodycontainercontract.Runtime, event melodyeventcontract.Event) error {
                 recorder.mutex.Lock()
                 recorder.observed = append(recorder.observed, observed)
                 recorder.mutex.Unlock()
@@ -287,7 +286,13 @@ var _ melodyclockcontract.Clock = (*frozenClock)(nil)
 
 var currencyQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
 
-func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatcher, melodyruntimecontract.Runtime) {
+/* containerRuntime keeps the container a fixture built the runtime over, so a test can register on it afterwards: a runtime reaches no container. */
+type containerRuntime struct {
+    melodycontainercontract.Runtime
+    serviceContainer melodycontainercontract.Container
+}
+
+func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatcher, *containerRuntime) {
     t.Helper()
 
     currencyRepository, repositoryErr := repository.NewCurrencyRepository(persistence.NewCatalogStorage(nil))
@@ -312,7 +317,7 @@ func currencyServiceUnderTest(t *testing.T) (*CurrencyService, *recordingDispatc
 
     return NewCurrencyService(currencyRepository, newInMemoryProductRepositoryForTest(t), newTtlRecordingCache(), dispatcher.dispatcher, clockInstance),
         dispatcher,
-        melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+        &containerRuntime{Runtime: melodyruntime.NewRun(context.Background(), containerInstance.NewScope()), serviceContainer: containerInstance}
 }
 
 type updateCountingCurrencyRepository struct {
@@ -394,7 +399,7 @@ type refusingDispatcher struct {
     melodyeventcontract.EventDispatcher
 }
 
-func (instance *refusingDispatcher) DispatchName(runtimeInstance melodyruntimecontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
+func (instance *refusingDispatcher) DispatchName(runtimeInstance melodycontainercontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
     return nil, errors.New("redis: connection refused")
 }
 
@@ -424,7 +429,7 @@ type catalogueUnderTest struct {
     currency *CurrencyService
     cache    melodycachecontract.Cache
     logger   *errorRecordingLogger
-    runtime  melodyruntimecontract.Runtime
+    runtime  melodycontainercontract.Runtime
 }
 
 func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
@@ -479,7 +484,7 @@ func newCatalogueUnderTest(t *testing.T, refusing bool) *catalogueUnderTest {
         currency: currencyService,
         cache:    cacheInstance,
         logger:   logger,
-        runtime:  melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
+        runtime:  melodyruntime.NewRun(context.Background(), containerInstance.NewScope()),
     }
 }
 
@@ -518,7 +523,7 @@ type userServiceUnderTest struct {
     userRepository repository.UserRepository
     cache          melodycachecontract.Cache
     serializer     *recordingSerializer
-    runtime        melodyruntimecontract.Runtime
+    runtime        melodycontainercontract.Runtime
 }
 
 func newUserServiceUnderTest(t *testing.T, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher, cacheOf func(melodycachecontract.Cache) melodycachecontract.Cache) *userServiceUnderTest {
@@ -559,7 +564,7 @@ func newUserServiceUnderTest(t *testing.T, dispatcherOf func(melodyeventcontract
         userRepository: userRepository,
         cache:          cacheInstance,
         serializer:     serializer,
-        runtime:        melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
+        runtime:        melodyruntime.NewRun(context.Background(), containerInstance.NewScope()),
     }
 }
 

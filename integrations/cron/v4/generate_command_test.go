@@ -21,9 +21,9 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    "github.com/precision-soft/melody/v4/runtime"
 )
 
 func TestNewGenerateCommandIdentity(t *testing.T) {
@@ -3457,7 +3457,7 @@ func TestGenerateCommand_ConfigurationResolvesThroughTheRunScope(t *testing.T) {
     }()
     scope.MustOverrideProtectedInstance(melodyconfig.ServiceConfig, scopeConfiguration, container.OverrideOptions{})
 
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), scope)
 
     resolved, resolveErr := configurationFromRuntime(runtimeInstance)
     if nil != resolveErr {

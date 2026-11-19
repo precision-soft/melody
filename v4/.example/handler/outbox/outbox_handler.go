@@ -10,14 +10,14 @@ import (
     "github.com/precision-soft/melody/v4/.example/presenter"
     melodybag "github.com/precision-soft/melody/v4/bag"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     bun "github.com/uptrace/bun"
 )
 
 /* EnqueueHandler writes a notice to the outbox inside a transaction that in real use also carries the business change, so the message is published if and only if that write commits; the relay publishes it later. The database and the store are container.Lazy handles resolved at the first request. */
 func EnqueueHandler(database *melodycontainer.LazyService[*bun.DB], store *melodycontainer.LazyService[*outboxintegration.Store]) melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         reference := melodybag.StringOrDefault(request.Query(), "reference", "")
         if "" == reference {
             reference = "unreferenced"
@@ -55,7 +55,7 @@ func EnqueueHandler(database *melodycontainer.LazyService[*bun.DB], store *melod
 
 /* RelayHandler drains one batch of due outbox rows to the transport and reports how many were published, standing in for the relay a scheduler or the outbox:relay command runs. The relay is a container.Lazy handle, so the transport opens at the first request. */
 func RelayHandler(relay *melodycontainer.LazyService[*outboxintegration.Relay]) melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         relayInstance, resolveErr := relay.Resolve(runtimeInstance.Context())
         if true == errors.Is(resolveErr, message.ErrTransportNotConfigured) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusServiceUnavailable, message.ErrTransportNotConfigured.Error()), nil
@@ -77,7 +77,7 @@ func RelayHandler(relay *melodycontainer.LazyService[*outboxintegration.Relay]) 
 
 /* StatusHandler reports the outbox row counts by status. It resolves the lazy store first, so the outbox schema exists before the count query. */
 func StatusHandler(database *melodycontainer.LazyService[*bun.DB], store *melodycontainer.LazyService[*outboxintegration.Store]) melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if _, resolveErr := store.Resolve(runtimeInstance.Context()); nil != resolveErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the outbox store is unavailable", resolveErr), nil
         }

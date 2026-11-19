@@ -80,7 +80,7 @@ func buildTranslator() *translation.Manager {
 From a handler, resolve the service and translate with the request locale:
 
 ```go
-translator := translation.TranslatorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+translator := translation.TranslatorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
 greeting := translator.Trans("greeting", map[string]any{"name": "Ada"}, "messages", "ro")
 ```

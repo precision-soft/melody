@@ -8,10 +8,10 @@ import (
 
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -44,7 +44,7 @@ func TestSecurityAuthenticationEventSubscriber_JournalsAFailureAsAWarningAtTheEv
         },
         melodycontainer.RegisterOptions{},
     )
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     instant := time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC)
     listener := NewSecurityAuthenticationEventSubscriber().onLoginFailure()
@@ -69,7 +69,7 @@ func TestSecurityAuthenticationEventSubscriber_JournalsASuccessAtInfoAtTheEvents
         },
         melodycontainer.RegisterOptions{},
     )
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     instant := time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC)
     listener := NewSecurityAuthenticationEventSubscriber().onLoginSuccess()

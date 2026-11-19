@@ -14,10 +14,10 @@ import (
 
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
 )
 
 func moduleWithTrustedProxyList(t *testing.T, value string) *Module {
@@ -401,7 +401,7 @@ func TestTrustedProxyResolver_ReportsAnEntryThatNamesNothingToTheRequestsLogger(
     request := melodyhttp.NewRequest(
         httpRequest,
         nil,
-        melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
+        melodyruntime.NewRun(context.Background(), containerInstance.NewScope()),
         melodyhttp.NewRequestContext("budget-test", time.Now()),
     )
 

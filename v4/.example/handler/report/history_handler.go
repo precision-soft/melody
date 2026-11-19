@@ -10,8 +10,8 @@ import (
     "github.com/precision-soft/melody/v4/.example/reporting"
     melodybag "github.com/precision-soft/melody/v4/bag"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* errInvalidLimit is the one refusal of every limit this door cannot serve: not a number, zero or negative. */
@@ -27,8 +27,8 @@ const (
 
 /* ApiHistoryHandler answers the archive of catalogue readings, newest first, and beside it the current reading: the one the schedule left in the cache, or one taken now on a cold cache and left there. It never writes the archive, so a caller cannot fill the archive by asking to see it. */
 func ApiHistoryHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), runtimeInstance.Container())
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        reportService, resolveErr := melodycontainer.FromResolverByType[*reporting.CatalogReportService](runtimeInstance.Context(), runtimeInstance.Scope())
         if nil != resolveErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive is unavailable", resolveErr), nil
         }

@@ -6,21 +6,21 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/security/totp"
 )
 
 type runtimeRecordingAuthenticator struct {
-    runtimes []runtimecontract.Runtime
+    runtimes []containercontract.Runtime
 }
 
 func (instance *runtimeRecordingAuthenticator) Supports(request httpcontract.Request) bool {
     return true
 }
 
-func (instance *runtimeRecordingAuthenticator) Authenticate(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *runtimeRecordingAuthenticator) Authenticate(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     instance.runtimes = append(instance.runtimes, runtimeInstance)
 
     return NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil), nil
@@ -40,14 +40,14 @@ func TestAuthenticatorManager_HandsItsRuntimeToTheAuthenticator(t *testing.T) {
 }
 
 type runtimeRecordingRule struct {
-    runtimes []runtimecontract.Runtime
+    runtimes []containercontract.Runtime
 }
 
 func (instance *runtimeRecordingRule) Applies(request httpcontract.Request) bool {
     return true
 }
 
-func (instance *runtimeRecordingRule) Check(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) error {
+func (instance *runtimeRecordingRule) Check(runtimeInstance containercontract.Runtime, request httpcontract.Request) error {
     instance.runtimes = append(instance.runtimes, runtimeInstance)
 
     return nil
@@ -68,20 +68,20 @@ func TestFirewall_Check_HandsItsRuntimeToTheRule(t *testing.T) {
 
 type runtimeRecordingEnrollmentStore struct {
     secret   string
-    runtimes []runtimecontract.Runtime
+    runtimes []containercontract.Runtime
 }
 
-func (instance *runtimeRecordingEnrollmentStore) FindTotpSecret(runtimeInstance runtimecontract.Runtime, userIdentifier string) (string, bool, error) {
+func (instance *runtimeRecordingEnrollmentStore) FindTotpSecret(runtimeInstance containercontract.Runtime, userIdentifier string) (string, bool, error) {
     instance.runtimes = append(instance.runtimes, runtimeInstance)
 
     return instance.secret, true, nil
 }
 
 type runtimeRecordingNonceGuard struct {
-    runtimes []runtimecontract.Runtime
+    runtimes []containercontract.Runtime
 }
 
-func (instance *runtimeRecordingNonceGuard) Remember(runtimeInstance runtimecontract.Runtime, nonce string, ttl bound.Duration) (bool, error) {
+func (instance *runtimeRecordingNonceGuard) Remember(runtimeInstance containercontract.Runtime, nonce string, ttl bound.Duration) (bool, error) {
     instance.runtimes = append(instance.runtimes, runtimeInstance)
 
     return false, nil
@@ -105,7 +105,7 @@ func TestTotpSecondFactorAuthenticator_ReadsItsStoresThroughTheRuntimeItWasHande
         t.Fatalf("expected the second factor accepted, got %v, %v", token, err)
     }
 
-    for name, runtimes := range map[string][]runtimecontract.Runtime{"primary": primary.runtimes, "enrollments": store.runtimes, "replay guard": guard.runtimes} {
+    for name, runtimes := range map[string][]containercontract.Runtime{"primary": primary.runtimes, "enrollments": store.runtimes, "replay guard": guard.runtimes} {
         if 1 != len(runtimes) || runtimeInstance != runtimes[0] {
             t.Fatalf("expected the %s handed the runtime the authenticator was handed, on a request that carries none, got %v", name, runtimes)
         }
@@ -114,9 +114,9 @@ func TestTotpSecondFactorAuthenticator_ReadsItsStoresThroughTheRuntimeItWasHande
 
 func TestResolverTokenSource_ResolveHandsTheRuntimeToTheResolver(t *testing.T) {
     runtimeInstance := newTestRuntime()
-    var seen runtimecontract.Runtime
+    var seen containercontract.Runtime
 
-    source := NewResolverTokenSource(func(resolverRuntime runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+    source := NewResolverTokenSource(func(resolverRuntime containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
         seen = resolverRuntime
 
         return nil, nil
@@ -129,7 +129,7 @@ func TestResolverTokenSource_ResolveHandsTheRuntimeToTheResolver(t *testing.T) {
 
 func TestResolverTokenSource_ResolveAnswersTheResolversErrorAndNoToken(t *testing.T) {
     resolveErr := errors.New("the session store is down")
-    source := NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+    source := NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
         return NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil), resolveErr
     })
 
@@ -145,7 +145,7 @@ func (instance *typedNilResolverError) Error() string { return "never rendered" 
 
 func TestResolverTokenSource_ATypedNilResolverErrorIsNoError(t *testing.T) {
     var typedNil *typedNilResolverError
-    source := NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+    source := NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
         return NewAuthenticatedToken("user-1", []string{"ROLE_USER"}, nil), typedNil
     })
 
@@ -171,14 +171,14 @@ func TestAuthenticatorTokenSource_ResolveHandsItsRuntimeToTheAuthenticator(t *te
 }
 
 type runtimeRecordingRecoveryStore struct {
-    runtimes []runtimecontract.Runtime
+    runtimes []containercontract.Runtime
 }
 
-func (instance *runtimeRecordingRecoveryStore) FindTotpSecret(runtimeInstance runtimecontract.Runtime, userIdentifier string) (string, bool, error) {
+func (instance *runtimeRecordingRecoveryStore) FindTotpSecret(runtimeInstance containercontract.Runtime, userIdentifier string) (string, bool, error) {
     return "JBSWY3DPEHPK3PXP", true, nil
 }
 
-func (instance *runtimeRecordingRecoveryStore) RedeemRecoveryCode(runtimeInstance runtimecontract.Runtime, userIdentifier string, code string) (bool, error) {
+func (instance *runtimeRecordingRecoveryStore) RedeemRecoveryCode(runtimeInstance containercontract.Runtime, userIdentifier string, code string) (bool, error) {
     instance.runtimes = append(instance.runtimes, runtimeInstance)
 
     return true, nil

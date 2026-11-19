@@ -149,7 +149,7 @@ import (
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/security"
     securityconfig "github.com/precision-soft/melody/v4/security/config"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -158,7 +158,7 @@ import (
 type apiKeyLoginHandler struct{}
 
 func (instance *apiKeyLoginHandler) Login(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
@@ -178,7 +178,7 @@ func (instance *apiKeyLoginHandler) Login(
 type apiKeyLogoutHandler struct{}
 
 func (instance *apiKeyLogoutHandler) Logout(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
@@ -593,8 +593,8 @@ A configuration whose hazard has no legitimate reading is refused where it is co
 - [`const ServiceFirewallManager`](../../security/service_resolver.go)
 - [`FirewallManagerMustFromResolver(context.Context, containercontract.Resolver)`](../../security/service_resolver.go)
 - [`FirewallManagerFromResolver(context.Context, containercontract.Resolver)`](../../security/service_resolver.go)
-- [`SecurityContextSetOnRuntime(runtimecontract.Runtime, *SecurityContext)`](../../security/service_resolver.go)
-- [`SecurityContextFromRuntime(runtimecontract.Runtime)`](../../security/service_resolver.go)
+- [`SecurityContextSetOnRuntime(containercontract.Runtime, *SecurityContext)`](../../security/service_resolver.go)
+- [`SecurityContextFromRuntime(containercontract.Runtime)`](../../security/service_resolver.go)
 
 ### Configuration (`security/config`)
 

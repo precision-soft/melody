@@ -9,12 +9,12 @@ import (
     "testing"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
     securityconfig "github.com/precision-soft/melody/v4/security/config"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -23,7 +23,7 @@ import (
 type firewallDoorTestLoginHandler struct{}
 
 func (instance *firewallDoorTestLoginHandler) Login(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
@@ -123,7 +123,7 @@ func (instance *firewallDoorTestModule) RegisterSecurity(builder *securityconfig
     builder.AddFirewall(
         "main",
         security.NewPathPrefixMatcher("/"),
-        security.NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+        security.NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return security.NewAnonymousToken(), nil
         }),
         securityconfig.FirewallConfig{Login: securityconfig.LoginConfig{Path: "/login/check", Name: "door.login", Handler: &firewallDoorTestLoginHandler{}}},

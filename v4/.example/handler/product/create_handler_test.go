@@ -19,9 +19,8 @@ import (
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodyserializer "github.com/precision-soft/melody/v4/serializer"
     melodyserializercontract "github.com/precision-soft/melody/v4/serializer/contract"
@@ -32,7 +31,7 @@ import (
    body limit comes from, the validator the binding runs, the serializer the presenter renders through, and
    an editor's token. A refused body never reaches the product service, so none is registered — a door that
    started resolving one would say so by panicking here rather than by rendering something plausible. */
-func editorRuntime(t *testing.T) melodyruntimecontract.Runtime {
+func editorRuntime(t *testing.T) melodycontainercontract.Runtime {
     t.Helper()
 
     environment, environmentErr := melodyconfig.NewEnvironment(context.Background(), &stubEnvironmentSource{
@@ -89,7 +88,7 @@ func editorRuntime(t *testing.T) melodyruntimecontract.Runtime {
         t.Fatalf("register serializer manager: %v", registerSerializerErr)
     }
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
         Name:               "main",

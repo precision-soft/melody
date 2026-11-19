@@ -5,24 +5,23 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
     ServiceLogger = "service.logger"
 )
 
-func LoggerMustFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
+func LoggerMustFromRuntime(runtimeInstance containercontract.Runtime) loggingcontract.Logger {
     return runtime.MustFromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
 }
 
 /* LoggerFromRuntime resolves the logger and answers nil when it cannot, recording the failure through the emergency logger. A typed nil, which the container refuses today, is answered nil too, since it would panic on the first call. */
-func LoggerFromRuntime(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
+func LoggerFromRuntime(runtimeInstance containercontract.Runtime) loggingcontract.Logger {
     loggerInstance, err := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, ServiceLogger)
     if nil != err {
         EmergencyLogger().Emergency(

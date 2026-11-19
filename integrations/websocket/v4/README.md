@@ -25,7 +25,7 @@ handler := melodywebsocket.NewStreamHandler(hub, melodywebsocket.Options{
     TopicResolver: func(request httpcontract.Request) string {
         return request.Header("X-Device-Id")
     },
-    OnMessage: func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
+    OnMessage: func(runtimeInstance containercontract.Runtime, messageType coderwebsocket.MessageType, payload []byte) {
         // handle inbound client messages (messageType distinguishes text from binary)
     },
 })

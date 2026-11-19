@@ -2,7 +2,7 @@ package security
 
 import (
     "github.com/precision-soft/melody/v4/.example/entity"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -17,7 +17,7 @@ func NewRoleHierarchy() *melodysecurity.RoleHierarchy {
 }
 
 /* ViewerRoleList answers the roles the request's token holds, expanded through the hierarchy, and an empty list for a caller without one. It decides what a page offers, never what the server allows: every door it hides keeps its own rule. */
-func ViewerRoleList(runtimeInstance melodyruntimecontract.Runtime) []string {
+func ViewerRoleList(runtimeInstance melodycontainercontract.Runtime) []string {
     token, exists := TokenFromRuntime(runtimeInstance)
     if false == exists || false == token.IsAuthenticated() {
         return []string{}

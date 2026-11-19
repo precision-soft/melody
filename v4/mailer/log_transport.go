@@ -1,12 +1,12 @@
 package mailer
 
 import (
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* NewLogTransport answers a transport that writes the recipients (To, Cc, Bcc), the subject, both bodies and each attachment's metadata to the logger instead of delivering the message, so a development app never sends real mail. */
@@ -19,7 +19,7 @@ type LogTransport struct {
 }
 
 /* Send prefers the logger supplied at construction; when it is nil the runtime's logger is resolved quietly, and with neither the send is a no-op. */
-func (instance *LogTransport) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
+func (instance *LogTransport) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) error {
     logger := instance.logger
     if true == internal.IsNilInterface(logger) {
         resolved, _ := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)

@@ -14,10 +14,10 @@ import (
     "github.com/precision-soft/melody/v4/.example/service"
     melodybound "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 var conversionQuoteInstant = time.Date(2026, time.September, 7, 9, 0, 0, 0, time.UTC)
@@ -241,10 +241,10 @@ func TestRecordedViews_AnswersTheCountTheServiceRecorded(t *testing.T) {
 
 type viewRecorderContextKey struct{}
 
-func newViewRecorderRuntime() melodyruntimecontract.Runtime {
+func newViewRecorderRuntime() melodycontainercontract.Runtime {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
-    return melodyruntime.New(context.WithValue(context.Background(), viewRecorderContextKey{}, "request"), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRequest(context.WithValue(context.Background(), viewRecorderContextKey{}, "request"), containerInstance.NewScope())
 }
 
 func TestRecordedViews_LeavesTheCountOutWhenTheCacheRefused(t *testing.T) {

@@ -18,10 +18,10 @@ import (
     "github.com/precision-soft/melody/v4/cli/output"
     melodyconfig "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -135,7 +135,7 @@ func (instance *GenerateCommand) ownFlags() []clicontract.Flag {
 }
 
 func (instance *GenerateCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     configuration, configurationErr := configurationFromRuntime(runtimeInstance)
@@ -1307,7 +1307,7 @@ func chownCreatedLogDirectories(commandName string, directories []string, owner 
 }
 
 /* configurationFromRuntime resolves through the run's scope with the container as the fallback, so a scope-level substitution of the configuration is honoured. */
-func configurationFromRuntime(runtimeInstance runtimecontract.Runtime) (configcontract.Configuration, error) {
+func configurationFromRuntime(runtimeInstance containercontract.Runtime) (configcontract.Configuration, error) {
     configuration, fromRuntimeErr := runtime.FromRuntime[configcontract.Configuration](runtimeInstance, melodyconfig.ServiceConfig)
     if nil != fromRuntimeErr {
         return nil, exception.NewError(

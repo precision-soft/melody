@@ -7,11 +7,11 @@ import (
     "sort"
     "sync"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* NewEventDispatcherAdapter wraps a dispatcher; a nil one is refused. */
@@ -129,11 +129,11 @@ func (instance *EventDispatcherAdapter) removeSubscriberListener(registration ev
     return 0
 }
 
-func (instance *EventDispatcherAdapter) Dispatch(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
+func (instance *EventDispatcherAdapter) Dispatch(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
     return instance.eventDispatcher.Dispatch(runtimeInstance, eventValue)
 }
 
-func (instance *EventDispatcherAdapter) DispatchName(runtimeInstance runtimecontract.Runtime, eventName string, payload any) (eventcontract.Event, error) {
+func (instance *EventDispatcherAdapter) DispatchName(runtimeInstance containercontract.Runtime, eventName string, payload any) (eventcontract.Event, error) {
     return instance.eventDispatcher.DispatchName(runtimeInstance, eventName, payload)
 }
 

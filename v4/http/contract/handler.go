@@ -3,11 +3,11 @@ package contract
 import (
     nethttp "net/http"
 
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type Handler func(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     writer nethttp.ResponseWriter,
     request Request,
 ) (Response, error)

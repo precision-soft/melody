@@ -5,10 +5,10 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -17,7 +17,7 @@ import (
 type noopLoginHandler struct{}
 
 func (instance *noopLoginHandler) Login(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
@@ -33,7 +33,7 @@ var _ securitycontract.LoginHandler = (*noopLoginHandler)(nil)
 type noopLogoutHandler struct{}
 
 func (instance *noopLogoutHandler) Logout(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
@@ -286,7 +286,7 @@ func (instance *typedNilTokenSourceProbe) Name() string {
 }
 
 func (instance *typedNilTokenSourceProbe) Resolve(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
 ) (securitycontract.Token, error) {
     return nil, nil

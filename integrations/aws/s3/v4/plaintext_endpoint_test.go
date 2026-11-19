@@ -13,10 +13,9 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* warningCapturingLogger keeps the message and the context of every warning */
@@ -52,12 +51,12 @@ func (instance *warningCapturingLogger) captured() []loggingcontract.Context {
     return append([]loggingcontract.Context{}, instance.warnings...)
 }
 
-func newRuntimeWithLogger(logger loggingcontract.Logger) runtimecontract.Runtime {
+func newRuntimeWithLogger(logger loggingcontract.Logger) containercontract.Runtime {
     return newRuntimeOver(logger, nil)
 }
 
 /* a nil logger registers none, a nil configuration none, so each half of what the first-use writer reads can be left out */
-func newRuntimeOver(logger loggingcontract.Logger, configuration configcontract.Configuration) runtimecontract.Runtime {
+func newRuntimeOver(logger loggingcontract.Logger, configuration configcontract.Configuration) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     if nil != logger {
@@ -72,7 +71,7 @@ func newRuntimeOver(logger loggingcontract.Logger, configuration configcontract.
         }, container.RegisterOptions{})
     }
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 type testEnvironmentSource struct {

@@ -8,7 +8,6 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -29,7 +28,7 @@ func FirewallManagerFromResolver(ctx context.Context, resolver containercontract
     return firewallManagerInstance
 }
 
-func SecurityContextSetOnRuntime(runtimeInstance runtimecontract.Runtime, securityContext *SecurityContext) {
+func SecurityContextSetOnRuntime(runtimeInstance containercontract.Runtime, securityContext *SecurityContext) {
     if true == internal.IsNilInterface(runtimeInstance) {
         exception.Panic(exception.NewError("runtime is nil for security context", nil, nil))
     }
@@ -46,7 +45,7 @@ func SecurityContextSetOnRuntime(runtimeInstance runtimecontract.Runtime, securi
     scope.MustOverrideProtectedInstance(securitycontract.ServiceSecurityContext, securityContext, container.OverrideOptions{})
 }
 
-func SecurityContextFromRuntime(runtimeInstance runtimecontract.Runtime) (*SecurityContext, bool) {
+func SecurityContextFromRuntime(runtimeInstance containercontract.Runtime) (*SecurityContext, bool) {
     if true == internal.IsNilInterface(runtimeInstance) {
         return nil, false
     }

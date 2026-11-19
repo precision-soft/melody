@@ -1,7 +1,7 @@
 package contract
 
 import (
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* TwoFactorPending is implemented by the token returned when a primary credential has been accepted but a required second factor (a TOTP code) has not yet been supplied or did not verify. The token is deliberately not authenticated; the application inspects this interface to know it should prompt for a code rather than treating the request as anonymous. */
@@ -16,10 +16,10 @@ type TwoFactorRejection interface {
 
 /* TwoFactorEnrollmentStore reports whether a user has a second factor configured and, if so, returns the TOTP secret to verify against. It is supplied by the application because only the application knows where enrollments live (typically an encrypted column). Returning enrolled=false means the user has no second factor and primary authentication stands on its own. */
 type TwoFactorEnrollmentStore interface {
-    FindTotpSecret(runtimeInstance runtimecontract.Runtime, userIdentifier string) (secret string, enrolled bool, err error)
+    FindTotpSecret(runtimeInstance containercontract.Runtime, userIdentifier string) (secret string, enrolled bool, err error)
 }
 
 /* TwoFactorRecoveryStore is an optional companion to TwoFactorEnrollmentStore: when the enrollment store implements it, TotpSecondFactorAuthenticator accepts a single-use recovery code on its recovery header. RedeemRecoveryCode must atomically verify and consume one of the user's unused codes, answering redeemed=true only when it consumed one. */
 type TwoFactorRecoveryStore interface {
-    RedeemRecoveryCode(runtimeInstance runtimecontract.Runtime, userIdentifier string, code string) (redeemed bool, err error)
+    RedeemRecoveryCode(runtimeInstance containercontract.Runtime, userIdentifier string, code string) (redeemed bool, err error)
 }

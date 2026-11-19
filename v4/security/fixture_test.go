@@ -17,6 +17,7 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -26,8 +27,6 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
@@ -137,14 +136,14 @@ func (instance *recordingLogger) recordsAtLevel(level loggingcontract.Level) []r
     return matched
 }
 
-func runtimeWithRecordingLogger() (runtimecontract.Runtime, *recordingLogger) {
+func runtimeWithRecordingLogger() (containercontract.Runtime, *recordingLogger) {
     logger := &recordingLogger{}
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer), logger
+    return runtime.NewRequest(context.Background(), scope), logger
 }
 
 type securityTestRequestContext struct {
@@ -160,7 +159,7 @@ func (instance *securityTestRequestContext) StartedAt() time.Time {
     return instance.startedAtValue
 }
 
-func newSecurityTestRequest(method string, path string, headers map[string]string, runtimeInstance runtimecontract.Runtime) httpcontract.Request {
+func newSecurityTestRequest(method string, path string, headers map[string]string, runtimeInstance containercontract.Runtime) httpcontract.Request {
     request := httptest.NewRequest(method, "http://example.com"+path, nil)
 
     for key, value := range headers {
@@ -367,9 +366,8 @@ func (instance *testKernel) Clock() clockcontract.Clock { return nil }
 
 var _ kernelcontract.Kernel = (*testKernel)(nil)
 
-func newTestRuntime() runtimecontract.Runtime {
+func newTestRuntime() containercontract.Runtime {
     scope := newTestScope()
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     overrideErr := scope.OverrideInstance(
         logging.ServiceLogger,
@@ -380,12 +378,12 @@ func newTestRuntime() runtimecontract.Runtime {
         panic(overrideErr)
     }
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
-func testRuntime() runtimecontract.Runtime {
+func testRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 }
 
 func bearerRequest(tokenString string) httpcontract.Request {
@@ -475,7 +473,7 @@ func serveSecurityRequest(t *testing.T, kernelInstance *testKernel, path string)
         kernelInstance,
         path,
         logging.NewNopLogger(),
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return http.TextResponse(nethttp.StatusOK, "served"), nil
         },
     )
@@ -486,7 +484,7 @@ func serveSecurityRequestThrough(
     kernelInstance *testKernel,
     path string,
     logger loggingcontract.Logger,
-    handler func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error),
+    handler func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error),
 ) *httptest.ResponseRecorder {
     t.Helper()
 
@@ -547,14 +545,14 @@ type fallibleTestVoter struct {
     attribute string
     result    securitycontract.VoteResult
     err       error
-    runtimes  []runtimecontract.Runtime
+    runtimes  []containercontract.Runtime
 }
 
 func (instance *fallibleTestVoter) Supports(attribute string, subject any) bool {
     return instance.attribute == attribute
 }
 
-func (instance *fallibleTestVoter) Vote(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
+func (instance *fallibleTestVoter) Vote(runtimeInstance containercontract.Runtime, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
     instance.runtimes = append(instance.runtimes, runtimeInstance)
 
     return instance.result, instance.err
@@ -563,6 +561,6 @@ func (instance *fallibleTestVoter) Vote(runtimeInstance runtimecontract.Runtime,
 var _ securitycontract.Voter = (*fallibleTestVoter)(nil)
 
 /* withItsRuntime hands a door the request together with the runtime the request carries */
-func withItsRuntime(request httpcontract.Request) (runtimecontract.Runtime, httpcontract.Request) {
+func withItsRuntime(request httpcontract.Request) (containercontract.Runtime, httpcontract.Request) {
     return request.RuntimeInstance(), request
 }

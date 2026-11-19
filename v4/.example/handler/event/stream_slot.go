@@ -5,8 +5,8 @@ import (
     "sync"
 
     "github.com/precision-soft/melody/v4/.example/presenter"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -73,7 +73,7 @@ func (instance *StreamSlots) release(userId string) {
 /* StreamSlotMiddleware counts, in the same slots as the event stream door, the connections of the route named, which streams the same hub through a handler this application does not write: the websocket integration's. The slot is taken before that handler accepts the upgrade, past which a refusal would be discarded, and given back when the handler returns, at the end of the connection. Every other route passes through untouched. */
 func StreamSlotMiddleware(slots *StreamSlots, routeName string) melodyhttpcontract.Middleware {
     return func(next melodyhttpcontract.Handler) melodyhttpcontract.Handler {
-        return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
             if routeName != request.RouteName() {
                 return next(runtimeInstance, writer, request)
             }

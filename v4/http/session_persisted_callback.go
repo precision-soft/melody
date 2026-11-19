@@ -1,12 +1,12 @@
 package http
 
 import (
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const requestAttributeSessionPersistedCallbacks = "_session_persisted_callbacks"
@@ -48,7 +48,7 @@ func sessionPersistedCallbacks(request httpcontract.Request) []SessionPersistedC
 
 /* taken before the first runs, so a recovery that re-enters the response path runs none twice */
 func runSessionPersistedCallbacks(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     response httpcontract.Response,
     persistErr error,

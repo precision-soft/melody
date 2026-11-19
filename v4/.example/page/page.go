@@ -10,12 +10,12 @@ import (
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     exampleurl "github.com/precision-soft/melody/v4/.example/url"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const LoginHtml = "login.html"
@@ -40,7 +40,7 @@ func Load(fileName string) (string, error) {
     return string(content), nil
 }
 
-func Html(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, statusCode int, fileName string) melodyhttpcontract.Response {
+func Html(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, statusCode int, fileName string) melodyhttpcontract.Response {
     htmlString, err := Load(fileName)
     if nil != err {
         return melodyhttp.JsonErrorResponse(nethttp.StatusInternalServerError, "failed to load page")

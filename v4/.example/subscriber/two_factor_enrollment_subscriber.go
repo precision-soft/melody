@@ -4,10 +4,10 @@ import (
     "github.com/precision-soft/melody/v4/.example/event"
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
     "github.com/precision-soft/melody/v4/.example/twofactor"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* TwoFactorEnrollmentSubscriber releases a second factor with the account it was enrolled for: an enrollment left behind would name an account that is gone, and enroll whoever holds the identifier after example:db:reset hands it out again. It listens where the deletion is published, so every door that deletes an account releases the factor. The release is a second hand: the enrollment's foreign key cascades the row away with the account, the authoritative release, so a store this listener cannot reach is journaled and the deletion goes on — the dispatcher ends a dispatch at the first listener that fails, and the listeners after this one are the cache's and whatever an application adds. It runs ahead of the cache listener, after the token release. */
@@ -28,7 +28,7 @@ func (instance *TwoFactorEnrollmentSubscriber) SubscribedEvents() map[string][]m
 }
 
 func (instance *TwoFactorEnrollmentSubscriber) onUserDeleted() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadInstance, ok := eventValue.Payload().(*event.UserDeletedEvent)
         if false == ok || nil == payloadInstance {
             return nil
@@ -50,7 +50,7 @@ func (instance *TwoFactorEnrollmentSubscriber) onUserDeleted() melodyeventcontra
 }
 
 /* journalUnreleasedEnrollment records a release this listener could not make; the cascade on the account has released the row whenever the database took the deletion */
-func journalUnreleasedEnrollment(runtimeInstance melodyruntimecontract.Runtime, userId string, cause error) {
+func journalUnreleasedEnrollment(runtimeInstance melodycontainercontract.Runtime, userId string, cause error) {
     examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error(
         "the second factor of a deleted account was not released by its listener; the cascade on the account releases it",
         map[string]any{"userId": userId, "error": cause.Error()},

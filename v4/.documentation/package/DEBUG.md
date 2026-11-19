@@ -57,6 +57,7 @@ Shared behaviours — the first, second and last applying to every command on th
 ### Commands
 
 - [`ContainerCommand`](../../debug/command_container.go)
+    - [`NewContainerCommand(serviceContainer containercontract.Container) *ContainerCommand`](../../debug/command_container.go): the command describes the container it is built over, since a runtime reaches no container; the application hands it its own at registration.
 - [`EventCommand`](../../debug/command_event.go)
     - [`NewEventCommand(deferredListenerProvider DeferredListenerProvider) *EventCommand`](../../debug/command_event.go)
 - [`DeferredListener`](../../debug/command_event.go)
@@ -87,7 +88,7 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
-    "github.com/precision-soft/melody/v4/runtime"
+    "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 func main() {
@@ -101,10 +102,9 @@ func main() {
 
     scope := serviceContainer.NewScope()
 
-    runtimeInstance := runtime.New(
+    runtimeInstance := runtime.NewRun(
         ctx,
         scope,
-        serviceContainer,
     )
 
     rootCli := cli.NewRoot(
@@ -114,7 +114,7 @@ func main() {
     rootCli.SetVersion("v1.0.0")
 
     /* Register returns nothing: it fails fast through exception.Panic on a nil argument, an empty name or a duplicate name */
-    rootCli.Register(&debug.ContainerCommand{}, runtimeInstance)
+    rootCli.Register(debug.NewContainerCommand(serviceContainer), runtimeInstance)
     /* the zero value leaves the deferred-listener provider nil, so data.servingProcessListeners is omitted; debug.NewEventCommand(provider) is what fills it, and is what the framework's own wiring uses */
     rootCli.Register(&debug.EventCommand{}, runtimeInstance)
     rootCli.Register(&debug.ParameterCommand{}, runtimeInstance)

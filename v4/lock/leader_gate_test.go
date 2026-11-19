@@ -14,11 +14,10 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type switchableRefreshLocker struct {
@@ -38,15 +37,15 @@ type switchableRefreshLock struct {
     inner  lockcontract.Lock
 }
 
-func (instance *switchableRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *switchableRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return instance.inner.Acquire(runtimeInstance)
 }
 
-func (instance *switchableRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *switchableRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *switchableRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *switchableRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     if true == instance.locker.fail.Load() {
         return exception.NewError("lease lost", nil, nil)
     }
@@ -172,10 +171,10 @@ func TestLeaderGate_DemotesAndReelectsOnRefreshFailure(t *testing.T) {
         Ttl:             bound.Of(time.Minute),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             elected <- struct{}{}
         },
-        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+        OnLost: func(runtimeInstance containercontract.Runtime, cause error) {
             lostMutex.Lock()
             defer lostMutex.Unlock()
             lostCauses = append(lostCauses, cause)
@@ -258,7 +257,7 @@ func TestLeaderGate_CampaignErrorsReachTheHook(t *testing.T) {
         LeaderGateConfig{
             Ttl:           bound.Of(20 * time.Millisecond),
             RetryInterval: bound.Of(5 * time.Millisecond),
-            OnCampaignError: func(callbackRuntime runtimecontract.Runtime, cause error) {
+            OnCampaignError: func(callbackRuntime containercontract.Runtime, cause error) {
                 select {
                 case observed <- cause:
                 default:
@@ -302,7 +301,7 @@ func TestLeaderGate_ShutdownDoesNotReportACampaignError(t *testing.T) {
         LeaderGateConfig{
             Ttl:           bound.Of(20 * time.Millisecond),
             RetryInterval: bound.Of(5 * time.Millisecond),
-            OnCampaignError: func(callbackRuntime runtimecontract.Runtime, cause error) {
+            OnCampaignError: func(callbackRuntime containercontract.Runtime, cause error) {
                 select {
                 case reported <- cause:
                 default:
@@ -406,7 +405,7 @@ func TestLeaderGate_RenewsTheLeaseWhileTheElectedHookRuns(t *testing.T) {
         Ttl:             bound.Of(time.Minute),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             close(hookEntered)
             <-releaseHook
         },
@@ -441,7 +440,7 @@ func TestLeaderGate_ElectedHookIsCancelledWhenTheLeaseIsLost(t *testing.T) {
         Ttl:             bound.Of(time.Minute),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             <-runtimeInstance.Context().Done()
 
             select {
@@ -487,15 +486,15 @@ type countingRefreshLock struct {
     inner  lockcontract.Lock
 }
 
-func (instance *countingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *countingRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return instance.inner.Acquire(runtimeInstance)
 }
 
-func (instance *countingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *countingRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *countingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *countingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     instance.locker.count.Add(1)
 
     return instance.inner.Refresh(runtimeInstance, ttl)
@@ -514,7 +513,7 @@ type contextSensitiveAcquireLock struct {
     entered chan struct{}
 }
 
-func (instance *contextSensitiveAcquireLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *contextSensitiveAcquireLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     select {
     case instance.entered <- struct{}{}:
     default:
@@ -526,11 +525,11 @@ func (instance *contextSensitiveAcquireLock) Acquire(runtimeInstance runtimecont
     return false, exception.NewError("acquire failed", nil, runtimeInstance.Context().Err())
 }
 
-func (instance *contextSensitiveAcquireLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *contextSensitiveAcquireLock) Release(runtimeInstance containercontract.Runtime) error {
     return nil
 }
 
-func (instance *contextSensitiveAcquireLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *contextSensitiveAcquireLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     return nil
 }
 
@@ -547,15 +546,15 @@ type hangingRefreshLock struct {
     inner lockcontract.Lock
 }
 
-func (instance *hangingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *hangingRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return instance.inner.Acquire(runtimeInstance)
 }
 
-func (instance *hangingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *hangingRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *hangingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *hangingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     <-runtimeInstance.Context().Done()
 
     return exception.NewError("lock refresh never answered", nil, runtimeInstance.Context().Err())
@@ -625,7 +624,7 @@ func TestLeaderGate_LeadershipDropsWhileTheElectedHookIsStillRunning(t *testing.
         Ttl:             bound.Of(time.Minute),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             close(hookEntered)
 
             /* a hook that outlives the lease: the gate cannot campaign again while it runs, so leadership is whatever IsLeader says it is */
@@ -698,15 +697,15 @@ type countedFailureLock struct {
     inner  lockcontract.Lock
 }
 
-func (instance *countedFailureLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *countedFailureLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return instance.inner.Acquire(runtimeInstance)
 }
 
-func (instance *countedFailureLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *countedFailureLock) Release(runtimeInstance containercontract.Runtime) error {
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *countedFailureLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *countedFailureLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     if instance.locker.attempts.Add(1) <= instance.locker.failureCount {
         return exception.NewError("lease lost", nil, nil)
     }
@@ -728,10 +727,10 @@ func TestLeaderGate_ASingleFailedRenewalDoesNotCostTheTerm(t *testing.T) {
         Ttl:             bound.Of(time.Minute),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             elected <- struct{}{}
         },
-        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+        OnLost: func(runtimeInstance containercontract.Runtime, cause error) {
             lostCount.Add(1)
         },
     })
@@ -779,10 +778,10 @@ func TestLeaderGate_ThresholdConsecutiveFailuresEndTheTermWhileTheLeaseIsStillVa
         RetryInterval:                 bound.Of(5 * time.Millisecond),
         RefreshInterval:               bound.Of(5 * time.Millisecond),
         MaxConsecutiveRefreshFailures: bound.Of(3),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             elected <- struct{}{}
         },
-        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+        OnLost: func(runtimeInstance containercontract.Runtime, cause error) {
             lost <- cause
         },
     })
@@ -867,15 +866,15 @@ type alternatingRefreshLock struct {
     inner  lockcontract.Lock
 }
 
-func (instance *alternatingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *alternatingRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return instance.inner.Acquire(runtimeInstance)
 }
 
-func (instance *alternatingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *alternatingRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *alternatingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *alternatingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     if 0 == instance.locker.attempts.Add(1)%2 {
         return exception.NewError("lease lost", nil, nil)
     }
@@ -898,10 +897,10 @@ func TestLeaderGate_ScatteredFailuresNeverAccumulateIntoADemotion(t *testing.T) 
         RetryInterval:                 bound.Of(5 * time.Millisecond),
         RefreshInterval:               bound.Of(5 * time.Millisecond),
         MaxConsecutiveRefreshFailures: bound.Of(3),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             elected <- struct{}{}
         },
-        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+        OnLost: func(runtimeInstance containercontract.Runtime, cause error) {
             lostCount.Add(1)
         },
     })
@@ -946,10 +945,10 @@ func TestLeaderGate_SessionModeToleratesTransientProbeFailures(t *testing.T) {
         Ttl:             bound.UnlimitedDuration(),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(20 * time.Millisecond),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             elected <- struct{}{}
         },
-        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+        OnLost: func(runtimeInstance containercontract.Runtime, cause error) {
             lostCount.Add(1)
         },
     })
@@ -986,7 +985,7 @@ func TestLeaderGate_SessionModePersistentProbeFailuresEndTheTerm(t *testing.T) {
         Ttl:             bound.UnlimitedDuration(),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+        OnLost: func(runtimeInstance containercontract.Runtime, cause error) {
             lost <- struct{}{}
         },
     })
@@ -1012,7 +1011,7 @@ func TestLeaderGate_PanickingOnElectedHookIsShieldedAndLogged(t *testing.T) {
         Ttl:             bound.Of(time.Minute),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(electedRuntime runtimecontract.Runtime) {
+        OnElected: func(electedRuntime containercontract.Runtime) {
             panic(exception.NewError("hook exploded", nil, nil))
         },
     })
@@ -1066,7 +1065,7 @@ func TestLeaderGate_CampaignErrorHookReplacesTheDefaultRecord(t *testing.T) {
     hookCalls := make(chan error, 16)
 
     options := fastGateConfig(bound.Of(time.Minute))
-    options.OnCampaignError = func(hookRuntime runtimecontract.Runtime, cause error) {
+    options.OnCampaignError = func(hookRuntime containercontract.Runtime, cause error) {
         hookCalls <- cause
     }
 
@@ -1098,7 +1097,7 @@ func TestLeaderGate_PanickingRefreshDemotesInsteadOfKillingTheProcess(t *testing
         Ttl:             bound.Of(time.Minute),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnLost: func(runtimeInstance runtimecontract.Runtime, cause error) {
+        OnLost: func(runtimeInstance containercontract.Runtime, cause error) {
             lost <- cause
         },
     })
@@ -1135,7 +1134,7 @@ func TestLeaderGate_IsLeaderAnswersFromTheAcquireLeaseBeforeAnyRenewal(t *testin
     gate = NewLeaderGate(NewInMemoryLocker(clock.NewSystemClock()), "worker:first-window", LeaderGateConfig{
         Ttl:           bound.Of(time.Minute),
         RetryInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             leaderAtElection <- gate.IsLeader()
         },
     })
@@ -1166,10 +1165,10 @@ func TestLeaderGate_APanickingOnElectedEndsTheTermAndReleasesTheLock(t *testing.
         Ttl:             bound.Of(time.Minute),
         RetryInterval:   bound.Of(time.Second),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(electedRuntime runtimecontract.Runtime) {
+        OnElected: func(electedRuntime containercontract.Runtime) {
             panic(exception.NewError("hook exploded", nil, nil))
         },
-        OnLost: func(lostRuntime runtimecontract.Runtime, cause error) {
+        OnLost: func(lostRuntime containercontract.Runtime, cause error) {
             lostCauses <- cause
         },
     })
@@ -1219,7 +1218,7 @@ func TestLeaderGate_APanickingOnElectedIsCampaignedAgainAfterRetryInterval(t *te
         Ttl:             bound.Of(time.Minute),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(electedRuntime runtimecontract.Runtime) {
+        OnElected: func(electedRuntime containercontract.Runtime) {
             elections.Add(1)
             panic("hook exploded")
         },
@@ -1244,11 +1243,11 @@ func TestLeaderGate_APanickingOnLostDoesNotStopTheCampaigns(t *testing.T) {
         Ttl:             bound.Of(time.Minute),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(electedRuntime runtimecontract.Runtime) {
+        OnElected: func(electedRuntime containercontract.Runtime) {
             elections.Add(1)
             panic("elected exploded")
         },
-        OnLost: func(lostRuntime runtimecontract.Runtime, cause error) {
+        OnLost: func(lostRuntime containercontract.Runtime, cause error) {
             panic("lost exploded")
         },
     })
@@ -1267,25 +1266,22 @@ type nilableTestScope struct {
 }
 
 type typedNilScopeRuntime struct {
-    ctx       context.Context
-    container containercontract.Container
+    ctx context.Context
 }
 
 func (instance *typedNilScopeRuntime) Context() context.Context       { return instance.ctx }
 func (instance *typedNilScopeRuntime) Scope() containercontract.Scope { return (*nilableTestScope)(nil) }
-func (instance *typedNilScopeRuntime) Container() containercontract.Container {
-    return instance.container
+func (instance *typedNilScopeRuntime) Kind() containercontract.Kind {
+    return containercontract.KindRun
 }
 
-/* the runtime package's resolution doors tolerate a typed-nil scope, so such a runtime reaches the gate; it is refused before campaigning, since runtime.New would refuse it inside the deferred release, a second panic with the lock held */
+/* the runtime package's resolution doors tolerate a typed-nil scope, so such a runtime reaches the gate; it is refused before campaigning, since runtime.WithContext would refuse it inside the deferred release, a second panic with the lock held */
 func TestLeaderGateRun_RefusesATypedNilScopeBeforeCampaigning(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-
     gate := NewLeaderGate(locker, "worker:typed-nil-scope", LeaderGateConfig{Ttl: bound.Of(time.Minute)})
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = gate.Run(&typedNilScopeRuntime{ctx: context.Background(), container: serviceContainer})
+        _ = gate.Run(&typedNilScopeRuntime{ctx: context.Background()})
     }, "leader gate runtime scope is nil")
 
     acquired, acquireErr := locker.CreateLock("worker:typed-nil-scope", bound.Of(time.Minute)).Acquire(testRuntimeWithContext(context.Background()))
@@ -1313,7 +1309,7 @@ func handoverMarginUnder(t *testing.T, innerLocker lockcontract.Locker, firstLoc
         Ttl:             bound.Of(ttl),
         RetryInterval:   bound.Of(time.Minute),
         RefreshInterval: bound.Of(ttl / 2),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             close(firstElected)
             <-runtimeInstance.Context().Done()
             firstStopped <- time.Now()
@@ -1325,7 +1321,7 @@ func handoverMarginUnder(t *testing.T, innerLocker lockcontract.Locker, firstLoc
         Ttl:             bound.Of(ttl),
         RetryInterval:   bound.Of(5 * time.Millisecond),
         RefreshInterval: bound.Of(ttl / 2),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             select {
             case secondElected <- time.Now():
             default:
@@ -1401,11 +1397,11 @@ type parkingReleaseLock struct {
     inner  lockcontract.Lock
 }
 
-func (instance *parkingReleaseLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *parkingReleaseLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return instance.inner.Acquire(runtimeInstance)
 }
 
-func (instance *parkingReleaseLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *parkingReleaseLock) Release(runtimeInstance containercontract.Runtime) error {
     instance.locker.enteredOnce.Do(func() {
         close(instance.locker.releaseEntered)
     })
@@ -1414,7 +1410,7 @@ func (instance *parkingReleaseLock) Release(runtimeInstance runtimecontract.Runt
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *parkingReleaseLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *parkingReleaseLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     return instance.inner.Refresh(runtimeInstance, ttl)
 }
 
@@ -1433,7 +1429,7 @@ func TestLeaderGate_LeavesTheTermBeforeTheReleaseReachesTheStore(t *testing.T) {
     gate := NewLeaderGate(locker, "worker:leave-then-release", LeaderGateConfig{
         Ttl:           bound.Of(time.Minute),
         RetryInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             close(elected)
         },
     })
@@ -1469,7 +1465,7 @@ func TestLeaderGate_ARenewalIgnoringItsContextStopsTheElectedHookAtTheDemotionIn
     gate := NewLeaderGate(locker, "worker:context-ignoring", LeaderGateConfig{
         Ttl:           bound.Of(ttl),
         RetryInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(runtimeInstance runtimecontract.Runtime) {
+        OnElected: func(runtimeInstance containercontract.Runtime) {
             electedAt := time.Now()
             select {
             case <-runtimeInstance.Context().Done():
@@ -1507,7 +1503,7 @@ func TestLeaderGate_AnOnElectedPanicWithNoOnLostIsJournaledWithItsStackOnce(t *t
         Ttl:             bound.Of(time.Minute),
         RetryInterval:   bound.Of(time.Hour),
         RefreshInterval: bound.Of(5 * time.Millisecond),
-        OnElected: func(electedRuntime runtimecontract.Runtime) {
+        OnElected: func(electedRuntime containercontract.Runtime) {
             elections.Add(1)
             panic("elected exploded")
         },
@@ -1677,7 +1673,7 @@ func TestLeaderGate_RunEndsWithTheRefusalOverALockerTheConstructorCannotRead(t *
     gate := NewLeaderGate(NewLazyLocker(serviceContainer), "worker:lazy", LeaderGateConfig{
         Ttl:           bound.UnlimitedDuration(),
         RetryInterval: bound.Of(time.Millisecond),
-        OnCampaignError: func(runtimeInstance runtimecontract.Runtime, cause error) {
+        OnCampaignError: func(runtimeInstance containercontract.Runtime, cause error) {
             campaignErrors.Add(1)
         },
     })
@@ -1685,7 +1681,7 @@ func TestLeaderGate_RunEndsWithTheRefusalOverALockerTheConstructorCannotRead(t *
     runContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
     defer cancel()
 
-    runErr := gate.Run(runtime.New(runContext, serviceContainer.NewScope(), serviceContainer))
+    runErr := gate.Run(runtime.NewRun(runContext, serviceContainer.NewScope()))
     if false == errors.Is(runErr, lockcontract.ErrUnlimitedTtlRefused) {
         t.Fatalf("expected Run to end with the refusal, got %v", runErr)
     }
@@ -1745,7 +1741,7 @@ func TestLeaderGate_AnAcquireErrorWhoseChainReachesItselfDoesNotHangTheCampaign(
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     finished := make(chan error, 1)
     go func() {
-        finished <- gate.Run(runtime.New(runContext, serviceContainer.NewScope(), serviceContainer))
+        finished <- gate.Run(runtime.NewRun(runContext, serviceContainer.NewScope()))
     }()
 
     select {
@@ -1779,7 +1775,7 @@ func TestLeaderGate_AnotherAcquireErrorStillBacksOffAndCampaignsAgain(t *testing
     var campaignErrors atomic.Int32
     gate := NewLeaderGate(&failingAcquireLocker{err: errors.New("store outage")}, "worker:outage", LeaderGateConfig{
         RetryInterval: bound.Of(time.Millisecond),
-        OnCampaignError: func(runtimeInstance runtimecontract.Runtime, cause error) {
+        OnCampaignError: func(runtimeInstance containercontract.Runtime, cause error) {
             campaignErrors.Add(1)
         },
     })
@@ -1788,7 +1784,7 @@ func TestLeaderGate_AnotherAcquireErrorStillBacksOffAndCampaignsAgain(t *testing
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    if runErr := gate.Run(runtime.New(runContext, serviceContainer.NewScope(), serviceContainer)); nil != runErr {
+    if runErr := gate.Run(runtime.NewRun(runContext, serviceContainer.NewScope())); nil != runErr {
         t.Fatalf("expected a clean shutdown, got %v", runErr)
     }
 
@@ -1809,15 +1805,15 @@ type failingAcquireLock struct {
     err error
 }
 
-func (instance *failingAcquireLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *failingAcquireLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return false, instance.err
 }
 
-func (instance *failingAcquireLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *failingAcquireLock) Release(runtimeInstance containercontract.Runtime) error {
     return nil
 }
 
-func (instance *failingAcquireLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *failingAcquireLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     return nil
 }
 
@@ -1829,7 +1825,7 @@ func TestLeaderGate_RenewsTheLeaseWhileOnElectedWindsDownAfterAStop(t *testing.T
     var atStop atomic.Int64
     config := fastGateConfig(bound.Of(40 * time.Millisecond))
     config.RefreshInterval = bound.Of(10 * time.Millisecond)
-    config.OnElected = func(termRuntime runtimecontract.Runtime) {
+    config.OnElected = func(termRuntime containercontract.Runtime) {
         cancel()
         <-termRuntime.Context().Done()
         atStop.Store(locker.refreshes())
@@ -1856,14 +1852,14 @@ func TestLeaderGate_StopsRenewingPastTheStopRenewalLimit(t *testing.T) {
     config := fastGateConfig(bound.Of(40 * time.Millisecond))
     config.RefreshInterval = bound.Of(10 * time.Millisecond)
     config.StopRenewalLimit = bound.Of(60 * time.Millisecond)
-    config.OnElected = func(termRuntime runtimecontract.Runtime) {
+    config.OnElected = func(termRuntime containercontract.Runtime) {
         cancel()
 
         time.Sleep(100 * time.Millisecond)
         pastLimit.Store(locker.refreshes())
         time.Sleep(100 * time.Millisecond)
     }
-    config.OnLost = func(_ runtimecontract.Runtime, cause error) {
+    config.OnLost = func(_ containercontract.Runtime, cause error) {
         lostCause.Store(cause)
     }
 
@@ -1894,12 +1890,12 @@ func TestLeaderGate_ACleanWindDownUnderRenewalCallsNoOnLost(t *testing.T) {
     var lost atomic.Bool
     config := fastGateConfig(bound.Of(40 * time.Millisecond))
     config.RefreshInterval = bound.Of(10 * time.Millisecond)
-    config.OnElected = func(termRuntime runtimecontract.Runtime) {
+    config.OnElected = func(termRuntime containercontract.Runtime) {
         cancel()
         <-termRuntime.Context().Done()
         time.Sleep(60 * time.Millisecond)
     }
-    config.OnLost = func(runtimecontract.Runtime, error) {
+    config.OnLost = func(containercontract.Runtime, error) {
         lost.Store(true)
     }
 
@@ -1918,12 +1914,12 @@ func TestLeaderGate_ALeaseLostDuringTheWindDownReachesOnLost(t *testing.T) {
     var lostCause atomic.Value
     config := fastGateConfig(bound.Of(40 * time.Millisecond))
     config.RefreshInterval = bound.Of(10 * time.Millisecond)
-    config.OnElected = func(termRuntime runtimecontract.Runtime) {
+    config.OnElected = func(termRuntime containercontract.Runtime) {
         locker.fail.Store(true)
         cancel()
         time.Sleep(150 * time.Millisecond)
     }
-    config.OnLost = func(_ runtimecontract.Runtime, cause error) {
+    config.OnLost = func(_ containercontract.Runtime, cause error) {
         lostCause.Store(cause)
     }
 
@@ -1939,12 +1935,12 @@ func TestLeaderGate_AHookPanickingOnItsStoppedContextCallsNoOnLost(t *testing.T)
 
     var lost atomic.Bool
     config := fastGateConfig(bound.Of(time.Minute))
-    config.OnElected = func(termRuntime runtimecontract.Runtime) {
+    config.OnElected = func(termRuntime containercontract.Runtime) {
         cancel()
         <-termRuntime.Context().Done()
         panic("cleanup failed")
     }
-    config.OnLost = func(runtimecontract.Runtime, error) {
+    config.OnLost = func(containercontract.Runtime, error) {
         lost.Store(true)
     }
 

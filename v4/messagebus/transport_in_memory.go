@@ -6,14 +6,14 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* InMemoryTransportConfig configures the in-process transport; the zero value is the framework's. */
@@ -69,7 +69,7 @@ type InMemoryTransport struct {
 }
 
 func (instance *InMemoryTransport) Send(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) error {
     if _, received := LastStampOfType[ReceivedStamp](envelopeInstance); false == received {
@@ -97,7 +97,7 @@ func (instance *InMemoryTransport) Send(
 }
 
 func (instance *InMemoryTransport) Receive(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
 ) (<-chan messagebuscontract.Envelope, error) {
     return instance.queue, nil
 }
@@ -117,14 +117,14 @@ func (instance *InMemoryTransport) CloseWithContext(closeContext context.Context
 }
 
 func (instance *InMemoryTransport) Ack(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) error {
     return nil
 }
 
 func (instance *InMemoryTransport) Nack(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
     requeue bool,
 ) error {
@@ -225,7 +225,7 @@ func (instance *InMemoryTransport) requeueAfter(
     }
 }
 
-func (instance *InMemoryTransport) resolveLogger(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
+func (instance *InMemoryTransport) resolveLogger(runtimeInstance containercontract.Runtime) loggingcontract.Logger {
     /* resolved without logging.LoggerFromRuntime, which writes an emergency line per runtime without a logger; this runs on every delayed Nack, and a line is owed only for a drop */
     if logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger); nil == resolveErr && false == internal.IsNilInterface(logger) {
         return logger

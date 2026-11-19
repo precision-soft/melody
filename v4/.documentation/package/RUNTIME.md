@@ -1,30 +1,30 @@
 # RUNTIME
 
-The [`runtime`](../../runtime) package provides Melody’s runtime handle used during request/command lifecycles. A runtime carries a `context.Context` plus access to a scope overlay and the underlying container.
+The [`runtime`](../../container/runtime) package builds the runtime of one phase — an http request, a cli run, one message delivery or one cron tick — over its `context.Context` and its scope. The `Runtime` contract lives beside the container's, in [`container/contract`](../../container/contract).
 
 ## Scope
 
-- Package: [`runtime/`](../../runtime)
-- Subpackage: [`runtime/contract/`](../../runtime/contract)
+- Package: [`container/runtime/`](../../container/runtime)
+- Contract: [`container/contract/`](../../container/contract) (`Runtime`, `Kind`)
 
-A `runtimecontract.Runtime` is passed through framework boundaries (HTTP handlers, event listeners, CLI commands) so code can:
+A `containercontract.Runtime` is passed through framework boundaries (HTTP handlers, event listeners, CLI commands) so code can:
 
 - access lifecycle context (`Context()`),
-- resolve services from a scope overlay (scope-first with container fallback),
-- keep per-request / per-command overrides isolated via a `Scope`.
+- resolve services through its scope (`Scope()`): the scope answers its own services and the container's,
+- know the phase it stands for (`Kind()`: `KindRequest`, `KindRun`).
 
-## Subpackages
-
-- [`runtime/contract`](../../runtime/contract)\
-  Public runtime contract (`Runtime`).
+A runtime reaches no container: everything it resolves goes through its scope, and code that needs the container itself (a command that describes it) is handed it where it is built.
 
 ## Responsibilities
 
-- Provide the default runtime implementation and constructor:
-    - [`New`](../../runtime/runtime.go)
-- Provide typed service resolution helpers (scope-first with container fallback):
-    - [`FromRuntime`](../../runtime/resolver.go)
-    - [`MustFromRuntime`](../../runtime/resolver.go)
+- Build a runtime:
+    - [`NewRequest`](../../container/runtime/runtime.go): one http request;
+    - [`NewRun`](../../container/runtime/runtime.go): one cli run, one delivery, one tick;
+    - [`NewChildRun`](../../container/runtime/runtime.go): a run over a new scope of the same container, for one delivery or one tick inside a run; the caller closes it through `child.Scope().Close()`;
+    - [`WithContext`](../../container/runtime/runtime.go): the same runtime, kind and scope, over a derived context.
+- Provide typed service resolution helpers, through the scope:
+    - [`FromRuntime`](../../container/runtime/resolver.go)
+    - [`MustFromRuntime`](../../container/runtime/resolver.go)
 
 ## Usage
 
@@ -39,7 +39,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/runtime"
+    "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 type Clock interface {
@@ -72,10 +72,9 @@ func example() int64 {
 
     scope := serviceContainer.NewScope()
 
-    runtimeInstance := runtime.New(
+    runtimeInstance := runtime.NewRun(
         context.Background(),
         scope,
-        serviceContainer,
     )
 
     clock := runtime.MustFromRuntime[Clock](
@@ -103,23 +102,27 @@ func example() int64 {
 
 ## Footguns & caveats
 
-- `FromRuntime` / `MustFromRuntime` resolve through `runtime.Scope()` whenever there is one, and use `runtime.Container()` only when the runtime carries no scope at all. **The choice is made on the presence of the scope, not on what it contains**: a scope resolves the container's own services itself — `scope.Get` builds its resolver over the container it was opened from — so there is nothing left for a second lookup to find. Consequently a **closed** scope answers `scope is closed` rather than falling through to the container: the resolution goes where the runtime says it goes, and a runtime holding a dead scope is a wiring fault rather than something to route around.
-    - Implementation: [`selectRuntimeResolver`](../../runtime/resolver.go), [`(*scope).Get`](../../container/scope.go)
-- `runtime.New(...)` requires a non-nil `context.Context`, `Scope`, and `Container` and fail-fast panics on invalid construction.
-    - Implementation: [`New`](../../runtime/runtime.go)
+- `FromRuntime` / `MustFromRuntime` resolve through `runtime.Scope()`; a scope resolves the container's own services itself — `scope.Get` builds its resolver over the container it was opened from. A **closed** scope answers `scope is closed`: a runtime holding a dead scope is a wiring fault rather than something to route around.
+    - Implementation: [`selectRuntimeResolver`](../../container/runtime/resolver.go), [`(*scope).Get`](../../container/scope.go)
+- The constructors require a non-nil `context.Context` and `Scope` and fail-fast panic on invalid construction; `WithContext` keeps the kind, so a runtime derived for a deadline stays the phase it was.
+    - Implementation: [`NewRequest`, `NewRun`, `WithContext`](../../container/runtime/runtime.go)
 - The runtime itself does not own lifecycle cleanup; the caller is responsible for closing the scope (and container when appropriate).
 
 ## Userland API
 
 ### Contracts
 
-- [`runtime/contract.Runtime`](../../runtime/contract/runtime.go)
+- [`containercontract.Runtime`](../../container/contract/runtime.go)
+- [`containercontract.Kind`](../../container/contract/runtime_kind.go)
 
 ### Constructors
 
-- [`runtime.New`](../../runtime/runtime.go)
+- [`runtime.NewRequest`](../../container/runtime/runtime.go)
+- [`runtime.NewRun`](../../container/runtime/runtime.go)
+- [`runtime.NewChildRun`](../../container/runtime/runtime.go)
+- [`runtime.WithContext`](../../container/runtime/runtime.go)
 
 ### Service resolution helpers
 
-- [`runtime.FromRuntime`](../../runtime/resolver.go)
-- [`runtime.MustFromRuntime`](../../runtime/resolver.go)
+- [`runtime.FromRuntime`](../../container/runtime/resolver.go)
+- [`runtime.MustFromRuntime`](../../container/runtime/resolver.go)

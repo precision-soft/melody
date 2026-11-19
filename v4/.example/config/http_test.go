@@ -21,14 +21,13 @@ import (
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodyvalidation "github.com/precision-soft/melody/v4/validation"
@@ -67,12 +66,12 @@ func TestBuildInProcessCatalogWriteThrottle_RefusesTheThirtyFirstWriteOfAnAddres
     moduleInstance := &Module{trustedProxyResolver: newTrustedProxyResolver("", time.Now)}
     moduleInstance.buildInProcessCatalogWriteThrottle(melodyclock.NewFrozenClock(time.Unix(1700000000, 0)))
 
-    throttled := moduleInstance.throttledWrite(func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    throttled := moduleInstance.throttledWrite(func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         return melodyhttp.EmptyResponse(nethttp.StatusNoContent), nil
     })
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     statusFrom := func(peer string) int {
         httpRequest := httptest.NewRequest(nethttp.MethodPost, "/products/api/create/", nil)
@@ -111,12 +110,12 @@ func TestBuildInProcessCatalogWriteThrottle_GivesTheSlotOfTheAddressSeenLongestA
     moduleInstance := &Module{trustedProxyResolver: newTrustedProxyResolver("", time.Now)}
     moduleInstance.buildInProcessCatalogWriteThrottle(melodyclock.NewFrozenClock(time.Unix(1700000000, 0)))
 
-    throttled := moduleInstance.throttledWrite(func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    throttled := moduleInstance.throttledWrite(func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         return melodyhttp.EmptyResponse(nethttp.StatusNoContent), nil
     })
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     writeFrom := func(peer string) error {
         httpRequest := httptest.NewRequest(nethttp.MethodPost, "/products/api/create/", nil)
@@ -198,8 +197,8 @@ func TestRegisterHttpRoutes_PutsTheBackendSpendingDoorsBehindTheWriteBudget(t *t
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
     moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
-    noContent := func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
+    noContent := func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         return melodyhttp.EmptyResponse(nethttp.StatusNoContent), nil
     }
 
@@ -348,7 +347,7 @@ func TestRegisterHttpRoutes_HoldsTheIssueDoorToTheConfiguredBoundAndTheRevokeDoo
     moduleInstance.RegisterHttpRoutes(&routeKernel{router: router, httpKernel: melodyhttp.NewKernel(router, melodyhttp.KernelConfig{}), container: containerInstance})
 
     callDoor := func(pattern string, deviceIdentifier string) int {
-        runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+        runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
         firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
             Name:               "main",
             Matcher:            melodysecurity.NewPathPrefixMatcher("/"),

@@ -7,6 +7,7 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -15,7 +16,6 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/validation"
 )
 
@@ -39,7 +39,7 @@ func installBuiltInExceptionListener(eventDispatcher eventcontract.EventDispatch
 }
 
 /* builtInExceptionListener journals an error no producer filed and answers with RenderExceptionResponse. Debug mode is read per dispatch from the runtime's configuration; a runtime without one renders the production body. */
-func builtInExceptionListener(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+func builtInExceptionListener(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
     exceptionEvent, ok := eventValue.Payload().(*KernelExceptionEvent)
     if false == ok {
         return nil
@@ -143,12 +143,12 @@ func recordOccurrence(loggerInstance loggingcontract.Logger, request httpcontrac
     return occurrence
 }
 
-func exceptionListenerDebugMode(runtimeInstance runtimecontract.Runtime) bool {
+func exceptionListenerDebugMode(runtimeInstance containercontract.Runtime) bool {
     if true == internal.IsNilInterface(runtimeInstance) {
         return false
     }
 
-    configuration, configurationErr := config.ConfigFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    configuration, configurationErr := config.ConfigFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
     if nil != configurationErr {
         return false
     }
@@ -165,7 +165,7 @@ type ExceptionRenderConfig struct {
 }
 
 /* RenderExceptionResponse renders the answer an error earns: an error exception.AnswersUnavailable reads as unavailable is 503 service unavailable with Retry-After, whatever status lies beneath the mark; otherwise the status and message of the http exception its chain carries, its client-facing code, key and parameters, its validation errors projected for the client, and in debug mode the context and cause of the nearest melody error; any other error is a 500. The built-in listener answers with it and the kernel's final step renders with it; an application listener that wants the framework body for some errors calls it. */
-func RenderExceptionResponse(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, err error, renderConfig ExceptionRenderConfig) httpcontract.Response {
+func RenderExceptionResponse(runtimeInstance containercontract.Runtime, request httpcontract.Request, err error, renderConfig ExceptionRenderConfig) httpcontract.Response {
     debugMode := renderConfig.DebugMode
 
     /* resolved for every error, so a refused delay meets its caller at the first error rendered rather than at the first outage */

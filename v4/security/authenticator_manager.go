@@ -3,10 +3,10 @@ package security
 import (
     "fmt"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/internal"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -37,7 +37,7 @@ type AuthenticatorManager struct {
     authenticators []securitycontract.Authenticator
 }
 
-func (instance *AuthenticatorManager) Authenticate(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, bool, error) {
+func (instance *AuthenticatorManager) Authenticate(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, bool, error) {
     for _, authenticator := range instance.authenticators {
         if false == authenticator.Supports(request) {
             continue

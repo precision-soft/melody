@@ -80,7 +80,7 @@ bus := messagebus.BusMustFromResolver(runtimeInstance.Context(), resolver)
 bus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1}, nil)
 ```
 
-`BusMustFromResolver` takes a `Container` as it takes a scope (for example `runtimeInstance.Container()` inside a handler). The factory result is cached, so every resolver shares the one configured bus — configure it once, dispatch from many places. The example application wires this end-to-end: the bus is registered in [`.example/config/service.go`](../../.example/config/service.go) and resolved in the [`/messagebus/dispatch`](../../.example/handler/welcome_email_dispatch_handler.go) HTTP handler. Set `AMQP_DSN` before launching the example to route the bus over RabbitMQ via the [`amqp`](../../../integrations/amqp/v4) integration instead of the in-process transport: without a broker the HTTP dispatch door answers `503` naming `AMQP_DSN`, since nothing in the process would consume what it accepted, while the `messagebus:dispatch` console command dispatches over the in-process transport.
+`BusMustFromResolver` takes a scope as it takes a `Container` (for example `runtimeInstance.Scope()` inside a handler). The factory result is cached, so every resolver shares the one configured bus — configure it once, dispatch from many places. The example application wires this end-to-end: the bus is registered in [`.example/config/service.go`](../../.example/config/service.go) and resolved in the [`/messagebus/dispatch`](../../.example/handler/welcome_email_dispatch_handler.go) HTTP handler. Set `AMQP_DSN` before launching the example to route the bus over RabbitMQ via the [`amqp`](../../../integrations/amqp/v4) integration instead of the in-process transport: without a broker the HTTP dispatch door answers `503` naming `AMQP_DSN`, since nothing in the process would consume what it accepted, while the `messagebus:dispatch` console command dispatches over the in-process transport.
 
 ## Usage
 
@@ -93,7 +93,7 @@ import (
 
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type WelcomeEmail struct {
@@ -105,7 +105,7 @@ func buildBus() (*melodymessagebus.Manager, *melodymessagebus.InMemoryTransport)
     transport := melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{})
 
     locator := melodymessagebus.NewHandlerLocator()
-    melodymessagebus.RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message WelcomeEmail, envelope melodymessagebuscontract.Envelope) error {
+    melodymessagebus.RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message WelcomeEmail, envelope melodymessagebuscontract.Envelope) error {
         return nil
     })
 
@@ -182,7 +182,7 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 - [`MessageId(envelope messagebuscontract.Envelope) (string, bool)`](../../messagebus/stamp.go) — the producer-assigned message id stamped on the envelope, if any
 - [`type HandlerLocator`](../../messagebus/locator.go)
     - [`NewHandlerLocator() *HandlerLocator`](../../messagebus/locator.go)
-    - [`RegisterHandler[T any](locator *HandlerLocator, handle func(runtimecontract.Runtime, T) error)`](../../messagebus/locator.go)
+    - [`RegisterHandler[T any](locator *HandlerLocator, handle func(containercontract.Runtime, T) error)`](../../messagebus/locator.go)
 - [`type Manager`](../../messagebus/manager.go)
     - [`NewManager(name string, middlewares []messagebuscontract.Middleware) *Manager`](../../messagebus/manager.go) — nil is a bus with no middleware, a nil middleware is refused by its index; `Dispatch(runtimeInstance, message, stamps)` adds the stamps, nil for none
 - [`NewHandleMessageMiddleware(locator messagebuscontract.HandlerLocator, options HandleOptions) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go) — a nil locator is refused

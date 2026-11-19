@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -22,8 +23,6 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -294,11 +293,10 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         writer.Header().Set(HeaderRequestId, requestId)
 
-        runtimeInstance := runtime.New(
+        runtimeInstance := runtime.NewRequest(
             request.Context(),
             scope,
-            serviceContainer,
-        )
+)
 
         configuration := config.ConfigMustFromResolver(request.Context(), serviceContainer)
         defaultLocale := configuration.Http().DefaultLocale()
@@ -668,7 +666,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         if nil == baseHandler {
             baseHandler = func(
-                runtimeInstance runtimecontract.Runtime,
+                runtimeInstance containercontract.Runtime,
                 writer nethttp.ResponseWriter,
                 request httpcontract.Request,
             ) (httpcontract.Response, error) {
@@ -807,7 +805,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
 /* the response is written back through the pointer at every step, since the recovery reads the caller's variable when the write panics */
 func (instance *Kernel) dispatchResponseAndWrite(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     melodyRequest httpcontract.Request,
     writer nethttp.ResponseWriter,
     finalResponse *httpcontract.Response,
@@ -862,7 +860,7 @@ func (instance *Kernel) dispatchResponseAndWrite(
 
 /* a failed dispatch answers nothing: a response set by a listener that then panicked is half made */
 func (instance *Kernel) raiseException(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     err error,
     requestLogger loggingcontract.Logger,
@@ -896,7 +894,7 @@ func (instance *Kernel) raiseException(
 }
 
 func renderExceptionSafely(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     err error,
     requestLogger loggingcontract.Logger,

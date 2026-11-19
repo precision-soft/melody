@@ -5,11 +5,11 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* defaultStopRenewalLimit is how long a lease is still renewed after the stop when the configuration names no limit. The runtime does not answer the application's teardown timeout (10s by default), so the literal stands; it equals Kubernetes' default grace period, so a deployment on defaults sets it below its own forced exit. */
@@ -118,7 +118,7 @@ func (instance *stopRenewalWatch) stop() {
 }
 
 /* expiredError writes the warning at the instant the limit passes, since the work may never return to carry the error, and answers it */
-func (instance *stopRenewalWatch) expiredError(runtimeInstance runtimecontract.Runtime, name string, field string) error {
+func (instance *stopRenewalWatch) expiredError(runtimeInstance containercontract.Runtime, name string, field string) error {
     expiredErr := exception.NewError(
         "the work was still running past the stop renewal limit; the lease is no longer renewed",
         exceptioncontract.Context{

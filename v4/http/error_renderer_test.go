@@ -11,12 +11,11 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/internal/plaintext"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/serializer"
     serializercontract "github.com/precision-soft/melody/v4/serializer/contract"
 )
@@ -38,7 +37,7 @@ func (instance *xmlTestSerializer) ContentType() string {
 func newErrorRendererTestRuntime(
     logger loggingcontract.Logger,
     serializersByMime map[string]serializercontract.Serializer,
-) runtimecontract.Runtime {
+) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     if nil != serializersByMime {
@@ -55,7 +54,7 @@ func newErrorRendererTestRuntime(
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
 func TestRenderErrorResponse_NegotiatesTheErrorBodyThroughTheSerializerManager(t *testing.T) {
@@ -216,7 +215,7 @@ func (instance *panickingSerializer) ContentType() string {
     return "application/x-panic"
 }
 
-func newErrorRendererTextAndJsonRuntime() runtimecontract.Runtime {
+func newErrorRendererTextAndJsonRuntime() containercontract.Runtime {
     return newErrorRendererTestRuntime(
         logging.NewNopLogger(),
         map[string]serializercontract.Serializer{

@@ -9,20 +9,20 @@ import (
     "strings"
     "time"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/internal/plaintext"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/serializer"
     serializercontract "github.com/precision-soft/melody/v4/serializer/contract"
 )
 
 /* renderErrorResponse builds the framework's error response, the one door every default rendering goes through. The body is negotiated as on the success path, except that an Accept refusing every media type keeps the error's status and is served the default json body: the error status is the signal, so no 406 masks it. Any serializer failure falls back to that json body, so an error response always exists. The body is the error envelope, the status, the moment and the request id beside the error object that carries the message; the payloadExtras entries an error object holds, the client-facing code, key and parameters and the debug context and cause, join that object, and every other entry joins the body at the top level, where the envelope's own keys win. */
 func renderErrorResponse(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     statusCode int,
     message string,
@@ -84,7 +84,7 @@ func isErrorObjectKey(key string) bool {
 }
 
 func renderNegotiatedErrorPayload(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     statusCode int,
     message string,

@@ -4,8 +4,8 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
@@ -30,7 +30,7 @@ func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
 
     locator := NewHandlerLocator()
     var handled int
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
         handled = message.TaskId
         return nil
     })

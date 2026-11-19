@@ -2,11 +2,11 @@ package security
 
 import (
     "github.com/precision-soft/melody/v4/.example/entity"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
@@ -21,7 +21,7 @@ const (
 
 /* SessionTokenResolver answers the token of the account the session names, with the account's CURRENT roles. A session its storage could not load, or the empty one served for it under MELODY_HTTP_SESSION_EMPTY_ON_OUTAGE, answers the unavailable token; any other error reading the session answers anonymous, its record filed by the read. A session that carries no credential version, or one the account does not hold, or that names an account which is gone or holds no role, is cleared and answers anonymous; a lookup that fails answers the unavailable token, 503 with Retry-After on a protected page, and leaves the session alone, since the failure says nothing about the account; the framework files the cause at error. */
 func SessionTokenResolver(lookupUser SessionUserLookup) melodysecuritycontract.TokenResolver {
-    return func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
         sessionInstance, sessionErr := melodyhttp.RequestSession(request)
         if nil != sessionErr {
             /* a session its storage could not load says nothing about the visitor: a public page is served as not signed in, a protected one answers 503 with Retry-After */

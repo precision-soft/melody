@@ -6,8 +6,8 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/.example/entity"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -16,7 +16,7 @@ func TestDeviceAccountEnricher_HoldsTheTokenToItsAccount(t *testing.T) {
     directory := map[string]*entity.User{
         "user-2": entity.NewUser("user-2", "editor", "hash", []string{entity.RoleUser}),
     }
-    enricher := newDeviceAccountEnricher(func(runtimeInstance runtimecontract.Runtime, userIdentifier string) (*entity.User, bool, error) {
+    enricher := newDeviceAccountEnricher(func(runtimeInstance containercontract.Runtime, userIdentifier string) (*entity.User, bool, error) {
         if "user-broken" == userIdentifier {
             return nil, false, errors.New("the directory is down")
         }

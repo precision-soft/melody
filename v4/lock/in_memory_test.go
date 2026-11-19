@@ -10,18 +10,18 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-func testRuntime() runtimecontract.Runtime {
+func testRuntime() containercontract.Runtime {
     return testRuntimeUnder(context.Background())
 }
 
-func testRuntimeUnder(ctx context.Context) runtimecontract.Runtime {
+func testRuntimeUnder(ctx context.Context) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(ctx, serviceContainer.NewScope())
 }
 
 func TestInMemoryLocker_MutualExclusionAndRelease(t *testing.T) {

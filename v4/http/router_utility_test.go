@@ -18,12 +18,11 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
     "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -676,9 +675,9 @@ func (instance *testRuntime) Context() context.Context { return context.Backgrou
 
 func (instance *testRuntime) Scope() containercontract.Scope { return instance.scope }
 
-func (instance *testRuntime) Container() containercontract.Container { return nil }
+func (instance *testRuntime) Kind() containercontract.Kind { return containercontract.KindRequest }
 
-var _ runtimecontract.Runtime = (*testRuntime)(nil)
+var _ containercontract.Runtime = (*testRuntime)(nil)
 
 func assertPanicWithExceptionMessage(t *testing.T, callback func(), expectedMessage string) {
     t.Helper()
@@ -758,10 +757,10 @@ func TestControllerHandler_InsertsRuntimeWhenControllerRequestsRuntimeParameter(
 
     runtimeInstance := &testRuntime{scope: scope}
 
-    var receivedRuntime runtimecontract.Runtime
+    var receivedRuntime containercontract.Runtime
     var receivedDependency *dependencyA
 
-    controller := func(request *Request, runtimeInstance runtimecontract.Runtime, dep *dependencyA) (*Response, error) {
+    controller := func(request *Request, runtimeInstance containercontract.Runtime, dep *dependencyA) (*Response, error) {
         receivedRuntime = runtimeInstance
         receivedDependency = dep
 
@@ -1579,7 +1578,7 @@ func TestWriteResponse_AnOutOfRangeStatusCodeAnswersTheRenderedServerError(t *te
     router := NewRouter()
     router.Handle(
         "/bad",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(99), nil
         },
         RouteOptions{Methods: []string{nethttp.MethodGet}},
@@ -1791,7 +1790,7 @@ func writeResponseWithSessionOutcome(
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account/settings", nil)
     netRequest.RemoteAddr = "127.0.0.1:1234"
@@ -2356,7 +2355,7 @@ func serveALogout(t *testing.T, storage *deleteCountingSessionStorage, cookieVal
     router := NewRouter()
     router.Handle(
         "/logout",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, _ := RequestSession(request)
             sessionInstance.Clear()
 
@@ -2622,7 +2621,7 @@ func TestKernel_AResponseObjectWithSwitchingProtocolsIsAnsweredAsTheRendered500(
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
     body := &closeTrackingReader{}
     response := &Response{statusCode: nethttp.StatusSwitchingProtocols, headers: make(nethttp.Header), bodyReader: body}
@@ -2661,7 +2660,7 @@ func writeResponseUnderRequestContext(
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
-    runtimeInstance := runtime.New(requestContext, scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(requestContext, scope)
 
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account", nil).WithContext(requestContext)
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
@@ -2714,7 +2713,7 @@ func TestWriteResponse_PersistsUnderTheRuntimesContextOverTheNetRequests(t *test
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
-    runtimeInstance := runtime.New(context.WithValue(context.Background(), persistencePlantedKey{}, "planted"), scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.WithValue(context.Background(), persistencePlantedKey{}, "planted"), scope)
 
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account", nil)
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})
@@ -2945,7 +2944,7 @@ func writeResponseRecorded(
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
     netRequest := httptest.NewRequest(nethttp.MethodPost, "http://example.com/account", nil)
     netRequest.AddCookie(&nethttp.Cookie{Name: session.SessionCookieName, Value: sessionInstance.Id()})

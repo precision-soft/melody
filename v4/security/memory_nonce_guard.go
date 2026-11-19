@@ -7,10 +7,10 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -79,7 +79,7 @@ type MemoryNonceGuard struct {
 }
 
 func (instance *MemoryNonceGuard) Remember(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     nonce string,
     ttl bound.Duration,
 ) (bool, error) {

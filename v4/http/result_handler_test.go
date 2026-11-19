@@ -11,12 +11,11 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/serializer"
     serializercontract "github.com/precision-soft/melody/v4/serializer/contract"
 )
@@ -54,7 +53,7 @@ func TestNormalizeResultToResponse_JoinsRepeatedAcceptLines(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/value", nil)
     httpRequest.Header.Add("Accept", "application/json;q=0")
@@ -82,7 +81,7 @@ func TestNormalizeResultToResponse_JoinsRepeatedAcceptLines(t *testing.T) {
 
 func TestWrapResultHandler_NormalizesAPlainStringResult(t *testing.T) {
     handler := WrapResultHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
             return "plain text", nil
         },
     )
@@ -116,14 +115,14 @@ func TestWrapResultHandler_ATextPlainClientReadsLines(t *testing.T) {
         },
         container.RegisterOptions{},
     )
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/order", nil)
     httpRequest.Header.Set("Accept", "text/plain")
     request := NewRequest(httpRequest, nil, runtimeInstance, NewRequestContext("test", time.Now()))
 
     handler := WrapResultHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
             return map[string]any{"orderId": 7, "lines": []any{map[string]any{"sku": "a-1", "quantity": 2}}}, nil
         },
     )
@@ -143,7 +142,7 @@ func TestWrapResultHandler_ReturnsTheHandlerErrorWithoutAResponse(t *testing.T) 
     failure := exception.NewHttpException(nethttp.StatusTeapot, "short and stout")
 
     handler := WrapResultHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
             return "never rendered", failure
         },
     )
@@ -161,7 +160,7 @@ func TestWrapResultHandler_ReturnsTheHandlerErrorWithoutAResponse(t *testing.T) 
 
 func TestWrapResultHandler_ANilResultProducesNoResponse(t *testing.T) {
     handler := WrapResultHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
             return nil, nil
         },
     )
@@ -180,7 +179,7 @@ func TestWrapResultHandler_PassesAResponseThrough(t *testing.T) {
     built := NewResponse(nethttp.StatusCreated, []byte("created"))
 
     handler := WrapResultHandler(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (any, error) {
             return built, nil
         },
     )
@@ -284,7 +283,7 @@ func TestNormalizeResultToResponse_AFailedResolutionIsRecordedBeforeTheFallback(
     capture := &exceptionListenerCaptureLogger{}
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
 
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/value", nil)
     httpRequest.Header.Set("Accept", ",,,")

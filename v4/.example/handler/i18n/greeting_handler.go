@@ -6,9 +6,9 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/presenter"
     melodybag "github.com/precision-soft/melody/v4/bag"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodytranslation "github.com/precision-soft/melody/v4/translation"
 )
 
@@ -20,8 +20,8 @@ type GreetingResponse struct {
 }
 
 func GreetingHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        translator := melodytranslation.TranslatorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        translator := melodytranslation.TranslatorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         /* the route validated the path's locale against its list, so the one the router matched is the one served */
         locale := melodybag.StringOrDefault(request.Attributes(), melodyhttp.RouteAttributeLocale, "en")

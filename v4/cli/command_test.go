@@ -17,7 +17,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     urfavecli "github.com/urfave/cli/v3"
 )
 
@@ -28,7 +27,7 @@ func TestRegister_PanicsOnNilRootCommand(t *testing.T) {
         nameValue:        "test",
         descriptionValue: "test",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -55,7 +54,7 @@ func TestRegister_PanicsOnNilRuntime(t *testing.T) {
         nameValue:        "test",
         descriptionValue: "test",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -73,7 +72,7 @@ func TestRegister_PanicsOnEmptyCommandName(t *testing.T) {
         nameValue:        "   ",
         descriptionValue: "test",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -94,7 +93,7 @@ func TestRegister_AppendsCommandAndBindsFields(t *testing.T) {
         flagsValue: []clicontract.Flag{
             &clicontract.StringFlag{Name: "name"},
         },
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -136,7 +135,7 @@ func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
         nameValue:        "hello",
         descriptionValue: "a",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -145,7 +144,7 @@ func TestRegister_PanicsOnDuplicateCommandName(t *testing.T) {
         nameValue:        "  hello  ",
         descriptionValue: "b",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -178,7 +177,7 @@ func TestRegister_ActionClosesTheScopeOnce(t *testing.T) {
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -208,7 +207,7 @@ func TestRegister_ActionReportsAFailingScopeClose(t *testing.T) {
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -297,7 +296,7 @@ func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
 
     expectedErr := errors.New("run error")
 
-    var capturedRuntime runtimecontract.Runtime
+    var capturedRuntime containercontract.Runtime
     var capturedCommandContext *clicontract.CommandContext
 
     var commandInterface clicontract.Command
@@ -306,7 +305,7 @@ func TestRegister_ActionCallsRunWithRuntimeInstance(t *testing.T) {
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             capturedRuntime = runtimeInstance
             capturedCommandContext = commandContext
             return expectedErr
@@ -357,7 +356,7 @@ func runRegisteredCommand(
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             _, _ = fmt.Fprint(commandContext.Writer, "{\"meta\":{}}\n")
 
             return nil
@@ -405,7 +404,7 @@ func runRegisteredStandardFlagsCommand(
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.StandardFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             _, _ = fmt.Fprint(commandContext.Writer, "{\"meta\":{}}\n")
 
             return nil
@@ -498,7 +497,7 @@ func newScopeCloseFailingRuntime(closeErr error) *testRuntime {
 }
 
 func runRegisteredCommandWithRuntime(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     command clicontract.Command,
     arguments []string,
 ) (string, error) {
@@ -509,7 +508,7 @@ func runRegisteredCommandWithRuntime(
 
 /* runRegisteredCommandOnTwoStreams answers the output stream and the error stream apart, as a shell redirecting one of them sees them */
 func runRegisteredCommandOnTwoStreams(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     command clicontract.Command,
     arguments []string,
 ) (string, string, error) {
@@ -537,7 +536,7 @@ func newEnvelopeErrorCommand() *testCommand {
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
             if nil != normalizeOptionErr {
                 return normalizeOptionErr
@@ -634,7 +633,7 @@ func TestRegister_ActionLeavesTheContainerOpenWhenTheCommandSucceeds(t *testing.
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -667,7 +666,7 @@ func TestRegister_ActionPrintsTheFailedBannerAndRepanicsWhenTheCommandPanics(t *
         nameValue:        "explode",
         descriptionValue: "explode command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             panic(panicValue)
         },
     }
@@ -710,7 +709,7 @@ func TestRegister_ActionLeavesTheContainerOpenOnThePanicPath(t *testing.T) {
         nameValue:        "explode",
         descriptionValue: "explode command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             panic("boom")
         },
     }
@@ -731,7 +730,7 @@ func TestRegister_ActionLeavesTheContainerOpenOnThePanicPath(t *testing.T) {
         _ = registered.Action(context.Background(), registered)
     }()
 
-    closedChecker, isChecker := runtimeInstance.Container().(interface{ IsClosed() bool })
+    closedChecker, isChecker := runtimeInstance.containerValue.(interface{ IsClosed() bool })
     if false == isChecker {
         t.Fatalf("expected the container to expose IsClosed")
     }
@@ -760,7 +759,7 @@ func TestRegister_ActionReadsATypedNilCommandErrorAsSuccess(t *testing.T) {
         nameValue:        "typed-nil",
         descriptionValue: "typed nil command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             var failure *typedNilErrorCommandFailure
 
             return failure
@@ -793,9 +792,10 @@ func (instance *failingCloseService) CloseWithContext(closeContext context.Conte
 /* asking before closing mirrors the application teardown: a repeated Close answers the first teardown's memoized error, so a command that already closed the container itself — and folded the failure into its own result — would have that one failure presented again as a fresh shutdown incident */
 func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlreadyClosed(t *testing.T) {
     runtimeInstance := newTestRuntime(t)
+    serviceContainer := runtimeInstance.containerValue
 
     container.MustRegister(
-        runtimeInstance.Container(),
+        runtimeInstance.containerValue,
         "test.failing-close",
         func(resolver containercontract.Resolver) (*failingCloseService, error) {
             return &failingCloseService{}, nil
@@ -811,11 +811,11 @@ func TestRegister_ActionDoesNotReportTheCloseFailureOfAContainerTheCommandAlread
         nameValue:        "self-close",
         descriptionValue: "self close command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
-            _ = runtimeInstance.Container().MustGet(runtimeInstance.Context(), "test.failing-close")
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
+            _ = runtimeInstance.Scope().MustGet(runtimeInstance.Context(), "test.failing-close")
 
             /* the command takes the teardown failure into its own hands: the close error is its to fold into the result */
-            closeErr := runtimeInstance.Container().CloseWithContext(context.Background())
+            closeErr := serviceContainer.CloseWithContext(context.Background())
             if nil == closeErr {
                 t.Fatalf("expected the container close to fail through the registered service")
             }
@@ -925,7 +925,7 @@ func TestRegister_ActionEscapesTheCommandErrorInTheStatusLine(t *testing.T) {
         nameValue:        "hello",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(callbackRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(callbackRuntime containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return errors.New("import failed for row \x1b[42m\x1b[2K\r====== [import:run] [finished] [success]")
         },
     }
@@ -957,7 +957,7 @@ func TestRegister_ActionEscapesTheCommandNameInTheStartedBanner(t *testing.T) {
         nameValue:        "hello\x1b[2J",
         descriptionValue: "hello command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(callbackRuntime runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(callbackRuntime containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return nil
         },
     }
@@ -985,7 +985,7 @@ func TestRegister_ActionColoursTheFailedVerdictAfterEscapingTheBanner(t *testing
         nameValue:        "bo\rom",
         descriptionValue: "boom command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return errors.New("boom")
         },
     }
@@ -1014,7 +1014,7 @@ func TestRegister_ActionPrintsTheErrorLineOnTheRedBackground(t *testing.T) {
         nameValue:        "boom",
         descriptionValue: "boom command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return errors.New("boom")
         },
     }
@@ -1035,7 +1035,7 @@ func TestRegister_ActionPrintsThePlainFailedVerdictUnderNoColor(t *testing.T) {
         nameValue:        "boom",
         descriptionValue: "boom command",
         flagsValue:       output.DebugFlags(),
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             return errors.New("boom")
         },
     }
@@ -1130,7 +1130,7 @@ func TestRegister_APositionalHelpReachesTheCommand(t *testing.T) {
         command := &testCommand{
             nameValue:        "hello",
             descriptionValue: "hello command",
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
                 observedArguments = commandContext.Args().Slice()
 
                 return nil
@@ -1162,7 +1162,7 @@ func TestRegister_AFailingCommandWritesItsErrorLineWhateverQuietSays(t *testing.
             nameValue:        "hello",
             descriptionValue: "hello command",
             flagsValue:       output.StandardFlags(),
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
                 return errors.New("the command failed")
             },
         }
@@ -1196,7 +1196,7 @@ func TestRegister_AFailingCommandWritesItsErrorLineOnTheErrorStream(t *testing.T
             nameValue:        "hello",
             descriptionValue: "hello command",
             flagsValue:       output.StandardFlags(),
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
                 return errors.New("the command failed")
             },
         }
@@ -1239,7 +1239,7 @@ func TestNewCommandContext_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *test
             nameValue:        "exit-coded",
             descriptionValue: "exit-coded",
             flagsValue:       nil,
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
                 return exception.NewExitError(7, exception.NewError("command asked for an exit code", nil, nil))
             },
         },
@@ -1281,7 +1281,7 @@ func TestRegister_CopiesTheRootStreamsOntoTheCommand(t *testing.T) {
             nameValue:        "hello",
             descriptionValue: "hello",
             flagsValue:       output.StandardFlags(),
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
                 _, _ = fmt.Fprint(commandContext.Writer, "document")
 
                 return errors.New("refused")
@@ -1315,7 +1315,7 @@ func TestRegister_SkipsANilEntryTheCallerAppended(t *testing.T) {
         &testCommand{
             nameValue:        "hello",
             descriptionValue: "hello",
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
                 return nil
             },
         },
@@ -1338,7 +1338,7 @@ func TestRegister_RefusesARepeatedFlagSpelling(t *testing.T) {
                 nameValue:        "hello",
                 descriptionValue: "hello",
                 flagsValue:       []clicontract.Flag{&clicontract.StringFlag{Name: "host", Aliases: []string{"h"}}},
-                runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
                     return nil
                 },
             },
@@ -1374,7 +1374,7 @@ func TestRegister_TheErrorLineCarriesTheCauseChain(t *testing.T) {
             nameValue:        "hello",
             descriptionValue: "hello",
             flagsValue:       output.StandardFlags(),
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
                 return exception.NewError("import failed", nil, exception.NewError("row 7 refused", nil, errors.New("duplicate key")))
             },
         },

@@ -13,32 +13,31 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type closedQueueTransport struct {
     queue chan messagebuscontract.Envelope
 }
 
-func (instance *closedQueueTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *closedQueueTransport) Send(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *closedQueueTransport) Receive(runtimeInstance runtimecontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+func (instance *closedQueueTransport) Receive(runtimeInstance containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
     return instance.queue, nil
 }
 
-func (instance *closedQueueTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *closedQueueTransport) Ack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *closedQueueTransport) Nack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+func (instance *closedQueueTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
     return nil
 }
 
@@ -52,7 +51,7 @@ type consumeTestMessage struct {
 
 func TestConsumeFrom_StopsAtLimitAndHandlesMessages(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
 
@@ -64,7 +63,7 @@ func TestConsumeFrom_StopsAtLimitAndHandlesMessages(t *testing.T) {
 
     locator := NewHandlerLocator()
     var sum int
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         sum += message.Value
         return nil
     })
@@ -84,7 +83,7 @@ func TestConsumeFrom_StopsAtLimitAndHandlesMessages(t *testing.T) {
 
 func TestConsumeFrom_DoesNotOvershootLimitWithConcurrency(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(16)})
 
@@ -96,7 +95,7 @@ func TestConsumeFrom_DoesNotOvershootLimitWithConcurrency(t *testing.T) {
 
     locator := NewHandlerLocator()
     var handled int64
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         atomic.AddInt64(&handled, 1)
         return nil
     })
@@ -116,7 +115,7 @@ func TestConsumeFrom_DoesNotOvershootLimitWithConcurrency(t *testing.T) {
 
 func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     source := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
     failure := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
@@ -127,7 +126,7 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
 
     var attempts int
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         attempts++
         return exception.NewError("handler always fails", nil, nil)
     })
@@ -156,7 +155,7 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
 
 func TestConsume_AMessageExhaustedOnTheFailureTransportItselfIsNotSentBackToIt(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     failure := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
 
@@ -167,7 +166,7 @@ func TestConsume_AMessageExhaustedOnTheFailureTransportItselfIsNotSentBackToIt(t
 
     var attempts int
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         attempts++
         return exception.NewError("handler always fails", nil, nil)
     })
@@ -193,7 +192,7 @@ func TestConsume_AMessageExhaustedOnTheFailureTransportItselfIsNotSentBackToIt(t
 
 func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     source := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
 
@@ -203,7 +202,7 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
 
     var attempts int
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         attempts++
         return exception.NewError("handler always fails", nil, nil)
     })
@@ -235,19 +234,19 @@ type recordingNackTransport struct {
     nackEnvelope messagebuscontract.Envelope
 }
 
-func (instance *recordingNackTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *recordingNackTransport) Send(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *recordingNackTransport) Receive(runtimeInstance runtimecontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+func (instance *recordingNackTransport) Receive(runtimeInstance containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
     return nil, nil
 }
 
-func (instance *recordingNackTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *recordingNackTransport) Ack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *recordingNackTransport) Nack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+func (instance *recordingNackTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
     instance.nackCount++
     instance.nackRequeue = requeue
     instance.nackEnvelope = envelope
@@ -260,19 +259,19 @@ func (instance *recordingNackTransport) CloseWithContext(closeContext context.Co
 
 type alwaysFailingTransport struct{}
 
-func (instance *alwaysFailingTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *alwaysFailingTransport) Send(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return exception.NewError("failure transport is down", nil, nil)
 }
 
-func (instance *alwaysFailingTransport) Receive(runtimeInstance runtimecontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+func (instance *alwaysFailingTransport) Receive(runtimeInstance containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
     return nil, nil
 }
 
-func (instance *alwaysFailingTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *alwaysFailingTransport) Ack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *alwaysFailingTransport) Nack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+func (instance *alwaysFailingTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
     return nil
 }
 
@@ -280,14 +279,14 @@ func (instance *alwaysFailingTransport) CloseWithContext(closeContext context.Co
     return nil
 }
 
-func newAlwaysFailingConsumeCommand(t *testing.T, policy RetryPolicy) (*ConsumeCommand, runtimecontract.Runtime) {
+func newAlwaysFailingConsumeCommand(t *testing.T, policy RetryPolicy) (*ConsumeCommand, containercontract.Runtime) {
     t.Helper()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         return exception.NewError("handler always fails", nil, nil)
     })
 
@@ -429,7 +428,7 @@ func TestConsume_AbsentDeadLetterAttemptsStopRequeueAtFive(t *testing.T) {
 
 func TestNewConsumeSession_AContainerPolicyKeepsTheDefaultsItLeavesOut(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
     registerConsumeServices(t, serviceContainer, RetryPolicy{FailureTransport: &alwaysFailingTransport{}})
 
     session := mustConsumeSession(NewConsumeCommandFromContainer(ConsumeCommandConfig{}), runtimeInstance)
@@ -440,7 +439,7 @@ func TestNewConsumeSession_AContainerPolicyKeepsTheDefaultsItLeavesOut(t *testin
 
 func TestNewConsumeSession_AnswersARefusedContainerPolicyAsTheError(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
     registerConsumeServices(t, serviceContainer, RetryPolicy{MaxRetries: bound.UnlimitedCount()})
 
     _, sessionErr := NewConsumeCommandFromContainer(ConsumeCommandConfig{}).newConsumeSession(runtimeInstance)
@@ -451,7 +450,7 @@ func TestNewConsumeSession_AnswersARefusedContainerPolicyAsTheError(t *testing.T
 
 func TestConsumeFrom_AbnormalChannelCloseReturnsError(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     queue := make(chan messagebuscontract.Envelope)
     close(queue)
@@ -469,7 +468,7 @@ func TestConsumeFrom_ShutdownGraceTimesOutWedgedHandler(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     consumeContext, cancel := context.WithCancel(context.Background())
     defer cancel()
-    runtimeInstance := runtime.New(consumeContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(consumeContext, serviceContainer.NewScope())
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(1)})
     if sendErr := transport.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 1}, nil)); nil != sendErr {
@@ -481,7 +480,7 @@ func TestConsumeFrom_ShutdownGraceTimesOutWedgedHandler(t *testing.T) {
     defer close(release)
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         close(started)
         <-release
         return nil
@@ -527,22 +526,22 @@ type contextAwareTransport struct {
     nackErr      error
 }
 
-func (instance *contextAwareTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *contextAwareTransport) Send(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *contextAwareTransport) Receive(runtimeInstance runtimecontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+func (instance *contextAwareTransport) Receive(runtimeInstance containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
     return instance.queue, nil
 }
 
-func (instance *contextAwareTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *contextAwareTransport) Ack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     instance.ackCalls++
     instance.ackErr = runtimeInstance.Context().Err()
 
     return instance.ackErr
 }
 
-func (instance *contextAwareTransport) Nack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+func (instance *contextAwareTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
     instance.nackCalls++
     instance.nackRequeue = requeue
     instance.nackEnvelope = envelope
@@ -559,7 +558,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheHandlerAndAckContextAlive(t *testing.T
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     parentContext, cancel := context.WithCancel(context.Background())
     defer cancel()
-    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(parentContext, serviceContainer.NewScope())
 
     transport := &contextAwareTransport{queue: make(chan messagebuscontract.Envelope, 1)}
     transport.queue <- NewEnvelope(consumeTestMessage{Value: 1}, nil)
@@ -569,7 +568,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheHandlerAndAckContextAlive(t *testing.T
 
     var handlerContextErr error
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(handlerRuntime containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         close(started)
         <-release
         handlerContextErr = handlerRuntime.Context().Err()
@@ -620,7 +619,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheNackContextAlive(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     parentContext, cancel := context.WithCancel(context.Background())
     defer cancel()
-    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(parentContext, serviceContainer.NewScope())
 
     transport := &contextAwareTransport{queue: make(chan messagebuscontract.Envelope, 1)}
     transport.queue <- NewEnvelope(consumeTestMessage{Value: 1}, nil)
@@ -629,7 +628,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheNackContextAlive(t *testing.T) {
     release := make(chan struct{})
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(handlerRuntime containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         close(started)
         <-release
 
@@ -723,7 +722,7 @@ func TestFailureRequeueDelay_Override(t *testing.T) {
 
 func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     source := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
     failure := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
@@ -734,7 +733,7 @@ func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
 
     var attempts int
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         attempts++
         panic("poison message handler")
     })
@@ -763,10 +762,10 @@ func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
 
 func TestDispatchSafely_ConvertsErrorPanicIntoDispatchError(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         panic(exception.NewError("handler exploded", nil, nil))
     })
 
@@ -794,10 +793,10 @@ func (instance *consumeNilPanicError) Error() string {
 /* a handler panicking with a typed-nil error answers no cause, as every recovery boundary reads it, and takes the path of a non-error panic: the dispatch error carries the recovered value and renders, where the typed nil travelled as the cause and its Error dereferenced nil. */
 func TestDispatchSafely_ATypedNilPanicIsAnsweredWithoutACause(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         var typedNil *consumeNilPanicError
 
         panic(typedNil)
@@ -827,7 +826,7 @@ type typedNilAckPanickingTransport struct {
     recordingNackTransport
 }
 
-func (instance *typedNilAckPanickingTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *typedNilAckPanickingTransport) Ack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     var typedNil *consumeNilPanicError
 
     panic(typedNil)
@@ -855,10 +854,10 @@ func TestConsumeRecovered_ATypedNilPanicOutsideTheHandlerIsLoggedWithoutACause(t
     scope := serviceContainer.NewScope()
     logger := &panicRecordCapturingLogger{}
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), scope)
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         return nil
     })
 
@@ -881,7 +880,7 @@ func TestConsumeRecovered_ATypedNilPanicOutsideTheHandlerIsLoggedWithoutACause(t
 
 func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
 
@@ -894,7 +893,7 @@ func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
 
     var leaked int64
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(handlerRuntime containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         /* each delivery must see its own scope: an override written for one message must not be visible while handling another */
         if true == handlerRuntime.Scope().Has("service.ambient") {
             atomic.AddInt64(&leaked, 1)
@@ -948,7 +947,7 @@ func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
     baseScope := serviceContainer.NewScope()
     baseScope.MustOverrideProtectedInstance(logging.ServiceLogger, capturing, container.OverrideOptions{})
 
-    runtimeInstance := runtime.New(context.Background(), baseScope, serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), baseScope)
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
 
@@ -958,7 +957,7 @@ func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
     }
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(handlerRuntime containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         handlerLogger := logging.LoggerFromRuntime(handlerRuntime)
         if nil != handlerLogger {
             handlerLogger.Info("handled", nil)
@@ -991,7 +990,7 @@ func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         return nil
     })
     consumeBus := NewManager("consume", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
@@ -1006,7 +1005,7 @@ func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
         map[string]messagebuscontract.Transport{"async": transport},
     )
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     for message := 0; message < 4; message++ {
         if sendErr := transport.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: message}, nil)); nil != sendErr {
@@ -1153,7 +1152,7 @@ func TestConsumeFrom_AStoppedWorkerTakesNoFurtherDelivery(t *testing.T) {
         serviceContainer := container.NewContainer(container.ContainerConfig{})
         cancelledContext, cancel := context.WithCancel(context.Background())
         cancel()
-        runtimeInstance := runtime.New(cancelledContext, serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRun(cancelledContext, serviceContainer.NewScope())
 
         queue := make(chan messagebuscontract.Envelope, 64)
         for value := 0; value < 64; value++ {
@@ -1162,7 +1161,7 @@ func TestConsumeFrom_AStoppedWorkerTakesNoFurtherDelivery(t *testing.T) {
 
         locator := NewHandlerLocator()
         var handled int64
-        RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+        RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
             atomic.AddInt64(&handled, 1)
             return nil
         })
@@ -1174,5 +1173,31 @@ func TestConsumeFrom_AStoppedWorkerTakesNoFurtherDelivery(t *testing.T) {
         if 0 != atomic.LoadInt64(&handled) {
             t.Fatalf("run %d: expected no delivery taken after the stop, got %d", run, atomic.LoadInt64(&handled))
         }
+    }
+}
+
+/* a delivery gets a scope of its own; a run whose scope closed has none to open, so the delivery keeps the run's runtime and refuses at its first resolution */
+func TestConsume_MessageRuntimeOpensAChildScopeAndKeepsTheRunsWhenItsScopeClosed(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    baseScope := serviceContainer.NewScope()
+    runtimeInstance := runtime.NewRun(context.Background(), baseScope)
+
+    bus := NewManager("default", []messagebuscontract.Middleware{})
+    session := mustConsumeSession(NewConsumeCommand(bus, nil, ConsumeCommandConfig{}), runtimeInstance)
+    envelope := NewEnvelope(consumeTestMessage{Value: 1}, nil)
+
+    messageRuntime, closeScope := session.messageRuntime(runtimeInstance, envelope)
+    if baseScope == messageRuntime.Scope() {
+        t.Fatalf("expected the delivery to hold a scope of its own")
+    }
+    closeScope()
+
+    _ = baseScope.Close()
+
+    closedRuntime, closeClosed := session.messageRuntime(runtimeInstance, envelope)
+    defer closeClosed()
+
+    if runtimeInstance != closedRuntime {
+        t.Fatalf("expected the run's runtime kept once its scope closed")
     }
 }

@@ -10,11 +10,11 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -29,7 +29,7 @@ func TestRegenerateRequestSession_RotatesAndRepublishesInOneCall(t *testing.T) {
     router := NewRouter()
     router.Handle(
         "/login",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
             if nil != sessionReadErr {
                 t.Fatal("expected the request to carry a session")
@@ -156,7 +156,7 @@ func TestRegenerateSession_AWriteToTheAbandonedSessionDoesNotResurrectItsId(t *t
     router := NewRouter()
     router.Handle(
         "/login-writing-the-original",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             sessionInstance, sessionReadErr := RequestSession(request)
             if nil != sessionReadErr {
                 t.Fatal("expected the request to carry a session")
@@ -239,7 +239,7 @@ func TestRegenerateRequestSession_RefusesASessionALogoutBuriedWhileTheRequestRan
     router := NewRouter()
     router.Handle(
         "/rotate-after-logout",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             if _, readErr := RequestSession(request); nil != readErr {
                 return nil, readErr
             }
@@ -299,7 +299,7 @@ func TestRegenerateRequestSession_LoadsTheSessionNothingRead(t *testing.T) {
     manager := newCountingSessionManager()
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
 
-    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), nil)
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.NewRequest(context.Background(), serviceContainer.NewScope()), nil)
     request.Attributes().Set(requestAttributeSession, newRequestSession(context.Background(), manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{}))
 
     rotated, rotateErr := RegenerateRequestSession(request)
@@ -317,7 +317,7 @@ func TestRegenerateRequestSession_AnswersTheLoadErrorMarked(t *testing.T) {
     manager := &countingSessionManager{Manager: newCountingSessionManager().Manager, newSessionErr: storeErr}
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
 
-    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), nil)
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.NewRequest(context.Background(), serviceContainer.NewScope()), nil)
     request.Attributes().Set(requestAttributeSession, newRequestSession(context.Background(), manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{}))
 
     rotated, rotateErr := RegenerateRequestSession(request)
@@ -331,7 +331,7 @@ func TestRegenerateRequestSession_RefusesAnUnavailableSessionMarked(t *testing.T
     manager := &countingSessionManager{Manager: newCountingSessionManager().Manager, newSessionErr: storeErr}
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
 
-    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), nil)
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.NewRequest(context.Background(), serviceContainer.NewScope()), nil)
     request.Attributes().Set(requestAttributeSession, newRequestSession(context.Background(), manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{EmptyOnOutage: true}))
 
     rotated, rotateErr := RegenerateRequestSession(request)
@@ -363,7 +363,7 @@ func TestRegenerateRequestSession_RefusesAnUnavailableSessionWithoutAskingTheMan
     manager := &rotationCountingSessionManager{Manager: newCountingSessionManager().Manager}
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
 
-    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), nil)
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.NewRequest(context.Background(), serviceContainer.NewScope()), nil)
     cause := errors.New("the application's store is down")
     if publishErr := SetRequestSession(request, session.NewUnavailableSession(cause)); nil != publishErr {
         t.Fatalf("unexpected publish error: %v", publishErr)
@@ -397,7 +397,7 @@ func TestRegenerateRequestSession_RotatesUnderTheRequestsContext(t *testing.T) {
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
 
     requestContext := context.WithValue(context.Background(), rotationPlantedKey{}, "planted")
-    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(requestContext, serviceContainer.NewScope(), serviceContainer), nil)
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.NewRequest(requestContext, serviceContainer.NewScope()), nil)
 
     current, newErr := manager.NewSession(context.Background())
     if nil != newErr {
@@ -420,7 +420,7 @@ func TestRegenerateRequestSession_RotatesUnderTheRequestsContext(t *testing.T) {
 func rotationRequest(requestContext context.Context, manager sessioncontract.Manager) *Request {
     serviceContainer := newHttpTestContainerWithSessionManager(manager)
 
-    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.New(requestContext, serviceContainer.NewScope(), serviceContainer), nil)
+    request := NewRequest(httptest.NewRequest(nethttp.MethodGet, "http://example.com/", nil), nil, runtime.NewRequest(requestContext, serviceContainer.NewScope()), nil)
     request.Attributes().Set(requestAttributeSession, newRequestSession(requestContext, manager, request, &errorCountingLogger{}, "", false, httpcontract.SessionPolicy{}))
 
     return request

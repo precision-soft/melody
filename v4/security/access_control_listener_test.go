@@ -11,6 +11,7 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -18,7 +19,6 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -29,10 +29,10 @@ type accessControlListenerTestAccessDecisionManager struct {
     decideAnyErr     error
     calledMethod     string
     calledAttributes []string
-    calledRuntime    runtimecontract.Runtime
+    calledRuntime    containercontract.Runtime
 }
 
-func (instance *accessControlListenerTestAccessDecisionManager) DecideAll(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
+func (instance *accessControlListenerTestAccessDecisionManager) DecideAll(runtimeInstance containercontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
     instance.calledMethod = "DecideAll"
     instance.calledRuntime = runtimeInstance
     instance.calledAttributes = append([]string{}, attributes...)
@@ -40,7 +40,7 @@ func (instance *accessControlListenerTestAccessDecisionManager) DecideAll(runtim
     return instance.decideAllErr
 }
 
-func (instance *accessControlListenerTestAccessDecisionManager) DecideAny(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
+func (instance *accessControlListenerTestAccessDecisionManager) DecideAny(runtimeInstance containercontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
     instance.calledMethod = "DecideAny"
     instance.calledAttributes = append([]string{}, attributes...)
 
@@ -53,7 +53,7 @@ type accessControlListenerTestEntryPoint struct {
     calls    int
 }
 
-func (instance *accessControlListenerTestEntryPoint) Start(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (httpcontract.Response, error) {
+func (instance *accessControlListenerTestEntryPoint) Start(runtimeInstance containercontract.Runtime, request httpcontract.Request) (httpcontract.Response, error) {
     instance.calls++
     return instance.response, instance.err
 }
@@ -64,7 +64,7 @@ type accessControlListenerTestAccessDeniedHandler struct {
     calls    int
 }
 
-func (instance *accessControlListenerTestAccessDeniedHandler) Handle(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, decisionErr error) (httpcontract.Response, error) {
+func (instance *accessControlListenerTestAccessDeniedHandler) Handle(runtimeInstance containercontract.Runtime, request httpcontract.Request, decisionErr error) (httpcontract.Response, error) {
     instance.calls++
     return instance.response, instance.err
 }
@@ -250,7 +250,7 @@ func TestAccessControlListener_WhenNoSecurityContext_EmitsAuthorizationDeniedAnd
     deniedCount := 0
     kernel.EventDispatcher().AddListener(
         securitycontract.EventSecurityAuthorizationDenied,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             deniedCount++
             return nil
         },
@@ -308,7 +308,7 @@ func TestAccessControlListener_ReadsThePathTheRouterRoutes(t *testing.T) {
         deniedCount := 0
         kernel.EventDispatcher().AddListener(
             securitycontract.EventSecurityAuthorizationDenied,
-            func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                 deniedCount++
                 return nil
             },
@@ -354,7 +354,7 @@ func TestAccessControlListener_ReadsAnEncodedSeparatorTheEscapedPathWouldRespell
         deniedCount := 0
         kernel.EventDispatcher().AddListener(
             securitycontract.EventSecurityAuthorizationDenied,
-            func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                 deniedCount++
                 return nil
             },
@@ -406,7 +406,7 @@ func TestAccessControlListener_WhenSecurityContextHasNilToken_EmitsAuthorization
     deniedReason := ""
     kernel.EventDispatcher().AddListener(
         securitycontract.EventSecurityAuthorizationDenied,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             deniedCount++
 
             deniedEvent, isDeniedEvent := eventValue.Payload().(*AuthorizationDeniedEvent)
@@ -537,7 +537,7 @@ func TestAccessControlListener_WhenDecisionGranted_EmitsAuthorizationGranted(t *
     grantedCount := 0
     kernel.EventDispatcher().AddListener(
         securitycontract.EventSecurityAuthorizationGranted,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             grantedCount++
             return nil
         },
@@ -640,7 +640,7 @@ func TestAccessControlListener_WhenDecisionDenied_EmitsAuthorizationDeniedAndRef
     deniedCount := 0
     kernel.EventDispatcher().AddListener(
         securitycontract.EventSecurityAuthorizationDenied,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             deniedCount++
             return nil
         },
@@ -894,7 +894,7 @@ func TestAccessControlListener_TheDecisionIsDecideAllOverTheWholeAttributeSet(t 
     grantedCount := 0
     kernel.EventDispatcher().AddListener(
         securitycontract.EventSecurityAuthorizationGranted,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             grantedCount++
             return nil
         },
@@ -1069,7 +1069,7 @@ func TestSecurityRefusals_ReachAnApplicationListenerAndKeepTheirStatus(t *testin
             var observedErr error
             kernel.EventDispatcher().AddListener(
                 kernelcontract.EventKernelException,
-                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     exceptionEvent := eventValue.Payload().(*httpPkg.KernelExceptionEvent)
                     observedErr = exceptionEvent.Err()
                     exceptionEvent.SetResponse(httpPkg.TextResponse(nethttp.StatusTeapot, "application body"))
@@ -1102,7 +1102,7 @@ func TestAccessControlListener_AnAnonymousRefusalReachesAnApplicationListener(t 
     var observedErr error
     kernel.EventDispatcher().AddListener(
         kernelcontract.EventKernelException,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             observedErr = eventValue.Payload().(*httpPkg.KernelExceptionEvent).Err()
 
             return nil
@@ -1160,7 +1160,7 @@ func TestSecurityListeners_StandAsideOnAnEarlierRefusal(t *testing.T) {
     deniedCount := 0
     kernel.EventDispatcher().AddListener(
         securitycontract.EventSecurityAuthorizationDenied,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             deniedCount++
 
             return nil
@@ -1293,7 +1293,7 @@ func newUnavailableRouteFixtureOver(tokenSource securitycontract.TokenSource, re
     dispatcher := fixture.kernel.EventDispatcher()
     dispatcher.AddListener(
         securitycontract.EventSecurityAuthorizationDenied,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             reason := ""
             if deniedErr := eventValue.Payload().(*AuthorizationDeniedEvent).Err(); nil != deniedErr {
                 reason, _ = exception.LogContext(deniedErr, exception.LogContextConfig{})["reason"].(string)
@@ -1307,7 +1307,7 @@ func newUnavailableRouteFixtureOver(tokenSource securitycontract.TokenSource, re
     )
     dispatcher.AddListener(
         securitycontract.EventSecurityAuthorizationGranted,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             fixture.grantedCount++
 
             return nil
@@ -1316,7 +1316,7 @@ func newUnavailableRouteFixtureOver(tokenSource securitycontract.TokenSource, re
     )
     dispatcher.AddListener(
         kernelcontract.EventKernelException,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             fixture.observedErr = eventValue.Payload().(*httpPkg.KernelExceptionEvent).Err()
 
             return nil
@@ -1337,7 +1337,7 @@ func (instance *unavailableRouteFixture) serve(t *testing.T, path string) (*http
         instance.kernel,
         path,
         instance.logger,
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             handled = true
             if securityContext, exists := SecurityContextFromRuntime(runtimeInstance); true == exists {
                 _, handlerSawUnavailable = AuthenticationUnavailableCause(securityContext.Token())
@@ -1519,7 +1519,7 @@ func newDecisionOutageFixture(decisionManager securitycontract.AccessDecisionMan
     dispatcher := fixture.kernel.EventDispatcher()
     dispatcher.AddListener(
         securitycontract.EventSecurityAuthorizationDenied,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             deniedErr := eventValue.Payload().(*AuthorizationDeniedEvent).Err()
             reason, _ := exception.LogContext(deniedErr, exception.LogContextConfig{})["reason"].(string)
             fixture.deniedReasons = append(fixture.deniedReasons, reason)
@@ -1531,7 +1531,7 @@ func newDecisionOutageFixture(decisionManager securitycontract.AccessDecisionMan
     )
     dispatcher.AddListener(
         kernelcontract.EventKernelException,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             fixture.observedErr = eventValue.Payload().(*httpPkg.KernelExceptionEvent).Err()
 
             return nil
@@ -1646,7 +1646,7 @@ func TestAccessControlListener_AFailedDeniedDispatchForAnOutageIsTheListenersErr
     listenerErr := errors.New("the audit sink refused the record")
     fixture.kernel.EventDispatcher().AddListener(
         securitycontract.EventSecurityAuthorizationDenied,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerErr
         },
         1,

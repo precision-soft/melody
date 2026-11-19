@@ -3,10 +3,10 @@ package security
 import (
     nethttp "net/http"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -57,7 +57,7 @@ func (instance *AccessDecisionManager) Strategy() securitycontract.DecisionStrat
     return instance.strategy
 }
 
-func (instance *AccessDecisionManager) DecideAll(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
+func (instance *AccessDecisionManager) DecideAll(runtimeInstance containercontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
     /* an empty attribute list is a refusal, not a vacuous grant, as in DecideAny; the compiled access control never produces one, so only a direct caller reaches it */
     if 0 == len(attributes) {
         return exception.Forbidden("forbidden")
@@ -74,7 +74,7 @@ func (instance *AccessDecisionManager) DecideAll(runtimeInstance runtimecontract
 }
 
 /* DecideAny grants on the first attribute granted; with none granted, the first error exception.AnswersUnavailable reads as unavailable is answered before the refusal, since its missing vote might have been the grant, and any other error is the 403 */
-func (instance *AccessDecisionManager) DecideAny(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
+func (instance *AccessDecisionManager) DecideAny(runtimeInstance containercontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
     var unavailableErr error
 
     for _, attribute := range attributes {
@@ -95,7 +95,7 @@ func (instance *AccessDecisionManager) DecideAny(runtimeInstance runtimecontract
     return exception.Forbidden("forbidden")
 }
 
-func (instance *AccessDecisionManager) decideSingleAttribute(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attribute string, subject any) error {
+func (instance *AccessDecisionManager) decideSingleAttribute(runtimeInstance containercontract.Runtime, token securitycontract.Token, attribute string, subject any) error {
     grantedCount := 0
     deniedCount := 0
     abstainCount := 0
@@ -159,7 +159,7 @@ func (instance *AccessDecisionManager) decideSingleAttribute(runtimeInstance run
 }
 
 /* castVote: a 4xx is the voter's own refusal; a 5xx or no status is a decision that could not be made, marked */
-func castVote(runtimeInstance runtimecontract.Runtime, voter securitycontract.Voter, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
+func castVote(runtimeInstance containercontract.Runtime, voter securitycontract.Voter, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
     result, err := voter.Vote(runtimeInstance, token, attribute, subject)
     /* IsNilInterface: a typed nil error is no error, as the kernel reads it */
     if true == internal.IsNilInterface(err) {

@@ -9,10 +9,10 @@ import (
     "github.com/precision-soft/melody/v4/.example/subscriber"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
 )
 
 /* Nothing dials at boot. The dsn below points at an address no broker answers on, and the transport is built over it without a packet leaving the process; a dsn this application cannot dial surfaces at the first publish, through the transport's own retry loop. The test is written as a deadline rather than as an assertion on the return, because the failure it guards against is a dial: the address is a discard port on a host that does not resolve, so a boot-time dial would spend the resolver's own timeout before it panicked. */
@@ -75,7 +75,7 @@ func TestBuildMessageBus_TheNotificationHandlerResolvesTheHubAtEachMessage(t *te
     listener := registeredHub.Subscribe("catalog")
     capturedListener := moduleInstance.serverSentEventHub.Subscribe("catalog")
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
     if _, dispatchErr := moduleInstance.messageBusDispatch.Dispatch(runtimeInstance, message.Notification{Topic: "catalog", Text: "changed"}, nil); nil != dispatchErr {
         t.Fatalf("dispatch the notification: %v", dispatchErr)
     }

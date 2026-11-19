@@ -11,19 +11,19 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
-    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/pgdialect"
     "github.com/uptrace/bun/driver/pgdriver"
 )
 
-func newLockRuntime() runtimecontract.Runtime {
+func newLockRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 func pgLockDatabase(t *testing.T) *bun.DB {
@@ -258,10 +258,10 @@ func TestPgsqlLock_AnUnlimitedTtlAcquiresAndRefreshes(t *testing.T) {
     }
 }
 
-func newReleaseRuntime(ctx context.Context) runtimecontract.Runtime {
+func newReleaseRuntime(ctx context.Context) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(ctx, serviceContainer.NewScope())
 }
 
 func acquireOnTheRecordingDouble(t *testing.T, connector *releaseRecordingConnector, config LockerConfig) (*pgsqlLock, int) {
@@ -402,13 +402,13 @@ func TestPgsqlLock_ACallerDeadlineAlreadyPassedReleasesOnTheLockersBudget(t *tes
 
 /* typedNilRuntime is a runtime implementation held as a nil pointer, which passes a plain nil comparison and panics on its first call */
 type typedNilRuntime struct {
-    runtimecontract.Runtime
+    containercontract.Runtime
 }
 
 func TestPgsqlLock_ANilOrTypedNilRuntimeReleasesOnTheLockersBudget(t *testing.T) {
     var typedNil *typedNilRuntime
 
-    for _, runtimeInstance := range []runtimecontract.Runtime{nil, typedNil} {
+    for _, runtimeInstance := range []containercontract.Runtime{nil, typedNil} {
         connector := &releaseRecordingConnector{}
         lock, _ := acquireOnTheRecordingDouble(t, connector, LockerConfig{})
 

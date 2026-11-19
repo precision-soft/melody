@@ -7,8 +7,8 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/repository"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* CurrencyResponse carries the rate with the code, so a client can tell which currencies the catalogue converts into and how old the quote is. RateAsOf is rendered in RFC 3339 and is the instant the provider took the reading. */
@@ -21,8 +21,8 @@ type CurrencyResponse struct {
 }
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        currencyRepository := repository.MustGetCurrencyRepository(runtimeInstance.Context(), runtimeInstance.Container())
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        currencyRepository := repository.MustGetCurrencyRepository(runtimeInstance.Context(), runtimeInstance.Scope())
 
         currencies, allErr := currencyRepository.All(runtimeInstance.Context())
         if nil != allErr {

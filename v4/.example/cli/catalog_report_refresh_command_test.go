@@ -22,12 +22,11 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/httpclient"
     melodylock "github.com/precision-soft/melody/v4/lock"
     melodylockcontract "github.com/precision-soft/melody/v4/lock/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* refreshSequence is the one ledger every collaborator of the refresh writes into — the lock, the cache the reading lands in, the archive, the sink — so the ORDER the command drove them in is a list the test can read, not a set of counters that agree with any order. */
@@ -90,7 +89,7 @@ type sequenceLock struct {
     acquireErr error
 }
 
-func (instance *sequenceLock) Acquire(runtimeInstance melodyruntimecontract.Runtime) (bool, error) {
+func (instance *sequenceLock) Acquire(runtimeInstance melodycontainercontract.Runtime) (bool, error) {
     if nil != instance.acquireErr {
         instance.sequence.record("acquire-failed")
 
@@ -108,13 +107,13 @@ func (instance *sequenceLock) Acquire(runtimeInstance melodyruntimecontract.Runt
     return instance.inner.Acquire(runtimeInstance)
 }
 
-func (instance *sequenceLock) Release(runtimeInstance melodyruntimecontract.Runtime) error {
+func (instance *sequenceLock) Release(runtimeInstance melodycontainercontract.Runtime) error {
     instance.sequence.record("release")
 
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *sequenceLock) Refresh(runtimeInstance melodyruntimecontract.Runtime, ttl bound.Duration) error {
+func (instance *sequenceLock) Refresh(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) error {
     return instance.inner.Refresh(runtimeInstance, ttl)
 }
 
@@ -190,7 +189,7 @@ var _ repository.CatalogReadingRepository = (*sequenceArchive)(nil)
 type refreshFixture struct {
     sequence *refreshSequence
     archive  *sequenceArchive
-    runtime  melodyruntimecontract.Runtime
+    runtime  melodycontainercontract.Runtime
     sink     *httptest.Server
     sinkHits int
 }
@@ -293,7 +292,7 @@ func newRefreshFixture(t *testing.T, option refreshFixtureOption) *refreshFixtur
 
     t.Cleanup(func() { _ = serviceContainer.CloseWithContext(context.Background()) })
 
-    fixture.runtime = melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    fixture.runtime = melodyruntime.NewRun(context.Background(), serviceContainer.NewScope())
 
     return fixture
 }

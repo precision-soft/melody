@@ -7,17 +7,16 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     serializercontract "github.com/precision-soft/melody/v4/serializer/contract"
 )
 
 func TestSoftResolvers_AnswerNilWhenTheLoggerIsMissingToo(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     resolvedSerializer := SerializerFromRuntime(runtimeInstance)
     if nil != resolvedSerializer {
@@ -45,7 +44,7 @@ func TestSerializerFromRuntime_RefusesATypedNilSerializer(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     resolvedSerializer := SerializerFromRuntime(runtimeInstance)
     if nil != resolvedSerializer {
@@ -86,7 +85,7 @@ func TestSoftResolvers_AnswerTheRegisteredServices(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerManagerErr)
     }
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     if registeredSerializer != SerializerFromRuntime(runtimeInstance) {
         t.Fatalf("expected the registered serializer to be handed back")
@@ -113,7 +112,7 @@ func TestSoftResolvers_RecordTheResolutionFailureThroughTheLogger(t *testing.T) 
         t.Fatalf("unexpected register error: %v", registerErr)
     }
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     if nil != SerializerFromRuntime(runtimeInstance) {
         t.Fatalf("expected a nil serializer from a container that has none")
@@ -169,7 +168,7 @@ func TestMustResolvers_HandBackTheRegisteredServices(t *testing.T) {
         t.Fatalf("unexpected register error: %v", registerManagerErr)
     }
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     if registeredSerializer != SerializerMustFromRuntime(runtimeInstance) {
         t.Fatalf("expected the registered serializer to be handed back")
@@ -182,22 +181,22 @@ func TestMustResolvers_HandBackTheRegisteredServices(t *testing.T) {
 
 /* both doors panic with the same message, so a message-only assertion is SHADOWED: the service name asked for travels in the context, and that is what each test reads. */
 func TestSerializerMustFromRuntime_PanicsNamingTheServiceItAskedFor(t *testing.T) {
-    assertMustResolverPanicsForService(t, ServiceSerializer, func(runtimeInstance runtimecontract.Runtime) {
+    assertMustResolverPanicsForService(t, ServiceSerializer, func(runtimeInstance containercontract.Runtime) {
         _ = SerializerMustFromRuntime(runtimeInstance)
     })
 }
 
 func TestSerializerManagerMustFromRuntime_PanicsNamingTheServiceItAskedFor(t *testing.T) {
-    assertMustResolverPanicsForService(t, ServiceSerializerManager, func(runtimeInstance runtimecontract.Runtime) {
+    assertMustResolverPanicsForService(t, ServiceSerializerManager, func(runtimeInstance containercontract.Runtime) {
         _ = SerializerManagerMustFromRuntime(runtimeInstance)
     })
 }
 
-func assertMustResolverPanicsForService(t *testing.T, expectedServiceName string, callback func(runtimeInstance runtimecontract.Runtime)) {
+func assertMustResolverPanicsForService(t *testing.T, expectedServiceName string, callback func(runtimeInstance containercontract.Runtime)) {
     t.Helper()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     defer func() {
         t.Helper()

@@ -1,7 +1,7 @@
 package security
 
 import (
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "testing"
 
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -12,7 +12,7 @@ func TestSecurityContext_IsGranted_TypedNilTokenAnswersFalse(t *testing.T) {
     firewall := NewCompiledFirewall(CompiledFirewallConfig{
         Name:                        "main",
         Matcher:                     NewPathPrefixMatcher("/"),
-        TokenSource:                 NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) { return nil, nil }),
+        TokenSource:                 NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) { return nil, nil }),
         AccessControl:               NewAccessControl(nil),
         AccessDecisionManager:       NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}),
         AccessDecisionManagerSource: SourceFirewall,
@@ -40,7 +40,7 @@ func TestSecurityContext_IsGranted_RefusesAnUnauthenticatedTokenTheVotersRefuse(
     firewall := NewCompiledFirewall(CompiledFirewallConfig{
         Name:                        "main",
         Matcher:                     NewPathPrefixMatcher("/"),
-        TokenSource:                 NewResolverTokenSource(func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) { return token, nil }),
+        TokenSource:                 NewResolverTokenSource(func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) { return token, nil }),
         AccessControl:               NewAccessControl(nil),
         AccessDecisionManager:       accessDecisionManager,
         AccessDecisionManagerSource: SourceFirewall,

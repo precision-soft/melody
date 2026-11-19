@@ -88,7 +88,7 @@ ran, runErr := lock.RunExclusive(
     lock.ExclusiveConfig{
         Ttl: bound.Of(30 * time.Second),
     },
-    func(childRuntime runtimecontract.Runtime) error {
+    func(childRuntime containercontract.Runtime) error {
         return settleInvoices(childRuntime)
     },
 )
@@ -135,13 +135,13 @@ gate := lock.NewLeaderGate(
     "importer:leader",
     lock.LeaderGateConfig{
         Ttl: bound.Of(30 * time.Second),
-        OnElected: func(termRuntime runtimecontract.Runtime) {
+        OnElected: func(termRuntime containercontract.Runtime) {
             runImportLoop(termRuntime)
         },
-        OnLost: func(termRuntime runtimecontract.Runtime, cause error) {
+        OnLost: func(termRuntime containercontract.Runtime, cause error) {
             logLostLeadership(cause)
         },
-        OnCampaignError: func(termRuntime runtimecontract.Runtime, cause error) {
+        OnCampaignError: func(termRuntime containercontract.Runtime, cause error) {
             logStoreOutage(cause)
         },
     },
@@ -177,7 +177,7 @@ The three hooks, none by default:
 An unlimited `Ttl` needs a session-style locker. [`NewLeaderGate`](../../lock/leader_gate.go) panics naming `LeaderGateConfig.Ttl` when the locker declares [`LeaseLocker`](../../lock/contract/lock.go), as the in-memory and the rueidis lockers do. A locker the constructor cannot read, `NewLazyLocker` or one of your own without the mark, is answered at the first campaign: `Run` reports the refusal once, through `OnCampaignError` when it is wired and as an error record otherwise, ends at once and returns it, with [`ErrUnlimitedTtlRefused`](../../lock/contract/lock.go) as its cause. [`NewExclusiveCommand`](../../lock/exclusive_command.go) panics the same way over a `LeaseLocker`, naming `ExclusiveCommandConfig.Ttl`.
 
 `Run` never aborts on any other `Acquire` error (a store outage): it backs off by doubling, capped at `MaxCampaignBackoff`, 1 minute by default, but never faster than `RetryInterval`, and resumes campaigning. Because such errors never abort it, they are also never returned: with no `OnCampaignError` wired, the gate logs each failed campaign through the runtime's logger — a store that stays down would otherwise be indistinguishable from a deployment that simply has no work to lead. A wired hook replaces the record rather than being echoed by it, and every hook runs behind a recover: a panicking hook is logged with its stack instead of unwinding the bare goroutine `Run` is documented to be started on and killing the process with the lock held. What the recover must not keep alive is the term: a panic out of `OnElected` ends the term it was leading — the lock is released, `OnLost` or the journal receives the panic as the
-lost cause with the hook's name, and the gate campaigns again after `RetryInterval`, where another replica may win — because a gate parked on a term whose work died would renew a lease under nothing, answer `IsLeader` and report no failure, the false leader a crashed process used to prevent by handing the work over. `OnLost` and `OnCampaignError` run outside any term, so their panics end nothing. Both `Run` and `RunExclusive` refuse, before any lock is taken, a runtime whose scope or container is a typed nil: they re-wrap the runtime through `runtime.New`, once inside the deferred release, and a refusal there kept the lock held for its whole ttl.
+lost cause with the hook's name, and the gate campaigns again after `RetryInterval`, where another replica may win — because a gate parked on a term whose work died would renew a lease under nothing, answer `IsLeader` and report no failure, the false leader a crashed process used to prevent by handing the work over. `OnLost` and `OnCampaignError` run outside any term, so their panics end nothing. Both `Run` and `RunExclusive` refuse, before any lock is taken, a runtime whose scope is a typed nil: they re-wrap the runtime through `runtime.WithContext`, once inside the deferred release, and a refusal there kept the lock held for its whole ttl.
 
 Each campaign creates a **fresh** `Lock`: every `CreateLock` mints a new fencing token, and reusing a lock after losing it would alias tokens with whoever took it over.
 
@@ -224,7 +224,7 @@ A failed resolution never panics: `CreateLock` resolves nothing and always hands
 
 ### Exclusive execution (`lock`)
 
-- [`RunExclusive(runtimeInstance runtimecontract.Runtime, locker lockcontract.Locker, name string, config ExclusiveConfig, callback func(runtimecontract.Runtime) error) (bool, error)`](../../lock/run_exclusive.go)
+- [`RunExclusive(runtimeInstance containercontract.Runtime, locker lockcontract.Locker, name string, config ExclusiveConfig, callback func(containercontract.Runtime) error) (bool, error)`](../../lock/run_exclusive.go)
 - [`ExclusiveConfig`](../../lock/run_exclusive.go) — `Ttl`, `StopRenewalLimit`
 - [`ExclusiveCommand`](../../lock/exclusive_command.go) — implements `cli/contract.Command`
     - [`NewExclusiveCommand(command clicontract.Command, locker lockcontract.Locker, config ExclusiveCommandConfig) *ExclusiveCommand`](../../lock/exclusive_command.go)
@@ -234,7 +234,7 @@ A failed resolution never panics: `CreateLock` resolves nothing and always hands
 
 - [`LeaderGate`](../../lock/leader_gate.go)
     - [`NewLeaderGate(locker lockcontract.Locker, name string, config LeaderGateConfig) *LeaderGate`](../../lock/leader_gate.go)
-    - `Run(runtimeInstance runtimecontract.Runtime) error`
+    - `Run(runtimeInstance containercontract.Runtime) error`
     - `IsLeader() bool`
 - [`LeaderGateConfig`](../../lock/leader_gate.go) — `Ttl`, `RetryInterval`, `RefreshInterval`, `MaxConsecutiveRefreshFailures`, `MaxCampaignBackoff`, `StopRenewalLimit`, `OnElected`, `OnLost`, `OnCampaignError`
 

@@ -5,9 +5,9 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -19,7 +19,7 @@ func (instance *anonymousTokenSource) Name() string {
 }
 
 func (instance *anonymousTokenSource) Resolve(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
 ) (securitycontract.Token, error) {
     _ = runtimeInstance
@@ -61,7 +61,7 @@ type noopAuthenticator struct{}
 
 func (instance *noopAuthenticator) Supports(request httpcontract.Request) bool { return false }
 
-func (instance *noopAuthenticator) Authenticate(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *noopAuthenticator) Authenticate(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     return nil, nil
 }
 

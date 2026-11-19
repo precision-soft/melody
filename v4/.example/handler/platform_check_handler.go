@@ -7,19 +7,19 @@ import (
     "time"
 
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylock "github.com/precision-soft/melody/v4/lock"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodystorage "github.com/precision-soft/melody/v4/storage"
     melodystoragecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
 /* PlatformCheckHandler is a readiness probe: it takes the distributed lock, refreshes it, then writes, reads back and removes one object in storage, answering whether the two backends a request needs are reachable and behaving. */
 func PlatformCheckHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        storageInstance := melodystorage.StorageMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
-        locker := melodylock.LockerMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        storageInstance := melodystorage.StorageMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        locker := melodylock.LockerMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         lockInstance := locker.CreateLock("example.platform.check", melodybound.Of(5*time.Second))
 

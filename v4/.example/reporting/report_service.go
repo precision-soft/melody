@@ -1,8 +1,8 @@
 package reporting
 
 import (
-    "errors"
     "context"
+    "errors"
     "fmt"
     "strconv"
     "strings"
@@ -15,9 +15,9 @@ import (
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* catalogReadingCacheKey is where a reading is left for whoever asks next: the scheduled refresh writes it and the history door reads it as the current reading. */
@@ -163,7 +163,7 @@ func (instance *CatalogReportService) Refresh(ctx context.Context) (*CatalogRead
 }
 
 /* Archive records a reading in the archive and answers whether this call wrote it. It is not a step of Refresh, because a request with a cold cache takes a reading too, and a read must not write to a second database; the scheduled command calls it under the archive's advisory lock, so overlapping processes record one reading. The row's counts are read back out of the reading's payload. A reading already recorded at that instant is not a failure: the caller is told it did not write, and every other failure is answered. */
-func (instance *CatalogReportService) Archive(runtimeInstance melodyruntimecontract.Runtime, reading *CatalogReading) (bool, error) {
+func (instance *CatalogReportService) Archive(runtimeInstance melodycontainercontract.Runtime, reading *CatalogReading) (bool, error) {
     if nil == reading {
         return false, fmt.Errorf("reading is required")
     }
@@ -198,10 +198,10 @@ func (instance *CatalogReportService) Archive(runtimeInstance melodyruntimecontr
 }
 
 /* readingRepositoryOf resolves the archive when it is needed, from the container the runtime carries: a resolution, not a capture, so the container records what this service holds of the archive when it holds it. */
-func (instance *CatalogReportService) readingRepositoryOf(runtimeInstance melodyruntimecontract.Runtime) (repository.CatalogReadingRepository, error) {
+func (instance *CatalogReportService) readingRepositoryOf(runtimeInstance melodycontainercontract.Runtime) (repository.CatalogReadingRepository, error) {
     return melodycontainer.FromResolver[repository.CatalogReadingRepository](
         runtimeInstance.Context(),
-        runtimeInstance.Container(),
+        runtimeInstance.Scope(),
         repository.ServiceCatalogReadingRepository,
     )
 }
@@ -213,7 +213,7 @@ func ArchivedInstantOf(recordedAt time.Time) time.Time {
 
 
 /* RecentReadings lists the archive, newest first, resolving it when asked, so the history door is the one request that touches the second database. */
-func (instance *CatalogReportService) RecentReadings(runtimeInstance melodyruntimecontract.Runtime, limit int) ([]*repository.CatalogReadingRecord, error) {
+func (instance *CatalogReportService) RecentReadings(runtimeInstance melodycontainercontract.Runtime, limit int) ([]*repository.CatalogReadingRecord, error) {
     readingRepository, resolveErr := instance.readingRepositoryOf(runtimeInstance)
     if nil != resolveErr {
         return nil, resolveErr

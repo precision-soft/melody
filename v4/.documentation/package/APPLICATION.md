@@ -84,7 +84,7 @@ A **handler decorator** and a middleware are two different seams, and the distan
 Everything the kernel does for a request therefore happens **inside** what a decorator wraps: opening the container scope, building the request logger, stamping `X-Request-Id` on the writer, loading the session, dispatching `kernel.request`, matching the route, recovering a panic, dispatching `kernel.response` and `kernel.terminate`. The middleware chain is the last of those steps and it is not always reached — when a `kernel.request` listener produces a response, the kernel writes it and returns without ever building the chain, and the same holds for `kernel.controller`. An access-control denial is exactly that shape. So a middleware observes only requests that reached the handler stage — which does include the kernel's own `404` and `405` fallbacks, since the chain is wrapped around those too, but not one answered before the chain was built — while a decorator observes **every** request the server accepted: the `401` and `403` the security listener wrote, the response a listener
 substituted, the `500` the recovery path produced. That is where a metric, a trace span or a per-request timer belongs, because those want the requests the chain never saw as much as the ones it did.
 
-What a decorator gives up in exchange is the request itself. It runs before the container scope exists, so there is no scoped service to resolve, no [`httpcontract.Request`](../../http/contract/request.go), no [`runtimecontract.Runtime`](../../runtime/contract/runtime.go) — only the raw `*nethttp.Request` and `nethttp.ResponseWriter`. Reading the status code means wrapping the writer; reading the request id means reading `X-Request-Id` back off `writer.Header()` after `next` returns, since the kernel sets it there. A decorator also sits outside the kernel's panic recovery for the one case the kernel deliberately re-panics — `net/http`'s `ErrAbortHandler` — so work that must happen on the way out belongs in a `defer`, not on the line after the `next` call.
+What a decorator gives up in exchange is the request itself. It runs before the container scope exists, so there is no scoped service to resolve, no [`httpcontract.Request`](../../http/contract/request.go), no [`containercontract.Runtime`](../../container/contract/runtime.go) — only the raw `*nethttp.Request` and `nethttp.ResponseWriter`. Reading the status code means wrapping the writer; reading the request id means reading `X-Request-Id` back off `writer.Header()` after `next` returns, since the kernel sets it there. A decorator also sits outside the kernel's panic recovery for the one case the kernel deliberately re-panics — `net/http`'s `ErrAbortHandler` — so work that must happen on the way out belongs in a `defer`, not on the line after the `next` call.
 
 Decorators come from two places and share one order:
 
@@ -172,7 +172,6 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type demoModule struct{}
@@ -223,7 +222,7 @@ func (instance *demoModule) RegisterHttpRoutes(kernelInstance kernelcontract.Ker
 
     router.Handle(
         "/health",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             _ = runtimeInstance
             _ = writer
             _ = request
@@ -261,7 +260,7 @@ func buildApplication(ctx context.Context, embeddedEnvironmentFiles fs.FS, embed
     app.RegisterHttpRoute(
         nethttp.MethodGet,
         "/ping",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             _ = runtimeInstance
             _ = writer
             _ = request
@@ -364,7 +363,7 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
 - [`(*Application).RegisterConfiguration(name, configuration)`](../../application/application.go) — accepts exactly one name in this major, `loggingcontract.LoggingConfigurationName`; any other name panics at registration, because nothing can ever consume it
 - [`(*Application).RegisterParameter(name, value)`](../../application/application.go)
 - [`(*Application).RegisterService(name, factory, options)`](../../application/application_container.go)
-- [`(*Application).RegisterScopedService(serviceName, provider, options)`](../../application/application_container.go) — the scoped counterpart: what it registers is built on the first resolution through a scope and closed when that scope closes. In console the run's scope spans the whole command, so a long-running command that processes many units creates a child runtime per unit, as the cron runner does: a scope from `Container().NewScope()`, a `runtime.New` over it, and a `Close` whose error joins the unit's own
+- [`(*Application).RegisterScopedService(serviceName, provider, options)`](../../application/application_container.go) — the scoped counterpart: what it registers is built on the first resolution through a scope and closed when that scope closes. In console the run's scope spans the whole command, so a long-running command that processes many units creates a child runtime per unit, as the cron runner does: a child run from `runtime.NewChildRun(runtimeInstance, ctx)`, over a new scope of the container, and a `Close` of that scope whose error joins the unit's own
 - [`(*Application).RegisterModule(module)`](../../application/application_module.go)
 - [`(*Application).RegisterModuleProvider(provider)`](../../application/application_module.go) — registers every module returned by a [`ModuleProvider`](../../application/contract/module.go). `RegisterModule` also expands a module that additionally implements `ModuleProvider`, so a single registration can contribute a whole group of capability-modules. Each Melody integration ships a self-registering module via its `NewModule(ModuleConfig{...})` (e.g. `app.RegisterModule(amqp.NewModule(...))`) that wires that integration's services, parameters and commands in one call instead of hand-calling the individual `Register*` helpers. A module's `Name()`, folded to lower case, is its identity in the application: a second module of a name already registered in any case, the same instance reached again through a provider included, is recorded at the line that registered it and fails the boot at its start in the aggregated report of duplicate registrations as `module "<name>"`, with `already registered as "<first spelling>"` when the two spellings differ, running no hook and expanding no module it provides; an empty `Name()`, or one that begins or ends with whitespace, is refused where it is registered.
 - [`(*Application).RegisterCliCommand(command)`](../../application/application_cli.go)

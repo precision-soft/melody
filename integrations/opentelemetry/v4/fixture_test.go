@@ -9,15 +9,15 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-func testRequestAndRuntime() (httpcontract.Request, runtimecontract.Runtime) {
+func testRequestAndRuntime() (httpcontract.Request, containercontract.Runtime) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/orders/42", nil)
     request := melodyhttp.NewRequest(httpRequest, nil, runtimeInstance, nil)
@@ -26,7 +26,7 @@ func testRequestAndRuntime() (httpcontract.Request, runtimecontract.Runtime) {
 }
 
 func okHandler() httpcontract.Handler {
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return melodyhttp.JsonResponse(nethttp.StatusOK, map[string]any{"ok": true})
     }
 }

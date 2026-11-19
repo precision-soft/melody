@@ -5,8 +5,8 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/message"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func NewMessageBusDispatchCommand(
@@ -40,7 +40,7 @@ func (instance *MessageBusDispatchCommand) Flags() []melodyclicontract.Flag {
 }
 
 func (instance *MessageBusDispatchCommand) Run(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     commandContext *melodyclicontract.CommandContext,
 ) error {
     writer := commandContext.Writer

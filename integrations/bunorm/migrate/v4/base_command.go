@@ -10,12 +10,11 @@ import (
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/migrate"
 )
@@ -72,7 +71,7 @@ func newBaseCommand(migrations *migrate.Migrations, options Options) baseCommand
 }
 
 type migrationRun func(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) error
@@ -80,7 +79,7 @@ type migrationRun func(
 /* run is the one entry door of every command of this set: the parsed posture, the output, the timer and the recovery, so a panicking migration is the failure of its command, never the death of the process. */
 func (instance *baseCommand) run(
     name string,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
     body migrationRun,
 ) (runErr error) {
@@ -105,7 +104,7 @@ func (instance *baseCommand) run(
 
 /* resolveMigrator answers the database this command acts on, the manager it belongs to, the migrator over it, the two tables it reads, and the release the caller must defer; the tables are read before the database is opened, and a migrator that cannot be built still releases the database. */
 func (instance *baseCommand) resolveMigrator(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) (*bun.DB, string, *migrate.Migrator, migrationTables, func(), error) {
@@ -181,7 +180,7 @@ func (instance *baseCommand) resolveRegistry(ctx context.Context, resolver conta
 
 /* resolveDatabase answers the connection this command runs on, the label the output names it by, and the release its caller must defer, which ends the dedicated migration connection: that connection lifts the driver deadlines and recycles nothing, so it must not outlive the run. The release reports a failed close through the command's output as a warning, not as the verdict, and it runs before the json document is rendered, since the command defers it after the frame defers finish. */
 func (instance *baseCommand) resolveDatabase(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) (*bun.DB, string, func(), error) {
@@ -264,7 +263,7 @@ func (instance *baseCommand) managerLabel(commandContext *clicontract.CommandCon
 }
 
 /* journal answers the application's logger, resolved through the runtime so the scope's logger wins over the root's, and the emergency logger when the runtime carries none — a process that runs migrations without wiring a logger still has a journal of last resort. It resolves for itself rather than through the framework's LoggerFromRuntime, which files an emergency record of its own and answers nil where this door wants a fallback. */
-func (instance *baseCommand) journal(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
+func (instance *baseCommand) journal(runtimeInstance containercontract.Runtime) loggingcontract.Logger {
     logger, resolveErr := runtime.FromRuntime[loggingcontract.Logger](runtimeInstance, logging.ServiceLogger)
     if nil != resolveErr || true == isNilInterface(logger) {
         return logging.EmergencyLogger()

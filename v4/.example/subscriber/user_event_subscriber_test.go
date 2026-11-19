@@ -16,9 +16,8 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* deleteCountingCache counts the deletions under each key over a working cache */
@@ -37,7 +36,7 @@ func (instance *deleteCountingCache) Delete(ctx context.Context, key string) err
 }
 
 /* userUpdateUnderTest answers a runtime holding only the cache: the listener drops its entries before it notifies, so the notification hub it cannot resolve ends the call after the drops under test */
-func userUpdateUnderTest(t *testing.T) (*deleteCountingCache, melodyruntimecontract.Runtime) {
+func userUpdateUnderTest(t *testing.T) (*deleteCountingCache, melodycontainercontract.Runtime) {
     t.Helper()
 
     clockInstance := melodyclock.NewSystemClock()
@@ -55,10 +54,10 @@ func userUpdateUnderTest(t *testing.T) (*deleteCountingCache, melodyruntimecontr
         melodycontainer.RegisterOptions{},
     )
 
-    return cacheInstance, melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return cacheInstance, melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 }
 
-func dispatchUserUpdated(runtimeInstance melodyruntimecontract.Runtime, user *entity.User, previousUsername string) {
+func dispatchUserUpdated(runtimeInstance melodycontainercontract.Runtime, user *entity.User, previousUsername string) {
     listener := NewUserEventSubscriber().SubscribedEvents()[event.UserUpdatedEventName][0].Listener()
     _ = listener(runtimeInstance, melodyevent.NewEvent(event.UserUpdatedEventName, event.NewUserUpdatedEvent(user, previousUsername), melodyclock.NewSystemClock().Now()))
 }

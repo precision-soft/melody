@@ -10,8 +10,8 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/clock"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type recordingCommand struct {
@@ -34,7 +34,7 @@ func (instance *recordingCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *recordingCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     instance.calls++

@@ -2,9 +2,9 @@ package security
 
 import (
     "github.com/precision-soft/melody/v4/.example/entity"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -17,7 +17,7 @@ const (
 )
 
 /* PasswordCheck answers the account a username and password name, and false for a pair it refuses; an error is a failure to decide, never a refusal, and the authenticator returns it marked with exception.MarkInfrastructureFailure, so the door answers 503 with Retry-After. */
-type PasswordCheck func(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error)
+type PasswordCheck func(runtimeInstance melodycontainercontract.Runtime, username string, password string) (*entity.User, bool, error)
 
 /* NewPasswordAuthenticator is the first factor of the sign-in. It reads the credentials the door set as request attributes, never the body the door already consumed, and publishes the account it accepted on the request, so the door writes the session without reading the account a second time. */
 func NewPasswordAuthenticator(check PasswordCheck) *PasswordAuthenticator {
@@ -34,7 +34,7 @@ func (instance *PasswordAuthenticator) Supports(request melodyhttpcontract.Reque
     return "" != username && "" != password
 }
 
-func (instance *PasswordAuthenticator) Authenticate(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+func (instance *PasswordAuthenticator) Authenticate(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
     username, password := loginCredentials(request)
 
     account, accepted, checkErr := instance.check(runtimeInstance, username, password)

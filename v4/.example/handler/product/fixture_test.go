@@ -21,12 +21,12 @@ import (
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodyserializer "github.com/precision-soft/melody/v4/serializer"
     melodyserializercontract "github.com/precision-soft/melody/v4/serializer/contract"
@@ -197,7 +197,7 @@ func (instance *productDoorFixture) call(t *testing.T, handler melodyhttpcontrac
 func (instance *productDoorFixture) callAt(t *testing.T, handler melodyhttpcontract.Handler, method string, target string, body string, params map[string]string) (int, string) {
     t.Helper()
 
-    runtimeInstance := melodyruntime.New(instance.requestContext, instance.container.NewScope(), instance.container)
+    runtimeInstance := melodyruntime.NewRequest(instance.requestContext, instance.container.NewScope())
 
     firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
         Name:               "main",

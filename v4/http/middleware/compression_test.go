@@ -18,10 +18,10 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
 )
 
@@ -90,7 +90,7 @@ func TestCompressionMiddleware_ReleasesGzipGoroutineWhenRequestUnwinds(t *testin
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -148,7 +148,7 @@ func TestCompressionMiddleware_ReadAllError_ReturnsError(t *testing.T) {
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -180,7 +180,7 @@ func TestCompressionMiddleware_SuccessfulCompression(t *testing.T) {
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -225,7 +225,7 @@ func TestCompressionMiddleware_SkipsWhenBelowMinSize(t *testing.T) {
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -293,7 +293,7 @@ func serveCompressibleBodyThrough(t *testing.T, config CompressionConfig) httpco
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -329,7 +329,7 @@ func TestCompressionMiddleware_AddsVaryAcceptEncodingWhenCompressing(t *testing.
     body := strings.Repeat("melody ", 200)
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -365,7 +365,7 @@ func TestCompressionMiddleware_AddsVaryEvenWhenClientRefusesGzip(t *testing.T) {
     body := strings.Repeat("melody ", 200)
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -405,7 +405,7 @@ func TestCompressionMiddleware_DoesNotDuplicateVary(t *testing.T) {
     body := strings.Repeat("melody ", 200)
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -444,7 +444,7 @@ func TestCompressionMiddleware_StreamingGzipProducesValidOutput(t *testing.T) {
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -546,7 +546,7 @@ func TestCompressionMiddleware_AddsVaryWhenResponseIsAlreadyEncoded(t *testing.T
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -587,7 +587,7 @@ func TestCompressionMiddleware_AddsVaryOnExcludedPath(t *testing.T) {
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -626,7 +626,7 @@ func TestCompressionMiddleware_ReadsTheExclusionListAgainstTheSpellingTheRouterR
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -664,7 +664,7 @@ func TestCompressionMiddleware_AddsVaryOnExcludedContentType(t *testing.T) {
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -713,7 +713,7 @@ func TestCompressionMiddleware_StalledBodyReaderDoesNotSpin(t *testing.T) {
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -805,7 +805,7 @@ func TestCompressionMiddleware_ANilContentTypeListIsTheDefaultFamilyAndAnEmptyOn
         {[]string{}, "gzip"},
     } {
         next := func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -837,7 +837,7 @@ func TestCompressionMiddleware_TheZeroConfigCompressesAboveTheDefaultMinimumSize
     body := strings.Repeat("melody ", 500)
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -864,7 +864,7 @@ func TestCompressionMiddleware_TheZeroConfigSkipsBelowTheDefaultMinimumSize(t *t
     middleware := CompressionMiddleware(CompressionConfig{})
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -893,7 +893,7 @@ func TestCompressionMiddleware_JoinsEveryLineOfARepeatedAcceptEncodingField(t *t
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -948,7 +948,7 @@ func TestCompressionMiddleware_AnOversizedMinSizeDoesNotAllocateItUpfront(t *tes
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -996,7 +996,7 @@ func TestCompressionMiddleware_TheGrowingPeekStillCompressesABodyAtTheThreshold(
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1117,7 +1117,7 @@ func TestCompressionMiddleware_DropsTheContentLengthTheUncompressedBodyDeclared(
     body := strings.Repeat("melody ", 200)
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1177,7 +1177,7 @@ func TestCompressionMiddleware_ADeclaredLengthBelowTheMinimumIsTakenWithoutReadi
     body := strings.Repeat("melody ", 2000)
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1381,7 +1381,7 @@ func TestCompressionMiddleware_ClosesAStalledSourceOnceTheClientLeaves(t *testin
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1451,7 +1451,7 @@ func TestCompressionMiddleware_AnApplicationCloseThatPanicsOnTheRequestGoroutine
     response.SetBodyReader(&closePanickingBodyReader{Reader: strings.NewReader(strings.Repeat("a", 16))})
 
     handler := middleware(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return response, nil
         },
     )
@@ -1481,7 +1481,7 @@ func TestCompressionMiddleware_AnApplicationCloseThatPanicsOnTheGzipGoroutineIsC
     response.SetBodyReader(&closePanickingBodyReader{Reader: strings.NewReader(strings.Repeat("a", 4096))})
 
     handler := middleware(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return response, nil
         },
     )
@@ -1505,7 +1505,7 @@ func TestCompressionMiddleware_HandsATypedNilResponseOnAsNil(t *testing.T) {
 
     handler := middleware(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1534,7 +1534,7 @@ func TestCompressionMiddleware_SniffsTheTypeOfAnUntypedBodyBeforeCompressing(t *
 
     handler := CompressionMiddleware(CompressionConfig{Level: 6, MinSize: bound.Of(10)})(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1571,7 +1571,7 @@ func TestCompressionMiddleware_ASniffedExcludedTypeGoesOutUncompressedAndWhole(t
 
     handler := CompressionMiddleware(CompressionConfig{})(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1625,7 +1625,7 @@ func TestCompressionMiddleware_SniffsFromTheBytesNetHttpReadsUnderASmallMinSize(
 
     handler := CompressionMiddleware(CompressionConfig{Level: 6, MinSize: bound.Of(10)})(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1667,7 +1667,7 @@ func TestCompressionMiddleware_TheSniffReadKeepsTheMinSizeThreshold(t *testing.T
 
     handler := CompressionMiddleware(CompressionConfig{Level: 6, MinSize: bound.Of(10)})(
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -1699,7 +1699,7 @@ func compressedForRequest(t *testing.T, config CompressionConfig, prepare func(r
     config.MinSize = bound.Of(10)
 
     handler := CompressionMiddleware(config)(
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             response := &http.Response{}
             response.SetStatusCode(200)
             responseHeaders := make(nethttp.Header)
@@ -1756,7 +1756,7 @@ func TestCompressionMiddleware_CompressesAnAnonymousResponse(t *testing.T) {
 
 func compressionTestResponse(headers map[string]string) httpcontract.Handler {
     return func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {

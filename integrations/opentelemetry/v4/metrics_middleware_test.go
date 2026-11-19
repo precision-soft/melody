@@ -4,18 +4,18 @@ import (
     "errors"
     "fmt"
     "io"
-    "time"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
     "testing"
+    "time"
 
     "github.com/prometheus/client_golang/prometheus"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestNormalizedMethod(t *testing.T) {
@@ -86,7 +86,7 @@ func TestMetricsMiddleware_RecordsServerErrorStatusWhenHandlerReturnsError(t *te
     }
 
     request, runtimeInstance := testRequestAndRuntime()
-    handler := middleware(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := middleware(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return nil, errors.New("boom")
     })
 
@@ -129,7 +129,7 @@ func TestMetricsMiddleware_ReadsTheStatusADirectWriterCommitted(t *testing.T) {
         t.Fatalf("middleware: %v", middlewareErr)
     }
 
-    directWriter := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    directWriter := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         writer.WriteHeader(nethttp.StatusServiceUnavailable)
 
         return nil, nil
@@ -157,7 +157,7 @@ func TestMetricsMiddleware_AnEarlyHintDoesNotHideTheFinalStatus(t *testing.T) {
         t.Fatalf("middleware: %v", middlewareErr)
     }
 
-    directWriter := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    directWriter := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         writer.WriteHeader(nethttp.StatusEarlyHints)
         writer.WriteHeader(nethttp.StatusServiceUnavailable)
 
@@ -201,7 +201,7 @@ func TestMetricsMiddleware_ATypedNilResponseIsReadAsAbsentInsteadOfPanicking(t *
         t.Fatalf("middleware: %v", middlewareErr)
     }
 
-    typedNilHandler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    typedNilHandler := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         var response *typedNilProneResponse
 
         return response, nil
@@ -252,7 +252,7 @@ func TestMetricsMiddleware_RecordsTheClientStatusOfAnHttpExceptionError(t *testi
     }
 
     request, runtimeInstance := testRequestAndRuntime()
-    handler := middleware(func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := middleware(func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return nil, exception.NewHttpException(nethttp.StatusNotFound, "not found")
     })
 
@@ -357,7 +357,7 @@ func TestMetricsMiddleware_ACommittedStatusWinsOverWhatTheHandlerReturnsAfterIt(
                 t.Fatalf("middleware: %v", middlewareErr)
             }
 
-            committing := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            committing := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 writer.WriteHeader(nethttp.StatusAccepted)
 
                 return returned()

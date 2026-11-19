@@ -8,11 +8,11 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* recordingLogger captures every record with its level and message, so a test can assert both that a record was written and what it said. */
@@ -72,14 +72,14 @@ func (instance *recordingLogger) hasMessageContaining(fragment string) bool {
 }
 
 /* runtimeWithRecordingLogger builds a runtime whose scope carries the recording logger under the logger service, mirroring how a framework-assembled scope resolves logging.LoggerFromRuntime. */
-func runtimeWithRecordingLogger(ctx context.Context) (runtimecontract.Runtime, *recordingLogger) {
+func runtimeWithRecordingLogger(ctx context.Context) (containercontract.Runtime, *recordingLogger) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     logger := &recordingLogger{}
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
-    return runtime.New(ctx, scope, serviceContainer), logger
+    return runtime.NewRun(ctx, scope), logger
 }
 
 /* sessionStyleLocker stands in for the MySQL and PostgreSQL lockers, which hold until their connection drops and ignore the ttl, unlimited included: it hands the in-memory store an absent ttl whatever it is given. */

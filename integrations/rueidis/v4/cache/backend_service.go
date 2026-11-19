@@ -5,8 +5,8 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/redis/rueidis"
 )
 
@@ -81,6 +81,6 @@ func (instance *BackendService) CloseWithContext(closeContext context.Context) e
 var _ cachecontract.Backend = (*BackendService)(nil)
 
 /* BackendFromRuntime panics when the service is absent, despite carrying no Must in its name: it wraps the framework's MustFromRuntime and has no error slot. */
-func BackendFromRuntime(runtimeInstance runtimecontract.Runtime, serviceName string) *Backend {
+func BackendFromRuntime(runtimeInstance containercontract.Runtime, serviceName string) *Backend {
     return runtime.MustFromRuntime[*BackendService](runtimeInstance, serviceName).Backend()
 }

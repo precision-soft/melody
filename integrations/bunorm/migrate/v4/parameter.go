@@ -6,10 +6,10 @@ import (
 
     melodyconfig "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -116,7 +116,7 @@ type migrationTables struct {
 }
 
 /* the grammar is judged again: commands built without the module declared no key whose rule ran at boot */
-func resolveTables(runtimeInstance runtimecontract.Runtime) (migrationTables, error) {
+func resolveTables(runtimeInstance containercontract.Runtime) (migrationTables, error) {
     tables := migrationTables{migrations: DefaultMigrationsTable, locks: DefaultLocksTable}
 
     if false == runtimeInstance.Scope().Has(melodyconfig.ServiceConfig) {

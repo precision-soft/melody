@@ -9,11 +9,11 @@ import (
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     middlewarepipeline "github.com/precision-soft/melody/v4/http/middleware/pipeline"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* MiddlewareDescriptionProvider answers what the http pipeline would run without building it: the ordered descriptions, the inactive entries with their reasons, or the refusal the build would answer. */
@@ -72,7 +72,7 @@ func (instance *MiddlewareCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *MiddlewareCommand) Run(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     startedAt := time.Now()

@@ -11,8 +11,8 @@ import (
 
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v4/encrypt"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/security/totp"
     bun "github.com/uptrace/bun"
@@ -96,11 +96,11 @@ func NewStore(database *bun.DB) *Store {
 const ServiceStore = "service-example-two-factor-store"
 
 /* StoreSource answers the store a door acts on, at the moment it acts: StoreFromRuntime in production, a fixed store in tests. */
-type StoreSource func(runtimeInstance melodyruntimecontract.Runtime) (*Store, error)
+type StoreSource func(runtimeInstance melodycontainercontract.Runtime) (*Store, error)
 
 /* StoreFromRuntime resolves the store through the container, the single door that does so, when a request or a deletion needs it. Building the store applies the migration set to the catalogue's database, and the container keeps only a successful resolution, so a refusal is answered to the caller who met it and the next one asks again. */
-func StoreFromRuntime(runtimeInstance melodyruntimecontract.Runtime) (*Store, error) {
-    store, storeErr := melodycontainer.FromResolver[*Store](runtimeInstance.Context(), runtimeInstance.Container(), ServiceStore)
+func StoreFromRuntime(runtimeInstance melodycontainercontract.Runtime) (*Store, error) {
+    store, storeErr := melodycontainer.FromResolver[*Store](runtimeInstance.Context(), runtimeInstance.Scope(), ServiceStore)
     if nil != storeErr {
         return nil, storeErr
     }
@@ -282,7 +282,7 @@ func enrollmentUpsert(database bun.IDB, model any) *bun.InsertQuery {
 
 /* DeleteEnrollment removes an account's second factor, secret and recovery codes together, and an enrollment it has pending, in one transaction; it answers whether either was there. A deleted account's identifier is not minted again, but example:db:reset hands identifiers out anew, and an account must not start enrolled. Deleting nothing is not a failure. */
 func (instance *Store) DeleteEnrollment(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     userIdentifier string,
 ) (bool, error) {
     removed := false
@@ -325,7 +325,7 @@ func enrollmentDelete(database bun.IDB, userIdentifier string) *bun.DeleteQuery 
 
 /* FindTotpSecret implements securitycontract.TwoFactorEnrollmentStore, decrypting the stored secret through its bound column type. */
 func (instance *Store) FindTotpSecret(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     userIdentifier string,
 ) (string, bool, error) {
     enrollment := &Enrollment{}
@@ -349,7 +349,7 @@ func (instance *Store) FindTotpSecret(
 
 /* RedeemRecoveryCode implements securitycontract.TwoFactorRecoveryStore. Inside a transaction it loads the enrollment FOR UPDATE and, on a constant-time match, removes the code and writes the re-encrypted remainder back, so a code is never redeemed twice even under concurrent requests. The code is compared in its canonical form: case, spaces and the hyphen do not count. It reports false with a nil error when there is no enrollment or the code is not an unused one. */
 func (instance *Store) RedeemRecoveryCode(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     userIdentifier string,
     code string,
 ) (bool, error) {

@@ -49,7 +49,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/exception"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type ProductCreatedPayload struct {
@@ -57,7 +56,7 @@ type ProductCreatedPayload struct {
 }
 
 func dispatchProductCreated(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     serviceContainer containercontract.Container,
     productId string,
 ) {
@@ -146,8 +145,8 @@ A listener receives the event and writes to its payload, and the payload has no 
     - [`(*EventDispatcher).RemoveListener(registration eventcontract.ListenerRegistration) bool`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).AddSubscriber(subscriber eventcontract.EventSubscriber) eventcontract.SubscriberRegistration`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).RemoveSubscriber(registration eventcontract.SubscriberRegistration) int`](../../event/event_dispatcher.go)
-    - [`(*EventDispatcher).Dispatch(runtimeInstance runtimecontract.Runtime, event eventcontract.Event) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
-    - [`(*EventDispatcher).DispatchName(runtimeInstance runtimecontract.Runtime, eventName string, payload any) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).Dispatch(runtimeInstance containercontract.Runtime, event eventcontract.Event) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
+    - [`(*EventDispatcher).DispatchName(runtimeInstance containercontract.Runtime, eventName string, payload any) (eventcontract.Event, error)`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).RegisteredEvents() []eventcontract.RegisteredEvent`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).InstallFloorListener(eventName string, listener eventcontract.EventListener, priority int) (eventcontract.ListenerRegistration, bool)`](../../event/event_dispatcher.go)
     - [`(*EventDispatcher).MarkListenerRequired(registration eventcontract.ListenerRegistration)`](../../event/event_dispatcher.go)

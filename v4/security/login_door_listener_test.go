@@ -20,7 +20,6 @@ import (
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
@@ -41,7 +40,7 @@ type doorLoginHandler struct {
 }
 
 func (instance *doorLoginHandler) Login(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
@@ -75,7 +74,7 @@ type doorLogoutHandler struct {
 }
 
 func (instance *doorLogoutHandler) Logout(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
@@ -100,14 +99,14 @@ type doorAuthenticator struct {
     unsupported bool
     token       securitycontract.Token
     err         error
-    runtimes    []runtimecontract.Runtime
+    runtimes    []containercontract.Runtime
 }
 
 func (instance *doorAuthenticator) Supports(request httpcontract.Request) bool {
     return false == instance.unsupported
 }
 
-func (instance *doorAuthenticator) Authenticate(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *doorAuthenticator) Authenticate(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     instance.calls++
     instance.runtimes = append(instance.runtimes, runtimeInstance)
 
@@ -120,7 +119,7 @@ type doorTokenSource struct {
 
 func (instance *doorTokenSource) Name() string { return "door" }
 
-func (instance *doorTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *doorTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     if nil != instance.token {
         return instance.token, nil
     }
@@ -132,13 +131,13 @@ type countingDecisionManager struct {
     calls int
 }
 
-func (instance *countingDecisionManager) DecideAll(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
+func (instance *countingDecisionManager) DecideAll(runtimeInstance containercontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
     instance.calls++
 
     return nil
 }
 
-func (instance *countingDecisionManager) DecideAny(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
+func (instance *countingDecisionManager) DecideAny(runtimeInstance containercontract.Runtime, token securitycontract.Token, attributes []string, subject any) error {
     instance.calls++
 
     return nil
@@ -179,12 +178,12 @@ func newDoorFixture(t *testing.T, mutate func(*CompiledFirewallConfig)) *doorFix
 
     failures := 0
     successes := 0
-    kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginFailure, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginFailure, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         failures++
 
         return nil
     }, 0)
-    kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginSuccess, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginSuccess, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         successes++
 
         return nil
@@ -331,7 +330,7 @@ func TestLoginDoor_ASuccessfulLoginPublishesTheTokenToTheRestOfTheChain(t *testi
     published := ""
     fixture.kernel.eventDispatcher.AddListener(
         "kernel.response",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             if securityContext, exists := SecurityContextFromRuntime(runtimeInstance); true == exists {
                 published = securityContext.Token().UserIdentifier()
             }
@@ -398,7 +397,7 @@ func TestLoginDoor_ASecondFactorNotPresentedIsAChallengeAnnouncedToNobody(t *tes
     var refusal error
     fixture.kernel.eventDispatcher.AddListener(
         "kernel.exception",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             if exceptionEvent, ok := eventValue.Payload().(*http.KernelExceptionEvent); true == ok {
                 refusal = exceptionEvent.Err()
             }
@@ -440,7 +439,7 @@ func TestLoginDoor_AFailedFailureDispatchKeepsTheRefusalAndIsFiled(t *testing.T)
         config.LoginAuthenticator = authenticator
     })
 
-    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginFailure, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginFailure, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("audit refused")
     }, 100)
 
@@ -608,7 +607,7 @@ func TestLogoutDoor_AnAnonymousPostIsServed(t *testing.T) {
 
 func TestLogoutDoor_AFailedSuccessListenerStillEndsTheSession(t *testing.T) {
     fixture := newDoorFixture(t, nil)
-    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutSuccess, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutSuccess, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("audit unavailable")
     }, 0)
 
@@ -647,7 +646,7 @@ func TestLoginDoor_ARefusedSignInEndsTheSessionTheDoorRotated(t *testing.T) {
     fixture := newDoorFixture(t, func(config *CompiledFirewallConfig) {
         config.LoginAuthenticator = authenticator
     })
-    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginSuccess, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginSuccess, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("audit unavailable")
     }, 100)
 
@@ -665,7 +664,7 @@ func TestLoginDoor_ARefusedSignInEndsTheSessionTheDoorRotated(t *testing.T) {
 func TestLoginDoor_ARefusedSignInEndsTheSessionTheHandlerRotated(t *testing.T) {
     fixture := newDoorFixture(t, nil)
     fixture.login.rotate = true
-    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginSuccess, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLoginSuccess, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("audit unavailable")
     }, 100)
 
@@ -738,7 +737,7 @@ func TestDoor_AServedDoorIsNotJournaledAsNoRoute(t *testing.T) {
     fixture.login.response = http.EmptyResponse(nethttp.StatusNoContent)
     fixture.kernel.eventDispatcher.AddListener(
         "kernel.request",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             if requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent); true == ok {
                 routeName = requestEvent.Request().RouteName()
             }
@@ -915,7 +914,7 @@ func TestLoginDoor_TheUnavailableRefusalNamesTheDoorAndCarriesTheCause(t *testin
     })
 
     var observedErr error
-    fixture.kernel.eventDispatcher.AddListener(kernelcontract.EventKernelException, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    fixture.kernel.eventDispatcher.AddListener(kernelcontract.EventKernelException, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         observedErr = eventValue.Payload().(*http.KernelExceptionEvent).Err()
 
         return nil
@@ -1041,7 +1040,7 @@ func serveDoorUnderRequestContext(t *testing.T, requestContext context.Context, 
 func (instance *doorFixture) refusals() *[]error {
     recorded := []error{}
 
-    instance.kernel.eventDispatcher.AddListener(kernelcontract.EventKernelException, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    instance.kernel.eventDispatcher.AddListener(kernelcontract.EventKernelException, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         if exceptionEvent, isExceptionEvent := eventValue.Payload().(*http.KernelExceptionEvent); true == isExceptionEvent {
             recorded = append(recorded, exceptionEvent.Err())
         }
@@ -1253,7 +1252,7 @@ type sessionUnavailableTokenSource struct{}
 
 func (instance *sessionUnavailableTokenSource) Name() string { return "session" }
 
-func (instance *sessionUnavailableTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *sessionUnavailableTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     if _, sessionErr := http.RequestSession(request); nil != sessionErr {
         return NewUnavailableToken(sessionErr), nil
     }
@@ -1509,7 +1508,7 @@ type logoutEventRecord struct {
 func recordLogoutEvents(fixture *doorFixture, sessionManager sessioncontract.Manager, sessionId string) *logoutEventRecord {
     record := &logoutEventRecord{}
 
-    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutSuccess, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutSuccess, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         record.successes++
 
         stored, _ := sessionManager.Session(context.Background(), sessionId)
@@ -1518,7 +1517,7 @@ func recordLogoutEvents(fixture *doorFixture, sessionManager sessioncontract.Man
         return nil
     }, 0)
 
-    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutFailure, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutFailure, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         if failureEvent, isFailureEvent := eventValue.Payload().(*LogoutFailureEvent); true == isFailureEvent {
             record.failures = append(record.failures, failureEvent.Error())
         }
@@ -1661,7 +1660,7 @@ func TestLogoutDoor_A503ThenARetryRaisesOneSuccess(t *testing.T) {
 func TestLogoutDoor_AFailedFailureListenerKeepsTheStoragesAnswer(t *testing.T) {
     fixture := newDoorFixture(t, nil)
     stored := newStoredLogoutSession(t, fixture, 1)
-    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutFailure, func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    fixture.kernel.eventDispatcher.AddListener(securitycontract.EventSecurityLogoutFailure, func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return errors.New("audit unavailable")
     }, 0)
 

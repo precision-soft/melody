@@ -17,13 +17,12 @@ import (
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v4/serializer"
     melodyserializercontract "github.com/precision-soft/melody/v4/serializer/contract"
     melodyvalidation "github.com/precision-soft/melody/v4/validation"
@@ -39,7 +38,13 @@ func (instance *stubEnvironmentSource) Load(ctx context.Context) (map[string]str
     return instance.values, nil
 }
 
-func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimecontract.Runtime {
+/* containerRuntime keeps the container a fixture built the runtime over, so a test can register on it afterwards: a runtime reaches no container. */
+type containerRuntime struct {
+    melodycontainercontract.Runtime
+    serviceContainer melodycontainercontract.Container
+}
+
+func runtimeForEnvironment(t *testing.T, environmentName string) *containerRuntime {
     t.Helper()
 
     source := &stubEnvironmentSource{
@@ -72,10 +77,13 @@ func runtimeForEnvironment(t *testing.T, environmentName string) melodyruntimeco
         t.Fatalf("register configuration: %v", registerErr)
     }
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return &containerRuntime{
+        Runtime:          melodyruntime.NewRequest(context.Background(), containerInstance.NewScope()),
+        serviceContainer: containerInstance,
+    }
 }
 
-func runtimeRefusingEveryMediaType(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
+func runtimeRefusingEveryMediaType(t *testing.T) (melodycontainercontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -96,7 +104,7 @@ func runtimeRefusingEveryMediaType(t *testing.T) (melodyruntimecontract.Runtime,
         t.Fatalf("register serializer manager: %v", registerErr)
     }
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
     httpRequest.Header.Set("Accept", "*/*;q=0")
@@ -106,7 +114,7 @@ func runtimeRefusingEveryMediaType(t *testing.T) (melodyruntimecontract.Runtime,
     return runtimeInstance, request
 }
 
-func runtimeRefusingNothing(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
+func runtimeRefusingNothing(t *testing.T) (melodycontainercontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -127,7 +135,7 @@ func runtimeRefusingNothing(t *testing.T) (melodyruntimecontract.Runtime, melody
         t.Fatalf("register serializer manager: %v", registerErr)
     }
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/refused", nil)
     httpRequest.Header.Set("Accept", "application/json")
@@ -137,7 +145,7 @@ func runtimeRefusingNothing(t *testing.T) (melodyruntimecontract.Runtime, melody
     return runtimeInstance, request
 }
 
-func requestAcceptingLines(t *testing.T, runtimeInstance melodyruntimecontract.Runtime, acceptLineList ...string) melodyhttpcontract.Request {
+func requestAcceptingLines(t *testing.T, runtimeInstance melodycontainercontract.Runtime, acceptLineList ...string) melodyhttpcontract.Request {
     t.Helper()
 
     httpRequest := httptest.NewRequest(nethttp.MethodGet, "/refused", nil)
@@ -333,7 +341,7 @@ func TestDebugModeFailsClosedWhenTheEnvironmentCannotBeDetermined(t *testing.T) 
     }
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     if true == debugMode(runtimeInstance) {
         t.Fatalf("expected an unregistered configuration to disable debug material")
@@ -441,13 +449,13 @@ func (instance *recordingLogger) lines() []recordedLine {
     return serverErrorLines
 }
 
-func runtimeWithJournal(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request, *recordingLogger) {
+func runtimeWithJournal(t *testing.T) (melodycontainercontract.Runtime, melodyhttpcontract.Request, *recordingLogger) {
     t.Helper()
 
     runtimeInstance := runtimeForEnvironment(t, melodyconfig.EnvironmentProduction)
     logger := &recordingLogger{Logger: melodylogging.NewNopLogger()}
 
-    registrar := runtimeInstance.Container().(melodycontainercontract.Registrar)
+    registrar := runtimeInstance.serviceContainer
     melodycontainer.MustRegister(
         registrar,
         melodylogging.ServiceLogger,

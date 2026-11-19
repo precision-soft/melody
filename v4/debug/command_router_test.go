@@ -12,7 +12,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type routerCommandTestEnvelope struct {
@@ -34,7 +33,7 @@ func newRouterTestRuntime(routeCount int) *testRuntime {
         router.Handle(
             fmt.Sprintf("/route/%02d", index),
             func(
-                runtimeInstance runtimecontract.Runtime,
+                runtimeInstance containercontract.Runtime,
                 writer nethttp.ResponseWriter,
                 request httpcontract.Request,
             ) (httpcontract.Response, error) {
@@ -365,7 +364,7 @@ func TestRouterCommand_RendersThePriorityAndTheRegistrationOrder(t *testing.T) {
     router := http.NewRouter()
 
     handler := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -423,7 +422,7 @@ func TestRouterCommand_CarriesTheDiscriminatorsInJsonAndVerboseTable(t *testing.
     router := http.NewRouter()
 
     handler := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -517,7 +516,7 @@ func TestRouterCommand_TiedPatternAndMethodsRowsKeepTheRegistrationOrder(t *test
         router.Handle(
             "/tied",
             func(
-                runtimeInstance runtimecontract.Runtime,
+                runtimeInstance containercontract.Runtime,
                 writer nethttp.ResponseWriter,
                 request httpcontract.Request,
             ) (httpcontract.Response, error) {
@@ -568,7 +567,7 @@ func TestRouterCommand_KeepsTheDocumentWhenAnAttributeCannotBeSerialized(t *test
     router.Handle(
         "/probe",
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -644,7 +643,7 @@ func TestRouterCommand_ACyclicAttributeIsRenderedAsAMarkerRatherThanKillingThePr
     router.Handle(
         "/probe",
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             writer nethttp.ResponseWriter,
             request httpcontract.Request,
         ) (httpcontract.Response, error) {
@@ -714,7 +713,7 @@ func TestRouterCommand_TiedRowsFollowTheRegistrationOrderAndNotTheName(t *testin
         router.Handle(
             "/tied-reversed",
             func(
-                runtimeInstance runtimecontract.Runtime,
+                runtimeInstance containercontract.Runtime,
                 writer nethttp.ResponseWriter,
                 request httpcontract.Request,
             ) (httpcontract.Response, error) {

@@ -1,14 +1,14 @@
 package user
 
 import (
-    "fmt"
-    "reflect"
-    melodycache "github.com/precision-soft/melody/v4/cache"
     "bytes"
     "context"
     "errors"
+    "fmt"
+    melodycache "github.com/precision-soft/melody/v4/cache"
     nethttp "net/http"
     "net/http/httptest"
+    "reflect"
     "sort"
     "sync"
     "testing"
@@ -21,11 +21,10 @@ import (
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -406,25 +405,25 @@ func (instance *silentEventDispatcher) RemoveSubscriber(registration melodyevent
     return 0
 }
 
-func (instance *silentEventDispatcher) Dispatch(runtimeInstance melodyruntimecontract.Runtime, event melodyeventcontract.Event) (melodyeventcontract.Event, error) {
+func (instance *silentEventDispatcher) Dispatch(runtimeInstance melodycontainercontract.Runtime, event melodyeventcontract.Event) (melodyeventcontract.Event, error) {
     return event, nil
 }
 
-func (instance *silentEventDispatcher) DispatchName(runtimeInstance melodyruntimecontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
+func (instance *silentEventDispatcher) DispatchName(runtimeInstance melodycontainercontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
     return nil, nil
 }
 
 var _ melodyeventcontract.EventDispatcher = (*silentEventDispatcher)(nil)
 
 /* adminRuntime builds the runtime an admin door needs: a container carrying the user service, and a security context whose token holds the roles the caller is to be granted. The firewall under the context is the smallest compiled one that answers a role question, because the doors read nothing else off it. */
-func adminRuntime(t *testing.T, userRepository repository.UserRepository, actorId string, actorRoles []string) melodyruntimecontract.Runtime {
+func adminRuntime(t *testing.T, userRepository repository.UserRepository, actorId string, actorRoles []string) melodycontainercontract.Runtime {
     t.Helper()
 
     return adminRuntimeOverCache(t, userRepository, &valueCache{values: map[string]any{}}, actorId, actorRoles)
 }
 
 /* adminRuntimeOverCache is adminRuntime over a cache the test holds, so a test can plant the stale entry a raced or failed invalidation leaves behind; the dispatcher stays silent, which is that invalidation not happening */
-func adminRuntimeOverCache(t *testing.T, userRepository repository.UserRepository, cacheInstance *valueCache, actorId string, actorRoles []string) melodyruntimecontract.Runtime {
+func adminRuntimeOverCache(t *testing.T, userRepository repository.UserRepository, cacheInstance *valueCache, actorId string, actorRoles []string) melodycontainercontract.Runtime {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -441,7 +440,7 @@ func adminRuntimeOverCache(t *testing.T, userRepository repository.UserRepositor
         t.Fatalf("register the user service: %v", registerErr)
     }
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{
         Name:               "main",
@@ -460,7 +459,7 @@ func adminRuntimeOverCache(t *testing.T, userRepository repository.UserRepositor
 /* callDoor drives one admin door with a json body and the route parameters it reads, and answers the status it decided on. */
 func callDoor(
     t *testing.T,
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     door melodyhttpcontract.Handler,
     method string,
     path string,
@@ -475,7 +474,7 @@ func callDoor(
 /* callDoorBoundedTo runs a door over a body bounded as the kernel's MELODY_HTTP_MAX_REQUEST_BODY_BYTES bounds it; zero leaves it unbounded */
 func callDoorBoundedTo(
     t *testing.T,
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     door melodyhttpcontract.Handler,
     method string,
     path string,
@@ -551,11 +550,11 @@ func (instance *recordingUserRepository) stored(t *testing.T, id string) *entity
 }
 
 type canceledRuntime struct {
-    melodyruntimecontract.Runtime
+    melodycontainercontract.Runtime
     ctx context.Context
 }
 
-func newCanceledRuntime(runtimeInstance melodyruntimecontract.Runtime) melodyruntimecontract.Runtime {
+func newCanceledRuntime(runtimeInstance melodycontainercontract.Runtime) melodycontainercontract.Runtime {
     ctx, cancel := context.WithCancel(context.Background())
     cancel()
 

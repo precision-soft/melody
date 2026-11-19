@@ -7,9 +7,9 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/.example/entity"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestStreamSlots_RefusesPastTheAccountsCapAndAdmitsAnotherAccount(t *testing.T) {
@@ -94,7 +94,7 @@ func TestStreamSlots_ConcurrentAcquisitionsKeepTheCap(t *testing.T) {
 const countedRouteName = "example.websocket"
 
 /* countedRequest is an authenticated reader's request matched to the route given */
-func countedRequest(t *testing.T, routeName string) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
+func countedRequest(t *testing.T, routeName string) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
     request, runtimeInstance := streamRequestAs(t, "/ws", []string{entity.RoleUser, entity.RoleEditor})
@@ -109,7 +109,7 @@ func TestStreamSlotMiddleware_HoldsTheSlotForTheConnectionsLife(t *testing.T) {
     request, runtimeInstance := countedRequest(t, countedRouteName)
 
     heldDuringTheConnection := false
-    next := func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    next := func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         _, taken := slots.Acquire("reader")
         heldDuringTheConnection = false == taken
 
@@ -139,7 +139,7 @@ func TestStreamSlotMiddleware_RefusesPastTheCapBeforeTheHandler(t *testing.T) {
     request, runtimeInstance := countedRequest(t, countedRouteName)
 
     handlerRan := false
-    next := func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    next := func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         handlerRan = true
 
         return nil, nil
@@ -163,7 +163,7 @@ func TestStreamSlotMiddleware_LeavesEveryOtherRouteAlone(t *testing.T) {
     request, runtimeInstance := countedRequest(t, "example.products.list")
 
     handlerRan := false
-    next := func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    next := func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         handlerRan = true
 
         return nil, nil

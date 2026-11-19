@@ -10,7 +10,7 @@ import (
     "time"
 
     melodyclock "github.com/precision-soft/melody/v4/clock"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/security/totp"
 )
 
@@ -104,7 +104,7 @@ func TestTotpCodeCommand_GivesUpTheReadWhenTheRuntimeContextEnds(t *testing.T) {
     cancel()
 
     clockRuntime := runtimeWithClock(t, melodyclock.NewSystemClock())
-    runtimeInstance := melodyruntime.New(ctx, clockRuntime.Scope(), clockRuntime.Container())
+    runtimeInstance := melodyruntime.WithContext(clockRuntime, ctx)
     resultChannel := make(chan error, 1)
 
     go func() {

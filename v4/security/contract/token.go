@@ -1,8 +1,8 @@
 package contract
 
 import (
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type Token interface {
@@ -23,4 +23,4 @@ type AuthenticationUnavailable interface {
 }
 
 /* TokenResolver answers the request's token through the runtime it is handed; an error is answered as a token source's, refused with its status, 500 for a plain one and the unavailable reading for one carrying exception.MarkInfrastructureFailure, and a typed nil error is no error. */
-type TokenResolver func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (Token, error)
+type TokenResolver func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (Token, error)

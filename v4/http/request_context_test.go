@@ -6,8 +6,8 @@ import (
     "testing"
     "time"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestNewRequestContext_ReportsTheIdAndTheStartItWasGiven(t *testing.T) {
@@ -43,7 +43,7 @@ func TestRequestContext_ReachesTheHandlerThroughTheRequest(t *testing.T) {
     router := NewRouter()
     router.Handle(
         "/articles",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             if nil != request.RequestContext() {
                 observedRequestId = request.RequestContext().RequestId()
             }

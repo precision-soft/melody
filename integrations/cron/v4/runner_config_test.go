@@ -12,11 +12,10 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func refusalOfRunnerConstruction(t *testing.T, configuration *Configuration, config RunnerConfig) *exception.Error {
@@ -224,7 +223,7 @@ func TestRunnerCommand_TheOutputCaptureLimitReachesEveryRun(t *testing.T) {
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, OutputCaptureLimit: bound.Of(16)})
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
-    if runErr := runner.runDue(runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), at); nil != runErr {
+    if runErr := runner.runDue(runtime.NewRun(context.Background(), serviceContainer.NewScope()), at); nil != runErr {
         t.Fatalf("unexpected error: %v", runErr)
     }
 
@@ -338,7 +337,7 @@ func (instance *deadlineRecordingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *deadlineRecordingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *deadlineRecordingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     deadline, hasDeadline := runtimeInstance.Context().Deadline()
     instance.hasDeadline.Store(hasDeadline)
     instance.deadline.Store(deadline.UnixNano())

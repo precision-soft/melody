@@ -6,8 +6,8 @@ import (
     "html"
 
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodymailercontract "github.com/precision-soft/melody/v4/mailer/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* a 1x1 transparent PNG standing in for a brand logo; a real application embeds its own asset (for example with go:embed) and attaches it the same way */
@@ -40,7 +40,7 @@ func (instance *MailSendCommand) Flags() []melodyclicontract.Flag {
 }
 
 func (instance *MailSendCommand) Run(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     commandContext *melodyclicontract.CommandContext,
 ) error {
     to := commandContext.String("to")

@@ -13,9 +13,9 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
     redisclient "github.com/redis/rueidis"
@@ -1098,7 +1098,7 @@ func TestRedisTokenStore_LookupKeepsATighterRequestDeadline(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
 
     started := time.Now()
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {
@@ -1432,7 +1432,7 @@ func TestTokenStores_RefuseANilRuntimeAtEveryDoor(t *testing.T) {
     }
 
     var typedNil *contextOnlyRuntime
-    runtimes := map[string]runtimecontract.Runtime{
+    runtimes := map[string]containercontract.Runtime{
         "nil":           nil,
         "typed nil":     typedNil,
         "nil context":   &contextOnlyRuntime{},

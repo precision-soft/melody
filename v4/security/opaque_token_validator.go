@@ -1,9 +1,9 @@
 package security
 
 import (
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -22,7 +22,7 @@ type OpaqueTokenValidator struct {
 }
 
 func (instance *OpaqueTokenValidator) Validate(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     tokenString string,
 ) (securitycontract.Claims, error) {
     claims, found, lookupErr := instance.store.Lookup(runtimeInstance, tokenString)

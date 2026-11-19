@@ -14,12 +14,12 @@ import (
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* NewGenerateCommand builds the command that renders the service registrations for a bind set. It runs inside the application, so it checks every bind against the parameters the running configuration actually declares instead of against a copy of them. The output package must not be one the scanned constructors take types from: the generated file would import its own package. */
@@ -92,14 +92,14 @@ func (instance *GenerateCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *GenerateCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     if nil == instance.bindSet {
         return exception.NewError("the wiring generate command requires a bind set", nil, nil)
     }
 
-    applicationConfiguration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    applicationConfiguration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
     projectDirectory := applicationConfiguration.MustGet(config.KernelProjectDirectory).MustString()
 
@@ -335,7 +335,7 @@ func (instance *journalLineWriter) journalLine(line string) {
 }
 
 /* journal answers the application's logger, resolved through the runtime so the scope's logger wins, and the emergency logger when the runtime carries none. The two doors below are copied from the openapi generate command, since sharing them would need an exported symbol. When kernel.log_path is empty the emergency journal, stderr, carries the report, as the command's console journal also writes to stderr; either way the report stays off stdout, where the source goes. */
-func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime) loggingcontract.Logger {
+func (instance *GenerateCommand) journal(runtimeInstance containercontract.Runtime) loggingcontract.Logger {
     if true == journalSharesStdout(runtimeInstance) {
         return logging.EmergencyLogger()
     }
@@ -349,8 +349,8 @@ func (instance *GenerateCommand) journal(runtimeInstance runtimecontract.Runtime
 }
 
 /* journalSharesStdout reads what the container reads when it builds the logger: an empty log path, which made the journal write to stdout before a command's console journal moved to stderr. The configuration is read tolerantly, answering false when it is absent or fails to resolve. A logger the application substituted is not readable here, so such an application gives the command --out. */
-func journalSharesStdout(runtimeInstance runtimecontract.Runtime) bool {
-    configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Context(), runtimeInstance.Container(), config.ServiceConfig)
+func journalSharesStdout(runtimeInstance containercontract.Runtime) bool {
+    configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Context(), runtimeInstance.Scope(), config.ServiceConfig)
     if nil != resolveErr || nil == configuration {
         return false
     }

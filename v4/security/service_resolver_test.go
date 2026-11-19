@@ -7,9 +7,8 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -26,10 +25,9 @@ func (instance *erroringResolverScope) Get(ctx context.Context, serviceName stri
     return nil, errors.New("scope is closed")
 }
 
-/* substitutableRuntime stands for a Runtime supplied by application code rather than built by runtime.New, which is the only shape that can carry a typed-nil scope past construction. */
+/* substitutableRuntime stands for a Runtime supplied by application code rather than built by runtime.NewRequest or NewRun, which is the only shape that can carry a typed-nil scope past construction. */
 type substitutableRuntime struct {
-    scope            containercontract.Scope
-    serviceContainer containercontract.Container
+    scope containercontract.Scope
 }
 
 func (instance *substitutableRuntime) Context() context.Context {
@@ -40,19 +38,18 @@ func (instance *substitutableRuntime) Scope() containercontract.Scope {
     return instance.scope
 }
 
-func (instance *substitutableRuntime) Container() containercontract.Container {
-    return instance.serviceContainer
+func (instance *substitutableRuntime) Kind() containercontract.Kind {
+    return containercontract.KindRequest
 }
 
-func newTypedNilScopeRuntime() runtimecontract.Runtime {
+func newTypedNilScopeRuntime() containercontract.Runtime {
     return &substitutableRuntime{
-        scope:            (*testScope)(nil),
-        serviceContainer: container.NewContainer(container.ContainerConfig{}),
+        scope: (*testScope)(nil),
     }
 }
 
 func TestSecurityContextFromRuntime_AnswersNotFoundForATypedNilRuntime(t *testing.T) {
-    var runtimeInstance runtimecontract.Runtime = (*substitutableRuntime)(nil)
+    var runtimeInstance containercontract.Runtime = (*substitutableRuntime)(nil)
 
     securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
     if true == exists {
@@ -76,7 +73,7 @@ func TestSecurityContextFromRuntime_AnswersNotFoundForATypedNilScope(t *testing.
 }
 
 func TestSecurityContextSetOnRuntime_TypedNilRuntimePanicsWithTheRefusal(t *testing.T) {
-    var runtimeInstance runtimecontract.Runtime = (*substitutableRuntime)(nil)
+    var runtimeInstance containercontract.Runtime = (*substitutableRuntime)(nil)
 
     testhelper.AssertPanicsWithError(
         t,
@@ -106,7 +103,7 @@ func TestSecurityContextSetOnRuntime_TypedNilScopePanicsWithTheRefusal(t *testin
 /* SecurityContextFromRuntime runs from IsGranted, which a handler can call from a goroutine that outlives the request; resolving the logger with the panicking Must variant on a closed scope crashes that uncovered goroutine, so a failed resolution must return (nil, false) rather than panic */
 func TestSecurityContextFromRuntime_DoesNotPanicWhenResolutionFails(t *testing.T) {
     scope := &erroringResolverScope{testScope: newTestScope()}
-    runtimeInstance := runtime.New(context.Background(), scope, container.NewContainer(container.ContainerConfig{}))
+    runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
     securityContext, exists := SecurityContextFromRuntime(runtimeInstance)
     if true == exists {

@@ -18,14 +18,13 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecurityconfig "github.com/precision-soft/melody/v4/security/config"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -246,7 +245,7 @@ func TestRegisterSecurity_TheMetricsTokenPutsTheExpositionBehindTheScraperRole(t
             },
             melodycontainer.RegisterOptions{},
         )
-        runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+        runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
         token, _ := metricsFirewall.TokenSource().Resolve(runtimeInstance, request)
         if authenticated != (nil != token && true == token.IsAuthenticated()) {
@@ -303,7 +302,7 @@ func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExist
         melodycontainer.MustRegister[melodyloggingcontract.Logger](containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
             return melodylogging.NewNopLogger(), nil
         }, melodycontainer.RegisterOptions{})
-        runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+        runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
         httpRequest := httptest.NewRequest(nethttp.MethodGet, route.DeviceIdentityPattern, nil)
         httpRequest.Header.Set("Authorization", "Bearer device-token")
@@ -328,7 +327,7 @@ func TestRegisterSecurity_TheDeviceFirewallHonoursATokenOnlyWhileItsAccountExist
 
 type failingInternalNonceGuard struct{}
 
-func (instance *failingInternalNonceGuard) Remember(_ melodyruntimecontract.Runtime, _ string, _ bound.Duration) (bool, error) {
+func (instance *failingInternalNonceGuard) Remember(_ melodycontainercontract.Runtime, _ string, _ bound.Duration) (bool, error) {
     return false, errors.New("redis is down")
 }
 
@@ -396,7 +395,7 @@ func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryA
             melodycontainer.MustRegister[melodyloggingcontract.Logger](containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
                 return melodylogging.NewNopLogger(), nil
             }, melodycontainer.RegisterOptions{})
-            runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+            runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
             dispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
             kernel := &securityListenerKernel{dispatcher: dispatcher}

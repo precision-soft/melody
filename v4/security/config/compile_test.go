@@ -7,9 +7,9 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -114,7 +114,7 @@ type typedNilEntryPointProbe struct {
 }
 
 func (instance *typedNilEntryPointProbe) Start(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
 ) (httpcontract.Response, error) {
     return nil, nil
@@ -124,7 +124,7 @@ type typedNilDeniedHandlerProbe struct {
 }
 
 func (instance *typedNilDeniedHandlerProbe) Handle(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     decisionErr error,
 ) (httpcontract.Response, error) {
@@ -279,7 +279,7 @@ func impersonationSourceForCompile(hierarchy *security.RoleHierarchy) *security.
 
 type impersonatedUserResolverStub struct{}
 
-func (instance impersonatedUserResolverStub) ResolveImpersonatedUser(_ runtimecontract.Runtime, _ string) (securitycontract.Token, error) {
+func (instance impersonatedUserResolverStub) ResolveImpersonatedUser(_ containercontract.Runtime, _ string) (securitycontract.Token, error) {
     return nil, nil
 }
 

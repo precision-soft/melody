@@ -15,6 +15,7 @@ import (
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/debug"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
@@ -26,7 +27,6 @@ import (
     "github.com/precision-soft/melody/v4/logging"
     "github.com/precision-soft/melody/v4/messagebus"
     "github.com/precision-soft/melody/v4/openapi"
-    "github.com/precision-soft/melody/v4/runtime"
     "github.com/precision-soft/melody/v4/security"
 )
 
@@ -90,7 +90,7 @@ func (instance *Application) bootCli() {
     if config.EnvironmentDevelopment == instance.configuration.Kernel().Environment() {
         debugCommands = append(
             debugCommands,
-            &debug.ContainerCommand{},
+            debug.NewContainerCommand(instance.kernel.ServiceContainer()),
             &debug.ParameterCommand{},
             debug.NewEventCommand(instance.servingProcessListeners),
             debug.NewMiddlewareCommand(
@@ -194,7 +194,7 @@ func (instance *Application) runCli() error {
         }
     }()
 
-    runtimeInstance := runtime.New(instance.ctx, scope, serviceContainer)
+    runtimeInstance := runtime.NewRun(instance.ctx, scope)
 
     processId := logging.GenerateProcessId()
     loggerWithProcess := logging.NewProcessLogger(logger, processId, "processId")

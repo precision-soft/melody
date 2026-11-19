@@ -9,14 +9,14 @@ import (
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
 func ApiUpdateHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if false == melodysecurity.IsGranted(runtimeInstance, entity.RoleEditor) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
         }
@@ -32,13 +32,13 @@ func ApiUpdateHandler() melodyhttpcontract.Handler {
         }
 
         updateProduct := melodyhttp.JsonHandler(
-            func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, dto updateRequest) (melodyhttpcontract.Response, error) {
+            func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, dto updateRequest) (melodyhttpcontract.Response, error) {
                 dto = dto.trimmed()
                 if refusal := presenter.ApiRefusalOfInvalidBody(runtimeInstance, request, dto); nil != refusal {
                     return refusal, nil
                 }
 
-                productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Container())
+                productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Scope())
 
                 product, found, updateErr := productService.Update(
                     runtimeInstance,

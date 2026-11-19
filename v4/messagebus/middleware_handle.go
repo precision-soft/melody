@@ -3,11 +3,11 @@ package messagebus
 import (
     "reflect"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type HandleOptions struct {
@@ -25,7 +25,7 @@ func NewHandleMessageMiddleware(
     }
 
     return func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         envelopeInstance messagebuscontract.Envelope,
         next messagebuscontract.StackNext,
     ) (messagebuscontract.Envelope, error) {
@@ -53,7 +53,7 @@ func NewHandleMessageMiddleware(
 }
 
 func noHandler(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
     options HandleOptions,
 ) error {

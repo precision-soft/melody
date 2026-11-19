@@ -7,7 +7,6 @@ import (
     "testing"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestNewHttpTestRequest_BuildsARequestCarryingTheMethodAndTheUrl(t *testing.T) {
@@ -132,6 +131,6 @@ func (instance *stubRuntime) Context() context.Context { return instance.ctx }
 
 func (instance *stubRuntime) Scope() containercontract.Scope { return nil }
 
-func (instance *stubRuntime) Container() containercontract.Container { return nil }
+func (instance *stubRuntime) Kind() containercontract.Kind { return containercontract.KindRequest }
 
-var _ runtimecontract.Runtime = (*stubRuntime)(nil)
+var _ containercontract.Runtime = (*stubRuntime)(nil)

@@ -21,18 +21,17 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/httpclient"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* rateRefreshCommandRuntime wires the refresh service over the in-memory catalogue and a provider answering
    the document given, under the names the command resolves. */
-func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher, cacheOf func(melodycachecontract.Cache) melodycachecontract.Cache) melodyruntimecontract.Runtime {
+func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(melodyeventcontract.EventDispatcher) melodyeventcontract.EventDispatcher, cacheOf func(melodycachecontract.Cache) melodycachecontract.Cache) melodycontainercontract.Runtime {
     t.Helper()
 
     provider := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
@@ -82,7 +81,7 @@ func rateRefreshCommandRuntime(t *testing.T, document string, dispatcherOf func(
         return refreshService, nil
     }, melodycontainer.RegisterOptions{})
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 }
 
 /* tableCellsOf reads the one data row of the rendered table as trimmed cells, so an assertion names a column

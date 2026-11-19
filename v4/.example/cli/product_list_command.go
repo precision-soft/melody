@@ -15,10 +15,10 @@ import (
     "github.com/precision-soft/melody/v4/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodyclioutput "github.com/precision-soft/melody/v4/cli/output"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const productListFlagLimit = "limit"
@@ -51,15 +51,15 @@ func (instance *ProductListCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *ProductListCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *ProductListCommand) Run(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     writer := commandContext.Writer
 
     limit := int(commandContext.Int(productListFlagLimit))
     _, _ = fmt.Fprintf(writer, "product list: limit=%d\n", limit)
 
-    productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Container())
-    categoryService := service.MustGetCategoryService(runtimeInstance.Context(), runtimeInstance.Container())
-    currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Container())
+    productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Scope())
+    categoryService := service.MustGetCategoryService(runtimeInstance.Context(), runtimeInstance.Scope())
+    currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Scope())
 
     products, listErr := productService.List(runtimeInstance.Context())
     if nil != listErr {
@@ -148,7 +148,7 @@ func nameById[Entity any](ctx context.Context, list func(context.Context) ([]*En
 listing does not refuse over it — the products are what was asked for, and a column
 of dashes is still a listing — but a column of dashes printed in silence reads as
 products filed under nothing, so the loss goes to the journal with its cause. */
-func journalLostNomenclature(runtimeInstance melodyruntimecontract.Runtime, nomenclature string, listErr error) {
+func journalLostNomenclature(runtimeInstance melodycontainercontract.Runtime, nomenclature string, listErr error) {
     if nil == listErr {
         return
     }

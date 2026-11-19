@@ -9,10 +9,10 @@ import (
     "go.opentelemetry.io/otel/propagation"
     "go.opentelemetry.io/otel/trace"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPropagator) httpcontract.Middleware {
@@ -26,7 +26,7 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
     }
 
     return func(next httpcontract.Handler) httpcontract.Handler {
-        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             httpRequest := request.HttpRequest()
 
             /* a span already in the context, the lifecycle span of the handler decorator, is the parent; extracting the headers over it would put the remote span in its place and make the two siblings */
@@ -56,7 +56,7 @@ func NewTracingMiddleware(tracer trace.Tracer, propagator propagation.TextMapPro
                 panic(recovered)
             }()
 
-            tracedRuntime := runtime.New(spanContext, runtimeInstance.Scope(), runtimeInstance.Container())
+            tracedRuntime := runtime.WithContext(runtimeInstance, spanContext)
 
             /* the writer is recorded, so a status the handler commits directly — the streaming, proxy and upgrade shapes return no response — is the one the span carries */
             recorder := &statusRecordingResponseWriter{ResponseWriter: writer, statusCode: nethttp.StatusOK}

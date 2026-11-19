@@ -7,8 +7,8 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
 )
@@ -60,7 +60,7 @@ func TestSessionLogoutHandlerAnswersTheErrorOfARequestCarryingNoSession(t *testi
 func TestSessionLogoutHandlerReleasesTheSessionsRow(t *testing.T) {
     request, sessionInstance := requestCarryingSession(t)
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    request = melodyhttp.NewRequest(request.HttpRequest(), nil, melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), nil)
+    request = melodyhttp.NewRequest(request.HttpRequest(), nil, melodyruntime.NewRequest(context.Background(), containerInstance.NewScope()), nil)
     _ = melodyhttp.SetRequestSession(request, sessionInstance)
 
     index := &recordingSessionIndex{}

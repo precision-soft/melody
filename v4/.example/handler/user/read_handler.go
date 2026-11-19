@@ -7,18 +7,18 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if false == melodysecurity.IsGranted(runtimeInstance, entity.RoleAdmin) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
         }
 
-        userService := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container())
+        userService := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Scope())
 
         users, listErr := userService.List(runtimeInstance.Context())
         if nil != listErr {
@@ -46,7 +46,7 @@ func ApiReadAllHandler() melodyhttpcontract.Handler {
 }
 
 func ApiReadHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if false == melodysecurity.IsGranted(runtimeInstance, entity.RoleAdmin) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
         }
@@ -61,7 +61,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
         }
 
-        userService := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container())
+        userService := service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Scope())
 
         user, found, findErr := userService.FindById(runtimeInstance.Context(), id)
         if nil != findErr {

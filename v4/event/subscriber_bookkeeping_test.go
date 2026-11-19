@@ -5,8 +5,8 @@ import (
     "testing"
     "weak"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* detachedListenerSubscriber answers listeners that do not capture it, the example's idiom, so nothing holds it once the application drops its pointer, the bookkeeping included; the payload keeps it off the zero-size address */
@@ -18,7 +18,7 @@ func (instance *detachedListenerSubscriber) SubscribedEvents() map[string][]even
     return map[string][]eventcontract.SubscribedEvent{
         "detached": {
             NewSubscribedEvent(
-                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
                 0,

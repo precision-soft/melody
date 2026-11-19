@@ -15,8 +15,7 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 type failingClaimRepository struct {
@@ -37,13 +36,13 @@ func (instance *failingClaimRepository) ClaimDueMessages(ctx context.Context, li
     return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
 }
 
-func runRelayCommand(t *testing.T, runtimeInstance runtimecontract.Runtime, relay *Relay, arguments []string) error {
+func runRelayCommand(t *testing.T, runtimeInstance containercontract.Runtime, relay *Relay, arguments []string) error {
     t.Helper()
 
     return runRelayCommandWith(t, runtimeInstance, NewRelayCommand(relay, RelayCommandConfig{}), arguments)
 }
 
-func runRelayCommandWith(t *testing.T, runtimeInstance runtimecontract.Runtime, relayCommand *RelayCommand, arguments []string) error {
+func runRelayCommandWith(t *testing.T, runtimeInstance containercontract.Runtime, relayCommand *RelayCommand, arguments []string) error {
     t.Helper()
 
     capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
@@ -184,7 +183,7 @@ func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
         }), nil
     }, container.RegisterOptions{})
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     relayCommand := NewRelayCommandFromResolver(serviceContainer, RelayCommandConfig{})
 
@@ -212,7 +211,7 @@ func TestRelayCommand_RetriesRelayResolutionWithBackoff(t *testing.T) {
 func TestRelayCommand_StopsOnContextCancellation(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     cancellableContext, cancel := context.WithCancel(context.Background())
-    runtimeInstance := runtime.New(cancellableContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(cancellableContext, serviceContainer.NewScope())
 
     relay := NewRelay(RelayConfig{
         Repository: &fakeRepository{},
@@ -310,7 +309,7 @@ func TestRelayCommand_AGenuineFailureCoincidingWithAParentDeadlineIsNotSwallowed
     cancelParent()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(parentContext, serviceContainer.NewScope())
 
     repository := &failingClaimRepository{failuresLeft: 1}
     relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
@@ -327,7 +326,7 @@ func TestRelayCommand_ACancellationExplainedErrorStillExitsClean(t *testing.T) {
     cancelParent()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(parentContext, serviceContainer.NewScope())
 
     repository := &cancellationEchoRepository{}
     relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
@@ -353,14 +352,14 @@ func (instance *cancellationEchoRepository) ClaimDueMessages(ctx context.Context
 /* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
 type capturingCommand struct {
     clicontract.Command
-    runtimeInstance runtimecontract.Runtime
+    runtimeInstance containercontract.Runtime
     capturedErr     error
 }
 
 var _ clicontract.Command = (*capturingCommand)(nil)
 
 func (instance *capturingCommand) Run(
-    dispatchedRuntime runtimecontract.Runtime,
+    dispatchedRuntime containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     instance.capturedErr = instance.Command.Run(instance.runtimeInstance, commandContext)
@@ -373,7 +372,7 @@ func TestRelayCommand_ADeadlineExplainedErrorStillExitsClean(t *testing.T) {
     defer cancelParent()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(parentContext, serviceContainer.NewScope())
 
     repository := &cancellationEchoRepository{}
     relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{}, Codec: &stringCodec{}})
@@ -460,7 +459,7 @@ func TestRelayCommand_ReturnsOnACyclicChainFromTheRepository(t *testing.T) {
     cancelParent()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(parentContext, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(parentContext, serviceContainer.NewScope())
 
     relay := NewRelay(RelayConfig{Repository: &cyclicClaimRepository{}, Transport: &fakeTransport{}, Codec: &stringCodec{}})
 

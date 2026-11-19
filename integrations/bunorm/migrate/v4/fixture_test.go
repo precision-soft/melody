@@ -17,10 +17,9 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/feature"
@@ -36,7 +35,7 @@ func (instance *fakeDatabaseProvider) Open(params bunorm.ConnectionParameters, l
     return instance.database, nil
 }
 
-func newRuntimeWithDatabase(t *testing.T, database *bun.DB) runtimecontract.Runtime {
+func newRuntimeWithDatabase(t *testing.T, database *bun.DB) containercontract.Runtime {
     t.Helper()
 
     registry, registryErr := bunorm.NewManagerRegistry(
@@ -60,13 +59,13 @@ func newRuntimeWithDatabase(t *testing.T, database *bun.DB) runtimecontract.Runt
         container.RegisterOptions{},
     )
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 /* runMigrationCommand drives a migration command exactly like the CLI kernel does: the command metadata is mounted on a command context, the arguments are parsed and the command's Run receives the parsed context. */
 func runMigrationCommand(
     t *testing.T,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     command clicontract.Command,
     arguments ...string,
 ) (string, error) {
@@ -83,7 +82,7 @@ func runMigrationCommand(
 func runMigrationCommandTo(
     t *testing.T,
     writer io.Writer,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     command clicontract.Command,
     arguments ...string,
 ) error {
@@ -395,7 +394,7 @@ var (
 type probeCommand struct {
     nameValue   string
     flagsValue  []clicontract.Flag
-    runCallback func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error
+    runCallback func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error
 }
 
 var _ clicontract.Command = (*probeCommand)(nil)
@@ -413,7 +412,7 @@ func (instance *probeCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *probeCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     return instance.runCallback(runtimeInstance, commandContext)
@@ -421,7 +420,7 @@ func (instance *probeCommand) Run(
 
 func dispatchProbeCommand(
     command *probeCommand,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     arguments []string,
 ) error {
     return melodycli.DispatchCommand(context.Background(), command, runtimeInstance, arguments, io.Discard, melodycli.DispatchConfig{})
@@ -430,12 +429,12 @@ func dispatchProbeCommand(
 /* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
 type capturingCommand struct {
     clicontract.Command
-    runtimeInstance runtimecontract.Runtime
+    runtimeInstance containercontract.Runtime
     capturedErr     error
 }
 
 func (instance *capturingCommand) Run(
-    dispatchedRuntime runtimecontract.Runtime,
+    dispatchedRuntime containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     instance.capturedErr = instance.Command.Run(instance.runtimeInstance, commandContext)

@@ -14,7 +14,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* UserCreateCommand creates an account from the console: the door the first administrator of a deployment comes through, since outside development the directory starts empty. The username is its one argument and the role its required --role flag, spelt as example:grant:role spells it; the password is read from the first line of its input — standard input in the wiring — and never from an argument, where the shell history and the process list would keep it. The account is written through the user service, so the trail records it and the created event runs its listeners, as the admin create door does. */
@@ -46,10 +46,10 @@ func (instance *UserCreateCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *UserCreateCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *UserCreateCommand) Run(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     writer := commandContext.Writer
 
-    storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](runtimeInstance.Context(), runtimeInstance.Container(), persistence.ServiceCatalogStorage)
+    storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](runtimeInstance.Context(), runtimeInstance.Scope(), persistence.ServiceCatalogStorage)
     if nil != storageErr {
         return storageErr
     }

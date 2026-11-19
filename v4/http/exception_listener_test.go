@@ -17,6 +17,7 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -25,7 +26,6 @@ import (
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
-    "github.com/precision-soft/melody/v4/runtime"
     "github.com/precision-soft/melody/v4/session"
     "github.com/precision-soft/melody/v4/validation"
 )
@@ -997,7 +997,7 @@ func TestBuiltInExceptionListener_AProductionConfigurationRendersTheProductionBo
     serviceContainer := newHttpTestContainerWithSessionStorageAndEnvironmentValues(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), map[string]string{config.EnvironmentNameKey: config.EnvironmentProduction})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
     installBuiltInExceptionListener(dispatcher)
 

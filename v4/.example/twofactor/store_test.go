@@ -10,7 +10,7 @@ import (
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v4/encrypt"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 /* the write is read as the dialect renders it: what has to be pinned is the clause that decides what a second enrollment does, and that lives entirely in the statement. The primary key is the user identifier, so a plain insert would bind an account whose authenticator is lost to its first secret for good. Replacing is safe because the handler takes the identifier from the authenticated token, so the row this overwrites is always the caller's own. */
@@ -86,14 +86,14 @@ func TestStoreFromRuntime_ResolvesTheRegisteredStoreAndRefusesAnAbsentOne(t *tes
         melodycontainer.RegisterOptions{},
     )
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
     store, storeErr := StoreFromRuntime(runtimeInstance)
     if nil != storeErr || published != store {
         t.Fatalf("expected the published store, got %p, %v", store, storeErr)
     }
 
     emptyContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    emptyRuntime := melodyruntime.New(context.Background(), emptyContainer.NewScope(), emptyContainer)
+    emptyRuntime := melodyruntime.NewRequest(context.Background(), emptyContainer.NewScope())
     store, storeErr = StoreFromRuntime(emptyRuntime)
     if nil == storeErr || nil != store {
         t.Fatalf("expected an absent store to be refused, got %p, %v", store, storeErr)

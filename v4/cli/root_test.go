@@ -9,13 +9,12 @@ import (
     "testing"
     "time"
 
+    "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
-    "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     urfavecli "github.com/urfave/cli/v3"
 )
 
@@ -43,7 +42,7 @@ func TestRoot_CommandNamesAnswersTheRegistrationOrder(t *testing.T) {
                 nameValue:        commandName,
                 descriptionValue: commandName,
                 flagsValue:       nil,
-                runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
                     return nil
                 },
             },
@@ -109,7 +108,7 @@ func runProbeCommandThroughRoot(t *testing.T, setWriterFirst bool) []byte {
         nameValue:        "probe",
         descriptionValue: "probe",
         flagsValue:       nil,
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             _, _ = commandContext.Writer.Write([]byte("probe wrote this"))
 
             return nil
@@ -151,7 +150,7 @@ func TestNewRoot_ExitCodedErrorLeavesRunInsteadOfExitingInside(t *testing.T) {
             nameValue:        "exit-coded",
             descriptionValue: "exit-coded",
             flagsValue:       nil,
-            runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+            runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
                 return exception.NewExitError(7, exception.NewError("command asked for an exit code", nil, nil))
             },
         },
@@ -244,7 +243,7 @@ func TestRoot_RunEndsAtTheScopeTeardownTimeoutWithTheScopeFailure(t *testing.T) 
     command := &testCommand{
         nameValue:        "probe",
         descriptionValue: "probe",
-        runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+        runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
             _, resolveErr := container.FromResolver[*contextWaitingScopedService](runtimeInstance.Context(), runtimeInstance.Scope(), "scoped.waiting")
 
             return resolveErr
@@ -310,7 +309,7 @@ func TestRoot_ARegisteredCommandReadsTheVersionOffTheRoot(t *testing.T) {
             &testCommand{
                 nameValue:        "probe",
                 descriptionValue: "probe",
-                runCallback: func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+                runCallback: func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
                     observed = output.ApplicationVersionOf(commandContext)
 
                     return nil

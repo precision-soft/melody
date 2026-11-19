@@ -9,10 +9,10 @@ import (
 
     "github.com/precision-soft/melody/v4/bag"
     bagcontract "github.com/precision-soft/melody/v4/bag/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* netHttpUrlEncodedFormCeiling is the size past which net/http's ParseForm refuses a urlencoded body, its unexported maxFormSize */
@@ -26,7 +26,7 @@ const requestAttributeSession = "_session"
 func NewRequest(
     httpRequest *nethttp.Request,
     routeParams map[string]string,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     requestContext httpcontract.RequestContext,
 ) *Request {
     if nil == httpRequest {
@@ -109,7 +109,7 @@ type Request struct {
     query           bagcontract.ParameterBag
     post            bagcontract.ParameterBag
     attributes      bagcontract.ParameterBag
-    runtimeInstance runtimecontract.Runtime
+    runtimeInstance containercontract.Runtime
     requestContext  httpcontract.RequestContext
     /* the error that stopped the urlencoded body from being buffered; the kernel refuses the request when it is set */
     bodyReadErr error
@@ -301,7 +301,7 @@ func (instance *Request) Method() string {
     return instance.httpRequest.Method
 }
 
-func (instance *Request) RuntimeInstance() runtimecontract.Runtime {
+func (instance *Request) RuntimeInstance() containercontract.Runtime {
     return instance.runtimeInstance
 }
 

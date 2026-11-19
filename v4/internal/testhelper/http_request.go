@@ -7,10 +7,10 @@ import (
 
     "github.com/precision-soft/melody/v4/bag"
     bagcontract "github.com/precision-soft/melody/v4/bag/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func NewHttpTestRequest(method string, urlString string) httpcontract.Request {
@@ -57,7 +57,7 @@ type HttpTestRequest struct {
     attributesBagValue  bagcontract.ParameterBag
     routeNameValue      string
     routePatternValue   string
-    runtimeValue        runtimecontract.Runtime
+    runtimeValue        containercontract.Runtime
     requestContextValue httpcontract.RequestContext
 }
 
@@ -95,7 +95,7 @@ func (instance *HttpTestRequest) RouteName() string { return instance.routeNameV
 
 func (instance *HttpTestRequest) RoutePattern() string { return instance.routePatternValue }
 
-func (instance *HttpTestRequest) RuntimeInstance() runtimecontract.Runtime {
+func (instance *HttpTestRequest) RuntimeInstance() containercontract.Runtime {
     return instance.runtimeValue
 }
 

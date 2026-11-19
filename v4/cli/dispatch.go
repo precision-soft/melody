@@ -6,9 +6,9 @@ import (
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* DispatchConfig.ApplicationVersion is what the dispatched command reads as the application's version, "" undeclared. */
@@ -20,7 +20,7 @@ type DispatchConfig struct {
 func DispatchCommand(
     ctx context.Context,
     command clicontract.Command,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     arguments []string,
     writer io.Writer,
     config DispatchConfig,

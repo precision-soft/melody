@@ -10,20 +10,20 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 type compiledFirewallTestRule struct{}
 
 func (instance *compiledFirewallTestRule) Applies(request httpcontract.Request) bool { return true }
-func (instance *compiledFirewallTestRule) Check(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) error  { return nil }
+func (instance *compiledFirewallTestRule) Check(runtimeInstance containercontract.Runtime, request httpcontract.Request) error  { return nil }
 
 var _ securitycontract.Rule = (*compiledFirewallTestRule)(nil)
 
@@ -56,7 +56,7 @@ func TestCompiledFirewall_Rules_ReturnsCopy(t *testing.T) {
 type compiledFirewallNilResultLoginHandler struct{}
 
 func (instance *compiledFirewallNilResultLoginHandler) Login(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
@@ -76,7 +76,7 @@ func TestCompiledFirewall_Login_NilResultWithoutErrorFailsClosed(t *testing.T) {
     })
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
     result, loginErr := firewall.Login(runtimeInstance, nil, securitycontract.LoginInput{})
     if nil == loginErr {
@@ -92,7 +92,7 @@ type compiledFirewallTokenlessLoginHandler struct {
 }
 
 func (instance *compiledFirewallTokenlessLoginHandler) Login(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
@@ -114,7 +114,7 @@ func TestCompiledFirewall_Login_AResultWithoutATokenFailsClosed(t *testing.T) {
         })
 
         serviceContainer := container.NewContainer(container.ContainerConfig{})
-        runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+        runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
         result, loginErr := firewall.Login(runtimeInstance, nil, securitycontract.LoginInput{})
         if nil == loginErr || "firewall login handler returned nil token" != loginErr.Error() {
@@ -162,7 +162,7 @@ func TestCompiledConfiguration_Firewalls_ReturnsCopy(t *testing.T) {
 type compiledFirewallNilResultLogoutHandler struct{}
 
 func (instance *compiledFirewallNilResultLogoutHandler) Logout(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
@@ -182,7 +182,7 @@ func TestCompiledFirewall_Logout_NilResultWithoutErrorFailsClosed(t *testing.T) 
     })
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
     result, logoutErr := firewall.Logout(runtimeInstance, nil, securitycontract.LogoutInput{})
     if nil == logoutErr {
@@ -196,7 +196,7 @@ func TestCompiledFirewall_Logout_NilResultWithoutErrorFailsClosed(t *testing.T) 
 type compiledFirewallFailingLoginHandler struct{}
 
 func (instance *compiledFirewallFailingLoginHandler) Login(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LoginInput,
 ) (*securitycontract.LoginResult, error) {
@@ -222,7 +222,7 @@ func TestCompiledFirewall_Login_ADispatchFailureNamesTheBrokenListener(t *testin
     listenerFailure := errors.New("the audit sink refused the record")
     dispatcher.AddListener(
         securitycontract.EventSecurityLoginFailure,
-        func(listenerRuntime runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(listenerRuntime containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerFailure
         },
         0,
@@ -246,7 +246,7 @@ func TestCompiledFirewall_Login_ADispatchFailureNamesTheBrokenListener(t *testin
 type compiledFirewallFailingLogoutHandler struct{}
 
 func (instance *compiledFirewallFailingLogoutHandler) Logout(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     input securitycontract.LogoutInput,
 ) (*securitycontract.LogoutResult, error) {
@@ -271,7 +271,7 @@ func TestCompiledFirewall_Logout_ADispatchFailureNamesTheBrokenListener(t *testi
     listenerFailure := errors.New("the audit sink refused the record")
     dispatcher.AddListener(
         securitycontract.EventSecurityLogoutFailure,
-        func(listenerRuntime runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(listenerRuntime containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerFailure
         },
         0,
@@ -409,7 +409,7 @@ func TestNewCompiledFirewall_RefusesAnUnavailableRetryAfterOutsideItsRule(t *tes
 
 type compiledFirewallSucceedingLogoutHandler struct{}
 
-func (instance *compiledFirewallSucceedingLogoutHandler) Logout(runtimeInstance runtimecontract.Runtime, request httpcontract.Request, input securitycontract.LogoutInput) (*securitycontract.LogoutResult, error) {
+func (instance *compiledFirewallSucceedingLogoutHandler) Logout(runtimeInstance containercontract.Runtime, request httpcontract.Request, input securitycontract.LogoutInput) (*securitycontract.LogoutResult, error) {
     return &securitycontract.LogoutResult{}, nil
 }
 
@@ -429,7 +429,7 @@ func TestCompiledFirewall_Logout_DispatchesTheSuccessItself(t *testing.T) {
     successes := 0
     dispatcher.AddListener(
         securitycontract.EventSecurityLogoutSuccess,
-        func(listenerRuntime runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(listenerRuntime containercontract.Runtime, eventValue eventcontract.Event) error {
             successes++
 
             return listenerFailure

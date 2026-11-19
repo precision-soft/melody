@@ -3,8 +3,8 @@ package mailer
 import (
     "sync"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func NewInMemoryTransport() *InMemoryTransport {
@@ -16,7 +16,7 @@ type InMemoryTransport struct {
     sent  []mailercontract.Message
 }
 
-func (instance *InMemoryTransport) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
+func (instance *InMemoryTransport) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 

@@ -9,11 +9,11 @@ import (
 
     bagcontract "github.com/precision-soft/melody/v4/bag/contract"
     "github.com/precision-soft/melody/v4/clock"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* profiling listener must emit a profile even when Attributes() is nil, as long as RequestContext() is present */
@@ -27,7 +27,7 @@ func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreNil(t *testing.
     var capturedProfile *HttpRequestProfile
     dispatcher.AddListener(
         EventHttpRequestProfile,
-        func(_ runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(_ containercontract.Runtime, eventValue eventcontract.Event) error {
             capturedProfile, _ = eventValue.Payload().(*HttpRequestProfile)
 
             return nil
@@ -80,7 +80,7 @@ func (instance *nilAttributesRequest) RouteName() string { return "" }
 
 func (instance *nilAttributesRequest) RoutePattern() string { return "" }
 
-func (instance *nilAttributesRequest) RuntimeInstance() runtimecontract.Runtime { return nil }
+func (instance *nilAttributesRequest) RuntimeInstance() containercontract.Runtime { return nil }
 
 func (instance *nilAttributesRequest) RequestContext() httpcontract.RequestContext {
     return instance.requestContext
@@ -108,7 +108,7 @@ func TestKernelHttpProfilerListener_EmitsProfileWhenAttributesAreATypedNil(t *te
     var capturedProfile *HttpRequestProfile
     dispatcher.AddListener(
         EventHttpRequestProfile,
-        func(_ runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(_ containercontract.Runtime, eventValue eventcontract.Event) error {
             capturedProfile, _ = eventValue.Payload().(*HttpRequestProfile)
 
             return nil
@@ -167,7 +167,7 @@ func TestKernelHttpProfilerListener_EmitsNoProfileForATypedNilRequest(t *testing
     profileCount := 0
     dispatcher.AddListener(
         EventHttpRequestProfile,
-        func(_ runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(_ containercontract.Runtime, eventValue eventcontract.Event) error {
             profileCount++
 
             return nil

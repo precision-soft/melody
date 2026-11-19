@@ -72,9 +72,9 @@ These services are typically registered by the application/kernel wiring. Userla
 ### Runtime parameter injection
 
 When a controller function declares a parameter of type
-[`runtimecontract.Runtime`](../../runtime/contract), Melody injects the current `runtimeInstance` directly (it is **not** resolved from the scope/container by type).
+[`containercontract.Runtime`](../../container/contract), Melody injects the current `runtimeInstance` directly (it is **not** resolved from the scope/container by type).
 
-This allows controllers to access request-scoped state via `runtimeInstance.Scope()` without registering `runtimecontract.Runtime` as a service.
+This allows controllers to access request-scoped state via `runtimeInstance.Scope()` without registering `containercontract.Runtime` as a service.
 
 A controller is registered as the handler [`ControllerHandler`](../../http/router_utility.go) builds from it: `router.Handle("/articles", http.ControllerHandler(showArticles), http.RouteOptions{Methods: []string{nethttp.MethodGet}})`.
 
@@ -274,7 +274,7 @@ import (
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 const pingRouteName = "example.api.ping"
@@ -314,7 +314,7 @@ func (instance *ExampleHttpModule) RegisterHttpRoutes(kernelInstance kernelcontr
 
 func handlePing() httpcontract.Handler {
     return func(
-        _ runtimecontract.Runtime,
+        _ containercontract.Runtime,
         _ nethttp.ResponseWriter,
         _ httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -334,13 +334,13 @@ func handlePing() httpcontract.Handler {
 
 func handleRedirectToPing() httpcontract.Handler {
     return func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         _ nethttp.ResponseWriter,
         _ httpcontract.Request,
     ) (httpcontract.Response, error) {
         urlGenerator := http.UrlGeneratorMustFromResolver(
             runtimeInstance.Context(),
-            runtimeInstance.Container(),
+            runtimeInstance.Scope(),
         )
 
         path, generateErr := urlGenerator.GeneratePath(
@@ -378,7 +378,7 @@ and refuses to take a new backplane afterwards; `SetBackplane` refuses to instal
 
 ```go
 func StreamHandler(hub *http.ServerSentEventHub) httpcontract.Handler {
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         serverSentEventWriter, serverSentEventErr := http.NewServerSentEventWriter(writer, http.ServerSentEventWriterConfig{})
         if nil != serverSentEventErr {
             return http.JsonErrorResponse(nethttp.StatusInternalServerError, "streaming is not supported"), nil

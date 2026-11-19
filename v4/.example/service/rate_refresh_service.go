@@ -15,7 +15,6 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/httpclient"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* The two outbound clients this application holds, named here because their consumers live in this package and in reporting and the registration lives in config. */
@@ -86,14 +85,14 @@ type rateDocument struct {
 }
 
 /* Refresh reads the provider once and writes every quote it recognises. With no provider configured it is a no-op that says so, so a schedule in an environment without one neither fails nor pretends to have worked. */
-func (instance *RateRefreshService) Refresh(runtimeInstance melodyruntimecontract.Runtime) (RateRefreshOutcome, error) {
+func (instance *RateRefreshService) Refresh(runtimeInstance melodycontainercontract.Runtime) (RateRefreshOutcome, error) {
     if "" == instance.ratesBaseUrl {
         return RateRefreshOutcome{Configured: false}, nil
     }
 
     client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](
         runtimeInstance.Context(),
-        runtimeInstance.Container(),
+        runtimeInstance.Scope(),
         ServiceRatesHttpClient,
     )
     if nil != resolveErr {

@@ -4,24 +4,24 @@ import (
     "errors"
     nethttp "net/http"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/serializer"
 )
 
 type ResultHandler func(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     writer nethttp.ResponseWriter,
     request httpcontract.Request,
 ) (any, error)
 
 func WrapResultHandler(resultHandler ResultHandler) httpcontract.Handler {
     return func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -35,7 +35,7 @@ func WrapResultHandler(resultHandler ResultHandler) httpcontract.Handler {
 }
 
 func NormalizeResultToResponse(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     value any,
 ) (httpcontract.Response, error) {

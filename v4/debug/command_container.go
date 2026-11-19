@@ -18,10 +18,23 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
+/* ContainerCommand describes the container it was built over: the application hands it its own at registration, since a runtime reaches no container. */
 type ContainerCommand struct {
+    serviceContainer containercontract.Container
+}
+
+func NewContainerCommand(serviceContainer containercontract.Container) *ContainerCommand {
+    if true == internal.IsNilInterface(serviceContainer) {
+        exception.Panic(
+            exception.NewError("container may not be nil on the container command", nil, nil),
+        )
+    }
+
+    return &ContainerCommand{
+        serviceContainer: serviceContainer,
+    }
 }
 
 func (instance *ContainerCommand) Name() string {
@@ -51,7 +64,7 @@ type serviceDescriptionReporter interface {
 }
 
 func (instance *ContainerCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     startedAt := time.Now()
@@ -72,7 +85,15 @@ func (instance *ContainerCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    serviceContainer := runtimeInstance.Container()
+    /* the zero value is constructible without a container; the refusal travels through the envelope, as debug:middleware's does */
+    if true == internal.IsNilInterface(instance.serviceContainer) {
+        envelope.SetError("debug.containerNil", "the container command was built without a container: build it with NewContainerCommand", nil, nil)
+        envelope.Meta.DurationMilliseconds = time.Since(startedAt).Milliseconds()
+
+        return output.Render(commandContext.Writer, envelope, option)
+    }
+
+    serviceContainer := instance.serviceContainer
 
     serviceName := ""
     arguments := commandContext.Args().Slice()

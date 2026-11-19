@@ -10,10 +10,10 @@ import (
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/config"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* PlaintextEndpointBootWarningName is the code of the warning a storage over a plaintext endpoint off this machine writes, the code a cli process lists in MELODY_CLI_BOOT_WARNINGS_IGNORED to leave it out */
@@ -75,7 +75,7 @@ func (instance *plaintextEndpointWarning) bootWarning() applicationcontract.Boot
     }
 }
 
-func (instance *plaintextEndpointWarning) write(runtimeInstance runtimecontract.Runtime) {
+func (instance *plaintextEndpointWarning) write(runtimeInstance containercontract.Runtime) {
     if nil == instance {
         return
     }
@@ -108,8 +108,8 @@ func (instance *plaintextEndpointWarning) write(runtimeInstance runtimecontract.
 }
 
 /* a storage used outside an application finds no configuration and writes; an http process refuses both keys at boot, so they only ever narrow what a command writes */
-func silencedByCliBootWarningKeys(runtimeInstance runtimecontract.Runtime) bool {
-    configuration, configurationErr := config.ConfigFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+func silencedByCliBootWarningKeys(runtimeInstance containercontract.Runtime) bool {
+    configuration, configurationErr := config.ConfigFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
     if nil != configurationErr || nil == configuration {
         return false
     }

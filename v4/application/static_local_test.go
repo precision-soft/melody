@@ -16,12 +16,12 @@ import (
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func newStaticExclusionTestConfiguration(t *testing.T, values map[string]string) configcontract.Configuration {
@@ -40,12 +40,12 @@ func newStaticExclusionTestConfiguration(t *testing.T, values map[string]string)
     return configuration
 }
 
-func newStaticExclusionTestRuntime() runtimecontract.Runtime {
+func newStaticExclusionTestRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
 /* the pipeline hands back the middlewares outermost first, which is the order the http kernel wraps them in */
@@ -98,7 +98,7 @@ func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredW
     reached := false
 
     httpMiddleware.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler {
-        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             reached = true
 
             return next(runtimeInstance, writer, request)
@@ -109,7 +109,7 @@ func TestNewStaticFileServerConfig_ExcludedPrefixReachesTheMiddlewareRegisteredW
 
     handler := composeStaticExclusionTestChain(
         httpMiddleware.all(newTestKernel()),
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             answeredByTheApplication = true
 
             return nil, nil
@@ -155,7 +155,7 @@ func TestNewStaticFileServerConfig_PathOutsideTheExclusionIsStillServedFromDisk(
     reached := false
 
     httpMiddleware.Use(applicationcontract.MiddlewareRegistration{Middlewares: []httpcontract.Middleware{func(next httpcontract.Handler) httpcontract.Handler {
-        return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             reached = true
 
             return next(runtimeInstance, writer, request)
@@ -164,7 +164,7 @@ func TestNewStaticFileServerConfig_PathOutsideTheExclusionIsStillServedFromDisk(
 
     handler := composeStaticExclusionTestChain(
         httpMiddleware.all(newTestKernel()),
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             t.Fatalf("expected the file server to answer a path outside the exclusion")
 
             return nil, nil

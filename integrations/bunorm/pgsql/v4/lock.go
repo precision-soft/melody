@@ -9,9 +9,9 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/uptrace/bun"
 )
 
@@ -83,7 +83,7 @@ type pgsqlLock struct {
     connection *sql.Conn
 }
 
-func (instance *pgsqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *pgsqlLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -128,7 +128,7 @@ func (instance *pgsqlLock) Acquire(runtimeInstance runtimecontract.Runtime) (boo
     return true, nil
 }
 
-func (instance *pgsqlLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *pgsqlLock) Release(runtimeInstance containercontract.Runtime) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -152,7 +152,7 @@ func (instance *pgsqlLock) Release(runtimeInstance runtimecontract.Runtime) erro
     return nil
 }
 
-func (instance *pgsqlLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *pgsqlLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -196,7 +196,7 @@ func (instance *pgsqlLock) discardPinnedConnection() {
 }
 
 /* releaseContextFor answers the context a release runs on: the caller's values without its cancellation, so a cancelled request context still releases instead of stranding the advisory lock on a connection returned to the pool, and the earlier of the locker's budget and the caller's own deadline while that one is still ahead, so a caller's shorter release budget is honoured; a nil or typed-nil runtime releases on the locker's budget. A release cut by either deadline ends the session, which frees the lock server-side. */
-func releaseContextFor(runtimeInstance runtimecontract.Runtime, releaseTimeout time.Duration) (context.Context, context.CancelFunc) {
+func releaseContextFor(runtimeInstance containercontract.Runtime, releaseTimeout time.Duration) (context.Context, context.CancelFunc) {
     base := context.Background()
     now := time.Now()
     deadline := now.Add(releaseTimeout)

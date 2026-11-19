@@ -1,10 +1,10 @@
 package contract
 
 import (
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type EntryPoint interface {
-    Start(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (httpcontract.Response, error)
+    Start(runtimeInstance containercontract.Runtime, request httpcontract.Request) (httpcontract.Response, error)
 }

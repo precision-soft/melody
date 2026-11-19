@@ -10,9 +10,9 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -23,12 +23,12 @@ func TestAccessTokenReleaseSubscriber_DeletesTheDeviceTokensOfTheDeletedAccountO
     store.Put(releaseTestRuntime(), "token-deleted-laptop", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "laptop"}, bound.UnlimitedDuration())
     store.Put(releaseTestRuntime(), "token-kept", melodysecuritycontract.Claims{UserIdentifier: "user-5", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
 
-    subscriberInstance := NewAccessTokenReleaseSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
+    subscriberInstance := NewAccessTokenReleaseSubscriber(func(runtimeInstance melodycontainercontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
         return store
     })
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     listeners := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName]
     if 1 != len(listeners) {
@@ -58,10 +58,10 @@ func TestAccessTokenReleaseSubscriber_DeletesTheDeviceTokensOfTheDeletedAccountO
     }
 }
 
-func releaseTestRuntime() melodyruntimecontract.Runtime {
+func releaseTestRuntime() melodycontainercontract.Runtime {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 }
 
 type revocationFailingTokenStore struct {
@@ -70,11 +70,11 @@ type revocationFailingTokenStore struct {
     deleteErr error
 }
 
-func (instance *revocationFailingTokenStore) RevokeBefore(_ melodyruntimecontract.Runtime, _ string, _ string, _ time.Time) error {
+func (instance *revocationFailingTokenStore) RevokeBefore(_ melodycontainercontract.Runtime, _ string, _ string, _ time.Time) error {
     return instance.revokeErr
 }
 
-func (instance *revocationFailingTokenStore) DeleteByUser(_ melodyruntimecontract.Runtime, _ string) (int, error) {
+func (instance *revocationFailingTokenStore) DeleteByUser(_ melodycontainercontract.Runtime, _ string) (int, error) {
     return 0, instance.deleteErr
 }
 
@@ -83,7 +83,7 @@ func TestAccessTokenReleaseSubscriber_AFailedRevocationIsReturned(t *testing.T) 
     deleteErr := errors.New("the tokens could not be released")
     store := &revocationFailingTokenStore{InMemoryTokenStore: melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{}), revokeErr: revokeErr, deleteErr: deleteErr}
 
-    subscriberInstance := NewAccessTokenReleaseSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
+    subscriberInstance := NewAccessTokenReleaseSubscriber(func(runtimeInstance melodycontainercontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
         return store
     })
 
@@ -99,14 +99,14 @@ func TestAccessTokenReleaseSubscriber_ACancelledRequestStillPublishesTheBoundary
     store := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
     store.Put(releaseTestRuntime(), "token-held", melodysecuritycontract.Claims{UserIdentifier: "user-6", DeviceIdentifier: "phone"}, bound.UnlimitedDuration())
 
-    subscriberInstance := NewAccessTokenReleaseSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
+    subscriberInstance := NewAccessTokenReleaseSubscriber(func(runtimeInstance melodycontainercontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
         return store
     })
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    cancelledRuntime := melodyruntime.New(cancelledContext, containerInstance.NewScope(), containerInstance)
+    cancelledRuntime := melodyruntime.NewRun(cancelledContext, containerInstance.NewScope())
 
     deleted := melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-6", "deleted"), melodyclock.NewSystemClock().Now())
     if listenErr := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName][0].Listener()(cancelledRuntime, deleted); nil != listenErr {

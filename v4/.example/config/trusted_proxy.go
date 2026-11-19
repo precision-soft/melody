@@ -10,13 +10,13 @@ import (
 
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* exampleForwardedHeadersPolicy is the list the kernel believes a forwarded scheme from, which decides whether the session cookie is marked Secure behind a proxy that terminates tls. It is a static list of the private ranges and loopback, read at boot, where the rate limit's key goes through trustedProxyResolver, which trusts the balancer alone by name: a peer that forges X-Forwarded-Proto marks only its own cookie Secure, so the scheme can take the wide list a restarted balancer keeps matching, while a forged client address would choose whose budget a request spends and takes the narrow one. */
@@ -246,12 +246,12 @@ func (instance *trustedProxyResolver) resolvedList(logger melodyloggingcontract.
 }
 
 /* applicationLoggerOr answers the application's logger, resolved from the container rather than the request's scope, for a record written after the request is answered; the fallback when there is none */
-func applicationLoggerOr(runtimeInstance melodyruntimecontract.Runtime, fallback melodyloggingcontract.Logger) melodyloggingcontract.Logger {
-    if nil == runtimeInstance || nil == runtimeInstance.Container() {
+func applicationLoggerOr(runtimeInstance melodycontainercontract.Runtime, fallback melodyloggingcontract.Logger) melodyloggingcontract.Logger {
+    if nil == runtimeInstance || nil == runtimeInstance.Scope() {
         return fallback
     }
 
-    logger, resolveErr := melodycontainer.FromResolver[melodyloggingcontract.Logger](runtimeInstance.Context(), runtimeInstance.Container(), melodylogging.ServiceLogger)
+    logger, resolveErr := melodycontainer.FromResolver[melodyloggingcontract.Logger](runtimeInstance.Context(), runtimeInstance.Scope(), melodylogging.ServiceLogger)
     if nil != resolveErr || nil == logger {
         return fallback
     }

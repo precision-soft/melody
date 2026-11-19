@@ -17,7 +17,6 @@ import (
     "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -159,7 +158,7 @@ func (instance *UserService) FindByUsername(ctx context.Context, username string
 }
 
 func (instance *UserService) Create(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     userId string,
     username string,
     passwordHash string,
@@ -189,7 +188,7 @@ func (instance *UserService) Create(
 
 /* GrantRole adds one role to an account through the repository's atomic door, so the console grant and the admin update door serialise on the account; the event carries the account the door wrote. A role already held is answered as held without an event, the account's cache entries dropped all the same. A dispatch that fails after the write is answered with the account, so a caller can say the grant is in the directory. */
 func (instance *UserService) GrantRole(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     userId string,
     role string,
 ) (*entity.User, repository.GrantRoleOutcome, error) {
@@ -257,7 +256,7 @@ func (instance *UserService) dropCachedAccount(ctx context.Context, id string, u
 
 /* Update writes the change through the repository's locked door: the account is read from the directory, never from the cache, the guard decides on it under the lock, and a field the change leaves out is not written. The event carries the account the door wrote and the name it held before. */
 func (instance *UserService) Update(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     userId string,
     change repository.UserChange,
     guard repository.UserGuard,
@@ -288,7 +287,7 @@ func (instance *UserService) Update(
 
 /* DeleteById removes the account through the repository's locked door, the guard deciding on the account the delete removes. */
 func (instance *UserService) DeleteById(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     userId string,
     guard repository.UserGuard,
 ) (bool, error) {

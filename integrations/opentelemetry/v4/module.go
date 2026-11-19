@@ -4,10 +4,10 @@ import (
     nethttp "net/http"
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const defaultMetricsRouteName = "melody.metrics"
@@ -106,7 +106,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance kernelcontract.Kernel)
 }
 
 func MetricsRouteHandler(handler nethttp.Handler) httpcontract.Handler {
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         handler.ServeHTTP(writer, request.HttpRequest())
 
         return nil, nil

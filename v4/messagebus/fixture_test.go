@@ -8,22 +8,21 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type taskCreated struct {
     TaskId int
 }
 
-func newTestRuntime() runtimecontract.Runtime {
+func newTestRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 /* messageRecordingLogger captures every record with its message, so a test can assert both that a record was written and what it said. */
@@ -77,17 +76,17 @@ func (instance *messageRecordingLogger) hasMessageContaining(fragment string) bo
 }
 
 /* newTestRuntimeWithRecordingLogger mirrors newTestRuntime with the recording logger installed under the logger service, the way a framework-assembled scope carries one. */
-func newTestRuntimeWithRecordingLogger() (runtimecontract.Runtime, *messageRecordingLogger) {
+func newTestRuntimeWithRecordingLogger() (containercontract.Runtime, *messageRecordingLogger) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     logger := &messageRecordingLogger{}
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer), logger
+    return runtime.NewRun(context.Background(), scope), logger
 }
 
-func mustConsumeSession(command *ConsumeCommand, runtimeInstance runtimecontract.Runtime) *consumeSession {
+func mustConsumeSession(command *ConsumeCommand, runtimeInstance containercontract.Runtime) *consumeSession {
     session, sessionErr := command.newConsumeSession(runtimeInstance)
     if nil != sessionErr {
         panic(sessionErr)

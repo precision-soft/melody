@@ -4,13 +4,13 @@ import (
     "encoding/json"
 
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* RouteManifestForRuntime projects the exposed named routes into the RouteManifest shape the frontend RouteGenerator consumes, through the framework's BuildRouteManifest, so only routes opted in with RouteAttributeExpose reach the browser. The zone gate is applied against the caller: an unauthenticated visitor gets the public zone (login, logout, health, the openapi document), and the frontend zone, the admin api routes, joins it once the caller is authenticated. */
-func RouteManifestForRuntime(runtimeInstance runtimecontract.Runtime) (melodyhttp.RouteManifest, error) {
-    routeRegistry := melodyhttp.RouteRegistryMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+func RouteManifestForRuntime(runtimeInstance containercontract.Runtime) (melodyhttp.RouteManifest, error) {
+    routeRegistry := melodyhttp.RouteRegistryMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
     zones := []string{melodyhttp.RouteZonePublic}
     if true == callerIsAuthenticated(runtimeInstance) {
@@ -33,7 +33,7 @@ func RouteManifestForRuntime(runtimeInstance runtimecontract.Runtime) (melodyhtt
 }
 
 /* RoutesJsonFromRuntime renders the same projection as the JSON document every page carries. */
-func RoutesJsonFromRuntime(runtimeInstance runtimecontract.Runtime) (string, error) {
+func RoutesJsonFromRuntime(runtimeInstance containercontract.Runtime) (string, error) {
     manifest, manifestErr := RouteManifestForRuntime(runtimeInstance)
     if nil != manifestErr {
         return EmptyRoutesJson, manifestErr
@@ -52,7 +52,7 @@ The page renders it so its scripts still parse something, and the loss is
 journaled beside it rather than carried to the browser in silence. */
 const EmptyRoutesJson = `{"routes":[]}`
 
-func callerIsAuthenticated(runtimeInstance runtimecontract.Runtime) bool {
+func callerIsAuthenticated(runtimeInstance containercontract.Runtime) bool {
     token, found := examplesecurity.TokenFromRuntime(runtimeInstance)
     if false == found {
         return false

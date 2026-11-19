@@ -7,10 +7,10 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func NewInMemoryLocker(clockInstance clockcontract.Clock) *InMemoryLocker {
@@ -148,7 +148,7 @@ type inMemoryLock struct {
     token  uint64
 }
 
-func (instance *inMemoryLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *inMemoryLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     ttl, ttlErr := lockcontract.ResolveLeaseTtl(instance.ttl)
     if nil != ttlErr {
         return false, ttlErr
@@ -157,12 +157,12 @@ func (instance *inMemoryLock) Acquire(runtimeInstance runtimecontract.Runtime) (
     return instance.locker.acquire(instance.name, instance.token, ttl), nil
 }
 
-func (instance *inMemoryLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *inMemoryLock) Release(runtimeInstance containercontract.Runtime) error {
     instance.locker.release(instance.name, instance.token)
     return nil
 }
 
-func (instance *inMemoryLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *inMemoryLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     resolvedTtl, ttlErr := lockcontract.ResolveLeaseRefreshTtl(ttl)
     if nil != ttlErr {
         return ttlErr

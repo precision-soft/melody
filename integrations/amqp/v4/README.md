@@ -69,7 +69,7 @@ Wire the transport into a dispatch bus by routing your message types to it, then
 
 ```go
 locator := messagebus.NewHandlerLocator()
-messagebus.RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, welcome WelcomeEmail, envelope messagebuscontract.Envelope) error {
+messagebus.RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, welcome WelcomeEmail, envelope messagebuscontract.Envelope) error {
     return nil
 })
 

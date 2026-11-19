@@ -88,9 +88,7 @@ type brokenService struct {
 func TestContainerCommand_FailsWhenTheRequestedServiceIsMissing(t *testing.T) {
     runtimeInstance := newTestRuntime(container.NewContainer(container.ContainerConfig{}))
 
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        runtimeInstance,
+    rendered, runErr := runContainerCommand(runtimeInstance,
         []string{"--format=json", "missing.service.name"},
     )
 
@@ -127,9 +125,7 @@ func TestContainerCommand_DoesNotReportARegisteredServiceThatFailsToBuildAsMissi
 
             runtimeInstance := newTestRuntime(serviceContainer)
 
-            rendered, runErr := runDebugCommand(
-                &ContainerCommand{},
-                runtimeInstance,
+            rendered, runErr := runContainerCommand(runtimeInstance,
                 []string{"--format=json", "broken.service.name"},
             )
 
@@ -160,9 +156,7 @@ func TestContainerCommand_SucceedsForAResolvableService(t *testing.T) {
 
     runtimeInstance := newTestRuntime(serviceContainer)
 
-    _, runErr := runDebugCommand(
-        &ContainerCommand{},
-        runtimeInstance,
+    _, runErr := runContainerCommand(runtimeInstance,
         []string{"--format=json", "working.service.name"},
     )
     if nil != runErr {
@@ -198,9 +192,7 @@ func newContainerListTestRuntime(serviceCount int) *testRuntime {
 func containerCommandNameList(t *testing.T, arguments []string) []string {
     t.Helper()
 
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newContainerListTestRuntime(10),
+    rendered, runErr := runContainerCommand(newContainerListTestRuntime(10),
         arguments,
     )
     if nil != runErr {
@@ -620,9 +612,7 @@ func TestContainerCommand_ReportsTheCauseChainOfAFailedBuild(t *testing.T) {
 
     runtimeInstance := newTestRuntime(serviceContainer)
 
-    rendered, _ := runDebugCommand(
-        &ContainerCommand{},
-        runtimeInstance,
+    rendered, _ := runContainerCommand(runtimeInstance,
         []string{"--format=json", "broken.service.name"},
     )
 
@@ -648,9 +638,7 @@ func TestContainerCommand_ReportsTheCauseChainOfAFailedBuild(t *testing.T) {
         t.Fatalf("expected the cause chain on the envelope error, got %v", decoded.Error.Cause.Details)
     }
 
-    tableRendered, _ := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(serviceContainer),
+    tableRendered, _ := runContainerCommand(newTestRuntime(serviceContainer),
         []string{"broken.service.name"},
     )
 
@@ -658,9 +646,7 @@ func TestContainerCommand_ReportsTheCauseChainOfAFailedBuild(t *testing.T) {
         t.Fatalf("expected the cause line in the table, got %q", tableRendered)
     }
 
-    listTableRendered, _ := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(serviceContainer),
+    listTableRendered, _ := runContainerCommand(newTestRuntime(serviceContainer),
         []string{"--build"},
     )
 
@@ -735,9 +721,7 @@ func TestResolveErrorContextJson_ReadsTheFirstContextBelowAnEmptyProvider(t *tes
 
 /* the shown count precedes the ok/error split so the split reads as scoped to it: only the windowed services are resolved, and only under --build */
 func TestContainerCommand_ScopesTheSummarySplitToTheShownWindow(t *testing.T) {
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newContainerListTestRuntime(10),
+    rendered, runErr := runContainerCommand(newContainerListTestRuntime(10),
         []string{"--limit=2", "--build"},
     )
     if nil != runErr {
@@ -1001,9 +985,7 @@ func TestContainerCommand_DefaultListingGroupsTheLifetimes(t *testing.T) {
         container.RegisterOptions{},
     )
 
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(serviceContainer),
+    rendered, runErr := runContainerCommand(newTestRuntime(serviceContainer),
         []string{"--format=table", "--table-width=400"},
     )
     if nil != runErr {
@@ -1037,9 +1019,7 @@ func TestContainerCommand_SingleScopedServiceResolvesThroughTheRunScope(t *testi
         container.RegisterOptions{},
     )
 
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(serviceContainer),
+    rendered, runErr := runContainerCommand(newTestRuntime(serviceContainer),
         []string{"--format=json", "single.scoped.service"},
     )
     if nil != runErr {
@@ -1076,9 +1056,7 @@ func TestContainerCommand_AFailingScopedServiceIsNotReportedAsMissing(t *testing
         container.RegisterOptions{},
     )
 
-    rendered, _ := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(serviceContainer),
+    rendered, _ := runContainerCommand(newTestRuntime(serviceContainer),
         []string{"--format=json", "failing.scoped.service"},
     )
 
@@ -1106,9 +1084,7 @@ func TestContainerCommand_ListsNamesWithAWarningWithoutTheDescriptionsDoor(t *te
         container.RegisterOptions{},
     )
 
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(&nameOnlyTestContainer{Container: inner}),
+    rendered, runErr := runContainerCommand(newTestRuntime(&nameOnlyTestContainer{Container: inner}),
         []string{"--format=json"},
     )
     if nil != runErr {
@@ -1141,7 +1117,7 @@ func TestContainerCommand_DefaultListingRunsNoProvider(t *testing.T) {
 
     runtimeInstance := newTestRuntime(serviceContainer)
 
-    if _, listErr := runDebugCommand(&ContainerCommand{}, runtimeInstance, []string{"--format=json"}); nil != listErr {
+    if _, listErr := runContainerCommand(runtimeInstance, []string{"--format=json"}); nil != listErr {
         t.Fatalf("expected no error, got %v", listErr)
     }
 
@@ -1149,7 +1125,7 @@ func TestContainerCommand_DefaultListingRunsNoProvider(t *testing.T) {
         t.Fatalf("expected the bare listing to run no provider, ran %d times", buildCount)
     }
 
-    if _, buildErr := runDebugCommand(&ContainerCommand{}, runtimeInstance, []string{"--format=json", "--build"}); nil != buildErr {
+    if _, buildErr := runContainerCommand(runtimeInstance, []string{"--format=json", "--build"}); nil != buildErr {
         t.Fatalf("expected no error, got %v", buildErr)
     }
 
@@ -1175,9 +1151,7 @@ func TestContainerCommand_BuildSweepReportsItsFailuresInTheEnvelope(t *testing.T
         container.RegisterOptions{},
     )
 
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(serviceContainer),
+    rendered, runErr := runContainerCommand(newTestRuntime(serviceContainer),
         []string{"--format=json", "--build"},
     )
 
@@ -1230,9 +1204,7 @@ func TestContainerCommand_BuildSweepReportsItsFailuresInTheEnvelope(t *testing.T
         container.RegisterOptions{},
     )
 
-    if _, healthyErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(healthyContainer),
+    if _, healthyErr := runContainerCommand(newTestRuntime(healthyContainer),
         []string{"--format=json", "--build"},
     ); nil != healthyErr {
         t.Fatalf("expected a sweep without failures to succeed, got %v", healthyErr)
@@ -1261,9 +1233,7 @@ func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
         container.RegisterOptions{},
     )
 
-    rendered, _ := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(serviceContainer),
+    rendered, _ := runContainerCommand(newTestRuntime(serviceContainer),
         []string{"--format=json", "--build"},
     )
 
@@ -1310,9 +1280,7 @@ func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
         container.RegisterOptions{},
     )
 
-    plainTableRendered, _ := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(plainContainer),
+    plainTableRendered, _ := runContainerCommand(newTestRuntime(plainContainer),
         []string{"--verbosity=2", "--build", "--table-width=400"},
     )
 
@@ -1320,9 +1288,7 @@ func TestContainerCommand_JsonItemFieldsKeepOneTypeAcrossRows(t *testing.T) {
         t.Fatalf("expected the table to keep the empty cell for a failure carrying no context, got %q", plainTableRendered)
     }
 
-    plainJsonRendered, _ := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(plainContainer),
+    plainJsonRendered, _ := runContainerCommand(newTestRuntime(plainContainer),
         []string{"--format=json", "--build"},
     )
 
@@ -1417,9 +1383,7 @@ func TestContainerCommand_BuildSweepReachesAScopedRegistrationTheNameListCannotS
         }
     }
 
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(serviceContainer),
+    rendered, runErr := runContainerCommand(newTestRuntime(serviceContainer),
         []string{"--format=json", "--build"},
     )
     if nil != runErr {
@@ -1472,9 +1436,7 @@ func TestContainerCommand_TheTeardownBlockNamesTheWaveAndTheUnorderedServices(t 
         t.Fatalf("unexpected resolve error: %v", resolveErr)
     }
 
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(serviceContainer),
+    rendered, runErr := runContainerCommand(newTestRuntime(serviceContainer),
         []string{"--format=table", "--table-width=400"},
     )
     if nil != runErr {
@@ -1612,9 +1574,7 @@ func teardownRowsByNode(t *testing.T, rendered string) map[string][]string {
 
 /* the ordering of a node is read on both sides of it: the storage the holder resolved is a pure dependency — it depends on nothing and is depended on — and it read "none", the same word as the service nothing orders, which is the opposite of what the edge towards it proves. Under waves the row an operator has to look at is the one with no relation in EITHER direction. */
 func TestContainerCommand_TheTeardownBlockReadsTheOrderingOnBothSidesOfANode(t *testing.T) {
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(newTeardownViewTestContainer(t)),
+    rendered, runErr := runContainerCommand(newTestRuntime(newTeardownViewTestContainer(t)),
         []string{"--format=table", "--table-width=400"},
     )
     if nil != runErr {
@@ -1648,9 +1608,7 @@ func TestContainerCommand_TheTeardownBlockReadsTheOrderingOnBothSidesOfANode(t *
 }
 
 func TestContainerCommand_TheTeardownBlockRendersOnTheBuildSweep(t *testing.T) {
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(newTeardownViewTestContainer(t)),
+    rendered, runErr := runContainerCommand(newTestRuntime(newTeardownViewTestContainer(t)),
         []string{"--format=table", "--table-width=400", "--build"},
     )
     if nil != runErr {
@@ -1670,9 +1628,7 @@ func TestContainerCommand_TheTeardownBlockRendersOnTheBuildSweep(t *testing.T) {
 
 /* the single-service door renders the one row of the service it was asked about, with the wave the whole plan gives it */
 func TestContainerCommand_TheTeardownBlockRendersTheOneRowOfASingleService(t *testing.T) {
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(newTeardownViewTestContainer(t)),
+    rendered, runErr := runContainerCommand(newTestRuntime(newTeardownViewTestContainer(t)),
         []string{"--format=table", "--table-width=400", "view.storage"},
     )
     if nil != runErr {
@@ -1692,9 +1648,7 @@ func TestContainerCommand_TheTeardownBlockRendersTheOneRowOfASingleService(t *te
 }
 
 func TestContainerCommand_TheTeardownBlockKeepsToTheWindowAndTheGlobalWave(t *testing.T) {
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(newTeardownViewTestContainer(t)),
+    rendered, runErr := runContainerCommand(newTestRuntime(newTeardownViewTestContainer(t)),
         []string{"--format=table", "--table-width=400", "--limit=1", "--offset=1"},
     )
     if nil != runErr {
@@ -1738,9 +1692,7 @@ type containerCommandTeardownTestEnvelope struct {
 
 /* the json document carries the teardown beside each built service, and omits the key on a service the plan does not list, so `jq '.data.items[] | select(.teardown.ordering == "none")'` names the services nothing orders */
 func TestContainerCommand_TheJsonDocumentCarriesTheTeardownBesideEachBuiltService(t *testing.T) {
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(newTeardownViewTestContainer(t)),
+    rendered, runErr := runContainerCommand(newTestRuntime(newTeardownViewTestContainer(t)),
         []string{"--format=json"},
     )
     if nil != runErr {
@@ -1822,7 +1774,7 @@ func TestContainerCommand_AnAliasOfOneInstanceCarriesTheTeardownOfTheNodeItWasCo
         t.Fatalf("resolve: %v", resolveErr)
     }
 
-    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(serviceContainer), []string{"--format=json"})
+    rendered, runErr := runContainerCommand(newTestRuntime(serviceContainer), []string{"--format=json"})
     if nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
@@ -1842,7 +1794,7 @@ func TestContainerCommand_AnAliasOfOneInstanceCarriesTheTeardownOfTheNodeItWasCo
         }
     }
 
-    rendered, runErr = runDebugCommand(&ContainerCommand{}, newTestRuntime(serviceContainer), []string{"--format=table", "--limit=1"})
+    rendered, runErr = runContainerCommand(newTestRuntime(serviceContainer), []string{"--format=table", "--limit=1"})
     if nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
@@ -1873,7 +1825,7 @@ func TestContainerCommand_AScopedTwinOfABuiltServiceCarriesNoTeardown(t *testing
         container.RegisterOptions{TypeRegistrationDisabled: true, ReplacesContainerService: true},
     )
 
-    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(serviceContainer), []string{"--format=json"})
+    rendered, runErr := runContainerCommand(newTestRuntime(serviceContainer), []string{"--format=json"})
     if nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
@@ -1946,7 +1898,7 @@ func TestContainerCommand_TheTeardownBlockNamesACycleRemainder(t *testing.T) {
         t.Fatalf("resolve: %v", resolveErr)
     }
 
-    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(serviceContainer), []string{"--format=table"})
+    rendered, runErr := runContainerCommand(newTestRuntime(serviceContainer), []string{"--format=table"})
     if nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
@@ -1991,9 +1943,7 @@ func TestContainerCommand_TheTeardownBlockNamesTheSerialGroup(t *testing.T) {
     container.MustFromResolver[*viewPairB](t.Context(), serviceContainer, "pair.b")
     container.MustFromResolver[*teardownViewStorage](t.Context(), serviceContainer, "pair.alone")
 
-    rendered, runErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(serviceContainer),
+    rendered, runErr := runContainerCommand(newTestRuntime(serviceContainer),
         []string{"--format=table", "--table-width=400"},
     )
     if nil != runErr {
@@ -2019,9 +1969,7 @@ func TestContainerCommand_TheTeardownBlockNamesTheSerialGroup(t *testing.T) {
         t.Fatalf("expected the service in no group to print an empty group cell, got %v", groupOf)
     }
 
-    renderedJson, jsonErr := runDebugCommand(
-        &ContainerCommand{},
-        newTestRuntime(serviceContainer),
+    renderedJson, jsonErr := runContainerCommand(newTestRuntime(serviceContainer),
         []string{"--format=json"},
     )
     if nil != jsonErr {
@@ -2047,7 +1995,7 @@ func TestContainerCommand_TheTeardownBlockNamesATypeAliasByTheTypesOwnString(t *
         t.Fatalf("resolve by type: %v", resolveErr)
     }
 
-    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(serviceContainer), []string{"--format=table"})
+    rendered, runErr := runContainerCommand(newTestRuntime(serviceContainer), []string{"--format=table"})
     if nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
@@ -2096,7 +2044,7 @@ func newTwinRegistrationContainer(t *testing.T) containercontract.Container {
 
 /* the --build sweep resolves each registration under ITS lifetime and carries that lifetime on the row: keyed by name alone, both twins read as scoped, both were resolved through the scope, and both lost the teardown the built container service has */
 func TestContainerCommand_BuildSweepKeepsTheContainerTwinsTeardownAndCarriesEachLifetime(t *testing.T) {
-    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(newTwinRegistrationContainer(t)), []string{"--build", "--format=json"})
+    rendered, runErr := runContainerCommand(newTestRuntime(newTwinRegistrationContainer(t)), []string{"--build", "--format=json"})
     if nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
@@ -2134,7 +2082,7 @@ func TestContainerCommand_AWindowHoldingOnlyTheScopedTwinRendersNoTeardownRow(t 
         {"--format=table", "--limit=1", "--offset=2"},
         {"--build", "--format=table", "--limit=1", "--offset=2"},
     } {
-        rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(newTwinRegistrationContainer(t)), arguments)
+        rendered, runErr := runContainerCommand(newTestRuntime(newTwinRegistrationContainer(t)), arguments)
         if nil != runErr {
             t.Fatalf("%v: expected no error, got %v", arguments, runErr)
         }
@@ -2150,7 +2098,7 @@ func TestContainerCommand_AWindowHoldingOnlyTheScopedTwinRendersNoTeardownRow(t 
 }
 
 func TestContainerCommand_TheSingleDoorOnATwinNameAnswersScopedWithoutTheContainerTwinsRow(t *testing.T) {
-    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(newTwinRegistrationContainer(t)), []string{"view.shared", "--format=table"})
+    rendered, runErr := runContainerCommand(newTestRuntime(newTwinRegistrationContainer(t)), []string{"view.shared", "--format=table"})
     if nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
     }
@@ -2218,5 +2166,19 @@ func TestSanitizeErrorContextValue_RendersAMapWhoseOwnMarshalerFailsAsTheMarkerN
         if true == strings.Contains(string(encoded), "hunter2") || false == strings.Contains(string(encoded), "marshal failed") {
             t.Fatalf("%s: expected the failure marker in place of the value, got %s", name, encoded)
         }
+    }
+}
+
+/* the zero value has no container to describe: it refuses through the envelope instead of dereferencing nothing */
+func TestContainerCommand_TheZeroValueRefusesThroughTheEnvelope(t *testing.T) {
+    rendered, runErr := runDebugCommand(&ContainerCommand{}, newTestRuntime(container.NewContainer(container.ContainerConfig{})), []string{"--format=json"})
+
+    var exitError *exception.ExitError
+    if false == errors.As(runErr, &exitError) {
+        t.Fatalf("expected an exit error for the zero value, got %v", runErr)
+    }
+
+    if false == strings.Contains(rendered, "debug.containerNil") {
+        t.Fatalf("expected the refusal in the document, got %s", rendered)
     }
 }

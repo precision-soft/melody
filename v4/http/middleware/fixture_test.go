@@ -11,6 +11,7 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -18,8 +19,6 @@ import (
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
@@ -76,10 +75,10 @@ func servedRateLimitKernel(t *testing.T, configure func(router *http.Router, dis
     return http.NewKernel(router, http.KernelConfig{}).ServeHttp(serviceContainer)
 }
 
-func rateLimitTestRuntime() runtimecontract.Runtime {
+func rateLimitTestRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 }
 
 func allowedBy(limiter httpcontract.RateLimiter, key string) bool {

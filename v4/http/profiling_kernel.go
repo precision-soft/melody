@@ -5,9 +5,9 @@ import (
 
     "time"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -19,7 +19,7 @@ const (
 func RegisterKernelHttpProfilerListener(eventDispatcher eventcontract.EventDispatcher) {
     eventDispatcher.AddListener(
         kernelcontract.EventKernelResponse,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             responseEvent, ok := eventValue.Payload().(*KernelResponseEvent)
             if false == ok {
                 return nil

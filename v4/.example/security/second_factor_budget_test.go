@@ -7,12 +7,12 @@ import (
     "time"
 
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -93,13 +93,13 @@ type scriptedRuntimeLimiter struct {
     keyList    []string
 }
 
-func (instance *scriptedRuntimeLimiter) Allow(runtimeInstance melodyruntimecontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
+func (instance *scriptedRuntimeLimiter) Allow(runtimeInstance melodycontainercontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
     instance.keyList = append(instance.keyList, key)
 
     return melodyhttpcontract.RateLimitDecision{Allowed: instance.allowed, RetryAfter: instance.retryAfter}, instance.allowErr
 }
 
-func (instance *scriptedRuntimeLimiter) Reset(runtimeInstance melodyruntimecontract.Runtime, key string) error {
+func (instance *scriptedRuntimeLimiter) Reset(runtimeInstance melodycontainercontract.Runtime, key string) error {
     instance.keyList = append(instance.keyList, key)
 
     return instance.resetErr

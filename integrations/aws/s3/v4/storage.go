@@ -13,9 +13,9 @@ import (
     "github.com/minio/minio-go/v7"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
@@ -116,7 +116,7 @@ type Storage struct {
 }
 
 func (instance *Storage) Put(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     key string,
     reader io.Reader,
     size int64,
@@ -382,7 +382,7 @@ func boundedPutReader(reader io.Reader, size int64) io.Reader {
 }
 
 func (instance *Storage) Get(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     key string,
 ) (io.ReadCloser, error) {
     instance.plaintextEndpointWarning.write(runtimeInstance)
@@ -411,7 +411,7 @@ func (instance *Storage) Get(
 }
 
 func (instance *Storage) Delete(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     key string,
 ) error {
     instance.plaintextEndpointWarning.write(runtimeInstance)
@@ -430,7 +430,7 @@ func (instance *Storage) Delete(
 }
 
 func (instance *Storage) Exists(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     key string,
 ) (bool, error) {
     instance.plaintextEndpointWarning.write(runtimeInstance)
@@ -453,7 +453,7 @@ func (instance *Storage) Exists(
 }
 
 func (instance *Storage) PresignedUrl(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     key string,
     expiry time.Duration,
 ) (string, error) {

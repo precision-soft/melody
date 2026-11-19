@@ -10,12 +10,12 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -135,7 +135,7 @@ func (instance *HmacTokenSource) Name() string {
 }
 
 func (instance *HmacTokenSource) Resolve(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
 ) (securitycontract.Token, error) {
     headerValue := request.Header(instance.headerName)
@@ -332,7 +332,7 @@ func (instance *HmacTokenSource) verifyBody(envelope hmacEnvelope, request httpc
     return nil
 }
 
-func (instance *HmacTokenSource) guardNonce(runtimeInstance runtimecontract.Runtime, keyId string, envelope hmacEnvelope) error {
+func (instance *HmacTokenSource) guardNonce(runtimeInstance containercontract.Runtime, keyId string, envelope hmacEnvelope) error {
     if "" == envelope.Nonce {
         return exception.NewError("internal-auth envelope is missing a nonce", nil, nil)
     }
@@ -361,7 +361,7 @@ func hmacNonceGuardKey(keyId string, nonce string) string {
 }
 
 func (instance *HmacTokenSource) guardNonceAndBody(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
     keyId string,
     envelope hmacEnvelope,
@@ -392,7 +392,7 @@ func (instance *HmacTokenSource) effectiveVerifyBodyBeforeNonce(request httpcont
 }
 
 func (instance *HmacTokenSource) reject(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     cause error,
 ) (securitycontract.Token, error) {
     if true == exception.IsInfrastructureFailure(cause) {

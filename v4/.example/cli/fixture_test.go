@@ -26,12 +26,11 @@ import (
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
@@ -40,7 +39,7 @@ const testUserServiceName = "service.test.user"
 
 type commandFixture struct {
     container      melodycontainercontract.Container
-    runtime        melodyruntimecontract.Runtime
+    runtime        melodycontainercontract.Runtime
     userService    *service.UserService
     userRepository repository.UserRepository
 }
@@ -87,7 +86,7 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
     dispatcher := melodyevent.NewEventDispatcher(clockInstance)
     dispatcher.AddListener(
         event.UserUpdatedEventName,
-        func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+        func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
             updatedEvent, isUpdated := eventValue.Payload().(*event.UserUpdatedEvent)
             if false == isUpdated || nil == updatedEvent {
                 return nil
@@ -159,7 +158,7 @@ func newCommandFixtureOverUsers(t *testing.T, dispatcherOf func(melodyeventcontr
 
     return &commandFixture{
         container:      containerInstance,
-        runtime:        melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
+        runtime:        melodyruntime.NewRun(context.Background(), containerInstance.NewScope()),
         userService:    userService,
         userRepository: userRepository,
     }
@@ -279,7 +278,7 @@ type refusingDispatcher struct {
     melodyeventcontract.EventDispatcher
 }
 
-func (instance *refusingDispatcher) DispatchName(runtimeInstance melodyruntimecontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
+func (instance *refusingDispatcher) DispatchName(runtimeInstance melodycontainercontract.Runtime, eventName string, payload any) (melodyeventcontract.Event, error) {
     return nil, errors.New("redis: connection refused")
 }
 
@@ -321,7 +320,7 @@ func newResetRuntimeWithArchive(
     t *testing.T,
     storage *persistence.CatalogStorage,
     archiveStorage *persistence.ArchiveStorage,
-) (melodyruntimecontract.Runtime, *clearCountingCache) {
+) (melodycontainercontract.Runtime, *clearCountingCache) {
     t.Helper()
 
     serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -376,7 +375,7 @@ func newResetRuntimeWithArchive(
         melodycontainer.RegisterOptions{},
     )
 
-    return melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), cacheInstance
+    return melodyruntime.NewRun(context.Background(), serviceContainer.NewScope()), cacheInstance
 }
 
 func mustProductRepository(t *testing.T) repository.ProductRepository {
@@ -430,7 +429,7 @@ func newInterruptedCommandFixture(t *testing.T) *commandFixture {
     fixture := newCommandFixtureOverUsers(t, nil, persistence.NewCatalogStorage(bun.NewDB(sql.OpenDB(&undialledConnector{}), mysqldialect.New())), func(userRepository repository.UserRepository) repository.UserRepository {
         return &stalledUserRepository{UserRepository: userRepository}
     })
-    fixture.runtime = melodyruntime.New(endedContext(), fixture.container.NewScope(), fixture.container)
+    fixture.runtime = melodyruntime.NewRun(endedContext(), fixture.container.NewScope())
 
     return fixture
 }
@@ -459,7 +458,7 @@ func (instance *stalledCurrencyRepository) All(ctx context.Context) ([]*entity.C
     return nil, waitForTheCallerContext(ctx)
 }
 
-func runtimeWithClock(t *testing.T, clockInstance melodyclockcontract.Clock) melodyruntimecontract.Runtime {
+func runtimeWithClock(t *testing.T, clockInstance melodyclockcontract.Clock) melodycontainercontract.Runtime {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -473,5 +472,5 @@ func runtimeWithClock(t *testing.T, clockInstance melodyclockcontract.Clock) mel
         melodycontainer.RegisterOptions{},
     )
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 }

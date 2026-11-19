@@ -4,8 +4,8 @@ import (
     nethttp "net/http"
 
     "github.com/precision-soft/melody/v4/.example/page"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type adminUserCreateRequest struct {
@@ -15,19 +15,19 @@ type adminUserCreateRequest struct {
 }
 
 func ListPageHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         return page.Html(runtimeInstance, request, nethttp.StatusOK, page.UsersHtml), nil
     }
 }
 
 func UpdatePageHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         return page.Html(runtimeInstance, request, nethttp.StatusOK, page.ProfileHtml), nil
     }
 }
 
 func CreatePageHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         return page.Html(runtimeInstance, request, nethttp.StatusOK, page.ProfileHtml), nil
     }
 }

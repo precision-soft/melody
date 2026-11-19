@@ -3,12 +3,12 @@ package event
 import (
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func newSubscriberProbeListener(recorder *string, name string) eventcontract.EventListener {
-    return func(runtimeInstance runtimecontract.Runtime, eventInstance eventcontract.Event) error {
+    return func(runtimeInstance containercontract.Runtime, eventInstance eventcontract.Event) error {
         *recorder = name
 
         return nil

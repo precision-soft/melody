@@ -8,7 +8,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* TwoFactorResetCommand removes the second factor of the account named as its argument, secret and recovery codes together. The enrollment door replaces a factor only for a request carrying a current one, so an account whose authenticator and recovery codes are both lost — the last code spent at a sign-in — comes back through an operator here, never through a session alone; after the reset the account signs in with its password and enrolls again. */
@@ -33,7 +33,7 @@ func (instance *TwoFactorResetCommand) Flags() []melodyclicontract.Flag {
     return []melodyclicontract.Flag{}
 }
 
-func (instance *TwoFactorResetCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *TwoFactorResetCommand) Run(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     writer := commandContext.Writer
 
     arguments := commandContext.Args().Slice()

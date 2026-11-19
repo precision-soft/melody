@@ -19,7 +19,6 @@ import (
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestTextResponse_WritesBodyAndStatus(t *testing.T) {
@@ -710,7 +709,7 @@ func TestConfinedFileResponse_AServedRefusalAnswers404WithNoServerPathInTheBody(
     rootDirectory := t.TempDir()
 
     router := NewRouter()
-    router.Handle("/download", func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    router.Handle("/download", func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return ConfinedFileResponse(200, rootDirectory, request.HttpRequest().URL.Query().Get("name"))
     }, RouteOptions{Methods: []string{nethttp.MethodGet}})
 

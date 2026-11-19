@@ -6,12 +6,12 @@ import (
     "testing"
 
     "github.com/precision-soft/melody/v4/clock"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* the four kernel events are how every listener in the framework and in an application reaches the request, the runtime and the response: an event that hands back the wrong one of its three fields would send a listener the request of one hop and the response of another, and nothing in the dispatch would notice. Each event is asserted to report the very instances it is constructed with. */
@@ -154,7 +154,7 @@ func TestKernelExceptionEvent_SetResponseStopsPropagation(t *testing.T) {
 
     dispatcher.AddListener(
         kernelcontract.EventKernelException,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.Payload().(*KernelExceptionEvent).SetResponse(TextResponse(nethttp.StatusTeapot, "first"))
 
             return nil
@@ -163,7 +163,7 @@ func TestKernelExceptionEvent_SetResponseStopsPropagation(t *testing.T) {
     )
     dispatcher.AddListener(
         kernelcontract.EventKernelException,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             secondRan++
 
             return nil

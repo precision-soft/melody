@@ -13,8 +13,8 @@ import (
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
 )
 
 /* the liveness probe reports the version the build stamped, the one main hands Configure, beside its status */
@@ -24,7 +24,7 @@ func TestHealthHandler_ReportsTheVersionItWasBuiltWith(t *testing.T) {
     melodycontainer.MustRegister(containerInstance, melodyclock.ServiceClock, func(resolver melodycontainercontract.Resolver) (melodyclockcontract.Clock, error) {
         return melodyclock.NewSystemClock(), nil
     }, melodycontainer.RegisterOptions{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/health", nil), nil, runtimeInstance, melodyhttp.NewRequestContext("health-test", time.Now()))
 

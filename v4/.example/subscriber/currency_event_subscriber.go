@@ -6,9 +6,9 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
     melodycache "github.com/precision-soft/melody/v4/cache"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type CurrencyEventSubscriber struct{}
@@ -32,7 +32,7 @@ func (instance *CurrencyEventSubscriber) SubscribedEvents() map[string][]melodye
 }
 
 func (instance *CurrencyEventSubscriber) onCurrencyCreated() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*event.CurrencyCreatedEvent)
         if false == ok {
@@ -42,7 +42,7 @@ func (instance *CurrencyEventSubscriber) onCurrencyCreated() melodyeventcontract
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyCurrencyById(payloadInstance.Currency().Id))
         if nil != byIdDeleteErr {
@@ -64,7 +64,7 @@ func (instance *CurrencyEventSubscriber) onCurrencyCreated() melodyeventcontract
 }
 
 func (instance *CurrencyEventSubscriber) onCurrencyUpdated() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*event.CurrencyUpdatedEvent)
         if false == ok {
@@ -74,7 +74,7 @@ func (instance *CurrencyEventSubscriber) onCurrencyUpdated() melodyeventcontract
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyCurrencyById(payloadInstance.Currency().Id))
         if nil != byIdDeleteErr {
@@ -96,7 +96,7 @@ func (instance *CurrencyEventSubscriber) onCurrencyUpdated() melodyeventcontract
 }
 
 func (instance *CurrencyEventSubscriber) onCurrencyDeleted() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*event.CurrencyDeletedEvent)
         if false == ok {
@@ -106,7 +106,7 @@ func (instance *CurrencyEventSubscriber) onCurrencyDeleted() melodyeventcontract
             return nil
         }
 
-        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        cacheInstance := melodycache.CacheMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         byIdDeleteErr := cacheInstance.Delete(context.WithoutCancel(runtimeInstance.Context()), service.CacheKeyCurrencyById(payloadInstance.CurrencyId()))
         if nil != byIdDeleteErr {

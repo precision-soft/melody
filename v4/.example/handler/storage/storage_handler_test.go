@@ -18,11 +18,11 @@ import (
     melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
 )
 
 type failingReader struct{}
@@ -35,7 +35,7 @@ func putStatusFor(t *testing.T, body func(httpRequest *nethttp.Request)) int {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodPut, "/storage/object?key=probe", nil)
     body(httpRequest)
@@ -125,7 +125,7 @@ func TestLinkTtlOf_RefusesASecondsValueThatWrapsPastTheBound(t *testing.T) {
 /* the object store refuses a key with a ".." segment by name, so every door answers it as the client's error, before the store is asked */
 func TestHandlers_AnswerAKeyWithAParentSegmentWith400BeforeTheStore(t *testing.T) {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     for name, handler := range map[string]melodyhttpcontract.Handler{"put": PutHandler(nil), "get": GetHandler(nil), "link": LinkHandler(nil)} {
         for _, key := range []string{"tenant-b/../tenant-a/secret.txt", "..", "a\\..\\b"} {
@@ -214,7 +214,7 @@ func getObject(t *testing.T, storage *melodyawss3.Storage) (int, []string) {
     melodycontainer.MustRegister(containerInstance, melodylogging.ServiceLogger, func(resolver melodycontainercontract.Resolver) (melodyloggingcontract.Logger, error) {
         return logger, nil
     }, melodycontainer.RegisterOptions{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/storage/object?key=probe.txt", nil), nil, runtimeInstance, melodyhttp.NewRequestContext("storage-get-test", time.Now()))
 

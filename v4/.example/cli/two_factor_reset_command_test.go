@@ -3,13 +3,13 @@ package cli
 import (
     "bytes"
     "context"
-    "errors"
     "database/sql"
+    "errors"
     "strings"
     "testing"
 
     "github.com/precision-soft/melody/v4/.example/twofactor"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     bun "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
 )
@@ -26,7 +26,7 @@ func TestTwoFactorResetCommand_DeletesTheEnrollmentOfTheNamedAccount(t *testing.
     }
 
     output := &bytes.Buffer{}
-    command := NewTwoFactorResetCommand(fixture.lazyUserService(), func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+    command := NewTwoFactorResetCommand(fixture.lazyUserService(), func(runtimeInstance melodycontainercontract.Runtime) (*twofactor.Store, error) {
         return store, nil
     })
 
@@ -54,7 +54,7 @@ func TestTwoFactorResetCommand_DeletesTheEnrollmentOfTheNamedAccount(t *testing.
 /* an unknown name is refused before the store is asked */
 func TestTwoFactorResetCommand_RefusesAnUnknownAccountBeforeTheStore(t *testing.T) {
     fixture := newCommandFixture(t)
-    command := NewTwoFactorResetCommand(fixture.lazyUserService(), func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+    command := NewTwoFactorResetCommand(fixture.lazyUserService(), func(runtimeInstance melodycontainercontract.Runtime) (*twofactor.Store, error) {
         t.Fatal("expected the store never asked for an unknown account")
 
         return nil, nil
@@ -68,7 +68,7 @@ func TestTwoFactorResetCommand_RefusesAnUnknownAccountBeforeTheStore(t *testing.
 
 func TestTwoFactorResetCommandReadsThroughItsContext(t *testing.T) {
     fixture := newInterruptedCommandFixture(t)
-    command := NewTwoFactorResetCommand(fixture.lazyUserService(), func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+    command := NewTwoFactorResetCommand(fixture.lazyUserService(), func(runtimeInstance melodycontainercontract.Runtime) (*twofactor.Store, error) {
         t.Fatal("the interrupted reset reached the enrollment store")
 
         return nil, nil
@@ -94,7 +94,7 @@ func TestTwoFactorResetCommand_ReadsTheDirectoryPastTheCache(t *testing.T) {
         t.Fatalf("delete behind the cache: %v", deleteErr)
     }
 
-    command := NewTwoFactorResetCommand(fixture.lazyUserService(), func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+    command := NewTwoFactorResetCommand(fixture.lazyUserService(), func(runtimeInstance melodycontainercontract.Runtime) (*twofactor.Store, error) {
         return store, nil
     })
 

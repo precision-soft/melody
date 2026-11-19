@@ -12,10 +12,10 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -162,7 +162,7 @@ type JwtTokenValidator struct {
 }
 
 func (instance *JwtTokenValidator) Validate(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     tokenString string,
 ) (securitycontract.Claims, error) {
     parts := strings.Split(tokenString, ".")
@@ -261,7 +261,7 @@ func (instance *JwtTokenValidator) Validate(
 }
 
 func (instance *JwtTokenValidator) verifyRevocationEpoch(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     claims securitycontract.Claims,
 ) error {
     if nil == instance.epochStore {

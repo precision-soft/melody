@@ -6,16 +6,16 @@ import (
 
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* dispatchCommitted dispatches the event of a catalogue write that has committed, and a failure refuses nothing: the caller is answered with the row the write stored, where a refusal told it nothing was written. The dispatcher stops at its first failing listener, so the cache invalidation may not have run; the entries the write changed are dropped here, best effort, and the failure, a failed drop joined to it, is filed at error with the event and the entity. */
 func dispatchCommitted(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     eventDispatcher melodyeventcontract.EventDispatcher,
     cacheInstance melodycachecontract.Cache,
     eventName string,

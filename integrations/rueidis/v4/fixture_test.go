@@ -16,10 +16,9 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     redisclient "github.com/redis/rueidis"
 )
 
@@ -61,9 +60,9 @@ func exceptionContextOf(err error) map[string]any {
     return exception.LogContext(err, exception.LogContextConfig{})
 }
 
-func newTokenStoreRuntime() runtimecontract.Runtime {
+func newTokenStoreRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 func newTokenStoreClient(t *testing.T) redisclient.Client {
@@ -459,8 +458,8 @@ func (instance *contextOnlyRuntime) Scope() containercontract.Scope {
     return nil
 }
 
-func (instance *contextOnlyRuntime) Container() containercontract.Container {
-    return nil
+func (instance *contextOnlyRuntime) Kind() containercontract.Kind {
+    return containercontract.KindRun
 }
 
 type commandCountingConn struct {

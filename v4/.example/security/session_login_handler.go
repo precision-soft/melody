@@ -7,10 +7,10 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/route"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -28,7 +28,7 @@ type sessionLoginHandler struct {
 }
 
 func (instance *sessionLoginHandler) Login(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     input melodysecuritycontract.LoginInput,
 ) (*melodysecuritycontract.LoginResult, error) {
@@ -71,7 +71,7 @@ func (instance *sessionLoginHandler) Login(
         return nil, admitErr
     }
 
-    redirectUrl, _ := melodyhttp.UrlGeneratorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container()).GeneratePath(LandingPageName(user.Roles), nil)
+    redirectUrl, _ := melodyhttp.UrlGeneratorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()).GeneratePath(LandingPageName(user.Roles), nil)
 
     response := presenter.ApiSuccess(
         runtimeInstance,

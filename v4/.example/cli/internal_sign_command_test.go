@@ -14,8 +14,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
@@ -52,10 +51,10 @@ func newInternalSignTestCommand(newSigner func(ctx context.Context, ttl bound.Du
     )
 }
 
-func signTestRuntime() melodyruntimecontract.Runtime {
+func signTestRuntime() melodycontainercontract.Runtime {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 }
 
 func TestInternalSignCommandPrintsTheHeaderNameAndValueOnTheCommandWriter(t *testing.T) {

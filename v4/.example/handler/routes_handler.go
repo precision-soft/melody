@@ -7,12 +7,12 @@ import (
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
     "github.com/precision-soft/melody/v4/.example/presenter"
     exampleurl "github.com/precision-soft/melody/v4/.example/url"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type routeListingResponse struct {
@@ -23,8 +23,8 @@ type routeListingResponse struct {
 
 /* RoutesHandler lists the routes a client may know about, through the framework's projection every page carries, which applies the RouteAttributeExpose opt-in and the caller's zone; walking the registry directly would list internal and admin routes to an anonymous caller. */
 func RoutesHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        urlGenerator := melodyhttp.UrlGeneratorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        urlGenerator := melodyhttp.UrlGeneratorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         manifest, manifestErr := exampleurl.RouteManifestForRuntime(runtimeInstance)
         if nil != manifestErr {

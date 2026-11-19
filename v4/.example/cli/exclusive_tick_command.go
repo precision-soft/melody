@@ -5,7 +5,7 @@ import (
     "time"
 
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* ExclusiveTickCommand simulates a cron-launched job that must run on exactly one instance per tick: config/cli.go wraps it in lock.NewExclusiveCommand over lock.NewLazyLocker, which resolves the registered locker (redis when configured) at the first Acquire rather than at boot, so launching it from two shells at once runs the body once while the other exits zero with a "skipped" log line. */
@@ -33,7 +33,7 @@ func (instance *ExclusiveTickCommand) Flags() []melodyclicontract.Flag {
 }
 
 func (instance *ExclusiveTickCommand) Run(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     commandContext *melodyclicontract.CommandContext,
 ) error {
     hold := 2 * time.Second

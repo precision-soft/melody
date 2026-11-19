@@ -35,16 +35,16 @@ The [`cli`](../../cli) package provides core primitives for Melody's command-lin
 ### Root command wiring (`cli`)
 
 - [`cli.NewCommandContext(applicationName string, applicationDescription string) *clicontract.CommandContext`](../../cli/command.go)
-- [`cli.Register(commandContext *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime)`](../../cli/command.go)
+- [`cli.Register(commandContext *clicontract.CommandContext, command clicontract.Command, runtimeInstance containercontract.Runtime)`](../../cli/command.go)
 - [`cli.Root`](../../cli/root.go)
 - [`cli.NewRoot(applicationName string, applicationDescription string) *cli.Root`](../../cli/root.go)
-- [`cli.Root.Register(command clicontract.Command, runtimeInstance runtimecontract.Runtime)`](../../cli/root.go)
+- [`cli.Root.Register(command clicontract.Command, runtimeInstance containercontract.Runtime)`](../../cli/root.go)
 - [`cli.Root.SetVersion(version string)`](../../cli/root.go)
 - [`cli.Root.SetWriter(writer io.Writer)`](../../cli/root.go)
 - [`cli.Root.SetErrorWriter(writer io.Writer)`](../../cli/root.go)
 - [`cli.Root.Run(ctx context.Context, arguments []string) error`](../../cli/root.go)
 - [`cli.Root.CommandNames() []string`](../../cli/root.go)
-- [`cli.DispatchCommand(ctx context.Context, command clicontract.Command, runtimeInstance runtimecontract.Runtime, arguments []string, writer io.Writer, config cli.DispatchConfig) error`](../../cli/dispatch.go)
+- [`cli.DispatchCommand(ctx context.Context, command clicontract.Command, runtimeInstance containercontract.Runtime, arguments []string, writer io.Writer, config cli.DispatchConfig) error`](../../cli/dispatch.go)
 - [`cli.DispatchConfig{ApplicationVersion}`](../../cli/dispatch.go)
 
 The application's version has one source, `ApplicationConfig.Version`, which the application hands to `Root.SetVersion` on the tree it dispatches from. The root then shows `--version`, without the engine's `-v` alias, which melody keeps for the verbosity, printing `<name> version <version>`, `<unknown>` when no version is declared, the root's help naming it in a `VERSION:` block, and every command registered on the tree reads the version off the root through `output.ApplicationVersionOf`, which `output.ParseOptionFromCommand` copies into `Option.ApplicationVersion` and `output.NewMeta` writes into the meta of every document, `""` when undeclared. A command run through `DispatchCommand` is the root of its own tree, so the version it reads is `DispatchConfig.ApplicationVersion`: a caller dispatching inside an application's command, as the cron runner does, hands on its own `output.ApplicationVersionOf(commandContext)`.
@@ -157,8 +157,8 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type HelloCommand struct{}
@@ -175,7 +175,7 @@ func (instance *HelloCommand) Flags() []clicontract.Flag {
     return []clicontract.Flag{}
 }
 
-func (instance *HelloCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *HelloCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     _, _ = commandContext.Writer.Write([]byte("hello\n"))
 
     return nil
@@ -192,10 +192,9 @@ func main() {
 
     scope := serviceContainer.NewScope()
 
-    runtimeInstance := runtime.New(
+    runtimeInstance := runtime.NewRun(
         ctx,
         scope,
-        serviceContainer,
     )
 
     rootCli := cli.NewCommandContext(

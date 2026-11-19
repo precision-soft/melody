@@ -16,11 +16,10 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func deleteEnrollmentStatementsAfter(t *testing.T, eventName string, payload any) []string {
@@ -30,7 +29,7 @@ func deleteEnrollmentStatementsAfter(t *testing.T, eventName string, payload any
     subscriberInstance := NewTwoFactorEnrollmentSubscriber(fixedTwoFactorStore(twofactor.NewStore(database)))
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     listeners := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName]
     if 1 != len(listeners) {
@@ -116,7 +115,7 @@ func TestTwoFactorEnrollmentSubscriber_ReleasesTheEnrollmentBeforeTheCacheListen
         },
         melodycontainer.RegisterOptions{},
     )
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     _, dispatchErr := dispatcher.DispatchName(runtimeInstance, event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"))
     if nil == dispatchErr {
@@ -139,14 +138,14 @@ func TestTwoFactorEnrollmentSubscriber_AStoreThatCannotBeResolvedIsJournaledAndT
     refusal := errors.New("the catalogue database refused the migration")
     asked := 0
 
-    subscriberInstance := NewTwoFactorEnrollmentSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+    subscriberInstance := NewTwoFactorEnrollmentSubscriber(func(runtimeInstance melodycontainercontract.Runtime) (*twofactor.Store, error) {
         asked = asked + 1
 
         return nil, refusal
     })
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 
     listener := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName][0].Listener()
     listenErr := listener(runtimeInstance, melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"), melodyclock.NewSystemClock().Now()))

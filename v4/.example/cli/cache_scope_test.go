@@ -9,8 +9,7 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 /* sharedBackendDouble stands for a backend that is not the in-process map — the redis one, in production — and it is a distinct type on purpose: what the scope helper reads is the TYPE of the backend the wiring registered, not what the backend answers. */
@@ -18,7 +17,7 @@ type sharedBackendDouble struct {
     melodycachecontract.Backend
 }
 
-func newCacheScopeRuntime(backend melodycachecontract.Backend) melodyruntimecontract.Runtime {
+func newCacheScopeRuntime(backend melodycachecontract.Backend) melodycontainercontract.Runtime {
     serviceContainer := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
     if nil != backend {
@@ -32,7 +31,7 @@ func newCacheScopeRuntime(backend melodycachecontract.Backend) melodyruntimecont
         )
     }
 
-    return melodyruntime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return melodyruntime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 func TestCacheIsProcessLocal_ReadsTheInProcessBackendAsThisProcessOwn(t *testing.T) {

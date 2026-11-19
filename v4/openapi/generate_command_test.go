@@ -17,12 +17,11 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type commandEmptyEnvironmentSource struct {
@@ -33,13 +32,19 @@ func (instance *commandEmptyEnvironmentSource) Load(ctx context.Context) (map[st
 }
 
 /* newCommandFixtureRuntime builds a runtime whose container carries a router with one route and the running configuration anchored at the given project directory, so the command resolves the same doors it resolves inside a booted application. */
-func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpenApiServices bool, registerInfo bool) runtimecontract.Runtime {
+/* commandFixtureRuntime keeps the container the fixture registered on, so a test can register more after the runtime is built: a runtime reaches no container. */
+type commandFixtureRuntime struct {
+    containercontract.Runtime
+    serviceContainer containercontract.Container
+}
+
+func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpenApiServices bool, registerInfo bool) *commandFixtureRuntime {
     t.Helper()
 
     router := melodyhttp.NewRouter()
     router.Handle(
         "/products/api/create/",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
         melodyhttp.RouteOptions{Name: "products.create", Methods: []string{"POST"}},
@@ -96,14 +101,17 @@ func newCommandFixtureRuntime(t *testing.T, projectDirectory string, registerOpe
         }
     }
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return &commandFixtureRuntime{
+        Runtime:          runtime.NewRun(context.Background(), serviceContainer.NewScope()),
+        serviceContainer: serviceContainer,
+    }
 }
 
 /* runOpenApiGenerateCommand drives the command through the cli library rather than around it, so the flags it declares are the flags the arguments are parsed against. */
 func runOpenApiGenerateCommand(
     t *testing.T,
     command *GenerateCommand,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     arguments ...string,
 ) (string, error) {
     t.Helper()
@@ -324,7 +332,7 @@ func TestGenerateCommand_TheStdoutDocumentStaysValidJsonWithoutTheInfoService(t 
     withoutInfo := newCommandFixtureRuntime(t, projectDirectory, true, false)
 
     journal := &recordingOpenApiLogger{}
-    withoutInfo.Container().MustRegister(
+    withoutInfo.serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return journal, nil
@@ -373,10 +381,10 @@ func TestGenerateCommand_AConfigurationThatDoesNotResolveDoesNotFailTheStdoutMod
         },
         container.RegisterOptions{},
     )
-    withoutInfo := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    withoutInfo := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     journal := &recordingOpenApiLogger{}
-    withoutInfo.Container().MustRegister(
+    serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return journal, nil
@@ -425,10 +433,10 @@ func TestGenerateCommand_AConfigurationWithoutAKernelSectionDoesNotFailTheStdout
         },
         container.RegisterOptions{},
     )
-    withoutKernel := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    withoutKernel := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     journal := &recordingOpenApiLogger{}
-    withoutKernel.Container().MustRegister(
+    serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return journal, nil
@@ -503,12 +511,12 @@ func TestGenerateCommand_AStdoutJournalDoesNotCarryTheWarningAheadOfTheDocument(
     if "" != configuration.Kernel().LogPath() {
         t.Fatalf("expected the fixture to configure a stdout journal, got %q", configuration.Kernel().LogPath())
     }
-    if overrideErr := withoutInfo.Container().OverrideProtectedInstance(config.ServiceConfig, configuration, container.OverrideOptions{}); nil != overrideErr {
+    if overrideErr := withoutInfo.Scope().OverrideProtectedInstance(config.ServiceConfig, configuration, container.OverrideOptions{}); nil != overrideErr {
         t.Fatalf("override configuration: %v", overrideErr)
     }
 
     journal := &recordingOpenApiLogger{}
-    withoutInfo.Container().MustRegister(
+    withoutInfo.serviceContainer.MustRegister(
         logging.ServiceLogger,
         func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
             return journal, nil

@@ -10,10 +10,9 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type transportRegistrarAdapter struct {
@@ -78,7 +77,7 @@ func TestRetryPolicyFromResolver_AbsentThenPresent(t *testing.T) {
 
 func TestNewConsumeCommandFromResolver_HydratesBusTransportsAndRetryThenConsumes(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(8)})
     if sendErr := transport.Send(runtimeInstance, NewEnvelope(consumeTestMessage{Value: 5}, nil)); nil != sendErr {
@@ -87,7 +86,7 @@ func TestNewConsumeCommandFromResolver_HydratesBusTransportsAndRetryThenConsumes
 
     locator := NewHandlerLocator()
     var sum int
-    RegisterHandler(locator, func(_ runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(_ containercontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         sum += message.Value
 
         return nil
@@ -141,19 +140,19 @@ type recordingCloseTransport struct {
     closed atomic.Bool
 }
 
-func (instance *recordingCloseTransport) Send(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *recordingCloseTransport) Send(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *recordingCloseTransport) Receive(runtimeInstance runtimecontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+func (instance *recordingCloseTransport) Receive(runtimeInstance containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
     return nil, nil
 }
 
-func (instance *recordingCloseTransport) Ack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+func (instance *recordingCloseTransport) Ack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *recordingCloseTransport) Nack(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+func (instance *recordingCloseTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
     return nil
 }
 

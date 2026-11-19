@@ -5,20 +5,20 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/message"
     "github.com/precision-soft/melody/v4/.example/presenter"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* WelcomeEmailDispatchHandler hands a welcome email to the message bus and answers once the bus has accepted it: sending is slow and may fail for reasons the caller cannot act on, so the transport carries it from there. Without a broker the door answers 503 naming AMQP_DSN, since nothing in this process would read what it accepted. */
 func WelcomeEmailDispatchHandler(transportConfigured bool) melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if false == transportConfigured {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusServiceUnavailable, message.ErrTransportNotConfigured.Error()), nil
         }
 
-        bus := melodymessagebus.BusMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        bus := melodymessagebus.BusMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         _, dispatchErr := bus.Dispatch(runtimeInstance, message.WelcomeEmail{UserId: 1, Address: "new-user@example.com"}, nil)
         if nil != dispatchErr {

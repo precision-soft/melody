@@ -3,13 +3,13 @@ package middleware
 import (
     nethttp "net/http"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* RateLimitRequestListenerPriority places the limiter ahead of token resolution (50) and access control (20), so a request over budget is answered before it pays an authenticator round. */
@@ -26,7 +26,7 @@ func RegisterRateLimitRequestListener(
 
     eventDispatcher.AddListener(
         kernelcontract.EventKernelRequest,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
             if false == ok || nil == requestEvent || true == internal.IsNilInterface(requestEvent.Request()) {
                 return nil
@@ -58,7 +58,7 @@ type RateLimitGate struct {
 }
 
 /* Apply charges the request and reports whether it stops it, over budget or because a store could not answer, in which case the event already carries the answer or the refusal. */
-func (instance *RateLimitGate) Apply(runtimeInstance runtimecontract.Runtime, requestEvent *http.KernelRequestEvent) bool {
+func (instance *RateLimitGate) Apply(runtimeInstance containercontract.Runtime, requestEvent *http.KernelRequestEvent) bool {
     request := requestEvent.Request()
 
     decision, unavailableErr := allowRequestUnderLimit(instance.settings, runtimeInstance, request)

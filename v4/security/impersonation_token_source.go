@@ -4,12 +4,12 @@ import (
     "reflect"
     "sync/atomic"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -160,7 +160,7 @@ func (instance *ImpersonationTokenSource) Name() string {
 }
 
 func (instance *ImpersonationTokenSource) Resolve(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
 ) (securitycontract.Token, error) {
     innerToken, resolveErr := instance.inner.Resolve(runtimeInstance, request)
@@ -216,7 +216,7 @@ func (instance *ImpersonationTokenSource) Resolve(
 }
 
 func (instance *ImpersonationTokenSource) logDenied(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     message string,
     target string,
 ) {

@@ -1,12 +1,12 @@
 package contract
 
 import (
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type Command interface {
     Name() string
     Description() string
     Flags() []Flag
-    Run(runtimeInstance runtimecontract.Runtime, commandContext *CommandContext) error
+    Run(runtimeInstance containercontract.Runtime, commandContext *CommandContext) error
 }

@@ -4,9 +4,9 @@ import (
     nethttp "net/http"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* the guard exists to replace the raw dereference with a refusal that names the pattern, so an unqualified recover is satisfied by the very crash it was written to remove. */
@@ -16,7 +16,7 @@ func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
         group.Handle(
             "/x",
-            func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                 return EmptyResponse(200), nil
             },
             RouteOptions{Name: "a", Methods: []string{nethttp.MethodGet}},
@@ -38,7 +38,7 @@ func TestRouteGroup_JoinsPathAndPrefixesName(t *testing.T) {
 
     group.Handle(
         "/user/:id",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
         RouteOptions{Name: "user_show", Methods: []string{nethttp.MethodGet}},
@@ -76,7 +76,7 @@ func TestRouteGroup_MergesDefaultsAndDoesNotOverrideRouteDefault(t *testing.T) {
 
     group.Handle(
         "/:locale?/list/:page",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
         RouteOptions{
@@ -119,7 +119,7 @@ func TestRouteGroup_MergesRequirementsAndDoesNotOverrideRouteRequirement(t *test
 
     group.Handle(
         "/user/:id",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return EmptyResponse(200), nil
         },
         RouteOptions{
@@ -151,7 +151,7 @@ func TestRouteGroup_RejectsAnOptionalSegmentInThePrefix(t *testing.T) {
         func() {
             group.Handle(
                 "/list",
-                func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+                func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
                     return EmptyResponse(200), nil
                 },
                 RouteOptions{Name: "list", Methods: []string{nethttp.MethodGet}},
@@ -181,7 +181,7 @@ func TestRouteGroup_Handle_LeavesTheCallersOptionsUntouched(t *testing.T) {
         Defaults:     map[string]string{},
     }
 
-    handler := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    handler := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return TextResponse(200, "users"), nil
     }
 
@@ -220,7 +220,7 @@ func TestRouteGroup_Handle_LeavesTheCallersOptionsUntouched(t *testing.T) {
 }
 
 func newRouteGroupTestHandler() httpcontract.Handler {
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return EmptyResponse(200), nil
     }
 }

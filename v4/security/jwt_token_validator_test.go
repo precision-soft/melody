@@ -12,8 +12,8 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func signJwtHs256(secret []byte, claims map[string]any) string {
@@ -506,7 +506,7 @@ type revocationEpochStoreStub struct {
 }
 
 func (instance *revocationEpochStoreStub) RevokeBefore(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     userIdentifier string,
     deviceIdentifier string,
     instant time.Time,
@@ -521,7 +521,7 @@ func (instance *revocationEpochStoreStub) RevokeBefore(
 }
 
 func (instance *revocationEpochStoreStub) RevocationEpoch(
-    _ runtimecontract.Runtime,
+    _ containercontract.Runtime,
     userIdentifier string,
     deviceIdentifier string,
 ) (time.Time, error) {

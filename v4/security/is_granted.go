@@ -1,10 +1,10 @@
 package security
 
 import (
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
-func IsGranted(runtimeInstance runtimecontract.Runtime, role string) bool {
+func IsGranted(runtimeInstance containercontract.Runtime, role string) bool {
     if nil == runtimeInstance {
         return false
     }

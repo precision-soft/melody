@@ -3,12 +3,12 @@ package security
 import (
     "errors"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -28,7 +28,7 @@ func (instance *ResolverTokenSource) Name() string {
     return "tokenResolver"
 }
 
-func (instance *ResolverTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *ResolverTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     token, resolveErr := instance.resolver(runtimeInstance, request)
     if false == internal.IsNilInterface(resolveErr) {
         return nil, resolveErr
@@ -60,11 +60,11 @@ func (instance *AuthenticatorTokenSource) Name() string {
     return "authenticatorManager"
 }
 
-func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     token, usedAuthenticator, err := instance.manager.Authenticate(runtimeInstance, request)
     if nil != err {
         if true == usedAuthenticator && true == raisesLoginFailure(err) {
-            eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+            eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
             _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
                 runtimeInstance,
                 securitycontract.EventSecurityLoginFailure,
@@ -105,7 +105,7 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
 
         failureErr := exception.NewError(failureMessage, nil, nil)
 
-        eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
         _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
             runtimeInstance,
             securitycontract.EventSecurityLoginFailure,
@@ -126,7 +126,7 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance runtimecontrac
     }
 
     if true == usedAuthenticator && true == token.IsAuthenticated() {
-        eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
         _, eventSecurityLoginSuccessErr := eventDispatcher.DispatchName(
             runtimeInstance,
             securitycontract.EventSecurityLoginSuccess,

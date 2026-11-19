@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking** with the framework: the fourth major's runtime is read from `v4/container/contract` and built through `v4/container/runtime`, a runtime resolving through its scope only; `runtime.New` and `Runtime.Container()` are gone. See the framework's `UPGRADE.md`.
 - `base_command.go`, `command_create.go`: the migration commands resolve the manager registry under their run's context, the fourth major's resolver form.
 - **Breaking** — `migrate.go`: `RunQueries`, `Up` and `Down` take a `RunnerOption` last; `RunQueriesWithOption`, `UpWithOption` and `DownWithOption` are removed.
 - **Breaking** — `migrate.go`, `command_migrate.go`, `command_rollback.go`: `DefaultRunnerOption` and `SetDefaultRunnerOption` are removed with the process-wide fallback they fed, which the migrate and rollback commands installed for the length of their run; the context the migrator hands every migration is the one channel from a command to its migrations, and a migration that drops it prints to standard output.

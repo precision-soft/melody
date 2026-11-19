@@ -11,12 +11,12 @@ import (
     "unicode"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     mailercontract "github.com/precision-soft/melody/v4/mailer/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* NewSmtpTransport builds the transport, refusing an Address that is empty, not host:port with both halves written, padded, or naming a port the dial cannot read, and a timeout below its minimum or unlimited, by name. */
@@ -192,7 +192,7 @@ type SmtpTransport struct {
     localName              string
 }
 
-func (instance *SmtpTransport) Send(runtimeInstance runtimecontract.Runtime, message mailercontract.Message) error {
+func (instance *SmtpTransport) Send(runtimeInstance containercontract.Runtime, message mailercontract.Message) error {
     /* the runtime's context drives cancellation, so a nil or typed-nil runtime is refused before the dial */
     if true == internal.IsNilInterface(runtimeInstance) {
         return exception.NewError("runtime may not be nil", nil, nil)
@@ -216,7 +216,7 @@ func (instance *SmtpTransport) Send(runtimeInstance runtimecontract.Runtime, mes
     return instance.deliver(runtimeInstance, message.From.Email, recipientList, payload)
 }
 
-func (instance *SmtpTransport) deliver(runtimeInstance runtimecontract.Runtime, from string, recipientList []string, payload []byte) error {
+func (instance *SmtpTransport) deliver(runtimeInstance containercontract.Runtime, from string, recipientList []string, payload []byte) error {
     connection, dialErr := instance.connect(runtimeInstance.Context())
     if nil != dialErr {
         return exception.NewError("smtp dial failed", map[string]any{"address": instance.address}, dialErr)
@@ -381,7 +381,7 @@ func (instance *SmtpTransport) resetSessionDeadline(connection net.Conn) error {
 }
 
 /* watchRuntimeCancellation closes the connection when the runtime context is cancelled, unblocking any command in flight; the caller closes done on return, so a completed delivery stops the watcher without a second close. */
-func watchRuntimeCancellation(runtimeInstance runtimecontract.Runtime, connection net.Conn, done <-chan struct{}) {
+func watchRuntimeCancellation(runtimeInstance containercontract.Runtime, connection net.Conn, done <-chan struct{}) {
     select {
     case <-runtimeInstance.Context().Done():
         connection.Close()

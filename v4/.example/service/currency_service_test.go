@@ -16,9 +16,9 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     melodybound "github.com/precision-soft/melody/v4/bound"
     melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestCurrencyServiceUpdateRate_WritesTheQuoteAndTellsTheListeners(t *testing.T) {
@@ -423,7 +423,7 @@ func TestCurrencyServiceUpdate_AnswersAndPublishesTheRowAsWrittenAfterAConcurren
     var published *entity.Currency
     dispatcher.dispatcher.AddListener(
         event.CurrencyUpdatedEventName,
-        func(listenerRuntime melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+        func(listenerRuntime melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
             if updatedEvent, isUpdated := eventValue.Payload().(*event.CurrencyUpdatedEvent); true == isUpdated {
                 published = updatedEvent.Currency()
             }

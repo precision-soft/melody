@@ -12,7 +12,7 @@ import (
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/security/totp"
 )
 
@@ -61,7 +61,7 @@ func TestRegisterCliCommands_HandsTheTotpCodeCommandTheStandardInput(t *testing.
     }
 
     captured := &bytes.Buffer{}
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
     if runErr := totpCommand.Run(runtimeInstance, &melodyclicontract.CommandContext{Writer: captured}); nil != runErr {
         t.Fatalf("expected the secret read from the standard input, got %v", runErr)
     }

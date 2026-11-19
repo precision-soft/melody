@@ -11,25 +11,25 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-func newLockRuntime() runtimecontract.Runtime {
+func newLockRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 /* a runtime whose context is already done: the client refuses the command before writing it, so the round trip cannot have reached the store — which is the only state in which an acquire is known NOT to have taken a lease */
-func newCancelledLockRuntime() runtimecontract.Runtime {
+func newCancelledLockRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     cancelledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    return runtime.New(cancelledContext, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(cancelledContext, serviceContainer.NewScope())
 }
 
 /* lockTestSequence keeps the key of a test unique across REPETITIONS. A warm-up lease taken over a wedged
@@ -258,7 +258,7 @@ func TestRedisLock_AcquireKeepsATighterRequestDeadline(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
 
     started := time.Now()
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {

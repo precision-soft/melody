@@ -13,10 +13,9 @@ import (
     "github.com/precision-soft/melody/integrations/bunorm/v4"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/migrate"
 )
@@ -198,7 +197,7 @@ func (instance *refusingCountingProvider) Open(params bunorm.ConnectionParameter
 }
 
 /* newRuntimeWithProvider wires a registry whose one manager opens through the given provider, the way newRuntimeWithDatabase does for a database already opened */
-func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) runtimecontract.Runtime {
+func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) containercontract.Runtime {
     t.Helper()
 
     registry, registryErr := bunorm.NewManagerRegistry(
@@ -222,7 +221,7 @@ func newRuntimeWithProvider(t *testing.T, provider bunorm.Provider) runtimecontr
         container.RegisterOptions{},
     )
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 /* the file is written from the migrations collection alone: bun's generator never touches the database, so none is opened, and a host that is down costs no dial */
@@ -315,7 +314,7 @@ func (instance *nilRegistryScope) Get(ctx context.Context, serviceName string) (
 /* a registry service answering a nil registry is refused as nil, as the database door refuses it, where the create command reported the manager unregistered in a registry that was not there. */
 func TestCreateCommand_RefusesANilRegistryAsNil(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), &nilRegistryScope{Scope: serviceContainer.NewScope()}, serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), &nilRegistryScope{Scope: serviceContainer.NewScope()})
 
     migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(t.TempDir()))
 
@@ -371,7 +370,7 @@ func TestCreateCommand_ALostReportWriteIsAWarningInTheJournalNotAFailure(t *test
         },
         container.RegisterOptions{},
     )
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     directory := t.TempDir()
     migrations := migrate.NewMigrations(migrate.WithMigrationsDirectory(directory))

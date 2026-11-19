@@ -4,7 +4,6 @@ import (
     "context"
     "testing"
 
-    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -16,12 +15,12 @@ func (instance *contextOnlyRuntime) Context() context.Context {
     return instance.ctx
 }
 
-func (instance *contextOnlyRuntime) Scope() containercontract.Scope {
+func (instance *contextOnlyRuntime) Scope() Scope {
     return nil
 }
 
-func (instance *contextOnlyRuntime) Container() containercontract.Container {
-    return nil
+func (instance *contextOnlyRuntime) Kind() Kind {
+    return KindRun
 }
 
 func TestRefuseNilRuntime_RefusesNilATypedNilAndANilContextNamingTheArgument(t *testing.T) {

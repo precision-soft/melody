@@ -10,7 +10,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/session"
     "github.com/precision-soft/melody/v4/validation"
 )
@@ -21,7 +20,7 @@ func TestRequest_BindJsonOversizedBodyReturns413(t *testing.T) {
     router := NewRouter()
     router.Handle(
         "/bind",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             concreteRequest := request.(*Request)
 
             var target map[string]any
@@ -62,7 +61,7 @@ func TestRequest_BindJsonMaxIntBodyLimitStillBinds(t *testing.T) {
     router := NewRouter()
     router.Handle(
         "/bind",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             concreteRequest := request.(*Request)
 
             bindErr = concreteRequest.BindJson(&target)
@@ -100,7 +99,7 @@ func TestRequest_BindJsonInvalidJsonCarriesTheDecoderCause(t *testing.T) {
     router := NewRouter()
     router.Handle(
         "/bind",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             concreteRequest := request.(*Request)
 
             var target map[string]any
@@ -161,7 +160,7 @@ func bindAndValidateOutcome(body string) (error, int, string) {
 
     router.Handle(
         "/articles",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             subject := bindAndValidateSubject{}
 
             bindErr = request.(*Request).BindJsonAndValidate(&subject)
@@ -192,7 +191,7 @@ func TestRequest_BindJsonAndValidateBindsAValidBody(t *testing.T) {
 
     router.Handle(
         "/articles",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             if bindErr := request.(*Request).BindJsonAndValidate(&bound); nil != bindErr {
                 return nil, bindErr
             }
@@ -269,7 +268,7 @@ func TestRequest_BindJsonAndValidateBoundsTheViolationsOfABodyOfManyFailingEleme
 
     router.Handle(
         "/articles",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             bindErr = request.(*Request).BindJsonAndValidate(&subject{})
             if nil != bindErr {
                 return nil, bindErr
@@ -344,7 +343,7 @@ func serveBindJsonAndValidateIntoAPointer(t *testing.T, body string) (error, int
     router := NewRouter()
     router.Handle(
         "/articles",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             var subject *bindAndValidateSubject
 
             bindErr = request.(*Request).BindJsonAndValidate(&subject)
@@ -390,7 +389,7 @@ func TestRequest_BindJsonReturnsOnACyclicChainFromTheBody(t *testing.T) {
     router := NewRouter()
     router.Handle(
         "/bind",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             var target map[string]any
             bindErr = request.(*Request).BindJson(&target)
 

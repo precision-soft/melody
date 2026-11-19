@@ -1,8 +1,8 @@
 package security
 
 import (
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -23,7 +23,7 @@ func (instance *LoginAuthentication) Budget() *SecondFactorBudget {
 }
 
 /* Authenticate answers the manager's token; an authenticated one that presented a second factor gives its account the budget back. */
-func (instance *LoginAuthentication) Authenticate(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+func (instance *LoginAuthentication) Authenticate(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
     token, _, authenticateErr := instance.manager.Authenticate(runtimeInstance, request)
     if nil != authenticateErr {
         return nil, authenticateErr

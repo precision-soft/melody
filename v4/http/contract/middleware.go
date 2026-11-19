@@ -3,7 +3,7 @@ package contract
 import (
     "time"
 
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type Middleware func(next Handler) Handler
@@ -25,7 +25,7 @@ type RateLimitDecision struct {
 
 /* RateLimiter charges one call to a key and answers the decision. Both doors take the caller's runtime first and refuse a nil one. A store that could not answer returns an error carrying exception.MarkInfrastructureFailure beside the decision its failure policy gives; a denial beside such an error is answered 503 with Retry-After by the framework, never 429, and any other error beside a denial keeps 429. A limiter that makes no round trip need not read the runtime's context. Reset gives a key its whole budget back and reports a failure to do so. */
 type RateLimiter interface {
-    Allow(runtimeInstance runtimecontract.Runtime, key string) (RateLimitDecision, error)
+    Allow(runtimeInstance containercontract.Runtime, key string) (RateLimitDecision, error)
 
-    Reset(runtimeInstance runtimecontract.Runtime, key string) error
+    Reset(runtimeInstance containercontract.Runtime, key string) error
 }

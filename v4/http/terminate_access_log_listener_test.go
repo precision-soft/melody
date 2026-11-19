@@ -11,13 +11,13 @@ import (
 
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type accessLogRecordingLogger struct {
@@ -60,13 +60,13 @@ func (instance *accessLogRecordingLogger) accessLogContext() (loggingcontract.Co
     return nil, false
 }
 
-func newAccessLogRuntime(recordingLogger *accessLogRecordingLogger) runtimecontract.Runtime {
+func newAccessLogRuntime(recordingLogger *accessLogRecordingLogger) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, recordingLogger, container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
 func TestRegisterKernelTerminateAccessLogListener_RecordsTheRequestItCompleted(t *testing.T) {

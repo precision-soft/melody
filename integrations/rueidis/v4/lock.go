@@ -9,9 +9,9 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/redis/rueidis"
 )
 
@@ -95,12 +95,12 @@ func (instance *redisLock) heldToken() string {
 }
 
 /* callContext caps the runtime context with the call timeout; context.WithTimeout keeps the earlier deadline, so a caller with a tighter one, as the framework's lock helpers renew and release under, still wins. */
-func (instance *redisLock) callContext(runtimeInstance runtimecontract.Runtime) (context.Context, context.CancelFunc) {
+func (instance *redisLock) callContext(runtimeInstance containercontract.Runtime) (context.Context, context.CancelFunc) {
     return context.WithTimeout(runtimeInstance.Context(), instance.callTimeout)
 }
 
 /* Acquire resolves the ttl through lockcontract.ResolveLeaseTtl: a Redis lock is a lease whose expiry is the crash safety, so an unlimited ttl, a key with no expiry that would strand the lock forever when its holder died, is refused naming it. Session-style locks that hold until the connection drops belong to the MySQL GET_LOCK and PostgreSQL advisory lockers; this backend fails closed. */
-func (instance *redisLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *redisLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     ttl, ttlErr := lockcontract.ResolveLeaseTtl(instance.ttl)
     if nil != ttlErr {
         return false, ttlErr
@@ -180,7 +180,7 @@ func (instance *redisLock) releaseAmbiguousAcquire(acquisitionToken string) {
 }
 
 /* Release gives up the lease this handle holds. A handle that holds none returns without a round trip, which is the published contract, a no-op reporting no error, and the only correct answer, since there is no token to compare. The claim is dropped only once the store answered, since a release whose round trip never landed leaves the lease standing under a token only this handle can name. */
-func (instance *redisLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *redisLock) Release(runtimeInstance containercontract.Runtime) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
 
@@ -202,7 +202,7 @@ func (instance *redisLock) Release(runtimeInstance runtimecontract.Runtime) erro
     return nil
 }
 
-func (instance *redisLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *redisLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     resolvedTtl, ttlErr := lockcontract.ResolveLeaseRefreshTtl(ttl)
     if nil != ttlErr {
         return ttlErr

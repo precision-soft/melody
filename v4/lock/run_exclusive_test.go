@@ -12,16 +12,15 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-func testRuntimeWithContext(ctx context.Context) runtimecontract.Runtime {
+func testRuntimeWithContext(ctx context.Context) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(ctx, serviceContainer.NewScope())
 }
 
 type acquireFailingLocker struct{}
@@ -32,15 +31,15 @@ func (instance *acquireFailingLocker) CreateLock(name string, ttl bound.Duration
 
 type acquireFailingLock struct{}
 
-func (instance *acquireFailingLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *acquireFailingLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return false, exception.NewError("store unreachable", nil, nil)
 }
 
-func (instance *acquireFailingLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *acquireFailingLock) Release(runtimeInstance containercontract.Runtime) error {
     return nil
 }
 
-func (instance *acquireFailingLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *acquireFailingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     return nil
 }
 
@@ -56,15 +55,15 @@ type refreshFailingLock struct {
     inner lockcontract.Lock
 }
 
-func (instance *refreshFailingLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *refreshFailingLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return instance.inner.Acquire(runtimeInstance)
 }
 
-func (instance *refreshFailingLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *refreshFailingLock) Release(runtimeInstance containercontract.Runtime) error {
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *refreshFailingLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *refreshFailingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     return exception.NewError("lease lost", nil, nil)
 }
 
@@ -77,15 +76,15 @@ func (instance *contextCancelledAcquireLocker) CreateLock(name string, ttl bound
 
 type contextCancelledAcquireLock struct{}
 
-func (instance *contextCancelledAcquireLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *contextCancelledAcquireLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return false, exception.NewError("acquire aborted", nil, runtimeInstance.Context().Err())
 }
 
-func (instance *contextCancelledAcquireLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *contextCancelledAcquireLock) Release(runtimeInstance containercontract.Runtime) error {
     return nil
 }
 
-func (instance *contextCancelledAcquireLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *contextCancelledAcquireLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     return nil
 }
 
@@ -94,7 +93,7 @@ func TestRunExclusive_RunsAndReleases(t *testing.T) {
     runtimeInstance := testRuntime()
 
     ranFirst := false
-    ran, runErr := RunExclusive(runtimeInstance, locker, "cron:tick", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime runtimecontract.Runtime) error {
+    ran, runErr := RunExclusive(runtimeInstance, locker, "cron:tick", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime containercontract.Runtime) error {
         ranFirst = true
         return nil
     })
@@ -104,7 +103,7 @@ func TestRunExclusive_RunsAndReleases(t *testing.T) {
 
     /* the lock must be released right after the run, not after the ttl */
     ranSecond := false
-    ran, runErr = RunExclusive(runtimeInstance, locker, "cron:tick", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime runtimecontract.Runtime) error {
+    ran, runErr = RunExclusive(runtimeInstance, locker, "cron:tick", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime containercontract.Runtime) error {
         ranSecond = true
         return nil
     })
@@ -124,7 +123,7 @@ func TestRunExclusive_SkipsWhenHeldByAnotherHolder(t *testing.T) {
     }
 
     called := false
-    ran, runErr := RunExclusive(runtimeInstance, locker, "cron:held", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime runtimecontract.Runtime) error {
+    ran, runErr := RunExclusive(runtimeInstance, locker, "cron:held", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime containercontract.Runtime) error {
         called = true
         return nil
     })
@@ -141,7 +140,7 @@ func TestRunExclusive_FailsClosedOnAcquireError(t *testing.T) {
     runtimeInstance := testRuntime()
 
     called := false
-    ran, runErr := RunExclusive(runtimeInstance, &acquireFailingLocker{}, "cron:error", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime runtimecontract.Runtime) error {
+    ran, runErr := RunExclusive(runtimeInstance, &acquireFailingLocker{}, "cron:error", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime containercontract.Runtime) error {
         called = true
         return nil
     })
@@ -162,7 +161,7 @@ func TestRunExclusive_AcquireCancellationIsShutdownNotError(t *testing.T) {
     runtimeInstance := testRuntimeWithContext(cancelledContext)
 
     called := false
-    ran, runErr := RunExclusive(runtimeInstance, &contextCancelledAcquireLocker{}, "cron:sigterm", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime runtimecontract.Runtime) error {
+    ran, runErr := RunExclusive(runtimeInstance, &contextCancelledAcquireLocker{}, "cron:sigterm", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime containercontract.Runtime) error {
         called = true
         return nil
     })
@@ -180,7 +179,7 @@ func TestRunExclusive_PropagatesFnError(t *testing.T) {
     runtimeInstance := testRuntime()
 
     expected := exception.NewError("work failed", nil, nil)
-    ran, runErr := RunExclusive(runtimeInstance, locker, "cron:failing", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime runtimecontract.Runtime) error {
+    ran, runErr := RunExclusive(runtimeInstance, locker, "cron:failing", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime containercontract.Runtime) error {
         return expected
     })
     if false == ran {
@@ -197,7 +196,7 @@ func TestRunExclusive_RefreshFailureCancelsChildRuntime(t *testing.T) {
     runtimeInstance := testRuntime()
 
     cancelled := false
-    ran, runErr := RunExclusive(runtimeInstance, locker, "cron:lease", ExclusiveConfig{Ttl: bound.Of(20 * time.Millisecond)}, func(childRuntime runtimecontract.Runtime) error {
+    ran, runErr := RunExclusive(runtimeInstance, locker, "cron:lease", ExclusiveConfig{Ttl: bound.Of(20 * time.Millisecond)}, func(childRuntime containercontract.Runtime) error {
         select {
         case <-childRuntime.Context().Done():
             cancelled = true
@@ -227,7 +226,7 @@ func TestRunExclusive_ReleasesEvenWhenCallerContextIsCancelled(t *testing.T) {
 
     runtimeInstance := testRuntimeWithContext(cancelledContext)
 
-    ran, runErr := RunExclusive(runtimeInstance, locker, "cron:sigterm", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime runtimecontract.Runtime) error {
+    ran, runErr := RunExclusive(runtimeInstance, locker, "cron:sigterm", ExclusiveConfig{Ttl: bound.Of(time.Minute)}, func(childRuntime containercontract.Runtime) error {
         return nil
     })
     if nil != runErr || false == ran {
@@ -257,15 +256,15 @@ type recordingRefreshLock struct {
     refreshTtl chan bound.Duration
 }
 
-func (instance *recordingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *recordingRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return instance.inner.Acquire(runtimeInstance)
 }
 
-func (instance *recordingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *recordingRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *recordingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *recordingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     select {
     case instance.refreshTtl <- ttl:
     default:
@@ -288,15 +287,15 @@ type blockingRefreshLock struct {
     closed  bool
 }
 
-func (instance *blockingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *blockingRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return true, nil
 }
 
-func (instance *blockingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *blockingRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return nil
 }
 
-func (instance *blockingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *blockingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     if false == instance.closed {
         instance.closed = true
         close(instance.entered)
@@ -350,7 +349,7 @@ func TestRunExclusive_ATtlBelowTheMinimumIsRefusedBeforeTheLockIsCreated(t *test
             &createLockForbiddenLocker{t: t},
             "tiny-ttl",
             ExclusiveConfig{Ttl: refusedTtl},
-            func(runtimecontract.Runtime) error {
+            func(containercontract.Runtime) error {
                 t.Fatal("the callback ran under a refused ttl")
 
                 return nil
@@ -397,7 +396,7 @@ func (instance *createLockForbiddenLocker) CreateLock(name string, ttl bound.Dur
 }
 
 /* waitForRefreshInFlight blocks until the blocking locker's Refresh has been entered. A loaded runner can schedule the refresh goroutine past the demotion instant, which then demotes without ever calling Refresh; the child runtime's cancellation ends the wait with an error instead of parking the test until the package timeout. */
-func waitForRefreshInFlight(childRuntime runtimecontract.Runtime, entered <-chan struct{}) error {
+func waitForRefreshInFlight(childRuntime containercontract.Runtime, entered <-chan struct{}) error {
     select {
     case <-entered:
         return nil
@@ -421,7 +420,7 @@ func TestRunExclusive_DoesNotHangWhenARefreshIsInFlightAtReturn(t *testing.T) {
             locker,
             "blocking",
             ExclusiveConfig{Ttl: bound.Of(1 * time.Second)},
-            func(childRuntime runtimecontract.Runtime) error {
+            func(childRuntime containercontract.Runtime) error {
                 return waitForRefreshInFlight(childRuntime, entered)
             },
         )
@@ -452,7 +451,7 @@ func TestRunExclusive_ContextCancellationIsShutdownNotLostLease(t *testing.T) {
         locker,
         "shutdown",
         ExclusiveConfig{Ttl: bound.Of(1 * time.Second)},
-        func(childRuntime runtimecontract.Runtime) error {
+        func(childRuntime containercontract.Runtime) error {
             /* wait until a refresh is genuinely in flight, then shut the process down underneath it */
             if waitErr := waitForRefreshInFlight(childRuntime, entered); nil != waitErr {
                 return waitErr
@@ -491,7 +490,7 @@ func TestRunExclusive_ARenewalThatNeverAnswersStopsTheCallback(t *testing.T) {
         locker,
         "job:hanging-refresh",
         ExclusiveConfig{Ttl: bound.Of(ttl)},
-        func(childRuntime runtimecontract.Runtime) error {
+        func(childRuntime containercontract.Runtime) error {
             select {
             case <-childRuntime.Context().Done():
                 cancelled = true
@@ -530,15 +529,15 @@ type slowSucceedingRefreshLock struct {
     delay time.Duration
 }
 
-func (instance *slowSucceedingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *slowSucceedingRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return true, nil
 }
 
-func (instance *slowSucceedingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *slowSucceedingRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return nil
 }
 
-func (instance *slowSucceedingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *slowSucceedingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     select {
     case <-time.After(instance.delay):
         return nil
@@ -559,7 +558,7 @@ func TestRunExclusive_ASlowButSuccessfulRenewalDoesNotLoseTheLease(t *testing.T)
         locker,
         "worker:slow-store",
         ExclusiveConfig{Ttl: bound.Of(ttl)},
-        func(runtimeInstance runtimecontract.Runtime) error {
+        func(runtimeInstance containercontract.Runtime) error {
             time.Sleep(time.Second)
             completed = true
 
@@ -590,7 +589,7 @@ func TestRunExclusive_ARenewalThatCannotLandBeforeTheDemotionInstantLosesTheLeas
         locker,
         "worker:slower-store",
         ExclusiveConfig{Ttl: bound.Of(ttl)},
-        func(runtimeInstance runtimecontract.Runtime) error {
+        func(runtimeInstance containercontract.Runtime) error {
             select {
             case <-runtimeInstance.Context().Done():
                 return nil
@@ -621,7 +620,7 @@ func TestRunExclusive_APersistentlyFailingRenewalStillLosesTheLease(t *testing.T
         locker,
         "worker:dead-store",
         ExclusiveConfig{Ttl: bound.Of(ttl)},
-        func(runtimeInstance runtimecontract.Runtime) error {
+        func(runtimeInstance containercontract.Runtime) error {
             select {
             case <-runtimeInstance.Context().Done():
                 return runtimeInstance.Context().Err()
@@ -657,15 +656,15 @@ type intermittentRefreshLock struct {
     attempts atomic.Int64
 }
 
-func (instance *intermittentRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *intermittentRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return true, nil
 }
 
-func (instance *intermittentRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *intermittentRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return nil
 }
 
-func (instance *intermittentRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *intermittentRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     if 1 == instance.attempts.Add(1) {
         return exception.NewError("refresh dropped by the store", nil, nil)
     }
@@ -685,7 +684,7 @@ func TestRunExclusive_ASingleFailedRenewalIsSurvivedByTheNextOne(t *testing.T) {
         locker,
         "worker:flaky-store",
         ExclusiveConfig{Ttl: bound.Of(ttl)},
-        func(runtimeInstance runtimecontract.Runtime) error {
+        func(runtimeInstance containercontract.Runtime) error {
             time.Sleep(500 * time.Millisecond)
             completed = true
 
@@ -720,16 +719,16 @@ type slowAcquireCountingLock struct {
     locker *slowAcquireCountingLocker
 }
 
-func (instance *slowAcquireCountingLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *slowAcquireCountingLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     time.Sleep(instance.locker.acquireDelay)
     return true, nil
 }
 
-func (instance *slowAcquireCountingLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *slowAcquireCountingLock) Release(runtimeInstance containercontract.Runtime) error {
     return nil
 }
 
-func (instance *slowAcquireCountingLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *slowAcquireCountingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     instance.locker.refreshCount.Add(1)
     return exception.NewError("lease lost", nil, nil)
 }
@@ -743,7 +742,7 @@ func TestRunExclusive_LeaseIsDatedFromTheAcquireIssueInstant(t *testing.T) {
         locker,
         "job:slow-acquire",
         ExclusiveConfig{Ttl: bound.Of(400 * time.Millisecond)},
-        func(childRuntime runtimecontract.Runtime) error {
+        func(childRuntime containercontract.Runtime) error {
             select {
             case <-childRuntime.Context().Done():
                 return nil
@@ -775,15 +774,15 @@ func (instance *releaseFailingLocker) CreateLock(name string, ttl bound.Duration
 
 type releaseFailingLock struct{}
 
-func (instance *releaseFailingLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *releaseFailingLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return true, nil
 }
 
-func (instance *releaseFailingLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *releaseFailingLock) Release(runtimeInstance containercontract.Runtime) error {
     return exception.NewError("store unreachable at release", nil, nil)
 }
 
-func (instance *releaseFailingLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *releaseFailingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     return nil
 }
 
@@ -795,7 +794,7 @@ func TestRunExclusive_FailedReleaseIsLogged(t *testing.T) {
         &releaseFailingLocker{},
         "job:release-fails",
         ExclusiveConfig{Ttl: bound.Of(time.Minute)},
-        func(childRuntime runtimecontract.Runtime) error {
+        func(childRuntime containercontract.Runtime) error {
             return nil
         },
     )
@@ -818,7 +817,7 @@ func TestRunExclusive_LostLeaseKeepsTheCallbackErrorInTheChain(t *testing.T) {
         &refreshFailingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())},
         "job:joined-cause",
         ExclusiveConfig{Ttl: bound.Of(100 * time.Millisecond)},
-        func(childRuntime runtimecontract.Runtime) error {
+        func(childRuntime containercontract.Runtime) error {
             <-childRuntime.Context().Done()
             return callbackErr
         },
@@ -843,17 +842,17 @@ func (instance *panickingRefreshLocker) CreateLock(name string, ttl bound.Durati
 
 type panickingRefreshLock struct{}
 
-func (instance *panickingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *panickingRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return true, nil
 }
 
-func (instance *panickingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *panickingRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return nil
 }
 
 var errPanickingRefreshBackend = exception.NewError("backend exploded", nil, nil)
 
-func (instance *panickingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *panickingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     panic(errPanickingRefreshBackend)
 }
 
@@ -863,7 +862,7 @@ func TestRunExclusive_PanickingRefreshDemotesInsteadOfKillingTheProcess(t *testi
         &panickingRefreshLocker{},
         "job:refresh-panics",
         ExclusiveConfig{Ttl: bound.Of(50 * time.Millisecond)},
-        func(childRuntime runtimecontract.Runtime) error {
+        func(childRuntime containercontract.Runtime) error {
             select {
             case <-childRuntime.Context().Done():
                 return nil
@@ -998,15 +997,15 @@ type slowThenFailingRefreshLock struct {
     locker *slowThenFailingRefreshLocker
 }
 
-func (instance *slowThenFailingRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *slowThenFailingRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return true, nil
 }
 
-func (instance *slowThenFailingRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *slowThenFailingRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return nil
 }
 
-func (instance *slowThenFailingRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *slowThenFailingRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     if 1 == instance.locker.refreshCount.Add(1) {
         time.Sleep(instance.locker.firstDelay)
         return nil
@@ -1024,7 +1023,7 @@ func TestRunExclusive_RenewalLeaseIsDatedFromTheRenewalIssueInstant(t *testing.T
         locker,
         "job:slow-renewal",
         ExclusiveConfig{Ttl: bound.Of(400 * time.Millisecond)},
-        func(childRuntime runtimecontract.Runtime) error {
+        func(childRuntime containercontract.Runtime) error {
             select {
             case <-childRuntime.Context().Done():
                 return nil
@@ -1048,30 +1047,28 @@ type nilableExclusiveScope struct {
 }
 
 type typedNilScopeExclusiveRuntime struct {
-    ctx       context.Context
-    container containercontract.Container
+    ctx context.Context
 }
 
 func (instance *typedNilScopeExclusiveRuntime) Context() context.Context { return instance.ctx }
 func (instance *typedNilScopeExclusiveRuntime) Scope() containercontract.Scope {
     return (*nilableExclusiveScope)(nil)
 }
-func (instance *typedNilScopeExclusiveRuntime) Container() containercontract.Container {
-    return instance.container
+func (instance *typedNilScopeExclusiveRuntime) Kind() containercontract.Kind {
+    return containercontract.KindRun
 }
 
-/* runtime.New refuses a typed-nil scope, and the run re-wraps its runtime through it three times — once inside the deferred release, where the refusal was a second panic in the unwind of the first and the lock stayed held for its ttl; refused at the entry, nothing is held */
+/* runtime.WithContext refuses a typed-nil scope, and the run re-wraps its runtime through it three times — once inside the deferred release, where the refusal was a second panic in the unwind of the first and the lock stayed held for its ttl; refused at the entry, nothing is held */
 func TestRunExclusive_RefusesATypedNilScopeBeforeAcquiring(t *testing.T) {
     locker := NewInMemoryLocker(clock.NewSystemClock())
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     testhelper.AssertPanicsWithError(t, func() {
         _, _ = RunExclusive(
-            &typedNilScopeExclusiveRuntime{ctx: context.Background(), container: serviceContainer},
+            &typedNilScopeExclusiveRuntime{ctx: context.Background()},
             locker,
             "typed-nil-scope",
             ExclusiveConfig{Ttl: bound.Of(time.Minute)},
-            func(runtimecontract.Runtime) error { return nil },
+            func(containercontract.Runtime) error { return nil },
         )
     }, "run exclusive runtime scope is nil")
 
@@ -1090,11 +1087,11 @@ type refreshHoldingLock struct {
     releases                    atomic.Int32
 }
 
-func (instance *refreshHoldingLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *refreshHoldingLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return instance.inner.Acquire(runtimeInstance)
 }
 
-func (instance *refreshHoldingLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *refreshHoldingLock) Release(runtimeInstance containercontract.Runtime) error {
     if 0 < instance.refreshInFlight.Load() {
         instance.releaseWhileRefreshInFlight.Store(true)
     }
@@ -1104,7 +1101,7 @@ func (instance *refreshHoldingLock) Release(runtimeInstance runtimecontract.Runt
     return instance.inner.Release(runtimeInstance)
 }
 
-func (instance *refreshHoldingLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *refreshHoldingLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     instance.refreshInFlight.Add(1)
     defer instance.refreshInFlight.Add(-1)
 
@@ -1133,7 +1130,7 @@ func TestRunExclusive_ACallbackPanicJoinsTheRefreshBeforeReleasing(t *testing.T)
         defer func() { recovered = recover() }()
 
         /* the callback panics while a renewal is on the wire, so the order of the join and the release is observable every time rather than by timing; the ttl leaves the 50ms renewal a quarter of it, 250ms, between the renewal at half the ttl and the demotion instant, where a few milliseconds let a late-scheduled renewal goroutine be demoted before it ever went out */
-        _, _ = RunExclusive(runtimeInstance, locker, "callback-panics", ExclusiveConfig{Ttl: bound.Of(time.Second)}, func(runtimecontract.Runtime) error {
+        _, _ = RunExclusive(runtimeInstance, locker, "callback-panics", ExclusiveConfig{Ttl: bound.Of(time.Second)}, func(containercontract.Runtime) error {
             deadline := time.Now().Add(5 * time.Second)
             for 0 == locker.last.refreshInFlight.Load() {
                 if time.Now().After(deadline) {
@@ -1174,15 +1171,15 @@ func (instance *hangingUntilCancelledRefreshLocker) CreateLock(name string, ttl 
 
 type hangingUntilCancelledRefreshLock struct{}
 
-func (instance *hangingUntilCancelledRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *hangingUntilCancelledRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return true, nil
 }
 
-func (instance *hangingUntilCancelledRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *hangingUntilCancelledRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return nil
 }
 
-func (instance *hangingUntilCancelledRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *hangingUntilCancelledRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     <-runtimeInstance.Context().Done()
 
     return runtimeInstance.Context().Err()
@@ -1200,7 +1197,7 @@ func cancellationDelayUnder(t *testing.T, locker lockcontract.Locker, ttl time.D
         locker,
         "worker:demotion-instant",
         ExclusiveConfig{Ttl: bound.Of(ttl)},
-        func(runtimeInstance runtimecontract.Runtime) error {
+        func(runtimeInstance containercontract.Runtime) error {
             select {
             case <-runtimeInstance.Context().Done():
                 cancelledAfter = time.Since(startedAt)
@@ -1255,15 +1252,15 @@ type contextIgnoringRefreshLock struct {
     delay time.Duration
 }
 
-func (instance *contextIgnoringRefreshLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *contextIgnoringRefreshLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return instance.inner.Acquire(runtimeInstance)
 }
 
-func (instance *contextIgnoringRefreshLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *contextIgnoringRefreshLock) Release(runtimeInstance containercontract.Runtime) error {
     return instance.inner.Release(testRuntimeWithContext(context.Background()))
 }
 
-func (instance *contextIgnoringRefreshLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *contextIgnoringRefreshLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     time.Sleep(instance.delay)
 
     return instance.inner.Refresh(testRuntimeWithContext(context.Background()), ttl)
@@ -1289,7 +1286,7 @@ func TestRunExclusive_ACallbackThatReturnedBeforeTheInstantIsACleanRunWhateverTh
         locker,
         "worker:returned-before-the-instant",
         ExclusiveConfig{Ttl: bound.Of(ttl)},
-        func(runtimecontract.Runtime) error {
+        func(containercontract.Runtime) error {
             time.Sleep(1250 * time.Millisecond)
 
             return nil
@@ -1304,7 +1301,7 @@ func TestRunExclusive_ACallbackThatReturnedBeforeTheInstantIsACleanRunWhateverTh
 func TestRunExclusive_TheZeroConfigurationHandsTheLockerAThirtySecondLease(t *testing.T) {
     locker := &ttlRecordingLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
 
-    ran, runErr := RunExclusive(testRuntime(), locker, "zero-config", ExclusiveConfig{}, func(runtimecontract.Runtime) error {
+    ran, runErr := RunExclusive(testRuntime(), locker, "zero-config", ExclusiveConfig{}, func(containercontract.Runtime) error {
         return nil
     })
     if false == ran || nil != runErr {
@@ -1319,7 +1316,7 @@ func TestRunExclusive_TheZeroConfigurationHandsTheLockerAThirtySecondLease(t *te
 func TestRunExclusive_AnUnlimitedTtlHandsTheLockerASessionLock(t *testing.T) {
     locker := &ttlRecordingLocker{inner: &sessionStyleLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}}
 
-    ran, runErr := RunExclusive(testRuntime(), locker, "session-config", ExclusiveConfig{Ttl: bound.UnlimitedDuration()}, func(runtimecontract.Runtime) error {
+    ran, runErr := RunExclusive(testRuntime(), locker, "session-config", ExclusiveConfig{Ttl: bound.UnlimitedDuration()}, func(containercontract.Runtime) error {
         return nil
     })
     if false == ran || nil != runErr {
@@ -1346,11 +1343,11 @@ type releaseDeadlineLock struct {
     releaseErr chan error
 }
 
-func (instance *releaseDeadlineLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
+func (instance *releaseDeadlineLock) Acquire(runtimeInstance containercontract.Runtime) (bool, error) {
     return true, nil
 }
 
-func (instance *releaseDeadlineLock) Release(runtimeInstance runtimecontract.Runtime) error {
+func (instance *releaseDeadlineLock) Release(runtimeInstance containercontract.Runtime) error {
     if nil != instance.releaseErr {
         instance.releaseErr <- runtimeInstance.Context().Err()
     }
@@ -1367,7 +1364,7 @@ func (instance *releaseDeadlineLock) Release(runtimeInstance runtimecontract.Run
     return nil
 }
 
-func (instance *releaseDeadlineLock) Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error {
+func (instance *releaseDeadlineLock) Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error {
     return nil
 }
 
@@ -1377,7 +1374,7 @@ func TestRunExclusive_ReleasesOnAContextDetachedFromTheRunWithNoDeadlineOfItsOwn
     runContext, cancelRun := context.WithCancel(context.Background())
     runtimeInstance := testRuntimeUnder(runContext)
 
-    _, runErr := RunExclusive(runtimeInstance, locker, "release-detached", ExclusiveConfig{}, func(runtimecontract.Runtime) error {
+    _, runErr := RunExclusive(runtimeInstance, locker, "release-detached", ExclusiveConfig{}, func(containercontract.Runtime) error {
         cancelRun()
 
         return nil
@@ -1403,7 +1400,7 @@ func TestRunExclusive_RenewsTheLeaseWhileTheCallbackWindsDownAfterAStop(t *testi
     locker := &countingRefreshLocker{inner: inner}
 
     var atStop int64
-    ran, err := RunExclusive(testRuntimeWithContext(parentContext), locker, "job:wind-down", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond)}, func(childRuntime runtimecontract.Runtime) error {
+    ran, err := RunExclusive(testRuntimeWithContext(parentContext), locker, "job:wind-down", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond)}, func(childRuntime containercontract.Runtime) error {
         cancelParent()
         <-childRuntime.Context().Done()
         atStop = locker.refreshes()
@@ -1432,7 +1429,7 @@ func TestRunExclusive_StopsRenewingPastTheStopRenewalLimit(t *testing.T) {
     locker := &countingRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
 
     var pastLimit int64
-    _, err := RunExclusive(testRuntimeWithContext(parentContext), locker, "job:past-limit", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond), StopRenewalLimit: bound.Of(60 * time.Millisecond)}, func(childRuntime runtimecontract.Runtime) error {
+    _, err := RunExclusive(testRuntimeWithContext(parentContext), locker, "job:past-limit", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond), StopRenewalLimit: bound.Of(60 * time.Millisecond)}, func(childRuntime containercontract.Runtime) error {
         cancelParent()
 
         time.Sleep(100 * time.Millisecond)
@@ -1457,7 +1454,7 @@ func TestRunExclusive_ALeaseLostDuringTheWindDownIsReported(t *testing.T) {
 
     locker := &switchableRefreshLocker{inner: NewInMemoryLocker(clock.NewSystemClock())}
 
-    _, err := RunExclusive(testRuntimeWithContext(parentContext), locker, "job:lost-in-wind-down", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond)}, func(childRuntime runtimecontract.Runtime) error {
+    _, err := RunExclusive(testRuntimeWithContext(parentContext), locker, "job:lost-in-wind-down", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond)}, func(childRuntime containercontract.Runtime) error {
         locker.fail.Store(true)
         cancelParent()
 
@@ -1472,7 +1469,7 @@ func TestRunExclusive_ALeaseLostDuringTheWindDownIsReported(t *testing.T) {
 }
 
 func TestRunExclusive_RefusesAStopRenewalLimitBelowTheRefreshInterval(t *testing.T) {
-    _, err := RunExclusive(testRuntimeWithContext(context.Background()), NewInMemoryLocker(clock.NewSystemClock()), "job:limit", ExclusiveConfig{Ttl: bound.Of(time.Second), StopRenewalLimit: bound.Of(100 * time.Millisecond)}, func(runtimecontract.Runtime) error {
+    _, err := RunExclusive(testRuntimeWithContext(context.Background()), NewInMemoryLocker(clock.NewSystemClock()), "job:limit", ExclusiveConfig{Ttl: bound.Of(time.Second), StopRenewalLimit: bound.Of(100 * time.Millisecond)}, func(containercontract.Runtime) error {
         t.Fatal("expected the callback not run")
 
         return nil
@@ -1505,7 +1502,7 @@ func TestRunExclusive_TheJoinInterruptsARefreshBlockedAtReturn(t *testing.T) {
     locker := &blockingRefreshLocker{entered: entered}
 
     var returnedAt time.Time
-    _, runErr := RunExclusive(testRuntimeWithContext(context.Background()), locker, "blocking-join", ExclusiveConfig{Ttl: bound.Of(4 * time.Second)}, func(childRuntime runtimecontract.Runtime) error {
+    _, runErr := RunExclusive(testRuntimeWithContext(context.Background()), locker, "blocking-join", ExclusiveConfig{Ttl: bound.Of(4 * time.Second)}, func(childRuntime containercontract.Runtime) error {
         waitErr := waitForRefreshInFlight(childRuntime, entered)
         returnedAt = time.Now()
 
@@ -1529,7 +1526,7 @@ func TestRunExclusive_TheStopRenewalLimitRunsFromTheStopAndWarnsAtOnce(t *testin
 
     var atStop, beforeLimit int64
     warnedBeforeReturn := false
-    _, err := RunExclusive(runtimeInstance, locker, "job:limit-from-stop", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond), StopRenewalLimit: bound.Of(80 * time.Millisecond)}, func(childRuntime runtimecontract.Runtime) error {
+    _, err := RunExclusive(runtimeInstance, locker, "job:limit-from-stop", ExclusiveConfig{Ttl: bound.Of(40 * time.Millisecond), StopRenewalLimit: bound.Of(80 * time.Millisecond)}, func(childRuntime containercontract.Runtime) error {
         time.Sleep(120 * time.Millisecond)
         cancelParent()
         atStop = locker.refreshes()

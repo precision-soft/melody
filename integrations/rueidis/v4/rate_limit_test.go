@@ -10,10 +10,10 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/redis/rueidis"
 )
 
@@ -37,14 +37,14 @@ func rateLimiterTestClient(t *testing.T) rueidis.Client {
     return client
 }
 
-func rateLimiterTestRuntime() runtimecontract.Runtime {
+func rateLimiterTestRuntime() containercontract.Runtime {
     return rateLimiterTestRuntimeWith(context.Background())
 }
 
-func rateLimiterTestRuntimeWith(ctx context.Context) runtimecontract.Runtime {
+func rateLimiterTestRuntimeWith(ctx context.Context) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(ctx, serviceContainer.NewScope())
 }
 
 func closedTestClient(t *testing.T) rueidis.Client {
@@ -334,7 +334,7 @@ func TestRateLimiter_AllowRefusesANilRuntime(t *testing.T) {
     limiter := NewRateLimiter(&stubClient{}, "nil", 1, time.Minute, RateLimiterConfig{FailureMode: FailureModeOpen})
 
     var typedNil *contextOnlyRuntime
-    for name, runtimeInstance := range map[string]runtimecontract.Runtime{
+    for name, runtimeInstance := range map[string]containercontract.Runtime{
         "nil":         nil,
         "typed nil":   typedNil,
         "nil context": &contextOnlyRuntime{},

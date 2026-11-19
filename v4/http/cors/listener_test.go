@@ -14,6 +14,7 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -23,19 +24,17 @@ import (
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/precision-soft/melody/v4/security"
     "github.com/precision-soft/melody/v4/security/accesscontrol"
     "github.com/precision-soft/melody/v4/session"
     sessioncontract "github.com/precision-soft/melody/v4/session/contract"
 )
 
-func newTestRuntime() runtimecontract.Runtime {
+func newTestRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
 func TestRegisterResponseListener_AppliesHeadersToErrorResponse(t *testing.T) {
@@ -308,7 +307,7 @@ func newAccessControlledCorsKernel(registerListenerDoors bool) nethttp.Handler {
     router := http.NewRouter()
     router.Handle(
         "/api/item",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return http.TextResponse(nethttp.StatusCreated, "created"), nil
         },
         http.RouteOptions{Methods: []string{nethttp.MethodPost}},
@@ -441,7 +440,7 @@ func TestMiddleware_And_Listener_PassTheRequestOfTheCall(t *testing.T) {
     var paths []string
     service := pathRecordingService(&paths)
 
-    next := func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    next := func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         return http.EmptyResponse(nethttp.StatusOK), nil
     }
     handler := Middleware(service)(next)

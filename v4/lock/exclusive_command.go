@@ -5,13 +5,13 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const exclusiveCommandLockNamePrefix = "melody:command:"
@@ -108,7 +108,7 @@ func (instance *ExclusiveCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *ExclusiveCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     ran, runErr := RunExclusive(
@@ -116,7 +116,7 @@ func (instance *ExclusiveCommand) Run(
         instance.locker,
         instance.lockName,
         instance.exclusiveConfig,
-        func(childRuntime runtimecontract.Runtime) error {
+        func(childRuntime containercontract.Runtime) error {
             return instance.command.Run(childRuntime, commandContext)
         },
     )

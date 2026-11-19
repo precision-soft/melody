@@ -13,7 +13,6 @@ import (
     "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -132,7 +131,7 @@ func (instance *ProductService) RecordView(ctx context.Context, id string) (int6
 }
 
 func (instance *ProductService) Create(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     productId string,
     name string,
     description string,
@@ -172,7 +171,7 @@ func (instance *ProductService) Create(
 }
 
 func (instance *ProductService) Update(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     id string,
     name string,
     description string,
@@ -228,7 +227,7 @@ func (instance *ProductService) Update(
 }
 
 func (instance *ProductService) DeleteById(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     productId string,
 ) (bool, error) {
     deleted, deleteErr := instance.productRepository.DeleteById(WriteContext(runtimeInstance), productId)

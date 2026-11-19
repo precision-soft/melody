@@ -17,9 +17,8 @@ import (
     store2fa "github.com/precision-soft/melody/v4/.example/twofactor"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect/mysqldialect"
@@ -251,7 +250,7 @@ func withPending(t *testing.T, connector *enrollmentConnector, pendingIdentifier
 }
 
 /* authenticatedTwoFactorRequest builds a request whose runtime carries a token for the given account, the way the firewall leaves it for a caller on the authenticated route. */
-func authenticatedTwoFactorRequest(t *testing.T, target string, userIdentifier string, headers map[string]string) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
+func authenticatedTwoFactorRequest(t *testing.T, target string, userIdentifier string, headers map[string]string) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
     request, runtimeInstance := twoFactorRequest(t, target)
@@ -275,11 +274,11 @@ func authenticatedTwoFactorRequest(t *testing.T, target string, userIdentifier s
 
 /* twoFactorRequest builds a request whose runtime carries NO security context, which is what an
    unauthenticated caller reaches these doors with. */
-func twoFactorRequest(t *testing.T, target string) (*melodyhttp.Request, melodyruntimecontract.Runtime) {
+func twoFactorRequest(t *testing.T, target string) (*melodyhttp.Request, melodycontainercontract.Runtime) {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     request := melodyhttp.NewRequest(
         httptest.NewRequest(nethttp.MethodPost, target, nil),
@@ -294,7 +293,7 @@ func twoFactorRequest(t *testing.T, target string) (*melodyhttp.Request, melodyr
 /* fixedStore hands a door one store whatever the runtime, the source its tests need where production
    resolves the store through the container */
 func fixedStore(store *store2fa.Store) store2fa.StoreSource {
-    return func(runtimeInstance melodyruntimecontract.Runtime) (*store2fa.Store, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime) (*store2fa.Store, error) {
         return store, nil
     }
 }

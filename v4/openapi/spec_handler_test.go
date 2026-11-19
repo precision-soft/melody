@@ -10,17 +10,16 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestSpecificationHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
     router := melodyhttp.NewRouter()
     router.Handle(
         "/products/api/create/",
-        func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
             return nil, nil
         },
         melodyhttp.RouteOptions{Name: "products.create", Methods: []string{"POST"}},
@@ -44,7 +43,7 @@ func TestSpecificationHandler_ServesDocumentFromLiveRoutes(t *testing.T) {
         },
     })
 
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
 
     handler := SpecificationHandler(Info{Title: "Example", Version: "1.0.0"}, registry)
 

@@ -7,10 +7,10 @@ import (
     "sync"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type testAdapterSubscriber struct {
@@ -26,7 +26,7 @@ func TestEventDispatcherAdapter_StopPropagationIsMirroredToOriginalEvent(t *test
     adapter := NewEventDispatcherAdapter(dispatcher)
     _ = adapter.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.StopPropagation()
             return nil
         },
@@ -68,7 +68,7 @@ func TestEventDispatcherAdapter_AddSubscriber_PanicsOnInvalidDefinitions(t *test
             &testAdapterSubscriber{
                 events: map[string][]eventcontract.SubscribedEvent{
                     "": {
-                        NewSubscribedEvent(func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0),
+                        NewSubscribedEvent(func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0),
                     },
                 },
             },
@@ -138,7 +138,7 @@ func TestEventDispatcherAdapter_RemoveListener_RemovesListener(t *testing.T) {
 
     invoked := 0
 
-    listener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    listener := func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         invoked++
         return nil
     }
@@ -171,12 +171,12 @@ func TestEventDispatcherAdapter_RemoveSubscriber_RemovesAllSubscriberListeners(t
 
     invoked := 0
 
-    listenerA := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    listenerA := func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         invoked++
         return nil
     }
 
-    listenerB := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    listenerB := func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         invoked++
         return nil
     }
@@ -213,7 +213,7 @@ func TestEventDispatcherAdapter_RegisteredEventsIsSafeForConcurrentReaders(t *te
     dispatcher, _ := testNewEventDispatcher()
     adapter := NewEventDispatcherAdapter(dispatcher)
 
-    listener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    listener := func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         return nil
     }
 
@@ -248,7 +248,7 @@ func (instance *firstZeroSizeAdapterSubscriber) SubscribedEvents() map[string][]
     return map[string][]eventcontract.SubscribedEvent{
         "zero.size.adapter.first": {
             NewSubscribedEvent(
-                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
                 0,
@@ -263,7 +263,7 @@ func (instance *secondZeroSizeAdapterSubscriber) SubscribedEvents() map[string][
     return map[string][]eventcontract.SubscribedEvent{
         "zero.size.adapter.second": {
             NewSubscribedEvent(
-                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
                 0,
@@ -305,7 +305,7 @@ func TestEventDispatcherAdapter_RemoveListener_ScrubsItsRecordForAListenerTheWra
 
     registration := adapter.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         0,
@@ -367,7 +367,7 @@ func TestEventDispatcherAdapter_RegisteredEvents_ReportsTheRequiredListenerMarks
 
     registration := adapter.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         0,
@@ -419,11 +419,11 @@ func (instance *testPlainEventDispatcher) RemoveSubscriber(registration eventcon
     return 0
 }
 
-func (instance *testPlainEventDispatcher) Dispatch(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
+func (instance *testPlainEventDispatcher) Dispatch(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) (eventcontract.Event, error) {
     return eventValue, nil
 }
 
-func (instance *testPlainEventDispatcher) DispatchName(runtimeInstance runtimecontract.Runtime, eventName string, payload any) (eventcontract.Event, error) {
+func (instance *testPlainEventDispatcher) DispatchName(runtimeInstance containercontract.Runtime, eventName string, payload any) (eventcontract.Event, error) {
     return nil, nil
 }
 
@@ -437,7 +437,7 @@ func TestEventDispatcherAdapter_AddListener_RefusesAnEmptyNameAndANilListener(t 
         func() {
             _ = adapter.AddListener(
                 "",
-                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
                 0,
@@ -468,7 +468,7 @@ func TestEventDispatcherAdapter_AddSubscriber_SecondRegistrationIsItsOwnInstalla
         events: map[string][]eventcontract.SubscribedEvent{
             "e": {
                 NewSubscribedEvent(
-                    func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                         return nil
                     },
                     0,
@@ -508,7 +508,7 @@ func TestEventDispatcherAdapter_RemoveListener_DropsTheSubscriberKeyWithItsLastR
         events: map[string][]eventcontract.SubscribedEvent{
             "e": {
                 NewSubscribedEvent(
-                    func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                         return nil
                     },
                     0,
@@ -550,7 +550,7 @@ func TestEventDispatcherAdapter_MarkListenerMaySkipRequiredListeners_RecordsTheM
 
     registration := adapter.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         0,
@@ -578,21 +578,21 @@ func TestEventDispatcherAdapter_RegisteredEvents_BreaksEqualPrioritiesByRegistra
 
     firstRegistration := adapter.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         5,
     )
     secondRegistration := adapter.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         5,
     )
     higherRegistration := adapter.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         10,
@@ -627,8 +627,8 @@ func TestEventDispatcherAdapter_ConcurrentAddSubscriberInstallsEachWhole(t *test
         subscriber := &testAdapterSubscriber{
             events: map[string][]eventcontract.SubscribedEvent{
                 "adapter.concurrent": {
-                    NewSubscribedEvent(func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0),
-                    NewSubscribedEvent(func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error { return nil }, 1),
+                    NewSubscribedEvent(func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0),
+                    NewSubscribedEvent(func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return nil }, 1),
                 },
             },
         }
@@ -672,12 +672,12 @@ func TestEventDispatcherAdapter_InspectorTiebreakFollowsTheDispatchOrder(t *test
 
     firstRegistration := dispatcher.AddListener(
         "adapter.tiebreak",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error { return nil },
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return nil },
         0,
     )
     secondRegistration := dispatcher.AddListener(
         "adapter.tiebreak",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error { return nil },
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return nil },
         0,
     )
 
@@ -724,7 +724,7 @@ func TestEventDispatcherAdapter_HandsListenersTheOriginalEvent(t *testing.T) {
     seenMarker := 0
     _ = adapter.AddListener(
         "identity.probe",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             if probe, ok := eventValue.(*adapterIdentityProbeEvent); true == ok {
                 seenMarker = probe.marker
             }
@@ -750,7 +750,7 @@ func TestEventDispatcherAdapter_HandsListenersTheOriginalEvent(t *testing.T) {
 
 var errEventDispatcherAdapterListenerFailed = errors.New("the listener failed")
 
-func eventDispatcherAdapterFailingListener(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+func eventDispatcherAdapterFailingListener(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
     return errEventDispatcherAdapterListenerFailed
 }
 

@@ -5,9 +5,9 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* LockTtlRule is the reading every locker gives the ttl it is handed: 30s when left out, at least 1ms, unlimited the session-style lock that holds until its connection drops, which a lease locker refuses through ResolveLeaseTtl and ResolveLeaseRefreshTtl, since its lease would never lapse. */
@@ -54,12 +54,12 @@ func resolveLeaseTtl(ttl bound.Duration, rule bound.Rule[time.Duration]) (time.D
 }
 
 type Lock interface {
-    Acquire(runtimeInstance runtimecontract.Runtime) (bool, error)
+    Acquire(runtimeInstance containercontract.Runtime) (bool, error)
 
     /* Release bounds its own round trip; it may be handed a context that is never done, as the framework's helpers release on one detached from the run's cancellation. */
-    Release(runtimeInstance runtimecontract.Runtime) error
+    Release(runtimeInstance containercontract.Runtime) error
 
-    Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error
+    Refresh(runtimeInstance containercontract.Runtime, ttl bound.Duration) error
 }
 
 type Locker interface {

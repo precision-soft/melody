@@ -12,18 +12,17 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodyserializer "github.com/precision-soft/melody/v4/serializer"
     melodyserializercontract "github.com/precision-soft/melody/v4/serializer/contract"
 )
 
-func textNegotiatingRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
+func textNegotiatingRequest(t *testing.T) (melodycontainercontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
     runtimeInstance := runtimeForEnvironment(t, melodyconfig.EnvironmentProduction)
 
     melodycontainer.MustRegister(
-        runtimeInstance.Container().(melodycontainercontract.Registrar),
+        runtimeInstance.serviceContainer,
         melodyserializer.ServiceSerializerManager,
         func(resolver melodycontainercontract.Resolver) (*melodyserializer.SerializerManager, error) {
             return melodyserializer.NewSerializerManager(

@@ -9,8 +9,8 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
 )
 
 func TestProductEventSubscriber_DropsTheViewCounterOnDelete(t *testing.T) {
@@ -43,7 +43,7 @@ func TestProductEventSubscriber_DropsTheEntriesUnderARequestContextAlreadyDone(t
 
     canceledContext, cancel := context.WithCancel(context.Background())
     cancel()
-    canceledRuntime := melodyruntime.New(canceledContext, runtimeInstance.Scope(), runtimeInstance.Container())
+    canceledRuntime := melodyruntime.WithContext(runtimeInstance, canceledContext)
 
     listener := NewProductEventSubscriber().SubscribedEvents()[event.ProductDeletedEventName][0].Listener()
     _ = listener(canceledRuntime, melodyevent.NewEvent(event.ProductDeletedEventName, event.NewProductDeletedEvent("prod-7"), melodyclock.NewSystemClock().Now()))

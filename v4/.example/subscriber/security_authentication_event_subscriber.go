@@ -3,11 +3,11 @@ package subscriber
 import (
     "time"
 
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -30,7 +30,7 @@ func (instance *SecurityAuthenticationEventSubscriber) SubscribedEvents() map[st
 }
 
 func (instance *SecurityAuthenticationEventSubscriber) onLoginSuccess() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*melodysecurity.LoginSuccessEvent)
         if false == ok {
@@ -73,7 +73,7 @@ func (instance *SecurityAuthenticationEventSubscriber) onLoginSuccess() melodyev
 }
 
 func (instance *SecurityAuthenticationEventSubscriber) onLoginFailure() melodyeventcontract.EventListener {
-    return func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+    return func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
         payloadValue := eventValue.Payload()
         payloadInstance, ok := payloadValue.(*melodysecurity.LoginFailureEvent)
         if false == ok {

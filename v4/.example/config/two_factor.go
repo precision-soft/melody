@@ -16,7 +16,6 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     bun "github.com/uptrace/bun"
@@ -113,6 +112,6 @@ func (instance *Module) buildSecondFactorBudgetLimiter(clockInstance melodyclock
 }
 
 /* checkLoginPassword checks a username and password against the accounts through the user service of the request's container. */
-func checkLoginPassword(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
-    return service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container()).AuthenticateByUsernameAndPassword(runtimeInstance.Context(), username, password)
+func checkLoginPassword(runtimeInstance melodycontainercontract.Runtime, username string, password string) (*entity.User, bool, error) {
+    return service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Scope()).AuthenticateByUsernameAndPassword(runtimeInstance.Context(), username, password)
 }

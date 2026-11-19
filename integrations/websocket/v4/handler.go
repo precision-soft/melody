@@ -12,13 +12,13 @@ import (
     coderwebsocket "github.com/coder/websocket"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* Options declares one stream handler. A limit outside its rule is refused at NewStreamHandler naming the field, at boot through the module. */
@@ -27,7 +27,7 @@ type Options struct {
     TopicResolver func(request httpcontract.Request) string
 
     /* OnMessage receives every inbound frame, nil to drop them. */
-    OnMessage func(runtimeInstance runtimecontract.Runtime, messageType coderwebsocket.MessageType, payload []byte)
+    OnMessage func(runtimeInstance containercontract.Runtime, messageType coderwebsocket.MessageType, payload []byte)
 
     /* WriteTimeout bounds one write: 10s by default, at least 1ms, unlimited refused. */
     WriteTimeout bound.Duration
@@ -136,7 +136,7 @@ func NewStreamHandler(hub *melodyhttp.ServerSentEventHub, options Options) httpc
 func newStreamHandler(hub *melodyhttp.ServerSentEventHub, resolved resolvedOptions) httpcontract.Handler {
     options := resolved.options
 
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
         /* a hub that has shut down serves no stream: Subscribe on it hands back a closed channel, which the event loop would read as an ordinary end of stream after a 101, indistinguishable from a peer that went away. The request is refused before the upgrade with 503, as an empty resolved topic is with 400, so a client connecting during the shutdown drain is told to come back rather than handed a server error. */
         if true == hub.IsClosed() {
             return nil, exception.NewHttpException(
@@ -229,7 +229,7 @@ func readLoop(
     ctx context.Context,
     cancel context.CancelFunc,
     connection *coderwebsocket.Conn,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     options Options,
     liveness *connectionLiveness,
     logger connectionLogger,
@@ -381,7 +381,7 @@ func pingLoop(
 
 /* the read goroutine runs outside the kernel's panic recovery, so a panic in the user OnMessage callback would crash the whole process; recover it, log it, and signal the connection to close. */
 func dispatchOnMessage(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     options Options,
     messageType coderwebsocket.MessageType,
     payload []byte,
@@ -442,7 +442,7 @@ type connectionLogger struct {
     logger loggingcontract.Logger
 }
 
-func newConnectionLogger(runtimeInstance runtimecontract.Runtime) connectionLogger {
+func newConnectionLogger(runtimeInstance containercontract.Runtime) connectionLogger {
     return connectionLogger{logger: logging.LoggerFromRuntime(runtimeInstance)}
 }
 

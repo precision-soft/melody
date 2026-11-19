@@ -1,9 +1,9 @@
 package contract
 
 import (
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
-type StackNext func(runtimeInstance runtimecontract.Runtime, envelope Envelope) (Envelope, error)
+type StackNext func(runtimeInstance containercontract.Runtime, envelope Envelope) (Envelope, error)
 
-type Middleware func(runtimeInstance runtimecontract.Runtime, envelope Envelope, next StackNext) (Envelope, error)
+type Middleware func(runtimeInstance containercontract.Runtime, envelope Envelope, next StackNext) (Envelope, error)

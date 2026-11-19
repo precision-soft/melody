@@ -2,7 +2,7 @@ package example
 
 import (
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type BillingCleanupCommand struct{}
@@ -23,7 +23,7 @@ func (instance *BillingCleanupCommand) Flags() []melodyclicontract.Flag {
     return nil
 }
 
-func (instance *BillingCleanupCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *BillingCleanupCommand) Run(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     return nil
 }
 

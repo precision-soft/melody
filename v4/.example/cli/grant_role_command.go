@@ -9,7 +9,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* GrantRoleCommand grants an application role to the account named as its argument. Its own --role flag shows that an application command may reuse a name the runtime understands, since the runtime's --mode/--role are recognized only before the command name; the flag is required, so the framework refuses an invocation without it before the command runs, and -r is its short spelling. It holds the user service through a container.Lazy handle, resolved at the first run rather than when the command is constructed. */
@@ -40,7 +40,7 @@ func (instance *GrantRoleCommand) Flags() []melodyclicontract.Flag {
     }
 }
 
-func (instance *GrantRoleCommand) Run(runtimeInstance melodyruntimecontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
+func (instance *GrantRoleCommand) Run(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     writer := commandContext.Writer
 
     /* the flag is trimmed and judged against the roles the application knows before anything is read, as the two admin doors normalise what they store: an untrimmed role would never match the no-op check and be appended on every re-run, and a misspelt one would be reported as granted while the voter, which compares exactly, grants nothing */

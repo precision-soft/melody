@@ -31,7 +31,7 @@ import (
     "github.com/precision-soft/melody/v4/application"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 func main() {
@@ -41,7 +41,7 @@ func main() {
         "GET",
         "/health",
         func(
-            runtimeInstance melodyruntimecontract.Runtime,
+            runtimeInstance melodycontainercontract.Runtime,
             writer nethttp.ResponseWriter,
             request melodyhttpcontract.Request,
         ) (melodyhttpcontract.Response, error) {
@@ -81,7 +81,7 @@ Melody is designed for teams that want:
 At a high level, a Melody application is assembled as follows:
 
 - **Application** ([code](./application/)) wires modules and services into a **container** ([code](./container/)).
-- A **runtime** ([code](./runtime/)) owns the lifecycle (boot/compile/run/shutdown) and creates request/command scopes.
+- A **runtime** ([code](./container/runtime/)) owns the lifecycle (boot/compile/run/shutdown) and creates request/command scopes.
 - **HTTP** ([code](./http/)) uses the runtime + container scopes to run middleware and dispatch handlers.
 - **CLI** ([code](./cli/)) runs commands inside the same runtime/container infrastructure.
 - Cross-cutting packages are wired as services: [logging](./logging/), [event](./event/), [validation](./validation/), [cache](./cache/), [session](./session/), [security](./security/).
@@ -267,7 +267,7 @@ Each package below links to its source folder and its package documentation.
 - **OPENAPI** — [code](./openapi/) | [docs](.documentation/package/OPENAPI.md)\
   OpenAPI 3.0.3 document generation from routes and Go types.
 
-- **RUNTIME** — [code](./runtime/) | [docs](.documentation/package/RUNTIME.md)\
+- **RUNTIME** — [code](./container/runtime/) | [docs](.documentation/package/RUNTIME.md)\
   Application runtime lifecycle, boot/compile/run, and wiring orchestration.
 
 - **SECURITY** — [code](./security/) | [docs](.documentation/package/SECURITY.md)\

@@ -3,7 +3,7 @@ package migrate
 import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/uptrace/bun/migrate"
 )
 
@@ -30,12 +30,12 @@ func (instance *RollbackCommand) Flags() []clicontract.Flag {
     )
 }
 
-func (instance *RollbackCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *RollbackCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     return instance.base.run(instance.Name(), runtimeInstance, commandContext, instance.runRollback)
 }
 
 func (instance *RollbackCommand) runRollback(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
     outputInstance *commandOutput,
 ) (runErr error) {

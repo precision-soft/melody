@@ -14,11 +14,10 @@ import (
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
@@ -29,7 +28,7 @@ func plainRequest(t *testing.T) melodyhttpcontract.Request {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     return melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodGet, "/products/", nil), nil, runtimeInstance, nil)
 }
@@ -98,7 +97,7 @@ func budgetOverPassword() *SecondFactorBudget {
 }
 
 func budgetOverPasswordWithLimiter(limiter melodyhttpcontract.RateLimiter) *SecondFactorBudget {
-    password := NewPasswordAuthenticator(func(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
+    password := NewPasswordAuthenticator(func(runtimeInstance melodycontainercontract.Runtime, username string, password string) (*entity.User, bool, error) {
         if "secret" != password {
             return nil, false, nil
         }
@@ -180,7 +179,7 @@ func mustSession(sessionInstance melodysessioncontract.Session, sessionErr error
 }
 
 /* withItsRuntime hands a door the request together with the runtime the request carries */
-func withItsRuntime(request melodyhttpcontract.Request) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
+func withItsRuntime(request melodyhttpcontract.Request) (melodycontainercontract.Runtime, melodyhttpcontract.Request) {
     if nil == request {
         return nil, nil
     }

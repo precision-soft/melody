@@ -4,9 +4,9 @@ import (
     "sync"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestHandlerLocator_ConcurrentRegisterAndLookup(t *testing.T) {
@@ -18,7 +18,7 @@ func TestHandlerLocator_ConcurrentRegisterAndLookup(t *testing.T) {
         waitGroup.Add(1)
         go func() {
             defer waitGroup.Done()
-            RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
+            RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
                 return nil
             })
         }()
@@ -42,7 +42,7 @@ type locatorNilPinMessage struct{}
 /* a nil message is refused by the function handler as an unexpected type, the actual type spelled "<nil>", where reflect.TypeOf(nil).String() panicked. */
 func TestFunctionHandler_RefusesANilMessageWithoutPanicking(t *testing.T) {
     handler := &functionHandler[locatorNilPinMessage]{
-        handle: func(runtimeInstance runtimecontract.Runtime, message locatorNilPinMessage, envelope messagebuscontract.Envelope) error { return nil },
+        handle: func(runtimeInstance containercontract.Runtime, message locatorNilPinMessage, envelope messagebuscontract.Envelope) error { return nil },
     }
 
     handleErr := handler.Handle(nil, nil)
@@ -71,7 +71,7 @@ func TestRegisterHandler_HandsTheEnvelopeOfTheDeliveryToTheHandler(t *testing.T)
     locator := NewHandlerLocator()
 
     var seenId string
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
         seenId, _ = MessageId(envelope)
 
         return nil
@@ -92,7 +92,7 @@ func TestHandleMessageMiddleware_HandsTheDispatchedEnvelopeToTheHandler(t *testi
     locator := NewHandlerLocator()
 
     var seenId string
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
+    RegisterHandler(locator, func(runtimeInstance containercontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
         seenId, _ = MessageId(envelope)
 
         return nil

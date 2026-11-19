@@ -122,7 +122,6 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const userProfileCacheKey = "example.userProfile:42"
@@ -182,11 +181,11 @@ func registerCacheOverrides(
 
 func loadUserProfile(
     ctx context.Context,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
 ) (userProfile, error) {
     cacheInstance := cache.CacheMustFromResolver(
         ctx,
-        runtimeInstance.Container(),
+        runtimeInstance.Scope(),
     )
 
     return cache.Remember(

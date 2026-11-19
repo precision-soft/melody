@@ -6,9 +6,9 @@ import (
 
     "github.com/precision-soft/melody/v4/bag"
     bagcontract "github.com/precision-soft/melody/v4/bag/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -21,7 +21,7 @@ func (instance *firewallTestRule) Applies(request httpcontract.Request) bool {
     return instance.appliesCallback(request)
 }
 
-func (instance *firewallTestRule) Check(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) error {
+func (instance *firewallTestRule) Check(runtimeInstance containercontract.Runtime, request httpcontract.Request) error {
     return instance.checkCallback(request)
 }
 
@@ -105,7 +105,7 @@ func TestFirewall_Check_ReturnsFirstError(t *testing.T) {
 }
 
 var _ bagcontract.ParameterBag = bag.NewParameterBag()
-var _ runtimecontract.Runtime = nil
+var _ containercontract.Runtime = nil
 
 func TestNewFirewall_TypedNilRulePanics(t *testing.T) {
     var typedNilRule *ApiKeyHeaderRule

@@ -18,11 +18,11 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    "github.com/precision-soft/melody/v4/runtime"
     "github.com/uptrace/bun"
     "github.com/uptrace/bun/dialect"
     "github.com/uptrace/bun/dialect/mysqldialect"
@@ -422,7 +422,7 @@ func runEncryptCommand(t *testing.T, command clicontract.Command, arguments []st
     t.Helper()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     capturing := &capturingCommand{Command: command, runtimeInstance: runtimeInstance}
 

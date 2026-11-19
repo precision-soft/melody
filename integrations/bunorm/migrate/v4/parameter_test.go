@@ -12,10 +12,9 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/logging"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     "github.com/uptrace/bun"
 )
 
@@ -46,7 +45,7 @@ func newParameterConfiguration(values map[string]string) *parameterConfiguration
     return &parameterConfiguration{parameters: parameters}
 }
 
-func newRuntimeWithDatabaseAndParameters(t *testing.T, database *bun.DB, values map[string]string) runtimecontract.Runtime {
+func newRuntimeWithDatabaseAndParameters(t *testing.T, database *bun.DB, values map[string]string) containercontract.Runtime {
     t.Helper()
 
     registry, registryErr := bunorm.NewManagerRegistry(
@@ -78,7 +77,7 @@ func newRuntimeWithDatabaseAndParameters(t *testing.T, database *bun.DB, values 
         container.RegisterOptions{},
     )
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 func TestModule_DeclaresTheTwoTableKeysWithBunNamesAsDefaults(t *testing.T) {
@@ -176,7 +175,7 @@ func exceptionContextText(err error) string {
 func TestResolveTables_ReadsBunNamesWhenNothingConfiguresThem(t *testing.T) {
     database, _ := newFakeBunDatabase()
 
-    for name, runtimeInstance := range map[string]runtimecontract.Runtime{
+    for name, runtimeInstance := range map[string]containercontract.Runtime{
         "no configuration service": newRuntimeWithDatabase(t, database),
         "keys unset":               newRuntimeWithDatabaseAndParameters(t, database, nil),
         "keys empty":               newRuntimeWithDatabaseAndParameters(t, database, map[string]string{ParameterMigrationsTable: "", ParameterLocksTable: ""}),

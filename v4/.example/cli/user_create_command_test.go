@@ -11,7 +11,7 @@ import (
 
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/persistence"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 func TestUserCreateCommand_CreatesAnAccountThatSignsInWithThePasswordReadFromItsInput(t *testing.T) {
@@ -110,7 +110,7 @@ func TestUserCreateCommand_GivesUpTheReadWhenTheRuntimeContextEnds(t *testing.T)
     ctx, cancel := context.WithCancel(context.Background())
     cancel()
 
-    runtimeInstance := melodyruntime.New(ctx, fixture.container.NewScope(), fixture.container)
+    runtimeInstance := melodyruntime.NewRun(ctx, fixture.container.NewScope())
     resultChannel := make(chan error, 1)
 
     go func() {

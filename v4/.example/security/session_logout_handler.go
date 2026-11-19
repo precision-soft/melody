@@ -2,11 +2,11 @@ package security
 
 import (
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -22,7 +22,7 @@ type sessionLogoutHandler struct {
 }
 
 func (instance *sessionLogoutHandler) Logout(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     input melodysecuritycontract.LogoutInput,
 ) (*melodysecuritycontract.LogoutResult, error) {

@@ -9,8 +9,8 @@ import (
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/http"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type RouterCommand struct {
@@ -29,7 +29,7 @@ func (instance *RouterCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *RouterCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     startedAt := time.Now()
@@ -50,7 +50,7 @@ func (instance *RouterCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    router := http.RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    router := http.RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
     routes := router.RouteDefinitions()
 
     items := make([]routeListItem, 0, len(routes))

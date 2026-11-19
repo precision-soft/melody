@@ -15,17 +15,16 @@ import (
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 /* deletionRuntime is a runtime over a container holding the cache the user listener drops entries from and a silent journal */
-func deletionRuntime(t *testing.T, cacheInstance melodycachecontract.Cache) melodyruntimecontract.Runtime {
+func deletionRuntime(t *testing.T, cacheInstance melodycachecontract.Cache) melodycontainercontract.Runtime {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -37,14 +36,14 @@ func deletionRuntime(t *testing.T, cacheInstance melodycachecontract.Cache) melo
         return melodylogging.NewNopLogger(), nil
     }, melodycontainer.RegisterOptions{})
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    return melodyruntime.NewRun(context.Background(), containerInstance.NewScope())
 }
 
 /* the three listeners of the deletion, registered in the composition root's order: the cache's first, the token release, then the two-factor release over the given store source */
 func deletionDispatcher(tokenStore melodysecuritycontract.EpochRevocableTokenStore, twoFactorStore twofactor.StoreSource) *melodyevent.EventDispatcher {
     dispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
     dispatcher.AddSubscriber(NewUserEventSubscriber())
-    dispatcher.AddSubscriber(NewAccessTokenReleaseSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
+    dispatcher.AddSubscriber(NewAccessTokenReleaseSubscriber(func(runtimeInstance melodycontainercontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
         return tokenStore
     }))
     dispatcher.AddSubscriber(NewTwoFactorEnrollmentSubscriber(twoFactorStore))
@@ -72,7 +71,7 @@ func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *tes
     tokenStore := melodysecurity.NewInMemoryTokenStore(melodysecurity.InMemoryTokenStoreConfig{})
     tokenStore.Put(releaseTestRuntime(), "token-user-4", melodysecuritycontract.Claims{UserIdentifier: "user-4", DeviceIdentifier: "phone"}, melodybound.UnlimitedDuration())
 
-    panicking := func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+    panicking := func(runtimeInstance melodycontainercontract.Runtime) (*twofactor.Store, error) {
         panic(errors.New("the two-factor store is unreachable"))
     }
 
@@ -95,7 +94,7 @@ func TestUserDeleted_AFailingListenerDoesNotLeaveTheDeletedAccountsTokens(t *tes
     database, recorder := newRecordingDatabase()
 
     controlDispatcher := melodyevent.NewEventDispatcher(clockInstance)
-    controlDispatcher.AddSubscriber(NewAccessTokenReleaseSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
+    controlDispatcher.AddSubscriber(NewAccessTokenReleaseSubscriber(func(runtimeInstance melodycontainercontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
         return controlStore
     }))
     controlDispatcher.AddSubscriber(NewTwoFactorEnrollmentSubscriber(fixedTwoFactorStore(twofactor.NewStore(database))))

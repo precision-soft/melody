@@ -11,9 +11,9 @@ import (
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     urfavecli "github.com/urfave/cli/v3"
 )
 
@@ -29,7 +29,7 @@ func NewCommandContext(applicationName string, applicationDescription string) *c
 }
 
 /* Register appends a command to a root command. The root's streams travel with the registration, since the engine defaults each command's own separately; a stream set on the root afterwards does not reach the command, which Root.SetWriter and Root.SetErrorWriter do. A typed nil stream on the root is copied as the nil the engine defaults, so the command writes to the process's own stream rather than panicking. The command's flags are refused when one is nil, repeats a spelling, carries an empty alias or, under ValidateDefaults, declares a default its own validator refuses, and the engine is handed fresh instances of them, so a command may answer the same instances on every Flags() call. */
-func Register(commandContext *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
+func Register(commandContext *clicontract.CommandContext, command clicontract.Command, runtimeInstance containercontract.Runtime) {
     if nil == commandContext {
         exception.Panic(
             exception.NewError("root cli command may not be nil", nil, nil),
@@ -40,7 +40,7 @@ func Register(commandContext *clicontract.CommandContext, command clicontract.Co
 }
 
 /* registerCommand is the registration Register and Root.Register share: the command is refused when nil, unnamed or named like one already registered, and its flags as prepareCommandFlags refuses them. */
-func registerCommand(rootCommand *clicontract.CommandContext, command clicontract.Command, runtimeInstance runtimecontract.Runtime) {
+func registerCommand(rootCommand *clicontract.CommandContext, command clicontract.Command, runtimeInstance containercontract.Runtime) {
     if true == internal.IsNilInterface(command) {
         exception.Panic(
             exception.NewError("cli command may not be nil", nil, nil),
@@ -112,7 +112,7 @@ func registerCommand(rootCommand *clicontract.CommandContext, command clicontrac
 func runCommandAction(
     commandContext *clicontract.CommandContext,
     command clicontract.Command,
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandName string,
 ) error {
     /* the engine defaults the stream to standard output on every command it runs, so the guard is for an action invoked by hand on a context never run */

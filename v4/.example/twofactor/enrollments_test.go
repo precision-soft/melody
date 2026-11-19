@@ -4,14 +4,14 @@ import (
     "errors"
     "testing"
 
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* a store that could not be built refuses the sign-in that needed it, on both doors of the second factor, rather than reading as an account without one */
 func TestEnrollmentsAnswerTheStoreRefusalOnBothDoors(t *testing.T) {
     refusal := errors.New("the catalogue database refused the migration")
 
-    enrollments := NewEnrollments(func(runtimeInstance melodyruntimecontract.Runtime) (*Store, error) {
+    enrollments := NewEnrollments(func(runtimeInstance melodycontainercontract.Runtime) (*Store, error) {
         return nil, refusal
     })
 

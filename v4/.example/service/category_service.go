@@ -12,7 +12,6 @@ import (
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -98,7 +97,7 @@ func (instance *CategoryService) FindById(ctx context.Context, id string) (*enti
 }
 
 func (instance *CategoryService) Create(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     categoryId string,
     name string,
 ) (*entity.Category, error) {
@@ -115,7 +114,7 @@ func (instance *CategoryService) Create(
 }
 
 func (instance *CategoryService) Update(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     categoryId string,
     name string,
 ) (*entity.Category, bool, error) {
@@ -148,7 +147,7 @@ func (instance *CategoryService) Update(
 }
 
 func (instance *CategoryService) DeleteById(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     categoryId string,
 ) (bool, error) {
     deleted := false

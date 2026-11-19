@@ -4,15 +4,15 @@ import (
     "bytes"
     "testing"
 
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodymailercontract "github.com/precision-soft/melody/v4/mailer/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type recordingMailer struct {
     sent []melodymailercontract.Message
 }
 
-func (instance *recordingMailer) Send(runtimeInstance melodyruntimecontract.Runtime, message melodymailercontract.Message) error {
+func (instance *recordingMailer) Send(runtimeInstance melodycontainercontract.Runtime, message melodymailercontract.Message) error {
     instance.sent = append(instance.sent, message)
 
     return nil

@@ -1,10 +1,10 @@
 package security
 
 import (
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -51,7 +51,7 @@ func (instance *ApiKeyHeaderAuthenticator) Supports(request httpcontract.Request
     return "" != headerValue
 }
 
-func (instance *ApiKeyHeaderAuthenticator) Authenticate(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+func (instance *ApiKeyHeaderAuthenticator) Authenticate(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
     headerValue := request.Header(instance.headerName)
 
     if false == constantTimeSecretEquals(instance.expectedValue, headerValue) {

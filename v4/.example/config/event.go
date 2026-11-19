@@ -12,13 +12,13 @@ import (
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     melodybound "github.com/precision-soft/melody/v4/bound"
     melodyconfig "github.com/precision-soft/melody/v4/config"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcors "github.com/precision-soft/melody/v4/http/cors"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
@@ -57,8 +57,8 @@ func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.
 
     /* the tokens go with the account, from the store the token firewalls read: redis when wired, the process's own otherwise. The release outranks every other listener of the deletion, so no outage of theirs skips it; an outage of its own store fails the deletion loudly, and the device firewall refuses the tokens it left, its account being gone */
     eventDispatcher.AddSubscriber(
-        subscriber.NewAccessTokenReleaseSubscriber(func(runtimeInstance melodyruntimecontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
-            return examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+        subscriber.NewAccessTokenReleaseSubscriber(func(runtimeInstance melodycontainercontract.Runtime) melodysecuritycontract.EpochRevocableTokenStore {
+            return examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
         }),
     )
 
@@ -141,7 +141,7 @@ func requestBudgetConfig(trustedProxyResolver *trustedProxyResolver) melodyhttpm
 func (instance *Module) registerRequiredRequestContextListener(eventDispatcher melodyeventcontract.EventDispatcher) {
     registration := eventDispatcher.AddListener(
         melodykernelcontract.EventKernelRequest,
-        func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+        func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*melodyhttp.KernelRequestEvent)
             if false == ok || nil == requestEvent || nil == requestEvent.Request() {
                 return nil
@@ -163,7 +163,7 @@ func (instance *Module) registerRequiredRequestContextListener(eventDispatcher m
 func (instance *Module) registerApiExceptionListener(eventDispatcher melodyeventcontract.EventDispatcher) {
     eventDispatcher.AddListener(
         melodykernelcontract.EventKernelException,
-        func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+        func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
             exceptionEvent, ok := eventValue.Payload().(*melodyhttp.KernelExceptionEvent)
             if false == ok || nil == exceptionEvent || nil == exceptionEvent.Request() {
                 return nil

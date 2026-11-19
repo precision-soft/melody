@@ -11,7 +11,6 @@ import (
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -42,7 +41,7 @@ func NewCatalogJournalService(
 
 /* Record writes one entry, stamped by the injected clock and attributed to whoever the request was authenticated as. */
 func (instance *CatalogJournalService) Record(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     action string,
     subject string,
     subjectId string,
@@ -65,7 +64,7 @@ func (instance *CatalogJournalService) Record(
 const CatalogJournalActorProcessPrefix = "process:"
 
 /* ActorFromRuntime names whoever is behind the change: the signed-in user; a console run, as process:<id>, the identifier its journal records carry, so the audit trail says which run granted a role; and an unauthenticated request or a run with no process context, as the system rather than an empty actor. */
-func ActorFromRuntime(runtimeInstance melodyruntimecontract.Runtime) string {
+func ActorFromRuntime(runtimeInstance melodycontainercontract.Runtime) string {
     token, found := examplesecurity.TokenFromRuntime(runtimeInstance)
     if true == found && true == token.IsAuthenticated() {
         identifier := strings.TrimSpace(token.UserIdentifier())
@@ -86,6 +85,6 @@ func MustGetCatalogJournalService(ctx context.Context, resolver melodycontainerc
 }
 
 /* WriteContext is the context a change to the nomenclature is made under, carrying who makes it, so a repository that receives a context rather than a runtime can still name a person in the audit trail. The actor travels as a plain string under a key the persistence package owns, which keeps the ORM's actor helper out of the service layer. */
-func WriteContext(runtimeInstance melodyruntimecontract.Runtime) context.Context {
+func WriteContext(runtimeInstance melodycontainercontract.Runtime) context.Context {
     return persistence.WithActor(runtimeInstance.Context(), ActorFromRuntime(runtimeInstance))
 }

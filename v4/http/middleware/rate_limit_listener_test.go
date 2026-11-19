@@ -1,9 +1,9 @@
 package middleware
 
 import (
+    "context"
     "errors"
     "io"
-    "context"
     nethttp "net/http"
     "net/http/httptest"
     "testing"
@@ -11,6 +11,8 @@ import (
 
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -19,19 +21,17 @@ import (
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-func newRateLimitListenerTestRuntime() runtimecontract.Runtime {
+func newRateLimitListenerTestRuntime() containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logging.NewNopLogger(), container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRequest(context.Background(), scope)
 }
 
-func newRateLimitListenerTestRequestEvent(runtimeInstance runtimecontract.Runtime) *http.KernelRequestEvent {
+func newRateLimitListenerTestRequestEvent(runtimeInstance containercontract.Runtime) *http.KernelRequestEvent {
     request := httptest.NewRequest(nethttp.MethodPost, "/api/item", nil)
     request.RemoteAddr = "203.0.113.7:4711"
 
@@ -148,7 +148,7 @@ func TestRegisterRateLimitRequestListener_ChargesTheBudgetBeforeTheSecurityChain
     authenticatorPaidRounds := 0
     dispatcher.AddListener(
         kernelcontract.EventKernelRequest,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             requestEvent, ok := eventValue.Payload().(*http.KernelRequestEvent)
             if false == ok || nil == requestEvent {
                 return nil
@@ -207,7 +207,7 @@ func TestRegisterRateLimitRequestListener_ACancelledLimiterCallIsRecordedAtWarni
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, capture, container.OverrideOptions{})
-    runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
+    runtimeInstance := runtime.NewRequest(context.Background(), scope)
 
     dispatcher := event.NewEventDispatcher(clock.NewSystemClock())
 

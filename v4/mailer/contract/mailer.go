@@ -1,7 +1,7 @@
 package contract
 
 import (
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 type Address struct {
@@ -31,9 +31,9 @@ type Message struct {
 }
 
 type Mailer interface {
-    Send(runtimeInstance runtimecontract.Runtime, message Message) error
+    Send(runtimeInstance containercontract.Runtime, message Message) error
 }
 
 type Transport interface {
-    Send(runtimeInstance runtimecontract.Runtime, message Message) error
+    Send(runtimeInstance containercontract.Runtime, message Message) error
 }

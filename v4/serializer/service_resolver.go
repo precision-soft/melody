@@ -1,11 +1,11 @@
 package serializer
 
 import (
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     serializercontract "github.com/precision-soft/melody/v4/serializer/contract"
 )
 
@@ -15,11 +15,11 @@ const (
     ServiceSerializerManager = "service.serializer.manager"
 )
 
-func SerializerManagerMustFromRuntime(runtimeInstance runtimecontract.Runtime) *SerializerManager {
+func SerializerManagerMustFromRuntime(runtimeInstance containercontract.Runtime) *SerializerManager {
     return runtime.MustFromRuntime[*SerializerManager](runtimeInstance, ServiceSerializerManager)
 }
 
-func SerializerManagerFromRuntime(runtimeInstance runtimecontract.Runtime) *SerializerManager {
+func SerializerManagerFromRuntime(runtimeInstance containercontract.Runtime) *SerializerManager {
     serializerManagerInstance, err := runtime.FromRuntime[*SerializerManager](runtimeInstance, ServiceSerializerManager)
     if nil == serializerManagerInstance || nil != err {
         if nil != err {
@@ -39,12 +39,12 @@ func SerializerManagerFromRuntime(runtimeInstance runtimecontract.Runtime) *Seri
     return serializerManagerInstance
 }
 
-func SerializerMustFromRuntime(runtimeInstance runtimecontract.Runtime) serializercontract.Serializer {
+func SerializerMustFromRuntime(runtimeInstance containercontract.Runtime) serializercontract.Serializer {
     return runtime.MustFromRuntime[serializercontract.Serializer](runtimeInstance, ServiceSerializer)
 }
 
 /* SerializerFromRuntime resolves the request serializer and answers nil when it cannot, logging the failure; a typed nil answers nil too. */
-func SerializerFromRuntime(runtimeInstance runtimecontract.Runtime) serializercontract.Serializer {
+func SerializerFromRuntime(runtimeInstance containercontract.Runtime) serializercontract.Serializer {
     serializerInstance, err := runtime.FromRuntime[serializercontract.Serializer](runtimeInstance, ServiceSerializer)
     if true == internal.IsNilInterface(serializerInstance) || nil != err {
         if nil != err {

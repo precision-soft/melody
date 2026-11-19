@@ -22,6 +22,14 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Runtime: the runtime lives under the container, names its phase, and reaches no container
+
+**What changed.** The `Runtime` contract moved from `v4/runtime/contract` to [`v4/container/contract`](../container/contract/runtime.go), and its implementation, with `FromRuntime` and `MustFromRuntime`, from `v4/runtime` to [`v4/container/runtime`](../container/runtime); the old packages are gone. `Runtime` gains `Kind()`, the phase it stands for, and loses `Container()`: a runtime resolves through its scope, which answers the container's own services as before. `runtime.New(ctx, scope, container)` is replaced by `NewRequest(ctx, scope)` and `NewRun(ctx, scope)`; a runtime over a derived context is `WithContext(runtime, ctx)`, which keeps the kind; the scope of one delivery or one tick inside a run is `NewChildRun(parent, ctx)`. `debug:container` is built over the container it describes, `debug.NewContainerCommand(container)`.
+
+**Symptom.** `no required module provides package github.com/precision-soft/melody/v4/runtime`; `undefined: runtime.New`; `runtimeInstance.Container undefined`; a hand-written runtime `does not implement Runtime (missing method Kind)`; `&debug.ContainerCommand{}` describes nothing.
+
+**Remedy.** Import `github.com/precision-soft/melody/v4/container/runtime` and read `Runtime` from `containercontract`; build a handler's or a listener's test runtime with `runtime.NewRequest(ctx, scope)`, a command's with `runtime.NewRun(ctx, scope)`; replace `runtime.New(ctx, rt.Scope(), rt.Container())` with `runtime.WithContext(rt, ctx)` and `rt.Container().NewScope()` with `runtime.NewChildRun(rt, ctx)`, closing its scope; resolve through `rt.Scope()` where the code read `rt.Container()`, and keep a container the code registers on or describes beside the runtime, where it was built; a hand-written runtime answers `Kind()`, or is replaced by a constructor; `debug.NewContainerCommand(kernel.ServiceContainer())`.
+
 ### Config: a key is read as `%env(KEY)%`
 
 **What changed.** A `.env` key is no longer a parameter. It was registered as a second name of the parameter it fed, and a line nobody declared as a parameter of its own name; now the configuration's parameter table holds parameter names only, and a template reads a key as `%env(KEY)%`. A `%KEY%` reference to a loaded or declared key is refused with its own message. `MarkSecret` and [`Application.MarkParameterSecret`](../application/application.go) take a parameter name; a `MELODY_*` key nobody declared marks its readers at the boot resolve. `debug:parameters` lists parameters only and drops the `aliases` column. [`EnvironmentKeyDeclarer`](../config/contract/environment_key.go) gains `EnvironmentValue(key)`, the loaded text of a line, which the `application.environment.processVariableIgnored` warning compares for a key nobody declared. A declared key is upper-case letters, digits and underscores, so a lower-case or dotted line (`database_url`, `db.host`) is read through `%env(database_url)%` or `%env(db.host)%` and cannot be declared until it is renamed.
@@ -198,7 +206,7 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Symptom.** A call of `cache.CacheMustFromContainer(…)`, `logging.LoggerMustFromContainer(…)` or any other `…FromContainer` accessor no longer compiles.
 
-**Remedy.** Replace `FromContainer` with `FromResolver` in the name and keep the argument: `cache.CacheMustFromResolver(ctx, runtimeInstance.Container())`.
+**Remedy.** Replace `FromContainer` with `FromResolver` in the name and keep the argument: `cache.CacheMustFromResolver(ctx, runtimeInstance.Scope())`.
 
 ### Security: a voter and the decision manager receive the runtime
 
@@ -206,7 +214,7 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Symptom.** A `Voter` of the application's own no longer satisfies the interface; `securitycontract.FallibleVoter` is undefined; `manager.DecideAll(token, attributes, subject)` reports not enough arguments.
 
-**Remedy.** Add the runtime as the first parameter and `nil` as the second result; a voter that implemented `VoteWithError` renames it `Vote` and deletes the old one; a handler calls `DecideAll(runtimeInstance, token, attributes, subject)`; read a repository through `runtimeInstance.Container()` under `runtimeInstance.Context()` instead of asserting the subject to a request.
+**Remedy.** Add the runtime as the first parameter and `nil` as the second result; a voter that implemented `VoteWithError` renames it `Vote` and deletes the old one; a handler calls `DecideAll(runtimeInstance, token, attributes, subject)`; read a repository through `runtimeInstance.Scope()` under `runtimeInstance.Context()` instead of asserting the subject to a request.
 
 ### Security: an authenticator, a rule and a token resolver receive the runtime
 
@@ -1164,11 +1172,11 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Security: a token store's doors take the runtime and answer an error
 
-**What changed.** Every write door of [`RevocableTokenStore`](../security/contract/token_store.go) and `RevocationEpochStore` takes the caller's runtime first and answers an error: `Put(runtimeInstance, token, claims, ttl) error`, `Delete(runtimeInstance, token) error`, `DeleteByUser(runtimeInstance, user) (int, error)` and `PurgeExpired(runtimeInstance) (int, error)`, the last two answering what they removed before a failure beside the error, and `RevokeBefore(runtimeInstance, user, device, instant) error`. Both framework stores refuse a nil runtime, a typed nil and one whose context is nil at every door, the reads included, through [`runtimecontract.RefuseNilRuntime`](../runtime/contract/refuse.go), naming `runtimeInstance`. A store that could not answer returns an error marked with `exception.MarkInfrastructureFailure`; a refused argument, an absent ttl, an empty user, a zero instant, a user that is not valid UTF-8, an instant outside 1970 to 2262, returns an unmarked one where both stores panicked. Both stores refuse a runtime whose context is already done at every door, marked, carrying the context's error, before any work. The redis store runs every round trip on the runtime's context capped by `TokenStoreConfig.CallTimeout`, so a write is cancelled with the request, names `TokenStoreConfig.CallTimeout` on a round trip that bound cut, and marks a failed `Lookup` or `RevocationEpoch` itself; `Delete` over an unreachable store returns its failure where it panicked.
+**What changed.** Every write door of [`RevocableTokenStore`](../security/contract/token_store.go) and `RevocationEpochStore` takes the caller's runtime first and answers an error: `Put(runtimeInstance, token, claims, ttl) error`, `Delete(runtimeInstance, token) error`, `DeleteByUser(runtimeInstance, user) (int, error)` and `PurgeExpired(runtimeInstance) (int, error)`, the last two answering what they removed before a failure beside the error, and `RevokeBefore(runtimeInstance, user, device, instant) error`. Both framework stores refuse a nil runtime, a typed nil and one whose context is nil at every door, the reads included, through [`containercontract.RefuseNilRuntime`](../container/contract/runtime_refuse.go), naming `runtimeInstance`. A store that could not answer returns an error marked with `exception.MarkInfrastructureFailure`; a refused argument, an absent ttl, an empty user, a zero instant, a user that is not valid UTF-8, an instant outside 1970 to 2262, returns an unmarked one where both stores panicked. Both stores refuse a runtime whose context is already done at every door, marked, carrying the context's error, before any work. The redis store runs every round trip on the runtime's context capped by `TokenStoreConfig.CallTimeout`, so a write is cancelled with the request, names `TokenStoreConfig.CallTimeout` on a round trip that bound cut, and marks a failed `Lookup` or `RevocationEpoch` itself; `Delete` over an unreachable store returns its failure where it panicked.
 
 **Symptom.** `not enough arguments in call to store.Put`; `assignment mismatch: 1 variable but store.DeleteByUser returns 2 values`; `*MyStore does not implement RevocableTokenStore (wrong type for method Delete)`. A door that panicked on a store outage or a refused argument now returns the error, which a caller that ignores it drops silently.
 
-**Remedy.** Pass the runtime first and return or journal the error; an implementation of the application's own marks a store failure with `exception.MarkInfrastructureFailure` and returns an argument refusal unmarked. A revocation or a withdraw that must outlive the request, a compensation after a committed write, is called on a runtime detached from the request's cancellation, `runtime.New(context.WithoutCancel(runtimeInstance.Context()), runtimeInstance.Scope(), runtimeInstance.Container())`, the store's `CallTimeout` still bounding each round trip.
+**Remedy.** Pass the runtime first and return or journal the error; an implementation of the application's own marks a store failure with `exception.MarkInfrastructureFailure` and returns an argument refusal unmarked. A revocation or a withdraw that must outlive the request, a compensation after a committed write, is called on a runtime detached from the request's cancellation, `runtime.WithContext(runtimeInstance, context.WithoutCancel(runtimeInstance.Context()))`, the store's `CallTimeout` still bounding each round trip; the derived runtime keeps the request's scope, which closes with the request, so the call resolves its store before the request returns.
 
 ### Security: the in-memory token store refuses a token past `MaxEntries`
 
@@ -2042,7 +2050,7 @@ The full width is what makes the stamps sortable as text, which is the whole of 
 
 ### Clock and runtime: the nil refusals read through the interface
 
-**What changed.** `ClockMustFromResolver`, `runtime.New` and the `runtime` resolvers judge their arguments through the interface rather than with a plain `nil ==` comparison, so a typed nil is refused by name at the door it was handed to. `selectRuntimeResolver` reads the same way: a custom `Runtime` whose `Scope()` yields a typed nil no longer has its healthy container bypassed.
+**What changed.** `ClockMustFromResolver`, the `runtime` constructors and the `runtime` resolvers judge their arguments through the interface rather than with a plain `nil ==` comparison, so a typed nil is refused by name at the door it was handed to. `selectRuntimeResolver` reads the same way: a custom `Runtime` whose `Scope()` yields a typed nil is refused, a runtime resolving through its scope alone.
 
 **Symptom.** A wiring mistake that used to surface as a nil dereference inside the container package — on the request path, with the panic blaming the container — is now refused where it was made, naming the argument.
 
@@ -2979,7 +2987,7 @@ node than the same amount. Both default to zero, which leaves the behaviour of t
 
 ### Compile-level: `messagebus/contract.Transport`'s `Close` lost its runtime parameter
 
-**What changed.** The contract method is `Close() error`; the former `Close(runtimeInstance runtimecontract.Runtime) error` is gone, and `RegisterTransports` now registers a `TransportsCloser` the container's ordered teardown reaches — built at boot wherever the transports were registered, so a process that never resolves the transports map closes them too.
+**What changed.** The contract method is `Close() error`; the former `Close(runtimeInstance Runtime) error` is gone, and `RegisterTransports` now registers a `TransportsCloser` the container's ordered teardown reaches — built at boot wherever the transports were registered, so a process that never resolves the transports map closes them too.
 
 **Symptom.** A userland transport fails to compile against the interface until the parameter is deleted. The old signature was structurally dead: the teardown recognizes `Close() error` and nothing else, nothing in the framework or any production wiring ever called a transport's `Close`, so every broker connection lived exactly as long as the process and every deploy tore it down abruptly.
 

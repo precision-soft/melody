@@ -8,13 +8,13 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     melodyapplication "github.com/precision-soft/melody/v4/application"
     melodycontainer "github.com/precision-soft/melody/v4/container"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
 /* actorTestRuntime answers a runtime whose scope carries a console run's process context when processId is not empty, and a signed-in token when userIdentifier is not empty */
-func actorTestRuntime(processId string, userIdentifier string) melodyruntimecontract.Runtime {
+func actorTestRuntime(processId string, userIdentifier string) melodycontainercontract.Runtime {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     scope := containerInstance.NewScope()
 
@@ -22,7 +22,7 @@ func actorTestRuntime(processId string, userIdentifier string) melodyruntimecont
         scope.MustOverrideProtectedInstance(melodyapplication.ServiceProcessContext, melodyapplication.NewProcessContext(processId, time.Now()), melodycontainer.OverrideOptions{})
     }
 
-    runtimeInstance := melodyruntime.New(context.Background(), scope, containerInstance)
+    runtimeInstance := melodyruntime.NewRun(context.Background(), scope)
 
     if "" != userIdentifier {
         firewall := melodysecurity.NewCompiledFirewall(melodysecurity.CompiledFirewallConfig{

@@ -4,9 +4,9 @@ import (
     "encoding/json"
 
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -27,10 +27,10 @@ type catalogNotification struct {
 }
 
 /* CatalogNotificationHubFromRuntime resolves the hub through the container, the single door that does so. Resolving runs the provider, which moves the hub's reporting off the emergency logger and tells the container the hub must be closed in order. */
-func CatalogNotificationHubFromRuntime(runtimeInstance melodyruntimecontract.Runtime) (*melodyhttp.ServerSentEventHub, error) {
+func CatalogNotificationHubFromRuntime(runtimeInstance melodycontainercontract.Runtime) (*melodyhttp.ServerSentEventHub, error) {
     hub, hubErr := melodycontainer.FromResolver[*melodyhttp.ServerSentEventHub](
         runtimeInstance.Context(),
-        runtimeInstance.Container(),
+        runtimeInstance.Scope(),
         ServiceCatalogNotificationHub,
     )
     if nil != hubErr {
@@ -46,7 +46,7 @@ func CatalogNotificationHubFromRuntime(runtimeInstance melodyruntimecontract.Run
 
 /* notifyCatalogChange tells every open page that the nomenclature changed, from the event listeners beside the cache invalidation and the journal entry. A broadcast cannot fail, so the only error is an unreachable hub, a wiring mistake, which is reported so the pages do not go silent unexplained. */
 func notifyCatalogChange(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     action string,
     subject string,
     subjectId string,

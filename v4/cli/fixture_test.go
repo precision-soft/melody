@@ -8,7 +8,6 @@ import (
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* the scope is closed when the TEST ends, not when this constructor returns: a defer here handed every test a scope already closed at its first line, so each assertion about scope reporting and the action's teardown half passed vacuously — the two runtimes the package writes by hand omit that defer on purpose */
@@ -42,17 +41,17 @@ func (instance *testRuntime) Scope() containercontract.Scope {
     return instance.scopeValue
 }
 
-func (instance *testRuntime) Container() containercontract.Container {
-    return instance.containerValue
+func (instance *testRuntime) Kind() containercontract.Kind {
+    return containercontract.KindRun
 }
 
-var _ runtimecontract.Runtime = (*testRuntime)(nil)
+var _ containercontract.Runtime = (*testRuntime)(nil)
 
 type testCommand struct {
     nameValue        string
     descriptionValue string
     flagsValue       []clicontract.Flag
-    runCallback      func(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error
+    runCallback      func(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error
 }
 
 var _ clicontract.Command = (*testCommand)(nil)
@@ -69,6 +68,6 @@ func (instance *testCommand) Flags() []clicontract.Flag {
     return instance.flagsValue
 }
 
-func (instance *testCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *testCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     return instance.runCallback(runtimeInstance, commandContext)
 }

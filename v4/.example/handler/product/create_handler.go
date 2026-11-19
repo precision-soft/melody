@@ -9,21 +9,21 @@ import (
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/service"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
 func ApiCreateHandler() melodyhttpcontract.Handler {
     createProduct := melodyhttp.JsonHandler(
-        func(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, dto CreateRequest) (melodyhttpcontract.Response, error) {
+        func(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, dto CreateRequest) (melodyhttpcontract.Response, error) {
             dto = dto.trimmed()
             if refusal := presenter.ApiRefusalOfInvalidBody(runtimeInstance, request, dto); nil != refusal {
                 return refusal, nil
             }
 
-            productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Container())
+            productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Scope())
 
             product, createErr := productService.Create(
                 runtimeInstance,
@@ -49,7 +49,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
         melodyhttp.JsonHandlerConfig{ErrorResponder: apiJsonErrorResponder},
     )
 
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         if false == melodysecurity.IsGranted(runtimeInstance, entity.RoleEditor) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusForbidden, "forbidden"), nil
         }
@@ -60,7 +60,7 @@ func ApiCreateHandler() melodyhttpcontract.Handler {
 
 /* apiJsonErrorResponder answers through ApiRefusal, so a validation failure is rendered field by field and any other refusal keeps its generic message with the decoder's diagnosis in the debug-gated context. It returns the response: a responder that answers nothing leaves the framework's own refusal standing. */
 func apiJsonErrorResponder(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     status int,
     message string,

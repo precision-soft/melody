@@ -3,7 +3,7 @@ package security
 import (
     "github.com/precision-soft/melody/v4/internal"
 
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -18,7 +18,7 @@ func (instance *RoleVoter) Supports(attribute string, subject any) bool {
     return true
 }
 
-func (instance *RoleVoter) Vote(runtimeInstance runtimecontract.Runtime, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
+func (instance *RoleVoter) Vote(runtimeInstance containercontract.Runtime, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
     if "" == attribute {
         return securitycontract.VoteAbstain, nil
     }

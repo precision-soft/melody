@@ -12,7 +12,7 @@ import (
     cachecontract "github.com/precision-soft/melody/v4/cache/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
-    "github.com/precision-soft/melody/v4/runtime"
+    "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 /* liveService answers a service over the redis the validation lane starts, under a prefix unique to the calling test. */
@@ -173,7 +173,7 @@ func TestBackendFromRuntime_AnswersTheRegisteredServicesBackend(t *testing.T) {
         container.RegisterOptions{},
     )
 
-    runtimeInstance := runtime.New(t.Context(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(t.Context(), serviceContainer.NewScope())
 
     answered := BackendFromRuntime(runtimeInstance, "cache.backend")
     if service.Backend() != answered {

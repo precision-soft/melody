@@ -10,10 +10,10 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -126,7 +126,7 @@ func refuseNonUtf8TokenStoreUser(userIdentifier string) error {
     return nil
 }
 
-func refuseDoneTokenStoreContext(runtimeInstance runtimecontract.Runtime, door string) error {
+func refuseDoneTokenStoreContext(runtimeInstance containercontract.Runtime, door string) error {
     contextErr := runtimeInstance.Context().Err()
     if nil == contextErr {
         return nil
@@ -160,12 +160,12 @@ type tokenEntry struct {
 
 /* Put stores the claims under the ttl, refusing an absent one and one under a second by the ttl's name; unlimited stores with no expiry. The user identifier must be valid UTF-8, as the redis store asks. */
 func (instance *InMemoryTokenStore) Put(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     tokenString string,
     claims securitycontract.Claims,
     ttl bound.Duration,
 ) error {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return runtimeErr
     }
 
@@ -185,8 +185,8 @@ func (instance *InMemoryTokenStore) Put(
     return instance.put(tokenString, claims, expiry)
 }
 
-func (instance *InMemoryTokenStore) Delete(runtimeInstance runtimecontract.Runtime, tokenString string) error {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+func (instance *InMemoryTokenStore) Delete(runtimeInstance containercontract.Runtime, tokenString string) error {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return runtimeErr
     }
 
@@ -207,8 +207,8 @@ func (instance *InMemoryTokenStore) Delete(runtimeInstance runtimecontract.Runti
     return nil
 }
 
-func (instance *InMemoryTokenStore) DeleteByUser(runtimeInstance runtimecontract.Runtime, userIdentifier string) (int, error) {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+func (instance *InMemoryTokenStore) DeleteByUser(runtimeInstance containercontract.Runtime, userIdentifier string) (int, error) {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return 0, runtimeErr
     }
 
@@ -241,8 +241,8 @@ func (instance *InMemoryTokenStore) DeleteByUser(runtimeInstance runtimecontract
     return removed, nil
 }
 
-func (instance *InMemoryTokenStore) PurgeExpired(runtimeInstance runtimecontract.Runtime) (int, error) {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+func (instance *InMemoryTokenStore) PurgeExpired(runtimeInstance containercontract.Runtime) (int, error) {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return 0, runtimeErr
     }
 
@@ -384,10 +384,10 @@ func cloneActorDataAtDepth(actor *securitycontract.ActorData, depth int) *securi
 }
 
 func (instance *InMemoryTokenStore) Lookup(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     tokenString string,
 ) (securitycontract.Claims, bool, error) {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return securitycontract.Claims{}, false, runtimeErr
     }
 
@@ -415,12 +415,12 @@ func (instance *InMemoryTokenStore) Lookup(
 }
 
 func (instance *InMemoryTokenStore) RevokeBefore(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     userIdentifier string,
     deviceIdentifier string,
     instant time.Time,
 ) error {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return runtimeErr
     }
 
@@ -477,11 +477,11 @@ func (instance *InMemoryTokenStore) RevokeBefore(
 }
 
 func (instance *InMemoryTokenStore) RevocationEpoch(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     userIdentifier string,
     deviceIdentifier string,
 ) (time.Time, error) {
-    if runtimeErr := runtimecontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
         return time.Time{}, runtimeErr
     }
 

@@ -4,8 +4,8 @@ import (
     "context"
     "errors"
     "fmt"
-    "strings"
     nethttp "net/http"
+    "strings"
     "testing"
     "time"
 
@@ -13,6 +13,7 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -20,19 +21,17 @@ import (
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
 /* newTokenSourceTestRuntime builds a runtime whose container carries the event dispatcher the authenticator token source reaches for, plus the logger the dispatcher's own failure path needs. The dispatcher is handed back so a test can plant a listener on it. */
-func newTokenSourceTestRuntime(t *testing.T) (runtimecontract.Runtime, eventcontract.EventDispatcher) {
+func newTokenSourceTestRuntime(t *testing.T) (containercontract.Runtime, eventcontract.EventDispatcher) {
     t.Helper()
 
     return newTokenSourceTestRuntimeLogging(t, logging.NewNopLogger())
 }
 
-func newTokenSourceTestRuntimeLogging(t *testing.T, logger loggingcontract.Logger) (runtimecontract.Runtime, eventcontract.EventDispatcher) {
+func newTokenSourceTestRuntimeLogging(t *testing.T, logger loggingcontract.Logger) (containercontract.Runtime, eventcontract.EventDispatcher) {
     t.Helper()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
@@ -60,7 +59,7 @@ func newTokenSourceTestRuntimeLogging(t *testing.T, logger loggingcontract.Logge
         t.Fatalf("unexpected error: %v", loggerRegisterErr)
     }
 
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer), dispatcher
+    return runtime.NewRequest(context.Background(), serviceContainer.NewScope()), dispatcher
 }
 
 func TestNewResolverTokenSource_NilResolverPanics(t *testing.T) {
@@ -75,7 +74,7 @@ func TestNewResolverTokenSource_NilResolverPanics(t *testing.T) {
 
 func TestResolverTokenSource_NameIdentifiesTheSource(t *testing.T) {
     tokenSource := NewResolverTokenSource(
-        func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+        func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return nil, nil
         },
     )
@@ -90,7 +89,7 @@ func TestResolverTokenSource_ResolveAnswersAnonymousWhenTheResolverFindsNobody(t
     runtimeInstance, _ := newTokenSourceTestRuntime(t)
 
     tokenSource := NewResolverTokenSource(
-        func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+        func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return nil, nil
         },
     )
@@ -115,7 +114,7 @@ func TestResolverTokenSource_ResolveAnswersTheResolvedToken(t *testing.T) {
     resolvedToken := NewAuthenticatedToken("u1", []string{"ROLE_USER"}, nil)
 
     tokenSource := NewResolverTokenSource(
-        func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+        func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             return resolvedToken, nil
         },
     )
@@ -138,7 +137,7 @@ func TestResolverTokenSource_ResolveHandsTheRequestToTheResolver(t *testing.T) {
     seenRequest := httpcontract.Request(nil)
 
     tokenSource := NewResolverTokenSource(
-        func(runtimeInstance runtimecontract.Runtime, resolverRequest httpcontract.Request) (securitycontract.Token, error) {
+        func(runtimeInstance containercontract.Runtime, resolverRequest httpcontract.Request) (securitycontract.Token, error) {
             seenRequest = resolverRequest
 
             return nil, nil
@@ -304,7 +303,7 @@ func TestAuthenticatorTokenSource_ResolveKeepsTheAuthenticationErrorWhenTheFailu
 
     dispatcher.AddListener(
         securitycontract.EventSecurityLoginFailure,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return errors.New("event bus down")
         },
         0,
@@ -342,7 +341,7 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheSuccessDispatchFails(t *tes
 
     dispatcher.AddListener(
         securitycontract.EventSecurityLoginSuccess,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return dispatchErr
         },
         0,
@@ -408,7 +407,7 @@ func TestAuthenticatorTokenSource_ARejectedSecondFactorIsAnnouncedAsAFailure(t *
     failureMessageList := make([]string, 0)
     dispatcher.AddListener(
         securitycontract.EventSecurityLoginFailure,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             failureEvent, isFailureEvent := eventValue.Payload().(*LoginFailureEvent)
             if false == isFailureEvent {
                 t.Fatalf("expected a login failure event, got %T", eventValue.Payload())
@@ -459,7 +458,7 @@ func recordSecurityLoginEvents(dispatcher eventcontract.EventDispatcher) *[]stri
 
         dispatcher.AddListener(
             eventName,
-            func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                 dispatchedNameList = append(dispatchedNameList, recordedName)
 
                 return nil
@@ -474,7 +473,7 @@ func recordSecurityLoginEvents(dispatcher eventcontract.EventDispatcher) *[]stri
 /* The resolver is the application's function; a nil pointer of its own token type reaches here as a non-nil interface and, read as a live token, is published into the security context every voter then reads. */
 func TestResolverTokenSource_ResolveReadsATypedNilTokenAsAbsent(t *testing.T) {
     tokenSource := NewResolverTokenSource(
-        func(runtimeInstance runtimecontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
+        func(runtimeInstance containercontract.Runtime, request httpcontract.Request) (securitycontract.Token, error) {
             var unassignedToken *AuthenticatedToken
 
             return unassignedToken, nil
@@ -569,7 +568,7 @@ func TestAuthenticatorTokenSource_ResolveFailsWhenTheRejectedCredentialsDispatch
     listenerErr := errors.New("event bus down")
     dispatcher.AddListener(
         securitycontract.EventSecurityLoginFailure,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerErr
         },
         0,
@@ -602,7 +601,7 @@ func TestAuthenticatorTokenSource_AFailedLoginFailureDispatchKeepsTheStatusAndFi
     listenerErr := exception.NewHttpException(503, "event bus down")
     dispatcher.AddListener(
         securitycontract.EventSecurityLoginFailure,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerErr
         },
         0,
@@ -638,7 +637,7 @@ func TestAuthenticatorTokenSource_AFailedRejectedCredentialsDispatchKeepsTheReje
     listenerErr := errors.New("event bus down")
     dispatcher.AddListener(
         securitycontract.EventSecurityLoginFailure,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             if failureEvent, ok := eventValue.Payload().(*LoginFailureEvent); true == ok {
                 announcedErr = failureEvent.Error()
             }

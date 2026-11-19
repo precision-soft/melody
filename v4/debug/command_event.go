@@ -8,9 +8,9 @@ import (
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* DeferredListener declares a listener the serving process wires and this process does not, so the listing names it instead of reporting an absence. */
@@ -47,7 +47,7 @@ func (instance *EventCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *EventCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     startedAt := time.Now()
@@ -68,7 +68,7 @@ func (instance *EventCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    dispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    dispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
     inspector, ok := dispatcher.(eventcontract.EventDispatcherInspector)
     if false == ok {

@@ -3,14 +3,14 @@ package openapi
 import (
     nethttp "net/http"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func SpecificationHandler(info Info, registry *Registry) httpcontract.Handler {
-    return func(runtimeInstance runtimecontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-        router := melodyhttp.RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container())
+    return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+        router := melodyhttp.RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         document := Generate(info, router.RouteDefinitions(), registry)
 

@@ -29,6 +29,7 @@ import (
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
@@ -38,8 +39,6 @@ import (
     melodykernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/security/totp"
@@ -65,7 +64,7 @@ func (instance *refusingAuthenticationRepository) FindByUsername(ctx context.Con
     return nil, false, errors.New(authenticationCauseSecret)
 }
 
-func loginRuntimeForEnvironment(t *testing.T, environmentName string) melodyruntimecontract.Runtime {
+func loginRuntimeForEnvironment(t *testing.T, environmentName string) melodycontainercontract.Runtime {
     t.Helper()
 
     runtimeInstance, _ := loginRuntimeForEnvironmentRecordingFailures(t, environmentName)
@@ -73,7 +72,7 @@ func loginRuntimeForEnvironment(t *testing.T, environmentName string) melodyrunt
     return runtimeInstance
 }
 
-func loginRuntimeForEnvironmentRecordingFailures(t *testing.T, environmentName string) (melodyruntimecontract.Runtime, *[]error) {
+func loginRuntimeForEnvironmentRecordingFailures(t *testing.T, environmentName string) (melodycontainercontract.Runtime, *[]error) {
     t.Helper()
 
     source := &stubAuthenticationEnvironmentSource{
@@ -119,10 +118,10 @@ func loginRuntimeForEnvironmentRecordingFailures(t *testing.T, environmentName s
         t.Fatalf("register user service: %v", registerServiceErr)
     }
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), failureList
+    return melodyruntime.NewRequest(context.Background(), containerInstance.NewScope()), failureList
 }
 
-func loginResponseBody(t *testing.T, runtimeInstance melodyruntimecontract.Runtime) (int, string) {
+func loginResponseBody(t *testing.T, runtimeInstance melodycontainercontract.Runtime) (int, string) {
     t.Helper()
 
     httpRequest := httptest.NewRequest(
@@ -290,7 +289,7 @@ func (instance *absentAuthenticationRepository) FindByUsername(ctx context.Conte
     return nil, false, nil
 }
 
-func loginRuntimeRefusingEveryCredential(t *testing.T) (melodyruntimecontract.Runtime, *[]error) {
+func loginRuntimeRefusingEveryCredential(t *testing.T) (melodycontainercontract.Runtime, *[]error) {
     t.Helper()
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -308,7 +307,7 @@ func loginRuntimeRefusingEveryCredential(t *testing.T) (melodyruntimecontract.Ru
         t.Fatalf("register user service: %v", registerErr)
     }
 
-    return melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance), failureList
+    return melodyruntime.NewRequest(context.Background(), containerInstance.NewScope()), failureList
 }
 
 func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontainercontract.Container, listenerErr error, logger melodyloggingcontract.Logger) *[]error {
@@ -323,7 +322,7 @@ func registerLoginFailureRecorder(t *testing.T, containerInstance melodycontaine
     dispatcher := melodyevent.NewEventDispatcher(melodyclock.NewSystemClock())
     dispatcher.AddListener(
         melodysecuritycontract.EventSecurityLoginFailure,
-        func(runtimeInstance melodyruntimecontract.Runtime, eventValue melodyeventcontract.Event) error {
+        func(runtimeInstance melodycontainercontract.Runtime, eventValue melodyeventcontract.Event) error {
             if failure, isFailure := eventValue.Payload().(*melodysecurity.LoginFailureEvent); true == isFailure {
                 failureList = append(failureList, failure.Error())
             }
@@ -408,7 +407,7 @@ func TestLoginHandler_KeepsTheRefusalWhenTheLoginFailureDispatchFails(t *testing
         t.Fatalf("register user service: %v", registerErr)
     }
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     response := postLoginCredentials(t, runtimeInstance, "nobody", "wrong")
 
@@ -488,7 +487,7 @@ func TestLoginHandler_AMissingSessionRefusesTheSignInBeforeTheCredentials(t *tes
         t.Fatalf("register user service: %v", registerErr)
     }
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", loginJsonBody(t, "admin", "secret"))
     httpRequest.Header.Set("Content-Type", "application/json")
@@ -520,7 +519,7 @@ func (instance *acceptingAuthenticationRepository) FindByUsername(ctx context.Co
     return instance.user, true, nil
 }
 
-func postLoginCredentials(t *testing.T, runtimeInstance melodyruntimecontract.Runtime, username string, password string) melodyhttpcontract.Response {
+func postLoginCredentials(t *testing.T, runtimeInstance melodycontainercontract.Runtime, username string, password string) melodyhttpcontract.Response {
     t.Helper()
 
     httpRequest := httptest.NewRequest(nethttp.MethodPost, "/login", loginJsonBody(t, username, password))
@@ -561,11 +560,11 @@ type anonymousDoorTokenSource struct{}
 
 func (instance *anonymousDoorTokenSource) Name() string { return "anonymous" }
 
-func (instance *anonymousDoorTokenSource) Resolve(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+func (instance *anonymousDoorTokenSource) Resolve(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
     return melodysecurity.NewAnonymousToken(), nil
 }
 
-func serveLoginDoor(t *testing.T, runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, chain security.LoginChain, sessionIndex security.SessionIndexLookup) (melodyhttpcontract.Response, error) {
+func serveLoginDoor(t *testing.T, runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, chain security.LoginChain, sessionIndex security.SessionIndexLookup) (melodyhttpcontract.Response, error) {
     t.Helper()
 
     authenticator := &security.LoginDoorAuthenticator{}
@@ -630,8 +629,8 @@ func passwordOnlyLogin() security.LoginChain {
     )
 }
 
-func checkPasswordThroughUserService(runtimeInstance melodyruntimecontract.Runtime, username string, password string) (*entity.User, bool, error) {
-    return service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Container()).AuthenticateByUsernameAndPassword(runtimeInstance.Context(), username, password)
+func checkPasswordThroughUserService(runtimeInstance melodycontainercontract.Runtime, username string, password string) (*entity.User, bool, error) {
+    return service.MustGetUserService(runtimeInstance.Context(), runtimeInstance.Scope()).AuthenticateByUsernameAndPassword(runtimeInstance.Context(), username, password)
 }
 
 const (
@@ -645,13 +644,13 @@ type enrollmentDouble struct {
     recoveryCodes map[string][]string
 }
 
-func (instance *enrollmentDouble) FindTotpSecret(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string) (string, bool, error) {
+func (instance *enrollmentDouble) FindTotpSecret(runtimeInstance melodycontainercontract.Runtime, userIdentifier string) (string, bool, error) {
     secret, enrolled := instance.enrolled[userIdentifier]
 
     return secret, enrolled, nil
 }
 
-func (instance *enrollmentDouble) RedeemRecoveryCode(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string, code string) (bool, error) {
+func (instance *enrollmentDouble) RedeemRecoveryCode(runtimeInstance melodycontainercontract.Runtime, userIdentifier string, code string) (bool, error) {
     remaining := make([]string, 0, len(instance.recoveryCodes[userIdentifier]))
     redeemed := false
 
@@ -671,7 +670,7 @@ func (instance *enrollmentDouble) RedeemRecoveryCode(runtimeInstance melodyrunti
 }
 
 type secondFactorLogin struct {
-    runtimeInstance melodyruntimecontract.Runtime
+    runtimeInstance melodycontainercontract.Runtime
     authentication  security.LoginChain
     failureList     *[]error
     clock           *melodyclock.FrozenClock
@@ -809,7 +808,7 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
     )
 
     return &secondFactorLogin{
-        runtimeInstance: melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance),
+        runtimeInstance: melodyruntime.NewRequest(context.Background(), containerInstance.NewScope()),
         authentication:  security.NewLoginAuthentication(melodysecurity.NewAuthenticatorManager([]melodysecuritycontract.Authenticator{secondFactor}), budget),
         failureList:     failureList,
         clock:           clockInstance,
@@ -1158,13 +1157,13 @@ func TestLoginHandler_SignInsNotYetStoredStillMeetTheCap(t *testing.T) {
 
 type unreadableBudgetLimiter struct{}
 
-func (instance *unreadableBudgetLimiter) Allow(runtimeInstance melodyruntimecontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
+func (instance *unreadableBudgetLimiter) Allow(runtimeInstance melodycontainercontract.Runtime, key string) (melodyhttpcontract.RateLimitDecision, error) {
     storeErr := melodyexception.NewError("redis rate limiter store failure", map[string]any{"key": key}, melodyexception.MarkInfrastructureFailure(errors.New("connection refused")))
 
     return melodyhttpcontract.RateLimitDecision{}, storeErr
 }
 
-func (instance *unreadableBudgetLimiter) Reset(runtimeInstance melodyruntimecontract.Runtime, key string) error {
+func (instance *unreadableBudgetLimiter) Reset(runtimeInstance melodycontainercontract.Runtime, key string) error {
     return nil
 }
 
@@ -1196,7 +1195,7 @@ func TestLoginHandler_AnswersAnUnreadableBudgetWith503RetryAfterAndOneRecord(t *
 func TestLoginHandler_AnswersAnUnavailableSecondFactorStoreWith503RetryAfterAndOneRecord(t *testing.T) {
     journal := &loginJournalRecordingLogger{Logger: melodylogging.NewNopLogger()}
     login := newSecondFactorLoginWith(t, secondFactorLoginOptions{
-        enrollments: twofactor.NewEnrollments(func(runtimeInstance melodyruntimecontract.Runtime) (*twofactor.Store, error) {
+        enrollments: twofactor.NewEnrollments(func(runtimeInstance melodycontainercontract.Runtime) (*twofactor.Store, error) {
             return nil, errors.New("the catalogue database is not reachable")
         }),
         logger: journal,
@@ -1220,7 +1219,7 @@ func TestLoginHandler_AnswersAnUnavailableSecondFactorStoreWith503RetryAfterAndO
 
 type strangerTokenAuthenticator struct{}
 
-func (instance *strangerTokenAuthenticator) Authenticate(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
+func (instance *strangerTokenAuthenticator) Authenticate(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request) (melodysecuritycontract.Token, error) {
     return melodysecurity.NewAuthenticatedToken("user-9", []string{"ROLE_USER"}, nil), nil
 }
 
@@ -1357,7 +1356,7 @@ func TestLandingPageName_SendsEachRoleToAPageItOpens(t *testing.T) {
 
 func landingPageRouter() *melodyhttp.Router {
     router := melodyhttp.NewRouter()
-    landingPage := func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    landingPage := func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         return nil, nil
     }
 

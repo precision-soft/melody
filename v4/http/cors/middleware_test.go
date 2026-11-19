@@ -5,17 +5,17 @@ import (
     "net/http/httptest"
     "testing"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestMiddleware_PreflightOptions(t *testing.T) {
     middleware := Middleware(NewService(Config{}))
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -59,7 +59,7 @@ func TestMiddleware_OptionsWithoutRequestMethodReachesNext(t *testing.T) {
 
     calledNext := false
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -101,7 +101,7 @@ func TestMiddleware_AddsVaryOriginForDisallowedOrigin(t *testing.T) {
     middleware := Middleware(service)
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -127,7 +127,7 @@ func TestMiddleware_AddsVaryOriginWhenOriginAbsent(t *testing.T) {
     middleware := Middleware(NewService(Config{}))
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -152,7 +152,7 @@ func TestMiddleware_NonPreflightAddsHeaders(t *testing.T) {
     middleware := Middleware(NewService(Config{}))
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -187,7 +187,7 @@ func TestMiddleware_DisallowedOriginPassesThrough(t *testing.T) {
 
     calledNext := false
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -216,7 +216,7 @@ func TestMiddleware_NoOriginHeaderPassesThrough(t *testing.T) {
     middleware := Middleware(NewService(Config{}))
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -240,7 +240,7 @@ func TestMiddleware_AppliesHeadersEvenWhenHandlerErrored(t *testing.T) {
     middleware := Middleware(NewService(Config{}))
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -268,7 +268,7 @@ func TestRestrictiveService_MiddlewareCarriesTheRestrictivePolicyOntoTheResponse
     middleware := Middleware(RestrictiveService([]string{"https://app.example.com"}))
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -298,7 +298,7 @@ func TestRestrictiveService_MiddlewareRefusesAnOriginTheCallerDidNotName(t *test
     middleware := Middleware(RestrictiveService([]string{"https://app.example.com"}))
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -332,7 +332,7 @@ func TestRestrictiveService_MiddlewarePreflightAdvertisesTheNarrowMethodList(t *
     middleware := Middleware(RestrictiveService([]string{"https://app.example.com"}))
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -376,7 +376,7 @@ func TestMiddleware_AppliesHeadersToTheWriterBeforeTheHandlerRuns(t *testing.T) 
     varyOnWriterWhenHandlerRan := ""
 
     next := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {
@@ -412,7 +412,7 @@ func TestMiddleware_RefusesANilService(t *testing.T) {
 /* a handler answering a typed nil reaches the kernel as nil, which answers it with its empty 204; the middleware never dereferences it */
 func TestMiddleware_HandsATypedNilResponseOnAsNil(t *testing.T) {
     handler := Middleware(NewService(Config{}))(func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         writer nethttp.ResponseWriter,
         request httpcontract.Request,
     ) (httpcontract.Response, error) {

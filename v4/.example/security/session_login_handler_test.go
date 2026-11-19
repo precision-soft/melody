@@ -12,10 +12,9 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
-    melodyruntime "github.com/precision-soft/melody/v4/runtime"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
@@ -46,7 +45,7 @@ func TestSessionLoginHandlerWritesTheIdentityOnTheSessionTheRequestCarries(t *te
     registerAdmissionClock(t, containerInstance)
     registerLandingUrlGenerator(t, containerInstance)
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
 
@@ -92,7 +91,7 @@ func TestSessionLoginHandlerRefusesARequestWithoutASession(t *testing.T) {
     }
 }
 
-func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontract.Request) {
+func loginRequest(t *testing.T) (melodycontainercontract.Runtime, melodyhttpcontract.Request) {
     t.Helper()
 
     managerStorage := melodysession.NewInMemoryStorage(melodysession.InMemoryStorageConfig{})
@@ -118,7 +117,7 @@ func loginRequest(t *testing.T) (melodyruntimecontract.Runtime, melodyhttpcontra
     registerAdmissionClock(t, containerInstance)
     registerLandingUrlGenerator(t, containerInstance)
 
-    runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
+    runtimeInstance := melodyruntime.NewRequest(context.Background(), containerInstance.NewScope())
 
     request := melodyhttp.NewRequest(httptest.NewRequest(nethttp.MethodPost, "/login", nil), nil, runtimeInstance, nil)
     _ = melodyhttp.SetRequestSession(request, mustSession(manager.NewSession(context.Background())))

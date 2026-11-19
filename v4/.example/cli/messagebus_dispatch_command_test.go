@@ -6,9 +6,9 @@ import (
     "testing"
 
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* sendingBus hands every message to the transport as the routed dispatch bus does, without the handler chain the command does not read */
@@ -16,7 +16,7 @@ type sendingBus struct {
     transport melodymessagebuscontract.Transport
 }
 
-func (instance *sendingBus) Dispatch(runtimeInstance melodyruntimecontract.Runtime, message any, stamps []melodymessagebuscontract.Stamp) (melodymessagebuscontract.Envelope, error) {
+func (instance *sendingBus) Dispatch(runtimeInstance melodycontainercontract.Runtime, message any, stamps []melodymessagebuscontract.Stamp) (melodymessagebuscontract.Envelope, error) {
     envelope := melodymessagebus.NewEnvelope(message, stamps)
 
     return envelope, instance.transport.Send(runtimeInstance, envelope)
@@ -24,7 +24,7 @@ func (instance *sendingBus) Dispatch(runtimeInstance melodyruntimecontract.Runti
 
 type acceptingBus struct{}
 
-func (instance *acceptingBus) Dispatch(runtimeInstance melodyruntimecontract.Runtime, message any, stamps []melodymessagebuscontract.Stamp) (melodymessagebuscontract.Envelope, error) {
+func (instance *acceptingBus) Dispatch(runtimeInstance melodycontainercontract.Runtime, message any, stamps []melodymessagebuscontract.Stamp) (melodymessagebuscontract.Envelope, error) {
     return melodymessagebus.NewEnvelope(message, stamps), nil
 }
 

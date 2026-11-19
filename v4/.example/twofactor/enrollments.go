@@ -3,8 +3,8 @@ package twofactor
 import (
     "errors"
 
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -20,7 +20,7 @@ type Enrollments struct {
     source StoreSource
 }
 
-func (instance *Enrollments) FindTotpSecret(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string) (string, bool, error) {
+func (instance *Enrollments) FindTotpSecret(runtimeInstance melodycontainercontract.Runtime, userIdentifier string) (string, bool, error) {
     store, storeErr := instance.source(runtimeInstance)
     if nil != storeErr {
         return "", false, storeUnavailable(storeErr)
@@ -29,7 +29,7 @@ func (instance *Enrollments) FindTotpSecret(runtimeInstance melodyruntimecontrac
     return store.FindTotpSecret(runtimeInstance, userIdentifier)
 }
 
-func (instance *Enrollments) RedeemRecoveryCode(runtimeInstance melodyruntimecontract.Runtime, userIdentifier string, code string) (bool, error) {
+func (instance *Enrollments) RedeemRecoveryCode(runtimeInstance melodycontainercontract.Runtime, userIdentifier string, code string) (bool, error) {
     store, storeErr := instance.source(runtimeInstance)
     if nil != storeErr {
         return false, storeUnavailable(storeErr)

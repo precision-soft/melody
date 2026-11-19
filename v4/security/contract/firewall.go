@@ -1,8 +1,8 @@
 package contract
 
 import (
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type Firewall interface {
@@ -13,13 +13,13 @@ type Firewall interface {
     LogoutPath() string
 
     Login(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         request httpcontract.Request,
         input LoginInput,
     ) (*LoginResult, error)
 
     Logout(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         request httpcontract.Request,
         input LogoutInput,
     ) (*LogoutResult, error)

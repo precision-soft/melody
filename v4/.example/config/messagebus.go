@@ -6,10 +6,10 @@ import (
     "github.com/precision-soft/melody/v4/.example/messagehandler"
     "github.com/precision-soft/melody/v4/.example/subscriber"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -23,7 +23,7 @@ func (instance *Module) buildMessageBus() {
 
     locator := melodymessagebus.NewHandlerLocator()
     melodymessagebus.RegisterHandler(locator, messagehandler.HandleWelcomeEmail)
-    melodymessagebus.RegisterHandler(locator, func(runtimeInstance melodyruntimecontract.Runtime, notification message.Notification, envelope melodymessagebuscontract.Envelope) error {
+    melodymessagebus.RegisterHandler(locator, func(runtimeInstance melodycontainercontract.Runtime, notification message.Notification, envelope melodymessagebuscontract.Envelope) error {
         /* resolved rather than captured, for the reason written at CatalogNotificationHubFromRuntime: a consumer that holds the hub the composition root built leaves the provider — and with it the logger swap and the container's teardown edge — unrun. */
         hub, hubErr := subscriber.CatalogNotificationHubFromRuntime(runtimeInstance)
         if nil != hubErr {

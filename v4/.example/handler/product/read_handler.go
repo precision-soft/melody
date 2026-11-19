@@ -16,18 +16,18 @@ import (
     "github.com/precision-soft/melody/v4/.example/presenter"
     "github.com/precision-soft/melody/v4/.example/service"
     melodybag "github.com/precision-soft/melody/v4/bag"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const convertedCurrencyQueryParameter = "currency"
 
 func ApiReadAllHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
-        productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Container())
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+        productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Scope())
 
         products, listErr := productService.List(runtimeInstance.Context())
         if nil != listErr {
@@ -49,7 +49,7 @@ func ApiReadAllHandler() melodyhttpcontract.Handler {
 }
 
 func ApiReadHandler() melodyhttpcontract.Handler {
-    return func(runtimeInstance melodyruntimecontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
+    return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         id, exists := request.Parameter("id")
         if false == exists {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
@@ -60,7 +60,7 @@ func ApiReadHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, "id is required"), nil
         }
 
-        productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Container())
+        productService := service.MustGetProductService(runtimeInstance.Context(), runtimeInstance.Scope())
 
         product, found, findErr := productService.FindById(runtimeInstance.Context(), id)
         if nil != findErr {
@@ -71,13 +71,13 @@ func ApiReadHandler() melodyhttpcontract.Handler {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusNotFound, "not found"), nil
         }
 
-        categoryService := service.MustGetCategoryService(runtimeInstance.Context(), runtimeInstance.Container())
+        categoryService := service.MustGetCategoryService(runtimeInstance.Context(), runtimeInstance.Scope())
         categories, categoriesErr := categoryService.List(runtimeInstance.Context())
         if nil != categoriesErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load categories", categoriesErr), nil
         }
 
-        currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Container())
+        currencyService := service.MustGetCurrencyService(runtimeInstance.Context(), runtimeInstance.Scope())
         currencies, currenciesErr := currencyService.List(runtimeInstance.Context())
         if nil != currenciesErr {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "failed to load currencies", currenciesErr), nil
@@ -139,7 +139,7 @@ type productViewRecorder interface {
 }
 
 /* recordedViews counts the read and answers the count, or nothing when the cache refused: the counter is a hint, so its failure is journaled at warning and the product is still answered */
-func recordedViews(runtimeInstance melodyruntimecontract.Runtime, recorder productViewRecorder, productId string) *int64 {
+func recordedViews(runtimeInstance melodycontainercontract.Runtime, recorder productViewRecorder, productId string) *int64 {
     views, recordErr := recorder.RecordView(runtimeInstance.Context(), productId)
     if nil != recordErr {
         examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Warning(

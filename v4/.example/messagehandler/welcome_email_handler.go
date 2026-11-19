@@ -3,18 +3,18 @@ package messagehandler
 import (
     "github.com/precision-soft/melody/v4/.example/message"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodymailer "github.com/precision-soft/melody/v4/mailer"
     melodymailercontract "github.com/precision-soft/melody/v4/mailer/contract"
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* HandleWelcomeEmail hands the welcome mail to the mailer the application wires and fails the message when the mailer refuses it, so the consumer's policy, a retry or the dead letter, decides instead of a mail counted as sent */
-func HandleWelcomeEmail(runtimeInstance melodyruntimecontract.Runtime, messageInstance message.WelcomeEmail, envelope melodymessagebuscontract.Envelope) error {
-    mailer, resolveErr := melodycontainer.FromResolver[melodymailercontract.Mailer](runtimeInstance.Context(), runtimeInstance.Container(), melodymailer.ServiceMailer)
+func HandleWelcomeEmail(runtimeInstance melodycontainercontract.Runtime, messageInstance message.WelcomeEmail, envelope melodymessagebuscontract.Envelope) error {
+    mailer, resolveErr := melodycontainer.FromResolver[melodymailercontract.Mailer](runtimeInstance.Context(), runtimeInstance.Scope(), melodymailer.ServiceMailer)
     if nil != resolveErr {
         return melodyexception.MarkInfrastructureFailure(resolveErr)
     }

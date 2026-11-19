@@ -2,6 +2,7 @@ package messagebus
 
 import (
     "context"
+    "errors"
     "os"
     "os/signal"
     "reflect"
@@ -14,14 +15,14 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 /* RetryPolicy is how the consume command treats a message whose handler failed. Every limit left out takes its default; MaxRetries 0, written explicitly, is no retry. */
@@ -226,7 +227,7 @@ func (instance *ConsumeCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *ConsumeCommand) Run(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
     /* the collaborators are resolved into run-local state, not the command's fields: the command is a singleton, and the in-process cron runner overlaps a run with itself when an entry outruns its interval */
@@ -265,7 +266,7 @@ type consumeSession struct {
     shutdownGrace time.Duration
 }
 
-func (instance *ConsumeCommand) newConsumeSession(runtimeInstance runtimecontract.Runtime) (*consumeSession, error) {
+func (instance *ConsumeCommand) newConsumeSession(runtimeInstance containercontract.Runtime) (*consumeSession, error) {
     session := &consumeSession{
         bus:           instance.bus,
         transports:    instance.transports,
@@ -277,12 +278,12 @@ func (instance *ConsumeCommand) newConsumeSession(runtimeInstance runtimecontrac
         return session, nil
     }
 
-    serviceContainer := runtimeInstance.Container()
+    scope := runtimeInstance.Scope()
 
-    session.bus = ConsumeBusFromResolver(runtimeInstance.Context(), serviceContainer)
-    session.transports = TransportsMustFromResolver(runtimeInstance.Context(), serviceContainer)
+    session.bus = ConsumeBusFromResolver(runtimeInstance.Context(), scope)
+    session.transports = TransportsMustFromResolver(runtimeInstance.Context(), scope)
 
-    if registeredPolicy, hasPolicy := RetryPolicyFromResolver(runtimeInstance.Context(), serviceContainer); true == hasPolicy {
+    if registeredPolicy, hasPolicy := RetryPolicyFromResolver(runtimeInstance.Context(), scope); true == hasPolicy {
         retryPolicy, retryPolicyErr := resolveRetryPolicy(registeredPolicy)
         if nil != retryPolicyErr {
             return nil, retryPolicyErr
@@ -295,7 +296,7 @@ func (instance *ConsumeCommand) newConsumeSession(runtimeInstance runtimecontrac
 }
 
 func (instance *consumeSession) consumeFrom(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     transport messagebuscontract.Transport,
     limit int64,
     concurrency int,
@@ -307,8 +308,8 @@ func (instance *consumeSession) consumeFrom(
     handlerContext, cancelHandlers := context.WithCancel(context.WithoutCancel(runtimeInstance.Context()))
     defer cancelHandlers()
 
-    signalRuntime := runtime.New(signalContext, runtimeInstance.Scope(), runtimeInstance.Container())
-    handlerRuntime := runtime.New(handlerContext, runtimeInstance.Scope(), runtimeInstance.Container())
+    signalRuntime := runtime.WithContext(runtimeInstance, signalContext)
+    handlerRuntime := runtime.WithContext(runtimeInstance, handlerContext)
 
     queue, receiveErr := transport.Receive(signalRuntime)
     if nil != receiveErr {
@@ -388,7 +389,7 @@ func (instance *consumeSession) consumeFrom(
 
 /* consumeRecovered runs consume behind a panic barrier, so a panic outside the handler dispatch (scope setup, Ack/Nack, scope teardown) is logged and the worker survives to take the next delivery. A handler panic already enters the retry pipeline inside dispatchSafely; the in-flight delivery here stays unacked, so the broker redelivers it. */
 func (instance *consumeSession) consumeRecovered(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     transport messagebuscontract.Transport,
     envelopeInstance messagebuscontract.Envelope,
 ) {
@@ -416,7 +417,7 @@ func (instance *consumeSession) consumeRecovered(
 }
 
 func (instance *consumeSession) consume(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     transport messagebuscontract.Transport,
     envelopeInstance messagebuscontract.Envelope,
 ) {
@@ -528,19 +529,27 @@ func isSameTransport(first messagebuscontract.Transport, second messagebuscontra
     return firstValue.Type() == secondValue.Type() && firstValue.Pointer() == secondValue.Pointer()
 }
 
-/* messageRuntime gives each delivery its own container scope and a logger keyed by MessageIdStamp, as the http kernel scopes a request, so scope state cannot leak between in-flight messages. Without a resolvable container the shared runtime is returned untouched. */
+/* messageRuntime gives each delivery its own container scope and a logger keyed by MessageIdStamp, as the http kernel scopes a request, so scope state cannot leak between in-flight messages. A runtime whose scope cannot open a child scope is returned untouched, a closed one journaled. */
 func (instance *consumeSession) messageRuntime(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
-) (runtimecontract.Runtime, func()) {
+) (containercontract.Runtime, func()) {
     noopClose := func() {}
 
-    serviceContainer := runtimeInstance.Container()
-    if true == internal.IsNilInterface(serviceContainer) {
+    messageRuntime, childErr := runtime.NewChildRun(runtimeInstance, runtimeInstance.Context())
+    if nil != childErr {
+        /* a closed run scope is the run ending, whose logger it cannot resolve: journaled on the emergency logger, and the delivery's first resolution refuses on it */
+        if true == errors.Is(childErr, container.ErrScopeClosed) {
+            logging.EmergencyLogger().Error(
+                "failed to open message scope",
+                exception.LogContext(childErr, exception.LogContextConfig{}),
+            )
+        }
+
         return runtimeInstance, noopClose
     }
 
-    messageScope := serviceContainer.NewScope()
+    messageScope := messageRuntime.Scope()
 
     baseLogger := logging.LoggerFromRuntime(runtimeInstance)
 
@@ -571,11 +580,11 @@ func (instance *consumeSession) messageRuntime(
         }
     }
 
-    return runtime.New(runtimeInstance.Context(), messageScope, serviceContainer), closeScope
+    return messageRuntime, closeScope
 }
 
 func (instance *consumeSession) dispatchSafely(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
 ) (dispatchErr error) {
     defer func() {
@@ -638,7 +647,7 @@ func (instance *consumeSession) failureRequeueDelay() time.Duration {
 }
 
 func (instance *consumeSession) logError(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     message string,
     err error,
 ) {

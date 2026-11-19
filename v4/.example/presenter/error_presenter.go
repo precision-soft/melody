@@ -14,12 +14,12 @@ import (
     melodyconfig "github.com/precision-soft/melody/v4/config"
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
-    melodyruntimecontract "github.com/precision-soft/melody/v4/runtime/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodyserializer "github.com/precision-soft/melody/v4/serializer"
     melodyvalidation "github.com/precision-soft/melody/v4/validation"
@@ -34,7 +34,7 @@ type apiResponse struct {
 }
 
 func ApiSuccess(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     statusCode int,
     payload any,
@@ -52,7 +52,7 @@ func ApiSuccess(
 }
 
 func ApiError(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     statusCode int,
     errors ...string,
@@ -74,7 +74,7 @@ func ApiError(
 
 /* ApiRefusalOfError renders an error the kernel raised: a refusal keeps its status and public message, its cause travels under the development environment alone, an error marked as an infrastructure failure answers 503 with unavailableRetryAfter, the kernel's delay the exception event carries, anything else answers 500 and says nothing of itself. The second-factor challenge names the factor the client must present; a refusal carrying a Retry-After delay keeps it as the header. */
 func ApiRefusalOfError(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     refusalErr error,
     unavailableRetryAfter time.Duration,
@@ -109,7 +109,7 @@ func ApiRefusalOfError(
 
 /* ApiErrorWithPayload renders a refusal that tells the client how to go on: the payload names what the client must present next, beside the public message. */
 func ApiErrorWithPayload(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     statusCode int,
     payload map[string]any,
@@ -130,7 +130,7 @@ func ApiErrorWithPayload(
 
 /* ApiErrorWithErr renders a refusal whose cause the handler holds. The cause travels in the body only under the development environment. A status of the server's own class is journaled here at error, because the kernel journals a returned failure and never a Response; a client's refusal below 500 is not journaled. */
 func ApiErrorWithErr(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     statusCode int,
     publicMessage string,
@@ -157,7 +157,7 @@ func ApiErrorWithErr(
 
 /* journalServerError writes the one record a 500 answered as a Response leaves: the public message, the route and the cause. The cause is marked logged, so a reader that files marked errors once does not file it again, and a cause already marked, filed where it was raised, is not filed here a second time. */
 func journalServerError(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     statusCode int,
     publicMessage string,
@@ -185,7 +185,7 @@ func journalServerError(
 
 /* JournalRefusalCause writes the record a refusal below 500 leaves when a step of the server failed behind it: the client keeps the status it earned, and the failure is journaled at error under journalMessage with the route and the cause, marked logged. */
 func JournalRefusalCause(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     statusCode int,
     publicMessage string,
@@ -233,11 +233,11 @@ func requestContextIsDone(request melodyhttpcontract.Request) bool {
 
 /* ApiRefusalOfInvalidBody validates a body the door normalised after the binding validated it as sent, and answers the refusal ApiRefusal renders for it, or nil for a valid body: the value the door stores is then the value the rules were checked against, and a name of two runes padded with a space cannot be stored as one. */
 func ApiRefusalOfInvalidBody(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     body any,
 ) melodyhttpcontract.Response {
-    validationErr := melodyvalidation.ValidatorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Container()).Validate(body)
+    validationErr := melodyvalidation.ValidatorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()).Validate(body)
     if nil == validationErr {
         return nil
     }
@@ -247,7 +247,7 @@ func ApiRefusalOfInvalidBody(
 
 /* ApiRefusalOfDecodedBody answers a body a door decoded by hand and could not read: one past the kernel's body limit is the client's too large a payload, answered 413 as the framework answers it on a bind, and any other failure is the client's unreadable json. */
 func ApiRefusalOfDecodedBody(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     decodeErr error,
 ) melodyhttpcontract.Response {
@@ -261,7 +261,7 @@ func ApiRefusalOfDecodedBody(
 
 /* ApiRefusal renders a refusal a json-binding door made before the handler ran, the decoder's or the validator's. A validation failure is rendered field by field, one errors entry per violated field, the same public collection the framework's exception listener projects. Every other refusal keeps its generic public message with the cause in the debug-gated context, because the decoder's diagnosis names internals. */
 func ApiRefusal(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     statusCode int,
     publicMessage string,
@@ -322,7 +322,7 @@ func validationErrorsOf(refusalErr error) (melodyvalidation.ValidationErrors, bo
     return validationErrors, true
 }
 
-func HtmlError(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, statusCode int, message string) melodyhttpcontract.Response {
+func HtmlError(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, statusCode int, message string) melodyhttpcontract.Response {
     _ = runtimeInstance
 
     htmlString := "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Error</title></head><body>"
@@ -341,7 +341,7 @@ func HtmlError(runtimeInstance melodyruntimecontract.Runtime, request melodyhttp
     return melodyhttp.HtmlResponse(statusCode, htmlString)
 }
 
-func Redirect(runtimeInstance melodyruntimecontract.Runtime, request melodyhttpcontract.Request, location string) melodyhttpcontract.Response {
+func Redirect(runtimeInstance melodycontainercontract.Runtime, request melodyhttpcontract.Request, location string) melodyhttpcontract.Response {
     _ = runtimeInstance
     _ = request
 
@@ -368,7 +368,7 @@ func normalizeErrors(errors []string) []string {
 }
 
 func buildApiResponse(
-    runtimeInstance melodyruntimecontract.Runtime,
+    runtimeInstance melodycontainercontract.Runtime,
     request melodyhttpcontract.Request,
     statusCode int,
     payload apiResponse,
@@ -439,12 +439,12 @@ func fallbackJsonResponse(statusCode int, payload any) melodyhttpcontract.Respon
 }
 
 /* the debug decision is the kernel environment, as the framework exception listener reads it; when it cannot be determined the presenter emits no cause material */
-func debugMode(runtimeInstance melodyruntimecontract.Runtime) bool {
+func debugMode(runtimeInstance melodycontainercontract.Runtime) bool {
     if nil == runtimeInstance {
         return false
     }
 
-    serviceContainer := runtimeInstance.Container()
+    serviceContainer := runtimeInstance.Scope()
     if nil == serviceContainer {
         return false
     }

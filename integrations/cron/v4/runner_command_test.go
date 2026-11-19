@@ -17,23 +17,24 @@ import (
 
     "github.com/precision-soft/melody/v4/application"
     "github.com/precision-soft/melody/v4/bound"
-    clicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodycli "github.com/precision-soft/melody/v4/cli"
+    clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type recordingCommand struct {
     commandName string
     runCount    int
     runErr      error
+    /* a service the run resolves from its scope before it answers */
+    resolveName string
 }
 
 func newRecordingCommand(name string) *recordingCommand {
@@ -52,16 +53,20 @@ func (instance *recordingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *recordingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *recordingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.runCount++
+
+    if "" != instance.resolveName {
+        _ = runtimeInstance.Scope().MustGet(runtimeInstance.Context(), instance.resolveName)
+    }
 
     return instance.runErr
 }
 
-func newRunnerTestRuntime(ctx context.Context) runtimecontract.Runtime {
+func newRunnerTestRuntime(ctx context.Context) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(ctx, serviceContainer.NewScope())
 }
 
 type panickingCommand struct {
@@ -80,7 +85,7 @@ func (instance *panickingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *panickingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *panickingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     panic("scheduled command panicked on purpose")
 }
 
@@ -108,7 +113,7 @@ func (instance *flagDefaultProbeCommand) Flags() []clicontract.Flag {
     }
 }
 
-func (instance *flagDefaultProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *flagDefaultProbeCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.observedBatchSize = commandContext.Int(probeFlagNameBatchSize)
 
     return nil
@@ -131,7 +136,7 @@ func (instance *writerProbeCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *writerProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *writerProbeCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.runCount++
 
     _, writeErr := fmt.Fprintln(commandContext.Writer, "writer probe output")
@@ -157,7 +162,7 @@ func (instance *argsProbeCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *argsProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *argsProbeCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.runCount++
     instance.observedArgsLength = len(commandContext.Args().Slice())
 
@@ -181,7 +186,7 @@ func (instance *signalingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *signalingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *signalingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     select {
     case instance.ran <- struct{}{}:
     default:
@@ -208,7 +213,7 @@ func (instance *rendezvousCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *rendezvousCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *rendezvousCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     close(instance.arrived)
 
     select {
@@ -239,7 +244,7 @@ func (instance *blockingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *blockingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *blockingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     select {
     case instance.started <- struct{}{}:
     default:
@@ -256,25 +261,29 @@ func (instance *blockingCommand) Run(runtimeInstance runtimecontract.Runtime, co
     return nil
 }
 
-type failingCloseScope struct {
-    containercontract.Scope
+/* failingCloseService is a scoped service whose close fails: the child scope that built it fails its own close with it */
+type failingCloseService struct {
     closeErr error
 }
 
-func (instance failingCloseScope) Close() error {
+func (instance *failingCloseService) CloseWithContext(closeContext context.Context) error {
     return instance.closeErr
 }
 
-type failingScopeContainer struct {
-    containercontract.Container
-    scopeCloseErr error
-}
+const failingCloseServiceName = "test.failing.close"
 
-func (instance failingScopeContainer) NewScope() containercontract.Scope {
-    return failingCloseScope{
-        Scope:    instance.Container.NewScope(),
-        closeErr: instance.scopeCloseErr,
-    }
+/* newFailingChildScopeRuntime answers a run runtime whose every child scope fails its close once the command resolved failingCloseServiceName */
+func newFailingChildScopeRuntime(t *testing.T, closeErr error) containercontract.Runtime {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegisterScoped(
+        failingCloseServiceName,
+        func(resolver containercontract.Resolver) (*failingCloseService, error) {
+            return &failingCloseService{closeErr: closeErr}, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 func TestRunnerCommand_RunDueInvokesOnlyMatchingCommands(t *testing.T) {
@@ -339,7 +348,7 @@ func (instance *versionRecordingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *versionRecordingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *versionRecordingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.observed = output.ParseOptionFromCommand(commandContext).ApplicationVersion
 
     return nil
@@ -702,20 +711,17 @@ func TestRunnerCommand_InvokeReportsChildScopeCloseError(t *testing.T) {
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     scopeCloseErr := errors.New("scope close failed")
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(
-        context.Background(),
-        serviceContainer.NewScope(),
-        failingScopeContainer{Container: serviceContainer, scopeCloseErr: scopeCloseErr},
-    )
+    job.resolveName = failingCloseServiceName
+    runtimeInstance := newFailingChildScopeRuntime(t, scopeCloseErr)
 
     invokeErr := runner.invokeRun(runtimeInstance, runner.entries[0], logging.GenerateProcessId())
     if nil == invokeErr {
         t.Fatal("expected the child scope close error to surface from invoke")
     }
 
-    if false == errors.Is(invokeErr, scopeCloseErr) {
-        t.Fatalf("expected the invoke error to wrap the scope close error, got %v", invokeErr)
+    /* the child scope reports its service's close failure in its context, not as a wrapped cause */
+    if false == strings.Contains(fmt.Sprintf("%v", exception.LogContext(invokeErr, exception.LogContextConfig{})), scopeCloseErr.Error()) {
+        t.Fatalf("expected the invoke error to carry the scope close error, got %v", exception.LogContext(invokeErr, exception.LogContextConfig{}))
     }
 
     if 1 != job.runCount {
@@ -1122,7 +1128,7 @@ func (instance *exitCoderCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *exitCoderCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *exitCoderCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     return exception.NewExitError(3, exception.NewError("the job failed with an exit code", nil, nil))
 }
 
@@ -1265,7 +1271,7 @@ func (instance *countingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *countingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *countingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     instance.runCount.Add(1)
 
     select {
@@ -1455,7 +1461,7 @@ func (instance *contextWatchingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *contextWatchingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *contextWatchingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     /* a non-blocking mark rather than a close, so the command survives being dispatched more than once */
     select {
     case instance.started <- struct{}{}:
@@ -1472,6 +1478,8 @@ type wedgedCommand struct {
     commandName string
     started     chan struct{}
     release     chan struct{}
+    /* a service the run resolves from its scope before it wedges */
+    resolveName string
 }
 
 func newWedgedCommand(name string) *wedgedCommand {
@@ -1490,7 +1498,11 @@ func (instance *wedgedCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *wedgedCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *wedgedCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
+    if "" != instance.resolveName {
+        _ = runtimeInstance.Scope().MustGet(runtimeInstance.Context(), instance.resolveName)
+    }
+
     close(instance.started)
 
     <-instance.release
@@ -1517,7 +1529,7 @@ func (instance *sleepingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *sleepingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *sleepingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     time.Sleep(instance.duration)
 
     instance.completed.Add(1)
@@ -1525,24 +1537,31 @@ func (instance *sleepingCommand) Run(runtimeInstance runtimecontract.Runtime, co
     return nil
 }
 
-type closeCountingScope struct {
-    containercontract.Scope
+/* closeCountingService is a scoped service counting its closes: the child scope that built it closes it once */
+type closeCountingService struct {
     closed *atomic.Int64
 }
 
-func (instance closeCountingScope) Close() error {
+func (instance *closeCountingService) CloseWithContext(closeContext context.Context) error {
     instance.closed.Add(1)
 
-    return instance.Scope.Close()
+    return nil
 }
 
-type closeCountingContainer struct {
-    containercontract.Container
-    closed *atomic.Int64
-}
+const closeCountingServiceName = "test.close.counting"
 
-func (instance closeCountingContainer) NewScope() containercontract.Scope {
-    return closeCountingScope{Scope: instance.Container.NewScope(), closed: instance.closed}
+/* newCloseCountingRuntime answers a run runtime whose child scopes count their closes once the command resolved closeCountingServiceName */
+func newCloseCountingRuntime(closed *atomic.Int64) containercontract.Runtime {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    serviceContainer.MustRegisterScoped(
+        closeCountingServiceName,
+        func(resolver containercontract.Resolver) (*closeCountingService, error) {
+            return &closeCountingService{closed: closed}, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    return runtime.NewRun(context.Background(), serviceContainer.NewScope())
 }
 
 func TestRunnerCommand_EntryTimeoutDefaultsAndOverrides(t *testing.T) {
@@ -1618,12 +1637,8 @@ func TestRunnerCommand_WedgedCommandIsAbandonedAndItsScopeReleased(t *testing.T)
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}, GracefulTimeout: bound.Of(50 * time.Millisecond)})
 
     var closedScopes atomic.Int64
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(
-        context.Background(),
-        serviceContainer.NewScope(),
-        closeCountingContainer{Container: serviceContainer, closed: &closedScopes},
-    )
+    job.resolveName = closeCountingServiceName
+    runtimeInstance := newCloseCountingRuntime(&closedScopes)
 
     completed := make(chan error, 1)
     go func() {
@@ -1770,12 +1785,8 @@ func TestRunnerCommand_AnEntrysGracefulWindowGovernsWhenItIsAbandoned(t *testing
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     var closedScopes atomic.Int64
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(
-        context.Background(),
-        serviceContainer.NewScope(),
-        closeCountingContainer{Container: serviceContainer, closed: &closedScopes},
-    )
+    job.resolveName = closeCountingServiceName
+    runtimeInstance := newCloseCountingRuntime(&closedScopes)
 
     completed := make(chan error, 1)
     go func() {
@@ -1969,7 +1980,7 @@ func (instance *typedNilErrorCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *typedNilErrorCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *typedNilErrorCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     var failure *exception.Error
 
     return failure
@@ -2075,7 +2086,7 @@ func TestRunnerCommand_DispatchFailureRecordCarriesTheExceptionContext(t *testin
         },
         container.RegisterOptions{},
     )
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(runtimeInstance, at); nil == runErr {
@@ -2162,7 +2173,7 @@ func (instance *identityProbeCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *identityProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *identityProbeCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     logging.LoggerFromRuntime(runtimeInstance).Info("job line", nil)
 
     processContext := application.ProcessContextFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
@@ -2208,7 +2219,7 @@ func TestRunnerCommand_InvokeInstallsThePerRunIdentity(t *testing.T) {
         container.OverrideOptions{},
     )
 
-    runtimeInstance := runtime.New(context.Background(), parentScope, serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), parentScope)
 
     if invokeErr := runner.invokeRun(runtimeInstance, runner.entries[0], logging.GenerateProcessId()); nil != invokeErr {
         t.Fatalf("invoke: %v", invokeErr)
@@ -2260,7 +2271,7 @@ func TestRunnerCommand_CarriesTheStandardFlags(t *testing.T) {
 }
 
 /* invokeUnderAFreshRunId mints the run id the dispatch would, for the tests that drive one run directly; the runId's presence on the records has its own test. */
-func invokeUnderAFreshRunId(runner *RunnerCommand, runtimeInstance runtimecontract.Runtime, entry *scheduledRunEntry) error {
+func invokeUnderAFreshRunId(runner *RunnerCommand, runtimeInstance containercontract.Runtime, entry *scheduledRunEntry) error {
     return runner.invokeRun(runtimeInstance, entry, logging.GenerateProcessId())
 }
 
@@ -2320,7 +2331,7 @@ func TestRunnerCommand_APanickingJobKeepsItsCauseAndItsStack(t *testing.T) {
         },
         container.RegisterOptions{},
     )
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
 
@@ -2369,7 +2380,7 @@ func TestRunnerCommand_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
         },
         container.RegisterOptions{},
     )
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
 
@@ -2401,7 +2412,7 @@ func (instance *idiomaticPanickingCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *idiomaticPanickingCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *idiomaticPanickingCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     panic(instance.panicValue)
 }
 
@@ -2441,7 +2452,7 @@ func (instance *outputWritingProbeCommand) Flags() []clicontract.Flag {
     return output.StandardFlags()
 }
 
-func (instance *outputWritingProbeCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *outputWritingProbeCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     option, normalizeOptionErr := output.NormalizeOption(output.ParseOptionFromCommand(commandContext))
     if nil != normalizeOptionErr {
         return normalizeOptionErr
@@ -2472,7 +2483,7 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
         },
         container.RegisterOptions{},
     )
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     at := time.Date(2026, time.July, 15, 9, 0, 0, 0, time.UTC)
     if runErr := runner.runDue(runtimeInstance, at); nil != runErr {
@@ -2509,7 +2520,7 @@ func TestRunnerCommand_ScheduledJobOutputIsCapturedIntoTheJournal(t *testing.T) 
     )
 
     if runErr := NewRunnerCommand(silentConfiguration, RunnerConfig{Commands: []clicontract.Command{silent}}).runDue(
-        runtime.New(context.Background(), silentContainer.NewScope(), silentContainer),
+        runtime.NewRun(context.Background(), silentContainer.NewScope()),
         at,
     ); nil != runErr {
         t.Fatalf("expected no error, got %v", runErr)
@@ -2542,7 +2553,7 @@ func TestRunnerCommand_ScheduledJobOutputIsBoundedAndSaysWhatItCut(t *testing.T)
 
     /* the run has to succeed: a short write answered to the job would come back as the job's own failure */
     if runErr := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}}).runDue(
-        runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer),
+        runtime.NewRun(context.Background(), serviceContainer.NewScope()),
         at,
     ); nil != runErr {
         t.Fatalf("expected the write to be answered in full, got %v", runErr)
@@ -2629,7 +2640,7 @@ func TestRunnerCommand_EntryArgumentsReachTheScheduledCommand(t *testing.T) {
 }
 
 /* newCapturingRunnerRuntime is a runtime whose logger records every line, which is how the runner's own declarations and failure records are read back. */
-func newCapturingRunnerRuntime(ctx context.Context) (runtimecontract.Runtime, *capturingRunnerLogger) {
+func newCapturingRunnerRuntime(ctx context.Context) (containercontract.Runtime, *capturingRunnerLogger) {
     captured := &capturingRunnerLogger{}
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
@@ -2640,7 +2651,7 @@ func newCapturingRunnerRuntime(ctx context.Context) (runtimecontract.Runtime, *c
         container.RegisterOptions{},
     )
 
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer), captured
+    return runtime.NewRun(ctx, serviceContainer.NewScope()), captured
 }
 
 /* TestRunnerCommand_OnceRendersTheMachineDocument pins the document a deploy step reads: `melody:cron:run --once --format=json | jq` must receive a document, since an empty stream is indistinguishable from a missing binary. */
@@ -2908,7 +2919,7 @@ func (instance *panicValueCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *panicValueCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *panicValueCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     panic(instance.panicValue)
 }
 
@@ -2972,12 +2983,8 @@ func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
     runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
 
     scopeCloseErr := errors.New("scope close failed")
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(
-        context.Background(),
-        serviceContainer.NewScope(),
-        failingScopeContainer{Container: serviceContainer, scopeCloseErr: scopeCloseErr},
-    )
+    job.resolveName = failingCloseServiceName
+    runtimeInstance := newFailingChildScopeRuntime(t, scopeCloseErr)
 
     invokeErr := runner.invokeRun(runtimeInstance, runner.entries[0], logging.GenerateProcessId())
     if nil == invokeErr {
@@ -3008,8 +3015,12 @@ func TestInvoke_ACommandFailureAndAScopeCloseFailureBothSurvive(t *testing.T) {
         t.Fatalf("expected the close failure's own chain, got %v", logContext["scopeCloseErrorCauseChain"])
     }
 
-    if false == strings.Contains(strings.Join(closeChain, " | "), "scope close failed") {
-        t.Fatalf("expected the close failure's chain to reach its cause, got %v", closeChain)
+    if false == strings.Contains(strings.Join(closeChain, " | "), "failed to close scope services") {
+        t.Fatalf("expected the close failure's chain to reach the scope's refusal, got %v", closeChain)
+    }
+
+    if false == strings.Contains(fmt.Sprintf("%v", logContext), scopeCloseErr.Error()) {
+        t.Fatalf("expected the record to carry the service's close failure, got %v", logContext)
     }
 }
 
@@ -3515,7 +3526,7 @@ func (instance *ignoringCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *ignoringCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *ignoringCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     select {
     case instance.started <- struct{}{}:
     default:
@@ -3555,7 +3566,7 @@ func awaitWithin(t *testing.T, budget time.Duration, label string, run func()) {
     }
 }
 
-func newLoggingRunnerTestRuntime(ctx context.Context, logger loggingcontract.Logger) runtimecontract.Runtime {
+func newLoggingRunnerTestRuntime(ctx context.Context, logger loggingcontract.Logger) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     serviceContainer.MustRegister(
         logging.ServiceLogger,
@@ -3565,7 +3576,7 @@ func newLoggingRunnerTestRuntime(ctx context.Context, logger loggingcontract.Log
         container.RegisterOptions{},
     )
 
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(ctx, serviceContainer.NewScope())
 }
 
 func TestWallMinuteTime_AMinuteInsideTheSpringForwardGapStaysUtcMaterialized(t *testing.T) {
@@ -3889,34 +3900,38 @@ func TestResolveAbandonedRun_AShutdownAbandonNamesTheShutdownAndIsNotACancellati
     }
 }
 
-/* panickingScopeContainer refuses the FIRST scope asked of it and answers the rest, so the minute-mate of the refused run still gets one. */
-type panickingScopeContainer struct {
-    containercontract.Container
-    refused *atomic.Bool
+/* panicOnceLogger panics on its first record and keeps every later one: a sink that fails once and recovers, so the runner's record of the contained panic can be read. */
+type panicOnceLogger struct {
+    capturingRunnerLogger
+    panicked atomic.Bool
 }
 
-func (instance panickingScopeContainer) NewScope() containercontract.Scope {
-    if true == instance.refused.CompareAndSwap(false, true) {
-        panic("the application's container refused a scope")
+func (instance *panicOnceLogger) Log(level loggingcontract.Level, message string, context loggingcontract.Context) {
+    if true == instance.panicked.CompareAndSwap(false, true) {
+        panic("the application's logger panicked once")
     }
 
-    return instance.Container.NewScope()
+    instance.capturingRunnerLogger.Log(level, message, context)
 }
 
-type panickingCloseScope struct {
-    containercontract.Scope
+func (instance *panicOnceLogger) Debug(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, context)
 }
 
-func (instance panickingCloseScope) Close() error {
-    panic("the application's scope panicked on close")
+func (instance *panicOnceLogger) Info(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, context)
 }
 
-type panickingCloseContainer struct {
-    containercontract.Container
+func (instance *panicOnceLogger) Warning(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, context)
 }
 
-func (instance panickingCloseContainer) NewScope() containercontract.Scope {
-    return panickingCloseScope{Scope: instance.Container.NewScope()}
+func (instance *panicOnceLogger) Error(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, context)
+}
+
+func (instance *panicOnceLogger) Emergency(message string, context loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, context)
 }
 
 /* panickingLogger panics on every record: the shape of an application logger whose sink is gone. */
@@ -3953,7 +3968,7 @@ func (instance errorWithPanickingText) Error() string {
     panic("the application's error panicked rendering itself")
 }
 
-func dispatchOnePanicProbe(t *testing.T, runtimeInstance runtimecontract.Runtime, job clicontract.Command) (dueReport, error, *recordingCommand) {
+func dispatchOnePanicProbe(t *testing.T, runtimeInstance containercontract.Runtime, job clicontract.Command) (dueReport, error, *recordingCommand) {
     t.Helper()
 
     healthy := newRecordingCommand("job:healthy")
@@ -4030,58 +4045,6 @@ func assertRunnerPanicFiled(t *testing.T, report dueReport, runErr error, health
     }
 }
 
-/* the two runs of the minute race for the one refused scope, so the assertion is on the shape of the minute, not on which entry drew it: one run filed as the runner's own panic, the other completed. */
-func TestDispatchDue_APanicPreparingARunIsFiledAsThatRunsFailure(t *testing.T) {
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), panickingScopeContainer{Container: serviceContainer, refused: &atomic.Bool{}})
-
-    first := newRecordingCommand("job:one")
-    report, runErr, healthy := dispatchOnePanicProbe(t, runtimeInstance, first)
-
-    if nil == runErr || false == strings.Contains(runErr.Error(), "scheduled commands failed") {
-        t.Fatalf("expected the minute to aggregate the contained panic, got %v", runErr)
-    }
-
-    if 2 != len(report.Ran) {
-        t.Fatalf("expected both runs in the document, got %v", report.Ran)
-    }
-
-    failed := 0
-    for _, run := range report.Ran {
-        if false == run.Failed {
-            continue
-        }
-
-        failed++
-
-        if "" == run.RunId || false == strings.Contains(run.Error, "runner panicked") {
-            t.Fatalf("expected the refused run filed with its id and the contained panic, got %+v", run)
-        }
-    }
-
-    if 1 != failed {
-        t.Fatalf("expected exactly one run filed as the runner's panic, got %d", failed)
-    }
-
-    if 1 != first.runCount+healthy.runCount {
-        t.Fatalf("expected the run that got a scope to complete, ran %d and %d", first.runCount, healthy.runCount)
-    }
-
-    var filed *exception.Error
-    if false == errors.As(errors.Unwrap(runErr), &filed) || false == strings.Contains(fmt.Sprintf("%v", filed.Context()["panicValue"]), "refused a scope") {
-        t.Fatalf("expected the panic value beneath the aggregate, got %v", runErr)
-    }
-}
-
-func TestDispatchDue_APanicClosingTheChildScopeIsFiledAsThatRunsFailure(t *testing.T) {
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), panickingCloseContainer{Container: serviceContainer})
-
-    report, runErr, healthy := dispatchOnePanicProbe(t, runtimeInstance, newRecordingCommand("job:one"))
-
-    assertRunnerPanicFiled(t, report, runErr, healthy, "job:one", "panicked on close")
-}
-
 func TestDispatchDue_APanicInTheLoggerIsFiledAsThatRunsFailure(t *testing.T) {
     failing := newRecordingCommand("job:one")
     failing.runErr = errors.New("job failed")
@@ -4133,7 +4096,7 @@ func TestDispatchDue_ALoggerRegisteredUnderItsConcreteTypeFailsTheRunNotTheProce
         },
         container.RegisterOptions{},
     )
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
 
     report, runErr, healthy := dispatchOnePanicProbe(t, runtimeInstance, newRecordingCommand("job:one"))
 
@@ -4181,19 +4144,13 @@ func TestScheduledOutputCapture_CutsOnARuneBoundary(t *testing.T) {
 }
 
 /* the contained panic is also recorded, when the logger is not the collaborator that panicked: the row and the aggregate carry it regardless, the record is the operator's line. */
-func TestDispatchDue_AContainedPanicIsRecordedWhenTheLoggerCanWrite(t *testing.T) {
-    captured := &capturingRunnerLogger{}
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-    serviceContainer.MustRegister(
-        logging.ServiceLogger,
-        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-            return captured, nil
-        },
-        container.RegisterOptions{},
-    )
-    runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), panickingCloseContainer{Container: serviceContainer})
+/* a sink that fails once and recovers: the run whose record panicked is contained, and the runner's record of that panic lands on the next write */
+func TestDispatchDue_AContainedPanicIsRecordedOnceTheLoggerWritesAgain(t *testing.T) {
+    captured := &panicOnceLogger{}
+    failing := newRecordingCommand("job:one")
+    failing.runErr = errors.New("job failed")
 
-    _, runErr, _ := dispatchOnePanicProbe(t, runtimeInstance, newRecordingCommand("job:one"))
+    _, runErr, _ := dispatchOnePanicProbe(t, newLoggingRunnerTestRuntime(context.Background(), captured), failing)
     if nil == runErr {
         t.Fatal("expected the contained panic aggregated as a failure")
     }
@@ -4203,7 +4160,7 @@ func TestDispatchDue_AContainedPanicIsRecordedWhenTheLoggerCanWrite(t *testing.T
         t.Fatalf("expected the contained panic recorded, got %v", captured.entries)
     }
 
-    if false == strings.Contains(fmt.Sprintf("%v", record.context), "panicked on close") {
+    if false == strings.Contains(fmt.Sprintf("%v", record.context), "panicked once") {
         t.Fatalf("expected the record to carry the panic value, got %v", record.context)
     }
 }
@@ -4260,7 +4217,7 @@ func (instance *concurrentRunCommand) Flags() []clicontract.Flag {
     return nil
 }
 
-func (instance *concurrentRunCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *concurrentRunCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     return nil
 }
 
@@ -4312,7 +4269,7 @@ func (instance *memoizedFlagsCommand) Flags() []clicontract.Flag {
     return instance.flags
 }
 
-func (instance *memoizedFlagsCommand) Run(runtimeInstance runtimecontract.Runtime, commandContext *clicontract.CommandContext) error {
+func (instance *memoizedFlagsCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     return nil
 }
 
@@ -4460,5 +4417,32 @@ func TestWithSiblingFailure_RendersEachLinkOfACyclicChainOnce(t *testing.T) {
     causeChain, isCauseChain := merged["closeCauseChain"].([]string)
     if false == isCauseChain || 2 != len(causeChain) {
         t.Fatalf("expected the two links of the cycle once each, got %v", merged["closeCauseChain"])
+    }
+}
+
+/* a run whose scope closed cannot open a child scope: the scheduled command fails naming itself and never runs */
+func TestInvoke_AClosedRunScopeFailsTheRunBeforeTheCommand(t *testing.T) {
+    job := newRecordingCommand("job:top")
+
+    configuration := NewConfiguration().
+        Schedule("job:top", EntryConfig{Schedule: &Schedule{Minute: "0"}})
+
+    runner := NewRunnerCommand(configuration, RunnerConfig{Commands: []clicontract.Command{job}})
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    closedScope := serviceContainer.NewScope()
+    _ = closedScope.Close()
+
+    invokeErr := runner.invokeRun(runtime.NewRun(context.Background(), closedScope), runner.entries[0], logging.GenerateProcessId())
+    if false == errors.Is(invokeErr, container.ErrScopeClosed) || false == strings.Contains(invokeErr.Error(), "could not be opened") {
+        t.Fatalf("expected the run refused on its closed scope, got %v", invokeErr)
+    }
+
+    if "job:top" != exception.LogContext(invokeErr, exception.LogContextConfig{})["commandName"] {
+        t.Fatalf("expected the refusal to name the command, got %v", exception.LogContext(invokeErr, exception.LogContextConfig{}))
+    }
+
+    if 0 != job.runCount {
+        t.Fatalf("expected the command not run, ran %d", job.runCount)
     }
 }

@@ -31,7 +31,7 @@ func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveIns
         t.Fatalf("override error: %v", err)
     }
 
-    runtimeInstance := New(context.Background(), scope, serviceContainer)
+    runtimeInstance := NewRun(context.Background(), scope)
 
     value, err := FromRuntime[string](runtimeInstance, "service.test")
     if nil != err {
@@ -47,7 +47,7 @@ func TestFromRuntime_UsesScopeWhenPresentAndUsesContainerWhenScopeDoesNotHaveIns
     }
 
     emptyScope := serviceContainer.NewScope()
-    runtimeInstance = New(context.Background(), emptyScope, serviceContainer)
+    runtimeInstance = NewRun(context.Background(), emptyScope)
 
     value, err = FromRuntime[string](runtimeInstance, "service.test")
     if nil != err {
@@ -80,7 +80,7 @@ func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
         t.Fatalf("override error: %v", err)
     }
 
-    runtimeInstance := New(context.Background(), scope, serviceContainer)
+    runtimeInstance := NewRun(context.Background(), scope)
 
     _, err = FromRuntime[string](runtimeInstance, "service.test")
     if nil == err {
@@ -91,7 +91,7 @@ func TestFromRuntime_DoesNotMaskScopeOverrideTypeMismatch(t *testing.T) {
 func TestFromRuntime_ReturnsErrorWhenMissingEverywhere(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    runtimeInstance := New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := NewRun(context.Background(), serviceContainer.NewScope())
 
     _, err := FromRuntime[string](runtimeInstance, "missing")
     if nil == err {
@@ -102,17 +102,15 @@ func TestFromRuntime_ReturnsErrorWhenMissingEverywhere(t *testing.T) {
 func TestMustFromRuntime_PanicsWhenMissingEverywhere(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    runtimeInstance := New(context.Background(), serviceContainer.NewScope(), container.NewContainer(container.ContainerConfig{}))
+    runtimeInstance := NewRun(context.Background(), serviceContainer.NewScope())
 
     testhelper.AssertPanicsWithError(t, func() {
         _ = MustFromRuntime[string](runtimeInstance, "missing")
     }, "service is not registered")
 }
 
-/* typedNilScopeRuntime yields a typed-nil scope beside a healthy container, the shape a custom Runtime implementation can legally produce */
-type typedNilScopeRuntime struct {
-    container containercontract.Container
-}
+/* typedNilScopeRuntime yields a typed-nil scope, the shape a custom Runtime implementation can legally produce */
+type typedNilScopeRuntime struct{}
 
 func (instance *typedNilScopeRuntime) Context() context.Context {
     return context.Background()
@@ -122,31 +120,19 @@ func (instance *typedNilScopeRuntime) Scope() containercontract.Scope {
     return (*nilableScope)(nil)
 }
 
-func (instance *typedNilScopeRuntime) Container() containercontract.Container {
-    return instance.container
+func (instance *typedNilScopeRuntime) Kind() containercontract.Kind {
+    return containercontract.KindRun
 }
 
-func TestFromRuntime_FallsBackToTheContainerPastATypedNilScope(t *testing.T) {
-    serviceContainer := container.NewContainer(container.ContainerConfig{})
-
-    registerErr := serviceContainer.Register(
-        "service.typed.nil.probe",
-        func(resolver containercontract.Resolver) (string, error) {
-            return "container", nil
-        },
-        container.RegisterOptions{},
-    )
-    if nil != registerErr {
-        t.Fatalf("register error: %v", registerErr)
+/* a typed-nil scope handed back as the resolver would dereference its nil receiver inside the container package; the runtime resolves through its scope only, so there is no container to fall back to */
+func TestFromRuntime_RefusesATypedNilScopeRatherThanResolvingThrough(t *testing.T) {
+    _, resolveErr := FromRuntime[string](&typedNilScopeRuntime{}, "service.test")
+    if nil == resolveErr {
+        t.Fatalf("expected the typed-nil scope to be refused")
     }
 
-    resolved, resolveErr := FromRuntime[string](&typedNilScopeRuntime{container: serviceContainer}, "service.typed.nil.probe")
-    if nil != resolveErr {
-        t.Fatalf("expected the container fallback to resolve, got: %v", resolveErr)
-    }
-
-    if "container" != resolved {
-        t.Fatalf("expected the container's value, got %q", resolved)
+    if "runtime resolver may not be nil" != resolveErr.Error() {
+        t.Fatalf("expected the resolver refusal, got %q", resolveErr.Error())
     }
 }
 
@@ -161,12 +147,12 @@ func (instance *typedNilRuntime) Scope() containercontract.Scope {
     return nil
 }
 
-func (instance *typedNilRuntime) Container() containercontract.Container {
-    return nil
+func (instance *typedNilRuntime) Kind() containercontract.Kind {
+    return containercontract.KindRun
 }
 
-/* a runtime that is itself present but carries neither a scope nor a container has nothing to resolve through, and says so: handing back a nil resolver would move the failure into the container call, where the message names a service instead of the wiring that has no resolver at all */
-func TestFromRuntime_RefusesARuntimeWithNeitherScopeNorContainer(t *testing.T) {
+/* a runtime that is itself present but carries no scope has nothing to resolve through, and says so: handing back a nil resolver would move the failure into the container call, where the message names a service instead of the wiring that has no resolver at all */
+func TestFromRuntime_RefusesARuntimeWithNoScope(t *testing.T) {
     runtimeInstance := &typedNilRuntime{}
 
     _, resolveErr := FromRuntime[string](runtimeInstance, "service.test")
@@ -202,33 +188,6 @@ func TestFromRuntime_RefusesATypedNilRuntimeByNameRatherThanByItsMissingResolver
 
     if "runtime may not be nil" != resolveErr.Error() {
         t.Fatalf("expected the runtime refusal, got %q", resolveErr.Error())
-    }
-}
-
-/* typedNilContainerRuntime yields a typed-nil container beside an absent scope: the container door reads through the interface exactly as the scope door does */
-type typedNilContainerRuntime struct{}
-
-func (instance *typedNilContainerRuntime) Context() context.Context {
-    return context.Background()
-}
-
-func (instance *typedNilContainerRuntime) Scope() containercontract.Scope {
-    return nil
-}
-
-func (instance *typedNilContainerRuntime) Container() containercontract.Container {
-    return (*nilableContainer)(nil)
-}
-
-/* a typed-nil container handed back as the resolver would dereference its nil receiver inside the container package, on the request path, in place of the refusal this door promises. The scope half of the same guard is pinned above; this is its container twin, unpinned on every major until here. */
-func TestFromRuntime_RefusesATypedNilContainerRatherThanResolvingThrough(t *testing.T) {
-    _, resolveErr := FromRuntime[string](&typedNilContainerRuntime{}, "service.test")
-    if nil == resolveErr {
-        t.Fatalf("expected the typed-nil container to be refused")
-    }
-
-    if "runtime resolver may not be nil" != resolveErr.Error() {
-        t.Fatalf("expected the resolver refusal, got %q", resolveErr.Error())
     }
 }
 
@@ -268,7 +227,7 @@ func TestFromRuntime_TheRuntimesContextBoundsTheWaitOnACreationAnotherGoroutineR
         _ = scope.Close()
     }()
 
-    if _, fromRuntimeErr := FromRuntime[string](New(runtimeContext, scope, serviceContainer), "service.held"); false == errors.Is(fromRuntimeErr, context.Canceled) {
+    if _, fromRuntimeErr := FromRuntime[string](NewRun(runtimeContext, scope), "service.held"); false == errors.Is(fromRuntimeErr, context.Canceled) {
         t.Fatalf("expected the cancelled runtime to leave the wait with context.Canceled, got %v", fromRuntimeErr)
     }
 

@@ -14,13 +14,12 @@ import (
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 func TestEventDispatcherStableOrderingForEqualPriorities(t *testing.T) {
@@ -29,7 +28,7 @@ func TestEventDispatcherStableOrderingForEqualPriorities(t *testing.T) {
     invoked := make([]string, 0)
     _ = dispatcher.AddListener(
         "test",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             invoked = append(invoked, "a")
             return nil
         },
@@ -37,7 +36,7 @@ func TestEventDispatcherStableOrderingForEqualPriorities(t *testing.T) {
     )
     _ = dispatcher.AddListener(
         "test",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             invoked = append(invoked, "b")
             return nil
         },
@@ -45,7 +44,7 @@ func TestEventDispatcherStableOrderingForEqualPriorities(t *testing.T) {
     )
     _ = dispatcher.AddListener(
         "test",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             invoked = append(invoked, "c")
             return nil
         },
@@ -90,7 +89,7 @@ func TestEventDispatcher_AddListener_SortsByPriorityDescending(t *testing.T) {
     order := make([]int, 0)
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             order = append(order, 10)
             return nil
         },
@@ -98,7 +97,7 @@ func TestEventDispatcher_AddListener_SortsByPriorityDescending(t *testing.T) {
     )
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             order = append(order, 30)
             return nil
         },
@@ -106,7 +105,7 @@ func TestEventDispatcher_AddListener_SortsByPriorityDescending(t *testing.T) {
     )
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             order = append(order, 20)
             return nil
         },
@@ -132,7 +131,7 @@ func TestEventDispatcher_AddListener_PanicsOnInvalidInput(t *testing.T) {
     dispatcher, _ := testNewEventDispatcher()
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = dispatcher.AddListener("", func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0)
+        _ = dispatcher.AddListener("", func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0)
     }, "event name is required to add a listener")
 
     testhelper.AssertPanicsWithError(t, func() {
@@ -207,7 +206,7 @@ func TestEventDispatcher_DispatchName_PayloadIsPreserved(t *testing.T) {
 
     dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             receivedPayload = eventValue.Payload()
             return nil
         },
@@ -234,7 +233,7 @@ func TestEventDispatcher_StopPropagation_SkipsRemainingListeners(t *testing.T) {
     calls := 0
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             calls++
             eventValue.StopPropagation()
             return nil
@@ -243,7 +242,7 @@ func TestEventDispatcher_StopPropagation_SkipsRemainingListeners(t *testing.T) {
     )
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             calls++
             return nil
         },
@@ -269,7 +268,7 @@ func TestEventDispatcher_StopBeforeRequiredListener_FailsClosed(t *testing.T) {
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.StopPropagation()
             return nil
         },
@@ -277,7 +276,7 @@ func TestEventDispatcher_StopBeforeRequiredListener_FailsClosed(t *testing.T) {
     )
     requiredRegistration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             requiredRan = true
             return nil
         },
@@ -301,7 +300,7 @@ func TestEventDispatcher_MaySkipRequiredListeners_RestoresProceed(t *testing.T) 
 
     stopperRegistration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.StopPropagation()
             return nil
         },
@@ -311,7 +310,7 @@ func TestEventDispatcher_MaySkipRequiredListeners_RestoresProceed(t *testing.T) 
 
     requiredRegistration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         0,
@@ -331,7 +330,7 @@ func TestEventDispatcher_StopAfterRequiredListener_DoesNotFail(t *testing.T) {
 
     requiredRegistration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         100,
@@ -340,7 +339,7 @@ func TestEventDispatcher_StopAfterRequiredListener_DoesNotFail(t *testing.T) {
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.StopPropagation()
             return nil
         },
@@ -361,7 +360,7 @@ func TestEventDispatcher_ListenerError_IsWrappedWithContext(t *testing.T) {
     expectedErr := errors.New("listener error")
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return expectedErr
         },
         0,
@@ -397,7 +396,7 @@ func TestEventDispatcher_TheWrapperInheritsTheAlreadyLoggedMarkOfTheListenerFail
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return exception.MarkLogged(exception.NewError("failed and already logged", nil, nil))
         },
         0,
@@ -420,7 +419,7 @@ func TestEventDispatcher_TheWrapperOfAnUnmarkedFailureStaysUnmarked(t *testing.T
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return errors.New("failed and never logged")
         },
         0,
@@ -442,7 +441,7 @@ func TestEventDispatcher_ListenerPanic_IsConvertedToErrorWithContext(t *testing.
     dispatcher, clockInstance := testNewEventDispatcher()
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             panic("boom")
         },
         0,
@@ -495,7 +494,7 @@ func TestEventDispatcher_ListenerPanicWithError_CarriesItAsCause(t *testing.T) {
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             exception.Panic(panicErr)
             return nil
         },
@@ -523,7 +522,7 @@ func TestEventDispatcher_ListenerPanicWithTypedNilError_YieldsNoCause(t *testing
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             var typedNil *exception.Error
             panic(typedNil)
         },
@@ -560,7 +559,7 @@ func TestEventDispatcher_AddSubscriber_HappyPathRegistersListeners(t *testing.T)
         events: map[string][]eventcontract.SubscribedEvent{
             "e": {
                 NewSubscribedEvent(
-                    func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                         calls++
                         return nil
                     },
@@ -600,7 +599,7 @@ func TestEventDispatcher_AddSubscriber_PanicsOnInvalidDefinitions(t *testing.T) 
             &testSubscriber{
                 events: map[string][]eventcontract.SubscribedEvent{
                     "": {
-                        NewSubscribedEvent(func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0),
+                        NewSubscribedEvent(func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0),
                     },
                 },
             },
@@ -643,12 +642,12 @@ func TestEventDispatcher_RemoveListener_RemovesListenerAndKeepsOthers(t *testing
 
     invoked := make([]string, 0)
 
-    listenerA := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    listenerA := func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         invoked = append(invoked, "a")
         return nil
     }
 
-    listenerB := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    listenerB := func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         invoked = append(invoked, "b")
         return nil
     }
@@ -689,12 +688,12 @@ func TestEventDispatcher_RemoveSubscriber_RemovesAllSubscriberListeners(t *testi
 
     invoked := make([]string, 0)
 
-    listenerA := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    listenerA := func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         invoked = append(invoked, "a")
         return nil
     }
 
-    listenerB := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    listenerB := func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         invoked = append(invoked, "b")
         return nil
     }
@@ -743,11 +742,10 @@ func TestEventDispatcher_Dispatch_UsesListenerSnapshot(t *testing.T) {
 
     scope := serviceContainer.NewScope()
 
-    runtimeInstance := runtime.New(
+    runtimeInstance := runtime.NewRun(
         context.Background(),
         scope,
-        serviceContainer,
-    )
+)
 
     dispatcher := NewEventDispatcher(clock.NewSystemClock())
 
@@ -755,7 +753,7 @@ func TestEventDispatcher_Dispatch_UsesListenerSnapshot(t *testing.T) {
     startedOnce := sync.Once{}
     continueDispatch := make(chan struct{})
 
-    firstListener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    firstListener := func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         startedOnce.Do(func() {
             close(started)
         })
@@ -765,7 +763,7 @@ func TestEventDispatcher_Dispatch_UsesListenerSnapshot(t *testing.T) {
     }
 
     var secondListenerCalled int32
-    secondListener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    secondListener := func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         atomic.AddInt32(&secondListenerCalled, 1)
 
         return nil
@@ -820,7 +818,7 @@ func (instance *firstZeroSizeSubscriber) SubscribedEvents() map[string][]eventco
     return map[string][]eventcontract.SubscribedEvent{
         "zero.size.first": {
             NewSubscribedEvent(
-                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
                 0,
@@ -835,7 +833,7 @@ func (instance *secondZeroSizeSubscriber) SubscribedEvents() map[string][]eventc
     return map[string][]eventcontract.SubscribedEvent{
         "zero.size.second": {
             NewSubscribedEvent(
-                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
                 0,
@@ -886,7 +884,7 @@ func TestEventDispatcher_StoppingListenerThatAlsoFails_StillReportsTheSkippedReq
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.StopPropagation()
 
             return errors.New("the listener's own failure")
@@ -895,7 +893,7 @@ func TestEventDispatcher_StoppingListenerThatAlsoFails_StillReportsTheSkippedReq
     )
     requiredRegistration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             requiredRan = true
 
             return nil
@@ -932,7 +930,7 @@ func TestEventDispatcher_StoppingListenerThatAlsoFails_ReportsItsOwnFailureWhenN
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.StopPropagation()
 
             return errors.New("the listener's own failure")
@@ -941,7 +939,7 @@ func TestEventDispatcher_StoppingListenerThatAlsoFails_ReportsItsOwnFailureWhenN
     )
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         0,
@@ -966,7 +964,7 @@ func TestEventDispatcher_EventThatArrivedStopped_RunsNoListener(t *testing.T) {
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             firstRan = true
 
             return nil
@@ -994,7 +992,7 @@ func TestEventDispatcher_EventThatArrivedStopped_ReportsTheSkippedRequiredListen
 
     requiredRegistration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         0,
@@ -1020,7 +1018,7 @@ func TestEventDispatcher_TypedNilListenerError_ReadsAsTheSuccessItMeans(t *testi
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             var typedNilErr *testTypedNilError
 
             return typedNilErr
@@ -1029,7 +1027,7 @@ func TestEventDispatcher_TypedNilListenerError_ReadsAsTheSuccessItMeans(t *testi
     )
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             secondRan = true
 
             return nil
@@ -1063,7 +1061,7 @@ func TestEventDispatcher_ListenerError_TravelsUnmarkedWithItsCause(t *testing.T)
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerErr
         },
         0,
@@ -1095,7 +1093,7 @@ func TestEventDispatcher_MarkListenerRequired_RefusesAnUnknownRegistration(t *te
 
     registration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         0,
@@ -1120,7 +1118,7 @@ func TestEventDispatcher_RegisteredEvents_ReportsTheRequiredListenerMarks(t *tes
 
     requiredRegistration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         0,
@@ -1179,7 +1177,7 @@ func TestEventDispatcher_AddSubscriber_RegistersNothingWhenALaterEventIsMalforme
         events: map[string][]eventcontract.SubscribedEvent{
             "a.event": {
                 NewSubscribedEvent(
-                    func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                    func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                         return nil
                     },
                     0,
@@ -1313,7 +1311,7 @@ func TestEventDispatcher_ListenerExit_TravelsToTheProcessBoundary(t *testing.T) 
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             exception.Exit(
                 exception.NewExitError(
                     7,
@@ -1353,7 +1351,7 @@ func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheValueReportsItself
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             panicErr := exception.NewError("already reported by its author", nil, nil)
             _ = exception.MarkLogged(panicErr)
 
@@ -1383,7 +1381,7 @@ func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheMarkIsOneLinkDown(
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             panicErr := exception.NewError("already reported by its author", nil, nil)
             _ = exception.MarkLogged(panicErr)
 
@@ -1410,7 +1408,7 @@ func TestEventDispatcher_ListenerPanic_IsLoggedWhenNobodyReportedIt(t *testing.T
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             panic("nobody reported this")
         },
         0,
@@ -1429,7 +1427,7 @@ func TestEventDispatcher_ListenerPanic_IsLoggedWhenNobodyReportedIt(t *testing.T
     }
 }
 
-func testRuntimeWithLogger(t *testing.T, logger loggingcontract.Logger) runtimecontract.Runtime {
+func testRuntimeWithLogger(t *testing.T, logger loggingcontract.Logger) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
@@ -1444,7 +1442,7 @@ func testRuntimeWithLogger(t *testing.T, logger loggingcontract.Logger) runtimec
         t.Fatalf("unexpected error: %v", err)
     }
 
-    return runtime.New(context.Background(), scope, serviceContainer)
+    return runtime.NewRun(context.Background(), scope)
 }
 
 type testRecordingLogger struct {
@@ -1568,7 +1566,7 @@ func TestEventDispatcher_MarkListenerRequired_RefusesAnUnusableRegistration(t *t
 
     registration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         0,
@@ -1600,7 +1598,7 @@ func TestEventDispatcher_RemoveListener_RefusesAnUnusableRegistration(t *testing
 
     registration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         0,
@@ -1634,7 +1632,7 @@ func (instance *testTwoEventSubscriber) SubscribedEvents() map[string][]eventcon
     return map[string][]eventcontract.SubscribedEvent{
         "first": {
             NewSubscribedEvent(
-                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
                 0,
@@ -1642,7 +1640,7 @@ func (instance *testTwoEventSubscriber) SubscribedEvents() map[string][]eventcon
         },
         "second": {
             NewSubscribedEvent(
-                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
                 0,
@@ -1716,7 +1714,7 @@ func (instance testValueSubscriber) SubscribedEvents() map[string][]eventcontrac
     return map[string][]eventcontract.SubscribedEvent{
         "e": {
             NewSubscribedEvent(
-                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
                 0,
@@ -1747,14 +1745,14 @@ func TestEventDispatcher_FailingListenerBeforeRequiredListener_FailsClosed(t *te
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerFailure
         },
         100,
     )
     requiredRegistration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             requiredRan = true
 
             return nil
@@ -1803,7 +1801,7 @@ func TestEventDispatcher_FailingListenerWithMaySkip_StillReportsTheSkippedRequir
 
     failingRegistration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerFailure
         },
         100,
@@ -1812,7 +1810,7 @@ func TestEventDispatcher_FailingListenerWithMaySkip_StillReportsTheSkippedRequir
 
     requiredRegistration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         0,
@@ -1840,7 +1838,7 @@ func TestEventDispatcher_FailingListenerAfterTheRequiredListenerRan_ReportsItsOw
 
     requiredRegistration := dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             requiredRan = true
 
             return nil
@@ -1851,7 +1849,7 @@ func TestEventDispatcher_FailingListenerAfterTheRequiredListenerRan_ReportsItsOw
 
     _ = dispatcher.AddListener(
         "e",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return listenerFailure
         },
         0,
@@ -1885,7 +1883,7 @@ func TestEventDispatcher_ConcurrentSubscriberRegistrationStaysAtomic(t *testing.
             events: map[string][]eventcontract.SubscribedEvent{
                 "e": {
                     NewSubscribedEvent(
-                        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                             calls++
                             return nil
                         },
@@ -2002,7 +2000,7 @@ func TestEventDispatcher_DoesNotBuildDebugRecordsTheJournalWouldDiscard(t *testi
 
             _ = dispatcher.AddListener(
                 "gate.event",
-                func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+                func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                     return nil
                 },
                 100,
@@ -2103,7 +2101,7 @@ func TestEventDispatcher_NamesTheListenerOnTheFailurePathWithDebugOff(t *testing
     }
 }
 
-func failingGateListener(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+func failingGateListener(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
     return errors.New("the listener refused")
 }
 
@@ -2117,7 +2115,7 @@ func TestEventDispatcher_NamesTheStoppingListenerInTheRequiredRefusalWithDebugOf
 
     requiredRegistration := dispatcher.AddListener(
         "gate.stop",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             return nil
         },
         100,
@@ -2144,7 +2142,7 @@ func TestEventDispatcher_NamesTheStoppingListenerInTheRequiredRefusalWithDebugOf
     }
 }
 
-func stoppingGateListener(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+func stoppingGateListener(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
     eventValue.StopPropagation()
 
     return nil
@@ -2179,7 +2177,7 @@ func TestEventDispatcher_RemoveSubscriber_RemovesEveryListenerOfTheRegistration(
     dispatcher, clockInstance := testNewEventDispatcher()
 
     calls := 0
-    listener := func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+    listener := func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
         calls++
         return nil
     }
@@ -2323,7 +2321,7 @@ func TestEventDispatcher_RefusalsOfASubscriberAndOfAnEmptyNameCarryTheType(t *te
 
     cases := map[string]map[string][]eventcontract.SubscribedEvent{
         "nil subscribed events":     nil,
-        "empty event name":          {"": {NewSubscribedEvent(func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0)}},
+        "empty event name":          {"": {NewSubscribedEvent(func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error { return nil }, 0)}},
         "nil subscribed event list": {"evt": nil},
     }
 
@@ -2376,7 +2374,7 @@ func TestEventDispatcher_APayloadThatReportsItsStopEndsTheDispatch(t *testing.T)
 
     dispatcher.AddListener(
         "payload.stop",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.Payload().(*testStoppingPayload).stopped = true
 
             return nil
@@ -2385,7 +2383,7 @@ func TestEventDispatcher_APayloadThatReportsItsStopEndsTheDispatch(t *testing.T)
     )
     dispatcher.AddListener(
         "payload.stop",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             secondRan++
 
             return nil
@@ -2416,7 +2414,7 @@ func TestEventDispatcher_APayloadStopBeforeARequiredListenerIsRefused(t *testing
 
     dispatcher.AddListener(
         "payload.required",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             eventValue.Payload().(*testStoppingPayload).stopped = true
 
             return nil
@@ -2426,7 +2424,7 @@ func TestEventDispatcher_APayloadStopBeforeARequiredListenerIsRefused(t *testing
     dispatcher.MarkListenerRequired(
         dispatcher.AddListener(
             "payload.required",
-            func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+            func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
                 return nil
             },
             0,
@@ -2447,7 +2445,7 @@ func TestEventDispatcher_ATypedNilPayloadDoesNotStopTheDispatch(t *testing.T) {
 
     dispatcher.AddListener(
         "payload.nil",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             ran++
 
             return nil
@@ -2464,7 +2462,7 @@ func TestEventDispatcher_ATypedNilPayloadDoesNotStopTheDispatch(t *testing.T) {
     }
 }
 
-func testNoopEventListener(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+func testNoopEventListener(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
     return nil
 }
 
@@ -2516,7 +2514,7 @@ func TestEventDispatcher_AListenerRegisteredBeforeTheFloorStands(t *testing.T) {
 
     dispatcher.AddListener(
         "floor.event",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             order = append(order, "earlier")
 
             return nil
@@ -2526,7 +2524,7 @@ func TestEventDispatcher_AListenerRegisteredBeforeTheFloorStands(t *testing.T) {
 
     registration, installed := dispatcher.InstallFloorListener(
         "floor.event",
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             order = append(order, "floor")
 
             return nil

@@ -9,8 +9,8 @@ import (
 
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/runtime"
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -96,7 +96,7 @@ func TestRedisNonceGuard_RememberKeepsATighterRequestDeadline(t *testing.T) {
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    runtimeInstance := runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
 
     started := time.Now()
     requireDeadlineExceeded(t, awaitOutcome(t, boundProbeBudget, func() error {

@@ -3,12 +3,12 @@ package http
 import (
     "time"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/internal"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 const (
@@ -18,7 +18,7 @@ const (
 func RegisterKernelTerminateAccessLogListener(eventDispatcher eventcontract.EventDispatcher) {
     eventDispatcher.AddListener(
         kernelcontract.EventKernelTerminate,
-        func(runtimeInstance runtimecontract.Runtime, eventValue eventcontract.Event) error {
+        func(runtimeInstance containercontract.Runtime, eventValue eventcontract.Event) error {
             terminateEvent, ok := eventValue.Payload().(*KernelTerminateEvent)
             if false == ok {
                 return nil

@@ -12,7 +12,6 @@ import (
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
 type eventCommandTestEnvelope struct {
@@ -34,7 +33,7 @@ func newEventTestRuntime(eventCount int) *testRuntime {
         dispatcher.AddListener(
             fmt.Sprintf("event.%02d", index),
             func(
-                runtimeInstance runtimecontract.Runtime,
+                runtimeInstance containercontract.Runtime,
                 eventInstance eventcontract.Event,
             ) error {
                 return nil
@@ -376,7 +375,7 @@ type debugTestSubscriber struct {
 
 func (instance *debugTestSubscriber) SubscribedEvents() map[string][]eventcontract.SubscribedEvent {
     listener := func(
-        runtimeInstance runtimecontract.Runtime,
+        runtimeInstance containercontract.Runtime,
         eventInstance eventcontract.Event,
     ) error {
         return nil
@@ -423,7 +422,7 @@ func TestEventCommand_CarriesTheListenerDetailInTheVerboseJsonFormat(t *testing.
     registration := dispatcher.AddListener(
         "event.guarded",
         func(
-            runtimeInstance runtimecontract.Runtime,
+            runtimeInstance containercontract.Runtime,
             eventInstance eventcontract.Event,
         ) error {
             return nil
@@ -522,14 +521,14 @@ func (instance *dispatcherWithoutInspection) RemoveSubscriber(registration event
 }
 
 func (instance *dispatcherWithoutInspection) Dispatch(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     eventInstance eventcontract.Event,
 ) (eventcontract.Event, error) {
     return eventInstance, nil
 }
 
 func (instance *dispatcherWithoutInspection) DispatchName(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     eventName string,
     payload any,
 ) (eventcontract.Event, error) {
@@ -653,14 +652,14 @@ func TestEventCommand_VerboseListsListenersInDispatchOrder(t *testing.T) {
 }
 
 func eventOrderProbeListenerAlpha(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     eventInstance eventcontract.Event,
 ) error {
     return nil
 }
 
 func eventOrderProbeListenerBeta(
-    runtimeInstance runtimecontract.Runtime,
+    runtimeInstance containercontract.Runtime,
     eventInstance eventcontract.Event,
 ) error {
     return nil

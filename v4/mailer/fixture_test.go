@@ -7,19 +7,18 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
-    "github.com/precision-soft/melody/v4/runtime"
-    runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-func testRuntime() runtimecontract.Runtime {
+func testRuntime() containercontract.Runtime {
     return testRuntimeWithContext(context.Background())
 }
 
-func testRuntimeWithContext(ctx context.Context) runtimecontract.Runtime {
+func testRuntimeWithContext(ctx context.Context) containercontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
+    return runtime.NewRun(ctx, serviceContainer.NewScope())
 }
 
 /* nilRuntime exists so a test can hand a TYPED nil runtime through the Runtime interface: the interface value then carries a type and a nil pointer, which a plain == nil comparison waves through. */
@@ -33,8 +32,8 @@ func (instance *nilRuntime) Scope() containercontract.Scope {
     return nil
 }
 
-func (instance *nilRuntime) Container() containercontract.Container {
-    return nil
+func (instance *nilRuntime) Kind() containercontract.Kind {
+    return containercontract.KindRun
 }
 
 /* mailerRecordingLogger captures every record's message, so a test can assert what a warning said. */
@@ -90,12 +89,12 @@ func (instance *mailerRecordingLogger) contextOfMessage(fragment string) (loggin
 }
 
 /* testRuntimeWithRecordingLogger mirrors testRuntime with the recording logger installed under the logger service. */
-func testRuntimeWithRecordingLogger() (runtimecontract.Runtime, *mailerRecordingLogger) {
+func testRuntimeWithRecordingLogger() (containercontract.Runtime, *mailerRecordingLogger) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     scope := serviceContainer.NewScope()
 
     logger := &mailerRecordingLogger{}
     scope.MustOverrideProtectedInstance(logging.ServiceLogger, logger, container.OverrideOptions{})
 
-    return runtime.New(context.Background(), scope, serviceContainer), logger
+    return runtime.NewRun(context.Background(), scope), logger
 }
