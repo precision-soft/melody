@@ -14,7 +14,7 @@ func TestRouting_RouteTypeDispatchesToTransport(t *testing.T) {
     routing := NewRouting()
     RouteType[taskCreated](routing, "async", transport)
 
-    dispatchBus := NewManager("default", []messagebuscontract.Middleware{NewSendMessageMiddlewareFromRouting(routing)})
+    dispatchBus := NewManager("default", []messagebuscontract.Middleware{NewSendMessageMiddleware(routing)})
 
     sentEnvelope, dispatchErr := dispatchBus.Dispatch(newTestRuntime(), taskCreated{TaskId: 9}, nil)
     if nil != dispatchErr {
@@ -31,7 +31,7 @@ func TestRouting_BuildSnapshotIgnoresRoutesAddedAfterBuild(t *testing.T) {
     lateTransport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
     routing := NewRouting()
-    middleware := NewSendMessageMiddlewareFromRouting(routing)
+    middleware := NewSendMessageMiddleware(routing)
 
     RouteType[taskCreated](routing, "async", lateTransport)
 

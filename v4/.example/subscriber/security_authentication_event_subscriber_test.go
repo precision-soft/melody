@@ -48,7 +48,7 @@ func TestSecurityAuthenticationEventSubscriber_JournalsAFailureAsAWarningAtTheEv
 
     instant := time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC)
     listener := NewSecurityAuthenticationEventSubscriber().onLoginFailure()
-    if listenErr := listener(runtimeInstance, melodyevent.NewEventWithTimestamp(melodysecuritycontract.EventSecurityLoginFailure, melodysecurity.NewLoginFailureEvent(nil, errors.New("invalid credentials")), instant)); nil != listenErr {
+    if listenErr := listener(runtimeInstance, melodyevent.NewEvent(melodysecuritycontract.EventSecurityLoginFailure, melodysecurity.NewLoginFailureEvent(nil, errors.New("invalid credentials")), instant)); nil != listenErr {
         t.Fatalf("listener: %v", listenErr)
     }
 
@@ -74,7 +74,7 @@ func TestSecurityAuthenticationEventSubscriber_JournalsASuccessAtInfoAtTheEvents
     instant := time.Date(2026, time.September, 6, 10, 0, 0, 0, time.UTC)
     listener := NewSecurityAuthenticationEventSubscriber().onLoginSuccess()
     successEvent := melodysecurity.NewLoginSuccessEvent(nil, melodysecurity.NewAuthenticatedToken("user-2", []string{"ROLE_EDITOR"}, nil))
-    if listenErr := listener(runtimeInstance, melodyevent.NewEventWithTimestamp(melodysecuritycontract.EventSecurityLoginSuccess, successEvent, instant)); nil != listenErr {
+    if listenErr := listener(runtimeInstance, melodyevent.NewEvent(melodysecuritycontract.EventSecurityLoginSuccess, successEvent, instant)); nil != listenErr {
         t.Fatalf("listener: %v", listenErr)
     }
 

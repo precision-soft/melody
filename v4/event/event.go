@@ -3,57 +3,13 @@ package event
 import (
     "time"
 
-    clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
 )
 
-func NewEvent(
-    name string,
-    payload any,
-    clockInstance clockcontract.Clock,
-) *Event {
-    if true == internal.IsNilInterface(clockInstance) {
-        exception.Panic(
-            exception.NewError(
-                "clock is nil",
-                nil,
-                nil,
-            ),
-        )
-    }
-
-    return NewEventWithTimestamp(
-        name,
-        payload,
-        clockInstance.Now(),
-    )
-}
-
-func NewEventFromEvent(event eventcontract.Event) *Event {
-    /* the parameter is an interface, so a nil *Event passes a plain comparison and would dereference on the first accessor below */
-    if true == internal.IsNilInterface(event) {
-        exception.Panic(
-            exception.NewError("event value may not be nil", nil, nil),
-        )
-    }
-
-    copied := NewEventWithTimestamp(
-        event.Name(),
-        event.Payload(),
-        event.Timestamp(),
-    )
-
-    /* the copy keeps the stop, so a listener never reads a stopped propagation as live */
-    if true == event.IsPropagationStopped() {
-        copied.StopPropagation()
-    }
-
-    return copied
-}
-
-func NewEventWithTimestamp(name string, payload any, timestamp time.Time) *Event {
+/* NewEvent builds an event stamped with the instant its caller read; the dispatcher stamps one with its own clock's reading. */
+func NewEvent(name string, payload any, timestamp time.Time) *Event {
     if "" == name {
         exception.Panic(
             exception.NewError("event name may not be empty", nil, nil),
@@ -65,6 +21,28 @@ func NewEventWithTimestamp(name string, payload any, timestamp time.Time) *Event
         payload:   payload,
         timestamp: timestamp,
     }
+}
+
+func NewEventFromEvent(event eventcontract.Event) *Event {
+    /* the parameter is an interface, so a nil *Event passes a plain comparison and would dereference on the first accessor below */
+    if true == internal.IsNilInterface(event) {
+        exception.Panic(
+            exception.NewError("event value may not be nil", nil, nil),
+        )
+    }
+
+    copied := NewEvent(
+        event.Name(),
+        event.Payload(),
+        event.Timestamp(),
+    )
+
+    /* the copy keeps the stop, so a listener never reads a stopped propagation as live */
+    if true == event.IsPropagationStopped() {
+        copied.StopPropagation()
+    }
+
+    return copied
 }
 
 /* Event is not safe for concurrent use. The dispatcher runs the listeners of one dispatch in sequence, so a listener sees every write a listener before it made; dispatching one event value from two goroutines, or writing to it from a goroutine a listener started, races on the propagation flag. Give each dispatch its own event. */

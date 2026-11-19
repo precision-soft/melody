@@ -594,7 +594,7 @@ func serveLoginDoor(t *testing.T, runtimeInstance melodyruntimecontract.Runtime,
     )
 
     requestEvent := melodyhttp.NewKernelRequestEvent(runtimeInstance, request)
-    if listenerErr := dispatcher.listener(runtimeInstance, melodyevent.NewEvent(melodykernelcontract.EventKernelRequest, requestEvent, melodyclock.NewSystemClock())); nil != listenerErr {
+    if listenerErr := dispatcher.listener(runtimeInstance, melodyevent.NewEvent(melodykernelcontract.EventKernelRequest, requestEvent, melodyclock.NewSystemClock().Now())); nil != listenerErr {
         return nil, listenerErr
     }
 

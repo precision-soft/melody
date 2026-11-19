@@ -10,12 +10,12 @@ import (
 
 func NewRouting() *Routing {
     return &Routing{
-        routes: make(map[reflect.Type]TransportRouting),
+        routes: make(map[reflect.Type]transportRouting),
     }
 }
 
 type Routing struct {
-    routes map[reflect.Type]TransportRouting
+    routes map[reflect.Type]transportRouting
 }
 
 func RouteType[T any](routing *Routing, name string, transport messagebuscontract.Transport) *Routing {
@@ -24,7 +24,7 @@ func RouteType[T any](routing *Routing, name string, transport messagebuscontrac
         exception.Panic(exception.NewError("messagebus route transport is nil", map[string]any{"name": name}, nil))
     }
 
-    routing.routes[reflect.TypeOf((*T)(nil)).Elem()] = TransportRouting{
+    routing.routes[reflect.TypeOf((*T)(nil)).Elem()] = transportRouting{
         Name:      name,
         Transport: transport,
     }
@@ -32,8 +32,8 @@ func RouteType[T any](routing *Routing, name string, transport messagebuscontrac
     return routing
 }
 
-func (instance *Routing) build() map[reflect.Type]TransportRouting {
-    copied := make(map[reflect.Type]TransportRouting, len(instance.routes))
+func (instance *Routing) build() map[reflect.Type]transportRouting {
+    copied := make(map[reflect.Type]transportRouting, len(instance.routes))
     for key, value := range instance.routes {
         copied[key] = value
     }
@@ -41,6 +41,3 @@ func (instance *Routing) build() map[reflect.Type]TransportRouting {
     return copied
 }
 
-func NewSendMessageMiddlewareFromRouting(routing *Routing) messagebuscontract.Middleware {
-    return NewSendMessageMiddleware(routing.build())
-}

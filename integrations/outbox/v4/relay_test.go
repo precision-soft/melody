@@ -676,8 +676,8 @@ func TestRelay_ReleasesLeaseOnAContextThatOutlivesCancellation(t *testing.T) {
         t.Fatalf("expected the release to run on a live context, got %v", lock.releaseContextErr)
     }
 
-    if false == lock.releaseHasDeadline {
-        t.Fatal("expected the release context to carry a bounded deadline")
+    if true == lock.releaseHasDeadline {
+        t.Fatal("expected the release context to carry no deadline of the relay's, the locker bounding its own release")
     }
 }
 
@@ -1429,17 +1429,17 @@ func (instance *deadlineRecordingRepository) Reschedule(ctx context.Context, id 
     return instance.fakeRepository.Reschedule(ctx, id, attempts, availableAt, lastError, claimToken)
 }
 
-func TestRelay_AGivenLockReleaseTimeoutBoundsTheLeaseRelease(t *testing.T) {
+func TestRelay_ReleasesTheLeaseWithNoDeadlineOfItsOwn(t *testing.T) {
     lock := &fakeLock{acquire: true}
 
-    relay := NewRelay(RelayConfig{Repository: &fakeRepository{}, Transport: &fakeTransport{}, Codec: &stringCodec{}, Locker: &fakeLocker{acquire: true, lock: lock}, LockReleaseTimeout: bound.Of(50 * time.Millisecond)})
+    relay := NewRelay(RelayConfig{Repository: &fakeRepository{}, Transport: &fakeTransport{}, Codec: &stringCodec{}, Locker: &fakeLocker{acquire: true, lock: lock}})
 
     if _, runErr := relay.RunOnce(relayTestRuntime()); nil != runErr {
         t.Fatalf("run once: %v", runErr)
     }
 
-    if 1 != lock.releaseCalls || false == lock.releaseHasDeadline || 0 >= lock.releaseRemaining || 50*time.Millisecond < lock.releaseRemaining {
-        t.Fatalf("expected one release bounded by the given 50ms, got %d calls, remaining %s", lock.releaseCalls, lock.releaseRemaining)
+    if 1 != lock.releaseCalls || true == lock.releaseHasDeadline {
+        t.Fatalf("expected one release under no deadline of the relay's, the locker bounding its own, got %d calls, deadline %v", lock.releaseCalls, lock.releaseHasDeadline)
     }
 }
 

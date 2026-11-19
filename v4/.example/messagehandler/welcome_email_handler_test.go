@@ -49,7 +49,7 @@ func runtimeWithMailer(t *testing.T, transport melodymailercontract.Transport) m
 func TestHandleWelcomeEmail_SendsTheMailThroughTheMailer(t *testing.T) {
     transport := &recordingTransport{}
 
-    if handleErr := HandleWelcomeEmail(runtimeWithMailer(t, transport), message.WelcomeEmail{UserId: 7, Address: "ada@example.com"}); nil != handleErr {
+    if handleErr := HandleWelcomeEmail(runtimeWithMailer(t, transport), message.WelcomeEmail{UserId: 7, Address: "ada@example.com"}, nil); nil != handleErr {
         t.Fatalf("handle: %v", handleErr)
     }
 
@@ -61,13 +61,13 @@ func TestHandleWelcomeEmail_SendsTheMailThroughTheMailer(t *testing.T) {
 func TestHandleWelcomeEmail_AFailedSendFailsTheMessage(t *testing.T) {
     sendErr := errors.New("smtp refused")
 
-    if handleErr := HandleWelcomeEmail(runtimeWithMailer(t, &recordingTransport{sendErr: sendErr}), message.WelcomeEmail{UserId: 7, Address: "ada@example.com"}); false == errors.Is(handleErr, sendErr) {
+    if handleErr := HandleWelcomeEmail(runtimeWithMailer(t, &recordingTransport{sendErr: sendErr}), message.WelcomeEmail{UserId: 7, Address: "ada@example.com"}, nil); false == errors.Is(handleErr, sendErr) {
         t.Fatalf("expected the send failure answered, got %v", handleErr)
     }
 }
 
 func TestHandleWelcomeEmail_AMissingMailerFailsTheMessageAsAnOutage(t *testing.T) {
-    if handleErr := HandleWelcomeEmail(runtimeWithMailer(t, nil), message.WelcomeEmail{UserId: 7, Address: "ada@example.com"}); false == melodyexception.IsInfrastructureFailure(handleErr) {
+    if handleErr := HandleWelcomeEmail(runtimeWithMailer(t, nil), message.WelcomeEmail{UserId: 7, Address: "ada@example.com"}, nil); false == melodyexception.IsInfrastructureFailure(handleErr) {
         t.Fatalf("expected an outage, got %v", handleErr)
     }
 }

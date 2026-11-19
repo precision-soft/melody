@@ -36,9 +36,6 @@ type ExclusiveConfig struct {
 
     /* StopRenewalLimit is how long after the stop the lease is still renewed while callback winds down: the stop cancels callback's context, not the renewal, so no peer acquires the lock while the work still runs. 30s by default, raised to the refresh interval when that is longer, the literal to align with the application's teardown timeout; when set, at least 1ms and not below the refresh interval; unlimited renews until callback returns. Past it the renewal ends, the lease lapses by itself and the run answers the error naming the limit. */
     StopRenewalLimit bound.Duration
-
-    /* ReleaseTimeout bounds the release that runs after the callback, detached from the caller's context, since a release skipped on that cancellation would hold the lock until the ttl lapses, losing the next tick: 5s by default, at least 1ms, unlimited refused. It bounds the runtime Release is handed; the mysql and pgsql lockers end their release at the earlier of this deadline, while it is still ahead, and their own LockerConfig.ReleaseTimeout. */
-    ReleaseTimeout bound.Duration
 }
 
 var exclusiveTtlRule = bound.Rule[time.Duration]{
@@ -48,16 +45,8 @@ var exclusiveTtlRule = bound.Rule[time.Duration]{
     UnlimitedAdmitted: true,
 }
 
-/* defaultReleaseTimeout bounds a detached release where the caller declares none: the default of ExclusiveConfig.ReleaseTimeout, and the bound of the leader gate's release. */
-const defaultReleaseTimeout = 5 * time.Second
-
 const exclusiveStopRenewalLimitField = "ExclusiveConfig.StopRenewalLimit"
 
-var exclusiveReleaseTimeoutRule = bound.Rule[time.Duration]{
-    Name:    "ExclusiveConfig.ReleaseTimeout",
-    Default: defaultReleaseTimeout,
-    Minimum: bound.TimeoutMinimum,
-}
 
 /* RunExclusive acquires the named lock, runs callback while holding it, and always releases afterwards, so the ttl acts only as crash-safety, never as the run cadence. The configuration is resolved before the lock is created, and a refusal is answered as the error, naming the field. It returns (false, nil) without running callback when another holder owns the lock, so N cron-launched instances run the command exactly once per tick. While callback runs, the lock is refreshed at half the ttl on a background goroutine; the child runtime handed to callback is cancelled at the lease's demotion instant, a quarter of the ttl before the lease last written lapses, when no renewal has landed by then, so the callback is told to stop before another instance can acquire the lock; a failed refresh is retried once before that instant. An unlimited ttl selects the session-lock behavior: no lease to extend, only a liveness probe at defaultSessionProbeInterval. A stop cancels callback's runtime, not the renewal: the lease is still renewed while callback winds down, up to ExclusiveConfig.StopRenewalLimit, past which the run answers the error naming the limit; a session lock's probe runs until callback returns. */
 func RunExclusive(
@@ -90,11 +79,6 @@ func RunExclusive(
         return false, ttlErr
     }
 
-    releaseTimeout, releaseTimeoutErr := bound.Resolve(config.ReleaseTimeout, exclusiveReleaseTimeoutRule)
-    if nil != releaseTimeoutErr {
-        return false, releaseTimeoutErr
-    }
-
     refreshInterval, _ := resolveRefreshSchedule(ttl)
     stopRenewalLimit, stopRenewalLimitErr := resolveStopRenewalLimit(exclusiveStopRenewalLimitField, config.StopRenewalLimit, refreshInterval)
     if nil != stopRenewalLimitErr {
@@ -121,7 +105,7 @@ func RunExclusive(
         return false, nil
     }
 
-    defer releaseDetached(runtimeInstance, lock, name, releaseTimeout.Value)
+    defer releaseDetached(runtimeInstance, lock, name)
 
     childContext, cancel := context.WithCancel(runtimeInstance.Context())
     defer cancel()
@@ -559,12 +543,15 @@ func refuseARuntimeThatCannotBeRewrapped(runtimeInstance runtimecontract.Runtime
     }
 }
 
-/* releaseDetached releases the lock on a runtime detached from the caller's context, which may already be cancelled. A release that fails anyway is logged, since the lock then stays held for up to a ttl and every peer's next tick skips. */
-func releaseDetached(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock, name string, releaseTimeout time.Duration) {
-    releaseContext, releaseCancel := context.WithTimeout(context.Background(), releaseTimeout)
-    defer releaseCancel()
+/* releaseDetached releases the lock on a runtime detached from the caller's cancellation, which may already have ended, with no deadline of its own: the locker bounds its own release. A release that fails anyway is logged, since the lock then stays held for up to a ttl and every peer's next tick skips. */
+func releaseDetached(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock, name string) {
+    releaseContext := runtimeInstance.Context()
+    /* a runtime that answers no context still releases, under one that never ends */
+    if true == internal.IsNilInterface(releaseContext) {
+        releaseContext = context.Background()
+    }
 
-    releaseRuntime := runtime.New(releaseContext, runtimeInstance.Scope(), runtimeInstance.Container())
+    releaseRuntime := runtime.New(context.WithoutCancel(releaseContext), runtimeInstance.Scope(), runtimeInstance.Container())
 
     releaseErr := lock.Release(releaseRuntime)
     if nil == releaseErr {

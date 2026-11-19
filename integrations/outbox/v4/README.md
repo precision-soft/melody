@@ -69,7 +69,7 @@ relay := outbox.NewRelay(outbox.RelayConfig{
     Transport:  amqpTransport,
     Codec:      Codec{},
     /* optional: Locker (e.g. the rueidis locker) as a single-drainer optimization; SKIP LOCKED already makes concurrent relays safe */
-    /* optional overrides: BatchSize, MaxAttempts, InitialBackoff, MaxBackoff, BackoffFactor, VisibilityTimeout, MaxDeliveryAttempts, LockName, LockTtl, LockReleaseTimeout, ResolutionTimeout, UnavailableBackoff, UnavailableBackoffMax */
+    /* optional overrides: BatchSize, MaxAttempts, InitialBackoff, MaxBackoff, BackoffFactor, VisibilityTimeout, MaxDeliveryAttempts, LockName, LockTtl, ResolutionTimeout, UnavailableBackoff, UnavailableBackoffMax */
 })
 
 app.RegisterModule(
@@ -99,7 +99,6 @@ Every [`RelayConfig`](./relay.go) tunable is optional; a field left out takes th
 | `VisibilityTimeout`     | `5m`                     | How long a claimed row stays hidden before it re-surfaces — the net that recovers rows whose claimer crashed. Must comfortably exceed the time to drain one batch; at least 1s, a lease like `LockTtl`.                                                                                                |
 | `LockTtl`               | `30s`                    | Lease TTL for the optional single-drainer `Locker`; at least 1s. The lease is refreshed at half of it. A refresh that fails is not retried: the claimed batch is drained under its claim tokens, to its end or to a failed send, then the failure is reported.                                         |
 | `LockName`              | `melody:outbox:relay`    | Lock name used with that `Locker`.                                                                                                                                                                                                                                                                     |
-| `LockReleaseTimeout`    | `5s`                     | Bound on the lease release, which runs on a context detached from the run so a signal does not leave the lease behind for its whole `LockTtl`; at least 1ms.                                                                                                                                           |
 | `ResolutionTimeout`     | `5s`                     | Bound on one resolution write — sent, rescheduled or dead — run on its own detached context so a signal between a send and its mark does not republish the row; at least 1ms.                                                                                                                          |
 | `UnavailableBackoff`    | `15s`                    | Wait of a row whose send met an unreachable transport (a failure marked by `exception.MarkInfrastructureFailure`), no attempt charged; grows by `BackoffFactor` per consecutive outage pass; at least 1ms.                                                                                             |
 | `UnavailableBackoffMax` | `1m`                     | Cap on that wait; at least 1ms, never below `UnavailableBackoff`.                                                                                                                                                                                                                                      |

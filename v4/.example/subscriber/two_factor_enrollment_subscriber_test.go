@@ -37,7 +37,7 @@ func deleteEnrollmentStatementsAfter(t *testing.T, eventName string, payload any
         t.Fatalf("expected one listener on %s, got %d", event.UserDeletedEventName, len(listeners))
     }
 
-    if listenErr := listeners[0].Listener()(runtimeInstance, melodyevent.NewEvent(eventName, payload, melodyclock.NewSystemClock())); nil != listenErr {
+    if listenErr := listeners[0].Listener()(runtimeInstance, melodyevent.NewEvent(eventName, payload, melodyclock.NewSystemClock().Now())); nil != listenErr {
         t.Fatalf("expected the listener to answer nil, got %v", listenErr)
     }
 
@@ -149,7 +149,7 @@ func TestTwoFactorEnrollmentSubscriber_AStoreThatCannotBeResolvedIsJournaledAndT
     runtimeInstance := melodyruntime.New(context.Background(), containerInstance.NewScope(), containerInstance)
 
     listener := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName][0].Listener()
-    listenErr := listener(runtimeInstance, melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"), melodyclock.NewSystemClock()))
+    listenErr := listener(runtimeInstance, melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "dave"), melodyclock.NewSystemClock().Now()))
     if nil != listenErr {
         t.Fatalf("expected the deletion to go on past a store that cannot be resolved, got %v", listenErr)
     }

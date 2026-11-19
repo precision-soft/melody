@@ -41,20 +41,8 @@ func newEventDispatcherAdapterTestRuntime(t *testing.T) runtimecontract.Runtime 
     return runtime.New(context.Background(), scope, serviceContainer)
 }
 
-func TestNewEvent_RefusesATypedNilClock(t *testing.T) {
-    var clockInstance *testTypedNilClock
-
-    testhelper.AssertPanicsWithError(
-        t,
-        func() {
-            _ = NewEvent("e", nil, clockInstance)
-        },
-        "clock is nil",
-    )
-}
-
 func TestEvent_StopPropagation(t *testing.T) {
-    eventInstance := NewEvent("e", nil, clock.NewSystemClock())
+    eventInstance := NewEvent("e", nil, clock.NewSystemClock().Now())
 
     if true == eventInstance.IsPropagationStopped() {
         t.Fatalf("expected propagation not stopped initially")
@@ -70,7 +58,7 @@ func TestEvent_StopPropagation(t *testing.T) {
 func TestEvent_Constructors(t *testing.T) {
     timestamp := time.Unix(123, 0)
 
-    original := NewEventWithTimestamp("e", "p", timestamp)
+    original := NewEvent("e", "p", timestamp)
     copied := NewEventFromEvent(original)
 
     if "e" != copied.Name() {
@@ -86,14 +74,14 @@ func TestEvent_Constructors(t *testing.T) {
 
 func TestEvent_Constructors_PanicOnEmptyName(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        NewEvent("", nil, clock.NewSystemClock())
+        NewEvent("", nil, clock.NewSystemClock().Now())
     }, "event name may not be empty")
 
     testhelper.AssertPanicsWithError(t, func() {
-        NewEventWithTimestamp("", nil, time.Now())
+        NewEvent("", nil, time.Now())
     }, "event name may not be empty")
 
-    /* the source is the zero value rather than a constructed event: NewEventWithTimestamp("", ...) panics while the argument is being evaluated, so writing it inline never enters NewEventFromEvent at all. In production the state arrives only through a foreign implementation of the contract. */
+    /* the source is the zero value rather than a constructed event: NewEvent("", ...) panics while the argument is being evaluated, so writing it inline never enters NewEventFromEvent at all. In production the state arrives only through a foreign implementation of the contract. */
     testhelper.AssertPanicsWithError(t, func() {
         NewEventFromEvent(&Event{})
     }, "event name may not be empty")
@@ -110,7 +98,7 @@ func TestEvent_Constructors_PanicOnNilEvent(t *testing.T) {
 }
 
 func TestNewEventFromEvent_CarriesTheStoppedPropagation(t *testing.T) {
-    original := NewEventWithTimestamp("e", nil, time.Unix(123, 0))
+    original := NewEvent("e", nil, time.Unix(123, 0))
     original.StopPropagation()
 
     copied := NewEventFromEvent(original)
@@ -121,7 +109,7 @@ func TestNewEventFromEvent_CarriesTheStoppedPropagation(t *testing.T) {
 }
 
 func TestNewEventFromEvent_KeepsALivePropagationLive(t *testing.T) {
-    original := NewEventWithTimestamp("e", nil, time.Unix(123, 0))
+    original := NewEvent("e", nil, time.Unix(123, 0))
 
     copied := NewEventFromEvent(original)
 

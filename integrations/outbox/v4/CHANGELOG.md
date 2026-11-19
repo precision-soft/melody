@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking** — `relay.go`: `RelayConfig.LockReleaseTimeout` is removed; the lease is released on a context detached from the run, the locker bounding its own release.
+
 ### Added
 
 - **Breaking** — `service_resolver.go`: `StoreMustFromContainer` and `RelayMustFromContainer` are removed, their `…FromResolver` forms taking the container as they take a scope.

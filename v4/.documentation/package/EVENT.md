@@ -16,7 +16,6 @@ The event dispatcher is used by framework components (for example, the HTTP kern
 - Provide event objects:
     - [`Event`](../../event/event.go)
     - [`NewEvent`](../../event/event.go)
-    - [`NewEventWithTimestamp`](../../event/event.go)
     - [`NewEventFromEvent`](../../event/event.go)
 - Provide a deterministic dispatcher with listener/subscriber management and an inspector:
     - [`EventDispatcher`](../../event/event_dispatcher.go)
@@ -139,8 +138,7 @@ A listener receives the event and writes to its payload, and the payload has no 
 ### Implementations (`event`)
 
 - [`type Event`](../../event/event.go)
-    - [`NewEvent(name string, payload any, clockInstance clockcontract.Clock) *Event`](../../event/event.go)
-    - [`NewEventWithTimestamp(name string, payload any, timestamp time.Time) *Event`](../../event/event.go)
+    - [`NewEvent(name string, payload any, timestamp time.Time) *Event`](../../event/event.go)
     - [`NewEventFromEvent(eventcontract.Event) *Event`](../../event/event.go)
 - [`type EventDispatcher`](../../event/event_dispatcher.go)
     - [`NewEventDispatcher(clockcontract.Clock) *EventDispatcher`](../../event/event_dispatcher.go)

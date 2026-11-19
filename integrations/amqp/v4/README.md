@@ -68,13 +68,12 @@ Wire the transport into a dispatch bus by routing your message types to it, then
 
 ```go
 locator := messagebus.NewHandlerLocator()
-messagebus.RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, welcome WelcomeEmail) error {
+messagebus.RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, welcome WelcomeEmail, envelope messagebuscontract.Envelope) error {
     return nil
 })
 
-routing := map[reflect.Type]messagebus.TransportRouting{
-    reflect.TypeOf(WelcomeEmail{}): {Name: "async", Transport: transport},
-}
+routing := messagebus.NewRouting()
+messagebus.RouteType[WelcomeEmail](routing, "async", transport)
 
 dispatchBus := messagebus.NewManager(
     "default",
@@ -119,7 +118,7 @@ app melody:messagebus:consume --transport=async --concurrency=8
 
 ### Routing keys
 
-The transport binds one queue and uses a single, static routing key — there is no per-message routing key. Message types are routed to transports in the bus layer (the `reflect.Type` routing map above), not by an AMQP routing key.
+The transport binds one queue and uses a single, static routing key — there is no per-message routing key. Message types are routed to transports in the bus layer (the `Routing` built above), not by an AMQP routing key.
 
 - **No `Exchange` (default):** the transport publishes to the default exchange using the queue name as the routing key — a direct delivery to the queue. The `RoutingKey` field is ignored.
 - **With `Exchange` set:** the transport declares it as a `direct` exchange, binds its queue to the exchange with `RoutingKey`, and publishes to `(Exchange, RoutingKey)`. To deliver different message types to different queues, build one transport per destination (each with its own `Queue`/`RoutingKey`) and map the types to them.

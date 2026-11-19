@@ -33,7 +33,7 @@ func TestEventDispatcherAdapter_StopPropagationIsMirroredToOriginalEvent(t *test
         0,
     )
 
-    eventInstance := NewEvent("e", nil, clockInstance)
+    eventInstance := NewEvent("e", nil, clockInstance.Now())
 
     if true == eventInstance.IsPropagationStopped() {
         t.Fatalf("expected not stopped")
@@ -737,7 +737,7 @@ func TestEventDispatcherAdapter_HandsListenersTheOriginalEvent(t *testing.T) {
 
     _, err := adapter.Dispatch(
         runtimeInstance,
-        &adapterIdentityProbeEvent{Event: NewEvent("identity.probe", nil, clockInstance), marker: 42},
+        &adapterIdentityProbeEvent{Event: NewEvent("identity.probe", nil, clockInstance.Now()), marker: 42},
     )
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
@@ -759,7 +759,7 @@ func TestEventDispatcherAdapter_AFailingListenerIsNamedByItsOwnFunction(t *testi
     adapter := NewEventDispatcherAdapter(dispatcher)
     _ = adapter.AddListener("e", eventDispatcherAdapterFailingListener, 0)
 
-    _, err := adapter.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance))
+    _, err := adapter.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance.Now()))
 
     var listenerFailure *exception.Error
     if false == errors.As(err, &listenerFailure) {

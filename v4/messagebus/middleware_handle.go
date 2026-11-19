@@ -40,12 +40,12 @@ func NewHandleMessageMiddleware(
         }
 
         for _, handler := range handlers {
-            handleErr := handler.Handle(runtimeInstance, envelopeInstance.Message())
+            handleErr := handler.Handle(runtimeInstance, envelopeInstance)
             if nil != handleErr {
                 return envelopeInstance, handleErr
             }
 
-            envelopeInstance = envelopeInstance.WithStamp(HandledStamp{HandlerName: reflect.TypeOf(handler).String()})
+            envelopeInstance = envelopeInstance.WithStamps([]messagebuscontract.Stamp{HandledStamp{HandlerName: reflect.TypeOf(handler).String()}})
         }
 
         return next(runtimeInstance, envelopeInstance)

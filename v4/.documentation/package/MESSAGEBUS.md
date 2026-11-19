@@ -33,7 +33,6 @@ The message bus is opt-in. Unlike core services, it is not wired by the applicat
     - [`NewHandleMessageMiddleware`](../../messagebus/middleware_handle.go)
 - Route messages to transports:
     - [`Transport`](../../messagebus/contract/transport.go)
-    - [`TransportRouting`](../../messagebus/middleware_send.go)
     - [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go)
     - [`InMemoryTransport`](../../messagebus/transport_in_memory.go)
 - Consume asynchronously:
@@ -91,7 +90,6 @@ Building a bus, registering a typed handler, and dispatching:
 package main
 
 import (
-    "reflect"
 
     melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
     melodymessagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
@@ -107,13 +105,12 @@ func buildBus() (*melodymessagebus.Manager, *melodymessagebus.InMemoryTransport)
     transport := melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{})
 
     locator := melodymessagebus.NewHandlerLocator()
-    melodymessagebus.RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message WelcomeEmail) error {
+    melodymessagebus.RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message WelcomeEmail, envelope melodymessagebuscontract.Envelope) error {
         return nil
     })
 
-    routing := map[reflect.Type]melodymessagebus.TransportRouting{
-        reflect.TypeOf(WelcomeEmail{}): {Name: "async", Transport: transport},
-    }
+    routing := melodymessagebus.NewRouting()
+    melodymessagebus.RouteType[WelcomeEmail](routing, "async", transport)
 
     bus := melodymessagebus.NewManager(
         "default",
@@ -127,14 +124,7 @@ func buildBus() (*melodymessagebus.Manager, *melodymessagebus.InMemoryTransport)
 }
 ```
 
-The routing map can also be built type-safely with [`NewRouting`](../../messagebus/routing.go) + [`RouteType[T]`](../../messagebus/routing.go), avoiding the `reflect.TypeOf` keys, and passed via [`NewSendMessageMiddlewareFromRouting`](../../messagebus/routing.go):
-
-```go
-routing := melodymessagebus.NewRouting()
-melodymessagebus.RouteType[WelcomeEmail](routing, "async", transport)
-
-bus := melodymessagebus.NewManager("default", []melodymessagebuscontract.Middleware{melodymessagebus.NewSendMessageMiddlewareFromRouting(routing)})
-```
+The routing is built with [`NewRouting`](../../messagebus/routing.go) and [`RouteType[T]`](../../messagebus/routing.go) and handed to [`NewSendMessageMiddleware`](../../messagebus/middleware_send.go), which copies it. A handler receives the envelope beside the typed message, so it reads the message id and the redelivery count of the delivery it handles (`messagebus.MessageId(envelope)`).
 
 Consuming asynchronously is done with the [`ConsumeCommand`](../../messagebus/consume_command.go), registered as a CLI command:
 
@@ -180,7 +170,7 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 
 ### Implementations (`messagebus`)
 
-- [`NewEnvelope(message any, stamps []messagebuscontract.Stamp) messagebuscontract.Envelope`](../../messagebus/envelope.go) — the stamps are copied, nil is none; `Envelope.WithStamp(stamp)` adds one stamp, `Envelope.WithStamps(stamps)` several, in order
+- [`NewEnvelope(message any, stamps []messagebuscontract.Stamp) messagebuscontract.Envelope`](../../messagebus/envelope.go) — the stamps are copied, nil is none; `Envelope.WithStamps(stamps)` adds them, in order
 - [`EnsureEnvelope(message any) messagebuscontract.Envelope`](../../messagebus/envelope.go)
 - [`type BusNameStamp`](../../messagebus/stamp.go), [`type SentStamp`](../../messagebus/stamp.go), [`type ReceivedStamp`](../../messagebus/stamp.go), [`type HandledStamp`](../../messagebus/stamp.go)
 - [`type RedeliveryStamp`](../../messagebus/stamp.go), [`type DelayStamp`](../../messagebus/stamp.go) — retry metadata carried on a requeued envelope
@@ -197,12 +187,10 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
     - [`NewManager(name string, middlewares []messagebuscontract.Middleware) *Manager`](../../messagebus/manager.go) — nil is a bus with no middleware, a nil middleware is refused by its index; `Dispatch(runtimeInstance, message, stamps)` adds the stamps, nil for none
 - [`NewHandleMessageMiddleware(locator messagebuscontract.HandlerLocator, options HandleOptions) messagebuscontract.Middleware`](../../messagebus/middleware_handle.go) — a nil locator is refused
 - [`type HandleOptions`](../../messagebus/middleware_handle.go) (`AllowMissingHandler bool`) — the default REFUSES a message with no registered handler — an envelope already carrying a `HandledStamp` passes, since it was handled upstream —, because on the consume path a pass-through is immediately Acked and the queue drains; `AllowMissingHandler: true` restores the pass-through with a warning
-- [`type TransportRouting`](../../messagebus/middleware_send.go)
-    - [`NewSendMessageMiddleware(routingByType map[reflect.Type]TransportRouting) messagebuscontract.Middleware`](../../messagebus/middleware_send.go)
+- [`NewSendMessageMiddleware(routing *Routing) messagebuscontract.Middleware`](../../messagebus/middleware_send.go) — a nil routing is refused
 - [`type Routing`](../../messagebus/routing.go) — type-safe routing builder
     - [`NewRouting() *Routing`](../../messagebus/routing.go)
     - [`RouteType[T any](routing *Routing, name string, transport messagebuscontract.Transport) *Routing`](../../messagebus/routing.go)
-    - [`NewSendMessageMiddlewareFromRouting(routing *Routing) messagebuscontract.Middleware`](../../messagebus/routing.go)
 - [`type InMemoryTransport`](../../messagebus/transport_in_memory.go)
     - [`NewInMemoryTransport(config InMemoryTransportConfig) *InMemoryTransport`](../../messagebus/transport_in_memory.go)
 - [`type InMemoryTransportConfig`](../../messagebus/transport_in_memory.go) (`BufferSize bound.Count`, `Logger loggingcontract.Logger`) — `BufferSize` 64 when left out, 0 an unbuffered queue where a send waits for a receiver and a requeue waits for the next receive on a goroutine of its own, or for the close, which journals the drop; unlimited refused; `Logger` journals that drop when the runtime carries no logger, a typed nil refused

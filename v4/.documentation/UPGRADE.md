@@ -192,6 +192,46 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Remedy.** Add the context as the parameter of `Load` and end a remote read on it; pass a context to `NewEnvironment`, `context.Background()` where none is at hand.
 
+### Event: one event constructor, stamped by the caller
+
+**What changed.** [`event.NewEvent`](../event/event.go) is `NewEvent(name, payload, timestamp time.Time)`, where it took a clock, and `NewEventWithTimestamp`, its twin, is removed. `DispatchName` stamps the event with its dispatcher's clock as before.
+
+**Symptom.** `event.NewEvent(name, payload, clock)` and `event.NewEventWithTimestamp(…)` no longer compile.
+
+**Remedy.** Pass `clock.Now()` where a clock was passed, and rename `NewEventWithTimestamp` to `NewEvent`.
+
+### Messagebus: a handler receives the envelope; one stamping and one send door
+
+**What changed.** [`MessageHandler.Handle`](../messagebus/contract/handler.go) is `Handle(runtimeInstance, envelope)` and the function [`RegisterHandler[T]`](../messagebus/locator.go) registers is `func(runtimeInstance, message T, envelope Envelope) error`, so a handler reads `messagebus.MessageId(envelope)` and the redelivery count of the delivery it handles. `Envelope.WithStamp` is removed beside `WithStamps`. [`NewSendMessageMiddleware`](../messagebus/middleware_send.go) takes the `*Routing` that `NewRouting` and `RouteType[T]` build; its map form, `NewSendMessageMiddlewareFromRouting` and `TransportRouting` are removed.
+
+**Symptom.** A handler function with two parameters, a `MessageHandler` of the application's own, `envelope.WithStamp(stamp)`, `NewSendMessageMiddleware(map…)` and `NewSendMessageMiddlewareFromRouting` no longer compile.
+
+**Remedy.** Add the envelope as the third parameter of a handler function and the second of `Handle`; write `envelope.WithStamps([]messagebuscontract.Stamp{stamp})`; build the routing with `NewRouting` and `RouteType[T]` and hand it to `NewSendMessageMiddleware`.
+
+### Lock: one deadline for a release, the locker's
+
+**What changed.** `ExclusiveConfig.ReleaseTimeout`, `LeaderGateConfig.ReleaseTimeout`, `ExclusiveCommandConfig.ReleaseTimeout` and the outbox's `RelayConfig.LockReleaseTimeout` are removed. The helpers and the relay release on a context detached from the run's cancellation, with no deadline of their own; [`Lock.Release`](../lock/contract/lock.go) bounds its own round trip, as the mysql and pgsql lockers do through `LockerConfig.ReleaseTimeout` and the redis one through its call timeout.
+
+**Symptom.** A config literal naming `ReleaseTimeout` on one of the three helpers, or `LockReleaseTimeout` on the relay, no longer compiles. A `Lock` of the application's own whose `Release` waits on its context without a bound of its own can now wait until the store answers.
+
+**Remedy.** Drop the field and set the bound on the locker; a `Lock` of the application's own bounds its `Release` itself.
+
+### Bunorm: a provider refuses `Insecure` beside `TlsConfig`
+
+**What changed.** The mysql and pgsql [`NewProvider`](../../integrations/bunorm/mysql/v4/provider.go) panic at construction, naming `ProviderConfig.Insecure` and `ProviderConfig.TlsConfig`, when both are set, where `TlsConfig` won in silence.
+
+**Symptom.** A boot that sets both panics at construction; nothing fails to compile.
+
+**Remedy.** Drop `Insecure` to dial the TLS session, or `TlsConfig` to dial plaintext.
+
+### Opentelemetry: the otlp provider shuts down under the teardown's context
+
+**What changed.** `otlp.ModuleConfig.ShutdownTimeout` is removed; the provider's shutdown runs under the teardown's own context, so `MELODY_TEARDOWN_TIMEOUT` is the one bound and a declared unlimited teardown stays unlimited.
+
+**Symptom.** A `ModuleConfig{ShutdownTimeout: …}` literal no longer compiles.
+
+**Remedy.** Drop the field; bound the flush through the application's teardown timeout.
+
 ### Translation: a quoted `#` in a plural branch, and locales matched in BCP 47 case
 
 **What changed.** Inside a `plural` branch `'#'` is a literal `#` and `''` an apostrophe, and [`ValidatePattern`](../translation/message_format.go) refuses a `'#` no apostrophe closes. The [`Manager`](../translation/manager.go) matches every locale in BCP 47 case (`ro-ro` finds `ro-RO`, separators kept as written) and refuses two catalogs spelling one locale differently.
@@ -1220,7 +1260,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Messagebus: the bus and the envelope take their lists as slices, and the handle middleware takes its options
 
-**What changed.** [`NewManager`](../messagebus/manager.go) takes the middlewares as a `[]messagebuscontract.Middleware`, nil for none, and refuses a nil middleware by its index, where a nil one panicked at the first dispatch. [`NewEnvelope`](../messagebus/envelope.go) takes the stamps as a slice, nil for none, and copies it. The `messagebuscontract.Envelope` contract's `WithStamp` takes one stamp and gains `WithStamps(stamps []Stamp)`; the `messagebuscontract.Bus` contract's `Dispatch` takes the stamps as a slice, nil for none. [`NewHandleMessageMiddleware`](../messagebus/middleware_handle.go) takes the `HandleOptions` and refuses a nil locator; `NewHandleMessageMiddlewareWithOptions` is removed.
+**What changed.** [`NewManager`](../messagebus/manager.go) takes the middlewares as a `[]messagebuscontract.Middleware`, nil for none, and refuses a nil middleware by its index, where a nil one panicked at the first dispatch. [`NewEnvelope`](../messagebus/envelope.go) takes the stamps as a slice, nil for none, and copies it. The `messagebuscontract.Envelope` contract carries `WithStamps(stamps []Stamp)`; the `messagebuscontract.Bus` contract's `Dispatch` takes the stamps as a slice, nil for none. [`NewHandleMessageMiddleware`](../messagebus/middleware_handle.go) takes the `HandleOptions` and refuses a nil locator; `NewHandleMessageMiddlewareWithOptions` is removed.
 
 **Symptom.** `NewManager("default", a, b)`, `NewEnvelope(message)`, `envelope.WithStamp(a, b)`, `bus.Dispatch(runtimeInstance, message)` and `NewHandleMessageMiddleware(locator)` no longer compile, and neither does a `Bus` or an `Envelope` implemented with the variadic signatures.
 
@@ -1486,7 +1526,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Outbox: the relay's limits are bound limits refused where they were clamped or raised, its detached budgets are configured, and the relay command takes a configuration struct
 
-**What changed.** [`RelayConfig`](../../integrations/outbox/v4/relay.go)'s `LockTtl`, `VisibilityTimeout`, `InitialBackoff` and `MaxBackoff` are `bound.Duration` and `BatchSize`, `MaxAttempts` and `MaxDeliveryAttempts` `bound.Count`, resolved once at `NewRelay` with the defaults they had, a value outside its rule panicking naming the field: `LockTtl` and `VisibilityTimeout` at least 1s, the backoffs at least 1ms, the counts at least 1, unlimited refused. `BatchSize` above 100000 is refused where it was clamped, and so is a `Store.ClaimDueMessages` limit above it; `MaxDeliveryAttempts` at or below `MaxAttempts` is refused naming both where it was raised to twice `MaxAttempts`, which stays its default; an `InitialBackoff` above `MaxBackoff` is refused naming both, and a `BackoffFactor` below 1 or NaN is refused. `LockReleaseTimeout` and `ResolutionTimeout`, 5s when left out as the constants were, bound the lease release and one resolution write. [`NewRelayCommand`](../../integrations/outbox/v4/relay_command.go) and `NewRelayCommandFromResolver` take a `RelayCommandConfig` of `MaxErrorBackoff`, one minute when left out, and `ModuleConfig.RelayCommand` carries it to the module's command.
+**What changed.** [`RelayConfig`](../../integrations/outbox/v4/relay.go)'s `LockTtl`, `VisibilityTimeout`, `InitialBackoff` and `MaxBackoff` are `bound.Duration` and `BatchSize`, `MaxAttempts` and `MaxDeliveryAttempts` `bound.Count`, resolved once at `NewRelay` with the defaults they had, a value outside its rule panicking naming the field: `LockTtl` and `VisibilityTimeout` at least 1s, the backoffs at least 1ms, the counts at least 1, unlimited refused. `BatchSize` above 100000 is refused where it was clamped, and so is a `Store.ClaimDueMessages` limit above it; `MaxDeliveryAttempts` at or below `MaxAttempts` is refused naming both where it was raised to twice `MaxAttempts`, which stays its default; an `InitialBackoff` above `MaxBackoff` is refused naming both, and a `BackoffFactor` below 1 or NaN is refused. `ResolutionTimeout`, 5s when left out as the constant was, bounds one resolution write. [`NewRelayCommand`](../../integrations/outbox/v4/relay_command.go) and `NewRelayCommandFromResolver` take a `RelayCommandConfig` of `MaxErrorBackoff`, one minute when left out, and `ModuleConfig.RelayCommand` carries it to the module's command.
 
 **Symptom.** `BatchSize: 50`, `LockTtl: 30 * time.Second`, `MaxAttempts: 3` and the other limits no longer compile, nor do `NewRelayCommand(relay)` and `NewRelayCommandFromResolver(resolver)`. A boot panics where a zero took the default, a `BatchSize` above 100000 was clamped or a `MaxDeliveryAttempts` at or below `MaxAttempts` was raised, a `LockTtl` or `VisibilityTimeout` under a second was taken, or an initial backoff above the cap was held at the cap.
 
@@ -1510,7 +1550,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 ### Opentelemetry: the sampling is a typed value with none written out, the batch timeout and the shutdown bound are bound limits, and the prometheus composing twin is removed
 
-**What changed.** [`otlp.Config.SampleRatio`](../../integrations/opentelemetry/v4/otlp/tracer_provider.go) is replaced by `Config.Sampling`, an [`otlp.Sampling`](../../integrations/opentelemetry/v4/otlp/sampling.go) whose zero value samples every trace, `SampleRatio(x)` a fraction in `(0, 1]` and `SampleNone()` none; a ratio of 0, one above 1 and NaN are refused at `NewTracerProvider` naming `Config.Sampling`. `Config.BatchTimeout` is a `bound.Duration`, 5s when left out, at least 1ms, unlimited refused. [`otlp.ModuleConfig.ShutdownTimeout`](../../integrations/opentelemetry/v4/otlp/module.go) bounds the provider's shutdown when its close carries no deadline, 5s when left out, at least 1ms, unlimited refused, refused at `RegisterServices`. `NewMetricsMiddlewareWithPrometheus` is removed.
+**What changed.** [`otlp.Config.SampleRatio`](../../integrations/opentelemetry/v4/otlp/tracer_provider.go) is replaced by `Config.Sampling`, an [`otlp.Sampling`](../../integrations/opentelemetry/v4/otlp/sampling.go) whose zero value samples every trace, `SampleRatio(x)` a fraction in `(0, 1]` and `SampleNone()` none; a ratio of 0, one above 1 and NaN are refused at `NewTracerProvider` naming `Config.Sampling`. `Config.BatchTimeout` is a `bound.Duration`, 5s when left out, at least 1ms, unlimited refused. `NewMetricsMiddlewareWithPrometheus` is removed.
 
 **Symptom.** `SampleRatio: 0.25`, `BatchTimeout: d` and `opentelemetry.NewMetricsMiddlewareWithPrometheus(name)` no longer compile. `SampleRatio(0)`, which sampled every trace as the zero ratio, and a ratio above 1, read as 1, are refused.
 
@@ -3261,7 +3301,7 @@ websocket.NewModule(websocket.ModuleConfig{
 - **`websocket` module configuration.** The [`websocket`](../../integrations/websocket/v4/module.go) module refuses, when it registers its route at boot, an empty `Path`, and `NewStreamHandler` refuses a nil `Hub` at the same moment; both used to register no route. *Symptom:* the boot panics naming the missing value, where it used to start with the stream endpoint answering 404. *Remedy:* configure the hub and the path, or do not register the module.
 - **`websocket` empty topic.** A `TopicResolver` that answers an empty topic has the connection refused before the upgrade ([`handler.go`](../../integrations/websocket/v4/handler.go)); it used to be subscribed to a topic every such connection shared. *Symptom:* a client whose topic could not be extracted is refused instead of receiving the broadcasts of every other such client. *Remedy:* have the resolver answer a topic for every connection it accepts.
 - **`websocket` keepalive.** A received pong refreshes the connection's liveness mark, and a keepalive ping that could not be written because a data frame was in flight is no longer read as a dead peer ([`handler.go`](../../integrations/websocket/v4/handler.go)). *Symptom:* a configuration with `IdleTimeout` below `WriteTimeout` no longer turns transient write contention into a disconnect — a frame in flight excuses a timed-out ping until one interval past the configured write timeout. *Remedy:* none; a receive-only client bridged onto a broadcast hub stops being disconnected for never sending a data frame.
-- **`outbox` relay lease.** The distributed lease is released on a context detached from the run and bounded by `RelayConfig.LockReleaseTimeout`, five seconds by default, and a release failure is logged rather than discarded ([`relay.go`](../../integrations/outbox/v4/relay.go)). *Symptom:* a graceful restart no longer stalls outbox delivery for a whole `LockTtl`. *Remedy:* none.
+- **`outbox` relay lease.** The distributed lease is released on a context detached from the run, the locker bounding its own release, and a release failure is logged rather than discarded ([`relay.go`](../../integrations/outbox/v4/relay.go)). *Symptom:* a graceful restart no longer stalls outbox delivery for a whole `LockTtl`. *Remedy:* none.
 - **`outbox` lease lost mid-batch.** A lease refresh that fails no longer ends `Relay.RunOnce` at that row ([`relay.go`](../../integrations/outbox/v4/relay.go)): the claimed rows are fenced by their claim token and invisible to the new holder, so the batch is drained to its end under its claim tokens, the refresh is not tried again, and the failure is reported once the batch is done. *Symptom:* a relay that lost its lease used to leave every unreached row of the batch claimed and invisible to every replica for the whole `VisibilityTimeout`; it now finishes the batch, and the `melody:outbox:relay` loop logs the refresh failure and backs off after it. *Remedy:* none; a caller of `RunOnce` that matched the refresh error by identity reads it through `errors.Is` now, since it is wrapped with the lock name.
 - **`outbox` panics in the codec or the transport.** A panic raised by `MessageCodec.Decode` or `Transport.Send` is contained per row ([`relay.go`](../../integrations/outbox/v4/relay.go)) and charged as the failure the collaborator would have returned — a decode panic dead-letters the row, a send panic takes the retry path — with the panic in `last_error` under a `panic: ` prefix and an `outbox delivery panicked` record in the log naming the row and the phase. *Symptom:* a relay process that died at one row on every claim, until the crash-poison cap dead-lettered it, now resolves that row and goes on. *Remedy:* none; a supervisor that relied on the crash to notice a poison row reads the log record or the `dead` rows instead.
 - **`outbox` a failed send ends the batch.** [`Relay.RunOnce`](../../integrations/outbox/v4/relay.go) stops at the first failed send: that row alone is charged an attempt, unless the transport marked the failure as an outage (see the section on an unreachable transport, which charges nothing), and the rows the batch had not reached go back to pending uncharged, available again when the failed row is tried again, with a `last_error` naming the row that held them; a failed send the transport returned as an error writes an `outbox message send failed` ERROR record once the row's resolution is written, a contained send panic keeping its own record. *Symptom:* a broker outage no longer dead-letters every claimed message after about 66 minutes at the default settings; it charges the first row of each claimed batch alone, one dead-letter per batch per ~66 minutes, and every poll that finds rows enqueued during the outage claims a batch of its own; once the broker is back the held rows wait out that row's current backoff, at most `MaxBackoff`, and a message the broker refuses holds the rows behind it for its own

@@ -21,12 +21,6 @@ import (
 /* leaderRetryFloor floors the derived RetryInterval, so a short lease does not campaign many times a second while another instance leads. */
 const leaderRetryFloor = 1 * time.Second
 
-var leaderGateReleaseTimeoutRule = bound.Rule[time.Duration]{
-    Name:    "LeaderGateConfig.ReleaseTimeout",
-    Default: exclusiveReleaseTimeoutRule.Default,
-    Minimum: exclusiveReleaseTimeoutRule.Minimum,
-}
-
 /* LeaderGateConfig is what a gate declares beyond its locker and its lock name; every zero value is the default, the intervals derived from the ttl. */
 type LeaderGateConfig struct {
     /* Ttl is the lease a term holds and renews: 30s by default, at least 2ms, unlimited selecting a session-style lock (MySQL GET_LOCK, PostgreSQL advisory), which has no lease to extend and is probed instead, and refused over a lockcontract.LeaseLocker. */
@@ -44,8 +38,6 @@ type LeaderGateConfig struct {
     /* MaxCampaignBackoff caps the doubling pause between campaigns that could not ask the store who leads, so a persistent outage neither tight-loops the gate nor pushes re-election out indefinitely: 1m by default, never below RetryInterval, at least 1ms, unlimited refused. */
     MaxCampaignBackoff bound.Duration
 
-    /* ReleaseTimeout bounds the release at the end of a term, detached from the term's context: 5s by default, at least 1ms, unlimited refused. */
-    ReleaseTimeout bound.Duration
 
     /* StopRenewalLimit is how long after the stop the lease is still renewed while OnElected winds down: the stop ends the term's context, not the renewal, so no peer is elected while the hook still works. 30s by default, raised to the refresh interval when that is longer, the literal to align with the application's teardown timeout; when set, at least 1ms and not below RefreshInterval; unlimited renews until the hook returns. Past it the renewal ends and the lease lapses by itself; OnLost receives the error naming the limit. */
     StopRenewalLimit bound.Duration
@@ -81,7 +73,6 @@ var leaderGateMaxCampaignBackoffRule = bound.Rule[time.Duration]{
 }
 
 type leaderGateSettings struct {
-    releaseTimeout                time.Duration
     ttl                           time.Duration
     sessionMode                   bool
     retryInterval                 time.Duration
@@ -196,18 +187,12 @@ func resolveLeaderGateConfig(config LeaderGateConfig) (leaderGateSettings, error
         return leaderGateSettings{}, maxCampaignBackoffErr
     }
 
-    releaseTimeout, releaseTimeoutErr := bound.Resolve(config.ReleaseTimeout, leaderGateReleaseTimeoutRule)
-    if nil != releaseTimeoutErr {
-        return leaderGateSettings{}, releaseTimeoutErr
-    }
-
     stopRenewalLimit, stopRenewalLimitErr := resolveStopRenewalLimit(leaderGateStopRenewalLimitField, config.StopRenewalLimit, refreshInterval.Value)
     if nil != stopRenewalLimitErr {
         return leaderGateSettings{}, stopRenewalLimitErr
     }
 
     return leaderGateSettings{
-        releaseTimeout:                releaseTimeout.Value,
         ttl:                           ttl.Value,
         sessionMode:                   ttl.Unlimited,
         retryInterval:                 retryInterval.Value,
@@ -359,7 +344,7 @@ func (instance *LeaderGate) holdTerm(
 ) error {
     instance.enterTerm(acquireIssuedAt)
 
-    defer releaseDetached(runtimeInstance, lock, instance.name, instance.settings.releaseTimeout)
+    defer releaseDetached(runtimeInstance, lock, instance.name)
     defer instance.leaveTerm()
 
     return instance.lead(runtimeInstance, lock)

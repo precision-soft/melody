@@ -14,6 +14,7 @@ import (
     "github.com/joho/godotenv"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
@@ -48,6 +49,10 @@ type dotEnvProvenance struct {
 }
 
 func (instance *EnvironmentSource) Load(ctx context.Context) (map[string]string, error) {
+    if true == internal.IsNilInterface(ctx) {
+        return nil, exception.NewError("config.EnvironmentSource.Load was handed no context", nil, nil)
+    }
+
     /* the files are read without waiting on anything, so the context is judged once, before the first read */
     if contextErr := ctx.Err(); nil != contextErr {
         return nil, contextErr

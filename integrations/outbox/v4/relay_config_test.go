@@ -25,7 +25,6 @@ func TestResolveRelayConfig_AnEmptyConfigIsEveryRuleDefault(t *testing.T) {
         InitialBackoff:        15 * time.Second,
         MaxBackoff:            10 * time.Minute,
         BackoffFactor:         2,
-        LockReleaseTimeout:    5 * time.Second,
         ResolutionTimeout:     5 * time.Second,
         UnavailableBackoff:    15 * time.Second,
         UnavailableBackoffMax: time.Minute,
@@ -50,7 +49,6 @@ func TestResolveRelayConfig_AGivenConfigReachesTheRelay(t *testing.T) {
         InitialBackoff:      bound.Of(6 * time.Millisecond),
         MaxBackoff:          bound.Of(7 * time.Millisecond),
         BackoffFactor:       1.5,
-        LockReleaseTimeout:  bound.Of(8 * time.Millisecond),
         ResolutionTimeout:   bound.Of(9 * time.Millisecond),
     })
 
@@ -59,7 +57,7 @@ func TestResolveRelayConfig_AGivenConfigReachesTheRelay(t *testing.T) {
         t.Fatalf("expected the given lease, visibility and counts, got %+v", config)
     }
 
-    if 6*time.Millisecond != config.InitialBackoff || 7*time.Millisecond != config.MaxBackoff || 1.5 != config.BackoffFactor || 8*time.Millisecond != config.LockReleaseTimeout || 9*time.Millisecond != config.ResolutionTimeout {
+    if 6*time.Millisecond != config.InitialBackoff || 7*time.Millisecond != config.MaxBackoff || 1.5 != config.BackoffFactor || 9*time.Millisecond != config.ResolutionTimeout {
         t.Fatalf("expected the given backoff and budgets, got %+v", config)
     }
 }
@@ -87,8 +85,6 @@ func TestResolveRelayConfig_RefusesALimitOutsideItsRuleNamingTheField(t *testing
         {name: "max backoff unlimited", config: RelayConfig{MaxBackoff: bound.UnlimitedDuration()}, field: "RelayConfig.MaxBackoff"},
         {name: "factor below one", config: RelayConfig{BackoffFactor: 0.5}, field: "RelayConfig.BackoffFactor"},
         {name: "factor NaN", config: RelayConfig{BackoffFactor: math.NaN()}, field: "RelayConfig.BackoffFactor"},
-        {name: "lock release timeout zero", config: RelayConfig{LockReleaseTimeout: bound.Of(time.Duration(0))}, field: "RelayConfig.LockReleaseTimeout"},
-        {name: "lock release timeout unlimited", config: RelayConfig{LockReleaseTimeout: bound.UnlimitedDuration()}, field: "RelayConfig.LockReleaseTimeout"},
         {name: "resolution timeout zero", config: RelayConfig{ResolutionTimeout: bound.Of(time.Duration(0))}, field: "RelayConfig.ResolutionTimeout"},
         {name: "resolution timeout unlimited", config: RelayConfig{ResolutionTimeout: bound.UnlimitedDuration()}, field: "RelayConfig.ResolutionTimeout"},
     }

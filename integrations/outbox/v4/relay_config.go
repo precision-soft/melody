@@ -64,12 +64,6 @@ var relayMaxBackoffRule = bound.Rule[time.Duration]{
     Minimum: bound.TimeoutMinimum,
 }
 
-var relayLockReleaseTimeoutRule = bound.Rule[time.Duration]{
-    Name:    "RelayConfig.LockReleaseTimeout",
-    Default: 5 * time.Second,
-    Minimum: bound.TimeoutMinimum,
-}
-
 var relayUnavailableBackoffRule = bound.Rule[time.Duration]{
     Name:    "RelayConfig.UnavailableBackoff",
     Default: 15 * time.Second,
@@ -102,7 +96,6 @@ type resolvedRelay struct {
     InitialBackoff        time.Duration
     MaxBackoff            time.Duration
     BackoffFactor         float64
-    LockReleaseTimeout    time.Duration
     ResolutionTimeout     time.Duration
     UnavailableBackoff    time.Duration
     UnavailableBackoffMax time.Duration
@@ -130,7 +123,6 @@ func resolveRelayConfig(config RelayConfig) (resolvedRelay, error) {
         {limit: config.VisibilityTimeout, rule: relayVisibilityTimeoutRule, target: &resolved.VisibilityTimeout},
         {limit: config.InitialBackoff, rule: relayInitialBackoffRule, target: &resolved.InitialBackoff},
         {limit: config.MaxBackoff, rule: relayMaxBackoffRule, target: &resolved.MaxBackoff},
-        {limit: config.LockReleaseTimeout, rule: relayLockReleaseTimeoutRule, target: &resolved.LockReleaseTimeout},
         {limit: config.ResolutionTimeout, rule: relayResolutionTimeoutRule, target: &resolved.ResolutionTimeout},
         {limit: config.UnavailableBackoff, rule: relayUnavailableBackoffRule, target: &resolved.UnavailableBackoff},
         {limit: config.UnavailableBackoffMax, rule: relayUnavailableBackoffMaxRule, target: &resolved.UnavailableBackoffMax},

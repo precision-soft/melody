@@ -73,7 +73,7 @@ func (instance *InMemoryTransport) Send(
     envelopeInstance messagebuscontract.Envelope,
 ) error {
     if _, received := LastStampOfType[ReceivedStamp](envelopeInstance); false == received {
-        envelopeInstance = envelopeInstance.WithStamp(ReceivedStamp{TransportName: "in_memory"})
+        envelopeInstance = envelopeInstance.WithStamps([]messagebuscontract.Stamp{ReceivedStamp{TransportName: "in_memory"}})
     }
 
     /* held across the two-step send, so CloseWithContext cannot close the queue between the closed-check and the send */

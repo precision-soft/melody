@@ -56,6 +56,7 @@ func resolveLeaseTtl(ttl bound.Duration, rule bound.Rule[time.Duration]) (time.D
 type Lock interface {
     Acquire(runtimeInstance runtimecontract.Runtime) (bool, error)
 
+    /* Release bounds its own round trip; it may be handed a context that is never done, as the framework's helpers release on one detached from the run's cancellation. */
     Release(runtimeInstance runtimecontract.Runtime) error
 
     Refresh(runtimeInstance runtimecontract.Runtime, ttl bound.Duration) error

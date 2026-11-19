@@ -64,7 +64,7 @@ func TestConsumeFrom_StopsAtLimitAndHandlesMessages(t *testing.T) {
 
     locator := NewHandlerLocator()
     var sum int
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         sum += message.Value
         return nil
     })
@@ -96,7 +96,7 @@ func TestConsumeFrom_DoesNotOvershootLimitWithConcurrency(t *testing.T) {
 
     locator := NewHandlerLocator()
     var handled int64
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         atomic.AddInt64(&handled, 1)
         return nil
     })
@@ -127,7 +127,7 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
 
     var attempts int
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         attempts++
         return exception.NewError("handler always fails", nil, nil)
     })
@@ -167,7 +167,7 @@ func TestConsume_AMessageExhaustedOnTheFailureTransportItselfIsNotSentBackToIt(t
 
     var attempts int
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         attempts++
         return exception.NewError("handler always fails", nil, nil)
     })
@@ -203,7 +203,7 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
 
     var attempts int
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         attempts++
         return exception.NewError("handler always fails", nil, nil)
     })
@@ -287,7 +287,7 @@ func newAlwaysFailingConsumeCommand(t *testing.T, policy RetryPolicy) (*ConsumeC
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         return exception.NewError("handler always fails", nil, nil)
     })
 
@@ -305,7 +305,7 @@ func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
     source := &recordingNackTransport{}
 
     /* still under the bound: the failed dead-letter routing must requeue and bump the attempt counter */
-    mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamp(DeadLetterAttemptStamp{Count: 0}))
+    mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamps([]messagebuscontract.Stamp{DeadLetterAttemptStamp{Count: 0}}))
     if 1 != source.nackCount || false == source.nackRequeue {
         t.Fatalf("expected the first failed dead-letter routing to requeue, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
     }
@@ -315,7 +315,7 @@ func TestConsume_BoundedDeadLetterStopsRequeueAfterMax(t *testing.T) {
 
     /* at the bound: stop requeueing and nack without requeue so a transport-native dead-letter can claim it instead of looping forever */
     source.nackCount = 0
-    mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamp(DeadLetterAttemptStamp{Count: 1}))
+    mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamps([]messagebuscontract.Stamp{DeadLetterAttemptStamp{Count: 1}}))
     if 1 != source.nackCount || true == source.nackRequeue {
         t.Fatalf("expected a nack without requeue once the dead-letter bound is reached, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
     }
@@ -331,7 +331,7 @@ func TestConsume_UnlimitedDeadLetterAttemptsKeepRequeueing(t *testing.T) {
 
     source := &recordingNackTransport{}
 
-    mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamp(DeadLetterAttemptStamp{Count: 99}))
+    mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamps([]messagebuscontract.Stamp{DeadLetterAttemptStamp{Count: 99}}))
     if 1 != source.nackCount || false == source.nackRequeue {
         t.Fatalf("expected an unlimited policy to keep requeueing, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
     }
@@ -415,13 +415,13 @@ func TestConsume_AbsentDeadLetterAttemptsStopRequeueAtFive(t *testing.T) {
 
     source := &recordingNackTransport{}
 
-    mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamp(DeadLetterAttemptStamp{Count: 3}))
+    mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamps([]messagebuscontract.Stamp{DeadLetterAttemptStamp{Count: 3}}))
     if 1 != source.nackCount || false == source.nackRequeue {
         t.Fatalf("expected the fourth failed dead-letter routing to requeue, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
     }
 
     source.nackCount = 0
-    mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamp(DeadLetterAttemptStamp{Count: 4}))
+    mustConsumeSession(command, runtimeInstance).consume(runtimeInstance, source, NewEnvelope(consumeTestMessage{Value: 1}, nil).WithStamps([]messagebuscontract.Stamp{DeadLetterAttemptStamp{Count: 4}}))
     if 1 != source.nackCount || true == source.nackRequeue {
         t.Fatalf("expected the fifth failed dead-letter routing to nack without requeue, got nackCount=%d requeue=%v", source.nackCount, source.nackRequeue)
     }
@@ -481,7 +481,7 @@ func TestConsumeFrom_ShutdownGraceTimesOutWedgedHandler(t *testing.T) {
     defer close(release)
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         close(started)
         <-release
         return nil
@@ -569,7 +569,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheHandlerAndAckContextAlive(t *testing.T
 
     var handlerContextErr error
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         close(started)
         <-release
         handlerContextErr = handlerRuntime.Context().Err()
@@ -629,7 +629,7 @@ func TestConsumeFrom_ShutdownGraceKeepsTheNackContextAlive(t *testing.T) {
     release := make(chan struct{})
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         close(started)
         <-release
 
@@ -734,7 +734,7 @@ func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
 
     var attempts int
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         attempts++
         panic("poison message handler")
     })
@@ -766,7 +766,7 @@ func TestDispatchSafely_ConvertsErrorPanicIntoDispatchError(t *testing.T) {
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         panic(exception.NewError("handler exploded", nil, nil))
     })
 
@@ -797,7 +797,7 @@ func TestDispatchSafely_ATypedNilPanicIsAnsweredWithoutACause(t *testing.T) {
     runtimeInstance := runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         var typedNil *consumeNilPanicError
 
         panic(typedNil)
@@ -858,7 +858,7 @@ func TestConsumeRecovered_ATypedNilPanicOutsideTheHandlerIsLoggedWithoutACause(t
     runtimeInstance := runtime.New(context.Background(), scope, serviceContainer)
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         return nil
     })
 
@@ -894,7 +894,7 @@ func TestConsume_MessagesGetIsolatedScopes(t *testing.T) {
 
     var leaked int64
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         /* each delivery must see its own scope: an override written for one message must not be visible while handling another */
         if true == handlerRuntime.Scope().Has("service.ambient") {
             atomic.AddInt64(&leaked, 1)
@@ -958,7 +958,7 @@ func TestConsume_MessageScopeCarriesMessageIdLogger(t *testing.T) {
     }
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(handlerRuntime runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         handlerLogger := logging.LoggerFromRuntime(handlerRuntime)
         if nil != handlerLogger {
             handlerLogger.Info("handled", nil)
@@ -991,7 +991,7 @@ func TestRun_OverlappingRunsShareNoMutableState(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         return nil
     })
     consumeBus := NewManager("consume", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
@@ -1098,10 +1098,6 @@ func (instance *foreignStampedEnvelope) Stamps() []messagebuscontract.Stamp {
     return instance.stamps
 }
 
-func (instance *foreignStampedEnvelope) WithStamp(stamp messagebuscontract.Stamp) messagebuscontract.Envelope {
-    return instance.WithStamps([]messagebuscontract.Stamp{stamp})
-}
-
 func (instance *foreignStampedEnvelope) WithStamps(stamps []messagebuscontract.Stamp) messagebuscontract.Envelope {
     return &foreignStampedEnvelope{stamps: append(append([]messagebuscontract.Stamp{}, instance.stamps...), stamps...)}
 }
@@ -1166,7 +1162,7 @@ func TestConsumeFrom_AStoppedWorkerTakesNoFurtherDelivery(t *testing.T) {
 
         locator := NewHandlerLocator()
         var handled int64
-        RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage) error {
+        RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
             atomic.AddInt64(&handled, 1)
             return nil
         })

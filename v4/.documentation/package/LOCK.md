@@ -105,9 +105,9 @@ Once the lease can no longer be saved, the demotion **cancels the child runtime*
 
 The threshold covers the one case the lease clock cannot see: a gate configured with a cadence far denser than its lease would otherwise keep leader work running for the whole lease against a store that has plainly gone. At the default cadence of half the ttl it is unreachable — three renewals already outlast the lease — so an ordinary deployment is governed by the lease alone. Set it to `bound.UnlimitedCount()` to remove it entirely and leave only the lease clock. In session mode (an unlimited `ttl`) there is no lease and no lease clock, so the threshold is the only demotion signal, and an unlimited threshold beside an unlimited `ttl` is refused at construction, naming both fields, since the gate would then have no signal to end a term at all.
 
-An `Acquire` that errors fails **closed**: `(false, err)`, because an unreachable store must not double-run the work. A shutdown is not an error: when the runtime context is already cancelled, an `Acquire` that fails with that cancellation returns `(false, nil)`, so a graceful stop does not read as a failed run. The release always runs on a detached context bounded by `ExclusiveConfig.ReleaseTimeout`, 5s by default, and a gate's release of its term by 5s, so a `SIGTERM` between a cron tick and its release cannot leave the lock held until the `ttl` lapses; a release that fails anyway — a store hiccup exactly at release time — is logged with the lock name and the cause, because the lock then does stay held for up to a full `ttl` and the skips it causes would otherwise blame a run that is not happening.
+An `Acquire` that errors fails **closed**: `(false, err)`, because an unreachable store must not double-run the work. A shutdown is not an error: when the runtime context is already cancelled, an `Acquire` that fails with that cancellation returns `(false, nil)`, so a graceful stop does not read as a failed run. The release always runs on a context detached from the run's cancellation, with no deadline of the helper's, the locker bounding its own release (the mysql and pgsql lockers by `LockerConfig.ReleaseTimeout`, the redis one by its call timeout), so a `SIGTERM` between a cron tick and its release cannot leave the lock held until the `ttl` lapses; a release that fails anyway — a store hiccup exactly at release time — is logged with the lock name and the cause, because the lock then does stay held for up to a full `ttl` and the skips it causes would otherwise blame a run that is not happening.
 
-[`ExclusiveConfig`](../../lock/run_exclusive.go) is everything the run declares beyond its locker and its lock name, its zero value the default: `Ttl`, 30s, at least 2ms, since under it the renewal cadence is floored at 1ms and a lease of 1.5ms or less is demoted before its first renewal, unlimited the session-style lock, and `ReleaseTimeout`, 5s, at least 1ms, unlimited refused. `ReleaseTimeout` bounds the runtime `Release` is handed; the MySQL and PostgreSQL lockers end their release at the earlier of that deadline, while it is still ahead, and their own `LockerConfig.ReleaseTimeout`, and end the session when either cuts it. Both are resolved before the lock is created, and a refusal is the error `RunExclusive` returns, naming the field. An unlimited `Ttl` selects session-lock behaviour: there is no lease to extend, so the renewal becomes a liveness probe every 15 seconds.
+[`ExclusiveConfig`](../../lock/run_exclusive.go) is everything the run declares beyond its locker and its lock name, its zero value the default: `Ttl`, 30s, at least 2ms, since under it the renewal cadence is floored at 1ms and a lease of 1.5ms or less is demoted before its first renewal, unlimited the session-style lock. An unlimited `Ttl` selects session-lock behaviour: there is no lease to extend, so the renewal becomes a liveness probe every 15 seconds.
 
 ### Decorate a CLI command
 
@@ -123,7 +123,7 @@ command := lock.NewExclusiveCommand(
 )
 ```
 
-[`ExclusiveCommandConfig`](../../lock/exclusive_command.go) carries `LockName`, `Ttl`, `ReleaseTimeout` and `StopRenewalLimit` (set it to the cron runner's `GracefulTimeout` when its commands may wind down longer than 30s), read as `ExclusiveConfig` reads them and resolved when the command is built, a refusal panicking naming the field. `LockName` left empty is `"melody:command:"` plus the wrapped command's name; name one for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
+[`ExclusiveCommandConfig`](../../lock/exclusive_command.go) carries `LockName`, `Ttl` and `StopRenewalLimit` (set it to the cron runner's `GracefulTimeout` when its commands may wind down longer than 30s), read as `ExclusiveConfig` reads them and resolved when the command is built, a refusal panicking naming the field. `LockName` left empty is `"melody:command:"` plus the wrapped command's name; name one for when two differently-named commands must share one lock or one command needs distinct locks per deployment. `Name`, `Description` and `Flags` delegate to the wrapped command, so the decorator is transparent to the CLI.
 
 ### Elect a leader
 
@@ -154,7 +154,7 @@ go func() {
 }()
 ```
 
-[`LeaderGateConfig`](../../lock/leader_gate.go) is everything the gate declares beyond its locker and its lock name, resolved when the gate is built; every zero value is the default, the intervals derived from the `ttl`, and a field below its minimum panics naming it. A `RefreshInterval` above half the `ttl` is refused, naming the field and the ceiling, because a cadence slower than half the lease lets the lease lapse before the first refresh and two instances would both report leadership. `ReleaseTimeout` bounds the release at the end of a term: 5s when left out, at least 1ms, unlimited refused.
+[`LeaderGateConfig`](../../lock/leader_gate.go) is everything the gate declares beyond its locker and its lock name, resolved when the gate is built; every zero value is the default, the intervals derived from the `ttl`, and a field below its minimum panics naming it. A `RefreshInterval` above half the `ttl` is refused, naming the field and the ceiling, because a cadence slower than half the lease lets the lease lapse before the first refresh and two instances would both report leadership.
 
 | Field                           | Default                                                    | Minimum                         | Unlimited                                                |
 |---------------------------------|------------------------------------------------------------|---------------------------------|----------------------------------------------------------|
@@ -225,10 +225,10 @@ A failed resolution never panics: `CreateLock` resolves nothing and always hands
 ### Exclusive execution (`lock`)
 
 - [`RunExclusive(runtimeInstance runtimecontract.Runtime, locker lockcontract.Locker, name string, config ExclusiveConfig, callback func(runtimecontract.Runtime) error) (bool, error)`](../../lock/run_exclusive.go)
-- [`ExclusiveConfig`](../../lock/run_exclusive.go) — `Ttl`, `ReleaseTimeout`, `StopRenewalLimit`
+- [`ExclusiveConfig`](../../lock/run_exclusive.go) — `Ttl`, `StopRenewalLimit`
 - [`ExclusiveCommand`](../../lock/exclusive_command.go) — implements `cli/contract.Command`
     - [`NewExclusiveCommand(command clicontract.Command, locker lockcontract.Locker, config ExclusiveCommandConfig) *ExclusiveCommand`](../../lock/exclusive_command.go)
-- [`ExclusiveCommandConfig`](../../lock/exclusive_command.go) — `LockName`, `Ttl`, `ReleaseTimeout`
+- [`ExclusiveCommandConfig`](../../lock/exclusive_command.go) — `LockName`, `Ttl`
 
 ### Leader election (`lock`)
 
@@ -236,7 +236,7 @@ A failed resolution never panics: `CreateLock` resolves nothing and always hands
     - [`NewLeaderGate(locker lockcontract.Locker, name string, config LeaderGateConfig) *LeaderGate`](../../lock/leader_gate.go)
     - `Run(runtimeInstance runtimecontract.Runtime) error`
     - `IsLeader() bool`
-- [`LeaderGateConfig`](../../lock/leader_gate.go) — `Ttl`, `RetryInterval`, `RefreshInterval`, `MaxConsecutiveRefreshFailures`, `MaxCampaignBackoff`, `ReleaseTimeout`, `StopRenewalLimit`, `OnElected`, `OnLost`, `OnCampaignError`
+- [`LeaderGateConfig`](../../lock/leader_gate.go) — `Ttl`, `RetryInterval`, `RefreshInterval`, `MaxConsecutiveRefreshFailures`, `MaxCampaignBackoff`, `StopRenewalLimit`, `OnElected`, `OnLost`, `OnCampaignError`
 
 ### Container helpers (`lock`)
 

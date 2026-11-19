@@ -87,7 +87,7 @@ func TestNewConsumeCommandFromResolver_HydratesBusTransportsAndRetryThenConsumes
 
     locator := NewHandlerLocator()
     var sum int
-    RegisterHandler(locator, func(_ runtimecontract.Runtime, message consumeTestMessage) error {
+    RegisterHandler(locator, func(_ runtimecontract.Runtime, message consumeTestMessage, envelope messagebuscontract.Envelope) error {
         sum += message.Value
 
         return nil

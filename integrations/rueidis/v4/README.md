@@ -80,7 +80,7 @@ Every attempt is reported in the journal `ProviderConfig.Logger` names: a warnin
 
 [`NewLocker(client, LockerConfig)`](./lock.go) returns a `lock/contract.Locker`; `CreateLock(name, ttl)` returns a `lock/contract.Lock` backed by a Redis key with a TTL. The ttl is a `bound.Duration` resolved through `lockcontract.ResolveLeaseTtl` at `Acquire` and `lockcontract.ResolveLeaseRefreshTtl` at `Refresh`: 30s when left out, at least 1ms, and `bound.UnlimitedDuration()` refused, naming `Locker.CreateLock.ttl` or `Lock.Refresh.ttl`, since a key with no expiry would strand the lock forever when its holder died. `Acquire` is a non-blocking try (returns `(false, nil)` when another holder owns the key), `Release` deletes the key only if still owned, and `Refresh` extends the TTL, returning a "lock is no longer held" error if the lease was lost.
 
-Every door is one Lua round trip on the caller's runtime context, capped at the locker's call timeout; the framework's `RunExclusive` and `LeaderGate` renew and release under deadlines of their own, and a tighter one always wins.
+Every door is one Lua round trip on the caller's runtime context, capped at the locker's call timeout; the framework's `RunExclusive` and `LeaderGate` renew under deadlines of their own, a tighter one winning, and release under no deadline of theirs, so the call timeout bounds the release.
 
 An `Acquire` whose reply was lost gives back, detached and best-effort, the lease it may have taken; when that give-back fails as well, the key keeps a token this handle no longer knows, and the same handle is refused like any other until the ttl lapses — the cost of a lost reply is one lost round, bounded by the ttl.
 

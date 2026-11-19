@@ -88,3 +88,10 @@ func TestEnvironmentSource_ADoneContextIsRefusedBeforeAFileIsRead(t *testing.T) 
         t.Fatalf("expected the done context refused, got %v", err)
     }
 }
+
+func TestEnvironmentSource_ARefusesANilContext(t *testing.T) {
+    //nolint:staticcheck // the nil context is the input under test
+    if _, err := writeDotEnvFiles(t, map[string]string{".env": "APP_KEY=value\n"}).Load(nil); nil == err {
+        t.Fatalf("expected a nil context refused")
+    }
+}

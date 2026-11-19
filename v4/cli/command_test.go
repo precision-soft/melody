@@ -460,10 +460,10 @@ type closeCountingContainer struct {
     closeCalls int
 }
 
-func (instance *closeCountingContainer) Close() error {
+func (instance *closeCountingContainer) CloseWithContext(closeContext context.Context) error {
     instance.closeCalls++
 
-    return instance.Container.CloseWithContext(context.Background())
+    return instance.Container.CloseWithContext(closeContext)
 }
 
 func newCloseCountingRuntime() *testRuntime {

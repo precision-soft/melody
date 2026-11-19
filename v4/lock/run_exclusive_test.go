@@ -1333,15 +1333,17 @@ func TestRunExclusive_AnUnlimitedTtlHandsTheLockerASessionLock(t *testing.T) {
 
 /* releaseDeadlineLocker hands out locks that acquire at once and record how long the release they are handed has left. */
 type releaseDeadlineLocker struct {
-    remaining chan time.Duration
+    remaining  chan time.Duration
+    releaseErr chan error
 }
 
 func (instance *releaseDeadlineLocker) CreateLock(name string, ttl bound.Duration) lockcontract.Lock {
-    return &releaseDeadlineLock{remaining: instance.remaining}
+    return &releaseDeadlineLock{remaining: instance.remaining, releaseErr: instance.releaseErr}
 }
 
 type releaseDeadlineLock struct {
-    remaining chan time.Duration
+    remaining  chan time.Duration
+    releaseErr chan error
 }
 
 func (instance *releaseDeadlineLock) Acquire(runtimeInstance runtimecontract.Runtime) (bool, error) {
@@ -1349,6 +1351,10 @@ func (instance *releaseDeadlineLock) Acquire(runtimeInstance runtimecontract.Run
 }
 
 func (instance *releaseDeadlineLock) Release(runtimeInstance runtimecontract.Runtime) error {
+    if nil != instance.releaseErr {
+        instance.releaseErr <- runtimeInstance.Context().Err()
+    }
+
     deadline, hasDeadline := runtimeInstance.Context().Deadline()
     if false == hasDeadline {
         instance.remaining <- -1
@@ -1365,44 +1371,27 @@ func (instance *releaseDeadlineLock) Refresh(runtimeInstance runtimecontract.Run
     return nil
 }
 
-func TestRunExclusive_TheReleaseIsBoundedByTheReleaseTimeout(t *testing.T) {
-    for _, testCase := range []struct {
-        name           string
-        releaseTimeout bound.Duration
-        wanted         time.Duration
-    }{
-        {"left out, the 5s default", bound.Duration{}, 5 * time.Second},
-        {"set", bound.Of(2 * time.Second), 2 * time.Second},
-    } {
-        t.Run(testCase.name, func(t *testing.T) {
-            locker := &releaseDeadlineLocker{remaining: make(chan time.Duration, 1)}
+func TestRunExclusive_ReleasesOnAContextDetachedFromTheRunWithNoDeadlineOfItsOwn(t *testing.T) {
+    locker := &releaseDeadlineLocker{remaining: make(chan time.Duration, 1), releaseErr: make(chan error, 1)}
 
-            _, runErr := RunExclusive(testRuntime(), locker, "release-timeout", ExclusiveConfig{ReleaseTimeout: testCase.releaseTimeout}, func(runtimecontract.Runtime) error {
-                return nil
-            })
-            if nil != runErr {
-                t.Fatalf("unexpected run error: %v", runErr)
-            }
+    runContext, cancelRun := context.WithCancel(context.Background())
+    runtimeInstance := testRuntimeUnder(runContext)
 
-            remaining := <-locker.remaining
-            if remaining > testCase.wanted || remaining <= testCase.wanted-time.Second {
-                t.Fatalf("expected the release to have just under %s left, got %s", testCase.wanted, remaining)
-            }
-        })
+    _, runErr := RunExclusive(runtimeInstance, locker, "release-detached", ExclusiveConfig{}, func(runtimecontract.Runtime) error {
+        cancelRun()
+
+        return nil
+    })
+    if nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
     }
-}
 
-func TestRunExclusive_AReleaseTimeoutTheRuleRefusesIsRefusedBeforeTheLockIsCreated(t *testing.T) {
-    for _, refused := range []bound.Duration{bound.Of(time.Duration(0)), bound.UnlimitedDuration()} {
-        acquired, runErr := RunExclusive(testRuntime(), &createLockForbiddenLocker{t: t}, "release-refused", ExclusiveConfig{ReleaseTimeout: refused}, func(runtimecontract.Runtime) error {
-            t.Fatal("the callback ran under a refused release timeout")
+    if remaining := <-locker.remaining; -1 != remaining {
+        t.Fatalf("expected the release handed no deadline of the helper's, got %s left", remaining)
+    }
 
-            return nil
-        })
-
-        if true == acquired || nil == runErr || "ExclusiveConfig.ReleaseTimeout" != exception.LogContext(runErr, exception.LogContextConfig{})["field"] {
-            t.Fatalf("expected %s to be refused naming ExclusiveConfig.ReleaseTimeout, got %v %v", refused, acquired, runErr)
-        }
+    if contextErr := <-locker.releaseErr; nil != contextErr {
+        t.Fatalf("expected the release context alive after the run was cancelled, got %v", contextErr)
     }
 }
 

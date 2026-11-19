@@ -14,7 +14,7 @@ func TestDispatch_RunsRegisteredHandler(t *testing.T) {
     locator := NewHandlerLocator()
 
     var handled int
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
         handled = message.TaskId
         return nil
     })
@@ -48,7 +48,7 @@ func TestDispatch_NilMessageReturnsErrorInsteadOfPanicking(t *testing.T) {
 
 func TestDispatch_WarnsWhenNothingSentOrHandledTheMessage(t *testing.T) {
     routing := NewRouting()
-    bus := NewManager("send-only", []messagebuscontract.Middleware{NewSendMessageMiddlewareFromRouting(routing)})
+    bus := NewManager("send-only", []messagebuscontract.Middleware{NewSendMessageMiddleware(routing)})
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
@@ -68,7 +68,7 @@ func TestDispatch_DoesNotWarnWhenTheMessageWasSent(t *testing.T) {
     routing := NewRouting()
     RouteType[taskCreated](routing, "async", transport)
 
-    bus := NewManager("send-only", []messagebuscontract.Middleware{NewSendMessageMiddlewareFromRouting(routing)})
+    bus := NewManager("send-only", []messagebuscontract.Middleware{NewSendMessageMiddleware(routing)})
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
@@ -83,7 +83,7 @@ func TestDispatch_DoesNotWarnWhenTheMessageWasSent(t *testing.T) {
 
 func TestDispatch_DoesNotWarnWhenTheMessageWasHandled(t *testing.T) {
     locator := NewHandlerLocator()
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
         return nil
     })
 
@@ -108,7 +108,7 @@ func TestDispatch_DoesNotWarnForAReceivedEnvelope(t *testing.T) {
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
     /* the consume path dispatches received envelopes, and the handle middleware owns the missing-handler verdict there — the untouched-dispatch record must not fire beside it */
-    received := NewEnvelope(taskCreated{TaskId: 1}, nil).WithStamp(ReceivedStamp{TransportName: "async"})
+    received := NewEnvelope(taskCreated{TaskId: 1}, nil).WithStamps([]messagebuscontract.Stamp{ReceivedStamp{TransportName: "async"}})
     if _, dispatchErr := bus.Dispatch(runtimeInstance, received, nil); nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }

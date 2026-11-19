@@ -34,7 +34,7 @@ var lockReleaseScript = rueidis.NewLuaScript(`if redis.call("get", KEYS[1]) == A
 var lockRefreshScript = rueidis.NewLuaScript(`if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end`)
 
 type LockerConfig struct {
-    /* CallTimeout bounds one round trip of Acquire, Release and Refresh by capping the runtime context with it, so a request whose context carries no deadline, as melody's http kernel leaves it, fails fast. The earlier of the two deadlines ends the call, so a looser budget declared by RunExclusive or LeaderGate is cut to this timeout, and a caller that needs longer raises it here. 1s by default, at least 1ms, unlimited refused. */
+    /* CallTimeout bounds one round trip of Acquire, Release and Refresh by capping the runtime context with it, so a request whose context carries no deadline, as melody's http kernel leaves it, fails fast. The earlier of the two deadlines ends the call, so a looser budget a caller declares is cut to this timeout, and the framework's helpers release under no deadline of their own, this timeout bounding the release; a caller that needs longer raises it here. 1s by default, at least 1ms, unlimited refused. */
     CallTimeout bound.Duration
 }
 

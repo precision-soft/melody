@@ -305,7 +305,7 @@ func (instance *EventDispatcher) DispatchName(runtimeInstance runtimecontract.Ru
     event := NewEvent(
         eventName,
         payload,
-        instance.clock,
+        instance.clock.Now(),
     )
 
     return instance.Dispatch(

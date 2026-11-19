@@ -40,7 +40,7 @@ func TestEnsureEnvelope_LeavesAnEnvelopeAlone(t *testing.T) {
 func TestEnvelope_WithStampDoesNotMutateTheEnvelopeItWasCalledOn(t *testing.T) {
     original := NewEnvelope("payload", []messagebuscontract.Stamp{SentStamp{TransportName: "amqp"}})
 
-    stamped := original.WithStamp(HandledStamp{HandlerName: "handler"})
+    stamped := original.WithStamps([]messagebuscontract.Stamp{HandledStamp{HandlerName: "handler"}})
 
     if 1 != len(original.Stamps()) {
         t.Fatalf("expected the original envelope to keep its own stamps, got %v", original.Stamps())
@@ -57,7 +57,7 @@ func TestEnvelope_WithStampDoesNotMutateTheEnvelopeItWasCalledOn(t *testing.T) {
 
 /* the order is append-only: a reader answering the LAST stamp of a type depends on it, so a stamp added later must sit after the ones already there */
 func TestEnvelope_WithStampKeepsTheStampsInTheOrderTheyWereAdded(t *testing.T) {
-    stamped := NewEnvelope("payload", []messagebuscontract.Stamp{RedeliveryStamp{Count: 1}}).WithStamp(RedeliveryStamp{Count: 2})
+    stamped := NewEnvelope("payload", []messagebuscontract.Stamp{RedeliveryStamp{Count: 1}}).WithStamps([]messagebuscontract.Stamp{RedeliveryStamp{Count: 2}})
 
     stamps := stamped.Stamps()
     if 2 != len(stamps) {
@@ -88,7 +88,7 @@ func TestNewEnvelope_CopiesTheStamps(t *testing.T) {
 func TestEnvelope_WithStampsAppendsInOrder(t *testing.T) {
     envelopeInstance := NewEnvelope("payload", []messagebuscontract.Stamp{SentStamp{TransportName: "a"}}).
         WithStamps([]messagebuscontract.Stamp{SentStamp{TransportName: "b"}, SentStamp{TransportName: "c"}}).
-        WithStamp(SentStamp{TransportName: "d"})
+        WithStamps([]messagebuscontract.Stamp{SentStamp{TransportName: "d"}})
 
     names := ""
     for _, stamp := range envelopeInstance.Stamps() {

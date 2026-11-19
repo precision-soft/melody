@@ -1,7 +1,6 @@
 package messagebus
 
 import (
-    "reflect"
     "testing"
 
     "github.com/precision-soft/melody/v4/bound"
@@ -12,9 +11,8 @@ import (
 func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
-    routing := map[reflect.Type]TransportRouting{
-        reflect.TypeOf(taskCreated{}): {Name: "async", Transport: transport},
-    }
+    routing := NewRouting()
+    RouteType[taskCreated](routing, "async", transport)
 
     dispatchBus := NewManager("default", []messagebuscontract.Middleware{NewSendMessageMiddleware(routing)})
 
@@ -32,7 +30,7 @@ func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
 
     locator := NewHandlerLocator()
     var handled int
-    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated) error {
+    RegisterHandler(locator, func(runtimeInstance runtimecontract.Runtime, message taskCreated, envelope messagebuscontract.Envelope) error {
         handled = message.TaskId
         return nil
     })

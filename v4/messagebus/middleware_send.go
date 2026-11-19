@@ -3,16 +3,24 @@ package messagebus
 import (
     "reflect"
 
+    "github.com/precision-soft/melody/v4/exception"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
 
-type TransportRouting struct {
+type transportRouting struct {
     Name      string
     Transport messagebuscontract.Transport
 }
 
-func NewSendMessageMiddleware(routingByType map[reflect.Type]TransportRouting) messagebuscontract.Middleware {
+/* NewSendMessageMiddleware sends each message type to the transport its routing names, the routing copied at the call; a nil routing is refused. */
+func NewSendMessageMiddleware(routing *Routing) messagebuscontract.Middleware {
+    if nil == routing {
+        exception.Panic(exception.NewError("messagebus send middleware routing is nil", nil, nil))
+    }
+
+    routingByType := routing.build()
+
     return func(
         runtimeInstance runtimecontract.Runtime,
         envelopeInstance messagebuscontract.Envelope,
@@ -33,6 +41,6 @@ func NewSendMessageMiddleware(routingByType map[reflect.Type]TransportRouting) m
             return envelopeInstance, sendErr
         }
 
-        return envelopeInstance.WithStamp(SentStamp{TransportName: routing.Name}), nil
+        return envelopeInstance.WithStamps([]messagebuscontract.Stamp{SentStamp{TransportName: routing.Name}}), nil
     }
 }

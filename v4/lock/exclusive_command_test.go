@@ -207,7 +207,6 @@ func TestNewExclusiveCommand_RefusesAConfigurationTheRulesRefuseNamingTheField(t
         field  string
     }{
         {ExclusiveCommandConfig{Ttl: bound.Of(time.Microsecond)}, "ExclusiveCommandConfig.Ttl"},
-        {ExclusiveCommandConfig{ReleaseTimeout: bound.UnlimitedDuration()}, "ExclusiveCommandConfig.ReleaseTimeout"},
     } {
         var recovered any
         func() {
@@ -233,19 +232,6 @@ func TestExclusiveCommand_AnUnlimitedTtlHandsTheLockerASessionLock(t *testing.T)
 
     if false == locker.firstTtl(t).IsUnlimited() {
         t.Fatalf("expected the locker to be handed an unlimited ttl, got %s", locker.firstTtl(t))
-    }
-}
-
-func TestExclusiveCommand_HandsItsReleaseTimeoutToTheRelease(t *testing.T) {
-    locker := &releaseDeadlineLocker{remaining: make(chan time.Duration, 1)}
-
-    command := NewExclusiveCommand(&recordingCommand{name: "report:build"}, locker, ExclusiveCommandConfig{ReleaseTimeout: bound.Of(2 * time.Second)})
-    if runErr := command.Run(testRuntime(), nil); nil != runErr {
-        t.Fatalf("unexpected run error: %v", runErr)
-    }
-
-    if remaining := <-locker.remaining; remaining > 2*time.Second || remaining <= time.Second {
-        t.Fatalf("expected the release to have just under 2s left, got %s", remaining)
     }
 }
 

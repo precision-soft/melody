@@ -60,9 +60,6 @@ type RelayConfig struct {
     /* BackoffFactor grows the retry delay: 2 when left out, below 1 or NaN refused. */
     BackoffFactor float64
 
-    /* LockReleaseTimeout bounds the lease release, which runs on a context detached from the run: 5s when left out, at least 1ms, unlimited refused. */
-    LockReleaseTimeout bound.Duration
-
     /* ResolutionTimeout bounds one resolution write — sent, rescheduled or dead — on its own detached context: 5s when left out, at least 1ms, unlimited refused. */
     ResolutionTimeout bound.Duration
 
@@ -671,15 +668,15 @@ func (instance *Relay) acquireLease(runtimeInstance runtimecontract.Runtime) (fu
         }, true, nil
 }
 
-/* releaseLease drops the lease on a context detached from the run and bounded by the lock release timeout, then reports a failure: a lease left behind is invisible otherwise, and it holds back every other replica until it expires. */
+/* releaseLease drops the lease on a context detached from the run, with no deadline of its own since the locker bounds its release, then reports a failure: a lease left behind is invisible otherwise, and it holds back every other replica until it expires. */
 func (instance *Relay) releaseLease(runtimeInstance runtimecontract.Runtime, lock lockcontract.Lock) {
-    releaseContext, cancelRelease := context.WithTimeout(
-        context.WithoutCancel(runtimeInstance.Context()),
-        instance.config.LockReleaseTimeout,
-    )
-    defer cancelRelease()
+    releaseContext := runtimeInstance.Context()
+    /* a runtime that answers no context still releases, under one that never ends */
+    if nil == releaseContext {
+        releaseContext = context.Background()
+    }
 
-    releaseRuntime := runtime.New(releaseContext, runtimeInstance.Scope(), runtimeInstance.Container())
+    releaseRuntime := runtime.New(context.WithoutCancel(releaseContext), runtimeInstance.Scope(), runtimeInstance.Container())
 
     releaseErr := lock.Release(releaseRuntime)
     if nil == releaseErr {

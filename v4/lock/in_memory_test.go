@@ -16,8 +16,12 @@ import (
 )
 
 func testRuntime() runtimecontract.Runtime {
+    return testRuntimeUnder(context.Background())
+}
+
+func testRuntimeUnder(ctx context.Context) runtimecontract.Runtime {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    return runtime.New(context.Background(), serviceContainer.NewScope(), serviceContainer)
+    return runtime.New(ctx, serviceContainer.NewScope(), serviceContainer)
 }
 
 func TestInMemoryLocker_MutualExclusionAndRelease(t *testing.T) {

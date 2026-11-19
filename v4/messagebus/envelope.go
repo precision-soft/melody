@@ -35,10 +35,6 @@ func (instance *envelope) Stamps() []messagebuscontract.Stamp {
     return instance.stamps
 }
 
-func (instance *envelope) WithStamp(stamp messagebuscontract.Stamp) messagebuscontract.Envelope {
-    return instance.WithStamps([]messagebuscontract.Stamp{stamp})
-}
-
 func (instance *envelope) WithStamps(stamps []messagebuscontract.Stamp) messagebuscontract.Envelope {
     combined := make([]messagebuscontract.Stamp, 0, len(instance.stamps)+len(stamps))
     combined = append(combined, instance.stamps...)
@@ -54,7 +50,7 @@ func (instance *envelope) WithStamps(stamps []messagebuscontract.Stamp) messageb
 func withReplacedStamp(envelopeInstance messagebuscontract.Envelope, stamp messagebuscontract.Stamp) messagebuscontract.Envelope {
     concrete, isConcrete := envelopeInstance.(*envelope)
     if false == isConcrete || nil == concrete {
-        return envelopeInstance.WithStamp(stamp)
+        return envelopeInstance.WithStamps([]messagebuscontract.Stamp{stamp})
     }
 
     kept := make([]messagebuscontract.Stamp, 0, len(concrete.stamps)+1)

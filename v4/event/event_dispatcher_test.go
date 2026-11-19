@@ -115,7 +115,7 @@ func TestEventDispatcher_AddListener_SortsByPriorityDescending(t *testing.T) {
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -252,7 +252,7 @@ func TestEventDispatcher_StopPropagation_SkipsRemainingListeners(t *testing.T) {
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -287,7 +287,7 @@ func TestEventDispatcher_StopBeforeRequiredListener_FailsClosed(t *testing.T) {
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected a fail-closed error when propagation stopped before a required listener")
     }
@@ -320,7 +320,7 @@ func TestEventDispatcher_MaySkipRequiredListeners_RestoresProceed(t *testing.T) 
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil != err {
         t.Fatalf("a stopping listener marked may-skip must not fail closed, got %v", err)
     }
@@ -349,7 +349,7 @@ func TestEventDispatcher_StopAfterRequiredListener_DoesNotFail(t *testing.T) {
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil != err {
         t.Fatalf("stopping propagation after a required listener already ran must not fail, got %v", err)
     }
@@ -369,7 +369,7 @@ func TestEventDispatcher_ListenerError_IsWrappedWithContext(t *testing.T) {
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -405,7 +405,7 @@ func TestEventDispatcher_TheWrapperInheritsTheAlreadyLoggedMarkOfTheListenerFail
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -428,7 +428,7 @@ func TestEventDispatcher_TheWrapperOfAnUnmarkedFailureStaysUnmarked(t *testing.T
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -450,7 +450,7 @@ func TestEventDispatcher_ListenerPanic_IsConvertedToErrorWithContext(t *testing.
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -504,7 +504,7 @@ func TestEventDispatcher_ListenerPanicWithError_CarriesItAsCause(t *testing.T) {
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -532,7 +532,7 @@ func TestEventDispatcher_ListenerPanicWithTypedNilError_YieldsNoCause(t *testing
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -574,7 +574,7 @@ func TestEventDispatcher_AddSubscriber_HappyPathRegistersListeners(t *testing.T)
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -670,7 +670,7 @@ func TestEventDispatcher_RemoveListener_RemovesListenerAndKeepsOthers(t *testing
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -717,7 +717,7 @@ func TestEventDispatcher_RemoveSubscriber_RemovesAllSubscriberListeners(t *testi
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -906,7 +906,7 @@ func TestEventDispatcher_StoppingListenerThatAlsoFails_StillReportsTheSkippedReq
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
 
     if true == requiredRan {
         t.Fatalf("the required listener must not have run")
@@ -949,7 +949,7 @@ func TestEventDispatcher_StoppingListenerThatAlsoFails_ReportsItsOwnFailureWhenN
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected the listener's own failure")
     }
@@ -976,7 +976,7 @@ func TestEventDispatcher_EventThatArrivedStopped_RunsNoListener(t *testing.T) {
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    eventValue := NewEvent("e", nil, clockInstance)
+    eventValue := NewEvent("e", nil, clockInstance.Now())
     eventValue.StopPropagation()
 
     _, err := dispatcher.Dispatch(runtimeInstance, eventValue)
@@ -1003,7 +1003,7 @@ func TestEventDispatcher_EventThatArrivedStopped_ReportsTheSkippedRequiredListen
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    eventValue := NewEvent("e", nil, clockInstance)
+    eventValue := NewEvent("e", nil, clockInstance.Now())
     eventValue.StopPropagation()
 
     _, err := dispatcher.Dispatch(runtimeInstance, eventValue)
@@ -1039,7 +1039,7 @@ func TestEventDispatcher_TypedNilListenerError_ReadsAsTheSuccessItMeans(t *testi
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -1071,7 +1071,7 @@ func TestEventDispatcher_ListenerError_TravelsUnmarkedWithItsCause(t *testing.T)
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected the listener failure")
     }
@@ -1333,7 +1333,7 @@ func TestEventDispatcher_ListenerExit_TravelsToTheProcessBoundary(t *testing.T) 
             recoveredValue = recover()
         }()
 
-        _, _ = dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+        _, _ = dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
 
         return nil
     }()
@@ -1367,7 +1367,7 @@ func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheValueReportsItself
     logger := &testRecordingLogger{}
     runtimeInstance := testRuntimeWithLogger(t, logger)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected the panic to travel as an error")
     }
@@ -1395,7 +1395,7 @@ func TestEventDispatcher_ListenerPanic_IsNotLoggedTwiceWhenTheMarkIsOneLinkDown(
     logger := &testRecordingLogger{}
     runtimeInstance := testRuntimeWithLogger(t, logger)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected the panic to travel as an error")
     }
@@ -1419,7 +1419,7 @@ func TestEventDispatcher_ListenerPanic_IsLoggedWhenNobodyReportedIt(t *testing.T
     logger := &testRecordingLogger{}
     runtimeInstance := testRuntimeWithLogger(t, logger)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
     if nil == err {
         t.Fatalf("expected the panic to travel as an error")
     }
@@ -1765,7 +1765,7 @@ func TestEventDispatcher_FailingListenerBeforeRequiredListener_FailsClosed(t *te
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
 
     if true == requiredRan {
         t.Fatalf("the required listener must not have run")
@@ -1821,7 +1821,7 @@ func TestEventDispatcher_FailingListenerWithMaySkip_StillReportsTheSkippedRequir
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
 
     if _, ok := err.(*RequiredListenerSkippedError); false == ok {
         t.Fatalf("expected the skipped required listener to be reported for a failing listener marked may-skip, got: %v", err)
@@ -1859,7 +1859,7 @@ func TestEventDispatcher_FailingListenerAfterTheRequiredListenerRan_ReportsItsOw
 
     runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+    _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
 
     if false == requiredRan {
         t.Fatalf("expected the required listener to have run before the failing one")
@@ -1928,7 +1928,7 @@ func TestEventDispatcher_ConcurrentSubscriberRegistrationStaysAtomic(t *testing.
 
         runtimeInstance := newEventDispatcherAdapterTestRuntime(t)
 
-        _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance))
+        _, err := dispatcher.Dispatch(runtimeInstance, NewEvent("e", nil, clockInstance.Now()))
         if nil != err {
             t.Fatalf("round %d: unexpected error: %v", round, err)
         }
@@ -2211,7 +2211,7 @@ func TestEventDispatcher_RemoveSubscriber_RemovesEveryListenerOfTheRegistration(
         t.Fatalf("expected a second removal of the registration to remove nothing")
     }
 
-    _, dispatchErr := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance))
+    _, dispatchErr := dispatcher.Dispatch(newEventDispatcherAdapterTestRuntime(t), NewEvent("e", nil, clockInstance.Now()))
     if nil != dispatchErr {
         t.Fatalf("unexpected error: %v", dispatchErr)
     }
@@ -2401,7 +2401,7 @@ func TestEventDispatcher_APayloadThatReportsItsStopEndsTheDispatch(t *testing.T)
         t.Fatalf("expected the payload's stop to end the dispatch, the second listener ran %d times", secondRan)
     }
 
-    if _, dispatchErr := dispatcher.Dispatch(runtimeInstance, NewEvent("payload.stop", &testStoppingPayload{}, clock.NewSystemClock())); nil != dispatchErr {
+    if _, dispatchErr := dispatcher.Dispatch(runtimeInstance, NewEvent("payload.stop", &testStoppingPayload{}, clock.NewSystemClock().Now())); nil != dispatchErr {
         t.Fatalf("unexpected dispatch error: %v", dispatchErr)
     }
 
@@ -2613,5 +2613,23 @@ func TestEventDispatcher_ASubscriberRefusedByAFloorIsNotHalfInstalled(t *testing
                 t.Fatalf("%s: expected only the floor listener left, got %d", name, len(registeredEvent.Listeners))
             }
         }
+    }
+}
+
+func TestEventDispatcher_DispatchName_StampsTheEventWithItsClock(t *testing.T) {
+    instant := time.Date(2026, 11, 19, 1, 20, 0, 0, time.UTC)
+    dispatcher := NewEventDispatcher(clock.NewFrozenClock(instant))
+
+    dispatched, err := dispatcher.DispatchName(newEventDispatcherAdapterTestRuntime(t), "e", nil)
+    if nil != err || false == instant.Equal(dispatched.Timestamp()) {
+        t.Fatalf("expected the event stamped with the dispatcher's clock, got %v (%v)", dispatched, err)
+    }
+}
+
+func TestNewEvent_KeepsTheTimestampItWasHanded(t *testing.T) {
+    instant := time.Date(2026, 11, 19, 1, 20, 0, 0, time.UTC)
+
+    if false == instant.Equal(NewEvent("e", nil, instant).Timestamp()) {
+        t.Fatal("expected the event stamped with the timestamp handed")
     }
 }

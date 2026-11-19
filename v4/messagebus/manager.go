@@ -49,7 +49,7 @@ func (instance *Manager) Dispatch(
     }
 
     envelopeInstance := EnsureEnvelope(message).WithStamps(stamps)
-    envelopeInstance = envelopeInstance.WithStamp(BusNameStamp{BusName: instance.name})
+    envelopeInstance = envelopeInstance.WithStamps([]messagebuscontract.Stamp{BusNameStamp{BusName: instance.name}})
 
     chain := instance.buildChain(0)
 

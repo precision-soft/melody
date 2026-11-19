@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
+    messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
 )
 
 func TestInMemoryTransport_RequeueOnFullQueueDoesNotBlock(t *testing.T) {
@@ -77,7 +78,7 @@ func TestInMemoryTransport_DroppedDelayedRequeueIsLoggedThroughTheRuntime(t *tes
         t.Fatalf("unexpected send error: %v", sendErr)
     }
 
-    delayed := NewEnvelope(taskCreated{TaskId: 2}, nil).WithStamp(DelayStamp{Delay: 20 * time.Millisecond})
+    delayed := NewEnvelope(taskCreated{TaskId: 2}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: 20 * time.Millisecond}})
     if nackErr := transport.Nack(runtimeInstance, delayed, true); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
@@ -163,7 +164,7 @@ func TestInMemoryTransport_ADelayedRequeueDroppedAtCloseIsLogged(t *testing.T) {
 
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
-    delayed := NewEnvelope(taskCreated{TaskId: 3}, nil).WithStamp(DelayStamp{Delay: time.Hour})
+    delayed := NewEnvelope(taskCreated{TaskId: 3}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: time.Hour}})
     if nackErr := transport.Nack(runtimeInstance, delayed, true); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
@@ -248,7 +249,7 @@ func TestInMemoryTransport_ADelayedNackOnARuntimeWithoutALoggerWritesNoEmergency
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
-    delayed := NewEnvelope(taskCreated{TaskId: 4}, nil).WithStamp(DelayStamp{Delay: time.Hour})
+    delayed := NewEnvelope(taskCreated{TaskId: 4}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: time.Hour}})
     if nackErr := transport.Nack(newTestRuntime(), delayed, true); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
@@ -272,7 +273,7 @@ func TestInMemoryTransport_ADropOnARuntimeWithoutALoggerIsJournaledOnTheEmergenc
 
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
-    delayed := NewEnvelope(taskCreated{TaskId: 5}, nil).WithStamp(DelayStamp{Delay: time.Hour})
+    delayed := NewEnvelope(taskCreated{TaskId: 5}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: time.Hour}})
     if nackErr := transport.Nack(newTestRuntime(), delayed, true); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }

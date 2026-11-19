@@ -23,7 +23,7 @@ func (instance *Module) buildMessageBus() {
 
     locator := melodymessagebus.NewHandlerLocator()
     melodymessagebus.RegisterHandler(locator, messagehandler.HandleWelcomeEmail)
-    melodymessagebus.RegisterHandler(locator, func(runtimeInstance melodyruntimecontract.Runtime, notification message.Notification) error {
+    melodymessagebus.RegisterHandler(locator, func(runtimeInstance melodyruntimecontract.Runtime, notification message.Notification, envelope melodymessagebuscontract.Envelope) error {
         /* resolved rather than captured, for the reason written at CatalogNotificationHubFromRuntime: a consumer that holds the hub the composition root built leaves the provider — and with it the logger swap and the container's teardown edge — unrun. */
         hub, hubErr := subscriber.CatalogNotificationHubFromRuntime(runtimeInstance)
         if nil != hubErr {
@@ -45,7 +45,7 @@ func (instance *Module) buildMessageBus() {
     instance.messageBusDispatch = melodymessagebus.NewManager(
         "default",
         []melodymessagebuscontract.Middleware{
-            melodymessagebus.NewSendMessageMiddlewareFromRouting(routing),
+            melodymessagebus.NewSendMessageMiddleware(routing),
             melodymessagebus.NewHandleMessageMiddleware(locator, melodymessagebus.HandleOptions{}),
         },
     )

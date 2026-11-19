@@ -332,7 +332,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
         t.Fatalf("expected initial redelivery count 0, got %d", melodymessagebus.RedeliveryCount(first))
     }
 
-    retried := first.WithStamp(melodymessagebus.RedeliveryStamp{Count: 1})
+    retried := first.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}})
     if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
         t.Fatalf("nack requeue: %v", nackErr)
     }
@@ -393,8 +393,8 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
     first := receiveWithin(t, queue, 10*time.Second)
 
     retried := first.
-        WithStamp(melodymessagebus.RedeliveryStamp{Count: 1}).
-        WithStamp(melodymessagebus.DelayStamp{Delay: 1500 * time.Millisecond})
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}}).
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 1500 * time.Millisecond}})
 
     start := time.Now()
     if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
@@ -933,7 +933,7 @@ func TestTransport_RequeuePersistsDeadLetterAttemptCount(t *testing.T) {
     instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
 
     envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
-        WithStamp(melodymessagebus.DeadLetterAttemptStamp{Count: 2})
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.DeadLetterAttemptStamp{Count: 2}})
 
     publishing, buildErr := instance.buildPublishing(envelope, "")
     if nil != buildErr {
@@ -959,7 +959,7 @@ func TestTransport_BuildPublishingCarriesMessageId(t *testing.T) {
     instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
 
     envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
-        WithStamp(melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"})
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"}})
 
     publishing, buildErr := instance.buildPublishing(envelope, "")
     if nil != buildErr {
@@ -979,7 +979,7 @@ func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
     instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
 
     sent := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
-        WithStamp(melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"})
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"}})
     published, buildErr := instance.buildPublishing(sent, "")
     if nil != buildErr {
         t.Fatalf("build publishing: %v", buildErr)
@@ -1760,11 +1760,11 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
     second := receiveWithin(t, queue, 10*time.Second)
 
     longDelayed := first.
-        WithStamp(melodymessagebus.RedeliveryStamp{Count: 1}).
-        WithStamp(melodymessagebus.DelayStamp{Delay: 8 * time.Second})
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}}).
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 8 * time.Second}})
     shortDelayed := second.
-        WithStamp(melodymessagebus.RedeliveryStamp{Count: 1}).
-        WithStamp(melodymessagebus.DelayStamp{Delay: 2 * time.Second})
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}}).
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 2 * time.Second}})
 
     start := time.Now()
     if nackErr := transport.Nack(runtimeInstance, longDelayed, true); nil != nackErr {
@@ -1944,8 +1944,8 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
     deleteQueue(t, connection, queueName+".delay")
 
     retried := delivered.
-        WithStamp(melodymessagebus.RedeliveryStamp{Count: 1}).
-        WithStamp(melodymessagebus.DelayStamp{Delay: 100 * time.Millisecond})
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}}).
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 100 * time.Millisecond}})
 
     if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
         t.Fatalf("nack requeue: %v", nackErr)

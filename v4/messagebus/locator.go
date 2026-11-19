@@ -5,6 +5,7 @@ import (
     "sync"
 
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/internal"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
@@ -42,7 +43,7 @@ func (instance *HandlerLocator) HandlersFor(message any) []messagebuscontract.Me
 
 func RegisterHandler[T any](
     locator *HandlerLocator,
-    handle func(runtimeInstance runtimecontract.Runtime, message T) error,
+    handle func(runtimeInstance runtimecontract.Runtime, message T, envelope messagebuscontract.Envelope) error,
 ) {
     if nil == handle {
         exception.Panic(exception.NewError("message handler function is nil", map[string]any{"messageType": reflect.TypeOf((*T)(nil)).Elem().String()}, nil))
@@ -53,10 +54,15 @@ func RegisterHandler[T any](
 }
 
 type functionHandler[T any] struct {
-    handle func(runtimeInstance runtimecontract.Runtime, message T) error
+    handle func(runtimeInstance runtimecontract.Runtime, message T, envelope messagebuscontract.Envelope) error
 }
 
-func (instance *functionHandler[T]) Handle(runtimeInstance runtimecontract.Runtime, message any) error {
+func (instance *functionHandler[T]) Handle(runtimeInstance runtimecontract.Runtime, envelope messagebuscontract.Envelope) error {
+    var message any
+    if false == internal.IsNilInterface(envelope) {
+        message = envelope.Message()
+    }
+
     typed, isType := message.(T)
     if false == isType {
         actualType := "<nil>"
@@ -74,7 +80,7 @@ func (instance *functionHandler[T]) Handle(runtimeInstance runtimecontract.Runti
         )
     }
 
-    return instance.handle(runtimeInstance, typed)
+    return instance.handle(runtimeInstance, typed, envelope)
 }
 
 var _ messagebuscontract.HandlerLocator = (*HandlerLocator)(nil)

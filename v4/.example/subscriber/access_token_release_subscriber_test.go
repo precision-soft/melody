@@ -35,7 +35,7 @@ func TestAccessTokenReleaseSubscriber_DeletesTheDeviceTokensOfTheDeletedAccountO
         t.Fatalf("expected one listener on %s, got %d", event.UserDeletedEventName, len(listeners))
     }
 
-    deleted := melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "deleted"), melodyclock.NewSystemClock())
+    deleted := melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "deleted"), melodyclock.NewSystemClock().Now())
     if listenErr := listeners[0].Listener()(runtimeInstance, deleted); nil != listenErr {
         t.Fatalf("expected the release to answer nil, got %v", listenErr)
     }
@@ -87,7 +87,7 @@ func TestAccessTokenReleaseSubscriber_AFailedRevocationIsReturned(t *testing.T) 
         return store
     })
 
-    deleted := melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "deleted"), melodyclock.NewSystemClock())
+    deleted := melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-4", "deleted"), melodyclock.NewSystemClock().Now())
     listenErr := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName][0].Listener()(releaseTestRuntime(), deleted)
 
     if false == errors.Is(listenErr, revokeErr) || false == errors.Is(listenErr, deleteErr) {
@@ -108,7 +108,7 @@ func TestAccessTokenReleaseSubscriber_ACancelledRequestStillPublishesTheBoundary
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     cancelledRuntime := melodyruntime.New(cancelledContext, containerInstance.NewScope(), containerInstance)
 
-    deleted := melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-6", "deleted"), melodyclock.NewSystemClock())
+    deleted := melodyevent.NewEvent(event.UserDeletedEventName, event.NewUserDeletedEvent("user-6", "deleted"), melodyclock.NewSystemClock().Now())
     if listenErr := subscriberInstance.SubscribedEvents()[event.UserDeletedEventName][0].Listener()(cancelledRuntime, deleted); nil != listenErr {
         t.Fatalf("expected the release to outlive the request's cancellation, got %v", listenErr)
     }
