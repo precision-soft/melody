@@ -784,28 +784,31 @@ func TestMarkSecret_ReachesADotEnvValueAssembledFromTheMarkedKey(t *testing.T) {
         t.Fatalf("environment error: %v", environmentErr)
     }
 
-    configuration, configurationErr := NewConfiguration(environment, t.TempDir(), ConfigurationConfig{})
+    configuration, configurationErr := NewConfiguration(environment, t.TempDir(), ConfigurationConfig{EnvironmentKeys: []configcontract.EnvironmentKey{{Key: "DB_PASSWORD", Parameter: "database.password", Field: "ApplicationConfig.EnvironmentKeys"}}})
     if nil != configurationErr {
         t.Fatalf("configuration error: %v", configurationErr)
     }
 
+    for _, key := range []string{"DSN", "DSN_COPY", "DB_HOST", "OTHER"} {
+        configuration.RegisterRuntime("app."+strings.ToLower(key), "%env("+key+")%")
+    }
     configuration.RegisterRuntime("database.dsn", "%env(DSN_COPY)%")
 
     if resolveErr := configuration.Resolve(); nil != resolveErr {
         t.Fatalf("resolve error: %v", resolveErr)
     }
 
-    if false == configuration.MarkSecret("DB_PASSWORD") {
+    if false == configuration.MarkSecret("database.password") {
         t.Fatalf("expected the marking to land")
     }
 
-    for _, name := range []string{"DSN", "DSN_COPY", "database.dsn"} {
+    for _, name := range []string{"app.dsn", "app.dsn_copy", "database.dsn"} {
         if false == configuration.MustGet(name).IsSecret() {
             t.Fatalf("expected %s, assembled from the marked key, marked", name)
         }
     }
 
-    for _, name := range []string{"DB_HOST", "OTHER"} {
+    for _, name := range []string{"app.db_host", "app.other"} {
         if true == configuration.MustGet(name).IsSecret() {
             t.Fatalf("expected %s, which reads no marked key, unmarked", name)
         }

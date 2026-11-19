@@ -71,25 +71,3 @@ func indexFrameworkEnvironmentKeys() map[string]configcontract.EnvironmentKey {
 func environmentPlaceholder(environmentKey string) string {
     return "%env(" + environmentKey + ")%"
 }
-
-/* a declared key and its parameter share one *Parameter, so the secret propagation scans both names */
-func (instance *Configuration) aliasesOfName(name string) []string {
-    /* an overridden parameter and its key are two parameters, so a mark does not hop between them */
-    if declared, isDeclared := instance.declaredEnvironmentKeys[name]; true == isDeclared {
-        if true == instance.isOverriddenLocked(declared.declaration.Parameter) {
-            return []string{name}
-        }
-
-        return []string{name, declared.declaration.Parameter}
-    }
-
-    if feedingKey, isFed := instance.declaredEnvironmentParameters[name]; true == isFed {
-        if true == instance.isOverriddenLocked(name) {
-            return []string{name}
-        }
-
-        return []string{feedingKey, name}
-    }
-
-    return []string{name}
-}

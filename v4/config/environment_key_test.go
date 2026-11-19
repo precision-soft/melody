@@ -69,32 +69,28 @@ func mustResolve(t *testing.T, configuration *Configuration) {
     }
 }
 
-func TestDeclareEnvironmentKey_AnAbsentKeyTakesTheDefaultUnderBothNames(t *testing.T) {
+func TestDeclareEnvironmentKey_AnAbsentKeyTakesTheDefault(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{})
     mustDeclare(t, configuration, "x", textKey("fallback"))
     mustResolve(t, configuration)
 
-    byKey, byParameter := configuration.Get("MELODY_X_TEXT"), configuration.Get("melody.x.text")
-    if nil == byKey || byKey != byParameter {
-        t.Fatalf("expected one parameter under both names, got %v and %v", byKey, byParameter)
+    if nil != configuration.Get("MELODY_X_TEXT") {
+        t.Fatalf("expected no parameter under the key")
     }
 
-    if "fallback" != byKey.String() || false == byKey.IsDefault() || "MELODY_X_TEXT" != byKey.EnvironmentKey() {
-        t.Fatalf("expected the default under the key, got %q default=%v key=%q", byKey.String(), byKey.IsDefault(), byKey.EnvironmentKey())
+    byParameter := configuration.Get("melody.x.text")
+    if "fallback" != byParameter.String() || false == byParameter.IsDefault() || "MELODY_X_TEXT" != byParameter.EnvironmentKey() {
+        t.Fatalf("expected the default, got %q default=%v key=%q", byParameter.String(), byParameter.IsDefault(), byParameter.EnvironmentKey())
     }
 }
 
 func TestDeclareEnvironmentKey_APresentKeyWinsOverTheDefault(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_TEXT": "from env"})
-    loaded := configuration.Get("MELODY_X_TEXT")
 
     mustDeclare(t, configuration, "x", textKey("fallback"))
     mustResolve(t, configuration)
 
     byParameter := configuration.Get("melody.x.text")
-    if loaded != byParameter || loaded != configuration.Get("MELODY_X_TEXT") {
-        t.Fatalf("expected the parameter the load created under both names")
-    }
 
     if "from env" != byParameter.String() || true == byParameter.IsDefault() {
         t.Fatalf("expected the .env value, got %q default=%v", byParameter.String(), byParameter.IsDefault())
@@ -137,7 +133,7 @@ func refusalOfRead(read func()) (refusal *exception.Error) {
 
 func TestDeclareEnvironmentKey_AReferenceByKeyOrByParameterResolvesWithoutTheLine(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{})
-    configuration.RegisterRuntime("app.by_key", "[%MELODY_X_TEXT%]")
+    configuration.RegisterRuntime("app.by_key", "[%env(MELODY_X_TEXT)%]")
     configuration.RegisterRuntime("app.by_parameter", "[%melody.x.text%]")
     mustDeclare(t, configuration, "x", textKey("fallback"))
     mustResolve(t, configuration)
@@ -158,23 +154,23 @@ func TestDeclareEnvironmentKey_AReferenceByKeyOrByParameterResolvesWithoutTheLin
     }
 }
 
-func TestDeclareEnvironmentKey_ASecretKeyMarksBothNamesAndEveryReader(t *testing.T) {
+func TestDeclareEnvironmentKey_ASecretKeyMarksItsParameterAndEveryReader(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_PASSWORD": "hunter2"})
-    configuration.RegisterRuntime("app.before_by_key", "u:%MELODY_X_PASSWORD%")
+    configuration.RegisterRuntime("app.before_by_key", "u:%env(MELODY_X_PASSWORD)%")
     configuration.RegisterRuntime("app.before_by_parameter", "u:%melody.x.password%")
     mustDeclare(t, configuration, "x", secretKey())
-    configuration.RegisterRuntime("app.after_by_key", "u:%MELODY_X_PASSWORD%")
+    configuration.RegisterRuntime("app.after_by_key", "u:%env(MELODY_X_PASSWORD)%")
     configuration.RegisterRuntime("app.after_by_parameter", "u:%melody.x.password%")
     mustResolve(t, configuration)
 
-    for _, name := range []string{"MELODY_X_PASSWORD", "melody.x.password", "app.before_by_key", "app.before_by_parameter", "app.after_by_key", "app.after_by_parameter"} {
+    for _, name := range []string{"melody.x.password", "app.before_by_key", "app.before_by_parameter", "app.after_by_key", "app.after_by_parameter"} {
         if false == configuration.Get(name).IsSecret() {
             t.Fatalf("expected %s secret", name)
         }
     }
 
     marked := mustConfigurationFromValues(t, map[string]string{})
-    marked.RegisterRuntime("app.reader", "u:%MELODY_X_PASSWORD%")
+    marked.RegisterRuntime("app.reader", "u:%env(MELODY_X_PASSWORD)%")
     mustDeclare(t, marked, "x", secretKey())
     marked.MarkSecret("melody.x.password")
     if false == marked.Get("app.reader").IsSecret() {
@@ -184,7 +180,7 @@ func TestDeclareEnvironmentKey_ASecretKeyMarksBothNamesAndEveryReader(t *testing
 
 func TestDeclareEnvironmentKey_AMarkThroughTheParameterNameReachesAReaderOfTheKey(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_TEXT": "v"})
-    configuration.RegisterRuntime("app.reader", "u:%MELODY_X_TEXT%")
+    configuration.RegisterRuntime("app.reader", "u:%env(MELODY_X_TEXT)%")
     mustDeclare(t, configuration, "x", textKey(""))
 
     configuration.MarkSecret("melody.x.text")
@@ -197,13 +193,14 @@ func TestDeclareEnvironmentKey_AMarkThroughTheParameterNameReachesAReaderOfTheKe
 func TestDeclareEnvironmentKey_AMarkAfterTheResolveReachesAReaderOfEitherSpelling(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_TEXT": "v"})
     configuration.RegisterRuntime("app.reader_by_parameter", "u:%melody.x.text%")
+    configuration.RegisterRuntime("app.reader_by_key", "u:%env(MELODY_X_TEXT)%")
     mustDeclare(t, configuration, "x", textKey(""))
     mustResolve(t, configuration)
 
-    configuration.MarkSecret("MELODY_X_TEXT")
+    configuration.MarkSecret("melody.x.text")
 
-    if false == configuration.Get("app.reader_by_parameter").IsSecret() {
-        t.Fatalf("expected a mark on the key, after the resolve, to reach the reader of the parameter name")
+    if false == configuration.Get("app.reader_by_parameter").IsSecret() || false == configuration.Get("app.reader_by_key").IsSecret() {
+        t.Fatalf("expected a mark on the parameter, after the resolve, to reach the readers of the parameter and of the key")
     }
 }
 
@@ -219,10 +216,11 @@ func TestDeclareEnvironmentKey_ASecretKeyMarksAValueAssembledFromIt(t *testing.T
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
 
+    configuration.RegisterRuntime("app.dsn", "%env(APP_DSN)%")
     mustDeclare(t, configuration, "x", secretKey())
     mustResolve(t, configuration)
 
-    if false == configuration.Get("APP_DSN").IsSecret() {
+    if false == configuration.Get("app.dsn").IsSecret() {
         t.Fatalf("expected the value assembled from the secret key marked")
     }
 }
@@ -364,12 +362,8 @@ func TestDeclareEnvironmentKey_RefusesTwoKeysOfOneParameter(t *testing.T) {
 
 func TestDeclareEnvironmentKey_RefusesAParameterAlreadyRegistered(t *testing.T) {
     handMapped := mustConfigurationFromValues(t, map[string]string{"APP_X": "v"})
-    handMapped.RegisterRuntime("melody.x.text", "%APP_X%")
+    handMapped.RegisterRuntime("melody.x.text", "%env(APP_X)%")
     declarationRefusal(t, handMapped.DeclareEnvironmentKey("x", textKey("")), "the parameter a declared environment key feeds is already registered")
-
-    underTheKey := mustConfigurationFromValues(t, map[string]string{})
-    underTheKey.RegisterRuntime("MELODY_X_TEXT", "v")
-    declarationRefusal(t, underTheKey.DeclareEnvironmentKey("x", textKey("")), "a parameter under the name of a declared environment key is already registered")
 }
 
 func TestDeclareEnvironmentKey_RefusedAfterTheBootResolve(t *testing.T) {
@@ -421,7 +415,7 @@ func TestCheckEnvironmentKeys_JudgesTheResolvedValue(t *testing.T) {
         {"0", true},
         {"5", false},
     } {
-        configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_COUNT": "%APP_COUNT%", "APP_COUNT": testCase.count})
+        configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_COUNT": "%env(APP_COUNT)%", "APP_COUNT": testCase.count})
         mustDeclare(t, configuration, "x", countKey())
         mustResolve(t, configuration)
 
@@ -448,7 +442,10 @@ func TestCheckEnvironmentKeys_AnEmptyLineIsAbsentUnderARule(t *testing.T) {
 
 func TestDeclareEnvironmentKey_AnEmptyLineUnderARuleTakesTheDeclaredDefault(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_COUNT": "", "MELODY_X_POLICY": "  ", "MELODY_X_SWITCH": "", "MELODY_X_TEXT": ""})
-    configuration.MarkSecret("MELODY_X_COUNT")
+
+    configuration.mutex.Lock()
+    configuration.propagateEnvironmentKeySecretMarkLocked("MELODY_X_COUNT")
+    configuration.mutex.Unlock()
 
     count := countKey()
     count.Default = "7"
@@ -539,7 +536,7 @@ func TestCheckEnvironmentKeys_ASecretKeyWithholdsTheCause(t *testing.T) {
         key.Rule = LimitKeyRule(bound.Rule[int]{Default: 1, Minimum: 1, Maximum: 10})
         mustDeclare(t, configuration, "x", key)
         if false == declaredSecret {
-            configuration.MarkSecret("MELODY_X_PASSWORD")
+            configuration.MarkSecret("melody.x.password")
         }
         mustResolve(t, configuration)
 
@@ -635,11 +632,10 @@ func TestDeclareEnvironmentKey_ADefaultReadingAKeyDeclaredLaterSettlesAtBoot(t *
 
 func TestDeclareEnvironmentKey_AnUnresolvableTextRefusesAndLeavesTheTables(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_SWITCH": ""})
-    loaded := configuration.Get("MELODY_X_SWITCH")
 
     declarationRefusal(t, configuration.DeclareEnvironmentKey("x", switchKey("%env(A))%")), "a declared environment key could not be resolved at its declaration")
 
-    if nil != configuration.Get("melody.x.switch") || loaded != configuration.Get("MELODY_X_SWITCH") || "" != loaded.Template() || true == loaded.IsDefault() {
+    if nil != configuration.Get("melody.x.switch") || nil != configuration.Get("MELODY_X_SWITCH") {
         t.Fatalf("expected the tables as they were, got %v", configuration.Get("melody.x.switch"))
     }
 
@@ -748,14 +744,14 @@ func TestNewConfiguration_ApplicationKeyFeedingAKernelParameterOrRetiringAFramew
 func TestNewConfiguration_ALineReadsAnApplicationKeysDefaultAtConstruction(t *testing.T) {
     configuration, configurationErr := newConfigurationWithApplicationKeys(
         map[string]string{"APP_LINK": "https://%env(APP_HOST)%/path"},
-        []configcontract.EnvironmentKey{applicationKey("APP_HOST", "app.host", "example.org")},
+        []configcontract.EnvironmentKey{applicationKey("APP_HOST", "app.host", "example.org"), applicationKey("APP_LINK", "app.link", "")},
     )
     if nil != configurationErr {
         t.Fatalf("unexpected configuration error: %v", configurationErr)
     }
 
-    if "https://example.org/path" != configuration.MustGet("APP_LINK").String() {
-        t.Fatalf("expected the line to read the declared default, got %q", configuration.MustGet("APP_LINK").String())
+    if "https://example.org/path" != configuration.MustGet("app.link").String() {
+        t.Fatalf("expected the line to read the declared default, got %q", configuration.MustGet("app.link").String())
     }
 }
 
@@ -782,4 +778,37 @@ func TestDeclareEnvironmentKey_AModuleIsRefusedAKeyTheApplicationHoldsOrRetired(
     if "the application" != refusal.Context()["holder"] || "APP_OTHER" != refusal.Context()["feedingEnvironmentKey"] {
         t.Fatalf("expected the application's key named, got %v", refusal.Context())
     }
+}
+
+func TestEnvironmentValue_AnswersTheLoadedLine(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"APP_SET": "a", "APP_BLANK": ""})
+
+    if value, isSet := configuration.EnvironmentValue("APP_SET"); false == isSet || "a" != value {
+        t.Fatalf("expected the line, got %q %v", value, isSet)
+    }
+
+    if value, isSet := configuration.EnvironmentValue("APP_BLANK"); false == isSet || "" != value {
+        t.Fatalf("expected a blank line present, got %q %v", value, isSet)
+    }
+
+    if _, isSet := configuration.EnvironmentValue(HttpAddressKey); true == isSet {
+        t.Fatalf("expected a declared default not to count as a line")
+    }
+}
+
+func TestEnvironmentKey_ALowerCaseLineLoadsAndReadsButIsNotDeclarable(t *testing.T) {
+    configuration, configurationErr := newConfigurationWithApplicationKeys(map[string]string{"database_url": "dsn"}, nil)
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    configuration.RegisterRuntime("app.database_url", "%env(database_url)%")
+    mustResolve(t, configuration)
+
+    if "dsn" != configuration.Get("app.database_url").String() {
+        t.Fatalf("expected the lower-case line read through %%env()%%")
+    }
+
+    _, declareErr := newConfigurationWithApplicationKeys(map[string]string{}, []configcontract.EnvironmentKey{applicationKey("database_url", "app.database_url", "")})
+    declarationRefusal(t, declareErr, "a declared environment key is not an upper-case letter followed by upper-case letters, digits and underscores")
 }

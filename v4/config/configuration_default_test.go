@@ -35,7 +35,7 @@ func TestRegisterDefaultParameters_DeclaresTheDefaultsAnApplicationInheritsByDec
         StaticEnableCacheKey:         "true",
         StaticCacheMaxAgeKey:         "3600",
     } {
-        parameter := configuration.Get(key)
+        parameter := configuration.Get(frameworkParameter(key))
         if nil == parameter {
             t.Fatalf("expected the default %q to be declared", key)
         }
@@ -82,7 +82,7 @@ func TestRegisterDefaultParameters_AnEnvironmentValueWinsOverTheDefault(t *testi
         func(configuration *Configuration) {},
     )
 
-    logLevel := configuration.Get(LogLevelKey)
+    logLevel := configuration.Get(frameworkParameter(LogLevelKey))
     if string(loggingcontract.LevelError) != logLevel.String() {
         t.Fatalf("expected the declared log level to win, got %q", logLevel.String())
     }
@@ -91,14 +91,14 @@ func TestRegisterDefaultParameters_AnEnvironmentValueWinsOverTheDefault(t *testi
         t.Fatalf("expected a parameter the environment declared to stop reporting itself as a default")
     }
 
-    httpAddress := configuration.Get(HttpAddressKey)
+    httpAddress := configuration.Get(frameworkParameter(HttpAddressKey))
     if ":9090" != httpAddress.String() {
         t.Fatalf("expected the declared address to win, got %q", httpAddress.String())
     }
 
     /* a default the environment said nothing about is untouched by the two that were overridden */
-    if "melody" != configuration.Get(CliNameKey).String() {
-        t.Fatalf("expected the untouched default to survive, got %q", configuration.Get(CliNameKey).String())
+    if "melody" != configuration.Get(frameworkParameter(CliNameKey)).String() {
+        t.Fatalf("expected the untouched default to survive, got %q", configuration.Get(frameworkParameter(CliNameKey)).String())
     }
 }
 

@@ -24,20 +24,27 @@ func TestFrameworkEnvironmentKeys_EachKeyFeedsOneKernelParameter(t *testing.T) {
     }
 }
 
-func TestFrameworkEnvironmentKeys_AKeyIsOneParameterUnderBothNames_AnUndeclaredLineUnderItsOwn(t *testing.T) {
+/* a keyless kernel parameter answers its own name */
+func frameworkParameter(key string) string {
+    if declared, isFrameworkKey := frameworkEnvironmentKeyIndex[key]; true == isFrameworkKey {
+        return declared.Parameter
+    }
+
+    return key
+}
+
+func TestFrameworkEnvironmentKeys_AKeyFeedsItsKernelParameter_AnUndeclaredLineIsNoParameter(t *testing.T) {
     configuration := mustConfigurationFromValues(t, map[string]string{EnvironmentNameKey: EnvironmentProduction, "APP_UNKNOWN_KEY": "x"})
 
-    byKey, byParameter := configuration.Get(EnvironmentNameKey), configuration.Get(KernelEnvironment)
-    if nil == byKey || byKey != byParameter || EnvironmentProduction != byParameter.String() {
-        t.Fatalf("expected one parameter under the key and the kernel name, got %v and %v", byKey, byParameter)
+    if nil != configuration.Get(EnvironmentNameKey) || EnvironmentProduction != configuration.Get(KernelEnvironment).String() {
+        t.Fatalf("expected the key read through its kernel parameter only")
     }
 
     if frameworkEnvironmentKeyOwner != configuration.declaredEnvironmentKeys[EnvironmentNameKey].owner {
         t.Fatalf("expected the framework to own its key in the key table")
     }
 
-    unknown := configuration.Get("APP_UNKNOWN_KEY")
-    if nil == unknown || "x" != unknown.String() || "x" != unknown.Template() {
-        t.Fatalf("expected an undeclared line to answer under itself, holding its line, got %v", unknown)
+    if nil != configuration.Get("APP_UNKNOWN_KEY") {
+        t.Fatalf("expected an undeclared line to be no parameter")
     }
 }

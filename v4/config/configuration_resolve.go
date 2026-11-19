@@ -35,6 +35,13 @@ func (instance *Configuration) resolveAll(deferUnresolvedReferences bool) error 
         )
     }
 
+    /* a key is no parameter, so the credential an undeclared MELODY_ key may hold is marked on the key, before its readers resolve */
+    if false == deferUnresolvedReferences {
+        for _, key := range instance.undeclaredEnvironmentKeysLocked() {
+            instance.propagateEnvironmentKeySecretMarkLocked(key)
+        }
+    }
+
     /* walked sorted so the failure names the same parameter on every boot */
     names := make([]string, 0, len(instance.parameters))
     for name := range instance.parameters {
@@ -84,7 +91,7 @@ func (instance *Configuration) resolveAll(deferUnresolvedReferences bool) error 
                 "parameterName": name,
             }
 
-            /* the environment key is named beside the parameter, since a MELODY_* key and its kernel.* alias are one parameter and the operator wrote only the key; a runtime parameter has none */
+            /* the environment key is named beside the parameter, since the operator wrote only the key; a runtime parameter has none */
             if "" != parameter.environmentKey && parameter.environmentKey != name {
                 failureContext["environmentKey"] = parameter.environmentKey
             }
@@ -339,7 +346,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
         }
 
         return "", 0, exception.NewError(
-            "malformed environment placeholder in template; the only supported form besides %env(KEY)% is %env(default:<fallback parameter>:KEY)%, and a type cast belongs on the typed accessor (Bool, Int, Float, Duration) rather than in the placeholder",
+            "malformed environment placeholder in template; the only form is %env(KEY)%; a key's fallback is the Default of its EnvironmentKey declaration, and a type cast belongs on the typed accessor (Bool, Int, Float, Duration) rather than in the placeholder",
             map[string]any{
                 "parameterName": currentKey,
                 "placeholder":   reportedPlaceholder,
@@ -348,9 +355,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
         )
     }
 
-    hasDefaultProcessor := "" != submatches[1]
-    fallbackParameterKey := submatches[2]
-    environmentKey := submatches[3]
+    environmentKey := submatches[1]
 
     /* the guard turns a self-referential environment text into an error */
     if true == resolvingEnvironmentKeys[environmentKey] {
@@ -364,7 +369,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
         )
     }
 
-    environmentText, isKnown := instance.environmentKeyText(environmentKey, false == hasDefaultProcessor)
+    environmentText, isKnown := instance.environmentKeyText(environmentKey, true)
     if true == isKnown {
         resolvingEnvironmentKeys[environmentKey] = true
 
@@ -384,8 +389,7 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
         }
 
         /* a dsn assembled from a secret key is redacted too */
-        environmentParameter := instance.getInternalParameter(environmentKey)
-        if true == instance.secretEnvironmentKeys[environmentKey] || (nil != environmentParameter && true == environmentParameter.isSecret.Load()) {
+        if true == instance.secretEnvironmentKeys[environmentKey] {
             currentParameter := instance.getInternalParameter(currentKey)
             if nil != currentParameter {
                 currentParameter.isSecret.Store(true)
@@ -395,33 +399,29 @@ func (instance *Configuration) resolveEnvironmentPlaceholder(
         return resolvedEnvironmentText, len(candidate), nil
     }
 
-    if false == hasDefaultProcessor {
-        /* the raw value is not embedded: it commonly holds inline credentials, and the error context reaches the logs; the environment key identifies the placeholder */
-        return "", 0, exception.NewError(
-            "undefined environment key in template",
-            map[string]any{
-                "parameterName":  currentKey,
-                "environmentKey": environmentKey,
-            },
-            errUndefinedEnvironmentKey,
-        )
-    }
-
-    if "" == fallbackParameterKey {
-        return "", len(candidate), nil
-    }
-
-    resolvedFallback, fallbackErr := instance.resolveParameterReference(
-        fallbackParameterKey,
-        currentKey,
-        resolvingParameters,
-        resolvingEnvironmentKeys,
+    /* the raw value is not embedded: it commonly holds inline credentials, and the error context reaches the logs; the environment key identifies the placeholder */
+    return "", 0, exception.NewError(
+        "undefined environment key in template",
+        map[string]any{
+            "parameterName":  currentKey,
+            "environmentKey": environmentKey,
+        },
+        errUndefinedEnvironmentKey,
     )
-    if nil != fallbackErr {
-        return "", 0, fallbackErr
+}
+
+func (instance *Configuration) isEnvironmentKey(name string) bool {
+    if _, isDeclared := instance.declaredEnvironmentKeys[name]; true == isDeclared {
+        return true
     }
 
-    return resolvedFallback, len(candidate), nil
+    if nil == instance.environment {
+        return false
+    }
+
+    _, isLoaded := instance.environment.Get(name)
+
+    return isLoaded
 }
 
 /* a blank line under a declared rule is unset, as the framework reads its own limits */
@@ -453,6 +453,18 @@ func (instance *Configuration) resolveParameterReference(
     resolvingEnvironmentKeys map[string]bool,
 ) (string, error) {
     referencedParameter := instance.getInternalParameter(parameterKey)
+    if nil == referencedParameter && true == instance.isEnvironmentKey(parameterKey) {
+        /* the sentinel cause lets the tolerant pass defer it like any undefined reference */
+        return "", exception.NewError(
+            "a template references an environment key as a parameter; a key is read as %env(KEY)%",
+            map[string]any{
+                "parameterName": currentKey,
+                "parameterKey":  parameterKey,
+            },
+            errUndefinedParameterReference,
+        )
+    }
+
     if nil == referencedParameter {
         /* the raw value is not embedded: it commonly holds inline credentials, and the error context reaches the logs. The sentinel cause lets the tolerant pass defer exactly this failure. */
         return "", exception.NewError(

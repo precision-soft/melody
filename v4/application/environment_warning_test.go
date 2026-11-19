@@ -1,9 +1,13 @@
 package application
 
 import (
+    "context"
     "maps"
+    "slices"
     "testing"
 
+    "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/internal"
 )
 
@@ -119,5 +123,47 @@ func TestIgnoredProcessEnvironmentBootWarnings_RetiredNamesCarryTheirSuccessor(t
         if internal.BootWarningNameProcessEnvironmentVariableIgnored != bootWarning.Name || false == maps.Equal(expected[index], map[string]any(bootWarning.Context)) {
             t.Fatalf("expected %v at %d, got %+v", expected[index], index, bootWarning)
         }
+    }
+}
+
+func TestProcessVariableIgnored_NamesADeclaredKey(t *testing.T) {
+    environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{"APP_LOOSE": "line", "MELODY_X_TEXT": "m"}})
+    if nil != environmentErr {
+        t.Fatalf("unexpected environment error: %v", environmentErr)
+    }
+
+    configuration, configurationErr := config.NewConfiguration(environment, t.TempDir(), config.ConfigurationConfig{
+        EnvironmentKeys:    []configcontract.EnvironmentKey{{Key: "APP_X", Parameter: "app.x", Field: "ApplicationConfig.EnvironmentKeys", Default: "a"}},
+        ParameterOverrides: map[string]string{config.KernelLogLevel: "error"},
+    })
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    if declareErr := configuration.DeclareEnvironmentKey("x", configcontract.EnvironmentKey{Key: "MELODY_X_TEXT", Parameter: "melody.x.text", Field: "x.F"}); nil != declareErr {
+        t.Fatalf("unexpected declaration error: %v", declareErr)
+    }
+
+    if resolveErr := configuration.Resolve(); nil != resolveErr {
+        t.Fatalf("unexpected resolve error: %v", resolveErr)
+    }
+
+    bootWarnings := ignoredProcessEnvironmentBootWarnings(configuration, []string{
+        "MELODY_HTTP_ADDRESS=:9999",
+        "MELODY_X_TEXT=other",
+        "APP_X=other",
+        "MELODY_LOG_LEVEL=info",
+        "APP_LOOSE=other",
+        "APP_ABSENT=x",
+    })
+
+    names := make([]string, 0, len(bootWarnings))
+    for _, bootWarning := range bootWarnings {
+        names = append(names, bootWarning.Context["environmentVariable"].(string))
+    }
+
+    expected := []string{"APP_LOOSE", "APP_X", "MELODY_HTTP_ADDRESS", "MELODY_LOG_LEVEL", "MELODY_X_TEXT"}
+    if false == slices.Equal(expected, names) {
+        t.Fatalf("expected %v, got %v", expected, names)
     }
 }

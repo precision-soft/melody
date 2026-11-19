@@ -514,13 +514,34 @@ func TestDebugParameters_ShowsOverrideAndTheKeyItStoppedReading(t *testing.T) {
 
     items := parameterItemsByName(t, rendered)
 
-    overridden, keyRow := items[config.KernelHttpAddress], items[config.HttpAddressKey]
-    if nil == overridden || true != overridden["isOverridden"] || config.HttpAddressKey != overridden["environmentKey"] || ":9090" != overridden["template"] || "" != overridden["aliases"] {
+    overridden := items[config.KernelHttpAddress]
+    if nil == overridden || true != overridden["isOverridden"] || config.HttpAddressKey != overridden["environmentKey"] || ":9090" != overridden["template"] {
         t.Fatalf("expected the overridden row keeping its key, got %v", overridden)
     }
+}
 
-    if nil == keyRow || false != keyRow["isOverridden"] || ":8080" != keyRow["value"] {
-        t.Fatalf("expected the key's own row reading the line, got %v", keyRow)
+func TestDebugParameters_AKeyIsNotARow(t *testing.T) {
+    rendered, runErr := runDebugCommand(
+        &ParameterCommand{},
+        newParameterTestRuntimeWith(t, map[string]string{config.HttpAddressKey: ":8080", "APP_LOOSE": "x"}, config.ConfigurationConfig{}),
+        []string{"--format=json"},
+    )
+    if nil != runErr {
+        t.Fatalf("expected no error, got %v", runErr)
+    }
+
+    for name, item := range parameterItemsByName(t, rendered) {
+        if true == strings.HasPrefix(name, "MELODY_") || "APP_LOOSE" == name {
+            t.Fatalf("expected no row named like a key, got %s", name)
+        }
+
+        if _, carriesAliases := item["aliases"]; true == carriesAliases {
+            t.Fatalf("expected no aliases field, got %v", item)
+        }
+    }
+
+    if ":8080" != parameterItemsByName(t, rendered)[config.KernelHttpAddress]["value"] {
+        t.Fatalf("expected the key read through its kernel parameter")
     }
 }
 

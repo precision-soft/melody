@@ -172,17 +172,7 @@ func assertContextOmitsSecret(t *testing.T, context map[string]any, secret strin
     }
 }
 
-func TestEnvPlaceholderPattern_AcceptsDefaultProcessorForms(t *testing.T) {
-    if false == envPlaceholderPattern.MatchString("%env(default::AWS_ENDPOINT_URL)%") {
-        t.Fatalf("expected pattern to accept the empty fallback form")
-    }
-
-    if false == envPlaceholderPattern.MatchString("%env(default:app.fallback:AWS_ENDPOINT_URL)%") {
-        t.Fatalf("expected pattern to accept the parameter fallback form")
-    }
-}
-
-/* a single colon is the most likely misspelling of the default processor; the strict pattern cannot match it, so without the shape guard it would survive resolution as literal text and reach the service as the string "%env(default:KEY)%" */
+/* a processor prefix the pattern cannot match would otherwise survive resolution as literal text and reach the service as the string "%env(default:KEY)%" */
 func TestResolveTemplate_MalformedEnvPlaceholderIsReported(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{
@@ -208,82 +198,7 @@ func TestResolveTemplate_MalformedEnvPlaceholderIsReported(t *testing.T) {
     }
 }
 
-func TestResolveTemplate_DefaultProcessorYieldsEmptyStringForUndefinedKey(t *testing.T) {
-    configuration := &Configuration{
-        environment: &Environment{
-            values: map[string]string{},
-        },
-        parameters: ParameterMap{},
-    }
-
-    value, err := configuration.resolveTemplate(
-        "%env(default::AWS_ENDPOINT_URL)%",
-        "aws.endpoint_url",
-        make(map[string]bool),
-        make(map[string]bool),
-    )
-    if nil != err {
-        t.Fatalf("expected the undefined key to be tolerated, got %v", err)
-    }
-
-    if "" != value {
-        t.Fatalf("expected an empty value, got %q", value)
-    }
-}
-
-func TestResolveTemplate_DefaultProcessorFallsBackToParameter(t *testing.T) {
-    configuration := &Configuration{
-        environment: &Environment{
-            values: map[string]string{},
-        },
-        parameters: ParameterMap{
-            "aws.default_endpoint": NewParameter("", "http://localstack:4566", "http://localstack:4566", false),
-        },
-    }
-
-    value, err := configuration.resolveTemplate(
-        "%env(default:aws.default_endpoint:AWS_ENDPOINT_URL)%",
-        "aws.endpoint_url",
-        make(map[string]bool),
-        make(map[string]bool),
-    )
-    if nil != err {
-        t.Fatalf("expected the fallback parameter to resolve, got %v", err)
-    }
-
-    if "http://localstack:4566" != value {
-        t.Fatalf("expected the fallback parameter value, got %q", value)
-    }
-}
-
-func TestResolveTemplate_DefaultProcessorPrefersDefinedEnvironmentValue(t *testing.T) {
-    configuration := &Configuration{
-        environment: &Environment{
-            values: map[string]string{
-                "AWS_ENDPOINT_URL": "https://s3.eu-central-1.amazonaws.com",
-            },
-        },
-        parameters: ParameterMap{
-            "aws.default_endpoint": NewParameter("", "http://localstack:4566", "http://localstack:4566", false),
-        },
-    }
-
-    value, err := configuration.resolveTemplate(
-        "%env(default:aws.default_endpoint:AWS_ENDPOINT_URL)%",
-        "aws.endpoint_url",
-        make(map[string]bool),
-        make(map[string]bool),
-    )
-    if nil != err {
-        t.Fatalf("expected resolution to succeed, got %v", err)
-    }
-
-    if "https://s3.eu-central-1.amazonaws.com" != value {
-        t.Fatalf("expected the environment value to win over the fallback, got %q", value)
-    }
-}
-
-/* the default processor must stay opt-in: a plain placeholder that silently degraded to an empty string would boot the application with an unset credential instead of refusing to start */
+/* a placeholder that silently degraded to an empty string would boot the application with an unset credential instead of refusing to start */
 func TestResolveTemplate_PlainPlaceholderStillFailsForUndefinedKey(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{
@@ -309,32 +224,6 @@ func TestResolveTemplate_PlainPlaceholderStillFailsForUndefinedKey(t *testing.T)
     }
 }
 
-/* the fallback is handed back as a parameter placeholder, so an undefined fallback must surface the parameter branch error rather than resolve to the literal text */
-func TestResolveTemplate_DefaultProcessorReportsUndefinedFallbackParameter(t *testing.T) {
-    configuration := &Configuration{
-        environment: &Environment{
-            values: map[string]string{},
-        },
-        parameters: ParameterMap{},
-    }
-
-    _, err := configuration.resolveTemplate(
-        "%env(default:aws.missing_fallback:AWS_ENDPOINT_URL)%",
-        "aws.endpoint_url",
-        make(map[string]bool),
-        make(map[string]bool),
-    )
-    if nil == err {
-        t.Fatalf("expected an undefined parameter key error")
-    }
-
-    context := contextOfError(t, err)
-
-    if "aws.missing_fallback" != context["parameterKey"] {
-        t.Fatalf("expected the offending fallback key in the context, got %v", context["parameterKey"])
-    }
-}
-
 /* a value holding a literal percent — a generated password is the common case — is written with the percent doubled; without the escape it reads as a parameter reference and the boot fails, which is what the resolution and validation messages have to point at */
 func TestConfiguration_EnvironmentValueWithLiteralPercentIsWrittenDoubled(t *testing.T) {
     configuration, newConfigurationErr := NewConfiguration(
@@ -344,14 +233,14 @@ func TestConfiguration_EnvironmentValueWithLiteralPercentIsWrittenDoubled(t *tes
             },
         },
         "/srv/app",
-        ConfigurationConfig{},
+        ConfigurationConfig{EnvironmentKeys: []configcontract.EnvironmentKey{applicationKey("DATABASE_PASSWORD", "app.database_password", "")}},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the escaped value to resolve, got %v", newConfigurationErr)
     }
 
-    if "pa%ss%word" != configuration.Get("DATABASE_PASSWORD").String() {
-        t.Fatalf("unexpected resolved value %q", configuration.Get("DATABASE_PASSWORD").String())
+    if "pa%ss%word" != configuration.Get("app.database_password").String() {
+        t.Fatalf("unexpected resolved value %q", configuration.Get("app.database_password").String())
     }
 }
 
@@ -364,7 +253,7 @@ func TestConfiguration_UnescapedLiteralPercentFailsTheBootResolveWithAnActionabl
             },
         },
         "/srv/app",
-        ConfigurationConfig{},
+        ConfigurationConfig{EnvironmentKeys: []configcontract.EnvironmentKey{applicationKey("DATABASE_PASSWORD", "app.database_password", "")}},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the constructor to defer the unresolved reference, got %v", newConfigurationErr)
@@ -395,7 +284,7 @@ func TestConfiguration_AForwardReferenceDefersAndTheBootResolveSettlesIt(t *test
             },
         },
         "/srv/app",
-        ConfigurationConfig{},
+        ConfigurationConfig{EnvironmentKeys: []configcontract.EnvironmentKey{applicationKey("APP_GREETING", "app.greeting", "")}},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the constructor to defer the forward reference, got %v", newConfigurationErr)
@@ -408,8 +297,8 @@ func TestConfiguration_AForwardReferenceDefersAndTheBootResolveSettlesIt(t *test
         t.Fatalf("expected the boot resolve to settle the deferred reference, got %v", resolveErr)
     }
 
-    if "hello operator" != configuration.Get("APP_GREETING").String() {
-        t.Fatalf("unexpected resolved value %q", configuration.Get("APP_GREETING").String())
+    if "hello operator" != configuration.Get("app.greeting").String() {
+        t.Fatalf("unexpected resolved value %q", configuration.Get("app.greeting").String())
     }
 }
 
@@ -422,7 +311,7 @@ func TestConfiguration_ADeferredParameterIsUnreadableUntilTheBootResolveSettlesI
             },
         },
         "/srv/app",
-        ConfigurationConfig{},
+        ConfigurationConfig{EnvironmentKeys: []configcontract.EnvironmentKey{applicationKey("APP_GREETING", "app.greeting", "")}},
     )
     if nil != newConfigurationErr {
         t.Fatalf("expected the constructor to defer the forward reference, got %v", newConfigurationErr)
@@ -444,7 +333,7 @@ func TestConfiguration_ADeferredParameterIsUnreadableUntilTheBootResolveSettlesI
         }
     }()
 
-    _ = configuration.Get("APP_GREETING").String()
+    _ = configuration.Get("app.greeting").String()
 }
 
 /* a kernel.* parameter is registered by melody itself before the constructor's pass, so an undefined reference in one is a settled error no later registration repairs; deferring it would only move the failure into whichever kernel view reads it next */
@@ -518,11 +407,8 @@ func TestResolveTemplate_ReferencedValueWithLiteralPercentSplicesAsData(t *testi
     }
 }
 
-/* marking the env-registered parameter is how a credential read through %env(KEY)% is declared, and the marking must travel to the reader exactly as it does on the parameter branch */
+/* a secret key marks its reader exactly as a secret parameter does on the parameter branch */
 func TestResolveTemplate_SecretTravelsThroughAnEnvPlaceholder(t *testing.T) {
-    passwordParameter := NewParameter("MYSQL_PASSWORD", "s3cret", "s3cret", false)
-    passwordParameter.isSecret.Store(true)
-
     databaseUrlParameter := NewParameter("", "root:%env(MYSQL_PASSWORD)%@db", "", false)
 
     configuration := &Configuration{
@@ -532,9 +418,9 @@ func TestResolveTemplate_SecretTravelsThroughAnEnvPlaceholder(t *testing.T) {
             },
         },
         parameters: ParameterMap{
-            "MYSQL_PASSWORD": passwordParameter,
-            "database.url":   databaseUrlParameter,
+            "database.url": databaseUrlParameter,
         },
+        secretEnvironmentKeys: map[string]bool{"MYSQL_PASSWORD": true},
     }
 
     escapedValue, resolveErr := configuration.resolveTemplate(
@@ -637,7 +523,7 @@ func TestResolveTemplate_SplicedLiteralsAndAdjacentReferencesResolve(t *testing.
     }
 }
 
-/* the default processor accepts a single-character fallback name, so the parameter pattern has to resolve it too instead of leaving %a% as literal text */
+/* a single-character parameter name resolves instead of staying %a% as literal text */
 func TestResolveTemplate_SingleCharacterParameterReferenceResolves(t *testing.T) {
     configuration := &Configuration{
         environment: &Environment{values: map[string]string{}},
@@ -647,17 +533,17 @@ func TestResolveTemplate_SingleCharacterParameterReferenceResolves(t *testing.T)
     }
 
     escapedValue, resolveErr := configuration.resolveTemplate(
-        "%env(default:a:MISSING_KEY)%",
+        "%a%",
         "app.value",
         make(map[string]bool),
         make(map[string]bool),
     )
     if nil != resolveErr {
-        t.Fatalf("expected the single-character fallback to resolve, got %v", resolveErr)
+        t.Fatalf("expected the single-character reference to resolve, got %v", resolveErr)
     }
 
     if "short" != escapedValue {
-        t.Fatalf("expected the fallback parameter to resolve, got %q", escapedValue)
+        t.Fatalf("expected the referenced parameter to resolve, got %q", escapedValue)
     }
 }
 
@@ -1181,17 +1067,21 @@ func newConfigurationFromEnvironmentValues(t *testing.T, values map[string]strin
     return configurationErr
 }
 
+func greetingKey() []configcontract.EnvironmentKey {
+    return []configcontract.EnvironmentKey{applicationKey("APP_GREETING", "app.greeting", "")}
+}
+
 func TestNewConfiguration_RefusesAMalformedTemplateAndAnUndefinedEnvironmentReferenceAtConstruction(t *testing.T) {
     for name, value := range map[string]string{
         "malformed template":              "%env(APP_UNSET_KEY",
         "undefined environment reference": "%env(APP_UNSET_KEY)%",
     } {
-        if configurationErr := newConfigurationFromEnvironmentValues(t, map[string]string{"APP_GREETING": value}); nil == configurationErr {
+        if _, configurationErr := newConfigurationWithApplicationKeys(map[string]string{"APP_GREETING": value}, greetingKey()); nil == configurationErr {
             t.Fatalf("%s: expected the construction refused", name)
         }
     }
 
-    if configurationErr := newConfigurationFromEnvironmentValues(t, map[string]string{"APP_GREETING": "%app.registered.later%"}); nil != configurationErr {
+    if _, configurationErr := newConfigurationWithApplicationKeys(map[string]string{"APP_GREETING": "%app.registered.later%"}, greetingKey()); nil != configurationErr {
         t.Fatalf("expected a reference to a parameter registered later deferred, got %v", configurationErr)
     }
 }
@@ -1311,23 +1201,109 @@ func TestTemplatedDefault_IsScanned(t *testing.T) {
     }
 }
 
-func TestEnvPlaceholder_DefaultProcessorSpeaksBeforeTheDeclaredDefault(t *testing.T) {
-    configuration := mustConfigurationFromValues(t, map[string]string{})
-    configuration.RegisterRuntime("app.fallback", "30s")
-    configuration.RegisterRuntime("app.reader", "%env(default:app.fallback:"+HttpReadTimeoutKey+")%")
-    mustResolve(t, configuration)
-
-    if "30s" != configuration.Get("app.reader").String() {
-        t.Fatalf("expected the fallback over the empty declared default, got %q", configuration.Get("app.reader").String())
-    }
-}
-
 func TestKernelParameter_TheBootResolveAgreesWithTheView(t *testing.T) {
-    configuration := mustConfigurationFromValues(t, map[string]string{CliNameKey: "n-%env(default::MELODY_X_TEXT)%"})
-    mustDeclare(t, configuration, "x", textKey("mod"))
+    configuration := mustConfigurationFromValues(t, map[string]string{CliNameKey: "n-%env(APP_X)%", "APP_X": "x"})
     mustResolve(t, configuration)
 
     if configuration.Cli().Name() != configuration.Get(KernelCliName).String() {
         t.Fatalf("expected the view and the parameter to agree, got %q and %q", configuration.Cli().Name(), configuration.Get(KernelCliName).String())
+    }
+}
+
+func keyAsParameterRefusal(t *testing.T, err error) *exception.Error {
+    t.Helper()
+
+    for currentErr := err; nil != currentErr; currentErr = errors.Unwrap(currentErr) {
+        refusal, isRefusal := currentErr.(*exception.Error)
+        if true == isRefusal && "a template references an environment key as a parameter; a key is read as %env(KEY)%" == refusal.Message() {
+            if false == errors.Is(refusal, errUndefinedParameterReference) {
+                t.Fatalf("expected the deferrable cause, got %v", refusal)
+            }
+
+            return refusal
+        }
+    }
+
+    t.Fatalf("expected the key-as-parameter refusal, got %v", err)
+
+    return nil
+}
+
+func TestTemplate_KeyAsParameterIsRefused_NamingEnvForm(t *testing.T) {
+    for _, row := range []struct {
+        name   string
+        values map[string]string
+        key    string
+    }{
+        {name: "framework key", values: map[string]string{}, key: HttpAddressKey},
+        {name: "loaded undeclared key", values: map[string]string{"APP_X": "x"}, key: "APP_X"},
+    } {
+        t.Run(row.name, func(t *testing.T) {
+            configuration := mustConfigurationFromValues(t, row.values)
+            /* the tolerant pass defers it as a forward reference */
+            configuration.RegisterRuntime("app.reader", "a-%"+row.key+"%")
+
+            refusal := keyAsParameterRefusal(t, configuration.Resolve())
+            context := refusal.Context()
+            if "app.reader" != context["parameterName"] || row.key != context["parameterKey"] || 2 != context["offset"] {
+                t.Fatalf("expected the reader, the key and the offset named, got %v", context)
+            }
+        })
+    }
+}
+
+func TestTemplate_AParameterRegisteredLaterStillDefers(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{})
+    mustDeclare(t, configuration, "x", textKey("%app.later%"))
+    configuration.RegisterRuntime("app.later", "late")
+    mustResolve(t, configuration)
+
+    if "late" != configuration.Get("melody.x.text").String() {
+        t.Fatalf("expected the forward reference settled, got %q", configuration.Get("melody.x.text").String())
+    }
+}
+
+func TestEnvPlaceholder_DefaultProcessorIsRefused_NamingTheDeclaration(t *testing.T) {
+    for _, template := range []string{"%env(default::" + HttpAddressKey + ")%", "%env(default:kernel.environment:" + HttpAddressKey + ")%"} {
+        configuration := mustConfigurationFromValues(t, map[string]string{})
+        configuration.RegisterRuntime("app.reader", template)
+
+        resolveErr := configuration.Resolve()
+
+        found := false
+        for currentErr := resolveErr; nil != currentErr; currentErr = errors.Unwrap(currentErr) {
+            refusal, isRefusal := currentErr.(*exception.Error)
+            if true == isRefusal && true == strings.HasPrefix(refusal.Message(), "malformed environment placeholder in template; the only form is %env(KEY)%; a key's fallback is the Default of its EnvironmentKey declaration") {
+                found = true
+            }
+        }
+
+        if false == found {
+            t.Fatalf("expected the reworded malformed refusal for %q, got %v", template, resolveErr)
+        }
+    }
+}
+
+func TestEnvPlaceholder_ADottedLineIsReadable_AndItsParameterSpellingIsRefused(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"db.host": "h"})
+    configuration.RegisterRuntime("app.reader", "x-%env(db.host)%")
+    mustResolve(t, configuration)
+
+    if "x-h" != configuration.Get("app.reader").String() {
+        t.Fatalf("expected the dotted line read, got %q", configuration.Get("app.reader").String())
+    }
+
+    spelled := mustConfigurationFromValues(t, map[string]string{"db.host": "h"})
+    spelled.RegisterRuntime("app.reader", "x-%db.host%")
+    keyAsParameterRefusal(t, spelled.Resolve())
+}
+
+func TestTemplate_KeyAsParameterInsideALineNamesTheLine(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"APP_PASS": "p", "APP_DSN": "mysql://u:%APP_PASS%@h"})
+    configuration.RegisterRuntime("app.reader", "prefix %env(APP_DSN)%")
+
+    context := keyAsParameterRefusal(t, configuration.Resolve()).Context()
+    if "APP_DSN" != context["environmentKey"] || "app.reader" != context["parameterName"] || 10 != context["offset"] {
+        t.Fatalf("expected the line holding the reference named, got %v", context)
     }
 }

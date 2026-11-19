@@ -18,8 +18,8 @@ import (
 )
 
 var (
-    /* without the "default:<fallback>:" prefix an undefined key stays a hard error */
-    envPlaceholderPattern = regexp.MustCompile(`%env\((default:([A-Za-z_][A-Za-z0-9_.]*)?:)?([A-Za-z_][A-Za-z0-9_]*)\)%`)
+    /* a dot is admitted, so a dotted .env line, no parameter now, stays readable */
+    envPlaceholderPattern = regexp.MustCompile(`%env\(([A-Za-z_][A-Za-z0-9_.]*)\)%`)
 )
 
 /* ConfigurationConfig is what a configuration is built from beside its environment and project directory; a field left out is empty. */
@@ -305,58 +305,96 @@ func (instance *Configuration) MarkSecret(name string) bool {
     return true
 }
 
-/* a match inside doubled-percent escaped text over-marks, which errs toward redacting more */
+/* a mark travels over two tables: a parameter to the parameters and keys reading it, a key to the parameters and keys reading it and the keys a .env value assembled from it; a match inside doubled-percent escaped text over-marks, which errs toward redacting more */
 func (instance *Configuration) propagateSecretMarkLocked(markedName string) {
-    markedNames := instance.aliasesOfName(markedName)
+    instance.propagateSecretMarksLocked([]string{markedName}, nil)
+}
 
-    for 0 < len(markedNames) {
-        currentName := markedNames[0]
-        markedNames = markedNames[1:]
+func (instance *Configuration) propagateEnvironmentKeySecretMarkLocked(markedKey string) {
+    instance.markEnvironmentKeySecretLocked(markedKey)
+    instance.propagateSecretMarksLocked(nil, []string{markedKey})
+}
 
-        for name, parameter := range instance.parameters {
-            if true == parameter.isSecret.Load() {
-                continue
+func (instance *Configuration) markEnvironmentKeySecretLocked(key string) bool {
+    if true == instance.secretEnvironmentKeys[key] {
+        return false
+    }
+
+    if nil == instance.secretEnvironmentKeys {
+        instance.secretEnvironmentKeys = make(map[string]bool)
+    }
+
+    instance.secretEnvironmentKeys[key] = true
+
+    return true
+}
+
+func (instance *Configuration) propagateSecretMarksLocked(markedParameters []string, markedKeys []string) {
+    for 0 < len(markedParameters) || 0 < len(markedKeys) {
+        if 0 < len(markedParameters) {
+            currentName := markedParameters[0]
+            markedParameters = markedParameters[1:]
+
+            /* the parameter a declared key feeds, not overridden, holds the key's value, so the key's other readers carry it too */
+            if feedingKey, isFed := instance.declaredEnvironmentParameters[currentName]; true == isFed && false == instance.isOverriddenLocked(currentName) {
+                if true == instance.markEnvironmentKeySecretLocked(feedingKey) {
+                    markedKeys = append(markedKeys, feedingKey)
+                }
             }
 
-            templateValue, isString := parameter.template.(string)
-            if false == isString {
-                continue
+            markedParameters = append(markedParameters, instance.markParametersReadingLocked(currentName, false)...)
+
+            for _, readingKey := range instance.environmentKeysReadingLocked(currentName, false) {
+                if true == instance.markEnvironmentKeySecretLocked(readingKey) {
+                    markedKeys = append(markedKeys, readingKey)
+                }
             }
 
-            if true == templateReadsName(templateValue, currentName) {
-                parameter.isSecret.Store(true)
-                markedNames = append(markedNames, instance.aliasesOfName(name)...)
-            }
+            continue
         }
 
-        /* %env(KEY)% reads a key's line or declared default, so those texts are templates too */
-        for _, readingKey := range instance.environmentKeysReadingLocked(currentName) {
-            readingParameter := instance.getInternalParameter(readingKey)
-            if nil == readingParameter || true == readingParameter.isSecret.Load() {
-                continue
-            }
+        currentKey := markedKeys[0]
+        markedKeys = markedKeys[1:]
 
-            readingParameter.isSecret.Store(true)
-            markedNames = append(markedNames, instance.aliasesOfName(readingKey)...)
-        }
+        markedParameters = append(markedParameters, instance.markParametersReadingLocked(currentKey, true)...)
+
+        readingKeys := instance.environmentKeysReadingLocked(currentKey, true)
 
         /* a .env value assembled from ${NAME} carries NAME's credential although no template names it */
-        for _, assembledKey := range instance.environment.keysAssembledFrom(currentName) {
-            assembledParameter := instance.getInternalParameter(assembledKey)
-            if nil != assembledParameter && true == assembledParameter.isSecret.Load() {
-                continue
-            }
+        readingKeys = append(readingKeys, instance.environment.keysAssembledFrom(currentKey)...)
 
-            if nil != assembledParameter {
-                assembledParameter.isSecret.Store(true)
+        for _, readingKey := range readingKeys {
+            if true == instance.markEnvironmentKeySecretLocked(readingKey) {
+                markedKeys = append(markedKeys, readingKey)
             }
-
-            markedNames = append(markedNames, instance.aliasesOfName(assembledKey)...)
         }
     }
 }
 
-func (instance *Configuration) environmentKeysReadingLocked(name string) []string {
+func (instance *Configuration) markParametersReadingLocked(name string, readsKey bool) []string {
+    markedNames := make([]string, 0)
+
+    for parameterName, parameter := range instance.parameters {
+        if true == parameter.isSecret.Load() {
+            continue
+        }
+
+        templateValue, isString := parameter.template.(string)
+        if false == isString {
+            continue
+        }
+
+        if true == templateReads(templateValue, name, readsKey) {
+            parameter.isSecret.Store(true)
+            markedNames = append(markedNames, parameterName)
+        }
+    }
+
+    return markedNames
+}
+
+/* %env(KEY)% reads a key's line or declared default, so those texts are templates too */
+func (instance *Configuration) environmentKeysReadingLocked(name string, readsKey bool) []string {
     candidates := make(map[string]bool)
     if nil != instance.environment {
         for key := range instance.environment.values {
@@ -370,8 +408,12 @@ func (instance *Configuration) environmentKeysReadingLocked(name string) []strin
 
     readingKeys := make([]string, 0)
     for key := range candidates {
+        if true == readsKey && key == name {
+            continue
+        }
+
         text, isKnown := instance.environmentKeyText(key, true)
-        if true == isKnown && key != name && true == templateReadsName(text, name) {
+        if true == isKnown && true == templateReads(text, name, readsKey) {
             readingKeys = append(readingKeys, key)
         }
     }
@@ -382,7 +424,8 @@ func (instance *Configuration) environmentKeysReadingLocked(name string) []strin
 }
 
 /* a doubled percent is a literal: "a%%%db.pass%" reads db.pass and "a%%db.pass%%" reads nothing */
-func templateReferencedNames(template string) []string {
+func templateReferences(template string) ([]string, []string) {
+    keys := make([]string, 0)
     names := make([]string, 0)
 
     index := 0
@@ -416,10 +459,7 @@ func templateReferencedNames(template string) []string {
 
                 submatches := envPlaceholderPattern.FindStringSubmatch(candidate)
                 if nil != submatches && candidate == submatches[0] {
-                    names = append(names, submatches[3])
-                    if "" != submatches[2] {
-                        names = append(names, submatches[2])
-                    }
+                    keys = append(keys, submatches[1])
 
                     index = index + len(candidate)
 
@@ -443,11 +483,16 @@ func templateReferencedNames(template string) []string {
         index = index + 1
     }
 
-    return names
+    return keys, names
 }
 
-func templateReadsName(template string, name string) bool {
-    return slices.Contains(templateReferencedNames(template), name)
+func templateReads(template string, name string, readsKey bool) bool {
+    keys, names := templateReferences(template)
+    if true == readsKey {
+        return slices.Contains(keys, name)
+    }
+
+    return slices.Contains(names, name)
 }
 
 func (instance *Configuration) Names() []string {
@@ -721,14 +766,6 @@ func (instance *Configuration) registerEnvironmentParameters() error {
                 nil,
             )
         }
-
-        if _, isFrameworkKey := frameworkEnvironmentKeyIndex[environmentKey]; true == isFrameworkKey {
-            continue
-        }
-
-        /* the raw line: a dotted key %env(...)% cannot spell may be one */
-        environmentText := environment[environmentKey]
-        instance.parameters[environmentKey] = NewParameter(environmentKey, environmentText, environmentText, false)
     }
 
     return nil

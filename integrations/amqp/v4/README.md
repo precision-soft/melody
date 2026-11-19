@@ -20,7 +20,7 @@ import amqp "github.com/precision-soft/melody/integrations/amqp/v4"
 
 ## Parameters
 
-The module registers no parameter and declares no key: the application reads its own key for the dsn and builds the connection and the transports before it registers the module, and marks the key secret, since the dsn carries the credentials. A transport whose `Prefetch` is left out takes 10.
+The module registers no parameter and declares no key: the application declares its own key for the dsn, `Secret` since the dsn carries the credentials, and builds the connection and the transports from that key's parameter before it registers the module. A transport whose `Prefetch` is left out takes 10.
 
 ## Usage
 
@@ -29,7 +29,8 @@ The module registers no parameter and declares no key: the application reads its
 ```go
 provider := amqp.NewProvider(amqp.ProviderConfig{})
 
-connection, openErr := provider.Open(configuration.MustGet("AMQP_DSN").String())
+/* AMQP_DSN is declared in ApplicationConfig.EnvironmentKeys, feeding app.amqp.dsn, Secret */
+connection, openErr := provider.Open(configuration.MustGet("app.amqp.dsn").String())
 if nil != openErr {
     return openErr
 }

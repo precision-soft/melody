@@ -158,7 +158,6 @@ func (instance *Application) refuseModuleEnvironmentKeys() {
     }
 }
 
-/* marked secret: the key of a module this process does not register may hold a credential */
 func (instance *Application) collectUndeclaredEnvironmentKeys() {
     declarer, isDeclarer := instance.configuration.(configcontract.EnvironmentKeyDeclarer)
     if false == isDeclarer {
@@ -168,10 +167,6 @@ func (instance *Application) collectUndeclaredEnvironmentKeys() {
     keys := declarer.UndeclaredEnvironmentKeys()
     if 0 == len(keys) {
         return
-    }
-
-    for _, key := range keys {
-        instance.configuration.MarkSecret(key)
     }
 
     instance.bootWarnings = append(instance.bootWarnings, internal.BootWarning{

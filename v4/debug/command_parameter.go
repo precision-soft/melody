@@ -2,14 +2,11 @@ package debug
 
 import (
     "fmt"
-    "sort"
-    "strings"
     "time"
 
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/config"
-    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/internal"
     runtimecontract "github.com/precision-soft/melody/v4/runtime/contract"
 )
@@ -78,62 +75,12 @@ func (instance *ParameterCommand) Run(
         return output.Render(commandContext.Writer, envelope, option)
     }
 
-    keys := make([]string, 0, len(names))
+    items := make([]parameterListItem, 0, len(names))
+
     for _, name := range names {
-        keys = append(keys, name)
-    }
-
-    sort.Strings(keys)
-
-    /* by identity: an overridden parameter and the key it stopped reading are two parameters under one key */
-    environmentAliases := make(map[configcontract.Parameter][]string)
-
-    for _, name := range keys {
         parameter := applicationConfiguration.Get(name)
         if true == internal.IsNilInterface(parameter) {
             continue
-        }
-
-        if "" == parameter.EnvironmentKey() {
-            continue
-        }
-
-        environmentAliases[parameter] = append(environmentAliases[parameter], name)
-    }
-
-    items := make([]parameterListItem, 0, len(keys))
-
-    for _, key := range keys {
-        parameter := applicationConfiguration.Get(key)
-        if true == internal.IsNilInterface(parameter) {
-            continue
-        }
-
-        aliases := ""
-
-        environmentKey := parameter.EnvironmentKey()
-        if "" != environmentKey {
-            aliasNames, exists := environmentAliases[parameter]
-
-            if true == exists && 1 < len(aliasNames) && key == environmentKey {
-                continue
-            }
-
-            if true == exists && 0 < len(aliasNames) {
-                filteredAliases := make([]string, 0, len(aliasNames))
-
-                for _, aliasName := range aliasNames {
-                    if aliasName == key {
-                        continue
-                    }
-
-                    filteredAliases = append(filteredAliases, aliasName)
-                }
-
-                if 0 < len(filteredAliases) {
-                    aliases = strings.Join(filteredAliases, ", ")
-                }
-            }
         }
 
         isSecret := parameter.IsSecret()
@@ -141,14 +88,13 @@ func (instance *ParameterCommand) Run(
         items = append(
             items,
             parameterListItem{
-                Name:             key,
+                Name:             name,
                 EnvironmentKey:   parameter.EnvironmentKey(),
                 Template:         redactedParameterValue(parameter.Template(), isSecret),
                 ValueString:      redactedParameterValue(parameter.Value(), isSecret),
                 IsDefault:        parameter.IsDefault(),
                 IsOverridden:     parameter.IsOverridden(),
                 IsSecret:         isSecret,
-                Aliases:          aliases,
             },
         )
     }
@@ -183,7 +129,7 @@ func (instance *ParameterCommand) Run(
 
         block := builder.AddBlock(
             "PARAMETERS",
-            []string{"parameter", "environmentKey", "template", "value", "default", "overridden", "secret", "aliases"},
+            []string{"parameter", "environmentKey", "template", "value", "default", "overridden", "secret"},
         )
 
         for _, item := range items {
@@ -195,7 +141,6 @@ func (instance *ParameterCommand) Run(
                 fmt.Sprintf("%t", item.IsDefault),
                 fmt.Sprintf("%t", item.IsOverridden),
                 fmt.Sprintf("%t", item.IsSecret),
-                item.Aliases,
             )
         }
 
@@ -242,7 +187,6 @@ type parameterListItem struct {
     IsDefault        bool   `json:"isDefault"`
     IsOverridden     bool   `json:"isOverridden"`
     IsSecret         bool   `json:"isSecret"`
-    Aliases          string `json:"aliases"`
 }
 
 var _ clicontract.Command = (*ParameterCommand)(nil)

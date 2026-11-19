@@ -188,7 +188,7 @@ const environmentKeyServicesRanMarker = "the module's services were registered"
 /* Boot exits the process at the refusal, so it runs in a child of the test binary and the parent reads the child's journal */
 func TestBoot_RefusesAModuleKeyOutsideItsRule(t *testing.T) {
     if projectDirectory := os.Getenv(environmentKeyRefusalChildVariable); "" != projectDirectory {
-        applicationInstance := newEnvironmentKeyBootApplicationIn(t, map[string]string{"MELODY_X_COUNT": "%MELODY_X_SOURCE%", "MELODY_X_SOURCE": "-424242"}, projectDirectory)
+        applicationInstance := newEnvironmentKeyBootApplicationIn(t, map[string]string{"MELODY_X_COUNT": "%env(MELODY_X_SOURCE)%", "MELODY_X_SOURCE": "-424242"}, projectDirectory)
         applicationInstance.modules = []applicationcontract.Module{&environmentKeyTestModule{
             name: "x",
             keys: []configcontract.EnvironmentKey{environmentKeyCount("")},
@@ -286,7 +286,7 @@ func TestBoot_AModuleReadsItsKeyInRegisterServices(t *testing.T) {
         {"the module's config field", nil, "7", 7},
         {"the .env line over the field", map[string]string{"MELODY_X_COUNT": "9"}, "7", 9},
         {"an empty .env line takes the field", map[string]string{"MELODY_X_COUNT": ""}, "7", 7},
-        {"a templated .env line", map[string]string{"MELODY_X_COUNT": "%APP_COUNT%", "APP_COUNT": "9"}, "7", 9},
+        {"a templated .env line", map[string]string{"MELODY_X_COUNT": "%env(APP_COUNT)%", "APP_COUNT": "9"}, "7", 9},
     } {
         read := 0
         applicationInstance := newEnvironmentKeyBootApplication(t, testCase.values)
@@ -320,14 +320,16 @@ func TestBoot_AnInactiveModuleDeclaresNothing(t *testing.T) {
         t.Fatalf("expected no parameter under the name of an inactive module's declaration")
     }
 
-    if parameter := applicationInstance.configuration.Get("MELODY_X_COUNT"); nil == parameter || "0" != parameter.String() || true == parameter.IsDefault() {
-        t.Fatalf("expected the key a plain parameter of its own name, got %v", parameter)
+    if nil != applicationInstance.configuration.Get("MELODY_X_COUNT") {
+        t.Fatalf("expected the key no parameter of its own name")
     }
 }
 
 func TestBoot_NamesTheUndeclaredMelodyKeysInOneBootWarning(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, map[string]string{"MELODY_TYPO": "x", "MELODY_INACTIVE_DSN": "amqp://user:secret@host", "MELODY_X_TEXT": "v", "APP_X": "y"})
-    applicationInstance.configuration.RegisterRuntime("app.dsn_reader", "%MELODY_INACTIVE_DSN%")
+    applicationInstance.configuration.RegisterRuntime("app.dsn_reader", "%env(MELODY_INACTIVE_DSN)%")
+    applicationInstance.configuration.RegisterRuntime("app.typo_reader", "%env(MELODY_TYPO)%")
+    applicationInstance.configuration.RegisterRuntime("app.x_reader", "%env(APP_X)%")
     applicationInstance.modules = []applicationcontract.Module{&environmentKeyTestModule{name: "x", keys: []configcontract.EnvironmentKey{environmentKeyText()}}}
 
     applicationInstance.Boot()
@@ -348,13 +350,13 @@ func TestBoot_NamesTheUndeclaredMelodyKeysInOneBootWarning(t *testing.T) {
         t.Fatalf("expected the keys sorted and nothing else in the context, got %v", warnings[0].Context)
     }
 
-    for _, name := range []string{"MELODY_TYPO", "MELODY_INACTIVE_DSN", "app.dsn_reader"} {
+    for _, name := range []string{"app.typo_reader", "app.dsn_reader"} {
         if false == applicationInstance.configuration.Get(name).IsSecret() {
             t.Fatalf("expected %s marked secret", name)
         }
     }
 
-    if true == applicationInstance.configuration.Get("APP_X").IsSecret() || true == applicationInstance.configuration.Get("MELODY_X_TEXT").IsSecret() {
+    if true == applicationInstance.configuration.Get("app.x_reader").IsSecret() || true == applicationInstance.configuration.Get("melody.x.text").IsSecret() {
         t.Fatalf("expected an application key and a declared key left unmarked")
     }
 
@@ -392,10 +394,6 @@ func TestBoot_ACommandLeavesTheUndeclaredKeyWarningOutWhenItIsIgnored(t *testing
 
         if warnings := cliLogger.warningsContaining("an environment key in the MELODY_ namespace"); testCase.expected != len(warnings) {
             t.Fatalf("%s: expected the warning written %d times, got %v", testCase.name, testCase.expected, warnings)
-        }
-
-        if false == cliApplication.configuration.Get("MELODY_TYPO").IsSecret() {
-            t.Fatalf("%s: expected the key marked secret whether or not the warning is written", testCase.name)
         }
     }
 }
@@ -444,7 +442,7 @@ func TestBoot_RefusesAnEnvironmentKeyModuleOverAConfigurationThatCannotDeclare(t
 
 func TestBoot_AHandMappingRegisteredBeforeBootIsRefusedNamingTheKey(t *testing.T) {
     applicationInstance := newEnvironmentKeyBootApplication(t, map[string]string{"APP_X_TEXT": "v"})
-    applicationInstance.RegisterParameter("melody.x.text", "%APP_X_TEXT%")
+    applicationInstance.RegisterParameter("melody.x.text", "%env(APP_X_TEXT)%")
     applicationInstance.modules = []applicationcontract.Module{&environmentKeyTestModule{name: "x", keys: []configcontract.EnvironmentKey{environmentKeyText()}}}
 
     refusal := refusalOf(t, applicationInstance.bootModuleEnvironmentKeys)

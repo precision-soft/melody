@@ -104,11 +104,6 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
         return exception.NewError("the parameter a declared environment key feeds is already registered", context, nil)
     }
 
-    loadedParameter := instance.getInternalParameter(key.Key)
-    if nil != loadedParameter && key.Key != loadedParameter.environmentKey {
-        return exception.NewError("a parameter under the name of a declared environment key is already registered", context, nil)
-    }
-
     instance.recordEnvironmentKeyDeclarationLocked(owner, key)
 
     /* under a rule a blank line is unset */
@@ -118,67 +113,41 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
     }
     speaksDefault := false == isSet || (false == internal.IsNilInterface(key.Rule) && "" == strings.TrimSpace(line))
 
-    keyParameter := loadedParameter
-    if nil == keyParameter {
-        keyParameter = NewParameter(key.Key, environmentPlaceholder(key.Key), nil, speaksDefault)
-    } else {
-        /* declared, it reads the key, so a blank line under a rule reaches the default */
-        keyParameter.template = environmentPlaceholder(key.Key)
-        keyParameter.isDefault = speaksDefault
-    }
+    template := environmentPlaceholder(key.Key)
+    parameter := NewParameter(key.Key, template, nil, speaksDefault)
 
-    /* an override held since construction becomes the parameter's template; the key's name keeps reading the key */
+    /* an override held since construction becomes the parameter's template */
     override, isOverridden := instance.pendingParameterOverrides[key.Parameter]
-
-    parameter := keyParameter
-    resolutions := []environmentKeyResolution{{parameter: keyParameter, template: environmentPlaceholder(key.Key), name: key.Parameter}}
     if true == isOverridden {
+        template = override
         parameter = newOverriddenParameter(key.Key, key.Parameter, override)
-        resolutions[0].name = key.Key
-        resolutions = append(resolutions, environmentKeyResolution{parameter: parameter, template: override, name: key.Parameter})
     }
 
     /* registered before the resolution, so a secret it reads marks it */
-    instance.parameters[key.Key] = keyParameter
     instance.parameters[key.Parameter] = parameter
 
-    /* every text is resolved before any value is stored, so a refusal leaves the tables as they were */
-    for index := range resolutions {
-        resolution := &resolutions[index]
-        resolution.value, resolution.err = instance.resolveTemplate(
-            resolution.template,
-            resolution.name,
-            make(map[string]bool),
-            make(map[string]bool),
-        )
-        if nil != resolution.err && false == errors.Is(resolution.err, errUndefinedParameterReference) && false == errors.Is(resolution.err, errUndefinedEnvironmentKey) {
-            instance.forgetEnvironmentKeyDeclarationLocked(key)
-
-            delete(instance.parameters, key.Parameter)
-            if nil == loadedParameter {
-                delete(instance.parameters, key.Key)
-            } else {
-                loadedParameter.template = line
-                loadedParameter.isDefault = false
-                instance.parameters[key.Key] = loadedParameter
-            }
-
-            if true == resolution.parameter.overridden {
-                context["overridden"] = true
-            }
-
-            return exception.NewError("a declared environment key could not be resolved at its declaration", context, resolution.err)
+    /* an overridden key's own text is still read by %env(KEY)%, so it is judged at its declaration too */
+    if true == isOverridden {
+        if _, keyErr := instance.resolveTemplate(environmentPlaceholder(key.Key), key.Key, make(map[string]bool), make(map[string]bool)); nil != keyErr && false == isDeferrableDeclarationError(keyErr) {
+            return instance.refuseEnvironmentKeyDeclarationLocked(key, context, keyErr)
         }
     }
 
-    for _, resolution := range resolutions {
-        if nil == resolution.err {
-            resolution.parameter.storeValue(resolution.value)
-            resolution.parameter.deferred.Store(false)
-        } else {
-            /* a parameter registered later settles it at the boot pass */
-            resolution.parameter.deferred.Store(true)
+    value, resolveErr := instance.resolveTemplate(template, key.Parameter, make(map[string]bool), make(map[string]bool))
+    if nil != resolveErr && false == isDeferrableDeclarationError(resolveErr) {
+        if true == isOverridden {
+            context["overridden"] = true
         }
+
+        return instance.refuseEnvironmentKeyDeclarationLocked(key, context, resolveErr)
+    }
+
+    if nil == resolveErr {
+        parameter.storeValue(value)
+        parameter.deferred.Store(false)
+    } else {
+        /* a parameter registered later settles it at the boot pass */
+        parameter.deferred.Store(true)
     }
 
     if true == isOverridden {
@@ -186,16 +155,10 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
     }
 
     if true == key.Secret {
-        if nil == instance.secretEnvironmentKeys {
-            instance.secretEnvironmentKeys = make(map[string]bool)
-        }
-
-        instance.secretEnvironmentKeys[key.Key] = true
-        keyParameter.isSecret.Store(true)
-        instance.propagateSecretMarkLocked(key.Key)
+        instance.propagateEnvironmentKeySecretMarkLocked(key.Key)
 
         /* the mark says what the parameter carries, so an override from another source stays redacted */
-        if true == isOverridden {
+        if true == isOverridden && false == parameter.isSecret.Load() {
             parameter.isSecret.Store(true)
             instance.propagateSecretMarkLocked(key.Parameter)
         }
@@ -204,12 +167,25 @@ func (instance *Configuration) DeclareEnvironmentKey(owner string, key configcon
     return nil
 }
 
-type environmentKeyResolution struct {
-    parameter *Parameter
-    template  string
-    name      string
-    value     string
-    err       error
+func isDeferrableDeclarationError(err error) bool {
+    return true == errors.Is(err, errUndefinedParameterReference) || true == errors.Is(err, errUndefinedEnvironmentKey)
+}
+
+/* a refusal leaves the tables as they were */
+func (instance *Configuration) refuseEnvironmentKeyDeclarationLocked(key configcontract.EnvironmentKey, context exceptioncontract.Context, cause error) error {
+    instance.forgetEnvironmentKeyDeclarationLocked(key)
+    delete(instance.parameters, key.Parameter)
+
+    return exception.NewError("a declared environment key could not be resolved at its declaration", context, cause)
+}
+
+/* EnvironmentValue answers the text a .env artifact loaded for the key, a blank line counted as set, and no declared default. It is raw text and no secret-safe door: a caller compares it and never writes it out. */
+func (instance *Configuration) EnvironmentValue(key string) (string, bool) {
+    if nil == instance.environment {
+        return "", false
+    }
+
+    return instance.environment.Get(key)
 }
 
 func (instance *Configuration) recordEnvironmentKeyDeclarationLocked(owner string, key configcontract.EnvironmentKey) {
@@ -217,7 +193,6 @@ func (instance *Configuration) recordEnvironmentKeyDeclarationLocked(owner strin
         instance.declaredEnvironmentKeys = make(map[string]declaredEnvironmentKey)
         instance.declaredEnvironmentParameters = make(map[string]string)
         instance.declaredRetiredEnvironmentKeys = make(map[string]string)
-        instance.secretEnvironmentKeys = make(map[string]bool)
     }
 
     instance.declaredEnvironmentKeys[key.Key] = declaredEnvironmentKey{owner: owner, declaration: key}
@@ -338,6 +313,10 @@ func (instance *Configuration) UndeclaredEnvironmentKeys() []string {
     instance.mutex.RLock()
     defer instance.mutex.RUnlock()
 
+    return instance.undeclaredEnvironmentKeysLocked()
+}
+
+func (instance *Configuration) undeclaredEnvironmentKeysLocked() []string {
     keys := make([]string, 0)
     if nil == instance.environment {
         return keys

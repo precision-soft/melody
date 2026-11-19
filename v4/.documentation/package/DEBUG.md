@@ -18,7 +18,7 @@ The commands are intended for diagnostics and local debugging (container service
     - parameters (`debug:parameters`)
     - version metadata (`debug:version`)
 
-`debug:parameters` reports a `secret` column: a parameter declared as holding a credential (see [CONFIG](CONFIG.md#secret-parameters)) renders its value as `********` — or `(empty)` when it carries none, including a nil value — with the length withheld, while an ordinary parameter prints in the clear.
+`debug:parameters` lists parameters only, never a key: the columns are the parameter, the `environmentKey` that feeds it, its `template`, the value, `default`, `overridden` and `secret`; an overridden row keeps the key it stopped reading. It reports a `secret` column: a parameter declared as holding a credential (see [CONFIG](CONFIG.md#secret-parameters)) renders its value as `********` — or `(empty)` when it carries none, including a nil value — with the length withheld, while an ordinary parameter prints in the clear.
 
 `debug:container` and `debug:middleware` describe by default and build only on request. The bare `debug:container` listing runs no provider: it reports names, lifetimes, built state and a type — the built instance's own for a service already built, the provider's declared return type for one not built yet and for a scoped one —, and the resolve sweep that builds services sits behind `--build`; naming a single service still resolves it. The bare `debug:middleware` listing describes the pipeline — the selection and ordering the build would run, with the inactive entries carrying their reasons — and only `--build` runs the real factories, under a recover so a panicking factory renders as a failure with its cause instead of killing the command.
 

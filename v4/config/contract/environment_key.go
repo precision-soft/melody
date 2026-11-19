@@ -1,6 +1,6 @@
 package contract
 
-/* EnvironmentKey is one .env key a module or the application owns: a module's is MELODY_ followed by upper-case letters, digits and underscores, the application's any such name outside MELODY_. Key and Parameter name one parameter, as MELODY_HTTP_ADDRESS and kernel.http_address do; Field is what a refusal names beside the key. Default is the text the key takes when no .env file sets it, written as the .env line would be and possibly a template; the empty text is absent. Rule is nil for free text. */
+/* EnvironmentKey is one .env key a module or the application owns: a module's is MELODY_ followed by upper-case letters, digits and underscores, the application's any such name outside MELODY_. Key feeds Parameter through %env(KEY)%, as MELODY_HTTP_ADDRESS feeds kernel.http_address, and is no parameter itself; Field is what a refusal names beside the key. Default is the text the key takes when no .env file sets it, written as the .env line would be and possibly a template; the empty text is absent. Rule is nil for free text. */
 type EnvironmentKey struct {
     Key       string
     Parameter string
@@ -56,4 +56,7 @@ type EnvironmentKeyDeclarer interface {
 
     /* EnvironmentKeyParameter answers the parameter a declared key feeds, the framework's keys included. */
     EnvironmentKeyParameter(key string) (string, bool)
+
+    /* EnvironmentValue answers the text a .env artifact loaded for the key, a blank line counted as set, and no declared default. It is raw text and no secret-safe door: a caller compares it and never writes it out. */
+    EnvironmentValue(key string) (string, bool)
 }

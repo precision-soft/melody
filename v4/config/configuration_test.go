@@ -419,15 +419,22 @@ func TestEnvPlaceholderPattern_AcceptsIdentifiersStartingWithLetterOrUnderscore(
     }
 }
 
-func TestTemplateReferencedNames_RejectsIdentifiersStartingWithDigit(t *testing.T) {
-    if 0 != len(templateReferencedNames("%1invalid%")) {
+func TestTemplateReferences_RejectsIdentifiersStartingWithDigit(t *testing.T) {
+    if _, names := templateReferences("%1invalid%"); 0 != len(names) {
         t.Fatalf("expected pattern to reject identifier starting with digit")
     }
 }
 
-func TestTemplateReferencedNames_AcceptsDottedAndSingleCharacterIdentifiers(t *testing.T) {
-    if false == slices.Equal([]string{"kernel.project_directory", "a"}, templateReferencedNames("%kernel.project_directory%%a%")) {
+func TestTemplateReferences_AcceptsDottedAndSingleCharacterIdentifiers(t *testing.T) {
+    if _, names := templateReferences("%kernel.project_directory%%a%"); false == slices.Equal([]string{"kernel.project_directory", "a"}, names) {
         t.Fatalf("expected pattern to accept dotted identifier")
+    }
+}
+
+func TestTemplateReferences_SeparatesKeysFromParameters(t *testing.T) {
+    keys, names := templateReferences("%env(APP_X)%-%app.x%")
+    if false == slices.Equal([]string{"APP_X"}, keys) || false == slices.Equal([]string{"app.x"}, names) {
+        t.Fatalf("expected one key and one parameter, got %v %v", keys, names)
     }
 }
 
@@ -590,11 +597,10 @@ func TestRegisterRuntime_LeavesAnOrdinaryParameterUnmarked(t *testing.T) {
 
 /* a MarkSecret arriving after the boot resolve travels to the parameters whose templates read the key, exactly as the early marking does: without the retroactive scan the key was redacted while the dsn assembled from it printed in full */
 func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
-    environment := &Environment{values: map[string]string{
-        "DB_PASSWORD": "hunter2",
-    }}
-
-    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
+    configuration, err := newConfigurationWithApplicationKeys(
+        map[string]string{"DB_PASSWORD": "hunter2"},
+        []configcontract.EnvironmentKey{applicationKey("DB_PASSWORD", "database.password", "")},
+    )
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
@@ -609,12 +615,12 @@ func TestMarkSecret_PropagatesRetroactivelyToDirectReaders(t *testing.T) {
         t.Fatalf("expected the dsn to start unmarked")
     }
 
-    if false == configuration.MarkSecret("DB_PASSWORD") {
+    if false == configuration.MarkSecret("database.password") {
         t.Fatalf("expected the marking to land")
     }
 
-    if false == configuration.MustGet("DB_PASSWORD").IsSecret() {
-        t.Fatalf("expected the key itself to be marked")
+    if false == configuration.MustGet("database.password").IsSecret() {
+        t.Fatalf("expected the parameter itself to be marked")
     }
 
     if false == configuration.MustGet("database.dsn").IsSecret() {
@@ -651,69 +657,62 @@ func TestMarkSecret_ReadsAReferenceBehindAnEscapedPercent(t *testing.T) {
 
 /* a late mark covers the whole derivation chain, not the direct readers alone */
 func TestMarkSecret_PropagatesRetroactivelyThroughDerivationChains(t *testing.T) {
-    environment := &Environment{values: map[string]string{
-        "G6_SECRET": "hunter2",
-        "G6_MIDDLE": "x-%env(G6_SECRET)%",
-        "G6_OUTER":  "y-%env(G6_MIDDLE)%",
-    }}
-
-    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
+    configuration, err := newConfigurationWithApplicationKeys(
+        map[string]string{
+            "G6_SECRET": "hunter2",
+            "G6_MIDDLE": "x-%env(G6_SECRET)%",
+            "G6_OUTER":  "y-%env(G6_MIDDLE)%",
+        },
+        []configcontract.EnvironmentKey{applicationKey("G6_SECRET", "g6.secret", "")},
+    )
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
+
+    configuration.RegisterRuntime("g6.middle", "%env(G6_MIDDLE)%")
+    configuration.RegisterRuntime("g6.outer", "%env(G6_OUTER)%")
 
     if resolveErr := configuration.Resolve(); nil != resolveErr {
         t.Fatalf("resolve error: %v", resolveErr)
     }
 
-    if true == configuration.MustGet("G6_OUTER").IsSecret() {
+    if true == configuration.MustGet("g6.outer").IsSecret() {
         t.Fatalf("expected the two-hop derivation to start unmarked")
     }
 
-    if false == configuration.MarkSecret("G6_SECRET") {
+    if false == configuration.MarkSecret("g6.secret") {
         t.Fatalf("expected the marking to land")
     }
 
-    if false == configuration.MustGet("G6_MIDDLE").IsSecret() {
+    if false == configuration.MustGet("g6.middle").IsSecret() {
         t.Fatalf("expected the direct reader to be marked")
     }
 
-    if false == configuration.MustGet("G6_OUTER").IsSecret() {
+    if false == configuration.MustGet("g6.outer").IsSecret() {
         t.Fatalf("expected the mark to follow the chain to the two-hop derivation")
     }
 }
 
-/* the late mark reaches a reader spelled with the kernel.* alias of the marked MELODY_* key: the aliased pair is one parameter under two names, so the propagation seeds every spelling — a scan over the marked spelling alone left the alias-spelled reader printing the derived value in full */
-func TestMarkSecret_ReachesAReaderSpelledWithTheKernelAlias(t *testing.T) {
-    environment := &Environment{values: map[string]string{
-        LogPathKey: "/var/log/app.log",
-    }}
-
-    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
+/* a kernel parameter holds its key's value, so a late mark on it reaches a reader of the key as well as a reader of the parameter */
+func TestMarkSecret_AKernelParameterMarksTheReadersOfItsKey(t *testing.T) {
+    configuration, err := NewConfiguration(&Environment{values: map[string]string{LogPathKey: "/var/log/app.log"}}, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
 
     configuration.RegisterRuntime("observability.sink", "file://%kernel.log_path%")
+    configuration.RegisterRuntime("observability.copy", "file://%env("+LogPathKey+")%")
 
     if resolveErr := configuration.Resolve(); nil != resolveErr {
         t.Fatalf("resolve error: %v", resolveErr)
     }
 
-    if true == configuration.MustGet("observability.sink").IsSecret() {
-        t.Fatalf("expected the alias-spelled reader to start unmarked")
-    }
-
-    if false == configuration.MarkSecret(LogPathKey) {
+    if false == configuration.MarkSecret(KernelLogPath) {
         t.Fatalf("expected the marking to land")
     }
 
-    if false == configuration.MustGet(KernelLogPath).IsSecret() {
-        t.Fatalf("expected the kernel spelling of the marked key to be marked")
-    }
-
-    if false == configuration.MustGet("observability.sink").IsSecret() {
-        t.Fatalf("expected the late marking to reach the reader through the kernel alias")
+    if false == configuration.MustGet("observability.sink").IsSecret() || false == configuration.MustGet("observability.copy").IsSecret() {
+        t.Fatalf("expected the late marking to reach both readers")
     }
 }
 
@@ -859,7 +858,7 @@ func TestRegisterRuntime_ALateParameterInheritsTheSecretMarkOfTheEnvironmentKeyI
 func TestRegisterRuntime_ALateParameterInheritsTheSecretMarkOfTheParameterItReads(t *testing.T) {
     configuration := newLateRegistrationConfiguration(t)
 
-    configuration.RegisterRuntime("app.dsn.viaParameter", "postgres://user:%DB_PASSWORD%@db/app")
+    configuration.RegisterRuntime("app.dsn.viaParameter", "postgres://user:%database.password%@db/app")
 
     if false == configuration.MustGet("app.dsn.viaParameter").IsSecret() {
         t.Fatalf("expected the marking to travel through a parameter reference too")
@@ -882,14 +881,14 @@ func newLateRegistrationConfiguration(t *testing.T) *Configuration {
     configuration, newConfigurationErr := NewConfiguration(
         &Environment{values: map[string]string{"DB_PASSWORD": "s3cr3t"}},
         "/srv/app",
-        ConfigurationConfig{},
+        ConfigurationConfig{EnvironmentKeys: []configcontract.EnvironmentKey{applicationKey("DB_PASSWORD", "database.password", "")}},
     )
     if nil != newConfigurationErr {
         t.Fatalf("could not build the configuration: %v", newConfigurationErr)
     }
 
-    if false == configuration.MarkSecret("DB_PASSWORD") {
-        t.Fatalf("expected the environment key to be registered as a parameter")
+    if false == configuration.MarkSecret("database.password") {
+        t.Fatalf("expected the key's parameter to be registered")
     }
 
     if resolveErr := configuration.Resolve(); nil != resolveErr {
@@ -899,20 +898,17 @@ func newLateRegistrationConfiguration(t *testing.T) *Configuration {
     return configuration
 }
 
-/* the retroactive scan reads both placeholder grammars: a reader written as a %NAME% parameter reference is marked exactly as one written through %env(NAME)%. The negative half is what pins the comparison itself — an inverted match over-marks every parameter reference through the fixpoint, so the reader of an unrelated parameter staying unmarked is the assertion that sees it. */
+/* the retroactive scan reads a %NAME% parameter reference. The negative half is what pins the comparison itself — an inverted match over-marks every parameter reference through the fixpoint, so the reader of an unrelated parameter staying unmarked is the assertion that sees it. */
 func TestMarkSecret_PropagatesThroughAParameterReference(t *testing.T) {
-    environment := &Environment{values: map[string]string{
-        "DB_PASSWORD": "hunter2",
-    }}
-
-    configuration, err := NewConfiguration(environment, "/tmp/melody", ConfigurationConfig{})
+    configuration, err := NewConfiguration(&Environment{values: map[string]string{}}, "/tmp/melody", ConfigurationConfig{})
     if nil != err {
         t.Fatalf("configuration error: %v", err)
     }
 
+    configuration.RegisterRuntime("db.password", "hunter2")
     configuration.RegisterRuntime("app.host", "api.internal")
     configuration.RegisterRuntime("app.endpoint", "https://%app.host%/v1")
-    configuration.RegisterRuntime("database.dsn", "postgres://app:%DB_PASSWORD%@db/app")
+    configuration.RegisterRuntime("database.dsn", "postgres://app:%db.password%@db/app")
 
     if resolveErr := configuration.Resolve(); nil != resolveErr {
         t.Fatalf("resolve error: %v", resolveErr)
@@ -922,7 +918,7 @@ func TestMarkSecret_PropagatesThroughAParameterReference(t *testing.T) {
         t.Fatalf("expected the dsn to start unmarked")
     }
 
-    if false == configuration.MarkSecret("DB_PASSWORD") {
+    if false == configuration.MarkSecret("db.password") {
         t.Fatalf("expected the marking to land")
     }
 
@@ -1209,5 +1205,92 @@ func TestSecretKey_MarksAReaderRegisteredAfterTheResolve(t *testing.T) {
 
     if false == configuration.Get("app.late_dsn").IsSecret() {
         t.Fatalf("expected a reader registered after the resolve marked by the key it reads")
+    }
+}
+
+func TestConfiguration_GetByKeyNameAnswersNil(t *testing.T) {
+    configuration, configurationErr := newConfigurationWithApplicationKeys(
+        map[string]string{HttpAddressKey: ":9090", "MELODY_X_TEXT": "m", "APP_X": "a", "APP_LOOSE": "l"},
+        []configcontract.EnvironmentKey{applicationKey("APP_X", "app.x", "")},
+    )
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    mustDeclare(t, configuration, "x", textKey(""))
+    mustResolve(t, configuration)
+
+    for _, key := range []string{HttpAddressKey, "MELODY_X_TEXT", "APP_X", "APP_LOOSE"} {
+        if nil != configuration.Get(key) {
+            t.Fatalf("expected no parameter named %s", key)
+        }
+    }
+
+    if ":9090" != configuration.Get(KernelHttpAddress).String() || "m" != configuration.Get("melody.x.text").String() || "a" != configuration.Get("app.x").String() {
+        t.Fatalf("expected each key read through its parameter")
+    }
+}
+
+func TestMarkSecret_AKeyNameMatchesNothing(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X": "x"})
+    configuration.RegisterRuntime("app.reader", "%env(MELODY_X)%")
+
+    if true == configuration.MarkSecret("MELODY_X") {
+        t.Fatalf("expected a key name to match no parameter")
+    }
+
+    if true == configuration.Get("app.reader").IsSecret() {
+        t.Fatalf("expected nothing marked")
+    }
+}
+
+func TestResolve_UndeclaredMelodyKeyIsSecretToItsReaders(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_UNKNOWN": "credential", "APP_LOOSE": "plain"})
+    configuration.RegisterRuntime("app.reader", "%env(MELODY_UNKNOWN)%")
+    configuration.RegisterRuntime("app.loose", "%env(APP_LOOSE)%")
+    mustResolve(t, configuration)
+
+    if false == configuration.Get("app.reader").IsSecret() {
+        t.Fatalf("expected the reader of an undeclared MELODY_ key secret")
+    }
+
+    if true == configuration.Get("app.loose").IsSecret() {
+        t.Fatalf("expected a reader of a key outside the namespace left alone")
+    }
+}
+
+func TestMarkSecret_AKeysParameterMarksTheOtherReadersOfTheKey(t *testing.T) {
+    configuration := mustConfigurationFromValues(t, map[string]string{"MELODY_X_TEXT": "x"})
+    mustDeclare(t, configuration, "x", textKey(""))
+    configuration.RegisterRuntime("app.reader", "%env(MELODY_X_TEXT)%")
+
+    if false == configuration.MarkSecret("melody.x.text") {
+        t.Fatalf("expected the parameter marked")
+    }
+
+    if false == configuration.Get("app.reader").IsSecret() {
+        t.Fatalf("expected a reader of the key the marked parameter reads secret")
+    }
+}
+
+func TestMarkSecret_ReachesAKeyWhoseLineReadsTheMarkedParameter(t *testing.T) {
+    configuration, configurationErr := newConfigurationWithApplicationKeys(
+        map[string]string{"APP_URL": "https://%app.token%@h"},
+        []configcontract.EnvironmentKey{applicationKey("APP_URL", "app.url", "")},
+    )
+    if nil != configurationErr {
+        t.Fatalf("unexpected configuration error: %v", configurationErr)
+    }
+
+    configuration.RegisterRuntime("app.token", "t0k3n")
+    configuration.RegisterRuntime("app.copy", "%env(APP_URL)%")
+    mustResolve(t, configuration)
+
+    if false == configuration.MarkSecret("app.token") {
+        t.Fatalf("expected the marking to land")
+    }
+
+    if false == configuration.MustGet("app.url").IsSecret() || false == configuration.MustGet("app.copy").IsSecret() {
+        t.Fatalf("expected the parameters reading the line that reads the marked parameter marked")
     }
 }

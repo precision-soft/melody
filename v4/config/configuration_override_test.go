@@ -185,6 +185,7 @@ func TestParameterOverride_ModuleParameterIsOverriddenWhenItsKeyIsDeclared(t *te
 
     mustDeclare(t, configuration, "x", textKey("from-key"))
     configuration.RegisterRuntime("app.user", "cron")
+    configuration.RegisterRuntime("app.reader", "%env(MELODY_X_TEXT)%")
     mustResolve(t, configuration)
 
     parameter := configuration.MustGet("melody.x.text")
@@ -192,8 +193,8 @@ func TestParameterOverride_ModuleParameterIsOverriddenWhenItsKeyIsDeclared(t *te
         t.Fatalf("expected the override applied, got %q (overridden %t)", parameter.String(), parameter.IsOverridden())
     }
 
-    if "from-key" != configuration.MustGet("MELODY_X_TEXT").String() {
-        t.Fatalf("expected the key's name to keep reading the key, got %q", configuration.MustGet("MELODY_X_TEXT").String())
+    if "from-key" != configuration.MustGet("app.reader").String() {
+        t.Fatalf("expected the key to keep its declared default, got %q", configuration.MustGet("app.reader").String())
     }
 }
 
@@ -281,7 +282,7 @@ func TestSecretKey_OverrideToASecretKeyIsSecret(t *testing.T) {
         t.Fatalf("expected both overrides secret")
     }
 
-    if true == configuration.MustGet("MELODY_X_TEXT").IsSecret() {
+    if true == configuration.secretEnvironmentKeys["MELODY_X_TEXT"] {
         t.Fatalf("expected the key the override stopped reading left unmarked")
     }
 }
@@ -363,9 +364,8 @@ func TestParameterOverride_ARefusedOverrideLeavesTheTablesAsTheyWere(t *testing.
         t.Fatalf("expected the override named as the failing text, got %v", refusal.Context())
     }
 
-    loaded := configuration.parameters["MELODY_X_TEXT"]
-    if nil == loaded || "%app.later%" != loaded.template || false == loaded.deferred.Load() {
-        t.Fatalf("expected the loaded parameter untouched, still deferred")
+    if _, isDeclared := configuration.declaredEnvironmentKeys["MELODY_X_TEXT"]; true == isDeclared {
+        t.Fatalf("expected the declaration taken back")
     }
 
     if nil != configuration.Get("melody.x.text") || 1 != len(configuration.UnappliedParameterOverrides()) {
@@ -436,10 +436,26 @@ func TestSecretKey_AMarkOnTheKeysValueDoesNotHopToTheOverride(t *testing.T) {
     configuration := mustOverriddenConfiguration(t, map[string]string{}, nil, map[string]string{"melody.x.text": "literal"})
     configuration.RegisterRuntime("app.reader", "%melody.x.text%")
     mustDeclare(t, configuration, "x", textKey(""))
-    configuration.MarkSecret("MELODY_X_TEXT")
+
+    configuration.mutex.Lock()
+    configuration.propagateEnvironmentKeySecretMarkLocked("MELODY_X_TEXT")
+    configuration.mutex.Unlock()
+
     mustResolve(t, configuration)
 
     if true == configuration.MustGet("melody.x.text").IsSecret() || true == configuration.MustGet("app.reader").IsSecret() {
         t.Fatalf("expected a mark on the key's value not to reach the override that does not read it")
+    }
+}
+
+func TestSecretKey_AMarkOnAnOverriddenParameterDoesNotHopToTheKeyItStoppedReading(t *testing.T) {
+    configuration := mustOverriddenConfiguration(t, map[string]string{"MELODY_X_TEXT": "v"}, nil, map[string]string{"melody.x.text": "literal"})
+    configuration.RegisterRuntime("app.key_reader", "%env(MELODY_X_TEXT)%")
+    mustDeclare(t, configuration, "x", textKey(""))
+    configuration.MarkSecret("melody.x.text")
+    mustResolve(t, configuration)
+
+    if true == configuration.MustGet("app.key_reader").IsSecret() || true == configuration.secretEnvironmentKeys["MELODY_X_TEXT"] {
+        t.Fatalf("expected a mark on the override not to reach the key it stopped reading")
     }
 }

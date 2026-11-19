@@ -61,7 +61,7 @@ func (instance *Configuration) applyParameterOverrides(overrides map[string]stri
     return nil
 }
 
-/* the key's name keeps a parameter of its own that reads the key, so the overridden one is a second parameter */
+/* it keeps the key it stopped reading, which debug:parameters and the refusals name */
 func newOverriddenParameter(environmentKey string, name string, template string) *Parameter {
     parameter := NewParameter(environmentKey, template, nil, false)
     parameter.name = name
@@ -95,7 +95,7 @@ func (instance *Configuration) OverriddenEnvironmentKeys() []configcontract.Over
             continue
         }
 
-        if template, isString := parameter.template.(string); true == isString && true == templateReadsName(template, key) {
+        if template, isString := parameter.template.(string); true == isString && true == templateReads(template, key, true) {
             continue
         }
 

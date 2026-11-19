@@ -9,7 +9,7 @@ import (
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
 
-/* ignoredProcessEnvironmentBootWarnings answers one boot warning per process environment variable named like a resolved configuration parameter or a retired key: melody reads configuration only from the .env artifacts, so such a variable is inert. A retired name is warned with its successor whatever its value; any other variable whose value equals the resolved one is skipped, and values are never written, since they may be secrets. */
+/* ignoredProcessEnvironmentBootWarnings answers one boot warning per process environment variable named like a .env key: melody reads configuration only from the .env artifacts, so such a variable is inert. A retired name is warned with its successor whatever its value; a declared key's variable is compared with its parameter's resolved value and an undeclared loaded key's with the loaded line, an equal one skipped; values are never written, since they may be secrets. */
 func ignoredProcessEnvironmentBootWarnings(
     configuration configcontract.Configuration,
     processEnvironment []string,
@@ -38,12 +38,8 @@ func ignoredProcessEnvironmentBootWarnings(
             }
         }
 
-        parameter := configuration.Get(name)
-        if nil == parameter {
-            continue
-        }
-
-        if value == parameter.String() {
+        current, isKnown := processVariableCounterpart(configuration, declarer, name)
+        if false == isKnown || value == current {
             continue
         }
 
@@ -70,4 +66,30 @@ func ignoredProcessEnvironmentBootWarnings(
     }
 
     return bootWarnings
+}
+
+func processVariableCounterpart(
+    configuration configcontract.Configuration,
+    declarer configcontract.EnvironmentKeyDeclarer,
+    name string,
+) (string, bool) {
+    if nil == declarer {
+        parameter := configuration.Get(name)
+        if nil == parameter {
+            return "", false
+        }
+
+        return parameter.String(), true
+    }
+
+    if parameterName, isDeclared := declarer.EnvironmentKeyParameter(name); true == isDeclared {
+        parameter := configuration.Get(parameterName)
+        if nil == parameter {
+            return "", false
+        }
+
+        return parameter.String(), true
+    }
+
+    return declarer.EnvironmentValue(name)
 }

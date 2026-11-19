@@ -34,7 +34,7 @@ app.RegisterModule(melodycron.NewModule(melodycron.ModuleConfig{
 
 ## Keys
 
-The module declares ten `.env` keys through the framework's [module keys](../../../v4/.documentation/package/CONFIG.md#module-keys): each key and its parameter are one parameter, the `.env` line wins, then the `ModuleConfig.KeyDefaults` field, then the module's default, and a key with a rule is judged at boot in every mode the module is registered in, refused naming the key and the `cron.KeyDefaults.<Field>`. A cli flag still wins over the parameter at generation.
+The module declares ten `.env` keys through the framework's [module keys](../../../v4/.documentation/package/CONFIG.md#module-keys): each key feeds its parameter through `%env(KEY)%`, the `.env` line wins, then the `ModuleConfig.KeyDefaults` field, then the module's default, and a key with a rule is judged at boot in every mode the module is registered in, refused naming the key and the `cron.KeyDefaults.<Field>`. A cli flag still wins over the parameter at generation.
 
 | Key                              | Parameter                        | Module default                                           | Rule                   |
 |----------------------------------|----------------------------------|----------------------------------------------------------|------------------------|

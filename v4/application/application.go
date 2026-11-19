@@ -189,7 +189,7 @@ func (instance *Application) RegisterSecretParameter(
     instance.registerParameter(name, value, true)
 }
 
-/* MarkParameterSecret marks a parameter that already exists, typically one melody registered from the .env artifacts, as holding a credential. A name that matches nothing does not fail the boot, since an environment key may be undefined in some environments; it is retried before the configuration resolves and at the end of the boot, and what still matches nothing is the boot warning `application.secretMark.unmatched`. */
+/* MarkParameterSecret marks a parameter, by its name, as holding a credential; an environment key is no parameter and is marked by declaring it Secret. A name that matches nothing does not fail the boot, since a module may register the parameter later; it is retried before the configuration resolves and at the end of the boot, and what still matches nothing is the boot warning `application.secretMark.unmatched`. */
 func (instance *Application) MarkParameterSecret(name string) {
     if true == instance.booted {
         exception.Panic(
@@ -230,7 +230,7 @@ func (instance *Application) collectUnappliedSecretMarks() {
 
         instance.bootWarnings = append(instance.bootWarnings, internal.BootWarning{
             Name:    internal.BootWarningNameSecretMarkUnmatched,
-            Message: "a secret marking matched no parameter; the name may be misspelled, or the environment key is undefined in this environment",
+            Message: "a secret marking matched no parameter; the name may be misspelled, or name an environment key, which is declared Secret rather than marked",
             Context: loggingcontract.Context{
                 "parameterName": name,
             },
@@ -584,14 +584,16 @@ func (instance *Application) refuseCliBootWarningKeysInHttp() {
         return
     }
 
+    /* the line is judged, never the parameter, so an override of the cli switches leaves an http process alone */
+    declarer, isDeclarer := instance.configuration.(configcontract.EnvironmentKeyDeclarer)
+    if false == isDeclarer {
+        return
+    }
+
     for _, environmentKey := range []string{config.CliBootWarningsIgnoredKey, config.CliBootWarningsDisabledKey} {
         /* a .env shared by both processes may carry the key blank */
-        parameter := instance.configuration.Get(environmentKey)
-        if nil == parameter {
-            continue
-        }
-
-        if text, isText := parameter.Value().(string); true == isText && "" == strings.TrimSpace(text) {
+        line, isSet := declarer.EnvironmentValue(environmentKey)
+        if false == isSet || "" == strings.TrimSpace(line) {
             continue
         }
 
@@ -637,7 +639,7 @@ func (instance *Application) refuseHttpBootWithoutEnvironment() {
 
 /* refuseBootWithDefaultedEnvironment fails the boot, in every mode, of a process whose MELODY_ENV no .env artifact set: the name defaults to dev, which selects the .env.dev files and turns the debug tooling on, so a production process would run on the development files without a word. A process environment variable does not set it, since melody reads configuration only from the .env artifacts. */
 func (instance *Application) refuseBootWithDefaultedEnvironment() {
-    environmentParameter := instance.configuration.Get(config.EnvironmentNameKey)
+    environmentParameter := instance.configuration.Get(config.KernelEnvironment)
     if nil != environmentParameter && false == environmentParameter.IsDefault() {
         return
     }

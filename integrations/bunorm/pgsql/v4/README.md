@@ -6,7 +6,7 @@ Import path: `github.com/precision-soft/melody/integrations/bunorm/pgsql/v4`
 
 ## Provider
 
-[`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from one [`ProviderConfig`](./provider_config.go). Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v4/connection_parameters.go) the manager registry passes to `Open`, an empty `Port` dialling `5432` — the provider itself holds only dialect, transport and driver tuning. Because the provider is given values rather than the configuration keys they came from, arming the framework's credential redaction is the application's call: declare the parameter with the parameter registrar's `RegisterSecretParameter`, or mark one melody registered from the `.env` artifacts with `MarkParameterSecret`.
+[`pgsql.NewProvider`](./provider.go) builds a [`pgsql.Provider`](./provider.go) from one [`ProviderConfig`](./provider_config.go). Connection details (`Host`, `Port`, `Database`, `User`, `Password`) are supplied at open time through the [`bunorm.ConnectionParameters`](../../v4/connection_parameters.go) the manager registry passes to `Open`, an empty `Port` dialling `5432` — the provider itself holds only dialect, transport and driver tuning. Because the provider is given values rather than the configuration keys they came from, arming the framework's credential redaction is the application's call: declare the parameter with the parameter registrar's `RegisterSecretParameter`, or declare the `.env` key `Secret` in `ApplicationConfig.EnvironmentKeys`, which marks the parameter it feeds; `MarkParameterSecret` takes a parameter name, never a key.
 
 ```go
 provider := pgsql.NewProvider(pgsql.ProviderConfig{})

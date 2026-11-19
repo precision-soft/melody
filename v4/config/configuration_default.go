@@ -25,17 +25,12 @@ func (instance *Configuration) registerKeylessParameter(name string, template st
     instance.parameters[name] = NewParameter(name, template, template, true)
 }
 
-/* the key's name stays a second name of its parameter, as a module key's does */
 func (instance *Configuration) registerFrameworkEnvironmentKey(key configcontract.EnvironmentKey) {
     instance.refuseDuplicateDefault(key.Parameter, key.Key)
-    instance.refuseDuplicateDefault(key.Key, key.Key)
 
     _, isSet := instance.environment.Get(key.Key)
 
-    parameter := NewParameter(key.Key, environmentPlaceholder(key.Key), nil, false == isSet)
-
-    instance.parameters[key.Parameter] = parameter
-    instance.parameters[key.Key] = parameter
+    instance.parameters[key.Parameter] = NewParameter(key.Key, environmentPlaceholder(key.Key), nil, false == isSet)
 
     instance.recordEnvironmentKeyDeclarationLocked(frameworkEnvironmentKeyOwner, key)
 }

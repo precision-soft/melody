@@ -66,7 +66,7 @@ provider := mysql.NewProvider(mysql.ProviderConfig{
 })
 ```
 
-Because the provider is given values rather than the configuration keys they came from, arming the framework's credential redaction is the application's call: declare the parameter with the parameter registrar's `RegisterSecretParameter`, or mark one melody registered from the `.env` artifacts with `MarkParameterSecret`. The mark propagates to every parameter whose template reads the secret, so the assembled dsn is redacted with it.
+Because the provider is given values rather than the configuration keys they came from, arming the framework's credential redaction is the application's call: declare the parameter with the parameter registrar's `RegisterSecretParameter`, or declare the `.env` key `Secret` in `ApplicationConfig.EnvironmentKeys`, which marks the parameter it feeds; `MarkParameterSecret` takes a parameter name, never a key. The mark propagates to every parameter whose template reads the secret, so the assembled dsn is redacted with it.
 
 ### Defaults
 
