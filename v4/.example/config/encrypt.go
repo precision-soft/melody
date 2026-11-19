@@ -22,8 +22,8 @@ const (
 /* buildEncrypt builds the cipher over the keys APP_ENCRYPT_KEYS names, each written id:key and separated by commas, and encrypts under APP_ENCRYPT_CURRENT_KEY. Every named key decrypts, so a key is retired by adding the next, making it current, re-encrypting with melody:encrypt:database --mode reencrypt --target-key <next>, and only then removing the key it replaced. */
 func (instance *Module) buildEncrypt() {
     currentKeyId, keysById := encryptKeys(
-        instance.environmentValue(environmentKeyEncryptKeys),
-        instance.environmentValue(environmentKeyEncryptCurrentKey),
+        instance.parameterValue(parameterEncryptKeys),
+        instance.parameterValue(parameterEncryptCurrentKey),
         instance.isDevelopment(),
     )
 

@@ -34,11 +34,6 @@ const (
     databaseArchiveManagerName = "archive"
 )
 
-/* dialIsInsecure reads the transport switch both providers share. Each dials verified TLS by default and the shipped .env arms the insecure dial for the plain-TCP compose databases; any value but the exact "true" keeps the verified handshake, so a credential-bearing dial downgrades only on an unambiguous instruction. */
-func dialIsInsecure(insecureValue string) bool {
-    return "true" == insecureValue
-}
-
 /* buildDatabase declares this example's connections in one bunorm manager registry, so db:migrate and the repositories reach one pool. The catalogue on mysql and the archive on postgres follow their own empty-means-unwired keys, so every combination boots, and with neither the registry stays nil and nothing is dialed. Neither is opened here: each is opened at the first resolution of its service, so a process that never reads a database never dials it, and the container closes every pool it opened, which a handle opened at boot and never resolved escaped. A declared database that cannot be reached is refused at its first use, by name. */
 func (instance *Module) buildDatabase() {
     definitionList := make([]melodybunorm.ProviderDefinition, 0, 2)
@@ -58,7 +53,7 @@ func (instance *Module) buildDatabase() {
         return
     }
 
-    /* the emergency logger carries the registry's reporting because the framework's logger does not exist yet while the modules are wired; the passwords are marked by name in RegisterParameters, not here. */
+    /* the emergency logger carries the registry's reporting because the framework's logger does not exist yet while the modules are wired; the passwords are declared secret in EnvironmentKeys, not here. */
     registry, registryErr := melodybunorm.NewManagerRegistry(
         instance.processContext,
         melodylogging.EmergencyLogger(),
@@ -74,7 +69,7 @@ func (instance *Module) buildDatabase() {
 
 /* catalogWired answers whether the environment declares the catalogue's host */
 func (instance *Module) catalogWired() bool {
-    return "" != instance.environmentValue(environmentKeyMysqlHost)
+    return "" != instance.parameterValue(parameterMysqlHost)
 }
 
 /* databaseLocationOf spells a declared connection as host:port/schema, the one line that separates a reset of this example's volume from a reset of whatever the host happens to point at; the credentials stay out of it, because it is printed. */
@@ -84,12 +79,12 @@ func databaseLocationOf(parameters melodybunorm.ConnectionParameters) string {
 
 /* catalogProviderDefinition declares the mysql connection, or answers that this environment did not ask for one. */
 func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefinition, bool) {
-    host := instance.environmentValue(environmentKeyMysqlHost)
+    host := instance.parameterValue(parameterMysqlHost)
     if "" == host {
         return melodybunorm.ProviderDefinition{}, false
     }
 
-    port := instance.environmentValue(environmentKeyMysqlPort)
+    port := instance.parameterValue(parameterMysqlPort)
     if "" == port {
         port = "3306"
     }
@@ -101,7 +96,7 @@ func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefini
             InitialDelay: bound.Of(lazyOpenFirstBackoff),
             MaxDelay:     bound.Of(lazyOpenMaxBackoff),
         },
-        Insecure: dialIsInsecure(instance.environmentValue(environmentKeyMysqlInsecure)),
+        Insecure: instance.booleanSwitch(environmentKeyMysqlInsecure, parameterMysqlInsecure),
     })
 
     return melodybunorm.ProviderDefinition{
@@ -110,9 +105,9 @@ func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefini
         Parameters: melodybunorm.ConnectionParameters{
             Host:     host,
             Port:     port,
-            Database: instance.environmentValue(environmentKeyMysqlDatabase),
-            User:     instance.environmentValue(environmentKeyMysqlUser),
-            Password: instance.environmentValue(environmentKeyMysqlPassword),
+            Database: instance.parameterValue(parameterMysqlDatabase),
+            User:     instance.parameterValue(parameterMysqlUser),
+            Password: instance.parameterValue(parameterMysqlPassword),
         },
         IsDefault: true,
     }, true
@@ -120,12 +115,12 @@ func (instance *Module) catalogProviderDefinition() (melodybunorm.ProviderDefini
 
 /* archiveProviderDefinition declares the postgres connection the reading archive is kept on, or answers that this environment did not ask for one. It is never the registry's default, because an unqualified consumer means the catalogue. Its retry budget is request-sized, as the catalogue's, since both are opened lazily by a request or a command and never at boot; only transient failures retry. */
 func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefinition, bool) {
-    host := instance.environmentValue(environmentKeyPgsqlHost)
+    host := instance.parameterValue(parameterPgsqlHost)
     if "" == host {
         return melodybunorm.ProviderDefinition{}, false
     }
 
-    port := instance.environmentValue(environmentKeyPgsqlPort)
+    port := instance.parameterValue(parameterPgsqlPort)
     if "" == port {
         port = "5432"
     }
@@ -136,7 +131,7 @@ func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefini
             InitialDelay: bound.Of(lazyOpenFirstBackoff),
             MaxDelay:     bound.Of(lazyOpenMaxBackoff),
         },
-        Insecure: dialIsInsecure(instance.environmentValue(environmentKeyPgsqlInsecure)),
+        Insecure: instance.booleanSwitch(environmentKeyPgsqlInsecure, parameterPgsqlInsecure),
     })
 
     return melodybunorm.ProviderDefinition{
@@ -145,9 +140,9 @@ func (instance *Module) archiveProviderDefinition() (melodybunorm.ProviderDefini
         Parameters: melodybunorm.ConnectionParameters{
             Host:     host,
             Port:     port,
-            Database: instance.environmentValue(environmentKeyPgsqlDatabase),
-            User:     instance.environmentValue(environmentKeyPgsqlUser),
-            Password: instance.environmentValue(environmentKeyPgsqlPassword),
+            Database: instance.parameterValue(parameterPgsqlDatabase),
+            User:     instance.parameterValue(parameterPgsqlUser),
+            Password: instance.parameterValue(parameterPgsqlPassword),
         },
     }, true
 }

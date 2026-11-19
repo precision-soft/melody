@@ -275,5 +275,5 @@ func forwardedClientIpResolver(trustedProxyList []string) melodyhttpmiddleware.C
 
 /* buildTrustedProxyResolver reads the list at build and resolves nothing: the names on it are looked up at the first request, which arrives through the balancer and therefore after the balancer exists. */
 func (instance *Module) buildTrustedProxyResolver() {
-    instance.trustedProxyResolver = newTrustedProxyResolver(instance.environmentValue(environmentKeyTrustedProxyList), time.Now)
+    instance.trustedProxyResolver = newTrustedProxyResolver(instance.parameterValue(parameterTrustedProxyList), time.Now)
 }

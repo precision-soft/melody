@@ -17,12 +17,12 @@ const outboundRequestTimeout = 3 * time.Second
 
 /* registerRatesHttpClientService leaves the client unwired when the provider key is absent; nothing resolves it unless a refresh runs, so an http process opens no pool for it. */
 func (instance *Module) registerRatesHttpClientService(registrar melodyapplicationcontract.ServiceRegistrar) {
-    baseUrl := instance.environmentValue(parameterRatesBaseUrl)
+    baseUrl := instance.parameterValue(parameterRatesBaseUrl)
     if "" == baseUrl {
         return
     }
 
-    apiKey := instance.environmentValue(environmentKeyRatesApiKey)
+    apiKey := instance.parameterValue(parameterRatesApiKey)
 
     registrar.RegisterService(
         service.ServiceRatesHttpClient,
@@ -36,7 +36,7 @@ func (instance *Module) registerRatesHttpClientService(registrar melodyapplicati
 
 /* registerReportExportHttpClientService builds the baseless shape, because the export endpoint is a whole url an operator configures and a based client would refuse it once it named another host. It follows no redirect: net/http re-sends a POST answered 301, 302 or 303 as a GET without its body, so the exporter sees the 3xx and refuses it rather than read a moved sink's 200 as a delivery. */
 func (instance *Module) registerReportExportHttpClientService(registrar melodyapplicationcontract.ServiceRegistrar) {
-    if "" == instance.environmentValue(parameterReportExportEndpoint) {
+    if "" == instance.parameterValue(parameterReportExportEndpoint) {
         return
     }
 

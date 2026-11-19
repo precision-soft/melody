@@ -38,7 +38,7 @@ func cacheKeyPrefix() string {
 }
 
 func (instance *Module) buildRedis() {
-    address := instance.environmentValue(environmentKeyRedisAddress)
+    address := instance.parameterValue(parameterRedisAddress)
     if "" == address {
         return
     }

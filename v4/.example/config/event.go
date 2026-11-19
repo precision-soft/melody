@@ -1,7 +1,6 @@
 package config
 
 import (
-    "strconv"
     "strings"
     "time"
 
@@ -12,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/twofactor"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodyconfig "github.com/precision-soft/melody/v4/config"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -77,7 +77,7 @@ func (instance *Module) registerSubscribers(eventDispatcher melodyeventcontract.
 func (instance *Module) registerCorsListeners(eventDispatcher melodyeventcontract.EventDispatcher) {
     originList := make([]string, 0)
 
-    for _, origin := range strings.Split(instance.environmentValue(environmentKeyCorsAllowOrigins), ",") {
+    for _, origin := range strings.Split(instance.parameterValue(parameterCorsAllowOrigins), ",") {
         trimmed := strings.TrimSpace(origin)
         if "" == trimmed {
             continue
@@ -101,23 +101,24 @@ func (instance *Module) registerCorsListeners(eventDispatcher melodyeventcontrac
 
 /* registerRateLimitRequestListener meters every request on kernel.request, ahead of authentication and access control, so a burst the security chain refuses is charged too; the write throttle in http.go meters only the handler path. The budget is per client address per hour, and an unset value leaves it unwired. */
 func (instance *Module) registerRateLimitRequestListener(eventDispatcher melodyeventcontract.EventDispatcher) {
-    budgetValue := strings.TrimSpace(instance.environmentValue(environmentKeyRequestBudgetPerHour))
-    if "" == budgetValue {
+    resolved, resolveErr := melodyconfig.ResolveLimitParameter(
+        instance.configuration.MustGet(parameterRequestBudgetPerHour),
+        environmentKeyRequestBudgetPerHour,
+        requestBudgetPerHourRule,
+    )
+    if nil != resolveErr {
+        melodyexception.Panic(melodyexception.FromError(resolveErr))
+    }
+
+    /* the rule's default, zero, is the unset budget: the door stays unwired */
+    if 0 == resolved.Value {
         return
     }
 
-    /* a malformed value is refused by name rather than read as unset, because a typo would otherwise disarm the budget with no signal */
-    budget, parseErr := strconv.Atoi(budgetValue)
-    if nil != parseErr || 0 >= budget {
-        melodyexception.Panic(melodyexception.NewError(
-            "the request budget switch does not hold a positive integer; unset it to keep the door unwired",
-            map[string]any{"key": environmentKeyRequestBudgetPerHour, "value": budgetValue},
-            parseErr,
-        ))
-    }
-
-    melodyhttpmiddleware.RegisterRateLimitRequestListener(eventDispatcher, requestBudgetLimiter(budget), requestBudgetConfig(instance.trustedProxyResolver))
+    melodyhttpmiddleware.RegisterRateLimitRequestListener(eventDispatcher, requestBudgetLimiter(resolved.Value), requestBudgetConfig(instance.trustedProxyResolver))
 }
+
+var requestBudgetPerHourRule = melodybound.Rule[int]{Minimum: 1}
 
 /* requestBudgetWindow is the window the request budget is counted over: the switch names a budget per hour */
 const requestBudgetWindow = time.Hour

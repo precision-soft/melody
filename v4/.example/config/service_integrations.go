@@ -38,7 +38,7 @@ func (instance *Module) registerStorageService(registrar melodyapplicationcontra
 
 /* localStorageDirectory is APP_LOCAL_STORAGE_DIRECTORY, a relative value anchored to the project directory as APP_SESSION_FILE is, so a console run and the http process write one directory; the system's temporary directory under melody-example-storage when the key is empty */
 func (instance *Module) localStorageDirectory() string {
-    if directory := strings.TrimSpace(instance.environmentValue(environmentKeyLocalStorageDirectory)); "" != directory {
+    if directory := strings.TrimSpace(instance.parameterValue(parameterLocalStorageDirectory)); "" != directory {
         if false == filepath.IsAbs(directory) {
             return filepath.Join(instance.configuration.Kernel().ProjectDirectory(), directory)
         }

@@ -89,7 +89,7 @@ const (
 
 /* buildOutboxTransport hands the transport ONLY a dialer, no pre-opened connection: the transport closes a connection it dialed itself, while one opened here and handed over would be owned by nobody — the exact leak registering the transport exists to close. The first publish dials; a bad DSN surfaces there through the relay's own backoff-and-retry loop rather than killing the resolution. Without AMQP_DSN no transport is built and the resolution is refused by name, message.ErrTransportNotConfigured: a process-local queue would hold what the relay publishes with nothing in the process reading it, and the rows stay in the outbox until a broker is configured. */
 func (instance *Module) buildOutboxTransport() (melodymessagebuscontract.Transport, error) {
-    dsn := instance.environmentValue(environmentKeyAmqpDsn)
+    dsn := instance.parameterValue(parameterAmqpDsn)
     if "" == dsn {
         return nil, exception.NewError("the outbox has no transport to publish to", map[string]any{"key": environmentKeyAmqpDsn}, message.ErrTransportNotConfigured)
     }

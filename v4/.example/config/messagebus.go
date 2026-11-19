@@ -58,7 +58,7 @@ func (instance *Module) buildMessageBus() {
 }
 
 func (instance *Module) buildMessageBusTransport() melodymessagebuscontract.Transport {
-    dsn := instance.environmentValue(environmentKeyAmqpDsn)
+    dsn := instance.parameterValue(parameterAmqpDsn)
     if "" == dsn {
         return melodymessagebus.NewInMemoryTransport(melodymessagebus.InMemoryTransportConfig{BufferSize: melodybound.Of(64)})
     }

@@ -25,9 +25,11 @@ func main() {
     app := application.NewApplication(
         ctx,
         application.ApplicationConfig{
-            Version:          applicationVersion,
-            EnvironmentFiles: embeddedEnvironmentFiles,
-            PublicFiles:      embeddedPublicFiles,
+            Version:            applicationVersion,
+            EnvironmentFiles:   embeddedEnvironmentFiles,
+            PublicFiles:        embeddedPublicFiles,
+            EnvironmentKeys:    config.EnvironmentKeys(),
+            ParameterOverrides: config.ParameterOverrides(),
         },
     )
 

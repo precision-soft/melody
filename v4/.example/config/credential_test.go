@@ -17,12 +17,12 @@ const ownJwtSecret = "an-operator-chosen-signing-secret-of-its-own"
 
 /* in development a blank key takes the committed value and a value of its own is kept */
 func TestCredential_DevelopmentTakesTheCommittedValueForABlankKey(t *testing.T) {
-    if exampleJwtSecret != moduleWithEnvironment(t, map[string]string{}).credential(environmentKeyJwtSecret, exampleJwtSecret) {
+    if exampleJwtSecret != moduleWithEnvironment(t, map[string]string{}).credential(environmentKeyJwtSecret, parameterJwtSecret, exampleJwtSecret) {
         t.Fatal("expected a blank key to take the committed value in development")
     }
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{environmentKeyJwtSecret: ownJwtSecret})
-    if ownJwtSecret != moduleInstance.credential(environmentKeyJwtSecret, exampleJwtSecret) {
+    if ownJwtSecret != moduleInstance.credential(environmentKeyJwtSecret, parameterJwtSecret, exampleJwtSecret) {
         t.Fatal("expected a value of its own kept in development")
     }
 }
@@ -91,8 +91,8 @@ func TestBuildTokenAuth_OutsideDevelopmentRefusesATokenSignedWithTheCommittedSec
 func TestBuildInternalAuth_ReadsTheKeyIdApplicationAndSecretFromConfiguration(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{
         melodyconfig.EnvironmentNameKey:       melodyconfig.EnvironmentProduction,
-        environmentKeyInternalAuthKeyId:       "erp-key-7",
-        environmentKeyInternalAuthApplication: "erp-service",
+        environmentKeyInternalAuthKeyId:       " erp-key-7 ",
+        environmentKeyInternalAuthApplication: " erp-service",
         environmentKeyInternalAuthSecret:      "an-operator-chosen-shared-secret",
     })
     moduleInstance.buildInternalAuth()

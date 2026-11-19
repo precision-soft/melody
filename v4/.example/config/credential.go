@@ -22,8 +22,8 @@ func (instance *Module) isDevelopment() bool {
 }
 
 /* credential answers the value a credential key holds. In development a blank key takes the value .env commits, so a checkout boots as it is; outside development a blank key or the committed value refuses the boot (see refuseDevelopmentCredential). */
-func (instance *Module) credential(environmentKey string, developmentValue string) string {
-    value := instance.environmentValue(environmentKey)
+func (instance *Module) credential(environmentKey string, parameter string, developmentValue string) string {
+    value := instance.parameterValue(parameter)
 
     if true == instance.isDevelopment() {
         if "" == strings.TrimSpace(value) {

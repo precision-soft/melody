@@ -10,20 +10,6 @@ import (
     "time"
 )
 
-func TestObjectStorageIsInsecure_DialsPlaintextOnlyWhenTheInsecureSwitchIsExactlyTrue(t *testing.T) {
-    for insecureValue, insecure := range map[string]bool{
-        "":      false,
-        "false": false,
-        "TRUE":  false,
-        "1":     false,
-        "true":  true,
-    } {
-        if insecure != objectStorageIsInsecure(insecureValue) {
-            t.Fatalf("expected S3_INSECURE=%q to dial insecure=%v", insecureValue, insecure)
-        }
-    }
-}
-
 func TestBuildStorage_EndsTheBucketCheckWhenTheProcessContextEnds(t *testing.T) {
     released := make(chan struct{})
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
@@ -57,5 +43,29 @@ func TestBuildStorage_EndsTheBucketCheckWhenTheProcessContextEnds(t *testing.T) 
         }
     case <-time.After(2 * time.Second):
         t.Fatal("expected the bucket check to end with the process context")
+    }
+}
+
+func TestBuildStorage_RefusesAnUnreadableInsecureSwitchBeforeItDials(t *testing.T) {
+    requested := false
+    server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
+        requested = true
+    }))
+    t.Cleanup(server.Close)
+
+    moduleInstance := moduleWithEnvironment(t, map[string]string{
+        environmentKeyS3Endpoint: strings.TrimPrefix(server.URL, "http://"),
+        environmentKeyS3Insecure: "treu",
+        environmentKeyS3Bucket:   "melody-example",
+    })
+    moduleInstance.processContext = context.Background()
+
+    refusal := recoveredRefusal(t, moduleInstance.buildStorage)
+    if nil == refusal || false == strings.Contains(refusal.Error(), "the switch is neither true nor false") {
+        t.Fatalf("expected the switch refused by name, got %v", refusal)
+    }
+
+    if true == requested {
+        t.Fatal("expected no request before the switch is read")
     }
 }

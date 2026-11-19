@@ -33,7 +33,7 @@ func TestRegisterReportExportHttpClientService_TheClientDoesNotFollowARedirect(t
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
-    moduleWithEnvironment(t, map[string]string{parameterReportExportEndpoint: server.URL + "/sink"}).
+    moduleWithEnvironment(t, map[string]string{environmentKeyReportExportEndpoint: server.URL + "/sink"}).
         registerReportExportHttpClientService(containerRegistrar{Container: containerInstance})
 
     client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](t.Context(), containerInstance, service.ServiceReportExportHttpClient)
@@ -83,8 +83,7 @@ func TestOutboundHttpClientConfigs_CarryTheirBaseTheBudgetAndTheAcceptHeader(t *
 }
 
 /* the rates client is registered when the parameter names a provider and reaches it: the relative target the
-   refresh names resolves under the base, the accept header travels. The fixture's environment key is the
-   parameter's own name, the one environmentValue reads. Without a provider nothing is registered, and an http
+   refresh names resolves under the base, the accept header travels. Without a provider nothing is registered, and an http
    process that never refreshes opens no pool. Neither client is on the by-type index: both are one concrete
    type, and "the http client" of an application that holds two has no answer. */
 func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOffTheTypeIndex(t *testing.T) {
@@ -104,8 +103,8 @@ func TestRegisterRatesHttpClientService_ReachesTheProviderUnderItsBaseAndStaysOf
     t.Cleanup(func() { _ = containerInstance.CloseWithContext(context.Background()) })
 
     moduleInstance := moduleWithEnvironment(t, map[string]string{
-        parameterRatesBaseUrl:         server.URL + "/v1/",
-        parameterReportExportEndpoint: server.URL + "/sink",
+        environmentKeyRatesBaseUrl:         server.URL + "/v1/",
+        environmentKeyReportExportEndpoint: server.URL + "/sink",
         environmentKeyRatesApiKey:     "provider-key",
     })
     moduleInstance.registerRatesHttpClientService(containerRegistrar{Container: containerInstance})

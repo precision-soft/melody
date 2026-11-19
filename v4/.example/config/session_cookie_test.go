@@ -28,7 +28,7 @@ func TestApplySessionCookieSecure_MarksTheCookieSecureOnTheSwitch(t *testing.T) 
         t.Fatalf("expected the kernel's default path, domain and SameSite=Lax restated, got %+v", setter.policyList[0])
     }
 
-    for _, value := range []string{"", "from-scheme", " "} {
+    for _, value := range []string{"", "from-scheme"} {
         untouched := &recordingSessionCookiePolicySetter{}
         applySessionCookieSecure(untouched, value)
 

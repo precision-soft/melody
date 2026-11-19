@@ -3,7 +3,6 @@ package config
 import (
     "context"
     nethttp "net/http"
-    "strings"
 
     minio "github.com/minio/minio-go/v7"
     melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
@@ -12,7 +11,6 @@ import (
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
     handlerevent "github.com/precision-soft/melody/v4/.example/handler/event"
     "github.com/precision-soft/melody/v4/.example/security"
-    "github.com/precision-soft/melody/v4/.example/wiring"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -127,7 +125,6 @@ func NewExampleModule(ctx context.Context, configuration melodyconfigcontract.Co
     return moduleInstance
 }
 
-/* env-key constants for the example's opt-in live integrations. melody auto-registers every .env key as a same-named parameter, so these double as the parameter names the eager build steps read through environmentValue. */
 const (
     environmentKeyMysqlHost     = "MYSQL_HOST"
     environmentKeyMysqlPort     = "MYSQL_PORT"
@@ -180,39 +177,6 @@ const (
     environmentKeyRatesBaseCurrency    = "RATES_BASE_CURRENCY"
     environmentKeyReportExportEndpoint = "APP_REPORTING_EXPORT_ENDPOINT"
 )
-
-/* the two outbound endpoints are read through parameters rather than raw .env keys: a bound constructor argument is read with MustGet, and an auto-registered key vanishes with its .env line, while a parameter declared with an empty-string fallback answers "", which means the door is unwired. */
-const (
-    parameterRatesBaseUrl         = wiring.ParameterRatesBaseUrl
-    parameterReportExportEndpoint = wiring.ParameterReportExportEndpoint
-)
-
-/* the base every rate of the catalogue is quoted against, which the refresh refuses a provider's document for not sharing. The seed quotes against the euro, so the default is EUR and a deployment names another only when it reseeds against another; it is a parameter with a defaulted key for the same reason the two endpoints are — a bound constructor argument is read with MustGet. */
-const (
-    parameterRatesBaseCurrency        = wiring.ParameterRatesBaseCurrency
-    parameterRatesDefaultBaseCurrency = "app.rates.default_base_currency"
-    defaultRatesBaseCurrency          = "EUR"
-)
-
-/* environmentValue reads a value melody auto-registered from the .env files. NewConfiguration has already resolved the env and placeholder indirection, so a plain String() read is correct; an absent key answers "", which leaves its integration unwired. */
-func (instance *Module) environmentValue(key string) string {
-    parameter := instance.configuration.Get(key)
-    if nil == parameter {
-        return ""
-    }
-
-    return parameter.String()
-}
-
-/* environmentValueOr reads a key as environmentValue does and answers the fallback for a blank one: the keys that name something rather than grant it, where a blank value means the example's own name. */
-func (instance *Module) environmentValueOr(key string, fallback string) string {
-    value := strings.TrimSpace(instance.environmentValue(key))
-    if "" == value {
-        return fallback
-    }
-
-    return value
-}
 
 func (instance *Module) Name() string {
     return "example"

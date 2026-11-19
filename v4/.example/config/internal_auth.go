@@ -2,6 +2,7 @@ package config
 
 import (
     "context"
+    "strings"
     "time"
 
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
@@ -26,9 +27,9 @@ const (
 )
 
 func (instance *Module) buildInternalAuth() {
-    keyId := instance.environmentValueOr(environmentKeyInternalAuthKeyId, internalCallerKeyId)
-    instance.internalAuthApplication = instance.environmentValueOr(environmentKeyInternalAuthApplication, internalCallerApplication)
-    secret := instance.credential(environmentKeyInternalAuthSecret, internalCallerSecret)
+    keyId := strings.TrimSpace(instance.parameterValue(parameterInternalAuthKeyId))
+    instance.internalAuthApplication = strings.TrimSpace(instance.parameterValue(parameterInternalAuthApplication))
+    secret := instance.credential(environmentKeyInternalAuthSecret, parameterInternalAuthSecret, internalCallerSecret)
 
     instance.hmacSecrets = melodysecurity.NewStaticHmacSecretProvider(melodysecurity.HmacKeyRing{
         CurrentKeyId: keyId,

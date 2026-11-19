@@ -37,7 +37,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
 
     kernelInstance.HttpKernel().SetNotFoundHandler(handler.NotFoundHandler())
     kernelInstance.HttpKernel().SetForwardedHeadersPolicy(exampleForwardedHeadersPolicy())
-    applySessionCookieSecure(kernelInstance.HttpKernel(), instance.environmentValue(environmentKeySessionCookieSecure))
+    applySessionCookieSecure(kernelInstance.HttpKernel(), instance.parameterValue(parameterSessionCookieSecure))
 
     /* the health and openapi routes opt into the frontend route manifest (melody:routes:manifest) as working proof of the export: exposed + zoned public, so the TypeScript RouteGenerator can build their URLs by name */
     router.Handle(
@@ -61,7 +61,7 @@ func (instance *Module) RegisterHttpRoutes(kernelInstance melodykernelcontract.K
         instance.buildInProcessCatalogWriteThrottle(kernelInstance.Clock())
     }
 
-    router.Handle("/messagebus/dispatch", instance.throttledWrite(handler.WelcomeEmailDispatchHandler("" != instance.environmentValue(environmentKeyAmqpDsn))), melodyhttp.RouteOptions{Name: "example.messagebus.dispatch", Methods: []string{"POST"}})
+    router.Handle("/messagebus/dispatch", instance.throttledWrite(handler.WelcomeEmailDispatchHandler("" != instance.parameterValue(parameterAmqpDsn))), melodyhttp.RouteOptions{Name: "example.messagebus.dispatch", Methods: []string{"POST"}})
 
     /* the example.metrics and example.websocket routes are contributed by the opentelemetry and websocket modules (see configure.go). */
 

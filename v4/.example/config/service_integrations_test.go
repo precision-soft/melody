@@ -92,7 +92,7 @@ func TestLocalStorageDirectory_ReadsItsKey(t *testing.T) {
             t.Fatalf("new environment: %v", environmentErr)
         }
 
-        configuration, configurationErr := melodyconfig.NewConfiguration(environment, "/tmp/melody", melodyconfig.ConfigurationConfig{})
+        configuration, configurationErr := melodyconfig.NewConfiguration(environment, "/tmp/melody", melodyconfig.ConfigurationConfig{EnvironmentKeys: EnvironmentKeys()})
         if nil != configurationErr {
             t.Fatalf("new configuration: %v", configurationErr)
         }

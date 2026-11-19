@@ -33,5 +33,5 @@ func (instance *Module) buildObservability() {
 
 /* buildMetricsAuth reads the credential the metrics scraper presents. The exposition names every route and its traffic, so with a token set /metrics answers only a caller presenting it; an empty value leaves the door public, the development default of a stack without a scraper. */
 func (instance *Module) buildMetricsAuth() {
-    instance.metricsToken = instance.environmentValue(environmentKeyMetricsToken)
+    instance.metricsToken = instance.parameterValue(parameterMetricsToken)
 }

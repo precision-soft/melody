@@ -37,6 +37,8 @@ type exampleMajor struct {
     label             string
     relativeDirectory string
     port              int
+    /* v4's example serves on its own key, and the framework's key refuses its boot there */
+    httpAddressKey string
     /* integrationDemos is off for v3 on purpose. Its example drives the same rate-limit counter that EXAMPLE OVER HTTP measures an exact exhaustion point on against the supervised application, so running the demos here as well would spend a budget another section is counting. */
     integrationDemos bool
     /* showcaseProbes and sessionRestartProbe gate the wirings an example carries — cors, gzip, the api-key firewall, per-field validation errors, the identity and grammar doors, the trusted-proxy client address, the file-backed session storage and the static cache validators. The three examples deliberately do not mirror each other, so these are per-major capabilities like integrationDemos, not shared surface, and showcaseProbes names each wiring on its own: the two published examples carry all of them, the third the cors listeners and the per-field validation. */
@@ -57,10 +59,10 @@ type exampleMajor struct {
 }
 
 var exampleMajorCatalog = []exampleMajor{
-    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true, journalOnPostgres: true},
-    {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true},
-    {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true},
-    {number: 4, label: "v4", relativeDirectory: "v4/.example", port: 18094, integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true, firewallDoors: true},
+    {number: 1, label: "v1", relativeDirectory: ".example", port: 18081, httpAddressKey: "MELODY_HTTP_ADDRESS", integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true, journalOnPostgres: true},
+    {number: 2, label: "v2", relativeDirectory: "v2/.example", port: 18082, httpAddressKey: "MELODY_HTTP_ADDRESS", integrationDemos: true, showcaseProbes: exampleShowcaseProbesAll, sessionRestartProbe: true, loginThrottleProbe: true},
+    {number: 3, label: "v3", relativeDirectory: "v3/.example", port: 18083, httpAddressKey: "MELODY_HTTP_ADDRESS", integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true},
+    {number: 4, label: "v4", relativeDirectory: "v4/.example", port: 18094, httpAddressKey: "APP_HTTP_ADDRESS", integrationDemos: false, showcaseProbes: exampleShowcaseProbes{cors: true, gzip: true, validation: true, staticCache: true}, sessionRestartProbe: true, loginThrottleProbe: true, processServiceInventory: true, shutdownStreamProbe: true, requestSurfaceProbes: true, firewallDoors: true},
 }
 
 /* exampleMysqlDsn answers the dsn of one major's own database. The four examples share the development mysql but not a database in it — each holds its schema in melody_example_v<major> — so a harness section that reads what an application wrote has to ask the database that application writes to. MYSQL_DSN carries v3's, the one the supervised sections use, and this swaps the database segment of it for the major being driven.
@@ -329,7 +331,7 @@ func prepareExampleWorkspace(major exampleMajor, workspace string) {
         fail("[%s] example application: copy the public directory: %v", major.label, copyErr)
     }
 
-    override := fmt.Sprintf("MELODY_HTTP_ADDRESS=:%d\n", major.port)
+    override := fmt.Sprintf("%s=:%d\n", major.httpAddressKey, major.port)
     if writeErr := os.WriteFile(filepath.Join(workspace, ".env.local"), []byte(override), 0o644); nil != writeErr {
         fail("[%s] example application: write the workspace .env.local: %v", major.label, writeErr)
     }

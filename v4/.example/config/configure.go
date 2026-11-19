@@ -48,7 +48,7 @@ func Configure(ctx context.Context, app *melodyapplication.Application, applicat
 
     app.RegisterModule(moduleInstance)
 
-    if otelEndpoint := moduleInstance.environmentValue(environmentKeyOtelExporterEndpoint); "" != otelEndpoint {
+    if otelEndpoint := moduleInstance.parameterValue(parameterOtelExporterEndpoint); "" != otelEndpoint {
         app.RegisterModule(melodyotlp.NewModule(moduleInstance.otlpModuleConfig(otelEndpoint)))
     }
 

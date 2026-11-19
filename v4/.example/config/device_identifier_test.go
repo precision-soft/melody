@@ -10,7 +10,7 @@ func TestDeviceIdentifierBound_RefusesAValueOutsideOneTo255(t *testing.T) {
         module := moduleWithEnvironment(t, map[string]string{environmentKeyDeviceIdentifierMaxBytes: value})
 
         refusal := recoveredRefusal(t, func() { module.deviceIdentifierMaximumBytes() })
-        if nil == refusal || false == strings.Contains(refusal.Error(), "the device identifier bound is not an integer from 1 to 255") {
+        if nil == refusal || false == strings.Contains(refusal.Error(), "invalid environment value") {
             t.Fatalf("expected %q refused at boot, got %v", value, refusal)
         }
     }

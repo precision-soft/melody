@@ -25,11 +25,11 @@ func (instance *Module) buildMailer() {
 
 /* smtpConfig reads the relay's address, its credentials and its two tls switches; a combination the transport would not honour as written refuses the boot naming its keys */
 func (instance *Module) smtpConfig() melodymailer.SmtpConfig {
-    address := instance.environmentValue(environmentKeySmtpAddress)
-    username := instance.environmentValue(environmentKeySmtpUsername)
-    password := instance.environmentValue(environmentKeySmtpPassword)
-    requireTls := instance.booleanSwitch(environmentKeySmtpRequireTls)
-    implicitTls := instance.booleanSwitch(environmentKeySmtpImplicitTls)
+    address := instance.parameterValue(parameterSmtpAddress)
+    username := instance.parameterValue(parameterSmtpUsername)
+    password := instance.parameterValue(parameterSmtpPassword)
+    requireTls := instance.booleanSwitch(environmentKeySmtpRequireTls, parameterSmtpRequireTls)
+    implicitTls := instance.booleanSwitch(environmentKeySmtpImplicitTls, parameterSmtpImplicitTls)
 
     if "" == username && "" != password {
         refuseSmtpConfig("the smtp password is set without a username", map[string]any{"key": environmentKeySmtpPassword, "requires": environmentKeySmtpUsername})
@@ -46,9 +46,14 @@ func (instance *Module) smtpConfig() melodymailer.SmtpConfig {
 
     /* without an address the log transport is wired, so a relay setting would be dropped without a signal */
     if "" == address {
-        for _, environmentKey := range []string{environmentKeySmtpUsername, environmentKeySmtpPassword, environmentKeySmtpRequireTls, environmentKeySmtpImplicitTls} {
-            if "" != strings.TrimSpace(instance.environmentValue(environmentKey)) {
-                refuseSmtpConfig("the smtp relay setting is set without an address", map[string]any{"key": environmentKey, "requires": environmentKeySmtpAddress})
+        for _, setting := range []struct{ environmentKey, parameter string }{
+            {environmentKeySmtpUsername, parameterSmtpUsername},
+            {environmentKeySmtpPassword, parameterSmtpPassword},
+            {environmentKeySmtpRequireTls, parameterSmtpRequireTls},
+            {environmentKeySmtpImplicitTls, parameterSmtpImplicitTls},
+        } {
+            if "" != strings.TrimSpace(instance.parameterValue(setting.parameter)) {
+                refuseSmtpConfig("the smtp relay setting is set without an address", map[string]any{"key": setting.environmentKey, "requires": environmentKeySmtpAddress})
             }
         }
     }
@@ -67,9 +72,9 @@ func refuseSmtpConfig(message string, context map[string]any) {
     melodyexception.Panic(melodyexception.NewError(message, context, nil))
 }
 
-/* booleanSwitch reads a key that is empty, "true" or "false"; any other value refuses the boot naming the key, since a typo would otherwise switch a protection off with no signal */
-func (instance *Module) booleanSwitch(environmentKey string) bool {
-    value := strings.TrimSpace(instance.environmentValue(environmentKey))
+/* booleanSwitch reads a key that is empty, "true" or "false", as switchRule admits it; any other value refuses naming the key, since a typo would otherwise switch a protection off with no signal */
+func (instance *Module) booleanSwitch(environmentKey string, parameter string) bool {
+    value := instance.parameterValue(parameter)
 
     switch value {
     case "", "false":

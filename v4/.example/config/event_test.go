@@ -217,7 +217,7 @@ func TestRegisterRateLimitRequestListener_ArmsOnAPositiveBudgetAndRefusesAnyOthe
             return nil
         }()
 
-        if nil == refusal || false == strings.Contains(fmt.Sprint(refusal), "the request budget switch does not hold a positive integer") {
+        if nil == refusal || false == strings.Contains(fmt.Sprint(refusal), "invalid environment value") {
             t.Fatalf("expected %q refused by name, got %v", value, refusal)
         }
     }

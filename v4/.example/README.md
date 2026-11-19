@@ -103,12 +103,12 @@ The example lives entirely under the [`./.example/`](./) directory and follows a
 The [`config/`](./config/) package keeps [`main.go`](./main.go) small by grouping all setup and integration logic in a single place, with each module hook in its own file:
 
 - [`configure.go`](./config/configure.go) — entry point invoked by `main.go`: registers the example module and the integration module facades (observability, otlp, encrypt, outbox, migrate, cron, websocket, aws.s3, rueidis); otlp, outbox, aws.s3 and rueidis are gated on the configuration that enables them, the others are registered unconditionally
-- [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + the `Module` interface assertion; each hook's assertion sits in the file that implements it (`cli.go`, `event.go`, `http.go`, `middleware.go`, `parameter.go`, `security.go`, `service.go`)
+- [`module.go`](./config/module.go) — `Module` struct + `Name()` + `Description()` + the `Module` interface assertion; each hook's assertion sits in the file that implements it (`cli.go`, `event.go`, `http.go`, `middleware.go`, `security.go`, `service.go`)
 - [`security.go`](./config/security.go) — `RegisterSecurity`: access-control rules, role hierarchy, decision manager, firewall
 - [`http.go`](./config/http.go) — `RegisterHttpRoutes`: named-route registration for pages and JSON APIs
 - [`cli.go`](./config/cli.go) — `RegisterCliCommands`: the application's own CLI commands, the framework's wiring generate command and the exclusive-lock wrapping of `example:exclusive:tick`; `melody:cron:generate` comes from the cron module registered in [`configure.go`](./config/configure.go)
 - [`event.go`](./config/event.go) — `RegisterEventSubscribers`: wires the example's domain event subscribers
-- [`parameter.go`](./config/parameter.go) — `RegisterParameters`: registers the example's own `app.*` parameters; the cron module declares its `MELODY_CRON_*` keys itself
+- [`environment_key.go`](./config/environment_key.go) — `EnvironmentKeys`: declares every `.env` key the example owns, each feeding one `app.*` parameter with its default, rule and secret mark, and `ParameterOverrides`, which points `kernel.http_address` at `APP_HTTP_ADDRESS`; `main.go` hands both to `ApplicationConfig`, and the cron module declares its `MELODY_CRON_*` keys itself
 - [`service.go`](./config/service.go) — `RegisterServices`: container wiring for repositories, services, and the cache serializer
 - [`middleware.go`](./config/middleware.go) — example-specific HTTP middleware (`NewTimingMiddleware`)
 
@@ -581,6 +581,10 @@ They are controlled independently via build tags.
 - **With** `melody_env_embedded`\
   Environment configuration is embedded into the binary at build time.\
   The resulting binary can start without any external `.env` file.
+
+### Declared keys
+
+Every key outside `MELODY_` is declared in [`config/environment_key.go`](./config/environment_key.go) and handed to `ApplicationConfig.EnvironmentKeys`; the example reads the parameter each key feeds, never the key. A key absent from every `.env` file takes its declared default, and a key with a rule takes it on a blank line too. The example serves on `APP_HTTP_ADDRESS`: `ApplicationConfig.ParameterOverrides` rewrites `kernel.http_address` to `%env(APP_HTTP_ADDRESS)%`, so a `.env` line that still sets `MELODY_HTTP_ADDRESS` refuses the boot.
 
 ---
 

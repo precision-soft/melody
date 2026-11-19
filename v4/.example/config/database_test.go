@@ -27,14 +27,25 @@ import (
     "github.com/uptrace/bun/dialect/pgdialect"
 )
 
-func TestDialIsInsecureOnlyOnTheExactSpelling(t *testing.T) {
-    if false == dialIsInsecure("true") {
-        t.Fatal("expected the exact spelling to arm the insecure dial")
-    }
+func TestInsecureSwitch_ArmsOnTheExactSpellingAndRefusesAnyOtherValueByName(t *testing.T) {
+    for _, switchKey := range []struct{ environmentKey, parameter string }{
+        {environmentKeyMysqlInsecure, parameterMysqlInsecure},
+        {environmentKeyPgsqlInsecure, parameterPgsqlInsecure},
+        {environmentKeyS3Insecure, parameterS3Insecure},
+    } {
+        for value, insecure := range map[string]bool{"": false, "false": false, "true": true} {
+            if insecure != moduleWithEnvironment(t, map[string]string{switchKey.environmentKey: value}).booleanSwitch(switchKey.environmentKey, switchKey.parameter) {
+                t.Fatalf("expected %s=%q to dial insecure=%v", switchKey.environmentKey, value, insecure)
+            }
+        }
 
-    for _, value := range []string{"", "false", "TRUE", "1", "yes", " true"} {
-        if true == dialIsInsecure(value) {
-            t.Fatalf("expected %q to keep the verified handshake", value)
+        for _, value := range []string{"TRUE", "1", "yes", " true"} {
+            moduleInstance := moduleWithEnvironment(t, map[string]string{switchKey.environmentKey: value})
+
+            refusal := recoveredRefusal(t, func() { moduleInstance.booleanSwitch(switchKey.environmentKey, switchKey.parameter) })
+            if nil == refusal || false == strings.Contains(refusal.Error(), "the switch is neither true nor false") {
+                t.Fatalf("expected %s=%q refused by name, got %v", switchKey.environmentKey, value, refusal)
+            }
         }
     }
 }
