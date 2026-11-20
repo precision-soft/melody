@@ -295,6 +295,8 @@ func (instance *Exporter) Export(user string) []byte {
 }
 ```
 
+A container registration with `RegisterOptions{BuiltAtBoot: true}` is built by the application inside `Boot`, under the boot runtime and after every registration is in, in registration order: its provider reads `KindBoot` and a live boot context, and a provider that fails fails the boot naming the service. A scoped registration refuses the option with `ErrScopedServiceAtBoot`, and a `BuiltAtBoot` service a scoped registration replaces through `ReplacesContainerService` fails the boot, the boot scope refusing the scoped one. The application reads the option from the framework's container; a container of another implementation builds nothing at boot. Once the registrations are in, `Boot` seals the application's registration doors before it builds these services and the middleware factories, so neither can register what the boot would never build or install.
+
 `debug:container` lists every registered service with its lifetime, and `debug:container --build` the concrete type each one resolves to, which together are the inventory the rule is checked against; the live harness pins the example's inventory — every process service classified by name, concrete type and category, so a service nobody classified fails the band, and so does one whose type changed since its state was measured.
 
 ### Scoped services

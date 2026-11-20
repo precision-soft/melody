@@ -36,6 +36,8 @@ This allows HTTP/CLI module code to read resolved configuration values during re
 
 `Run` is called once per process. It closes the application when it returns, and a second call panics with `application run called twice` before anything is booted or marked serving, a plain Go panic raised before `Run`'s exit handler, so it carries a stack trace and no exit record. `Boot` and `Close` may be called again and do nothing the second time; `Run` may not, so return from `main` after it.
 
+`Boot` opens the boot runtime before its first step and finishes it before it returns: every module hook reads it through `Kernel.BootRuntime()`, the services registered `BuiltAtBoot` are built under it after every registration is in, and in an http process the session manager's storage timeout is judged and the middleware pipeline built under it, so their refusals fail `Boot`. The finish closes the boot scope and ends the boot context with `ErrBootFinished`; a boot scope that fails to close refuses the boot.
+
 ## Runtime mode
 
 Runtime mode is determined by [`ParseRuntimeFlags`](../../application/cli.go). The full contract, in precedence order:

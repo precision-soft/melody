@@ -1787,7 +1787,9 @@ func (instance *refusedBoundSessionManager) StorageTimeout() bound.Duration {
     return bound.Of(time.Duration(0))
 }
 
-func TestRunHttp_RefusesAManagerDeclaringAStorageTimeoutTheRuleRefusesBeforeServing(t *testing.T) {
+func TestBootHttpPipeline_RefusesAManagerDeclaringAStorageTimeoutTheRuleRefusesInsideBoot(t *testing.T) {
+    probeKind := containercontract.KindUnspecified
+
     environment, environmentErr := config.NewEnvironment(context.Background(), &mapEnvironmentSource{values: map[string]string{config.HttpAddressKey: "127.0.0.1:34524"}})
     if nil != environmentErr {
         t.Fatalf("unexpected environment error: %v", environmentErr)
@@ -1810,22 +1812,31 @@ func TestRunHttp_RefusesAManagerDeclaringAStorageTimeoutTheRuleRefusesBeforeServ
     applicationInstance.RegisterService(
         session.ServiceSessionManager,
         func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
+            probeKind = resolver.Runtime().Kind()
+
             return &refusedBoundSessionManager{Manager: session.NewManager(session.NewInMemoryStorage(session.InMemoryStorageConfig{}), session.ManagerConfig{})}, nil
         },
         containercontract.RegisterOptions{},
     )
 
-    cancelledContext, cancel := context.WithCancel(context.Background())
-    cancel()
+    openBootRuntime(t, applicationInstance)
 
-    runErr := applicationInstance.runHttp(cancelledContext)
-    if nil == runErr || "the session manager declares a storage timeout the rule refuses" != runErr.Error() {
-        t.Fatalf("expected the boot refused by name, got %v", runErr)
+    var recovered any
+    func() {
+        defer func() {
+            recovered = recover()
+        }()
+
+        applicationInstance.bootHttpPipeline(applicationInstance.kernel.BootRuntime())
+    }()
+
+    exceptionErr, isExceptionErr := recovered.(*exception.Error)
+    if false == isExceptionErr || "the session manager declares a storage timeout the rule refuses" != exceptionErr.Error() || session.StorageTimeoutRule.Name != exceptionErr.Context()["field"] {
+        t.Fatalf("expected the boot refused naming %s, got %v", session.StorageTimeoutRule.Name, recovered)
     }
 
-    exceptionErr, isExceptionErr := runErr.(*exception.Error)
-    if false == isExceptionErr || session.StorageTimeoutRule.Name != exceptionErr.Context()["field"] {
-        t.Fatalf("expected the refusal to name %s, got %v", session.StorageTimeoutRule.Name, runErr)
+    if containercontract.KindBoot != probeKind {
+        t.Fatalf("expected the probe to build the session manager under the boot runtime, got %s", probeKind)
     }
 }
 

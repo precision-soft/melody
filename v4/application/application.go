@@ -68,6 +68,12 @@ type Application struct {
     closePerformerOnce sync.Once
     /* finishes the boot runtime once: at the tail of Boot, or at the teardown of a refused boot */
     finishBoot func() error
+    /* set once every registration is in, before the services built at boot and the middleware factories run, so neither can register what the boot would never build or install */
+    registrationsSealed bool
+}
+
+func (instance *Application) registrationClosed() bool {
+    return true == instance.booted || true == instance.registrationsSealed
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {
@@ -184,6 +190,16 @@ func (instance *Application) Boot() kernelcontract.Kernel {
 
     instance.verifyDeclaredTeardownDependencies()
 
+    instance.registrationsSealed = true
+
+    instance.buildServicesBuiltAtBoot(bootRuntime)
+
+    /* only an http process serves: a cli run builds no pipeline, so no factory dials what it would install */
+    if config.ModeCli != instance.runtimeFlags.Mode() {
+        instance.bootHttpPipeline(bootRuntime)
+    }
+
+    /* after the services built at boot, so a lazy handle a factory or a boot-built service created is verified too */
     instance.verifyLazyHandles()
 
     if finishErr := finishBoot(); nil != finishErr {
@@ -215,7 +231,7 @@ func (instance *Application) RegisterSecretParameter(
 
 /* MarkParameterSecret marks a parameter, by its name, as holding a credential; an environment key is no parameter and is marked by declaring it Secret. A name that matches nothing does not fail the boot, since a module may register the parameter later; it is retried before the configuration resolves and at the end of the boot, and what still matches nothing is the boot warning `application.secretMark.unmatched`. */
 func (instance *Application) MarkParameterSecret(name string) {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(
             exception.NewError(
                 "cannot mark a parameter secret after application boot",
@@ -269,7 +285,7 @@ func (instance *Application) registerParameter(
     value any,
     isSecret bool,
 ) {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(
             exception.NewError(
                 "cannot register parameter after application boot",
@@ -366,7 +382,7 @@ func resolveCliExitError(runCliErr error) (*exception.ExitError, bool) {
 }
 
 func (instance *Application) RegisterConfiguration(name string, configuration any) {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(
             exception.NewError(
                 "cannot register configuration after application boot",

@@ -30,6 +30,14 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** Import `github.com/precision-soft/melody/v4/container/runtime` and read `Runtime` from `containercontract`; build a handler's or a listener's test runtime with `runtime.NewRequest(ctx, scope)`, a command's with `runtime.NewRun(ctx, scope)`; replace `runtime.New(ctx, rt.Scope(), rt.Container())` with `runtime.WithContext(rt, ctx)` and `rt.Container().NewScope()` with `runtime.NewChildRun(rt, ctx)`, closing its scope; resolve through `rt.Scope()` where the code read `rt.Container()`, and keep a container the code registers on or describes beside the runtime, where it was built; a hand-written runtime answers `Kind()`, or is replaced by a constructor; `debug.NewContainerCommand(kernel.ServiceContainer())`.
 
+### Application: a service built at boot is declared on its registration, and the pipeline is built inside `Boot`
+
+**What changed.** [`RegisterOptions.BuiltAtBoot`](../container/contract/registrar.go) has the application build a container service inside `Boot`, under the boot runtime, in registration order. In an http process the session manager's storage timeout is judged and the middleware pipeline built inside `Boot`, no longer in `Run`.
+
+**Symptom.** A service resolved after `Boot` in `main` to have it built before the first request is built under no runtime of the boot; a refusal of the session storage timeout or of a middleware factory now exits from `Boot`; a test that called `Boot` and drove `HttpKernel().ServeHttp` without `Run` now gets the pipeline; a scoped registration with `BuiltAtBoot` is refused with `a scoped service is not built at boot`.
+
+**Remedy.** Register the service with `RegisterOptions{BuiltAtBoot: true}` and drop the resolution after `Boot`. A factory that needs the boot runtime reads `kernelInstance.BootRuntime()` while it builds; the `--build` inspection of `debug:middleware` runs after `Boot` and reports `ErrBootFinished` for such a factory.
+
 ### Kernel: a boot hook resolves under the boot runtime, and the phase lookups take the runtime
 
 **What changed.** [`Kernel`](../kernel/contract/kernel.go) declares `BootRuntime()` in place of `Context()`: the runtime of the application's boot, done with `containercontract.ErrBootFinished` once `Boot` returned. `kernel.NewKernel` no longer takes a context. `ScopeManager` declares `NewBootScope()` and `Registrar` declares `ReservePhaseService(name, kind)`. `http.RequestContextFromRuntime` / `RequestContextMustFromRuntime` and `application.ProcessContextFromRuntime` / `ProcessContextMustFromRuntime` replace the `…FromResolver` forms and answer an error for a runtime of another kind.

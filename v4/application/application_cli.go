@@ -36,7 +36,7 @@ type commandSuggestion struct {
 }
 
 func (instance *Application) RegisterCliCommand(command clicontract.Command) {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(
             exception.NewError(
                 "cannot register cli commands after boot",

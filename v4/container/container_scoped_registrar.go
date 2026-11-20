@@ -6,6 +6,7 @@ import (
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
 /* scopePlan is the set of scoped registrations a scope is created against, built once and never written afterwards, so every scope holds a reference to it. A later registration rebuilds the plan for the scopes created next; running ones keep theirs. */
@@ -90,6 +91,13 @@ func (instance *container) registerScoped(
     provider providerAny,
     options containercontract.RegisterOptions,
 ) error {
+    if true == options.BuiltAtBoot {
+        return exception.NewError(
+            "a scoped service is not built at boot",
+            exceptioncontract.Context{"serviceName": serviceName},
+            ErrScopedServiceAtBoot,
+        )
+    }
 
     /* a scope keeps its own teardown graph from the resolutions it made, so a declaration at registration is refused in both forms */
     if 0 < len(options.TeardownDependencyNames) || 0 < len(options.TeardownDependencyTypes) || 0 < len(options.OptionalTeardownDependencyNames) || 0 < len(options.OptionalTeardownDependencyTypes) {

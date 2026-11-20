@@ -30,7 +30,7 @@ func (instance *Application) RegisterHttpRoute(
     pattern string,
     handler httpcontract.Handler,
 ) {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register http routes after boot", nil, nil))
     }
 
@@ -54,7 +54,7 @@ func (instance *Application) RegisterHttpRoute(
 }
 
 func (instance *Application) RegisterHttpMiddlewares(middlewares []httpcontract.Middleware) {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register http middlewares after boot", nil, nil))
     }
 
@@ -62,7 +62,7 @@ func (instance *Application) RegisterHttpMiddlewares(middlewares []httpcontract.
 }
 
 func (instance *Application) RegisterHttpMiddlewareFactories(factories []applicationcontract.MiddlewareFactory) {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register http middleware factories after boot", nil, nil))
     }
 
@@ -71,7 +71,7 @@ func (instance *Application) RegisterHttpMiddlewareFactories(factories []applica
 
 /* RegisterHttpHandlerDecorator adds an outermost wrapper around the nethttp.Handler the http kernel produces. Decorators observe the full request lifecycle — including security denials and other kernel.request short-circuits that never reach the middlewares — which is where observability wrappers belong. The first registered decorator is the outermost. */
 func (instance *Application) RegisterHttpHandlerDecorator(decorator applicationcontract.HttpHandlerDecorator) {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register http handler decorators after boot", nil, nil))
     }
 
@@ -93,7 +93,7 @@ func (instance *Application) decorateHttpHandler(httpHandler nethttp.Handler) ne
 
 /* OnHttpShutdown registers a callback that runs as soon as the http server begins shutting down, before it waits for connections to drain. It is how an application unwinds handlers the server cannot: `http.Server.Shutdown` neither cancels the contexts of in-flight requests nor tracks hijacked connections, so a Server-Sent Events stream or a websocket blocks the whole shutdown timeout and is then cut mid-flight. Closing the hub those handlers select on (`ServerSentEventHub.Shutdown`) releases them at once. */
 func (instance *Application) OnHttpShutdown(hook func()) {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register http shutdown hooks after boot", nil, nil))
     }
 
@@ -124,6 +124,15 @@ func (instance *Application) registerKernelHttpListeners() {
     http.RegisterKernelTerminateAccessLogListener(eventDispatcher)
 }
 
+/* bootHttpPipeline judges the session manager's storage timeout and builds the middleware pipeline under the boot runtime, once */
+func (instance *Application) bootHttpPipeline(bootRuntime containercontract.Runtime) {
+    if refusedErr := refuseSessionStorageTimeout(bootRuntime.Context(), bootRuntime.Scope()); nil != refusedErr {
+        exception.Panic(exception.FromError(refusedErr))
+    }
+
+    instance.installHttpMiddlewares(instance.kernel.HttpKernel())
+}
+
 /* installHttpMiddlewares builds the pipeline. A middleware factory runs here with the writable router, so the walk Boot made is made again over what it registered. */
 func (instance *Application) installHttpMiddlewares(httpKernel httpcontract.Kernel) {
     httpKernel.Use(instance.httpMiddlewares.all(instance.kernel))
@@ -151,16 +160,11 @@ func (instance *Application) runHttp(
         return unavailableRetryAfterErr
     }
 
-    if refusedErr := refuseSessionStorageTimeout(ctx, instance.kernel.ServiceContainer()); nil != refusedErr {
-        return refusedErr
-    }
-
     httpKernel := instance.kernel.HttpKernel()
 
     /* installed again last, so a module's own SetUnavailableRetryAfter or SetSessionPolicy does not outrank the deployment's key */
     httpKernel.SetUnavailableRetryAfter(bound.Of(unavailableRetryAfter))
     httpKernel.SetSessionPolicy(httpcontract.SessionPolicy{EmptyOnOutage: resolveSessionEmptyOnOutage(configuration, instance.applicationConfig)})
-    instance.installHttpMiddlewares(httpKernel)
 
     httpHandler := instance.decorateHttpHandler(httpKernel.ServeHttp(instance.kernel.ServiceContainer()))
 
@@ -209,12 +213,12 @@ func (instance *Application) runHttp(
 }
 
 /* refuseSessionStorageTimeout judges the registered manager's bound once at boot, so a replaced manager declaring one the rule refuses fails the boot rather than every saving request. */
-func refuseSessionStorageTimeout(ctx context.Context, serviceContainer containercontract.Container) error {
-    if false == serviceContainer.Has(session.ServiceSessionManager) {
+func refuseSessionStorageTimeout(ctx context.Context, resolver containercontract.Resolver) error {
+    if false == resolver.Has(session.ServiceSessionManager) {
         return nil
     }
 
-    sessionManager, sessionManagerErr := container.FromResolver[sessioncontract.Manager](ctx, serviceContainer, session.ServiceSessionManager)
+    sessionManager, sessionManagerErr := container.FromResolver[sessioncontract.Manager](ctx, resolver, session.ServiceSessionManager)
     if nil != sessionManagerErr {
         return sessionManagerErr
     }

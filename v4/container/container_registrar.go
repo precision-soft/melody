@@ -33,12 +33,27 @@ func (instance *container) Register(
         return reflectedProviderErr
     }
 
-    return instance.register(
+    registerErr := instance.register(
         serviceName,
         serviceType,
         wrappedProvider,
         options,
     )
+    if nil == registerErr && true == options.BuiltAtBoot {
+        instance.builtAtBootMutex.Lock()
+        instance.builtAtBootNames = append(instance.builtAtBootNames, serviceName)
+        instance.builtAtBootMutex.Unlock()
+    }
+
+    return registerErr
+}
+
+/* BuiltAtBootServiceNames answers the names registered with BuiltAtBoot, in registration order. */
+func (instance *container) BuiltAtBootServiceNames() []string {
+    instance.builtAtBootMutex.Lock()
+    defer instance.builtAtBootMutex.Unlock()
+
+    return append([]string(nil), instance.builtAtBootNames...)
 }
 
 func (instance *container) MustRegister(

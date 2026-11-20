@@ -15,6 +15,14 @@ func (instance *scope) RegisterScoped(
     provider any,
     options containercontract.RegisterOptions,
 ) error {
+    if true == options.BuiltAtBoot {
+        return exception.NewError(
+            "a scoped service is not built at boot",
+            exceptioncontract.Context{"serviceName": serviceName},
+            ErrScopedServiceAtBoot,
+        )
+    }
+
     if true == instance.boot {
         return exception.NewError(
             "the boot scope builds no scoped service",

@@ -218,3 +218,52 @@ func TestNewBootScope_RefusesACollectionWithAScopedMember(t *testing.T) {
         t.Fatalf("expected a scope to gather both members, got %d, %v", len(members), collectErr)
     }
 }
+
+type builtAtBootRecordProbe struct{}
+
+type builtAtBootSecondRecordProbe struct{}
+
+func TestBuiltAtBoot_IsRecordedInRegistrationOrderOnlyWhenTheRegistrationSucceedsAndAScopedDoorRefusesIt(t *testing.T) {
+    serviceContainer := NewContainer(ContainerConfig{})
+    lister := serviceContainer.(*container)
+
+    MustRegister[*builtAtBootRecordProbe](serviceContainer, "app.built.b", func(resolver containercontract.Resolver) (*builtAtBootRecordProbe, error) {
+        return &builtAtBootRecordProbe{}, nil
+    }, RegisterOptions{BuiltAtBoot: true})
+    MustRegister[*builtAtBootSecondRecordProbe](serviceContainer, "app.built.a", func(resolver containercontract.Resolver) (*builtAtBootSecondRecordProbe, error) {
+        return &builtAtBootSecondRecordProbe{}, nil
+    }, RegisterOptions{BuiltAtBoot: true})
+
+    if duplicateErr := serviceContainer.Register("app.built.b", func(resolver containercontract.Resolver) (*builtAtBootRecordProbe, error) {
+        return &builtAtBootRecordProbe{}, nil
+    }, RegisterOptions{BuiltAtBoot: true}); nil == duplicateErr {
+        t.Fatalf("expected a duplicate registration to be refused")
+    }
+
+    names := lister.BuiltAtBootServiceNames()
+    if 2 != len(names) || "app.built.b" != names[0] || "app.built.a" != names[1] {
+        t.Fatalf("expected the two accepted names in registration order, got %v", names)
+    }
+
+    names[0] = "changed"
+    if "app.built.b" != lister.BuiltAtBootServiceNames()[0] {
+        t.Fatalf("expected the names answered as a copy")
+    }
+
+    if scopedErr := serviceContainer.RegisterScoped("app.built.scoped", func(resolver containercontract.Resolver) (*builtAtBootRecordProbe, error) {
+        return &builtAtBootRecordProbe{}, nil
+    }, RegisterOptions{BuiltAtBoot: true}); false == errors.Is(scopedErr, ErrScopedServiceAtBoot) {
+        t.Fatalf("expected the container's scoped door to refuse BuiltAtBoot, got %v", scopedErr)
+    }
+
+    liveScope := serviceContainer.NewScope()
+    defer func() {
+        _ = liveScope.Close()
+    }()
+
+    if scopedErr := liveScope.RegisterScoped("app.built.scope.own", func(resolver containercontract.Resolver) (*builtAtBootRecordProbe, error) {
+        return &builtAtBootRecordProbe{}, nil
+    }, RegisterOptions{BuiltAtBoot: true}); false == errors.Is(scopedErr, ErrScopedServiceAtBoot) {
+        t.Fatalf("expected a scope's own door to refuse BuiltAtBoot, got %v", scopedErr)
+    }
+}

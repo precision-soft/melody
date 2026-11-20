@@ -6,16 +6,17 @@ import (
     "strings"
     "testing"
 
+    "github.com/precision-soft/melody/v4/.example/subscriber"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodyloggingcontract "github.com/precision-soft/melody/v4/logging/contract"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
-/* the hub is never resolved through the container here except by ResolveBootServices, so the journal record proves its provider ran at boot: the module's own hub is the one broadcast on, as the handlers hold it */
-func TestResolveBootServices_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
+func TestBuiltAtBoot_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
     journal := &bytes.Buffer{}
 
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
@@ -33,7 +34,7 @@ func TestResolveBootServices_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
     moduleInstance.registerServerSentEventHubService(containerRegistrar{Container: containerInstance})
     moduleInstance.registerInternalAuthSignerService(containerRegistrar{Container: containerInstance})
 
-    if resolveErr := ResolveBootServices(t.Context(), containerInstance); nil != resolveErr {
+    if resolveErr := buildServicesBuiltAtBoot(t, containerInstance); nil != resolveErr {
         t.Fatalf("unexpected boot resolution error: %v", resolveErr)
     }
 
@@ -45,18 +46,6 @@ func TestResolveBootServices_HandsTheHubItsJournalBeforeAnyWrite(t *testing.T) {
     if false == strings.Contains(journal.String(), "server sent event backplane publish failed") {
         t.Fatalf("expected the refused publish in the container's journal, got %q", journal.String())
     }
-}
-
-func TestResolveBootServices_RefusesAHubThatIsNotRegistered(t *testing.T) {
-    resolveErr := ResolveBootServices(t.Context(), melodycontainer.NewContainer(melodycontainer.ContainerConfig{}))
-    if nil == resolveErr {
-        t.Fatal("expected the boot resolution to refuse a missing hub")
-    }
-
-    if false == strings.Contains(resolveErr.Error(), "not registered") {
-        t.Fatalf("expected the container's refusal, got %v", resolveErr)
-    }
-
 }
 
 func bootContainerWithInternalAuthSigner(t *testing.T, moduleInstance *Module) melodycontainercontract.Container {
@@ -78,12 +67,12 @@ func bootContainerWithInternalAuthSigner(t *testing.T, moduleInstance *Module) m
     return containerInstance
 }
 
-func TestResolveBootServices_BuildsTheInternalAuthSignerOnce(t *testing.T) {
+func TestBuiltAtBoot_BuildsTheInternalAuthSignerOnce(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.buildInternalAuth()
     containerInstance := bootContainerWithInternalAuthSigner(t, moduleInstance)
 
-    if resolveErr := ResolveBootServices(t.Context(), containerInstance); nil != resolveErr {
+    if resolveErr := buildServicesBuiltAtBoot(t, containerInstance); nil != resolveErr {
         t.Fatalf("unexpected boot resolution error: %v", resolveErr)
     }
 
@@ -94,13 +83,13 @@ func TestResolveBootServices_BuildsTheInternalAuthSignerOnce(t *testing.T) {
     }
 }
 
-func TestResolveBootServices_ACurrentKeyNotBoundToTheSignerApplicationFailsTheBoot(t *testing.T) {
+func TestBuiltAtBoot_ACurrentKeyNotBoundToTheSignerApplicationFailsTheBoot(t *testing.T) {
     moduleInstance := moduleWithEnvironment(t, map[string]string{})
     moduleInstance.buildInternalAuth()
     moduleInstance.internalAuthApplication = "another-service"
     containerInstance := bootContainerWithInternalAuthSigner(t, moduleInstance)
 
-    resolveErr := ResolveBootServices(t.Context(), containerInstance)
+    resolveErr := buildServicesBuiltAtBoot(t, containerInstance)
     for cause := resolveErr; nil != cause; cause = errors.Unwrap(cause) {
         if true == strings.Contains(cause.Error(), "not bound to the signer application") {
             return
@@ -108,4 +97,27 @@ func TestResolveBootServices_ACurrentKeyNotBoundToTheSignerApplicationFailsTheBo
     }
 
     t.Fatalf("expected the boot refused over the unbound key, got %v", resolveErr)
+}
+
+/* buildServicesBuiltAtBoot builds what the application's Boot builds, through a boot runtime: the services registered with BuiltAtBoot, in registration order */
+func buildServicesBuiltAtBoot(t *testing.T, containerInstance melodycontainercontract.Container) error {
+    t.Helper()
+
+    names := containerInstance.(interface{ BuiltAtBootServiceNames() []string }).BuiltAtBootServiceNames()
+    if 2 != len(names) || subscriber.ServiceCatalogNotificationHub != names[0] || ServiceInternalAuthSigner != names[1] {
+        t.Fatalf("expected the hub and the signer registered to be built at boot, got %v", names)
+    }
+
+    bootRuntime, finish := melodyruntime.NewBoot(t.Context(), containerInstance)
+    defer func() {
+        _ = finish()
+    }()
+
+    for _, serviceName := range names {
+        if _, buildErr := bootRuntime.Scope().Get(bootRuntime.Context(), serviceName); nil != buildErr {
+            return buildErr
+        }
+    }
+
+    return nil
 }

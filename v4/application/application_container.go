@@ -48,7 +48,7 @@ func (instance *Application) Register(
     provider any,
     options containercontract.RegisterOptions,
 ) error {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register services after boot", exceptioncontract.Context{"serviceName": serviceName}, nil))
     }
 
@@ -117,7 +117,7 @@ func (instance *Application) RegisterScoped(
     provider any,
     options containercontract.RegisterOptions,
 ) error {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register scoped services after boot", exceptioncontract.Context{"serviceName": serviceName}, nil))
     }
 
@@ -157,6 +157,22 @@ func (instance *Application) MustRegisterScoped(
     registerScopedErr := instance.RegisterScoped(serviceName, provider, options)
     if nil != registerScopedErr {
         exception.Panic(exception.FromError(registerScopedErr))
+    }
+}
+
+/* buildServicesBuiltAtBoot builds the services registered with BuiltAtBoot through the boot runtime, in registration order */
+func (instance *Application) buildServicesBuiltAtBoot(bootRuntime containercontract.Runtime) {
+    lister, lists := instance.kernel.ServiceContainer().(interface{ BuiltAtBootServiceNames() []string })
+    if false == lists {
+        return
+    }
+
+    for _, serviceName := range lister.BuiltAtBootServiceNames() {
+        if _, buildErr := bootRuntime.Scope().Get(bootRuntime.Context(), serviceName); nil != buildErr {
+            exception.Panic(
+                exception.NewError("a service built at boot cannot be built", exceptioncontract.Context{"serviceName": serviceName}, buildErr),
+            )
+        }
     }
 }
 

@@ -98,6 +98,8 @@ type container struct {
     /* the kind each phase name is installed under, read where a scope answers that a name is not registered */
     phaseReservationMutex sync.RWMutex
     phaseReservations     map[string]containercontract.Kind
+    builtAtBootMutex      sync.Mutex
+    builtAtBootNames      []string
     providers                   map[string]providerAny
     instances                   map[string]any
     typeProviders               map[reflect.Type]providerAny

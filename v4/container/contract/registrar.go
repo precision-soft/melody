@@ -7,6 +7,8 @@ import (
 
 /* RegisterOptions is what a registration declares beyond its name and provider. The zero value is the default: the service is registered under its name and, strictly, under the type its provider declares, collected at priority zero, substituting nothing, walked by the teardown, and closed through the CloseWithContext door its value carries. */
 type RegisterOptions struct {
+    /* BuiltAtBoot has the application build the service inside Boot, under the boot runtime, after every registration is in, in registration order: a failing provider fails the boot. A scoped registration refuses it, and a scoped service replacing it fails the boot. The application reads it from the framework's container; a container of another implementation builds nothing at boot. */
+    BuiltAtBoot bool
     /* TypeRegistrationDisabled keeps the service off the by-type index, so it is resolved by name alone. */
     TypeRegistrationDisabled bool
     /* TypeRegistrationRelaxed admits a second registration under the same type instead of refusing it; by-type resolution then refuses every one of them as ambiguous, while a collection gathers them all. It is read only while the type is registered. */

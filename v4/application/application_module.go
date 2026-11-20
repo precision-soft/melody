@@ -18,7 +18,7 @@ func (instance *Application) RegisterModule(moduleInstance applicationcontract.M
 }
 
 func (instance *Application) registerModuleAtDepth(moduleInstance applicationcontract.Module, depth int) {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register modules after boot", nil, nil))
     }
 
@@ -92,7 +92,7 @@ func (instance *Application) appendModule(moduleInstance applicationcontract.Mod
 }
 
 func (instance *Application) RegisterModuleProvider(provider applicationcontract.ModuleProvider) {
-    if true == instance.booted {
+    if true == instance.registrationClosed() {
         exception.Panic(exception.NewError("may not register modules after boot", nil, nil))
     }
 
