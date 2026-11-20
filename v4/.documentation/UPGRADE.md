@@ -1642,7 +1642,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Symptom.** `Secure: true`, `EnsureBucket(ctx, client, bucket, region)`, `NewStorage(client, bucket)` and `RegisterStorageService(registrar, client, bucket)` no longer compile. A configuration that named neither `Secure` nor `Insecure` dials https where it dialed plaintext http, so a plaintext endpoint answers the TLS handshake with an error.
 
-**Remedy.** Drop `Secure: true`; write `Insecure: true` where `Secure` was false on purpose, for a local endpoint. `EnsureBucket(ctx, client, bucket, awss3.EnsureBucketConfig{Region: region})`; `NewStorage(client, bucket, awss3.StorageConfig{})`; `RegisterStorageService(registrar, client, bucket, awss3.StorageConfig{})`.
+**Remedy.** Drop `Secure: true`; write `Insecure: true` where `Secure` was false on purpose, for a local endpoint. `EnsureBucket(resolver.Runtime(), client, bucket, awss3.EnsureBucketConfig{Region: region})` from a provider registered `RegisterOptions{BuiltAtBoot: true}`, so a missing bucket fails `Boot`; `EnsureBucket` refuses a nil runtime and bounds its calls by the runtime's context; `NewStorage(client, bucket, awss3.StorageConfig{})`; `RegisterStorageService(registrar, client, bucket, awss3.StorageConfig{})`.
 
 ### Event: `NewEventDispatcherAdapter` takes the dispatcher alone
 

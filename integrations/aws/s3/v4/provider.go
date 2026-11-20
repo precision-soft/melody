@@ -1,13 +1,13 @@
 package awss3
 
 import (
-    "context"
     "errors"
     "fmt"
 
     "github.com/minio/minio-go/v7"
     "github.com/minio/minio-go/v7/pkg/credentials"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
@@ -81,8 +81,14 @@ type EnsureBucketConfig struct {
     Region string
 }
 
-/* EnsureBucket creates the bucket when it does not exist; one that exists, or that a concurrent replica created first, is answered as success. */
-func EnsureBucket(ctx context.Context, client *minio.Client, bucket string, config EnsureBucketConfig) error {
+/* EnsureBucket creates the bucket when it does not exist, its calls bounded by the runtime's context; one that exists, or that a concurrent replica created first, is answered as success. A nil runtime is refused. */
+func EnsureBucket(runtimeInstance containercontract.Runtime, client *minio.Client, bucket string, config EnsureBucketConfig) error {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return runtimeErr
+    }
+
+    ctx := runtimeInstance.Context()
+
     exists, existsErr := client.BucketExists(ctx, bucket)
     if nil != existsErr {
         return exception.NewError("object storage bucket check failed", map[string]any{"bucket": bucket}, existsErr)

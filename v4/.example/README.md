@@ -156,7 +156,7 @@ It only:
     - `embeddedEnvironmentFiles` (from `embedded_env_*`)
     - `embeddedPublicFiles` (from `embedded_static_*`)
 - calls `config.Configure(ctx, app, applicationVersion)`
-- boots the application, which builds the services registered `BuiltAtBoot` — the catalogue notification hub and the internal auth signer — under the boot runtime, a refusal failing the boot; the boot refuses a declared teardown dependency that names no service, since the teardown closes in waves
+- boots the application, which builds the services registered `BuiltAtBoot` — the catalogue notification hub, the internal auth signer and, with S3 configured, the bucket check — under the boot runtime, a refusal failing the boot; the boot refuses a declared teardown dependency that names no service, since the teardown closes in waves
 - runs the application
 
 All wiring and integration logic lives outside `main.go`.

@@ -137,7 +137,7 @@ func (instance *Module) RegisterServices(registrar melodyapplicationcontract.Ser
         melodycontainer.RegisterOptions{},
     )
 
-    instance.registerStorageService(registrar)
+    instance.registerStorageServices(registrar)
     instance.registerLockerService(registrar)
     instance.registerArchiveLockerService(registrar)
     instance.registerDatabaseServices(registrar)

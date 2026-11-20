@@ -30,7 +30,7 @@ if nil != clientErr {
     return clientErr
 }
 
-if ensureErr := awss3.EnsureBucket(ctx, client, "documents", awss3.EnsureBucketConfig{}); nil != ensureErr {
+if ensureErr := awss3.EnsureBucket(runtimeInstance, client, "documents", awss3.EnsureBucketConfig{}); nil != ensureErr {
     return ensureErr
 }
 
@@ -47,7 +47,7 @@ url, _ := store.PresignedUrl(runtimeInstance, "labels/awb-123.pdf", 15*time.Minu
 
 The zero `Config` dials **https**. `Config.Insecure` selects plain http: credentials and objects cross the network in clear, and every presigned url is `http://`, so set it only for `localhost` or a loopback address. A plain http endpoint anywhere else — a private address and a single-label host such as a compose service name included — is named once per process, at WARNING, with `bootWarning=aws.s3.plaintextEndpoint` and the endpoint's host in the record, never a credential. The module declares the code as a [boot warning](../../../../v4/.documentation/package/SECURITY.md#boot-warnings) written by http and cli: over its `Client` it adds the warning at boot, written with the framework's own, and a storage built with `NewStorage` names it at the first use of one of its doors. A command leaves it out under `MELODY_CLI_BOOT_WARNINGS_IGNORED=aws.s3.plaintextEndpoint` or `MELODY_CLI_BOOT_WARNINGS_DISABLED=true`, on both paths; the code is accepted in that list only while the module is registered. Two storages over one host, or the module and a storage over the same host, name it once. The endpoint is read from the client itself, so a client built without `NewClient` is judged too.
 
-`EnsureBucketConfig.Region` is the region a missing bucket is created in; left empty, minio creates it in the client's region, and in `us-east-1` when the client names none either.
+`EnsureBucket` runs its calls under the runtime's context and refuses a nil runtime; an application checks its bucket at boot from a provider registered `RegisterOptions{BuiltAtBoot: true}`, handing it `resolver.Runtime()`. `EnsureBucketConfig.Region` is the region a missing bucket is created in; left empty, minio creates it in the client's region, and in `us-east-1` when the client names none either.
 
 ### Plug-and-play registration
 

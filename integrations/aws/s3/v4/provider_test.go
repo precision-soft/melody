@@ -12,7 +12,11 @@ import (
     "sync"
     "sync/atomic"
     "testing"
+    "time"
 
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -103,7 +107,7 @@ func TestEnsureBucketTreatsALostCreationRaceAsSuccessWhenTheBucketIsUsable(t *te
         t.Fatalf("could not build the client: %v", clientErr)
     }
 
-    if ensureErr := EnsureBucket(context.Background(), client, "raced-bucket", EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, "raced-bucket", EnsureBucketConfig{}); nil != ensureErr {
         t.Fatalf("expected the lost creation race to read as success once the bucket is usable, got %v", ensureErr)
     }
 }
@@ -149,7 +153,7 @@ func TestEnsureBucketStillRefusesANameOwnedElsewhere(t *testing.T) {
         t.Fatalf("could not build the client: %v", clientErr)
     }
 
-    if ensureErr := EnsureBucket(context.Background(), client, "foreign-bucket", EnsureBucketConfig{}); nil == ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, "foreign-bucket", EnsureBucketConfig{}); nil == ensureErr {
         t.Fatal("expected a conflict on a bucket the re-check cannot see to stay an error")
     }
 }
@@ -235,7 +239,7 @@ func TestEnsureBucketNamesAReCheckThatCouldNotComplete(t *testing.T) {
         t.Fatalf("could not build the client: %v", clientErr)
     }
 
-    ensureErr := EnsureBucket(context.Background(), client, "contested-bucket", EnsureBucketConfig{})
+    ensureErr := EnsureBucket(bucketTestRuntime(), client, "contested-bucket", EnsureBucketConfig{})
     if nil == ensureErr || false == strings.Contains(ensureErr.Error(), "the re-check of its existence could not complete") {
         t.Fatalf("expected the refusal to name the failed re-check, got %v", ensureErr)
     }
@@ -298,7 +302,7 @@ func TestEnsureBucket_TheConfiguredRegionReachesTheCreation(t *testing.T) {
         t.Fatalf("could not build the client: %v", clientErr)
     }
 
-    if ensureErr := EnsureBucket(context.Background(), client, "regional-bucket", EnsureBucketConfig{Region: "eu-west-1"}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, "regional-bucket", EnsureBucketConfig{Region: "eu-west-1"}); nil != ensureErr {
         t.Fatalf("unexpected error: %v", ensureErr)
     }
 
@@ -307,5 +311,92 @@ func TestEnsureBucket_TheConfiguredRegionReachesTheCreation(t *testing.T) {
 
     if false == strings.Contains(handler.body, "eu-west-1") {
         t.Fatalf("expected the creation to carry the configured region, got %q", handler.body)
+    }
+}
+
+func bucketTestRuntime() containercontract.Runtime {
+    return runtime.NewRun(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+}
+
+func TestEnsureBucket_RefusesANilRuntime(t *testing.T) {
+    if ensureErr := EnsureBucket(nil, nil, "any-bucket", EnsureBucketConfig{}); nil == ensureErr {
+        t.Fatalf("expected a nil runtime to be refused")
+    }
+}
+
+/* phaseBlockingServer answers like bucketRaceServer but blocks the phase it is told to, until the test ends */
+type phaseBlockingServer struct {
+    blockPhase    string
+    makeAttempted atomic.Bool
+    released      chan struct{}
+}
+
+func (instance *phaseBlockingServer) ServeHTTP(writer nethttp.ResponseWriter, request *nethttp.Request) {
+    if nethttp.MethodGet == request.Method || nethttp.MethodHead == request.Method {
+        if true == instance.makeAttempted.Load() {
+            if "recheck" == instance.blockPhase {
+                <-instance.released
+            }
+
+            writer.WriteHeader(nethttp.StatusOK)
+
+            return
+        }
+
+        if "check" == instance.blockPhase {
+            <-instance.released
+        }
+
+        writer.WriteHeader(nethttp.StatusNotFound)
+
+        return
+    }
+
+    instance.makeAttempted.Store(true)
+    if "create" == instance.blockPhase {
+        <-instance.released
+    }
+
+    writer.WriteHeader(nethttp.StatusConflict)
+
+    type errorResponse struct {
+        XMLName xml.Name `xml:"Error"`
+        Code    string   `xml:"Code"`
+        Message string   `xml:"Message"`
+    }
+
+    _ = xml.NewEncoder(writer).Encode(errorResponse{Code: "BucketAlreadyOwnedByYou", Message: "conflict"})
+}
+
+func TestEnsureBucket_EachOfItsThreeCallsEndsWithTheRuntimesContext(t *testing.T) {
+    for _, phase := range []string{"check", "create", "recheck"} {
+        handler := &phaseBlockingServer{blockPhase: phase, released: make(chan struct{})}
+        server := httptest.NewServer(handler)
+
+        client, clientErr := NewClient(Config{Endpoint: strings.TrimPrefix(server.URL, "http://"), AccessKey: "access", SecretKey: "secret", Insecure: true})
+        if nil != clientErr {
+            t.Fatalf("could not build the client: %v", clientErr)
+        }
+
+        deadlineContext, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+        runtimeInstance := runtime.NewRun(deadlineContext, container.NewContainer(container.ContainerConfig{}).NewScope())
+
+        done := make(chan error, 1)
+        go func() {
+            done <- EnsureBucket(runtimeInstance, client, "phase-bucket", EnsureBucketConfig{})
+        }()
+
+        select {
+        case ensureErr := <-done:
+            if false == errors.Is(ensureErr, context.DeadlineExceeded) {
+                t.Fatalf("%s: expected the call to end with the runtime's deadline, got %v", phase, ensureErr)
+            }
+        case <-time.After(5 * time.Second):
+            t.Fatalf("%s: expected the call to end with the runtime's deadline", phase)
+        }
+
+        cancel()
+        close(handler.released)
+        server.Close()
     }
 }

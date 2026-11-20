@@ -8,9 +8,12 @@ import (
     "strings"
     "testing"
     "time"
+
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
-func TestBuildStorage_EndsTheBucketCheckWhenTheProcessContextEnds(t *testing.T) {
+func TestStorageBucket_IsCheckedAtBootUnderTheBootRuntimeAndEndsWithItsContext(t *testing.T) {
     released := make(chan struct{})
     server := httptest.NewServer(nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {
         <-released
@@ -26,23 +29,37 @@ func TestBuildStorage_EndsTheBucketCheckWhenTheProcessContextEnds(t *testing.T) 
         environmentKeyS3Region:    "eu-central-1",
         environmentKeyS3Bucket:    "melody-example",
     })
+    moduleInstance.buildStorage()
 
-    processContext, cancel := context.WithCancel(context.Background())
-    cancel()
-    moduleInstance.processContext = processContext
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    moduleInstance.registerStorageBucketService(containerRegistrar{Container: containerInstance})
+
+    names := containerInstance.(interface{ BuiltAtBootServiceNames() []string }).BuiltAtBootServiceNames()
+    if 1 != len(names) || ServiceStorageBucket != names[0] {
+        t.Fatalf("expected the bucket check registered to be built at boot, got %v", names)
+    }
+
+    bootContext, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+    defer cancel()
+
+    bootRuntime, finish := melodyruntime.NewBoot(bootContext, containerInstance)
+    defer func() {
+        _ = finish()
+    }()
 
     refusalChannel := make(chan error, 1)
     go func() {
-        refusalChannel <- recoveredRefusal(t, moduleInstance.buildStorage)
+        _, checkErr := bootRuntime.Scope().Get(bootRuntime.Context(), ServiceStorageBucket)
+        refusalChannel <- checkErr
     }()
 
     select {
     case refusal := <-refusalChannel:
-        if false == errors.Is(refusal, context.Canceled) {
-            t.Fatalf("expected the boot refused with the ended process context, got %v", refusal)
+        if false == errors.Is(refusal, context.DeadlineExceeded) {
+            t.Fatalf("expected the bucket check ended with the boot runtime's context, got %v", refusal)
         }
     case <-time.After(2 * time.Second):
-        t.Fatal("expected the bucket check to end with the process context")
+        t.Fatal("expected the bucket check to end with the boot runtime's context")
     }
 }
 
@@ -58,7 +75,6 @@ func TestBuildStorage_RefusesAnUnreadableInsecureSwitchBeforeItDials(t *testing.
         environmentKeyS3Insecure: "treu",
         environmentKeyS3Bucket:   "melody-example",
     })
-    moduleInstance.processContext = context.Background()
 
     refusal := recoveredRefusal(t, moduleInstance.buildStorage)
     if nil == refusal || false == strings.Contains(refusal.Error(), "the switch is neither true nor false") {
@@ -67,5 +83,32 @@ func TestBuildStorage_RefusesAnUnreadableInsecureSwitchBeforeItDials(t *testing.
 
     if true == requested {
         t.Fatal("expected no request before the switch is read")
+    }
+}
+
+func TestRegisterStorageServices_RegistersTheBucketCheckBuiltAtBootOnlyWithS3Configured(t *testing.T) {
+    for _, testCase := range []struct {
+        name     string
+        values   map[string]string
+        expected bool
+    }{
+        {"with s3", map[string]string{environmentKeyS3Endpoint: "127.0.0.1:1", environmentKeyS3AccessKey: "test", environmentKeyS3SecretKey: "test", environmentKeyS3Insecure: "true", environmentKeyS3Bucket: "melody-example"}, true},
+        {"without s3", map[string]string{}, false},
+    } {
+        moduleInstance := moduleWithEnvironment(t, testCase.values)
+        moduleInstance.buildStorage()
+
+        containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+        moduleInstance.registerStorageServices(containerRegistrar{Container: containerInstance})
+
+        names := containerInstance.(interface{ BuiltAtBootServiceNames() []string }).BuiltAtBootServiceNames()
+        found := false
+        for _, name := range names {
+            found = found || ServiceStorageBucket == name
+        }
+
+        if testCase.expected != found {
+            t.Fatalf("%s: expected the bucket check built at boot %v, got names %v", testCase.name, testCase.expected, names)
+        }
     }
 }

@@ -49,7 +49,7 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(context.Background(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
@@ -659,7 +659,7 @@ func TestObjectStorage_RejectedPutPreservesTheStoredObject(t *testing.T) {
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(context.Background(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
@@ -730,7 +730,7 @@ func TestObjectStorage_StreamedPutAboveTheSpoolLimitIsAllOrNothing(t *testing.T)
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(context.Background(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
@@ -963,7 +963,7 @@ func TestObjectStorage_CancelledMultipartPutLeavesNoIncompleteUpload(t *testing.
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(context.Background(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 
@@ -1192,7 +1192,7 @@ func TestObjectStorage_AStreamedSingleShotPutThatOverReadsLeavesTheObjectUntouch
     }
 
     bucket := "melody-test"
-    if ensureErr := EnsureBucket(context.Background(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
+    if ensureErr := EnsureBucket(bucketTestRuntime(), client, bucket, EnsureBucketConfig{}); nil != ensureErr {
         t.Fatalf("ensure bucket: %v", ensureErr)
     }
 

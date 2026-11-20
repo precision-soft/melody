@@ -2,6 +2,9 @@ package config
 
 import (
     melodyawss3 "github.com/precision-soft/melody/integrations/aws/s3/v4"
+    melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -27,11 +30,36 @@ func (instance *Module) buildStorage() {
         exception.Panic(exception.FromError(clientErr))
     }
 
-    if ensureErr := melodyawss3.EnsureBucket(instance.processContext, client, bucket, melodyawss3.EnsureBucketConfig{Region: instance.parameterValue(parameterS3Region)}); nil != ensureErr {
-        exception.Panic(exception.FromError(ensureErr))
-    }
-
     instance.storageClient = client
     instance.storageBucket = bucket
     instance.storage = melodyawss3.NewStorage(client, bucket, melodyawss3.StorageConfig{})
+}
+
+/* ServiceStorageBucket is the example's bucket check, built at boot so a missing bucket fails Boot */
+const ServiceStorageBucket = "service.example.storage.bucket"
+
+type storageBucketReady struct{}
+
+/* registerStorageServices registers the storage the example serves and, with S3 configured, its bucket check built at boot */
+func (instance *Module) registerStorageServices(registrar melodyapplicationcontract.ServiceRegistrar) {
+    instance.registerStorageService(registrar)
+    instance.registerStorageBucketService(registrar)
+}
+
+func (instance *Module) registerStorageBucketService(registrar melodyapplicationcontract.ServiceRegistrar) {
+    if nil == instance.storageClient {
+        return
+    }
+
+    registrar.RegisterService(
+        ServiceStorageBucket,
+        func(resolver melodycontainercontract.Resolver) (*storageBucketReady, error) {
+            if ensureErr := melodyawss3.EnsureBucket(resolver.Runtime(), instance.storageClient, instance.storageBucket, melodyawss3.EnsureBucketConfig{Region: instance.parameterValue(parameterS3Region)}); nil != ensureErr {
+                return nil, ensureErr
+            }
+
+            return &storageBucketReady{}, nil
+        },
+        melodycontainer.RegisterOptions{BuiltAtBoot: true},
+    )
 }
