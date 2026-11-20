@@ -12,7 +12,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/security"
     melodyapplication "github.com/precision-soft/melody/v4/application"
     "github.com/precision-soft/melody/v4/bound"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
@@ -256,7 +256,7 @@ func sessionUserLookup(request melodyhttpcontract.Request, userId string) (*enti
         return nil, false, errors.New("the request carries no runtime to read the account through")
     }
 
-    userRepository, resolveErr := melodycontainer.FromResolver[repository.UserRepository](runtimeInstance.Context(), runtimeInstance.Scope(), repository.ServiceUserRepository)
+    userRepository, resolveErr := melodyruntime.FromRuntime[repository.UserRepository](runtimeInstance, repository.ServiceUserRepository)
     if nil != resolveErr {
         return nil, false, resolveErr
     }
@@ -271,7 +271,7 @@ func sessionIndexLookup(request melodyhttpcontract.Request) (security.SessionInd
         return nil, errors.New("the request carries no runtime to resolve the session index through")
     }
 
-    return melodycontainer.FromResolver[repository.UserSessionRepository](runtimeInstance.Context(), runtimeInstance.Scope(), repository.ServiceUserSessionRepository)
+    return melodyruntime.FromRuntime[repository.UserSessionRepository](runtimeInstance, repository.ServiceUserSessionRepository)
 }
 
 /* i18nGreetingPublicPattern opens the i18n prefix under each locale the greeting route serves, spelled from the route's own list so the rule and the route cannot drift apart */

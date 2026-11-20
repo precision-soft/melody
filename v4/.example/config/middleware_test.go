@@ -108,9 +108,8 @@ func newTrailRuntimeOver(t *testing.T, journalSource reporting.CatalogJournalSou
 func trailFromRuntime(t *testing.T, runtimeInstance containercontract.Runtime) *reporting.RequestReportTrail {
     t.Helper()
 
-    trail, trailErr := melodycontainer.FromResolver[*reporting.RequestReportTrail](
-        runtimeInstance.Context(),
-        runtimeInstance.Scope(),
+    trail, trailErr := melodyruntime.FromRuntime[*reporting.RequestReportTrail](
+        runtimeInstance,
         reporting.ServiceRequestReportTrail,
     )
     if nil != trailErr {
@@ -329,7 +328,7 @@ func TestCatalogJournalFlushMiddleware_ReturnsTheHandlersErrorOverAFlushFailure(
         t.Fatalf("expected the handler's own error, got %v", err)
     }
 
-    if records := melodycontainer.MustFromResolver[melodyloggingcontract.Logger](runtimeInstance.Context(), runtimeInstance.Scope(), melodylogging.ServiceLogger).(*trailErrorRecorder).recorded(); 1 != len(records) {
+    if records := melodyruntime.MustFromRuntime[melodyloggingcontract.Logger](runtimeInstance, melodylogging.ServiceLogger).(*trailErrorRecorder).recorded(); 1 != len(records) {
         t.Fatalf("expected the flush failure journaled once, got %v", records)
     }
 

@@ -7,8 +7,8 @@ import (
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
 )
 
@@ -46,9 +46,8 @@ func clearCache(runtimeInstance melodycontainercontract.Runtime, writer io.Write
 }
 
 func resolveCache(runtimeInstance melodycontainercontract.Runtime) (melodycachecontract.Cache, error) {
-    return melodycontainer.FromResolver[melodycachecontract.Cache](
-        runtimeInstance.Context(),
-        runtimeInstance.Scope(),
+    return melodyruntime.FromRuntime[melodycachecontract.Cache](
+        runtimeInstance,
         melodycache.ServiceCache,
     )
 }

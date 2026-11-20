@@ -12,6 +12,7 @@ import (
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/httpclient"
@@ -90,9 +91,8 @@ func (instance *RateRefreshService) Refresh(runtimeInstance melodycontainercontr
         return RateRefreshOutcome{Configured: false}, nil
     }
 
-    client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](
-        runtimeInstance.Context(),
-        runtimeInstance.Scope(),
+    client, resolveErr := melodyruntime.FromRuntime[*httpclient.HttpClient](
+        runtimeInstance,
         ServiceRatesHttpClient,
     )
     if nil != resolveErr {

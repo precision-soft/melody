@@ -3,8 +3,8 @@ package subscriber
 import (
     "encoding/json"
 
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
 )
@@ -28,9 +28,8 @@ type catalogNotification struct {
 
 /* CatalogNotificationHubFromRuntime resolves the hub through the container, the single door that does so. Resolving runs the provider, which moves the hub's reporting off the emergency logger and tells the container the hub must be closed in order. */
 func CatalogNotificationHubFromRuntime(runtimeInstance melodycontainercontract.Runtime) (*melodyhttp.ServerSentEventHub, error) {
-    hub, hubErr := melodycontainer.FromResolver[*melodyhttp.ServerSentEventHub](
-        runtimeInstance.Context(),
-        runtimeInstance.Scope(),
+    hub, hubErr := melodyruntime.FromRuntime[*melodyhttp.ServerSentEventHub](
+        runtimeInstance,
         ServiceCatalogNotificationHub,
     )
     if nil != hubErr {

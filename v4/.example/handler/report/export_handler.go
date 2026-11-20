@@ -43,7 +43,7 @@ func ApiExportHandler() melodyhttpcontract.Handler {
             return presenter.ApiErrorWithErr(runtimeInstance, request, nethttp.StatusInternalServerError, "the reading archive could not be exported", renderErr), nil
         }
 
-        exportedAt := melodyclock.ClockMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()).Now()
+        exportedAt := melodyclock.ClockMustFromRuntime(runtimeInstance).Now()
 
         response := melodyhttp.NewResponse(nethttp.StatusOK, document)
         response.SetHeaders(nethttp.Header{

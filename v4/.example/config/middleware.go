@@ -10,8 +10,8 @@ import (
     "github.com/precision-soft/melody/v4/.example/reporting"
     melodyapplicationcontract "github.com/precision-soft/melody/v4/application/contract"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodyhttpmiddleware "github.com/precision-soft/melody/v4/http/middleware"
@@ -38,9 +38,8 @@ func NewCatalogJournalFlushMiddleware() melodyhttpcontract.Middleware {
         return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
             response, err := next(runtimeInstance, writer, request)
 
-            trail, trailErr := melodycontainer.FromResolver[*reporting.RequestReportTrail](
-                runtimeInstance.Context(),
-                runtimeInstance.Scope(),
+            trail, trailErr := melodyruntime.FromRuntime[*reporting.RequestReportTrail](
+                runtimeInstance,
                 reporting.ServiceRequestReportTrail,
             )
             if nil != trailErr {

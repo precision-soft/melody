@@ -13,8 +13,8 @@ import (
     "github.com/precision-soft/melody/v4/.example/route"
     melodyconfig "github.com/precision-soft/melody/v4/config"
     melodyconfigcontract "github.com/precision-soft/melody/v4/config/contract"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyexceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttp "github.com/precision-soft/melody/v4/http"
@@ -237,7 +237,7 @@ func ApiRefusalOfInvalidBody(
     request melodyhttpcontract.Request,
     body any,
 ) melodyhttpcontract.Response {
-    validationErr := melodyvalidation.ValidatorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()).Validate(body)
+    validationErr := melodyvalidation.ValidatorMustFromRuntime(runtimeInstance).Validate(body)
     if nil == validationErr {
         return nil
     }
@@ -440,20 +440,7 @@ func fallbackJsonResponse(statusCode int, payload any) melodyhttpcontract.Respon
 
 /* the debug decision is the kernel environment, as the framework exception listener reads it; when it cannot be determined the presenter emits no cause material */
 func debugMode(runtimeInstance melodycontainercontract.Runtime) bool {
-    if nil == runtimeInstance {
-        return false
-    }
-
-    serviceContainer := runtimeInstance.Scope()
-    if nil == serviceContainer {
-        return false
-    }
-
-    configuration, configurationErr := melodycontainer.FromResolver[melodyconfigcontract.Configuration](
-        runtimeInstance.Context(),
-        serviceContainer,
-        melodyconfig.ServiceConfig,
-    )
+    configuration, configurationErr := melodyruntime.FromRuntime[melodyconfigcontract.Configuration](runtimeInstance, melodyconfig.ServiceConfig)
     if nil != configurationErr || nil == configuration {
         return false
     }

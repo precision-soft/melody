@@ -34,24 +34,22 @@ Resolution helpers:
 
 ## Usage
 
-The example below demonstrates resolving the session manager from the container and persisting a modified session.
+The example below demonstrates resolving the session manager through the runtime and persisting a modified session.
 
 ```go
 package main
 
 import (
-    "context"
-
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/session"
 )
 
 func updateSession(
-    ctx context.Context,
-    serviceContainer containercontract.Container,
+    runtimeInstance containercontract.Runtime,
     sessionId string,
 ) error {
-    manager := session.SessionMustFromResolver(ctx, serviceContainer)
+    ctx := runtimeInstance.Context()
+    manager := session.SessionMustFromRuntime(runtimeInstance)
 
     sessionInstance, loadErr := manager.Session(ctx, sessionId)
     if nil != loadErr {

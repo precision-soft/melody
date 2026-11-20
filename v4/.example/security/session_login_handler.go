@@ -71,7 +71,7 @@ func (instance *sessionLoginHandler) Login(
         return nil, admitErr
     }
 
-    redirectUrl, _ := melodyhttp.UrlGeneratorMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()).GeneratePath(LandingPageName(user.Roles), nil)
+    redirectUrl, _ := melodyhttp.UrlGeneratorMustFromRuntime(runtimeInstance).GeneratePath(LandingPageName(user.Roles), nil)
 
     response := presenter.ApiSuccess(
         runtimeInstance,

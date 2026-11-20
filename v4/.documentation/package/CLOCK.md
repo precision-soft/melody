@@ -30,7 +30,7 @@ The package defines the service name:
 
 - [`ServiceClock`](../../clock/service_resolver.go) (`"service.clock"`)
 
-`ServiceClock` is **already registered by the application during boot** — [`(*Application).bootContainer`](../../application/application_container.go) binds it to the kernel's own clock unconditionally, so `ClockMustFromResolver` works out of the box in any service, command or handler. Do **not** register it again from userland: a duplicate service id is recorded as a boot collision and the boot panics.
+`ServiceClock` is **already registered by the application during boot** — [`(*Application).bootContainer`](../../application/application_container.go) binds it to the kernel's own clock unconditionally, so `ClockMustFromRuntime` works out of the box in any command or handler, and `ClockMustFromResolver` in any provider. Do **not** register it again from userland: a duplicate service id is recorded as a boot collision and the boot panics.
 
 Registering `ServiceClock` yourself is therefore only for a container you build and own — a unit test that assembles a bare `container.NewContainer(container.ContainerConfig{})` rather than an `Application`, as below:
 
@@ -45,6 +45,7 @@ import (
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 func registerFrozenClock(
@@ -73,20 +74,22 @@ func registerFrozenClock(
 }
 
 func readCurrentTime(
-    ctx context.Context,
-    serviceContainer containercontract.Container,
+    runtimeInstance containercontract.Runtime,
 ) time.Time {
-    clockInstance := clock.ClockMustFromResolver(ctx, serviceContainer)
+    clockInstance := clock.ClockMustFromRuntime(runtimeInstance)
 
     return clockInstance.Now()
 }
 
-func example(ctx context.Context) time.Time {
+func example(ctx context.Context) (time.Time, error) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     registerFrozenClock(serviceContainer)
 
-    return readCurrentTime(ctx, serviceContainer)
+    scope := serviceContainer.NewScope()
+    now := readCurrentTime(runtime.NewRun(ctx, scope))
+
+    return now, scope.Close()
 }
 ```
 

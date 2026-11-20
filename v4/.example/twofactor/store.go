@@ -10,8 +10,8 @@ import (
     "time"
 
     melodyencrypt "github.com/precision-soft/melody/integrations/bunorm/v4/encrypt"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
     "github.com/precision-soft/melody/v4/security/totp"
@@ -100,7 +100,7 @@ type StoreSource func(runtimeInstance melodycontainercontract.Runtime) (*Store, 
 
 /* StoreFromRuntime resolves the store through the container, the single door that does so, when a request or a deletion needs it. Building the store applies the migration set to the catalogue's database, and the container keeps only a successful resolution, so a refusal is answered to the caller who met it and the next one asks again. */
 func StoreFromRuntime(runtimeInstance melodycontainercontract.Runtime) (*Store, error) {
-    store, storeErr := melodycontainer.FromResolver[*Store](runtimeInstance.Context(), runtimeInstance.Scope(), ServiceStore)
+    store, storeErr := melodyruntime.FromRuntime[*Store](runtimeInstance, ServiceStore)
     if nil != storeErr {
         return nil, storeErr
     }

@@ -8,8 +8,8 @@ import (
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/security/totp"
 )
 
@@ -57,7 +57,7 @@ func (instance *TotpCodeCommand) Run(
         return errors.New("a secret is required on standard input")
     }
 
-    clockInstance, clockErr := melodycontainer.FromResolver[melodyclockcontract.Clock](runtimeInstance.Context(), runtimeInstance.Scope(), melodyclock.ServiceClock)
+    clockInstance, clockErr := melodyruntime.FromRuntime[melodyclockcontract.Clock](runtimeInstance, melodyclock.ServiceClock)
     if nil != clockErr {
         return clockErr
     }

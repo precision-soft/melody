@@ -7,7 +7,7 @@ import (
 
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodysession "github.com/precision-soft/melody/v4/session"
     melodysessioncontract "github.com/precision-soft/melody/v4/session/contract"
@@ -59,23 +59,21 @@ func admitSession(
         return errors.New("the request carries no runtime to admit the session through")
     }
 
-    sessionManager, sessionManagerErr := melodycontainer.FromResolver[melodysessioncontract.Manager](
-        runtimeInstance.Context(),
-        runtimeInstance.Scope(),
+    sessionManager, sessionManagerErr := melodyruntime.FromRuntime[melodysessioncontract.Manager](
+        runtimeInstance,
         melodysession.ServiceSessionManager,
     )
     if nil != sessionManagerErr {
         return sessionManagerErr
     }
 
-    clockInstance, clockErr := melodycontainer.FromResolver[melodyclockcontract.Clock](runtimeInstance.Context(), runtimeInstance.Scope(), melodyclock.ServiceClock)
+    clockInstance, clockErr := melodyruntime.FromRuntime[melodyclockcontract.Clock](runtimeInstance, melodyclock.ServiceClock)
     if nil != clockErr {
         return clockErr
     }
 
-    sessionStorage, sessionStorageErr := melodycontainer.FromResolver[melodysessioncontract.Storage](
-        runtimeInstance.Context(),
-        runtimeInstance.Scope(),
+    sessionStorage, sessionStorageErr := melodyruntime.FromRuntime[melodysessioncontract.Storage](
+        runtimeInstance,
         melodysession.ServiceSessionStorage,
     )
     if nil != sessionStorageErr {

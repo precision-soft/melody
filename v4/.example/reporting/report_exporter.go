@@ -4,8 +4,8 @@ import (
     "time"
 
     "github.com/precision-soft/melody/v4/.example/service"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/httpclient"
@@ -43,9 +43,8 @@ func (instance *CatalogReportExporter) Export(
         return false, exception.NewError("there is no reading to export", nil, nil)
     }
 
-    client, resolveErr := melodycontainer.FromResolver[*httpclient.HttpClient](
-        runtimeInstance.Context(),
-        runtimeInstance.Scope(),
+    client, resolveErr := melodyruntime.FromRuntime[*httpclient.HttpClient](
+        runtimeInstance,
         service.ServiceReportExportHttpClient,
     )
     if nil != resolveErr {

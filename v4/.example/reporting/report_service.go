@@ -14,8 +14,8 @@ import (
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodyclockcontract "github.com/precision-soft/melody/v4/clock/contract"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodyhttp "github.com/precision-soft/melody/v4/http"
 )
@@ -199,9 +199,8 @@ func (instance *CatalogReportService) Archive(runtimeInstance melodycontainercon
 
 /* readingRepositoryOf resolves the archive when it is needed, from the container the runtime carries: a resolution, not a capture, so the container records what this service holds of the archive when it holds it. */
 func (instance *CatalogReportService) readingRepositoryOf(runtimeInstance melodycontainercontract.Runtime) (repository.CatalogReadingRepository, error) {
-    return melodycontainer.FromResolver[repository.CatalogReadingRepository](
-        runtimeInstance.Context(),
-        runtimeInstance.Scope(),
+    return melodyruntime.FromRuntime[repository.CatalogReadingRepository](
+        runtimeInstance,
         repository.ServiceCatalogReadingRepository,
     )
 }

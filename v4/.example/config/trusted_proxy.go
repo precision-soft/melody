@@ -9,8 +9,8 @@ import (
     "time"
 
     examplejournal "github.com/precision-soft/melody/v4/.example/journal"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
@@ -247,11 +247,7 @@ func (instance *trustedProxyResolver) resolvedList(logger melodyloggingcontract.
 
 /* applicationLoggerOr answers the application's logger, resolved from the container rather than the request's scope, for a record written after the request is answered; the fallback when there is none */
 func applicationLoggerOr(runtimeInstance melodycontainercontract.Runtime, fallback melodyloggingcontract.Logger) melodyloggingcontract.Logger {
-    if nil == runtimeInstance || nil == runtimeInstance.Scope() {
-        return fallback
-    }
-
-    logger, resolveErr := melodycontainer.FromResolver[melodyloggingcontract.Logger](runtimeInstance.Context(), runtimeInstance.Scope(), melodylogging.ServiceLogger)
+    logger, resolveErr := melodyruntime.FromRuntime[melodyloggingcontract.Logger](runtimeInstance, melodylogging.ServiceLogger)
     if nil != resolveErr || nil == logger {
         return fallback
     }

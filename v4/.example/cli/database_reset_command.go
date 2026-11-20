@@ -14,8 +14,8 @@ import (
     examplesecurity "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/service"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
@@ -48,9 +48,8 @@ func (instance *DatabaseResetCommand) Flags() []melodyclicontract.Flag {
 }
 
 func (instance *DatabaseResetCommand) Run(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) (runErr error) {
-    storage, resolveErr := melodycontainer.FromResolver[*persistence.CatalogStorage](
-        runtimeInstance.Context(),
-        runtimeInstance.Scope(),
+    storage, resolveErr := melodyruntime.FromRuntime[*persistence.CatalogStorage](
+        runtimeInstance,
         persistence.ServiceCatalogStorage,
     )
     if nil != resolveErr {
@@ -58,9 +57,8 @@ func (instance *DatabaseResetCommand) Run(runtimeInstance melodycontainercontrac
     }
 
     /* the archive is resolved BEFORE the plan is printed, not before it is used: the plan has to name the archive's tables when there is an archive, and a plan that named what it would not touch — or stayed silent about what it would — is the one thing this refusal exists to prevent. */
-    archiveStorage, archiveResolveErr := melodycontainer.FromResolver[*persistence.ArchiveStorage](
-        runtimeInstance.Context(),
-        runtimeInstance.Scope(),
+    archiveStorage, archiveResolveErr := melodyruntime.FromRuntime[*persistence.ArchiveStorage](
+        runtimeInstance,
         persistence.ServiceArchiveStorage,
     )
     if nil != archiveResolveErr {

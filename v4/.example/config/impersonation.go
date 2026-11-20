@@ -7,8 +7,8 @@ import (
     "github.com/precision-soft/melody/v4/.example/repository"
     "github.com/precision-soft/melody/v4/.example/security"
     "github.com/precision-soft/melody/v4/.example/service"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
@@ -32,7 +32,7 @@ func (instance *directoryImpersonatedUserResolver) ResolveImpersonatedUser(
         return nil, nil
     }
 
-    userRepository, resolveErr := melodycontainer.FromResolver[repository.UserRepository](runtimeInstance.Context(), runtimeInstance.Scope(), repository.ServiceUserRepository)
+    userRepository, resolveErr := melodyruntime.FromRuntime[repository.UserRepository](runtimeInstance, repository.ServiceUserRepository)
     if nil != resolveErr {
         return nil, melodyexception.MarkInfrastructureFailure(resolveErr)
     }

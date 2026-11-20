@@ -149,7 +149,7 @@ func publishBoundary(
     deviceIdentifier string,
 ) (melodyhttpcontract.Response, error) {
     store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
-    instant := melodyclock.ClockMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()).Now()
+    instant := melodyclock.ClockMustFromRuntime(runtimeInstance).Now()
 
     if revokeErr := store.RevokeBefore(runtimeInstance, userIdentifier, deviceIdentifier, instant); nil != revokeErr {
         return nil, revokeErr

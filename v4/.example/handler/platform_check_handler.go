@@ -19,7 +19,7 @@ import (
 func PlatformCheckHandler() melodyhttpcontract.Handler {
     return func(runtimeInstance melodycontainercontract.Runtime, writer nethttp.ResponseWriter, request melodyhttpcontract.Request) (melodyhttpcontract.Response, error) {
         storageInstance := melodystorage.StorageMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
-        locker := melodylock.LockerMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        locker := melodylock.LockerMustFromRuntime(runtimeInstance)
 
         lockInstance := locker.CreateLock("example.platform.check", melodybound.Of(5*time.Second))
 

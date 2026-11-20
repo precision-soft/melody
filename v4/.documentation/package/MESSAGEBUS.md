@@ -76,11 +76,11 @@ registrar.RegisterService(
 Any service, handler, or command then resolves the same bus and dispatches:
 
 ```go
-bus := messagebus.BusMustFromResolver(runtimeInstance.Context(), resolver)
+bus := messagebus.BusMustFromRuntime(runtimeInstance)
 bus.Dispatch(runtimeInstance, WelcomeEmail{UserId: 1}, nil)
 ```
 
-`BusMustFromResolver` takes a scope as it takes a `Container` (for example `runtimeInstance.Scope()` inside a handler). The factory result is cached, so every resolver shares the one configured bus — configure it once, dispatch from many places. The example application wires this end-to-end: the bus is registered in [`.example/config/service.go`](../../.example/config/service.go) and resolved in the [`/messagebus/dispatch`](../../.example/handler/welcome_email_dispatch_handler.go) HTTP handler. Set `AMQP_DSN` before launching the example to route the bus over RabbitMQ via the [`amqp`](../../../integrations/amqp/v4) integration instead of the in-process transport: without a broker the HTTP dispatch door answers `503` naming `AMQP_DSN`, since nothing in the process would consume what it accepted, while the `messagebus:dispatch` console command dispatches over the in-process transport.
+`BusMustFromRuntime` resolves through the runtime's scope; a provider, which holds a resolver, writes `messagebus.BusMustFromResolver(resolver.Runtime().Context(), resolver)`. The factory result is cached, so every resolver shares the one configured bus — configure it once, dispatch from many places. The example application wires this end-to-end: the bus is registered in [`.example/config/service.go`](../../.example/config/service.go) and resolved in the [`/messagebus/dispatch`](../../.example/handler/welcome_email_dispatch_handler.go) HTTP handler. Set `AMQP_DSN` before launching the example to route the bus over RabbitMQ via the [`amqp`](../../../integrations/amqp/v4) integration instead of the in-process transport: without a broker the HTTP dispatch door answers `503` naming `AMQP_DSN`, since nothing in the process would consume what it accepted, while the `messagebus:dispatch` console command dispatches over the in-process transport.
 
 ## Usage
 

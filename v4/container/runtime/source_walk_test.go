@@ -187,19 +187,63 @@ func TestSourceWalk_EveryNamedResolverAccessorHasARuntimeFormOrADecision(t *test
     }
 }
 
-/* the calls a runtime-holding framework file still makes with a runtime's context and its scope apart, each counted; a provider-only accessor's decision is the one in accessorWithoutRuntimeForm */
+const (
+    byTypeHasNoRuntimeForm     = "by type, which has no runtime form"
+    collectionHasNoRuntimeForm = "a collection (AllImplementing), which has no runtime form"
+    exampleOwnAccessor         = "the example's own accessor, which R-0 step 6 moves to the runtime"
+)
+
+/* the calls a runtime-holding file of the fourth major still makes with a runtime's context and its scope apart, each counted; a provider-only or a view accessor's decision is the one in accessorWithoutRuntimeForm, keyed by the call's own package unless the allowance names the accessor */
 var runtimeHeldResolverCallAllowed = map[string]runtimeHeldResolverAllowance{
-    "v4/openapi/generate_command.go:InfoFromResolver":             {count: 1, decision: "provider"},
-    "v4/openapi/generate_command.go:RegistryMustFromResolver":     {count: 1, decision: "provider"},
-    "v4/messagebus/consume_command.go:ConsumeBusFromResolver":     {count: 1, decision: "provider"},
-    "v4/messagebus/consume_command.go:TransportsMustFromResolver": {count: 1, decision: "provider"},
-    "v4/messagebus/consume_command.go:RetryPolicyFromResolver":    {count: 1, decision: "provider"},
-    "v4/http/router_utility.go:GetByType":                         {count: 1, decision: "by type, which has no runtime form"},
+    "v4/openapi/generate_command.go:InfoFromResolver":                                {count: 1, decision: "provider"},
+    "v4/openapi/generate_command.go:RegistryMustFromResolver":                        {count: 1, decision: "provider"},
+    "v4/messagebus/consume_command.go:ConsumeBusFromResolver":                        {count: 1, decision: "provider"},
+    "v4/messagebus/consume_command.go:TransportsMustFromResolver":                    {count: 1, decision: "provider"},
+    "v4/messagebus/consume_command.go:RetryPolicyFromResolver":                       {count: 1, decision: "provider"},
+    "v4/http/router_utility.go:GetByType":                                            {count: 1, decision: byTypeHasNoRuntimeForm},
+    "v4/.example/handler/platform_check_handler.go:StorageMustFromResolver":          {count: 1, decision: "view", accessor: "v4/storage:StorageMustFromResolver"},
+    "v4/.example/subscriber/category_event_subscriber.go:CacheMustFromResolver":      {count: 3, decision: "view", accessor: "v4/cache:CacheMustFromResolver"},
+    "v4/.example/subscriber/currency_event_subscriber.go:CacheMustFromResolver":      {count: 3, decision: "view", accessor: "v4/cache:CacheMustFromResolver"},
+    "v4/.example/subscriber/product_event_subscriber.go:CacheMustFromResolver":       {count: 3, decision: "view", accessor: "v4/cache:CacheMustFromResolver"},
+    "v4/.example/subscriber/user_event_subscriber.go:CacheMustFromResolver":          {count: 3, decision: "view", accessor: "v4/cache:CacheMustFromResolver"},
+    "v4/.example/cli/app_info_command.go:MustFromResolverByType":                     {count: 1, decision: byTypeHasNoRuntimeForm},
+    "v4/.example/cli/catalog_report_refresh_command.go:FromResolverByType":           {count: 2, decision: byTypeHasNoRuntimeForm},
+    "v4/.example/handler/report/export_handler.go:FromResolverByType":                {count: 1, decision: byTypeHasNoRuntimeForm},
+    "v4/.example/handler/report/history_handler.go:FromResolverByType":               {count: 1, decision: byTypeHasNoRuntimeForm},
+    "v4/.example/cli/database_reset_command.go:SeedAll":                              {count: 1, decision: collectionHasNoRuntimeForm},
+    "v4/.example/cli/currency_refresh_rates_command.go:MustGetRateRefreshService":    {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/cli/database_reset_command.go:TokenNamespaceFromResolver":           {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/cli/product_list_command.go:MustGetCategoryService":                 {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/cli/product_list_command.go:MustGetCurrencyService":                 {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/cli/product_list_command.go:MustGetProductService":                  {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/config/device_token_enricher.go:MustGetUserRepository":              {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/config/event.go:TokenStoreFromResolver":                             {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/config/two_factor.go:MustGetUserService":                            {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/accesstoken/access_token_handler.go:MustGetUserRepository":  {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/accesstoken/access_token_handler.go:TokenStoreFromResolver": {count: 2, decision: exampleOwnAccessor},
+    "v4/.example/handler/category/read_handler.go:MustGetCategoryRepository":         {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/currency/create_handler.go:MustGetCurrencyService":          {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/currency/delete_handler.go:MustGetCurrencyService":          {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/currency/read_handler.go:MustGetCurrencyRepository":         {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/currency/update_handler.go:MustGetCurrencyService":          {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/product/create_handler.go:MustGetProductService":            {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/product/delete_handler.go:MustGetProductService":            {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/product/read_handler.go:MustGetCategoryService":             {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/product/read_handler.go:MustGetCurrencyService":             {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/product/read_handler.go:MustGetProductService":              {count: 2, decision: exampleOwnAccessor},
+    "v4/.example/handler/product/update_handler.go:MustGetProductService":            {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/user/create_handler.go:MustGetUserService":                  {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/user/delete_handler.go:MustGetUserService":                  {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/handler/user/read_handler.go:MustGetUserService":                    {count: 2, decision: exampleOwnAccessor},
+    "v4/.example/handler/user/update_handler.go:MustGetUserService":                  {count: 1, decision: exampleOwnAccessor},
+    "v4/.example/security/token_store.go:TokenStoreFromResolver":                     {count: 2, decision: exampleOwnAccessor},
+    "v4/.example/subscriber/catalog_change_recorder.go:MustGetCatalogJournalService": {count: 1, decision: exampleOwnAccessor},
 }
 
 type runtimeHeldResolverAllowance struct {
     count    int
     decision string
+    accessor string
 }
 
 type runtimeHeldResolverCall struct {
@@ -217,12 +261,28 @@ func runtimeHeldResolverCalls(source string, content []byte) ([]runtimeHeldResol
 
     callList := []runtimeHeldResolverCall{}
 
+    bodyList := []*ast.BlockStmt{}
     for _, declaration := range file.Decls {
-        function, isFunction := declaration.(*ast.FuncDecl)
-        if false == isFunction || nil == function.Body {
+        if function, isFunction := declaration.(*ast.FuncDecl); true == isFunction {
+            if nil != function.Body {
+                bodyList = append(bodyList, function.Body)
+            }
+
             continue
         }
 
+        ast.Inspect(declaration, func(node ast.Node) bool {
+            if literal, isLiteral := node.(*ast.FuncLit); true == isLiteral {
+                bodyList = append(bodyList, literal.Body)
+
+                return false
+            }
+
+            return true
+        })
+    }
+
+    for _, body := range bodyList {
         contextOf := map[string]string{}
         scopeOf := map[string]string{}
 
@@ -243,7 +303,7 @@ func runtimeHeldResolverCalls(source string, content []byte) ([]runtimeHeldResol
             }
         }
 
-        ast.Inspect(function.Body, func(node ast.Node) bool {
+        ast.Inspect(body, func(node ast.Node) bool {
             switch statement := node.(type) {
             case *ast.AssignStmt:
                 if len(statement.Lhs) == len(statement.Rhs) {
@@ -266,7 +326,7 @@ func runtimeHeldResolverCalls(source string, content []byte) ([]runtimeHeldResol
             return true
         })
 
-        ast.Inspect(function.Body, func(node ast.Node) bool {
+        ast.Inspect(body, func(node ast.Node) bool {
             call, isCall := node.(*ast.CallExpr)
             if false == isCall || 0 == len(call.Args) {
                 return true
@@ -324,6 +384,11 @@ func runtimeOfScope(expression ast.Expr, scopeOf map[string]string) string {
         if selector, isSelector := ast.Unparen(typed.Fun).(*ast.SelectorExpr); true == isSelector && "Scope" == selector.Sel.Name && 0 == len(typed.Args) {
             return types.ExprString(ast.Unparen(selector.X))
         }
+
+        /* a conversion, containercontract.Resolver(R.Scope()), keeps the scope */
+        if 1 == len(typed.Args) {
+            return runtimeOfScope(typed.Args[0], scopeOf)
+        }
     case *ast.TypeAssertExpr:
         return runtimeOfScope(typed.X, scopeOf)
     case *ast.Ident, *ast.SelectorExpr:
@@ -349,24 +414,36 @@ func calleeName(function ast.Expr) string {
 }
 
 /* code holding a runtime resolves through it; a resolver door handed the runtime's context and scope bypasses the runtime's refusals */
-func TestSourceWalk_NoFrameworkFileHandsARuntimesContextAndScopeToAResolverDoor(t *testing.T) {
+func TestSourceWalk_NoFourthMajorFileHandsARuntimesContextAndScopeToAResolverDoor(t *testing.T) {
     seen := map[string]int{}
 
     for key, allowance := range runtimeHeldResolverCallAllowed {
-        if "provider" != allowance.decision {
+        if "provider" != allowance.decision && "view" != allowance.decision {
+            if byTypeHasNoRuntimeForm != allowance.decision && collectionHasNoRuntimeForm != allowance.decision && exampleOwnAccessor != allowance.decision {
+                t.Errorf("the allowance for %s gives a decision the walk does not know: %s", key, allowance.decision)
+            }
+
             continue
         }
 
-        directory := key[:strings.LastIndex(key[:strings.Index(key, ":")], "/")]
-        decisionKey := directory + key[strings.Index(key, ":"):]
-        if "provider" != accessorWithoutRuntimeForm[decisionKey] {
-            t.Errorf("the allowance for %s names an accessor %s does not list as provider-only", key, decisionKey)
+        if "" != allowance.accessor && key[strings.Index(key, ":"):] != allowance.accessor[strings.Index(allowance.accessor, ":"):] {
+            t.Errorf("the allowance for %s names the accessor %s, another callee", key, allowance.accessor)
+        }
+
+        decisionKey := allowance.accessor
+        if "" == decisionKey {
+            directory := key[:strings.LastIndex(key[:strings.Index(key, ":")], "/")]
+            decisionKey = directory + key[strings.Index(key, ":"):]
+        }
+
+        if allowance.decision != accessorWithoutRuntimeForm[decisionKey] {
+            t.Errorf("the allowance for %s names an accessor %s does not decide as %s", key, decisionKey, allowance.decision)
         }
     }
 
     for _, source := range fourthMajorSourceList(t) {
         slashed := filepath.ToSlash(source)
-        if true == strings.HasSuffix(source, "_test.go") || true == strings.Contains(slashed, "/.example/") {
+        if true == strings.HasSuffix(source, "_test.go") {
             continue
         }
 
@@ -471,6 +548,50 @@ func other(runtimeInstance Runtime, scope Resolver) {
         {callee: "EventDispatcherMustFromResolver", line: 28},
         {callee: "Get", line: 29},
         {callee: "GetByType", line: 30},
+    }
+
+    if len(expected) != len(callList) {
+        t.Fatalf("expected %v, got %v", expected, callList)
+    }
+
+    for index, call := range expected {
+        if call != callList[index] {
+            t.Fatalf("expected %v at %d, got %v", call, index, callList[index])
+        }
+    }
+}
+
+func TestRuntimeHeldResolverCalls_FindsPackageLevelLiteralsAndConversions(t *testing.T) {
+    content := []byte(`package probe
+
+var handler = func(runtimeInstance Runtime) {
+    _ = config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+}
+
+var handlerMap = map[string]func(Runtime){
+    "one": func(runtimeInstance Runtime) {
+        _ = clock.ClockMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    },
+}
+
+func probe(runtimeInstance Runtime) {
+    _ = config.ConfigMustFromResolver(runtimeInstance.Context(), containercontract.Resolver(runtimeInstance.Scope()))
+    resolver := containercontract.Resolver(runtimeInstance.Scope())
+    _ = config.ConfigMustFromResolver(runtimeInstance.Context(), resolver)
+    _ = config.ConfigMustFromResolver(runtimeInstance.Context(), wrap(other.Scope()))
+}
+`)
+
+    callList, parseErr := runtimeHeldResolverCalls("probe.go", content)
+    if nil != parseErr {
+        t.Fatalf("parse: %v", parseErr)
+    }
+
+    expected := []runtimeHeldResolverCall{
+        {callee: "ConfigMustFromResolver", line: 4},
+        {callee: "ClockMustFromResolver", line: 9},
+        {callee: "ConfigMustFromResolver", line: 14},
+        {callee: "ConfigMustFromResolver", line: 16},
     }
 
     if len(expected) != len(callList) {

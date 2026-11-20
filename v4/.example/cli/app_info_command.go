@@ -33,17 +33,17 @@ func (instance *ApplicationInformationCommand) Flags() []melodyclicontract.Flag 
 func (instance *ApplicationInformationCommand) Run(runtimeInstance melodycontainercontract.Runtime, commandContext *melodyclicontract.CommandContext) error {
     writer := commandContext.Writer
 
-    configuration := melodyconfig.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    configuration := melodyconfig.ConfigMustFromRuntime(runtimeInstance)
     fmt.Fprintln(writer, "env:", configuration.Kernel().Environment())
 
-    processRole := melodyapplication.ProcessRoleMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    processRole := melodyapplication.ProcessRoleMustFromRuntime(runtimeInstance)
     fmt.Fprintln(writer, "process_role:", processRole)
     fmt.Fprintln(writer, "background_work:", melodyconfig.RoleAllowsBackgroundWork(processRole))
     fmt.Fprintln(writer, "http_address:", configuration.Http().Address())
     fmt.Fprintln(writer, "public_directory:", configuration.Http().PublicDirectory())
     fmt.Fprintln(writer, "static_index_file:", configuration.Http().StaticIndexFile())
 
-    router := melodyhttp.RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    router := melodyhttp.RouterMustFromRuntime(runtimeInstance)
     fmt.Fprintln(writer, "routes:", len(router.RouteDefinitions()))
 
 

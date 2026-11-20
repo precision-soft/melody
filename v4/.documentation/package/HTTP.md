@@ -338,10 +338,7 @@ func handleRedirectToPing() httpcontract.Handler {
         _ nethttp.ResponseWriter,
         _ httpcontract.Request,
     ) (httpcontract.Response, error) {
-        urlGenerator := http.UrlGeneratorMustFromResolver(
-            runtimeInstance.Context(),
-            runtimeInstance.Scope(),
-        )
+        urlGenerator := http.UrlGeneratorMustFromRuntime(runtimeInstance)
 
         path, generateErr := urlGenerator.GeneratePath(
             pingRouteName,

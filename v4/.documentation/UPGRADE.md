@@ -44,7 +44,7 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Symptom.** `kernelInstance.Context undefined`; `too many arguments in call to kernel.NewKernel`; `undefined: http.RequestContextFromResolver`, `undefined: application.ProcessContextFromResolver`; a registrar of your own `does not implement Registrar (missing method ReservePhaseService)`; a scope manager of your own `missing method NewBootScope`; `context canceled` with the cause `the application boot has finished`; `a scoped service is not built at boot`.
 
-**Remedy.** In a boot hook resolve under `kernelInstance.BootRuntime()`: `config.ConfigMustFromResolver(bootRuntime.Context(), bootRuntime.Scope())`, or `runtime.MustFromRuntime[T](kernelInstance.BootRuntime(), name)`. For a context that must outlive the boot, keep the context you gave `NewApplication`. A value that keeps the boot runtime and uses it after `Boot` gets `ErrBootFinished`: take the runtime of the request or the run. Read the request context with `http.RequestContextFromRuntime(runtimeInstance)` and the process context with `application.ProcessContextFromRuntime(runtimeInstance)`, and treat an error under `ErrRuntimeKindRefused` as absence where the tolerant form answered nil. A registrar double declares `ReservePhaseService` and may answer nil. A scoped service asked at boot is built in the request or the run that needs it.
+**Remedy.** In a boot hook resolve under `kernelInstance.BootRuntime()`: `config.ConfigMustFromRuntime(kernelInstance.BootRuntime())`, or `runtime.MustFromRuntime[T](kernelInstance.BootRuntime(), name)`. For a context that must outlive the boot, keep the context you gave `NewApplication`. A value that keeps the boot runtime and uses it after `Boot` gets `ErrBootFinished`: take the runtime of the request or the run. Read the request context with `http.RequestContextFromRuntime(runtimeInstance)` and the process context with `application.ProcessContextFromRuntime(runtimeInstance)`, and treat an error under `ErrRuntimeKindRefused` as absence where the tolerant form answered nil. A registrar double declares `ReservePhaseService` and may answer nil. A scoped service asked at boot is built in the request or the run that needs it.
 
 ### Container: a provider reads the runtime of its resolution through `resolver.Runtime()`
 
@@ -230,7 +230,7 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Symptom.** A call of `cache.CacheMustFromContainer(…)`, `logging.LoggerMustFromContainer(…)` or any other `…FromContainer` accessor no longer compiles.
 
-**Remedy.** Replace `FromContainer` with `FromResolver` in the name and keep the argument: `cache.CacheMustFromResolver(ctx, runtimeInstance.Scope())`.
+**Remedy.** Replace `FromContainer` with `FromResolver` in the name and keep the argument: `cache.CacheMustFromResolver(ctx, runtimeInstance.Scope())`. With a runtime in hand, where the accessor has a `FromRuntime` form, resolve through the runtime instead: `clock.ClockMustFromRuntime(runtimeInstance)`, or `runtime.FromRuntime[T](runtimeInstance, name)` for a service of your own.
 
 ### Security: a voter and the decision manager receive the runtime
 
@@ -1000,7 +1000,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Symptom.** `serviceContainer.Get("app.service")`, `container.MustFromResolver[T](resolver, name)`, `container.FromResolverByType[T](resolver)`, `container.AllImplementing[T](resolver)`, `handle.Resolve()`, `logging.LoggerMustFromResolver(serviceContainer)`, `config.ConfigMustFromResolver(resolver)` and `kernel.NewKernel(configuration, ...)` no longer compile, nor does a resolver or a kernel of your own that does not declare the new forms. A previously generated `wiring_gen.go` no longer compiles until it is regenerated.
 
-**Remedy.** Hand the context you hold: `serviceContainer.Get(ctx, "app.service")`. Inside a provider write `ctx := resolver.Runtime().Context()` and pass it on, `container.MustFromResolver[T](ctx, resolver, name)`; in a command or a handler pass `runtimeInstance.Context()`; at boot pass the application's context, or resolve under `kernelInstance.BootRuntime()` in a module hook. A test passes `t.Context()`. Regenerate the wiring with `go generate ./generated`. A resolver of your own adds the context to its four waiting doors and declares `Runtime() containercontract.Runtime`; a kernel of your own declares `BootRuntime()`.
+**Remedy.** Hand the context you hold: `serviceContainer.Get(ctx, "app.service")`. Inside a provider write `ctx := resolver.Runtime().Context()` and pass it on, `container.MustFromResolver[T](ctx, resolver, name)`; in a command or a handler resolve through the runtime, `runtime.MustFromRuntime[T](runtimeInstance, name)`, or pass `runtimeInstance.Context()` to a door that takes a context; at boot pass the application's context, or resolve under `kernelInstance.BootRuntime()` in a module hook. A test passes `t.Context()`. Regenerate the wiring with `go generate ./generated`. A resolver of your own adds the context to its four waiting doors and declares `Runtime() containercontract.Runtime`; a kernel of your own declares `BootRuntime()`.
 
 ### Container: no ring of dependencies is admitted, a ring closed through a Lazy handle included
 

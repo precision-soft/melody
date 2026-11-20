@@ -12,7 +12,7 @@ import (
     melodybound "github.com/precision-soft/melody/v4/bound"
     melodycache "github.com/precision-soft/melody/v4/cache"
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
-    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 /* the command empties the cache the application reads, once, says what the clear reached, and touches neither
@@ -21,7 +21,7 @@ import (
 func TestCacheClearCommandEmptiesTheCacheAndSaysWhatItReached(t *testing.T) {
     runtimeInstance, cacheInstance := newResetRuntimeWithArchive(t, persistence.NewCatalogStorage(nil), persistence.NewArchiveStorage(nil))
 
-    cache := melodycontainer.MustFromResolver[melodycachecontract.Cache](runtimeInstance.Context(), runtimeInstance.Scope(), melodycache.ServiceCache)
+    cache := melodyruntime.MustFromRuntime[melodycachecontract.Cache](runtimeInstance, melodycache.ServiceCache)
     if setErr := cache.Set(context.Background(), "zz-cached", "value", melodybound.Of(time.Hour)); nil != setErr {
         t.Fatalf("planting an entry failed: %v", setErr)
     }

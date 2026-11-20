@@ -61,7 +61,7 @@ Resolution helpers:
 
 The example below demonstrates a typical Melody flow:
 
-- resolve the logger from the container;
+- resolve the logger through a run runtime;
 - create a process-scoped logger;
 - override the protected logger service inside a request scope.
 
@@ -80,11 +80,6 @@ func runWithScopedLogger(
     ctx context.Context,
     serviceContainer containercontract.Container,
 ) {
-    baseLogger := logging.LoggerMustFromResolver(
-        ctx,
-        serviceContainer,
-    )
-
     scope := serviceContainer.NewScope()
     defer func() {
         scopeCloseErr := scope.Close()
@@ -97,6 +92,8 @@ func runWithScopedLogger(
         ctx,
         scope,
     )
+
+    baseLogger := logging.LoggerMustFromRuntime(runtimeInstance)
 
     processId := logging.GenerateProcessId()
     loggerWithProcessId := logging.NewProcessLogger(

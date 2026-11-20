@@ -40,7 +40,7 @@ In the default application wiring, this service is registered by the application
 
 ## Usage
 
-The example below demonstrates dispatching a named event with an arbitrary payload from code that already has access to the runtime and container.
+The example below demonstrates dispatching a named event with an arbitrary payload from code that holds the runtime.
 
 ```go
 package main
@@ -57,10 +57,9 @@ type ProductCreatedPayload struct {
 
 func dispatchProductCreated(
     runtimeInstance containercontract.Runtime,
-    serviceContainer containercontract.Container,
     productId string,
 ) {
-    dispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), serviceContainer)
+    dispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
 
     _, dispatchErr := dispatcher.DispatchName(
         runtimeInstance,
