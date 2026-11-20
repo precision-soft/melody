@@ -140,6 +140,8 @@ connection := amqp.ConnectionMustFromResolver(ctx, resolver)
 transport := amqp.TransportMustFromResolver(ctx, resolver, "async")
 ```
 
+Code that holds a runtime reads the connection with `amqp.ConnectionMustFromRuntime(runtimeInstance)`; the transports are read by the provider that builds the bus.
+
 Or bundle all of it as a self-registering application module — one `RegisterModule` call wires the connection service and the named transport services:
 
 ```go

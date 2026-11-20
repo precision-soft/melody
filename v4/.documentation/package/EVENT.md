@@ -160,4 +160,5 @@ A listener receives the event and writes to its payload, and the payload has no 
 ### Container helpers (`event`)
 
 - [`const ServiceEventDispatcher`](../../event/service_resolver.go)
+- [`EventDispatcherMustFromRuntime(containercontract.Runtime) eventcontract.EventDispatcher`](../../event/service_resolver.go)
 - [`EventDispatcherMustFromResolver(context.Context, containercontract.Resolver) eventcontract.EventDispatcher`](../../event/service_resolver.go)

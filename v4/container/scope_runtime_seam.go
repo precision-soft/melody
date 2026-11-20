@@ -14,7 +14,7 @@ func (instance *scope) SpawnChildScope(token runtimeseam.Token) (containercontra
         return nil, exception.NewError(
             "scope is closed",
             nil,
-            ErrScopeClosed,
+            instance.closedCause(),
         )
     }
 

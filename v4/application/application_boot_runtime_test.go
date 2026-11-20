@@ -10,9 +10,12 @@ import (
 
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     clicontract "github.com/precision-soft/melody/v4/cli/contract"
+    "github.com/precision-soft/melody/v4/config"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -230,5 +233,44 @@ func TestApplicationReservePhaseService_RefusesTheFrameworksPhaseNames(t *testin
 
     if reserveErr := applicationInstance.ReservePhaseService("app.phase.own", containercontract.KindRun); nil != reserveErr {
         t.Fatalf("expected an application's own name to be reserved, got %v", reserveErr)
+    }
+}
+
+type lateBootRuntimeFactoryModule struct {
+    fakeModule
+    factoryErr error
+}
+
+func (instance *lateBootRuntimeFactoryModule) RegisterHttpMiddlewares(kernelInstance kernelcontract.Kernel, registrar applicationcontract.HttpMiddlewareRegistrar) {
+    registrar.Use(applicationcontract.MiddlewareRegistration{
+        Factories: []applicationcontract.MiddlewareFactory{
+            func(kernelInstance kernelcontract.Kernel) httpcontract.Middleware {
+                _, instance.factoryErr = runtime.FromRuntime[configcontract.Configuration](kernelInstance.BootRuntime(), config.ServiceConfig)
+
+                return func(next httpcontract.Handler) httpcontract.Handler {
+                    return next
+                }
+            },
+        },
+    })
+}
+
+/* the --build inspection runs the factories in a cli run, after Boot: a door a factory calls under the finished boot runtime names the finished boot */
+func TestBuildForInspection_AFactoryResolvingUnderTheBootRuntimeAfterBootReadsErrBootFinished(t *testing.T) {
+    applicationInstance := newEnvironmentKeyBootApplication(t, nil)
+    applicationInstance.runtimeFlags = NewRuntimeFlags(RuntimeFlagsConfig{Mode: config.ModeCli})
+    applicationInstance.httpMiddlewares = NewHttpMiddleware(newStaticFileServerConfig(testhelper.NewEmbeddedStaticFs(), applicationInstance.configuration), applicationInstance.configuration)
+
+    probe := &lateBootRuntimeFactoryModule{fakeModule: fakeModule{name: "late-boot-runtime-factory"}}
+    applicationInstance.RegisterModule(probe)
+
+    applicationInstance.Boot()
+
+    if _, buildErr := applicationInstance.httpMiddlewares.buildForInspection(applicationInstance.kernel); nil != buildErr {
+        t.Fatalf("unexpected build error: %v", buildErr)
+    }
+
+    if false == errors.Is(probe.factoryErr, containercontract.ErrBootFinished) || false == errors.Is(probe.factoryErr, container.ErrScopeClosed) {
+        t.Fatalf("expected the factory's resolution to name ErrBootFinished and ErrScopeClosed, got %v", probe.factoryErr)
     }
 }

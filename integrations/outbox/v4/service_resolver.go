@@ -5,6 +5,7 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
 )
 
 const ServiceStore = "service.outbox.store"
@@ -23,6 +24,10 @@ func RegisterStoreService(registrar ServiceRegistrar, store *Store) {
         },
         container.RegisterOptions{},
     )
+}
+
+func StoreMustFromRuntime(runtimeInstance containercontract.Runtime) *Store {
+    return runtime.MustFromRuntime[*Store](runtimeInstance, ServiceStore)
 }
 
 func StoreMustFromResolver(ctx context.Context, resolver containercontract.Resolver) *Store {

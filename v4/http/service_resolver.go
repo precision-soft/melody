@@ -5,6 +5,7 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
@@ -16,12 +17,24 @@ const (
     ServiceRequestContext = "service.http.request.context"
 )
 
+func RouteRegistryMustFromRuntime(runtimeInstance containercontract.Runtime) httpcontract.RouteRegistry {
+    return runtime.MustFromRuntime[httpcontract.RouteRegistry](runtimeInstance, ServiceRouteRegistry)
+}
+
 func RouteRegistryMustFromResolver(ctx context.Context, resolver containercontract.Resolver) httpcontract.RouteRegistry {
     return container.MustFromResolver[httpcontract.RouteRegistry](ctx, resolver, ServiceRouteRegistry)
 }
 
+func UrlGeneratorMustFromRuntime(runtimeInstance containercontract.Runtime) httpcontract.UrlGenerator {
+    return runtime.MustFromRuntime[httpcontract.UrlGenerator](runtimeInstance, ServiceUrlGenerator)
+}
+
 func UrlGeneratorMustFromResolver(ctx context.Context, resolver containercontract.Resolver) httpcontract.UrlGenerator {
     return container.MustFromResolver[httpcontract.UrlGenerator](ctx, resolver, ServiceUrlGenerator)
+}
+
+func RouterMustFromRuntime(runtimeInstance containercontract.Runtime) httpcontract.Router {
+    return runtime.MustFromRuntime[httpcontract.Router](runtimeInstance, ServiceRouter)
 }
 
 func RouterMustFromResolver(ctx context.Context, resolver containercontract.Resolver) httpcontract.Router {

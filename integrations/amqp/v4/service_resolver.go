@@ -7,6 +7,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
     amqp091 "github.com/rabbitmq/amqp091-go"
@@ -52,6 +53,10 @@ func RegisterConnectionService(registrar ServiceRegistrar, connection *amqp091.C
             return closeErr
         })},
     )
+}
+
+func ConnectionMustFromRuntime(runtimeInstance containercontract.Runtime) *amqp091.Connection {
+    return runtime.MustFromRuntime[*amqp091.Connection](runtimeInstance, ServiceConnection)
 }
 
 func ConnectionMustFromResolver(ctx context.Context, resolver containercontract.Resolver) *amqp091.Connection {

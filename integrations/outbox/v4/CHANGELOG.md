@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `StoreMustFromRuntime(runtimeInstance)`, the store read through the runtime's scope under its context, for code that holds a runtime; a nil runtime is refused. `StoreMustFromResolver` stays the door of a provider.
 - **Breaking** — `service_resolver.go`: `StoreMustFromContainer` and `RelayMustFromContainer` are removed, their `…FromResolver` forms taking the container as they take a scope.
 - This major includes every change of the third major up to v3.2.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.
 - `relay.go`, `relay_config.go`: `RelayConfig.LockReleaseTimeout` bounds the lease release and `RelayConfig.ResolutionTimeout` one resolution write, each on its detached context, 5s when left out as the constants were, at least 1ms, unlimited refused.

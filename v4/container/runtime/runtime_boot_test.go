@@ -60,8 +60,12 @@ func TestNewBoot_IsLiveUntilFinishThenDoneWithErrBootFinishedAndAClosedScope(t *
         t.Fatalf("expected the boot context done with ErrBootFinished, got %v / %v", bootRuntime.Context().Err(), context.Cause(bootRuntime.Context()))
     }
 
-    if _, resolveErr := FromRuntime[*bootServiceProbe](bootRuntime, "app.boot.service"); false == errors.Is(resolveErr, container.ErrScopeClosed) {
-        t.Fatalf("expected the finished boot scope to answer ErrScopeClosed, got %v", resolveErr)
+    if _, resolveErr := FromRuntime[*bootServiceProbe](bootRuntime, "app.boot.service"); false == errors.Is(resolveErr, container.ErrScopeClosed) || false == errors.Is(resolveErr, containercontract.ErrBootFinished) {
+        t.Fatalf("expected the finished boot scope to answer ErrScopeClosed naming ErrBootFinished, got %v", resolveErr)
+    }
+
+    if overrideErr := bootRuntime.Scope().OverrideProtectedInstance("app.boot.late", 1, containercontract.OverrideOptions{}); false == errors.Is(overrideErr, containercontract.ErrBootFinished) {
+        t.Fatalf("expected an override on the finished boot scope to name ErrBootFinished, got %v", overrideErr)
     }
 
     if containercontract.KindBoot != bootRuntime.Kind() {

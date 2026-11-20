@@ -591,7 +591,9 @@ A configuration whose hazard has no legitimate reading is refused where it is co
 ### Container and runtime helpers
 
 - [`const ServiceFirewallManager`](../../security/service_resolver.go)
+- [`FirewallManagerMustFromRuntime(containercontract.Runtime)`](../../security/service_resolver.go)
 - [`FirewallManagerMustFromResolver(context.Context, containercontract.Resolver)`](../../security/service_resolver.go)
+- [`FirewallManagerFromRuntime(containercontract.Runtime)`](../../security/service_resolver.go) — answers `nil` when the manager cannot be resolved, as `FirewallManagerFromResolver` does
 - [`FirewallManagerFromResolver(context.Context, containercontract.Resolver)`](../../security/service_resolver.go)
 - [`SecurityContextSetOnRuntime(containercontract.Runtime, *SecurityContext)`](../../security/service_resolver.go)
 - [`SecurityContextFromRuntime(containercontract.Runtime)`](../../security/service_resolver.go)

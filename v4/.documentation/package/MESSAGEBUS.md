@@ -204,6 +204,7 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 
 - [`const ServiceBus`](../../messagebus/service_resolver.go)
 - [`const ServiceHandlerLocator`](../../messagebus/service_resolver.go)
+- [`BusMustFromRuntime(containercontract.Runtime) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
 - [`BusMustFromResolver(context.Context, containercontract.Resolver) messagebuscontract.Bus`](../../messagebus/service_resolver.go)
 - [`HandlerLocatorMustFromResolver(context.Context, containercontract.Resolver) messagebuscontract.HandlerLocator`](../../messagebus/service_resolver.go)
 - [`const ServiceTransportsCloser`](../../messagebus/service_resolver.go)

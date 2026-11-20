@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `ConnectionMustFromRuntime(runtimeInstance)`, the connection read through the runtime's scope under its context, for code that holds a runtime; a nil runtime is refused. `ConnectionMustFromResolver` stays the door of a provider.
 - **Breaking** — `service_resolver.go`: `ConnectionMustFromContainer` is removed, `ConnectionMustFromResolver` taking the container as it takes a scope.
 - **Breaking** — `service_resolver.go`, `module.go`: `RegisterConnectionService` takes a `ConnectionServiceConfig{CloseTimeout}` and `ModuleConfig` carries `CloseTimeout`, a `bound.Duration` of 30s when left out, at least 1ms, unlimited refused, where the registered connection's closer always read the 30s default.
 - This major includes every change of the third major up to v3.3.0; that history is in the third major's changelog, and the third-major fixes released after it are listed below as carried.

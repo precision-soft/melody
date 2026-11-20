@@ -129,4 +129,5 @@ func example(ctx context.Context) time.Time {
 ### Container helpers (`clock`)
 
 - [`const ServiceClock`](../../clock/service_resolver.go)
+- [`ClockMustFromRuntime(containercontract.Runtime) clockcontract.Clock`](../../clock/service_resolver.go)
 - [`ClockMustFromResolver(context.Context, containercontract.Resolver) clockcontract.Clock`](../../clock/service_resolver.go)

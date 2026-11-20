@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- `ClientMustFromRuntime(runtimeInstance)`, the raw client read through the runtime's scope under its context, for code that holds a runtime; a nil runtime is refused. `ClientMustFromResolver` stays the door of a provider.
 - **Breaking** — `service_resolver.go`: `ClientMustFromContainer` and `TokenStoreMustFromContainer` are removed, their `…FromResolver` forms taking the container as they take a scope.
 - This major includes every change of the third major up to v3.6.0; that history is in the third major's changelog.
 - `client_config.go`: `ClientConfig.ClientSideCacheBytes`, the client-side cache's budget for each connection, 128 MiB when left out as the library's default, at least 1, unlimited refused, and refused naming both fields when the cache is not enabled.

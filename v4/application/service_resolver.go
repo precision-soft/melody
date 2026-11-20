@@ -6,11 +6,16 @@ import (
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
 )
 
 /* ServiceProcessRole resolves to the process role string (config.RoleWeb, config.RoleWorker or config.RoleAll) so services can gate background work without reaching back to the application instance. */
 const ServiceProcessRole = "service.application.process_role"
+
+func ProcessRoleMustFromRuntime(runtimeInstance containercontract.Runtime) string {
+    return runtime.MustFromRuntime[string](runtimeInstance, ServiceProcessRole)
+}
 
 func ProcessRoleMustFromResolver(ctx context.Context, resolver containercontract.Resolver) string {
     return container.MustFromResolver[string](ctx, resolver, ServiceProcessRole)

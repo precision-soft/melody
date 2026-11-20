@@ -207,5 +207,6 @@ The returned session is a **new object marked modified**, and the one passed in 
 
 - [`const ServiceSessionManager`](../../session/service_resolver.go)
 - [`const ServiceSessionStorage`](../../session/service_resolver.go)
+- [`SessionMustFromRuntime(containercontract.Runtime)`](../../session/service_resolver.go)
 - [`SessionMustFromResolver(context.Context, containercontract.Resolver)`](../../session/service_resolver.go)
 - [`SessionStorageMustFromResolver(context.Context, containercontract.Resolver)`](../../session/service_resolver.go)

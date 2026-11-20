@@ -102,3 +102,67 @@ func TestSourceWalk_NoFileNamesTheRemovedResolutionContextDoors(t *testing.T) {
         }
     }
 }
+
+/* an accessor a provider reads stays resolver-only, and one whose bound view is still to come waits for it; every other named accessor has a runtime form beside it */
+var accessorWithoutRuntimeForm = map[string]string{
+    "v4/cache:CacheBackendMustFromResolver":                         "provider",
+    "v4/cache:CacheSerializerMustFromResolver":                      "provider",
+    "v4/messagebus:ConsumeBusFromResolver":                          "provider",
+    "v4/messagebus:TransportsMustFromResolver":                      "provider",
+    "v4/messagebus:RetryPolicyFromResolver":                         "provider",
+    "v4/messagebus:HandlerLocatorMustFromResolver":                  "provider",
+    "v4/session:SessionStorageMustFromResolver":                     "provider",
+    "v4/openapi:RegistryMustFromResolver":                           "provider",
+    "v4/openapi:InfoFromResolver":                                   "provider",
+    "integrations/amqp/v4:TransportMustFromResolver":                "provider",
+    "integrations/outbox/v4:RelayMustFromResolver":                  "provider",
+    "integrations/outbox/v4:NewRelayCommandFromResolver":            "constructor",
+    "v4/cache:CacheMustFromResolver":                                "view",
+    "v4/storage:StorageMustFromResolver":                            "view",
+    "integrations/rueidis/v4:TokenStoreMustFromResolver":            "view",
+    "integrations/rueidis/v4:EpochRevocableTokenStoreMustFromResolver": "view",
+}
+
+func TestSourceWalk_EveryNamedResolverAccessorHasARuntimeFormOrADecision(t *testing.T) {
+    accessor := regexp.MustCompile(`(?m)^func ([A-Z][A-Za-z0-9]*)FromResolver\(`)
+    seen := map[string]bool{}
+
+    for _, source := range fourthMajorSourceList(t) {
+        slashed := filepath.ToSlash(source)
+        if true == strings.HasSuffix(source, "_test.go") || true == strings.Contains(slashed, "/.example/") {
+            continue
+        }
+
+        content, readErr := os.ReadFile(source)
+        if nil != readErr {
+            t.Fatalf("read %s: %v", source, readErr)
+        }
+
+        directory := filepath.ToSlash(filepath.Dir(source))
+        if true == strings.HasPrefix(directory, "../../../integrations/") {
+            directory = strings.TrimPrefix(directory, "../../../")
+        } else {
+            directory = "v4/" + strings.TrimPrefix(directory, "../../")
+        }
+
+        for _, match := range accessor.FindAllSubmatch(content, -1) {
+            stem := string(match[1])
+            key := directory + ":" + stem + "FromResolver"
+            seen[key] = true
+
+            if _, decided := accessorWithoutRuntimeForm[key]; true == decided {
+                continue
+            }
+
+            if false == regexp.MustCompile(`(?m)^func `+stem+`FromRuntime\(`).Match(content) {
+                t.Errorf("%s declares %sFromResolver without %sFromRuntime beside it; add the runtime form, or list it as provider-only or as waiting for its view", source, stem, stem)
+            }
+        }
+    }
+
+    for key := range accessorWithoutRuntimeForm {
+        if false == seen[key] {
+            t.Errorf("the decision for %s names no accessor any more; drop it from the list", key)
+        }
+    }
+}

@@ -128,4 +128,5 @@ The example application wires a translator (`config/translation.go`) and exposes
 ### Container helpers (`translation`)
 
 - [`const ServiceTranslator`](../../translation/service_resolver.go)
+- [`TranslatorMustFromRuntime(containercontract.Runtime) translationcontract.Translator`](../../translation/service_resolver.go)
 - [`TranslatorMustFromResolver(context.Context, containercontract.Resolver) translationcontract.Translator`](../../translation/service_resolver.go)

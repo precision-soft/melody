@@ -209,7 +209,7 @@ func main() {
 
 ## Plug-and-play registration
 
-Each capability has a one-call registration helper that binds it to a canonical service name, so handlers resolve it through the matching `*MustFromResolver` helper:
+Each capability has a one-call registration helper that binds it to a canonical service name, so a provider resolves it through the matching `*MustFromResolver` helper, and a handler holding a runtime reads the raw client with `ClientMustFromRuntime(runtimeInstance)`:
 
 ```go
 rueidis.RegisterClientService(registrar, client)                                                   /* rueidis.ServiceClient, "service.rueidis.client" */

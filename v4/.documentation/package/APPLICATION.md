@@ -339,6 +339,7 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
 - [`MiddlewarePriorityStatic`](../../application/http_middleware.go)
 - [`MiddlewarePriorityDefault`](../../application/http_middleware.go)
 - [`ServiceProcessRole`](../../application/service_resolver.go) — resolves to the process role string, so a service can gate background work without reaching back to the application instance
+    - [`ProcessRoleMustFromRuntime(runtimeInstance)`](../../application/service_resolver.go)
     - [`ProcessRoleMustFromResolver(ctx, resolver)`](../../application/service_resolver.go)
 - [`ServiceProcessContext`](../../application/service_resolver.go) — resolves to the console run's `ProcessContext`. The cli entry point installs it into the run's scope, so it takes a resolver rather than the container
     - [`ProcessContextFromRuntime(runtimeInstance)`](../../application/service_resolver.go), [`ProcessContextMustFromRuntime(runtimeInstance)`](../../application/service_resolver.go) — a runtime that is not a run's answers an error under `containercontract.ErrRuntimeKindRefused` naming both kinds, so code that runs on both process shapes tells absence apart by the error

@@ -469,6 +469,8 @@ func example() configcontract.Configuration {
 ### Container helpers (`config`)
 
 - [`const ServiceConfig`](../../config/service_resolver.go)
+- [`ConfigFromRuntime(containercontract.Runtime) (configcontract.Configuration, error)`](../../config/service_resolver.go) — the error form of `ConfigMustFromRuntime`
+- [`ConfigMustFromRuntime(containercontract.Runtime) configcontract.Configuration`](../../config/service_resolver.go) — the door of code that holds a runtime: a handler, a command, a listener, a boot hook under `kernelInstance.BootRuntime()`
 - [`ConfigMustFromResolver(context.Context, containercontract.Resolver) configcontract.Configuration`](../../config/service_resolver.go) — the door a provider comes through, since a provider is handed a `Resolver`; it takes the container as it takes a scope
 
 ### Environment variable keys (`config`)

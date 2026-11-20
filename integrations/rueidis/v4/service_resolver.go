@@ -7,6 +7,7 @@ import (
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     melodylock "github.com/precision-soft/melody/v4/lock"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
@@ -52,6 +53,10 @@ func RegisterClientService(registrar ServiceRegistrar, client rueidis.Client) {
         },
         container.RegisterOptions{},
     )
+}
+
+func ClientMustFromRuntime(runtimeInstance containercontract.Runtime) rueidis.Client {
+    return runtime.MustFromRuntime[rueidis.Client](runtimeInstance, ServiceClient)
 }
 
 func ClientMustFromResolver(ctx context.Context, resolver containercontract.Resolver) rueidis.Client {

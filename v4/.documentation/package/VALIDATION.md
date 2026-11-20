@@ -129,7 +129,9 @@ func validateInput(input CreateUserInput) error {
 ### Container access (validation)
 
 - [`const ServiceValidator`](../../validation/const.go)
+- [`ValidatorMustFromRuntime(runtimeInstance containercontract.Runtime)`](../../validation/service_resolver.go)
 - [`ValidatorMustFromResolver(ctx context.Context, resolver containercontract.Resolver)`](../../validation/service_resolver.go)
+- [`ValidatorFromRuntime(runtimeInstance containercontract.Runtime) *Validator`](../../validation/service_resolver.go) — returns `nil` when the validator cannot be resolved, as `ValidatorFromResolver` does
 - [`ValidatorFromResolver(ctx context.Context, resolver containercontract.Resolver) *Validator`](../../validation/service_resolver.go) — returns `nil` rather than an error when the service cannot be resolved; the `Must` variant panics instead
 
 ### Constants

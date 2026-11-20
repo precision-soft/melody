@@ -133,7 +133,7 @@ func (instance *scope) registerOnScope(
                 "refusedAt":   "entry",
                 "serviceName": serviceName,
             },
-            ErrScopeClosed,
+            instance.closedCause(),
         )
     }
 
@@ -164,7 +164,7 @@ func (instance *scope) registerOnScope(
                 "refusedAt":   "lockHandOff",
                 "serviceName": serviceName,
             },
-            ErrScopeClosed,
+            instance.closedCause(),
         )
     }
 

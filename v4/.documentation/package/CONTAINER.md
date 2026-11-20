@@ -113,6 +113,8 @@ container.MustRegister[*Worker](registrar, ServiceWorker,
     container.RegisterOptions{})
 ```
 
+With a runtime in hand — a handler, a command, a listener, a boot hook under `kernelInstance.BootRuntime()` — resolve through it: `XMustFromRuntime(runtimeInstance)` where the package has that form, or `runtime.FromRuntime[T](runtimeInstance, name)` for a service of your own. `XFromResolver(ctx, resolver)` is the door of a provider, which holds a resolver. The cache, the storage and the token stores keep their resolver form until their bound views arrive; the accessors other services are built from (a backend, a transport, a registry, a relay) have no runtime form.
+
 ## Usage
 
 The example below demonstrates:

@@ -101,6 +101,15 @@ func (instance *scope) recordCreationOrderLocked(nodeKey string) {
     instance.creationOrderByNodeKey[nodeKey] = instance.creationOrderCounter
 }
 
+/* closedCause is the sentinel a closed scope refuses under; the boot scope names the finished boot as well. */
+func (instance *scope) closedCause() error {
+    if true == instance.boot {
+        return errBootScopeClosed
+    }
+
+    return ErrScopeClosed
+}
+
 func (instance *scope) Get(ctx context.Context, serviceName string) (any, error) {
     if "" == serviceName {
         return nil, exception.NewError(
@@ -116,7 +125,7 @@ func (instance *scope) Get(ctx context.Context, serviceName string) (any, error)
         return nil, exception.NewError(
             "scope is closed",
             nil,
-            ErrScopeClosed,
+            instance.closedCause(),
         )
     }
 
@@ -157,7 +166,7 @@ func (instance *scope) GetByType(ctx context.Context, targetType reflect.Type) (
         return nil, exception.NewError(
             "scope is closed",
             nil,
-            ErrScopeClosed,
+            instance.closedCause(),
         )
     }
 
@@ -388,7 +397,7 @@ func (instance *scope) OverrideProtectedInstance(serviceName string, value any, 
                 "refusedAt":   "entry",
                 "serviceName": serviceName,
             },
-            ErrScopeClosed,
+            instance.closedCause(),
         )
     }
 
@@ -422,7 +431,7 @@ func (instance *scope) OverrideProtectedInstance(serviceName string, value any, 
                 "refusedAt":   "lockHandOff",
                 "serviceName": serviceName,
             },
-            ErrScopeClosed,
+            instance.closedCause(),
         )
     }
 
@@ -933,7 +942,7 @@ func (instance *scope) lookupInstanceByName(serviceName string) (any, bool, erro
         return nil, false, exception.NewError(
             "scope is closed",
             nil,
-            ErrScopeClosed,
+            instance.closedCause(),
         )
     }
 
@@ -963,7 +972,7 @@ func (instance *scope) lookupInstanceByType(canonicalType reflect.Type) (any, bo
         return nil, false, exception.NewError(
             "scope is closed",
             nil,
-            ErrScopeClosed,
+            instance.closedCause(),
         )
     }
 
@@ -998,7 +1007,7 @@ func (instance *scope) storeCreatedInstance(
                 "serviceName": serviceName,
                 "serviceType": canonicalTypeName,
             },
-            ErrScopeClosed,
+            instance.closedCause(),
         )
     }
 

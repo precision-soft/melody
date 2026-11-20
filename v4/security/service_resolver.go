@@ -5,6 +5,7 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
@@ -15,8 +16,22 @@ const (
     ServiceFirewallManager = "service.security.firewall_manager"
 )
 
+func FirewallManagerMustFromRuntime(runtimeInstance containercontract.Runtime) securitycontract.FirewallManager {
+    return runtime.MustFromRuntime[securitycontract.FirewallManager](runtimeInstance, ServiceFirewallManager)
+}
+
 func FirewallManagerMustFromResolver(ctx context.Context, resolver containercontract.Resolver) securitycontract.FirewallManager {
     return container.MustFromResolver[securitycontract.FirewallManager](ctx, resolver, ServiceFirewallManager)
+}
+
+/* FirewallManagerFromRuntime answers nil when the service cannot be resolved, as FirewallManagerFromResolver does. */
+func FirewallManagerFromRuntime(runtimeInstance containercontract.Runtime) securitycontract.FirewallManager {
+    firewallManagerInstance, err := runtime.FromRuntime[securitycontract.FirewallManager](runtimeInstance, ServiceFirewallManager)
+    if nil == firewallManagerInstance || nil != err {
+        return nil
+    }
+
+    return firewallManagerInstance
 }
 
 func FirewallManagerFromResolver(ctx context.Context, resolver containercontract.Resolver) securitycontract.FirewallManager {

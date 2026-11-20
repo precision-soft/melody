@@ -713,8 +713,11 @@ Where the list itself comes from is the application's business — a constant as
     - [`const ServiceUrlGenerator`](../../http/service_resolver.go)
     - [`const ServiceRouter`](../../http/service_resolver.go)
     - [`const ServiceRequestContext`](../../http/service_resolver.go)
+    - [`RouteRegistryMustFromRuntime(containercontract.Runtime)`](../../http/service_resolver.go)
     - [`RouteRegistryMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go)
+    - [`UrlGeneratorMustFromRuntime(containercontract.Runtime)`](../../http/service_resolver.go)
     - [`UrlGeneratorMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go)
+    - [`RouterMustFromRuntime(containercontract.Runtime)`](../../http/service_resolver.go)
     - [`RouterMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go)
     - [`RequestContextFromRuntime(runtimeInstance)`](../../http/service_resolver.go) / [`RequestContextMustFromRuntime(runtimeInstance)`](../../http/service_resolver.go) — the only accessors of `ServiceRequestContext`, which lives on the request scope; a runtime that is not a request's answers an error under `containercontract.ErrRuntimeKindRefused` naming both kinds, where the second panics
 

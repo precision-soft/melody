@@ -9,6 +9,7 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal"
     messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
@@ -25,6 +26,10 @@ const (
 
 type ServiceRegistrar interface {
     RegisterService(serviceName string, provider any, options containercontract.RegisterOptions)
+}
+
+func BusMustFromRuntime(runtimeInstance containercontract.Runtime) messagebuscontract.Bus {
+    return runtime.MustFromRuntime[messagebuscontract.Bus](runtimeInstance, ServiceBus)
 }
 
 func BusMustFromResolver(ctx context.Context, resolver containercontract.Resolver) messagebuscontract.Bus {

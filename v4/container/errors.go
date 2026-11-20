@@ -2,6 +2,9 @@ package container
 
 import (
     "errors"
+    "fmt"
+
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
 
 /* ErrServiceIdAlreadyRegistered is the cause of a Register refusal for a duplicate service name, and of a RegisterScoped refusal for a name the container holds unless the scoped registration declares ReplacesContainerService. */
@@ -45,6 +48,9 @@ var ErrScopedServiceTypeAlreadyRegistered = errors.New("scoped service type alre
 
 /* ErrScopeClosed is the cause of every refusal a closed scope answers — resolution, registration and collection — and of a lazy handle's refusal over it. */
 var ErrScopeClosed = errors.New("scope is closed")
+
+/* errBootScopeClosed is what the boot scope's refusals carry once the boot finished closed it: ErrScopeClosed and containercontract.ErrBootFinished both match. */
+var errBootScopeClosed = fmt.Errorf("%w: %w", ErrScopeClosed, containercontract.ErrBootFinished)
 
 /* ErrScopedServiceAtBoot is the cause of the boot scope's refusal of a scoped service, by name or type, and of a scoped registration on it: a scoped service is built inside a request, a delivery or a run. */
 var ErrScopedServiceAtBoot = errors.New("a scoped service is not built at boot")

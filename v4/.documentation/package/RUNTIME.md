@@ -108,7 +108,7 @@ func example() int64 {
     - Implementation: [`NewRequest`, `NewRun`, `WithContext`](../../container/runtime/runtime.go)
 - `NewRequest` and `NewRun` bind their kind to the scope, so a provider whose creation enters through that scope reads it as `resolver.Runtime().Kind()`, and a singleton reads the kind of the call that built it first. One scope serves one kind: a constructor of another kind over a bound scope panics naming both; give each kind its own scope. A scope of another implementation is accepted and not bound. A resolution through the container itself, or through a scope no constructor bound, hands its provider `KindDetached`.
     - Implementation: [`(*scope).BindRuntimeKind`](../../container/scope_runtime_seam.go), [`(*resolverContext).Runtime`](../../container/resolver_context.go)
-- `NewBoot(ctx, container)` opens the runtime of the application's boot over `container.NewBootScope()` and answers it with its finish: the finish closes the boot scope, then ends the context with `containercontract.ErrBootFinished` as its cause, answers the close's error and answers nil a second time. The application opens one in `Boot`; a hook reads it through `Kernel.BootRuntime()`.
+- `NewBoot(ctx, container)` opens the runtime of the application's boot over `container.NewBootScope()` and answers it with its finish: the finish closes the boot scope, then ends the context with `containercontract.ErrBootFinished` as its cause, answers the close's error and answers nil a second time. The application opens one in `Boot`; a hook reads it through `Kernel.BootRuntime()`. Once finished, every refusal of the boot scope — a resolution, an override, a registration, a child scope — matches both `container.ErrScopeClosed` and `ErrBootFinished`, so a door used under a boot runtime kept past `Boot` names the finished boot.
     - Implementation: [`NewBoot`](../../container/runtime/runtime.go)
 - The runtime itself does not own lifecycle cleanup; the caller is responsible for closing the scope (and container when appropriate).
 
@@ -130,3 +130,5 @@ func example() int64 {
 
 - [`runtime.FromRuntime`](../../container/runtime/resolver.go)
 - [`runtime.MustFromRuntime`](../../container/runtime/resolver.go)
+
+With a runtime in hand, resolve through it: `XMustFromRuntime(runtimeInstance)` where the package has that form, or `runtime.FromRuntime[T](runtimeInstance, name)` for a service of your own. `XFromResolver(ctx, resolver)` is the door of a provider, which holds a resolver.
