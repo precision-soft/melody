@@ -292,6 +292,14 @@ func (instance *resolverContext) readsContainer() bool {
     return false == instance.scopeVisible()
 }
 
+func (instance *resolverContext) closedScopeCause() error {
+    if nil == instance.scopeInstance {
+        return ErrScopeClosed
+    }
+
+    return instance.scopeInstance.closedCause()
+}
+
 /* isScopeClosed lets a collection through this resolver refuse as it refuses through a closed scope, under the same predicate as Closed. */
 func (instance *resolverContext) isScopeClosed() bool {
     return true == instance.scopeVisible() && true == instance.scopeInstance.isScopeClosed()

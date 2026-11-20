@@ -96,7 +96,7 @@ func (instance *UserCreateCommand) Run(runtimeInstance melodycontainercontract.R
         return hashErr
     }
 
-    userService, resolveErr := instance.userService.Resolve(runtimeInstance.Context())
+    userService, resolveErr := instance.userService.Resolve(runtimeInstance)
     if nil != resolveErr {
         return resolveErr
     }

@@ -535,7 +535,7 @@ func TestFromResolverByType_NilResolverIsRefusedInsteadOfDereferenced(t *testing
 func TestLazy_NilResolverSurfacesAsAnErrorAtFirstUse(t *testing.T) {
     lazyService := Lazy[*resolverTestService](nil, "app.service")
 
-    _, resolveErr := lazyService.Resolve(t.Context())
+    _, resolveErr := lazyService.resolveOver(t.Context())
 
     if nil == resolveErr {
         t.Fatalf("expected the deferred resolution to report the nil resolver")
@@ -844,12 +844,12 @@ func TestResolverDoors_ATypedNilContextAndTheTypedDoorsRefuseANilContext(t *test
     }
 
     handle := Lazy[*testService](serviceContainer, "app.typed.nil.context")
-    if _, resolveErr := handle.Resolve(context.Background()); nil != resolveErr {
+    if _, resolveErr := handle.resolveOver(context.Background()); nil != resolveErr {
         t.Fatalf("unexpected error: %v", resolveErr)
     }
 
-    if _, resolveErr := handle.Resolve(nilContext); nil == resolveErr || false == strings.Contains(resolveErr.Error(), "context is required in lazy resolve") {
-        t.Fatalf("expected a memoized handle to refuse a nil context, got %v", resolveErr)
+    if _, resolveErr := handle.resolveOver(nilContext); nil == resolveErr || false == strings.Contains(resolveErr.Error(), "the runtime is nil or carries no context") {
+        t.Fatalf("expected a memoized handle to refuse a runtime with a nil context, got %v", resolveErr)
     }
 }
 
@@ -888,7 +888,7 @@ func TestForGoroutine_AGoroutineAProviderStartsResolvesAsTheProvidersDependency(
 
             goroutineContexts <- goroutineResolver.Runtime().Context()
 
-            _, handleErr := handle.Resolve(context.Background())
+            _, handleErr := handle.resolveOver(context.Background())
             goroutineErrors <- handleErr
 
             _, typedErr := FromResolverByType[goroutineViewTypedDependency](context.Background(), goroutineResolver)
@@ -1176,7 +1176,7 @@ func TestForGoroutine_AHandleOverAScopedProvidersViewTurnsTerminalWithTheScope(t
         t.Fatalf("unexpected scope close error: %v", closeErr)
     }
 
-    if _, resolveErr := handle.Resolve(t.Context()); false == errors.Is(resolveErr, ErrScopeClosed) {
+    if _, resolveErr := handle.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrScopeClosed) {
         t.Fatalf("expected the handle terminal with its scope, got %v", resolveErr)
     }
 }

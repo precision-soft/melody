@@ -2,7 +2,6 @@ package container
 
 import (
     "errors"
-    "fmt"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
 )
@@ -46,11 +45,21 @@ var ErrScopedServiceIdAlreadyRegistered = errors.New("scoped service already reg
 /* ErrScopedServiceTypeAlreadyRegistered is the cause of a strict scoped type-registration refusal for a duplicate service type, and of a container Register refusal, strict or not, for a type a scoped registration holds. */
 var ErrScopedServiceTypeAlreadyRegistered = errors.New("scoped service type already registered")
 
-/* ErrScopeClosed is the cause of every refusal a closed scope answers — resolution, registration and collection — and of a lazy handle's refusal over it. */
+/* ErrScopeClosed is the cause of every refusal a closed scope answers — resolution, registration and collection — and of a lazy handle's refusal over it; a closed boot scope's refusals match containercontract.ErrBootFinished as well. */
 var ErrScopeClosed = errors.New("scope is closed")
 
-/* errBootScopeClosed is what the boot scope's refusals carry once the boot finished closed it: ErrScopeClosed and containercontract.ErrBootFinished both match. */
-var errBootScopeClosed = fmt.Errorf("%w: %w", ErrScopeClosed, containercontract.ErrBootFinished)
+/* errBootScopeClosed is what a closed boot scope's refusals carry: ErrScopeClosed and containercontract.ErrBootFinished both match, through Is rather than Unwrap, so the rendered cause chain names the fact once. A boot scope closed before the boot finished answers it too. */
+var errBootScopeClosed error = bootScopeClosedError{}
+
+type bootScopeClosedError struct{}
+
+func (instance bootScopeClosedError) Error() string {
+    return "the boot scope is closed: the application boot has finished"
+}
+
+func (instance bootScopeClosedError) Is(target error) bool {
+    return ErrScopeClosed == target || containercontract.ErrBootFinished == target
+}
 
 /* ErrScopedServiceAtBoot is the cause of the boot scope's refusal of a scoped service, by name or type, and of a scoped registration on it: a scoped service is built inside a request, a delivery or a run. */
 var ErrScopedServiceAtBoot = errors.New("a scoped service is not built at boot")

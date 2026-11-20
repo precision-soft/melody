@@ -922,6 +922,10 @@ func (instance *scope) scopedPrioritizedReferences(interfaceType reflect.Type) [
     return references
 }
 
+func (instance *scope) closedScopeCause() error {
+    return instance.closedCause()
+}
+
 func (instance *scope) isScopeClosed() bool {
     return nil == instance.container.Load()
 }

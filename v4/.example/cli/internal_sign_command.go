@@ -139,7 +139,7 @@ func (instance *InternalSignCommand) Run(
 
 func (instance *InternalSignCommand) signerFor(runtimeInstance melodycontainercontract.Runtime, rawTtl string) (*melodysecurity.HmacEnvelopeSigner, error) {
     if "" == rawTtl {
-        return instance.signer.Resolve(runtimeInstance.Context())
+        return instance.signer.Resolve(runtimeInstance)
     }
 
     parsedTtl, parseErr := time.ParseDuration(rawTtl)

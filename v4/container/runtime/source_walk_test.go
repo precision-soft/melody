@@ -105,6 +105,8 @@ func TestSourceWalk_NoFileNamesTheRemovedResolutionContextDoors(t *testing.T) {
 
 /* an accessor a provider reads stays resolver-only, and one whose bound view is still to come waits for it; every other named accessor has a runtime form beside it */
 var accessorWithoutRuntimeForm = map[string]string{
+    "v4/container:MustFromResolver":                                 "generic door, its runtime form is runtime.MustFromRuntime",
+    "v4/container:MustFromResolverByType":                           "generic door, by type, resolved through runtime.MustFromRuntime by name",
     "v4/cache:CacheBackendMustFromResolver":                         "provider",
     "v4/cache:CacheSerializerMustFromResolver":                      "provider",
     "v4/messagebus:ConsumeBusFromResolver":                          "provider",
@@ -124,8 +126,10 @@ var accessorWithoutRuntimeForm = map[string]string{
 }
 
 func TestSourceWalk_EveryNamedResolverAccessorHasARuntimeFormOrADecision(t *testing.T) {
-    accessor := regexp.MustCompile(`(?m)^func ([A-Z][A-Za-z0-9]*)FromResolver\(`)
+    /* a generic accessor and a suffixed one count too; the twin is looked for in the same file */
+    accessor := regexp.MustCompile(`(?m)^func ([A-Z][A-Za-z0-9]*)FromResolver([A-Za-z0-9]*)[\[(]`)
     seen := map[string]bool{}
+    _, integrationErr := os.Stat(filepath.Join("..", "..", "..", "integrations"))
 
     for _, source := range fourthMajorSourceList(t) {
         slashed := filepath.ToSlash(source)
@@ -147,20 +151,32 @@ func TestSourceWalk_EveryNamedResolverAccessorHasARuntimeFormOrADecision(t *test
 
         for _, match := range accessor.FindAllSubmatch(content, -1) {
             stem := string(match[1])
-            key := directory + ":" + stem + "FromResolver"
+            suffix := string(match[2])
+            key := directory + ":" + stem + "FromResolver" + suffix
             seen[key] = true
 
+            hasTwin := regexp.MustCompile(`(?m)^func ` + stem + `FromRuntime` + suffix + `[\[(]`).Match(content)
+
             if _, decided := accessorWithoutRuntimeForm[key]; true == decided {
+                if true == hasTwin {
+                    t.Errorf("%s has a runtime form now; drop it from the list", key)
+                }
+
                 continue
             }
 
-            if false == regexp.MustCompile(`(?m)^func `+stem+`FromRuntime\(`).Match(content) {
-                t.Errorf("%s declares %sFromResolver without %sFromRuntime beside it; add the runtime form, or list it as provider-only or as waiting for its view", source, stem, stem)
+            if false == hasTwin {
+                t.Errorf("%s declares %sFromResolver%s without %sFromRuntime%s beside it; add the runtime form, or list it as provider-only or as waiting for its view", source, stem, suffix, stem, suffix)
             }
         }
     }
 
     for key := range accessorWithoutRuntimeForm {
+        /* a tree without the integrations cannot judge their decisions */
+        if nil != integrationErr && true == strings.HasPrefix(key, "integrations/") {
+            continue
+        }
+
         if false == seen[key] {
             t.Errorf("the decision for %s names no accessor any more; drop it from the list", key)
         }

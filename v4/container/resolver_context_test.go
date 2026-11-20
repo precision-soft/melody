@@ -684,7 +684,7 @@ func TestResolverContext_ConcurrentFirstUsesOfALazyOverAProvidersResolverAllReso
                 defer waitGroup.Done()
                 <-start
 
-                if _, resolveErr := handle.Resolve(t.Context()); nil != resolveErr {
+                if _, resolveErr := handle.resolveOver(t.Context()); nil != resolveErr {
                     failures <- resolveErr
                 }
             }()
@@ -842,7 +842,7 @@ func assertResolverWaitGraphIsEmpty(t *testing.T, serviceContainer *container) {
 
 func TestResolverContext_ACycleClosedThroughALazyOverAProvidersResolverIsRefusedAsCircular(t *testing.T) {
     serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
-        _, resolveErr := holder.handle.Resolve(t.Context())
+        _, resolveErr := holder.handle.resolveOver(t.Context())
 
         return resolveErr
     }, true)
@@ -872,11 +872,11 @@ func TestResolverContext_ACycleClosedThroughAProvidersResolverByTypeIsRefusedAsC
 
 func TestResolverContext_LateUsesInsideABuildingAncestorWithoutACycleResolveAndLeaveNoWaitEdge(t *testing.T) {
     serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
-        if _, otherErr := holder.other.Resolve(t.Context()); nil != otherErr {
+        if _, otherErr := holder.other.resolveOver(t.Context()); nil != otherErr {
             return otherErr
         }
 
-        _, leafErr := holder.handle.Resolve(t.Context())
+        _, leafErr := holder.handle.resolveOver(t.Context())
 
         return leafErr
     }, false)
@@ -893,7 +893,7 @@ func TestResolverContext_ALateUseFromAnotherGoroutineOffTheAncestorsPathResolves
     otherAnswer := make(chan error, 1)
     serviceContainer := newLateCycleContainer(func(holder *lateCycleHolder) error {
         go func() {
-            _, otherErr := holder.other.Resolve(t.Context())
+            _, otherErr := holder.other.resolveOver(t.Context())
             otherAnswer <- otherErr
         }()
 
@@ -947,7 +947,7 @@ func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsC
             return nil, holderErr
         }
 
-        if _, leafErr := holder.handle.Resolve(resolver.Runtime().Context()); nil != leafErr {
+        if _, leafErr := holder.handle.resolveOver(resolver.Runtime().Context()); nil != leafErr {
             return nil, leafErr
         }
 

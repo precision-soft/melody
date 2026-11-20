@@ -1,6 +1,7 @@
 package config
 
 import (
+    "context"
     "path/filepath"
 
     melodyrueidis "github.com/precision-soft/melody/integrations/rueidis/v4"
@@ -17,6 +18,7 @@ import (
     melodycachecontract "github.com/precision-soft/melody/v4/cache/contract"
     melodycontainer "github.com/precision-soft/melody/v4/container"
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodylogging "github.com/precision-soft/melody/v4/logging"
     melodymailer "github.com/precision-soft/melody/v4/mailer"
@@ -301,7 +303,10 @@ func registerCatalogJournalSourceService(registrar melodycontainercontract.Regis
         func(resolver melodycontainercontract.Resolver) (reporting.CatalogJournalSource, error) {
             journal := melodycontainer.Lazy[repository.CatalogJournalRepository](resolver, repository.ServiceCatalogJournalRepository)
 
-            return journal.Resolve, nil
+            /* the trail flushes from its scope's close as well, where no runtime is held, so the journal is created detached over the flush's context */
+            return func(ctx context.Context) (repository.CatalogJournalRepository, error) {
+                return journal.Resolve(melodyruntime.WithContext(resolver.Runtime(), ctx))
+            }, nil
         },
         melodycontainer.RegisterOptions{},
     )

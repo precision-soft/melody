@@ -2396,7 +2396,7 @@ func TestScope_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClosesIt
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if _, resolveErr := holder.partner.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+    if _, resolveErr := holder.partner.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
         t.Fatalf("expected the lazy resolution closing the scoped ring refused with ErrCircularDependency, got %v", resolveErr)
     }
 
@@ -2583,7 +2583,7 @@ func TestScope_ARingClosedThroughALazyByTypeHandleIsRefused(t *testing.T) {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if _, resolveErr := holder.partnerByType.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+    if _, resolveErr := holder.partnerByType.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
         t.Fatalf("expected the by-type lazy resolution closing the ring refused with ErrCircularDependency, got %v", resolveErr)
     }
 
@@ -2623,7 +2623,7 @@ func TestScope_ARingClosedByTypeOntoABuiltInstanceIsRefused(t *testing.T) {
         t.Fatalf("unexpected resolution error: %v", getErr)
     }
 
-    if _, resolveErr := holder.partner.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+    if _, resolveErr := holder.partner.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
         t.Fatalf("expected the lazy resolution closing the ring by type refused with ErrCircularDependency, got %v", resolveErr)
     }
 }

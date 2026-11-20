@@ -10,9 +10,9 @@ import (
     "github.com/precision-soft/melody/v4/internal"
 )
 
-/* LazyService defers resolving a container service until its first use and memoizes success only; a failed or nil resolution is retried. A handle built over a provider's resolver records the dependency when it resolves, so the teardown closes the holder first; one built over the container has no owner and orders nothing. A handle follows the scope of its resolver: once that scope reports itself closed, the handle answers the scope-is-closed error and drops the value, the closure and the resolver; a handle whose resolver reads the container turns terminal once the container's teardown finished and answers ErrContainerClosed. Code shared across requests resolves per call through FromResolver instead. */
+/* LazyService defers resolving a container service until its first use and memoizes success only; a failed or nil resolution is retried. A handle built over a provider's resolver records the dependency when it resolves, so the teardown closes the holder first; one built over the container has no owner and orders nothing. A handle follows the scope of its resolver: once that scope reports itself closed, the handle answers the scope-is-closed error and drops the value, the closure and the resolver; a handle whose resolver reads the container turns terminal once the container's teardown finished and answers ErrContainerClosed. The handle is used with the runtime of each call. Code shared across requests resolves per call through FromRuntime instead. */
 type LazyService[T any] struct {
-    resolve func(ctx context.Context) (T, error)
+    resolve func(runtimeInstance containercontract.Runtime) (T, error)
     /* the captured resolver, kept so its liveness can be asked and dropped with the closure */
     source       any
     mutex        sync.Mutex
@@ -23,33 +23,33 @@ type LazyService[T any] struct {
     closedCause error
 }
 
-/* Lazy returns a handle that resolves serviceName on first use, the deferred form of FromResolver. A handle over the container is safe for concurrent first uses. A handle over the resolver a provider received is safe for concurrent first uses once that provider has returned: from then on every resolution through its resolver starts a chain of its own and is still recorded as the provider's dependency. Until the provider returns, the resolver is the one chain the provider is resolving on, so a handle for a goroutine the provider starts is built over ForGoroutine(resolver), which resolves on a chain of its own from the start; a handle over the provider's own resolver used there before the provider returns can read the chain the provider is in the middle of, so the provider's own resolutions, or that use, can be refused as circular or recorded under the wrong parent. While the resolution that built the provider is still building a service, a use that reaches back to that service is refused as a circular dependency — from the resolution itself, which would otherwise wait on its own creation, and from any other goroutine as well, since the container cannot tell the two apart. */
+/* Lazy returns a handle that resolves serviceName on first use, the deferred form of FromResolver; the handle is used with the runtime of each call. A handle over the container is safe for concurrent first uses. A handle over the resolver a provider received is safe for concurrent first uses once that provider has returned: from then on every resolution through its resolver starts a chain of its own and is still recorded as the provider's dependency. Until the provider returns, the resolver is the one chain the provider is resolving on, so a handle for a goroutine the provider starts is built over ForGoroutine(resolver), which resolves on a chain of its own from the start; a handle over the provider's own resolver used there before the provider returns can read the chain the provider is in the middle of, so the provider's own resolutions, or that use, can be refused as circular or recorded under the wrong parent. While the resolution that built the provider is still building a service, a use that reaches back to that service is refused as a circular dependency — from the resolution itself, which would otherwise wait on its own creation, and from any other goroutine as well, since the container cannot tell the two apart. */
 func Lazy[T any](resolver containercontract.Resolver, serviceName string) *LazyService[T] {
     recordLazyHandleOf(resolver, serviceName, nil, reflect.TypeOf((*T)(nil)).Elem())
 
     return &LazyService[T]{
         source: resolver,
-        resolve: func(ctx context.Context) (T, error) {
-            return FromResolver[T](ctx, resolver, serviceName)
+        resolve: func(runtimeInstance containercontract.Runtime) (T, error) {
+            return fromResolverUnderRuntime[T](runtimeInstance, resolver, serviceName)
         },
     }
 }
 
-/* LazyByType returns a handle that resolves the service by its type on first use, the deferred form of FromResolverByType. */
+/* LazyByType returns a handle that resolves the service by its type on first use, the deferred form of FromResolverByType; the handle is used with the runtime of each call. */
 func LazyByType[T any](resolver containercontract.Resolver) *LazyService[T] {
     recordLazyHandleOf(resolver, "", reflect.TypeOf((*T)(nil)).Elem(), reflect.TypeOf((*T)(nil)).Elem())
 
     return &LazyService[T]{
         source: resolver,
-        resolve: func(ctx context.Context) (T, error) {
-            return FromResolverByType[T](ctx, resolver)
+        resolve: func(runtimeInstance containercontract.Runtime) (T, error) {
+            return fromResolverByTypeUnderRuntime[T](runtimeInstance, resolver)
         },
     }
 }
 
-/* Get resolves and returns the memoized value, panicking if the resolution fails or yields nil; neither is memoized. */
-func (instance *LazyService[T]) Get(ctx context.Context) T {
-    value, resolveErr := instance.Resolve(ctx)
+/* Get resolves under the caller's runtime and returns the memoized value, panicking if the resolution fails or yields nil; neither is memoized. */
+func (instance *LazyService[T]) Get(runtimeInstance containercontract.Runtime) T {
+    value, resolveErr := instance.Resolve(runtimeInstance)
     if nil != resolveErr {
         exception.Panic(exception.FromError(resolveErr))
     }
@@ -61,12 +61,12 @@ func (instance *LazyService[T]) Get(ctx context.Context) T {
     return value
 }
 
-/* Resolve returns the memoized value once a non-nil resolution succeeded; a failure or a nil yield is returned unmemoized and retried next time. Once the resolver's scope reports itself closed the handle is terminal, answering the scope-is-closed error on every call, and ErrContainerClosed when the resolver reads the container. The resolver runs outside the handle's lock, so a re-entrant resolution through the same handle is reported by the container's cycle detection over a resolver context, or blocks on the creation wait over the container. Racing first uses may each run the resolver; the first to store wins. The context bounds the resolution's wait on a creation another goroutine runs; a cancelled resolution is a failure, so it is not memoized. */
-func (instance *LazyService[T]) Resolve(ctx context.Context) (T, error) {
-    if true == internal.IsNilInterface(ctx) {
+/* Resolve returns the memoized value once a non-nil resolution succeeded; a failure or a nil yield is returned unmemoized and retried next time. Once the resolver's scope reports itself closed the handle is terminal, answering the scope-is-closed error on every call, and ErrContainerClosed when the resolver reads the container. The resolver runs outside the handle's lock, so a re-entrant resolution through the same handle is reported by the container's cycle detection over a resolver context, or blocks on the creation wait over the container. Racing first uses may each run the resolver; the first to store wins. The runtime is the caller's: its context bounds the wait on a creation another goroutine runs, and a creation this call starts runs under it; an unmemoized call under a context already done is refused before it resolves. The handle resolves through the resolver it was built over, never through the runtime's scope, so the owner's dependency is recorded and a handle of a container service reaches no scoped service. A creation started through a handle whose resolver reads the container hands its provider a runtime of the caller's kind over the caller's context and a suspended scope; a scoped handle keeps its scope's kind and, until it memoized, refuses a runtime of another scope, a child run's included. Only the call that creates the value lends its runtime: the service keeps the phase of its first creator. A nil runtime, or one with no context, is refused; a cancelled resolution is a failure, so it is not memoized. */
+func (instance *LazyService[T]) Resolve(runtimeInstance containercontract.Runtime) (T, error) {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
         var zero T
 
-        return zero, exception.NewError("context is required in lazy resolve", nil, nil)
+        return zero, nilErr
     }
 
     instance.mutex.Lock()
@@ -89,7 +89,14 @@ func (instance *LazyService[T]) Resolve(ctx context.Context) (T, error) {
     resolve := instance.resolve
     instance.mutex.Unlock()
 
-    value, resolveErr := resolve(ctx)
+    /* a creation is not started under a context already done: a boot runtime after Boot returned names the finished boot */
+    if doneErr := runtimeInstance.Context().Err(); nil != doneErr {
+        var zero T
+
+        return zero, exception.NewError("the runtime's context is done in lazy resolve", nil, context.Cause(runtimeInstance.Context()))
+    }
+
+    value, resolveErr := resolve(runtimeInstance)
     if nil != resolveErr {
         var zero T
 
@@ -146,7 +153,7 @@ func (instance *LazyService[T]) closedErrorLocked() error {
         return exception.NewError("lazy service container is closed", nil, ErrContainerClosed)
     }
 
-    return exception.NewError("lazy service scope is closed", nil, ErrScopeClosed)
+    return exception.NewError("lazy service scope is closed", nil, instance.closedCause)
 }
 
 /* containerReadingSource is a resolver that can say it reads the container rather than a scope. */
@@ -154,13 +161,13 @@ type containerReadingSource interface {
     readsContainer() bool
 }
 
-/* closedSourceCause answers the sentinel a closed source is refused with: the container's for a resolver reading the container, the scope's for every other. */
+/* closedSourceCause answers the sentinel a closed source is refused with: the container's for a resolver reading the container, the one its scope closed under for every other. */
 func closedSourceCause(source any) error {
     if readingSource, isReading := source.(containerReadingSource); true == isReading && true == readingSource.readsContainer() {
         return ErrContainerClosed
     }
 
-    return ErrScopeClosed
+    return scopeClosedCause(source)
 }
 
 /* resolutionRefusingSource asks whether a resolution of this source would be refused now, which for the container is later than Closed or IsClosed turning true: it answers until the last service Close returned. The scope needs no such door, since it refuses from the moment it closes. */

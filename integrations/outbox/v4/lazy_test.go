@@ -71,3 +71,31 @@ func TestLazyRepository_NilResolverPanicsAtConstruction(t *testing.T) {
 
     NewLazyRepository(nil)
 }
+
+type lazyRepositoryContextKey struct{}
+
+func TestLazyRepository_ResolvesTheStoreUnderTheDoorsContext(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+    var seen any
+    container.MustRegister[*Store](serviceContainer, ServiceStore, func(resolver containercontract.Resolver) (*Store, error) {
+        seen = resolver.Runtime().Context().Value(lazyRepositoryContextKey{})
+
+        return nil, errors.New("no database in this test")
+    }, container.RegisterOptions{})
+
+    repository := NewLazyRepository(serviceContainer)
+    doorContext := context.WithValue(t.Context(), lazyRepositoryContextKey{}, "door")
+    if _, claimErr := repository.ClaimDueMessages(doorContext, 1, time.Second); nil == claimErr {
+        t.Fatalf("expected the failing store to fail the door")
+    }
+
+    if "door" != seen {
+        t.Fatalf("the store's provider read %v, wanted the door's context", seen)
+    }
+
+    //nolint:staticcheck
+    if _, nilErr := repository.ClaimDueMessages(nil, 1, time.Second); nil == nilErr {
+        t.Fatalf("expected a nil context refused as an error")
+    }
+}

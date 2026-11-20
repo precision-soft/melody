@@ -86,6 +86,10 @@ func (instance *suspendedScope) readsContainer() bool {
     return true == isReading && true == readingSource.readsContainer()
 }
 
+func (instance *suspendedScope) closedScopeCause() error {
+    return scopeClosedCause(instance.resolver)
+}
+
 func (instance *suspendedScope) isScopeClosed() bool {
     closedChecker, isClosedChecker := instance.resolver.(closedScopeChecker)
 

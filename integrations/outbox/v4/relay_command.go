@@ -67,9 +67,9 @@ type RelayCommand struct {
 }
 
 /* resolveRelay returns the prebuilt relay, or resolves the lazy one — a successful resolution is memoized, a failed one is reported so the run loop treats it like a failed batch, backs off and retries instead of exiting. The nil-yield guard mirrors lazyRepository.resolveStore: LazyService.Resolve passes a nil yield through with a nil error, and the run loop would then dereference it and panic the relay process on what should have been one more retried failure. */
-func (instance *RelayCommand) resolveRelay(ctx context.Context) (*Relay, error) {
+func (instance *RelayCommand) resolveRelay(runtimeInstance containercontract.Runtime) (*Relay, error) {
     if nil != instance.relayLazy {
-        relay, resolveErr := instance.relayLazy.Resolve(ctx)
+        relay, resolveErr := instance.relayLazy.Resolve(runtimeInstance)
         if nil != resolveErr {
             return nil, resolveErr
         }
@@ -140,7 +140,7 @@ func (instance *RelayCommand) Run(
     for {
         /* the relay is resolved inside the loop: with a lazy relay a store outage at start-up surfaces here as an error that follows the same backoff-and-retry path as a failed batch, and a later successful resolution proceeds normally. */
         published := 0
-        relay, runErr := instance.resolveRelay(runContext)
+        relay, runErr := instance.resolveRelay(relayRuntime)
         if nil == runErr {
             published, runErr = relay.RunOnce(relayRuntime)
         }

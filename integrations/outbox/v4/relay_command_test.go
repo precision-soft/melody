@@ -297,7 +297,7 @@ func (instance nilYieldingResolver) Runtime() containercontract.Runtime {
 func TestRelayCommand_ANilRelayYieldIsAnErrorNotAPanic(t *testing.T) {
     relayCommand := NewRelayCommandFromResolver(nilYieldingResolver{}, RelayCommandConfig{})
 
-    relay, resolveErr := relayCommand.resolveRelay(t.Context())
+    relay, resolveErr := relayCommand.resolveRelay(runtime.NewRun(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()))
 
     if nil != relay {
         t.Fatalf("expected no relay, got %v", relay)
@@ -470,4 +470,35 @@ func TestRelayCommand_ReturnsOnACyclicChainFromTheRepository(t *testing.T) {
     assertReturnsOnACyclicChain(t, func() {
         _ = runRelayCommand(t, runtimeInstance, relay, []string{"--limit", "1"})
     })
+}
+
+type relayRuntimeKey struct{}
+
+func TestRelayCommand_ResolvesTheLazyRelayUnderTheRelayRuntime(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+    seenKind := containercontract.KindUnspecified
+    var seenValue any
+    container.MustRegister[*Relay](serviceContainer, ServiceRelay, func(resolver containercontract.Resolver) (*Relay, error) {
+        seenKind = resolver.Runtime().Kind()
+        seenValue = resolver.Runtime().Context().Value(relayRuntimeKey{})
+
+        return NewRelay(RelayConfig{
+            Repository: &fakeRepository{},
+            Transport:  &fakeTransport{},
+            Codec:      &stringCodec{},
+        }), nil
+    }, container.RegisterOptions{})
+
+    runtimeInstance := runtime.NewRun(context.WithValue(context.Background(), relayRuntimeKey{}, "run"), serviceContainer.NewScope())
+    relayCommand := NewRelayCommandFromResolver(serviceContainer, RelayCommandConfig{})
+    capturing := &capturingCommand{Command: relayCommand, runtimeInstance: runtimeInstance}
+
+    if commandErr := melodycli.DispatchCommand(context.Background(), capturing, runtimeInstance, []string{relayCommand.Name(), "--limit", "1", "--interval", "1ms"}, io.Discard, melodycli.DispatchConfig{}); nil != commandErr {
+        t.Fatalf("unexpected command run error: %v", commandErr)
+    }
+
+    if containercontract.KindRun != seenKind || "run" != seenValue {
+        t.Fatalf("the relay's provider read %s / %v, wanted the run kind over the run's context", seenKind, seenValue)
+    }
 }

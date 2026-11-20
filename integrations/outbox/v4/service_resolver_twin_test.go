@@ -2,12 +2,15 @@ package outbox
 
 import (
     "context"
+    "errors"
+    "fmt"
     "strings"
     "testing"
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
 type twinContextKey struct{}
@@ -50,6 +53,7 @@ func TestStoreMustFromRuntime_PanicsOnANilRuntimeAndAnUnregisteredService(t *tes
     }{
         {"nil runtime", nil, "runtime may not be nil"},
         {"unregistered", runtime.NewRequest(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()), "service is not registered"},
+        {"unregistered names the service", runtime.NewRequest(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope()), ServiceStore},
     } {
         func() {
             defer func() {
@@ -58,7 +62,7 @@ func TestStoreMustFromRuntime_PanicsOnANilRuntimeAndAnUnregisteredService(t *tes
                     t.Fatalf("%s: expected a panic", probe.name)
                 }
 
-                if recoveredErr, isError := recovered.(error); false == isError || false == strings.Contains(recoveredErr.Error(), probe.expected) {
+                if _, isError := recovered.(error); false == isError || false == strings.Contains(twinRecoveredText(recovered), probe.expected) {
                     t.Fatalf("%s: expected a panic naming %q, got %v", probe.name, probe.expected, recovered)
                 }
             }()
@@ -66,4 +70,26 @@ func TestStoreMustFromRuntime_PanicsOnANilRuntimeAndAnUnregisteredService(t *tes
             _ = StoreMustFromRuntime(probe.runtime)
         }()
     }
+}
+
+func twinRecoveredText(value any) string {
+    builder := strings.Builder{}
+
+    current, isError := value.(error)
+    if false == isError {
+        return fmt.Sprint(value)
+    }
+
+    for nil != current {
+        builder.WriteString(current.Error())
+
+        if contextual, ok := current.(interface{ Context() exceptioncontract.Context }); true == ok {
+            builder.WriteString(fmt.Sprint(contextual.Context()))
+        }
+
+        builder.WriteString("\n")
+        current = errors.Unwrap(current)
+    }
+
+    return builder.String()
 }

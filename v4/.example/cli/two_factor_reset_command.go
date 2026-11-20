@@ -43,7 +43,7 @@ func (instance *TwoFactorResetCommand) Run(runtimeInstance melodycontainercontra
 
     username := strings.TrimSpace(arguments[0])
 
-    userService, resolveErr := instance.userService.Resolve(runtimeInstance.Context())
+    userService, resolveErr := instance.userService.Resolve(runtimeInstance)
     if nil != resolveErr {
         return resolveErr
     }

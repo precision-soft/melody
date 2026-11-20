@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
 
@@ -207,5 +208,41 @@ func TestLazyLocker_ADeferredLockCreatesItsRealLockOnce(t *testing.T) {
 
     if 1 != locker.creates.Load() {
         t.Fatalf("expected the deferred lock to create its real lock once, got %d", locker.creates.Load())
+    }
+}
+
+func TestLazyLocker_TheLockerIsCreatedUnderTheFirstMethodsRuntime(t *testing.T) {
+    for _, testCase := range []struct {
+        name string
+        make func(ctx context.Context, scope containercontract.Scope) containercontract.Runtime
+        kind containercontract.Kind
+    }{
+        {name: "request", make: runtime.NewRequest, kind: containercontract.KindRequest},
+        {name: "run", make: runtime.NewRun, kind: containercontract.KindRun},
+    } {
+        t.Run(testCase.name, func(t *testing.T) {
+            serviceContainer := container.NewContainer(container.ContainerConfig{})
+
+            seenKind := containercontract.KindUnspecified
+            container.MustRegister[lockcontract.Locker](
+                serviceContainer,
+                ServiceLocker,
+                func(resolver containercontract.Resolver) (lockcontract.Locker, error) {
+                    seenKind = resolver.Runtime().Kind()
+
+                    return NewInMemoryLocker(clock.NewSystemClock()), nil
+                },
+                container.RegisterOptions{},
+            )
+
+            lock := NewLazyLocker(serviceContainer).CreateLock("job", bound.Of(time.Minute))
+            if _, acquireErr := lock.Acquire(testCase.make(t.Context(), serviceContainer.NewScope())); nil != acquireErr {
+                t.Fatalf("acquire: %v", acquireErr)
+            }
+
+            if testCase.kind != seenKind {
+                t.Fatalf("the locker's provider read %s, wanted the first method's %s", seenKind, testCase.kind)
+            }
+        })
     }
 }

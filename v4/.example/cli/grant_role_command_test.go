@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/entity"
     "github.com/precision-soft/melody/v4/.example/repository"
     melodyclicontract "github.com/precision-soft/melody/v4/cli/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
 )
 
@@ -237,7 +238,7 @@ func TestGrantRoleCommandGrantsARoleTheCachedReadWronglySaysIsHeld(t *testing.T)
     if _, _, grantErr := fixture.userRepository.GrantRole(context.Background(), account.Id, entity.RoleEditor); nil != grantErr {
         t.Fatalf("seed the editor role: %v", grantErr)
     }
-    if _, _, findErr := userService.Get(t.Context()).FindByUsername(context.Background(), "user"); nil != findErr {
+    if _, _, findErr := userService.Get(melodyruntime.NewRun(t.Context(), fixture.container.NewScope())).FindByUsername(context.Background(), "user"); nil != findErr {
         t.Fatalf("warm the memo: %v", findErr)
     }
 

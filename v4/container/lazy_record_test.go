@@ -364,7 +364,7 @@ func TestVerifyLazyNames_AdmitsAConcreteHandleOverAnInterfaceDeclaredProviderNev
         t.Fatalf("a handle over an interface-declared provider was refused: %v", verifyErr)
     }
 
-    if "built" != handle.Get(t.Context()).Label() {
+    if "built" != handle.getOver(t.Context()).Label() {
         t.Fatalf("the admitted handle does not resolve the value")
     }
 }

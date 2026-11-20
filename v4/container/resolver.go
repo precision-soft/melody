@@ -29,6 +29,11 @@ func FromResolver[T any](ctx context.Context, resolver containercontract.Resolve
     }
 
     value, getErr := resolver.Get(ctx, serviceName)
+
+    return resolvedAs[T](serviceName, value, getErr)
+}
+
+func resolvedAs[T any](serviceName string, value any, getErr error) (T, error) {
     /* a foreign resolver can report success with a typed-nil error */
     if true == internal.IsNilInterface(getErr) {
         getErr = nil
@@ -118,6 +123,14 @@ func FromResolverByType[T any](ctx context.Context, resolver containercontract.R
     }
 
     value, getByTypeErr := resolver.GetByType(ctx, canonicalTargetType)
+
+    return resolvedByTypeAs[T](value, getByTypeErr)
+}
+
+func resolvedByTypeAs[T any](value any, getByTypeErr error) (T, error) {
+    targetType := reflect.TypeOf((*T)(nil)).Elem()
+    canonicalTargetType := canonicalServiceType(targetType)
+
     /* a foreign resolver can report success with a typed-nil error */
     if true == internal.IsNilInterface(getByTypeErr) {
         getByTypeErr = nil

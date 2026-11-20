@@ -6,12 +6,15 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
 )
 
 /* lazyRepository defers resolving the registered outbox Store until the first repository call, so a component assembled during boot can hold the Repository before the container is safe to resolve. A store that cannot be resolved is the call's error, never a panic, since the relay drives this Repository from its backoff-and-retry loop. */
 type lazyRepository struct {
     store *container.LazyService[*Store]
+    /* the doors take a context, not a runtime, so the store is created under the resolver's own runtime over the call's context */
+    resolver containercontract.Resolver
 }
 
 /* NewLazyRepository returns a Repository that resolves the registered service.outbox.store on first use; the underlying Store is resolved once and reused, and a failed resolution is retried on the next call. */
@@ -21,13 +24,18 @@ func NewLazyRepository(resolver containercontract.Resolver) Repository {
     }
 
     return &lazyRepository{
-        store: container.Lazy[*Store](resolver, ServiceStore),
+        store:    container.Lazy[*Store](resolver, ServiceStore),
+        resolver: resolver,
     }
 }
 
 /* resolveStore resolves the registered store, reporting a resolution failure — or a nil yield — as an error the caller returns from its own call, so the relay's retry loop owns the failure instead of a panic owning the process. */
 func (instance *lazyRepository) resolveStore(ctx context.Context) (*Store, error) {
-    store, resolveErr := instance.store.Resolve(ctx)
+    if nil == ctx {
+        return nil, exception.NewError("outbox: the lazy repository was handed a nil context", nil, nil)
+    }
+
+    store, resolveErr := instance.store.Resolve(runtime.WithContext(instance.resolver.Runtime(), ctx))
     if nil != resolveErr {
         return nil, resolveErr
     }

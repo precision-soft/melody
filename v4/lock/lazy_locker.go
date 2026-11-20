@@ -17,7 +17,7 @@ type lazyLocker struct {
     locker *container.LazyService[lockcontract.Locker]
 }
 
-/* NewLazyLocker returns a Locker that resolves the registered service.lock.locker on first use, under the context of the runtime handed to the lock's first Acquire, Release or Refresh, so the wait on a locker another goroutine is building ends with that run; a successful resolution is reused for every later lock. CreateLock resolves nothing and never fails: a resolution failure is reported by the lock method that met it, so LeaderGate and RunExclusive see a store outage as the acquire error they already handle, and the resolution is retried on the next method call. */
+/* NewLazyLocker returns a Locker that resolves the registered service.lock.locker on first use, under the runtime handed to the lock's first Acquire, Release or Refresh, whose context bounds the wait on a locker another goroutine is building and whose kind the locker's provider reads; a successful resolution is reused for every later lock. CreateLock resolves nothing and never fails: a resolution failure is reported by the lock method that met it, so LeaderGate and RunExclusive see a store outage as the acquire error they already handle, and the resolution is retried on the next method call. */
 func NewLazyLocker(resolver containercontract.Resolver) lockcontract.Locker {
     return &lazyLocker{
         locker: container.Lazy[lockcontract.Locker](resolver, ServiceLocker),
@@ -60,7 +60,7 @@ func (instance *deferredLock) resolvedLock(runtimeInstance containercontract.Run
         )
     }
 
-    locker, resolveErr := instance.owner.locker.Resolve(runtimeInstance.Context())
+    locker, resolveErr := instance.owner.locker.Resolve(runtimeInstance)
     if nil != resolveErr {
         return nil, resolveErr
     }

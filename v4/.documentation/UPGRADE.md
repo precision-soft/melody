@@ -942,6 +942,14 @@ The same holds for a value a module was handed and would drop, refused at the ho
 
 **Remedy.** Register the service the handle names, `service.lock.locker` for a lazy locker, or fix the name. For a type several services stand for, build the handle by name. Give the handle the type the provider declares, `*Mailer` for a provider of `*Mailer`. For a service that is optional, build the handle only after `Has` answers true.
 
+### Container: a Lazy handle is used with the runtime
+
+**What changed.** [`LazyService.Get` and `Resolve`](../container/lazy.go) take the caller's `containercontract.Runtime` in place of a context. The handle still resolves through the resolver it was built over; the runtime lends its context and, where that resolver reads the container — a handle over the container, or over a container provider's resolver once the provider returned — its kind, so a service first built through a handle is created under the caller's `KindRequest`, `KindRun` or `KindBoot` where it was created detached. A scoped handle keeps its scope's kind and, until it memoized, refuses a runtime of another scope, a child run's included. An unmemoized call under a runtime whose context is done is refused before it resolves. See [the container](package/CONTAINER.md).
+
+**Symptom.** `cannot use ctx (variable of type context.Context) as containercontract.Runtime value in argument to handle.Resolve`, the same for `runtimeInstance.Context()`. At run time "the runtime is nil or carries no context" for a nil runtime, "the runtime belongs to another scope than the lazy handle" (`handleScopeKind`, `runtimeScopeKind`) for a request's handle used under another scope's runtime, "the runtime's context is done in lazy resolve" for a done context, with `ErrBootFinished` in its cause chain under the boot runtime after `Boot`. A provider created through a handle reads `KindRequest` or `KindRun` where it read `KindDetached`, so a door it calls that refuses by kind is judged by its first caller's phase.
+
+**Remedy.** Hand the handle the runtime the call received: `handle.Resolve(runtimeInstance)`. Inside the holder's own provider, `handle.Get(resolver.Runtime())`. Where only a context is held — a goroutine a provider started over `ForGoroutine(resolver)`, a door that takes a `ctx` — build the detached runtime over it: `handle.Get(runtime.WithContext(resolver.Runtime(), ctx))`. In a test, `runtime.NewRun(ctx, scope)` or `runtime.NewRequest(ctx, scope)`.
+
 ### Logging: the reopenable file writer can be a container service
 
 **What changed.** [`ReopenableFileWriter`](../logging/reopenable_file_writer.go) carries `CloseWithContext` beside `Close`, so the teardown no longer refuses it as a service, and a close stuck on the watcher ends at the teardown's deadline.
@@ -1026,9 +1034,9 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Remedy.** Fix the misspelled name. A collaborator registered only in some deployments moves to `OptionalTeardownDependencyNames`, or is declared only where it is registered.
 
-### Lock: the lazy locker resolves the registered locker at the lock's first method, under that run's context
+### Lock: the lazy locker resolves the registered locker at the lock's first method, under that method's runtime
 
-**What changed.** A lock from [`lock.NewLazyLocker`](../lock/lazy_locker.go) resolves `service.lock.locker` at its first `Acquire`, `Release` or `Refresh`, under the context of the runtime handed to it, and creates the real lock then; `CreateLock` resolves nothing. A failed resolution is answered by the method that met it and retried at the next call, where the third major resolved at `CreateLock` and retried at the next `CreateLock`. The `Locker` and `Lock` contracts do not change.
+**What changed.** A lock from [`lock.NewLazyLocker`](../lock/lazy_locker.go) resolves `service.lock.locker` at its first `Acquire`, `Release` or `Refresh`, under the runtime handed to it — its context and its kind — and creates the real lock then; `CreateLock` resolves nothing. A failed resolution is answered by the method that met it and retried at the next call, where the third major resolved at `CreateLock` and retried at the next `CreateLock`. The `Locker` and `Lock` contracts do not change.
 
 **Symptom.** None at compile time. A locker provider runs at the first `Acquire` rather than at `CreateLock`, and a run whose context ends while another goroutine builds the locker leaves the wait with its context's error.
 
@@ -2229,7 +2237,7 @@ debug.NewMiddlewareCommand(
 
 **What changed.** `container.Lazy` and `container.LazyByType` ask the resolver they captured whether it has closed. The first closed answer makes the handle terminal: the scope-is-closed error on that call and on every later one, with the memoized value, the closure and the resolver dropped. The resolver's `Closed()` or `IsClosed()` is the door the question is asked through; a resolver that carries neither is read as open.
 
-**Symptom.** A handle built over a request scope and used after the request stops answering the memoized value and returns `lazy service scope is closed`. `LazyService.Get` panics with that error rather than handing back a dead request's state.
+**Symptom.** A handle built over a request scope and used after the request stops answering the memoized value and returns `lazy service scope is closed`. `LazyService.Get(runtimeInstance)` panics with that error rather than handing back a dead request's state; the runtime handed does not change the answer. A handle built over the boot scope answers it once the boot finished with `ErrBootFinished` matched as well.
 
 **Remedy.** Build the handle over the container where it is meant to outlive the request — every container resolution mints a fresh resolver context, so that is also the form safe for concurrent first uses. Code shared across requests resolves per call through `FromResolver` with the current request's resolver; the value is then keyed to the right scope by the scope's own instance map. A handle built over the container, or over the resolver a container provider was handed, follows the container instead: it keeps serving through the teardown and turns terminal once the teardown finished, answering `ErrContainerClosed` rather than the scope's sentinel, so a caller classifying the refusal tells an application shutting down from a request that ended.
 

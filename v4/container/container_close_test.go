@@ -1363,7 +1363,7 @@ func TestContainer_Close_ClosesAHolderBeforeTheServiceItResolvedThroughAKeptReso
     }
 
     /* the first use, on a path that runs long after the provider returned */
-    if nil == holder.handle.Get(t.Context()) {
+    if nil == holder.handle.getOver(t.Context()) {
         t.Fatalf("expected the lazy handle to resolve the service")
     }
 
@@ -2283,11 +2283,11 @@ func TestContainer_Close_ASharedDependencyWaitsForEveryDependent(t *testing.T) {
     }
 
     /* the shared service is built here, after BOTH holders, and each reach records an edge onto it */
-    if nil == firstHolder.handle.Get(t.Context()) {
+    if nil == firstHolder.handle.getOver(t.Context()) {
         t.Fatalf("expected the first handle to resolve the shared service")
     }
 
-    if nil == secondHolder.handle.Get(t.Context()) {
+    if nil == secondHolder.handle.getOver(t.Context()) {
         t.Fatalf("expected the second handle to resolve the shared service")
     }
 
@@ -4387,7 +4387,7 @@ func TestContainer_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClos
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, resolveErr := holder.partner.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+    if _, resolveErr := holder.partner.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
         t.Fatalf("expected the lazy resolution closing the ring refused with ErrCircularDependency, got %v", resolveErr)
     }
 
@@ -4437,7 +4437,7 @@ func TestContainer_ADeclaredEdgeRefusesTheLazyResolutionThatWouldCloseARing(t *t
                 t.Fatalf("unexpected get error: %v", getErr)
             }
 
-            if _, resolveErr := holder.partner.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+            if _, resolveErr := holder.partner.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
                 t.Fatalf("expected the resolution closing the declared ring refused with ErrCircularDependency, got %v", resolveErr)
             }
 
@@ -4463,7 +4463,7 @@ func TestContainer_Close_ALazyEdgeThatClosesNoRingStillOrders(t *testing.T) {
         t.Fatalf("unexpected get error: %v", getErr)
     }
 
-    if _, resolveErr := holder.partner.Resolve(t.Context()); nil != resolveErr {
+    if _, resolveErr := holder.partner.resolveOver(t.Context()); nil != resolveErr {
         t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
     }
 
@@ -4680,13 +4680,13 @@ func TestContainer_ASecondNameUnderATypeDoesNotUnfoldAResolvedEdge(t *testing.T)
     partner := MustFromResolver[*lazyRingPartner](t.Context(), serviceContainer, "app.partner")
     holder := MustFromResolver[*lazyRingHolder](t.Context(), serviceContainer, "app.holder")
 
-    if _, resolveErr := holder.partnerByType.Resolve(t.Context()); nil != resolveErr {
+    if _, resolveErr := holder.partnerByType.resolveOver(t.Context()); nil != resolveErr {
         t.Fatalf("unexpected lazy resolution error: %v", resolveErr)
     }
 
     serviceContainer.MustRegister("app.partner.second", func(_ containercontract.Resolver) (*lazyRingPartner, error) { return &lazyRingPartner{}, nil }, RegisterOptions{TypeRegistrationRelaxed: true})
 
-    if _, resolveErr := partner.holderHandle.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+    if _, resolveErr := partner.holderHandle.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
         t.Fatalf("expected the ring closed after the second name refused with ErrCircularDependency, got %v", resolveErr)
     }
 
@@ -4709,7 +4709,7 @@ func TestContainer_ASecondNameUnderATypeDoesNotUnfoldAResolvedEdge(t *testing.T)
 
     dependentContainer.MustRegister("app.partner.second", func(_ containercontract.Resolver) (*lazyRingPartner, error) { return &lazyRingPartner{}, nil }, RegisterOptions{TypeRegistrationRelaxed: true})
 
-    if _, resolveErr := builtPartner.holder.partner.Resolve(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
+    if _, resolveErr := builtPartner.holder.partner.resolveOver(t.Context()); false == errors.Is(resolveErr, ErrCircularDependency) {
         t.Fatalf("expected the ring closed onto a service built through its type refused with ErrCircularDependency, got %v", resolveErr)
     }
 }
