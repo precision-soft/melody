@@ -48,7 +48,7 @@ func (instance *CategoryService) List(ctx context.Context) ([]*entity.Category, 
         melodycache.RememberConfig{
             Ttl: melodybound.Of(entityCacheTtl),
         },
-        func(ctx context.Context) ([]*entity.Category, error) {
+        func(ctx context.Context, _ *melodycache.RememberItem) ([]*entity.Category, error) {
             return instance.categoryRepository.All(ctx)
         },
     )

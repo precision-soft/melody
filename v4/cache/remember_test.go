@@ -40,7 +40,7 @@ func TestRemember_ReturnsCachedValueWithoutCallingCallback(t *testing.T) {
         cacheInstance,
         "k",
         RememberConfig{Ttl: bound.Of(time.Second)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             called = true
             return "new", nil
         },
@@ -74,7 +74,7 @@ func TestRemember_CallsCallbackAndStoresValue(t *testing.T) {
         cacheInstance,
         "k",
         RememberConfig{Ttl: bound.Of(time.Second)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             called = true
             return "computed", nil
         },
@@ -120,7 +120,7 @@ func TestRemember_PropagatesCallbackErrorAndDoesNotStore(t *testing.T) {
         cacheInstance,
         "k",
         RememberConfig{Ttl: bound.Of(time.Second)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             return nil, expectedErr
         },
     )
@@ -157,7 +157,7 @@ func TestRemember_AnUnlimitedTtlKeepsTheValue(t *testing.T) {
         cacheInstance,
         "k",
         RememberConfig{Ttl: bound.UnlimitedDuration()},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             return "v", nil
         },
     )
@@ -198,7 +198,7 @@ func TestRemember_ProtectAgainstStampede_ExecutesCallbackOnce(t *testing.T) {
     releaseCallbackChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         atomic.AddInt64(&callbackCalls, 1)
         <-releaseCallbackChannel
         return "value", nil
@@ -283,7 +283,7 @@ func TestRemember_StampedeProtectionDisabled_AllowsParallelCallbackCalls(t *test
     releaseCallbackChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         atomic.AddInt64(&callbackCalls, 1)
         <-releaseCallbackChannel
         return "value", nil
@@ -358,7 +358,7 @@ func TestRemember_WaitTimeoutIsPerCaller_DoesNotPoisonInFlightCall(t *testing.T)
     releaseCallbackChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         atomic.AddInt64(&callbackCalls, 1)
         <-releaseCallbackChannel
         return "value", nil
@@ -461,7 +461,7 @@ func TestRemember_CancelableLateJoinerIsNotPoisonedByCanceledCall(t *testing.T) 
     holdLeader := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         call := atomic.AddInt64(&callbackCalls, 1)
         if 1 == call {
             close(callbackStarted)
@@ -551,13 +551,13 @@ func TestRemember_CancelableGroupIsSeparatedFromNonCancelableGroup(t *testing.T)
     var nonCancelableCalls int64
     var cancelableCalls int64
 
-    nonCancelableCallback := func(ctx context.Context) (any, error) {
+    nonCancelableCallback := func(ctx context.Context, _ *RememberItem) (any, error) {
         atomic.AddInt64(&nonCancelableCalls, 1)
         <-releaseCallbackNonCancelableChannel
         return "nonCancelable", nil
     }
 
-    cancelableCallback := func(ctx context.Context) (any, error) {
+    cancelableCallback := func(ctx context.Context, _ *RememberItem) (any, error) {
         atomic.AddInt64(&cancelableCalls, 1)
         <-releaseCallbackCancelableChannel
         return "cancelable", nil
@@ -627,7 +627,7 @@ func TestRemember_RefusesATypedNilCache(t *testing.T) {
         typedNilManager,
         "k",
         RememberConfig{Ttl: bound.Of(time.Second)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             return "v", nil
         },
     )
@@ -652,7 +652,7 @@ func TestRemember_AConfigurationOfOnlyTheTtlKeepsStampedeProtection(t *testing.T
     leaderStartedChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         if 1 == atomic.AddInt64(&callbackCalls, 1) {
             close(leaderStartedChannel)
         }
@@ -712,7 +712,7 @@ func TestRemember_ADeliberateProtectionOffWithZeroWaitIsNotCoalesced(t *testing.
     releaseCallbackChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         atomic.AddInt64(&callbackCalls, 1)
         <-releaseCallbackChannel
         return "value", nil
@@ -754,7 +754,7 @@ func TestRemember_RecomputesOverACorruptPayload(t *testing.T) {
         cacheManager,
         "poisoned",
         RememberConfig{Ttl: bound.UnlimitedDuration()},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             return "healed", nil
         },
     )
@@ -788,7 +788,7 @@ func TestRemember_CallbackTypedNilErrorIsSuccess(t *testing.T) {
         cacheManager,
         "typed.nil.callback",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             var typedNil *testRememberError
             return "computed", typedNil
         },
@@ -877,7 +877,7 @@ func TestRemember_ValueKindCacheDoesNotCoalesce(t *testing.T) {
     firstStartedChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         if 1 == atomic.AddInt64(&callbackCalls, 1) {
             close(firstStartedChannel)
         }
@@ -994,7 +994,7 @@ func TestRemember_CacheSidePanicIsNotBlamedOnTheCallback(t *testing.T) {
         panickingCache,
         "panicking.set",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             return "computed", nil
         },
     )
@@ -1015,6 +1015,7 @@ type testScriptedCache struct {
     setCallCount int
     getContexts  []context.Context
     setContexts  []context.Context
+    setTtls      []bound.Duration
 }
 
 type testScriptedGetResult struct {
@@ -1053,6 +1054,7 @@ func (instance *testScriptedCache) Set(ctx context.Context, key string, value an
 
     instance.setCallCount = instance.setCallCount + 1
     instance.setContexts = append(instance.setContexts, ctx)
+    instance.setTtls = append(instance.setTtls, ttl)
 
     return instance.setErr
 }
@@ -1120,7 +1122,7 @@ func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
         manager,
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             callbackCalled = true
             return "computed", nil
         },
@@ -1146,7 +1148,7 @@ func TestRemember_ACacheFailureThatIsNotACorruptPayloadEndsThere(t *testing.T) {
         manager,
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute), StampedeProtectionDisabled: true},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             callbackCalled = true
             return "computed", nil
         },
@@ -1181,7 +1183,7 @@ func TestRemember_TheLeaderServesAValueThatAppearedBetweenTheTwoReads(t *testing
         scriptedCache,
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             callbackCalled = true
             return "computed", nil
         },
@@ -1220,7 +1222,7 @@ func TestRemember_ACacheFailureOnTheLeaderReReadCompletesTheFlightWithIt(t *test
         scriptedCache,
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             callbackCalled = true
             return "computed", nil
         },
@@ -1254,7 +1256,7 @@ func TestRemember_AFailedWriteIsReportedRatherThanSwallowed(t *testing.T) {
         scriptedCache,
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             return "computed", nil
         },
     )
@@ -1279,7 +1281,7 @@ func TestRemember_WithoutStampedeProtectionBothFailuresReachTheCaller(t *testing
         scriptedCache,
         "key",
         config,
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             return nil, errors.New("computation refused")
         },
     )
@@ -1299,7 +1301,7 @@ func TestRemember_WithoutStampedeProtectionBothFailuresReachTheCaller(t *testing
         failingWriteCache,
         "key",
         config,
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             return "computed", nil
         },
     )
@@ -1325,7 +1327,7 @@ func TestRemember_ACallbackPanicIsReportedAsTheCallbacksOnBothPaths(t *testing.T
             scriptedCache,
             "key",
             testCase.config,
-            func(ctx context.Context) (any, error) {
+            func(ctx context.Context, _ *RememberItem) (any, error) {
                 panic("callback exploded")
             },
         )
@@ -1369,7 +1371,7 @@ func TestRemember_AnswersOneShapeOnMissAndHit(t *testing.T) {
 
     manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         return 5, nil
     }
 
@@ -1403,7 +1405,7 @@ func TestRemember_StampedeProtectedMissAnswersTheStoredShape(t *testing.T) {
         manager,
         "remember:stampede-shape",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             return map[string]int{"a": 1}, nil
         },
     )
@@ -1426,9 +1428,9 @@ func TestExecuteRememberCallbackSafely_APanickingCallbackKeepsItsCauseAndItsStac
         rootCause,
     )
 
-    _, callbackErr := executeRememberCallbackSafely(
+    _, _, callbackErr := executeRememberCallbackSafely(
         context.Background(),
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             panic(panicValue)
         },
         "report:daily",
@@ -1462,9 +1464,9 @@ func TestExecuteRememberCallbackSafely_APanickingCallbackKeepsItsCauseAndItsStac
 func TestExecuteRememberCallbackSafely_ATypedNilPanicValueIsNotHandedOnAsACause(t *testing.T) {
     var typedNil *exception.Error
 
-    _, callbackErr := executeRememberCallbackSafely(
+    _, _, callbackErr := executeRememberCallbackSafely(
         context.Background(),
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             panic(typedNil)
         },
         "report:daily",
@@ -1508,7 +1510,7 @@ func TestExecuteRememberInFlightLeader_APanickingCacheAccessKeepsItsCauseAndItsS
         "report:daily",
         bound.Of(time.Minute),
         call,
-        testRememberOperations(&panickingRememberCache{panicValue: exception.NewError("cache get exploded", nil, rootCause)}, "report:daily", func(ctx context.Context) (any, error) {
+        testRememberOperations(&panickingRememberCache{panicValue: exception.NewError("cache get exploded", nil, rootCause)}, "report:daily", func(ctx context.Context, _ *RememberItem) (any, error) {
             return "value", nil
         }),
     )
@@ -1565,7 +1567,7 @@ func TestRemember_ACanceledCallerContextEndsThatWaitAndLeavesTheFlightForTheOthe
     callbackEnteredChannel := make(chan struct{})
 
     var callbackCalls int64
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         atomic.AddInt64(&callbackCalls, 1)
         close(callbackEnteredChannel)
         <-releaseCallbackChannel
@@ -1660,7 +1662,7 @@ func TestRemember_WithoutStampedeProtectionTheCallbackRunsUnderTheCallerContext(
         cacheManager,
         "report.uncoalesced",
         RememberConfig{Ttl: bound.Of(time.Minute), StampedeProtectionDisabled: true},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             cancelCaller()
             observedContextError = ctx.Err()
             return "value", nil
@@ -1700,7 +1702,7 @@ func TestRemember_AValueTheSerializerCannotReadBackIsNotStored(t *testing.T) {
         manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
         calls := 0
-        callback := func(ctx context.Context) (any, error) {
+        callback := func(ctx context.Context, _ *RememberItem) (any, error) {
             calls = calls + 1
 
             return deeplyNestedValue(20000), nil
@@ -1736,7 +1738,7 @@ func rememberWithABoundedWaitOnASlowCallback(t *testing.T, config RememberConfig
     release := make(chan struct{})
 
     var calls atomic.Int64
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         calls.Add(1)
 
         select {
@@ -1816,7 +1818,7 @@ func TestRemember_AValueTheSerializerCannotEncodeIsRefusedNamingTheKey(t *testin
         backend := NewInMemoryBackend(InMemoryBackendConfig{CleanupInterval: bound.Of(time.Minute), Clock: clock.NewSystemClock()})
         manager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-        _, rememberErr := Remember(context.Background(), manager, "remember:unencodable", config, func(ctx context.Context) (any, error) {
+        _, rememberErr := Remember(context.Background(), manager, "remember:unencodable", config, func(ctx context.Context, _ *RememberItem) (any, error) {
             return math.NaN(), nil
         })
         if nil == rememberErr || "cache value serialization failed" != rememberErr.Error() {
@@ -1851,7 +1853,7 @@ func TestRemember_ANilOrTypedNilContextIsRefused(t *testing.T) {
     for _, callerContext := range []context.Context{nil, absentContext} {
         scriptedCache := &testScriptedCache{}
 
-        _, rememberErr := Remember(callerContext, scriptedCache, "key", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context) (any, error) {
+        _, rememberErr := Remember(callerContext, scriptedCache, "key", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (any, error) {
             return "value", nil
         })
         if nil == rememberErr || "remember context is nil" != rememberErr.Error() {
@@ -1873,7 +1875,7 @@ func TestRemember_EveryCallerOfOneFlightOwnsItsAnswer(t *testing.T) {
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
     releaseCallbackChannel := make(chan struct{})
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         <-releaseCallbackChannel
         return map[string]any{"owner": "none"}, nil
     }
@@ -1943,7 +1945,7 @@ func TestRemember_AWaiterNeverReadsTheValueTheCallbackKept(t *testing.T) {
 
     var kept map[string]any
     releaseCallbackChannel := make(chan struct{})
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         <-releaseCallbackChannel
         kept = map[string]any{"owner": "none"}
         return kept, nil
@@ -2029,7 +2031,7 @@ func TestRemember_AStoredValueTheLeaderCannotCopyIsAnsweredAsAPlainHit(t *testin
         scriptedCache,
         "key",
         RememberConfig{Ttl: bound.Of(time.Minute)},
-        func(ctx context.Context) (any, error) {
+        func(ctx context.Context, _ *RememberItem) (any, error) {
             return "computed", nil
         },
     )
@@ -2056,7 +2058,7 @@ func TestRemember_EveryWaiterReadsItsOwnValueTheLeaderCannotCopy(t *testing.T) {
 
     computations := 0
     call := newRememberInFlightCall(false)
-    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, testRememberOperations(scriptedCache, "key", func(ctx context.Context) (any, error) {
+    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, testRememberOperations(scriptedCache, "key", func(ctx context.Context, _ *RememberItem) (any, error) {
         computations++
 
         return "computed", nil
@@ -2104,7 +2106,7 @@ func TestRemember_AWaiterComputesWhenTheUncopyableEntryVanishedBeforeItsRead(t *
 
     computations := 0
     call := newRememberInFlightCall(false)
-    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, testRememberOperations(scriptedCache, "key", func(ctx context.Context) (any, error) {
+    executeRememberInFlightLeader(&rememberInFlightShard{inFlightByKey: map[rememberFlightKey]*rememberInFlightCall{}}, rememberFlightKey{key: "key"}, "key", bound.Of(time.Minute), call, testRememberOperations(scriptedCache, "key", func(ctx context.Context, _ *RememberItem) (any, error) {
         computations++
 
         return "computed", nil
@@ -2126,7 +2128,7 @@ func TestRemember_AnAbsentTtlOrOneBelowTheMinimumIsRefusedBeforeTheCacheIsRead(t
         scriptedCache := &testScriptedCache{}
         callbackCalled := false
 
-        _, rememberErr := Remember(context.Background(), scriptedCache, "key", RememberConfig{Ttl: refusedTtl}, func(ctx context.Context) (any, error) {
+        _, rememberErr := Remember(context.Background(), scriptedCache, "key", RememberConfig{Ttl: refusedTtl}, func(ctx context.Context, _ *RememberItem) (any, error) {
             callbackCalled = true
 
             return "value", nil
@@ -2144,7 +2146,7 @@ func TestRemember_AnAbsentTtlOrOneBelowTheMinimumIsRefusedBeforeTheCacheIsRead(t
 func TestRemember_ANegativeWaitTimeoutIsRefusedNamingTheField(t *testing.T) {
     scriptedCache := &testScriptedCache{}
 
-    _, rememberErr := Remember(context.Background(), scriptedCache, "key", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(-time.Second)}, func(ctx context.Context) (any, error) {
+    _, rememberErr := Remember(context.Background(), scriptedCache, "key", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(-time.Second)}, func(ctx context.Context, _ *RememberItem) (any, error) {
         return "value", nil
     })
     if nil == rememberErr || "RememberConfig.WaitTimeout" != exception.LogContext(rememberErr, exception.LogContextConfig{})["field"] {
@@ -2181,7 +2183,7 @@ func TestRemember_AnUnlimitedWaitIsHandedTheLeadersValue(t *testing.T) {
 
     leaderStarted := make(chan struct{})
     release := make(chan struct{})
-    callback := func(ctx context.Context) (any, error) {
+    callback := func(ctx context.Context, _ *RememberItem) (any, error) {
         close(leaderStarted)
         <-release
 
@@ -2228,7 +2230,7 @@ func TestRemember_TheCallerReadsUnderItsContextAndTheFlightReadsAndStoresUnderIt
 
     var flightContext context.Context
 
-    _, rememberErr := Remember(callerContext, scriptedCache, "flight.contexts", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context) (any, error) {
+    _, rememberErr := Remember(callerContext, scriptedCache, "flight.contexts", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (any, error) {
         flightContext = ctx
         return "value", nil
     })
@@ -2264,7 +2266,7 @@ func TestReadOwnStoredValue_ReadsUnderTheFlightContext(t *testing.T) {
     scriptedCache := &testScriptedCache{getResults: []testScriptedGetResult{{value: "stored", exists: true}}}
     flightContext := context.WithValue(context.Background(), rememberContextKey{}, "flight")
 
-    boxed, readErr := readOwnStoredValue("own.read", bound.Of(time.Minute), flightContext, testRememberOperations(scriptedCache, "own.read", func(ctx context.Context) (any, error) {
+    boxed, readErr := readOwnStoredValue("own.read", bound.Of(time.Minute), flightContext, testRememberOperations(scriptedCache, "own.read", func(ctx context.Context, _ *RememberItem) (any, error) {
         return "computed", nil
     }))
     value := unboxTestAnswer(boxed)
@@ -2275,6 +2277,23 @@ func TestReadOwnStoredValue_ReadsUnderTheFlightContext(t *testing.T) {
     if 1 != len(scriptedCache.getContexts) || flightContext != scriptedCache.getContexts[0] {
         t.Fatal("expected the own read under the flight's context")
     }
+
+    t.Run("a waiter's own computation honours its own item", func(t *testing.T) {
+        missingCache := &testScriptedCache{}
+
+        boxed, readErr := readOwnStoredValue("own.compute", bound.Of(time.Minute), flightContext, testRememberOperations(missingCache, "own.compute", func(ctx context.Context, item *RememberItem) (any, error) {
+            item.SetTtl(bound.Of(5 * time.Second))
+
+            return "computed", nil
+        }))
+        if nil != readErr || "computed" != unboxTestAnswer(boxed) {
+            t.Fatalf("expected the waiter's own computation, got %v, %v", unboxTestAnswer(boxed), readErr)
+        }
+
+        if 1 != len(missingCache.setTtls) || bound.Of(5*time.Second) != missingCache.setTtls[0] {
+            t.Fatalf("expected one store under the ttl the waiter's callback chose, got %v", missingCache.setTtls)
+        }
+    })
 }
 
 func TestRemember_ADoneCallerContextStillAnswersAHit(t *testing.T) {
@@ -2289,7 +2308,7 @@ func TestRemember_ADoneCallerContextStillAnswersAHit(t *testing.T) {
     canceledContext, cancel := context.WithCancel(context.Background())
     cancel()
 
-    value, rememberErr := Remember(canceledContext, cacheManager, "report.hit", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context) (any, error) {
+    value, rememberErr := Remember(canceledContext, cacheManager, "report.hit", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (any, error) {
         return "computed", nil
     })
     if nil != rememberErr || "stored" != value {
@@ -2303,7 +2322,7 @@ func TestRemember_ALeaderWhoseWaitersLeftStillStoresWhatItComputed(t *testing.T)
 
     cacheManager := NewManager(backend, NewJsonSerializer(), ManagerConfig{})
 
-    _, rememberErr := Remember(context.Background(), cacheManager, "report.slow", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(20 * time.Millisecond)}, func(ctx context.Context) (any, error) {
+    _, rememberErr := Remember(context.Background(), cacheManager, "report.slow", RememberConfig{Ttl: bound.Of(time.Minute), WaitTimeout: bound.Of(20 * time.Millisecond)}, func(ctx context.Context, _ *RememberItem) (any, error) {
         time.Sleep(200 * time.Millisecond)
         return "computed", nil
     })
@@ -2335,7 +2354,7 @@ func TestRemember_APlainDecoratorKeepsEveryGuarantee(t *testing.T) {
 
     t.Run("every caller of one flight owns its answer", func(t *testing.T) {
         releaseCallbackChannel := make(chan struct{})
-        callback := func(ctx context.Context) (any, error) {
+        callback := func(ctx context.Context, _ *RememberItem) (any, error) {
             <-releaseCallbackChannel
             return map[string]any{"owner": "none"}, nil
         }
@@ -2387,7 +2406,7 @@ func TestRemember_APlainDecoratorKeepsEveryGuarantee(t *testing.T) {
     })
 
     t.Run("the computing call answers the stored shape", func(t *testing.T) {
-        value, rememberErr := Remember(context.Background(), decorated, "decorated.shape", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context) (any, error) {
+        value, rememberErr := Remember(context.Background(), decorated, "decorated.shape", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (any, error) {
             return 5, nil
         })
         if nil != rememberErr {
@@ -2400,7 +2419,7 @@ func TestRemember_APlainDecoratorKeepsEveryGuarantee(t *testing.T) {
     })
 
     t.Run("a value that cannot be read back is refused with nothing stored", func(t *testing.T) {
-        _, rememberErr := Remember(context.Background(), decorated, "decorated.unreadable", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context) (any, error) {
+        _, rememberErr := Remember(context.Background(), decorated, "decorated.unreadable", RememberConfig{Ttl: bound.Of(time.Minute)}, func(ctx context.Context, _ *RememberItem) (any, error) {
             return deeplyNestedValue(20000), nil
         })
         if nil == rememberErr {

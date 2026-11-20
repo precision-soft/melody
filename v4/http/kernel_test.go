@@ -3981,7 +3981,7 @@ func TestKernel_TheWaitersOfOneRememberFlightFileOneRecordEach(t *testing.T) {
                 cacheManager,
                 "the-flight",
                 cache.RememberConfig{Ttl: bound.Of(time.Minute)},
-                func(ctx context.Context) (any, error) {
+                func(ctx context.Context, _ *cache.RememberItem) (any, error) {
                     <-release
 
                     return nil, flightErr

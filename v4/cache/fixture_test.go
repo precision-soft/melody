@@ -58,7 +58,7 @@ func assignTestValue(target any, value any) error {
     return nil
 }
 
-func testRememberOperations(cacheInstance cachecontract.Cache, key string, callback func(ctx context.Context) (any, error)) rememberOperations {
+func testRememberOperations(cacheInstance cachecontract.Cache, key string, callback func(ctx context.Context, item *RememberItem) (any, error)) rememberOperations {
     return newRememberOperations(cacheInstance, key, callback)
 }
 

@@ -35,7 +35,7 @@ func rememberEntityOrAbsence[T any](
         melodycache.RememberConfig{
             Ttl: melodybound.Of(absenceCacheTtl),
         },
-        func(ctx context.Context) (*T, error) {
+        func(ctx context.Context, _ *melodycache.RememberItem) (*T, error) {
             computedHere = true
 
             return loader(ctx)

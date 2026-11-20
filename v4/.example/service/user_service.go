@@ -51,7 +51,7 @@ func (instance *UserService) List(ctx context.Context) ([]*entity.UserProfile, e
         melodycache.RememberConfig{
             Ttl: melodybound.Of(entityCacheTtl),
         },
-        func(ctx context.Context) ([]*entity.UserProfile, error) {
+        func(ctx context.Context, _ *melodycache.RememberItem) ([]*entity.UserProfile, error) {
             users, allErr := instance.userRepository.All(ctx)
             if nil != allErr {
                 return nil, allErr

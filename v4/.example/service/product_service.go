@@ -56,7 +56,7 @@ func (instance *ProductService) List(ctx context.Context) ([]*entity.Product, er
         cache.RememberConfig{
             Ttl: bound.Of(entityCacheTtl),
         },
-        func(ctx context.Context) ([]*entity.Product, error) {
+        func(ctx context.Context, _ *cache.RememberItem) ([]*entity.Product, error) {
             return instance.productRepository.All(ctx)
         },
     )

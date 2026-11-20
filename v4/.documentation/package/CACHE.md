@@ -195,7 +195,7 @@ func loadUserProfile(
         cache.RememberConfig{
             Ttl: bound.Of(30 * time.Minute),
         },
-        func(ctx context.Context) (userProfile, error) {
+        func(ctx context.Context, _ *cache.RememberItem) (userProfile, error) {
             _ = ctx
 
             return userProfile{
@@ -204,6 +204,57 @@ func loadUserProfile(
             }, nil
         },
     )
+}
+```
+
+### The callback's item
+
+The callback receives a `*cache.RememberItem` beside its context, through which it says what the store does with the value it computes: nothing said stores it under `RememberConfig.Ttl`, `item.SetTtl(ttl)` stores it under its own ttl, and `item.SkipStore()` answers it without storing it. An absence remembered for a short while and a found value kept longer is one callback:
+
+```go
+func findUser(
+    ctx context.Context,
+    cacheInstance cachecontract.Cache,
+    key string,
+    load func(ctx context.Context) (*user, error),
+) (*user, error) {
+    return cache.Remember(
+        ctx,
+        cacheInstance,
+        key,
+        cache.RememberConfig{
+            Ttl: bound.Of(time.Minute),
+        },
+        func(ctx context.Context, item *cache.RememberItem) (*user, error) {
+            loaded, loadErr := load(ctx)
+            if nil != loadErr {
+                return nil, loadErr
+            }
+
+            if nil != loaded {
+                item.SetTtl(bound.Of(10 * time.Minute))
+            }
+
+            return loaded, nil
+        },
+    )
+}
+```
+
+A value that must not be served from the cache, a partial answer of a degraded upstream for one, is answered and not stored:
+
+```go
+func(ctx context.Context, item *cache.RememberItem) (report, error) {
+    computed, isPartial, computeErr := buildReport(ctx)
+    if nil != computeErr {
+        return report{}, computeErr
+    }
+
+    if true == isPartial {
+        item.SkipStore()
+    }
+
+    return computed, nil
 }
 ```
 
@@ -226,6 +277,7 @@ func loadUserProfile(
 - `Remember` reads the cache and stores a computed value without the cancellation of the context each runs under, the caller's or the flight's, its values kept: a done context still answers a hit, and a value already computed is stored whoever left.
 - `Manager.Increment` and `Manager.Decrement` are backend-native, so a distributed backend keeps them atomic and the count is stored as decimal text rather than through the serializer. Each takes a [`CounterOptions`](../../cache/contract/counter.go): `Ttl` is the counter's lifetime, read as a write's (at least 1s, `bound.UnlimitedDuration()` for none, absent refused); `RefreshTtl` false writes it only when the call creates the key or finds it without an expiry, a fixed window, and true rewrites it on every call, a sliding window; an unlimited ttl writes no expiry, leaving one the key carries in place with `RefreshTtl` false and removing it with `RefreshTtl` true, so the counter is kept until it is deleted or evicted. The redis backend removes it with `PERSIST`. The redis backend writes the count and its expiry in one script, atomic under concurrent increments, with no `PEXPIRE … NX`, so it needs no Redis 7, but it needs scripting (`EVALSHA`/`EVAL`) allowed for the cache's redis user, with the commands the script runs under that user's permissions (`INCRBY`, `PTTL`, `PEXPIRE`, `PERSIST`, `GET`); after a script cache flush the first call makes two round trips under one `CommandTimeout`. A counter that expired reads as absent and the next increment starts from its delta. Read such a key with [`Manager.GetCounter`](../../cache/manager.go), never with `Get`, and do not mix `Set` onto the same key. See [`cache/manager.go`](../../cache/manager.go).
 - `Remember` uses a single-flight mechanism when stampede protection is enabled (default). See [`cache/remember.go`](../../cache/remember.go).
+- The callback's item is read once, when the callback returns without an error: a callback that fails or panics stores nothing whatever its item says, and an item kept and told something later changes no store. A ttl chosen through `SetTtl` is any ttl the cache admits, unlimited included, longer than the configuration's too, and one below a second is answered as the error naming `RememberItem.Ttl`, with nothing stored and no value answered; an absent one takes the choice back. `SkipStore` wins over `SetTtl` in either order: the caller and every waiter of the flight are answered the value, each a copy through `RoundTrip`, and the next call computes again, so under a skipped store coalescing is the only stampede protection left. `RememberConfig.Ttl` stays required even where every callback chooses, since it is judged before the cache is read. See [`cache/remember_item.go`](../../cache/remember_item.go).
 - `Remember` groups in-flight calls by cache instance, key, and cancelability (cancelable callers are isolated from non-cancelable callers). See [`cache/remember.go`](../../cache/remember.go).
 - A cancelable in-flight call whose waiters have all timed out is abandoned: a caller that joins afterwards does not inherit the cancellation error — it starts a fresh computation. See [`cache/remember.go`](../../cache/remember.go).
 - [`InMemoryBackend`](../../cache/in_memory.go) owns a cleanup goroutine whose lifetime ends when [`CloseWithContext`](../../cache/in_memory.go) is called; callers must close the backend — or a `Manager` built over it with `ManagerConfig{OwnsBackend: true}` — to stop it; there is no finalizer fallback, and a manager that does not own its backend does not do it for you.
@@ -274,6 +326,7 @@ type Cache interface {
 - **cache.InMemoryBackendConfig** ([`cache/in_memory.go`](../../cache/in_memory.go)) — `MaxItems`, `CleanupInterval` and `Clock`, the zero value the default
 - **cache.ManagerConfig** ([`cache/manager.go`](../../cache/manager.go)) — `OwnsBackend`, off by default
 - **cache.RememberConfig** ([`cache/remember.go`](../../cache/remember.go)) — `Ttl` required, `StampedeProtectionDisabled`, `WaitTimeout` (30s, 0 no wait, unlimited) and `Detached`
+- **cache.RememberItem** ([`cache/remember_item.go`](../../cache/remember_item.go)) — `SetTtl(ttl)`, `SkipStore()`, `Ttl()` and `IsStoreSkipped()`; the zero value and a nil item say nothing
 - **cache.DeserializationError** ([`cache/deserialization_error.go`](../../cache/deserialization_error.go)) — the typed error a read answers when the payload does not deserialize; `Remember` treats it as a miss.
 - **cache.Item** ([`cache/item.go`](../../cache/item.go)) — the entry representation `InMemoryBackend` keeps internally. Carries key, payload, creation/expiration timestamps, last-access time, and hit count; `cachecontract.Backend.Get` itself returns the raw payload bytes, not an `Item`.
 
@@ -295,7 +348,7 @@ type Cache interface {
 
 #### Cache-aside
 
-- `cache.Remember[T](ctx, cacheInstance, key, config, callback) (T, error)` ([`cache/remember.go`](../../cache/remember.go)) — `T` inferred from the callback
+- `cache.Remember[T](ctx, cacheInstance, key, config, callback) (T, error)` ([`cache/remember.go`](../../cache/remember.go)) — `T` inferred from the callback, `func(ctx context.Context, item *cache.RememberItem) (T, error)`
 
 #### Typed reads
 

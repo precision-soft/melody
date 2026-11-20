@@ -16,7 +16,7 @@ import (
 
 /* RememberConfig is what one Remember call declares beyond its context, its cache, its key and its callback; the zero value is the default but for Ttl, which is required: stampede protection on, a 30s wait and a cancelable flight. */
 type RememberConfig struct {
-    /* Ttl is the lifetime of the stored value, handed to the cache's Set: a value of at least 1s, or unlimited for an entry kept until it is deleted or evicted; absent is refused, since a cached value declares how long it may be served. */
+    /* Ttl is the lifetime of the stored value unless the callback chooses its own through RememberItem.SetTtl, handed to the cache's Set: a value of at least 1s, or unlimited for an entry kept until it is deleted or evicted; absent is refused, also where every callback chooses, since the configuration is judged before the cache is read. */
     Ttl bound.Duration
 
     /* StampedeProtectionDisabled runs the callback on every miss in the caller's goroutine, under the caller's context, with no flight to join. Off, concurrent callers of one key on one cache instance coalesce under a leader. */
@@ -36,13 +36,13 @@ var rememberWaitTimeoutRule = bound.Rule[time.Duration]{
     UnlimitedAdmitted: true,
 }
 
-/* Remember answers the value cached under key as a T, computing it through the callback on a miss and storing it under the ttl. The context governs this caller's wait and nothing else under a flight: the computation belongs to the flight, and only the last waiter leaving a cancelable flight cancels it. A flight already finished is answered whatever the context says; otherwise the context's cancellation, the wait timeout and the leader's answer race, the first to arrive ending the wait. The callback receives the flight's context; with no flight, the stampede protection disabled or a cache the flight cannot tell apart by its pointer, it runs under the caller's context, which then governs the computation too. The cache is read and a computed value stored without the cancellation of the context they run under, its values kept, so a done context never refuses a hit and never loses a value already computed. A refused configuration is answered as the error, naming the field, before the cache is read. Every caller is answered a T of its own, the one the cache reads back: the computed value goes through the cache's RoundTrip before it is stored, so the miss answers what every hit answers, and a value the cache can write but not read back as a T is refused once, naming the key, with nothing stored. An entry the serializer refuses to decode into T, a corrupt payload or one of a kind T cannot hold, is a miss: the callback recomputes and the store overwrites it. One key holds one type: callers naming different types under one key never share a flight, and under json a struct written as another struct reads as a hit with the fields they do not share at zero. Remember[any] answers the generic form of the store's encoding, so under json an integer beyond 2^53 comes back changed. */
+/* Remember answers the value cached under key as a T, computing it through the callback on a miss and storing it under the configuration's ttl, unless the callback, through its item, chose another ttl or asked that nothing is stored. The context governs this caller's wait and nothing else under a flight: the computation belongs to the flight, and only the last waiter leaving a cancelable flight cancels it. A flight already finished is answered whatever the context says; otherwise the context's cancellation, the wait timeout and the leader's answer race, the first to arrive ending the wait. The callback receives the flight's context; with no flight, the stampede protection disabled or a cache the flight cannot tell apart by its pointer, it runs under the caller's context, which then governs the computation too. The cache is read and a computed value stored without the cancellation of the context they run under, its values kept, so a done context never refuses a hit and never loses a value already computed. A refused configuration is answered as the error, naming the field, before the cache is read. A ttl the callback chose that the cache refuses is answered as the error once the callback returned, naming RememberItem.Ttl, with nothing stored. A value the callback asked not to store is answered to this caller and to every waiter of its flight, and the next call computes again: under a skipped store, coalescing is the only stampede protection left. Every caller is answered a T of its own, the one the cache reads back: the computed value goes through the cache's RoundTrip before it is stored, so the miss answers what every hit answers, and a value the cache can write but not read back as a T is refused once, naming the key, with nothing stored. An entry the serializer refuses to decode into T, a corrupt payload or one of a kind T cannot hold, is a miss: the callback recomputes and the first computation that stores overwrites it. One key holds one type: callers naming different types under one key never share a flight, and under json a struct written as another struct reads as a hit with the fields they do not share at zero. Remember[any] answers the generic form of the store's encoding, so under json an integer beyond 2^53 comes back changed. */
 func Remember[T any](
     ctx context.Context,
     cacheInstance cachecontract.Cache,
     key string,
     config RememberConfig,
-    callback func(ctx context.Context) (T, error),
+    callback func(ctx context.Context, item *RememberItem) (T, error),
 ) (T, error) {
     var zero T
 
@@ -78,7 +78,7 @@ func Remember[T any](
     value, exists, getErr := operations.read(context.WithoutCancel(ctx))
     getErr = normalizeThirdPartyError(getErr)
     if nil != getErr {
-        /* a payload that does not decode into T is a miss: the callback recomputes and its Set overwrites the payload, so the key heals; every other error means the cache failed */
+        /* a payload that does not decode into T is a miss: the callback recomputes and the first Set overwrites the payload, so the key heals once a computation stores; every other error means the cache failed */
         if false == IsDeserializationError(getErr) {
             return zero, getErr
         }
@@ -131,13 +131,13 @@ type rememberOperations struct {
     read      func(ctx context.Context) (any, bool, error)
     roundTrip func(value any) (any, error)
     store     func(ctx context.Context, value any, ttl bound.Duration) error
-    compute   func(ctx context.Context) (any, error)
+    compute   func(ctx context.Context, item *RememberItem) (any, error)
 }
 
 func newRememberOperations[T any](
     cacheInstance cachecontract.Cache,
     key string,
-    callback func(ctx context.Context) (T, error),
+    callback func(ctx context.Context, item *RememberItem) (T, error),
 ) rememberOperations {
     return rememberOperations{
         valueType: reflect.TypeFor[T](),
@@ -168,8 +168,8 @@ func newRememberOperations[T any](
 
             return cacheInstance.Set(ctx, key, boxed.value, ttl)
         },
-        compute: func(ctx context.Context) (any, error) {
-            value, computeErr := callback(ctx)
+        compute: func(ctx context.Context, item *RememberItem) (any, error) {
+            value, computeErr := callback(ctx, item)
 
             return rememberedValue[T]{value: value}, computeErr
         },
@@ -221,6 +221,26 @@ func resolveRememberTtl(ttl bound.Duration) (bound.Duration, error) {
     return ttl, nil
 }
 
+/* the callback's choice is judged once it returned, under the item's field name: a skip wins over any ttl, an absent ttl leaves the configuration's */
+func resolveRememberStoreChoice(configTtl bound.Duration, storeChoice rememberStoreChoice) (bound.Duration, bool, error) {
+    if true == storeChoice.isStoreSkipped {
+        return bound.Duration{}, false, nil
+    }
+
+    if true == storeChoice.ttl.IsAbsent() {
+        return configTtl, true, nil
+    }
+
+    rule := cachecontract.TtlRule
+    rule.Name = "RememberItem.Ttl"
+
+    if _, err := bound.Resolve(storeChoice.ttl, rule); nil != err {
+        return bound.Duration{}, false, err
+    }
+
+    return storeChoice.ttl, true, nil
+}
+
 func rememberWithStampedeProtection(
     flightKey rememberFlightKey,
     key string,
@@ -268,7 +288,7 @@ func rememberWithStampedeProtection(
     return call.Wait(callerContext, waitTimeout, key)
 }
 
-/* readOwnStoredValue is a waiter's own read of the stored value its flight's leader could not copy: each read decodes a value of its own. An entry gone between the leader's read and this one, or one that fails to decode, is answered as a miss outside a flight is: the waiter computes through the callback and stores what it computed, under the flight's context, which lives while a waiter is in it. */
+/* readOwnStoredValue is a waiter's own read of the stored value its flight's leader could not copy: each read decodes a value of its own. An entry gone between the leader's read and this one, or one that fails to decode, is answered as a miss outside a flight is: the waiter computes through the callback, with an item of its own, and stores what it computed as that item says, under the flight's context, which lives while a waiter is in it. */
 func readOwnStoredValue(
     key string,
     ttl bound.Duration,
@@ -351,7 +371,7 @@ func executeRememberInFlightLeader(
         return
     }
 
-    computedValue, callbackErr := executeRememberCallbackSafely(
+    computedValue, storeChoice, callbackErr := executeRememberCallbackSafely(
         call.Context(),
         operations.compute,
         key,
@@ -361,16 +381,24 @@ func executeRememberInFlightLeader(
         return
     }
 
+    storeTtl, isStored, storeChoiceErr := resolveRememberStoreChoice(ttl, storeChoice)
+    if nil != storeChoiceErr {
+        call.Complete(nil, storeChoiceErr)
+        return
+    }
+
     normalizedValue, normalizeErr := operations.roundTrip(computedValue)
     if nil != normalizeErr {
         call.Complete(nil, normalizeErr)
         return
     }
 
-    setErr := normalizeThirdPartyError(operations.store(context.WithoutCancel(call.Context()), computedValue, ttl))
-    if nil != setErr {
-        call.Complete(nil, setErr)
-        return
+    if true == isStored {
+        setErr := normalizeThirdPartyError(operations.store(context.WithoutCancel(call.Context()), computedValue, storeTtl))
+        if nil != setErr {
+            call.Complete(nil, setErr)
+            return
+        }
     }
 
     /* the callback may keep the value it returned, so every caller past the first copies a master taken here, before the flight completes, which nothing else holds */
@@ -378,6 +406,15 @@ func executeRememberInFlightLeader(
     if nil != copyErr {
         call.Complete(nil, copyErr)
         return
+    }
+
+    /* a skipped value must be computed again by the next call, so its finished flight leaves the shard before it completes, where a call started after it would otherwise join it until the deferred delete */
+    if false == isStored {
+        shard.mutex.Lock()
+        if call == shard.inFlightByKey[flightKey] {
+            delete(shard.inFlightByKey, flightKey)
+        }
+        shard.mutex.Unlock()
     }
 
     call.CompleteWithCopies(normalizedValue, master, operations.roundTrip)
@@ -390,7 +427,7 @@ func rememberWithoutStampedeProtection(
     callerContext context.Context,
     operations rememberOperations,
 ) (any, error) {
-    value, callbackErr := executeRememberCallbackSafely(
+    value, storeChoice, callbackErr := executeRememberCallbackSafely(
         callerContext,
         operations.compute,
         key,
@@ -399,14 +436,21 @@ func rememberWithoutStampedeProtection(
         return nil, callbackErr
     }
 
+    storeTtl, isStored, storeChoiceErr := resolveRememberStoreChoice(ttl, storeChoice)
+    if nil != storeChoiceErr {
+        return nil, storeChoiceErr
+    }
+
     normalizedValue, normalizeErr := operations.roundTrip(value)
     if nil != normalizeErr {
         return nil, normalizeErr
     }
 
-    setErr := normalizeThirdPartyError(operations.store(context.WithoutCancel(callerContext), value, ttl))
-    if nil != setErr {
-        return nil, setErr
+    if true == isStored {
+        setErr := normalizeThirdPartyError(operations.store(context.WithoutCancel(callerContext), value, storeTtl))
+        if nil != setErr {
+            return nil, setErr
+        }
     }
 
     return normalizedValue, nil
@@ -478,10 +522,11 @@ func getRememberInFlightShard(flightKey rememberFlightKey) *rememberInFlightShar
 
 func executeRememberCallbackSafely(
     contextInstance context.Context,
-    callback func(ctx context.Context) (any, error),
+    callback func(ctx context.Context, item *RememberItem) (any, error),
     key string,
-) (result any, callbackErr error) {
+) (result any, storeChoice rememberStoreChoice, callbackErr error) {
     result = nil
+    storeChoice = rememberStoreChoice{}
     callbackErr = nil
 
     /* the panic value travels as the cause, with the stack captured on the goroutine that raised it, so an error-shaped panic keeps its context and chain */
@@ -502,16 +547,21 @@ func executeRememberCallbackSafely(
         )
 
         result = nil
+        storeChoice = rememberStoreChoice{}
     }()
 
     /* a typed-nil error from the callback is the success it means; boxed, it would be memoized as the flight's failure and panic the first waiter that renders it */
-    value, computeErr := callback(contextInstance)
+    /* an item of its own per computation, read once here, so what a callback tells a kept item later changes no store */
+    item := &RememberItem{}
+
+    value, computeErr := callback(contextInstance, item)
     computeErr = normalizeThirdPartyError(computeErr)
     if nil != computeErr {
-        return nil, computeErr
+        return nil, rememberStoreChoice{}, computeErr
     }
 
     result = value
+    storeChoice = item.storeChoice()
 
-    return result, nil
+    return result, storeChoice, nil
 }

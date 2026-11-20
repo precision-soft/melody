@@ -22,6 +22,14 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Cache: the callback of `Remember` receives an item, and chooses its ttl or skips the store
+
+**What changed.** The callback of [`Remember`](../cache/remember.go) is `func(ctx context.Context, item *cache.RememberItem) (T, error)`. Through the item it chooses the ttl of the entry it computes, `item.SetTtl(bound.Of(time.Minute))`, or asks that the value is answered and not stored, `item.SkipStore()`. `RememberConfig.Ttl` stays required and is what an untouched item stores under.
+
+**Symptom.** A callback declared `func(ctx context.Context) (T, error)` no longer compiles: `in call to cache.Remember, type func(ctx context.Context) (string, error) of func(ctx context.Context) (string, error) {…} does not match func(ctx context.Context, item *cache.RememberItem) (T, error) (cannot infer T)`, or, where the call names its type, `cannot use func(ctx context.Context) (string, error) {…} (value of type func(ctx context.Context) (string, error)) as func(ctx context.Context, item *cache.RememberItem) (string, error) value in argument to cache.Remember[string]`.
+
+**Remedy.** Add the parameter and ignore it: `func(ctx context.Context, _ *cache.RememberItem) (T, error)`. A helper that stored an absence under one ttl and wrote a found value again under another sets the ttl in the callback and drops its second `Set`. A ttl below a second chosen in the callback is answered by `Remember` as an error; `bound.Of(0)` does not mean "do not store", `item.SkipStore()` does.
+
 ### Runtime: the runtime lives under the container, names its phase, and reaches no container
 
 **What changed.** The `Runtime` contract moved from `v4/runtime/contract` to [`v4/container/contract`](../container/contract/runtime.go), and its implementation, with `FromRuntime` and `MustFromRuntime`, from `v4/runtime` to [`v4/container/runtime`](../container/runtime); the old packages are gone. `Runtime` gains `Kind()`, the phase it stands for, and loses `Container()`: a runtime resolves through its scope, which answers the container's own services as before. `runtime.New(ctx, scope, container)` is replaced by `NewRequest(ctx, scope)` and `NewRun(ctx, scope)`; a runtime over a derived context is `WithContext(runtime, ctx)`, which keeps the kind; the scope of one delivery or one tick inside a run is `NewChildRun(parent, ctx)`. `debug:container` is built over the container it describes, `debug.NewContainerCommand(container)`.
