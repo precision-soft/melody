@@ -57,7 +57,7 @@ Every registration door takes a [`RegisterOptions`](../../container/contract/reg
 Type registration is **on by default** (strict) for the application's `RegisterService` and the container's `MustRegisterType`, so every registered service is also resolvable by its concrete return type — the zero `RegisterOptions{}` does it. Resolve a service by type with the generic [`MustFromResolverByType[T]`](../../container/resolver.go) / [`FromResolverByType[T]`](../../container/resolver.go):
 
 ```go
-bus := container.MustFromResolverByType[messagebuscontract.Bus](container.ContextOf(resolver), resolver)
+bus := container.MustFromResolverByType[messagebuscontract.Bus](resolver.Runtime().Context(), resolver)
 ```
 
 For a service with a **single** implementation this removes the need to invent a string service-name constant and a per-type `MustGetX` accessor — register it and resolve it by type. Keep the **named** path (`RegisterService(ServiceX, ...)` + `XMustFromResolver`) when a contract has more than one implementation that must coexist: because type registration is strict, registering two services under the same contract type fails at registration (the string name is then the only disambiguator).
@@ -67,7 +67,7 @@ For a service with a **single** implementation this removes the need to invent a
 A component that must act on **all** services of a kind — a dispatcher over every message handler, a scheduler over every cron task — collects them with [`AllImplementing[T]`](../../container/resolver_implementing.go) instead of being handed a hand-maintained list that goes stale when a service is added:
 
 ```go
-handlers, err := container.AllImplementing[MessageHandler](container.ContextOf(resolver), resolver)
+handlers, err := container.AllImplementing[MessageHandler](resolver.Runtime().Context(), resolver)
 ```
 
 `AllImplementing[T]` requires `T` to be an interface and resolves every registered service whose type satisfies it — one registered under the interface type itself included, and every instance of a type registered non-strictly under several names. `MustAllImplementing[T]` is the panicking variant. The order never changes between runs: descending `RegisterOptions.CollectionPriority` (a higher priority is dispatched earlier), then type and name. A provider that fails aborts the whole collection rather than yielding a partial set.
@@ -80,14 +80,14 @@ Every door that can wait on a creation another goroutine runs takes the caller's
 
 The context bounds the wait, not the build. A resolution parked on another goroutine's creation leaves the moment its context ends, answering an error whose cause is `context.Cause(ctx)`, so `errors.Is` matches the cause set through `context.WithCancelCause`, or `context.Canceled` or `context.DeadlineExceeded` when none was set; it leaves the waiter count and the wait graph as a released waiter does, and a creation that finished in the same instant is answered as its value. The goroutine running the provider is never interrupted: its value is kept for the next resolution.
 
-A provider's own resolutions are another matter, since they wait under the context of the call that started its creation. When that call ends while the provider waits on a nested creation another goroutine runs, the provider's resolution fails, the creation fails, and every resolution coalesced behind it answers that failure, though their own contexts are live; nothing is memoized, so the next resolution builds again. A provider that must not fail with its first caller resolves under a context of its own, such as `context.WithoutCancel(container.ContextOf(resolver))`.
+A provider's own resolutions are another matter, since they wait under the context of the call that started its creation. When that call ends while the provider waits on a nested creation another goroutine runs, the provider's resolution fails, the creation fails, and every resolution coalesced behind it answers that failure, though their own contexts are live; nothing is memoized, so the next resolution builds again. A provider that must not fail with its first caller resolves under a context of its own, such as `context.WithoutCancel(resolver.Runtime().Context())`.
 
-A provider keeps its signature, `func(resolver Resolver) (T, error)`. The resolver it receives carries the context of the call whose resolution started the creation, read through [`container.ContextOf(resolver)`](../../container/resolver.go), so the provider's own resolutions wait under the same deadline as the call that asked for it:
+A provider keeps its signature, `func(resolver Resolver) (T, error)`. The resolver it receives answers the runtime of the resolution in flight through [`resolver.Runtime()`](../../container/contract/resolver.go): its `Context()` is the context of the call whose resolution started the creation, so the provider's own resolutions wait under the same deadline as the call that asked for it:
 
 ```go
 container.MustRegister[*ReportService](registrar, ServiceReportService,
     func(resolver containercontract.Resolver) (*ReportService, error) {
-        ctx := container.ContextOf(resolver)
+        ctx := resolver.Runtime().Context()
 
         return NewReportService(
             container.MustFromResolver[Repository](ctx, resolver, ServiceRepository),
@@ -96,9 +96,9 @@ container.MustRegister[*ReportService](registrar, ServiceReportService,
     container.RegisterOptions{})
 ```
 
-The capability behind it is [`contract.ResolutionContext`](../../container/contract/resolution_context.go), kept off `Resolver` so a resolver written outside the framework keeps compiling; `ContextOf` answers `context.Background()` for one without it, and the container and a scope do not implement it, since no call is in flight on them. The resolver a provider receives carries the context only while the provider runs: one the provider retains — in a `Lazy` handle, a closure or a callback — answers `context.Background()` through `ContextOf` once the provider returned, and keeps nothing of the call that built it; a later resolution through it passes its own context. A runtime carries its own context, so `runtime.FromRuntime` and `runtime.MustFromRuntime` keep their shape and resolve under `runtimeInstance.Context()`; every framework `*FromContainer` and `*FromResolver` helper takes the context first, the `*FromRuntime` ones do not. The kernel answers the application's context through `Kernel.Context()`, the one a boot hook resolves under.
+`Runtime()` is a method of `Resolver`, so the container, a scope and the resolver a provider receives all answer it, never nil. Inside a provider its `Kind()` is the kind of the scope the call entered through — a scope `runtime.NewRequest` built a runtime over answers `KindRequest`, one `runtime.NewRun` built over answers `KindRun` — and a call through the container itself, or through a scope no runtime constructor bound, is `KindDetached`; a dependency the provider creates reads the same kind. `Runtime().Scope()` resolves through the provider's own chain, so a resolution through the runtime — `runtime.FromRuntime`, a `*FromRuntime` helper, a runtime derived by `runtime.WithContext` — is refused as circular when it closes a cycle, as through the resolver, where a call through the container or a scope held from outside the provider starts a chain of its own and waits on its own creation until its context ends. A scoped provider's runtime scope hands its registrations, overrides and close to the real scope; a container-owned provider's is a suspended scope that resolves what the container holds, refuses a scope-only service as not registered, refuses a registration and an override naming the door, and closes nothing, so a process singleton never holds one request's scope. The runtime a provider reads is a snapshot of its resolution: kept past it, it still names the first caller's context and kind, so a provider keeps the resolver, not its runtime. A singleton reads the runtime of the call that created it first, never a waiter's: "the request's runtime" of a process singleton is the first request's. One scope serves one kind: a runtime constructor over a scope another kind bound panics naming both. Where nothing resolves in flight — the container, a scope, a resolver the provider retained in a `Lazy` handle, a closure or a callback after it returned — `Runtime()` answers a detached runtime over `context.Background()` and keeps nothing of the call that built it; a later resolution through a retained resolver passes its own context, and a creation it starts reads the scope's kind while the resolver sees the scope and `KindDetached` from a container-owned provider's, whose scope may be long closed. A runtime carries its own context, so `runtime.FromRuntime` and `runtime.MustFromRuntime` keep their shape and resolve under `runtimeInstance.Context()`; every framework `*FromContainer` and `*FromResolver` helper takes the context first, the `*FromRuntime` ones do not. The kernel answers the application's context through `Kernel.Context()`, the one a boot hook resolves under.
 
-A goroutine the provider starts resolves through its own resolver, [`container.ForGoroutine(resolver)`](../../container/resolver.go): every resolution through it — a `Lazy` handle built over it, or a plain `Get` — runs on a chain of its own, even while the provider is still running, and is recorded as the provider's dependency, never as one of the service the provider happens to be building at that moment. It carries no context, so `ContextOf` answers `context.Background()` and the goroutine passes its own to every door. The capability behind it is [`contract.GoroutineResolver`](../../container/contract/goroutine_resolver.go); the container and a scope do not implement it, since no chain is in flight on them, and are answered as they are. While the resolution that started the provider is still building, the container cannot tell whether the provider waits on its goroutine, so a use from the goroutine that would wait on any creation that resolution holds — the provider's own service, a service further up the chain, a dependency it is resolving at that instant, or a collection that includes one of them — is refused with `ErrCircularDependency` rather than risk a deadlock. A goroutine that needs one of those resolves it once the provider has returned: a `Lazy` handle used at the first piece of work, as in the sample, rather than as the goroutine starts.
+A goroutine the provider starts resolves through its own resolver, [`container.ForGoroutine(resolver)`](../../container/resolver.go): every resolution through it — a `Lazy` handle built over it, or a plain `Get` — runs on a chain of its own, even while the provider is still running, and is recorded as the provider's dependency, never as one of the service the provider happens to be building at that moment. It carries no context, so its `Runtime()` is detached and the goroutine passes its own context to every door. The capability behind it is [`contract.GoroutineResolver`](../../container/contract/goroutine_resolver.go); the container and a scope do not implement it, since no chain is in flight on them, and are answered as they are. While the resolution that started the provider is still building, the container cannot tell whether the provider waits on its goroutine, so a use from the goroutine that would wait on any creation that resolution holds — the provider's own service, a service further up the chain, a dependency it is resolving at that instant, or a collection that includes one of them — is refused with `ErrCircularDependency` rather than risk a deadlock. A goroutine that needs one of those resolves it once the provider has returned: a `Lazy` handle used at the first piece of work, as in the sample, rather than as the goroutine starts.
 
 ```go
 container.MustRegister[*Worker](registrar, ServiceWorker,
@@ -162,7 +162,7 @@ func registerServices(
         "example.greeting",
         func(resolver containercontract.Resolver) (string, error) {
             logger := container.MustFromResolver[Logger](
-                container.ContextOf(resolver),
+                resolver.Runtime().Context(),
                 resolver,
                 "example.logger",
             )
@@ -305,14 +305,14 @@ A service registered with `RegisterScoped` belongs to one scope — one http req
 /* a process-lifetime service */
 container.MustRegister(registrar, ServiceAuditWriter,
     func(resolver containercontract.Resolver) (*AuditWriter, error) {
-        return NewAuditWriter(container.MustFromResolverByType[*AuditRepository](container.ContextOf(resolver), resolver)), nil
+        return NewAuditWriter(container.MustFromResolverByType[*AuditRepository](resolver.Runtime().Context(), resolver)), nil
     },
     container.RegisterOptions{})
 
 /* a request-lifetime service: it may read both the scope and the container */
 container.MustRegisterScoped(registrar, ServiceAuditTrail,
     func(resolver containercontract.Resolver) (*AuditTrail, error) {
-        ctx := container.ContextOf(resolver)
+        ctx := resolver.Runtime().Context()
 
         return NewAuditTrail(
             http.RequestContextMustFromResolver(ctx, resolver),
@@ -346,7 +346,7 @@ A `Lazy` or `LazyByType` handle built over the container, or over the resolver a
 ### Contracts (`container/contract`)
 
 - [`type Container`](../../container/contract/container.go)
-- [`type Resolver`](../../container/contract/resolver.go)
+- [`type Resolver`](../../container/contract/resolver.go) — the six resolving doors and `Runtime()`, the runtime of the resolution in flight, detached where none is
 - [`type Registrar`](../../container/contract/registrar.go)
 - [`type OverrideService`](../../container/contract/override.go)
 - [`type ScopeManager`](../../container/contract/scope.go)
@@ -357,7 +357,6 @@ A `Lazy` or `LazyByType` handle built over the container, or over the resolver a
 - [`type RegisterOptions`](../../container/contract/registrar.go)
 - [`type Closer`](../../container/contract/registrar.go)
 - [`type TypeLister`](../../container/contract/type_lister.go)
-- [`type ResolutionContext`](../../container/contract/resolution_context.go) — the optional capability of a resolver that carries the context of the resolution in flight
 - [`type GoroutineResolver`](../../container/contract/goroutine_resolver.go) — the optional capability of a provider's resolver to hand out a resolver for a goroutine the provider starts
 - [`type ServiceReference`](../../container/contract/type_lister.go)
 - [`type ServiceDescription`](../../container/contract/service_description.go), [`ServiceLifetimeContainer`, `ServiceLifetimeScoped`](../../container/contract/service_description.go) — what a container can say about a registration without running its provider: the name, the owning lifetime, whether an instance already exists, and the type. Answered by `ServiceDescriptions()` on the container, which is what lets an introspection command list a container without building it
@@ -388,7 +387,6 @@ A `Lazy` or `LazyByType` handle built over the container, or over the resolver a
     - [`MustFromResolver[T]`](../../container/resolver.go)
     - [`FromResolverByType[T]`](../../container/resolver.go)
     - [`MustFromResolverByType[T]`](../../container/resolver.go)
-    - [`ContextOf(resolver) context.Context`](../../container/resolver.go) — the context a provider's resolver carries, `context.Background()` for a resolver without one
     - [`ForGoroutine(resolver) Resolver`](../../container/resolver.go) — the resolver a goroutine started by a provider resolves through, on a chain of its own; any other resolver is answered as it is
 - Deferred resolution — the handle a component assembled during the boot phase holds over a service whose provider is registered but not yet safe to resolve at that phase:
     - [`type LazyService[T]`](../../container/lazy.go) — `Resolve(ctx)` and `Get(ctx)` resolve under the caller's context; memoizes success only, so a failed, cancelled or nil resolution is retried on the next call

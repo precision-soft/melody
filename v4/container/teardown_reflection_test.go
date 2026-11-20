@@ -831,7 +831,7 @@ func TestContainer_Close_WavesAHeldEdgeAgainstAResolvedEdgeIsNotWritten(t *testi
     if registerErr := serviceContainer.Register(
         "app.holder",
         func(resolver containercontract.Resolver) (*resolvingHolder, error) {
-            if _, getErr := FromResolver[*backHolder](ContextOf(resolver), resolver, "app.collaborator"); nil != getErr {
+            if _, getErr := FromResolver[*backHolder](resolver.Runtime().Context(), resolver, "app.collaborator"); nil != getErr {
                 return nil, getErr
             }
 
@@ -1005,7 +1005,7 @@ func TestContainer_Close_WavesAHeldEdgeBesideAMutualPairIsStillWritten(t *testin
         "pair.b",
         func(resolver containercontract.Resolver) (*mutualPairB, error) {
             /* resolved, so the graph carries b before the holder: that resolution is what made the way back from a to the holder look like one */
-            if _, resolveErr := resolver.Get(ContextOf(resolver), "pair.holder"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "pair.holder"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -1136,7 +1136,7 @@ func TestContainer_Close_WavesAHeldEdgeAgainstAResolvedEdgeThroughATypeAliasIsNo
         if registerErr := serviceContainer.Register(
             "app.resolving",
             func(resolver containercontract.Resolver) (*aliasedResolvingService, error) {
-                if _, resolveErr := FromResolver[*aliasedCapturingService](ContextOf(resolver), resolver, "app.capturing"); nil != resolveErr {
+                if _, resolveErr := FromResolver[*aliasedCapturingService](resolver.Runtime().Context(), resolver, "app.capturing"); nil != resolveErr {
                     return nil, resolveErr
                 }
 
@@ -1761,7 +1761,7 @@ func TestContainer_Close_WavesTwoListenersHoldingTheirBusBackStillCloseTogether(
         "app.bus",
         func(resolver containercontract.Resolver) (*listenerBus, error) {
             for _, name := range []string{"app.p", "app.q"} {
-                listener, resolveErr := FromResolver[*busListener](ContextOf(resolver), resolver, name)
+                listener, resolveErr := FromResolver[*busListener](resolver.Runtime().Context(), resolver, name)
                 if nil != resolveErr {
                     return nil, resolveErr
                 }
@@ -2199,7 +2199,7 @@ func TestContainer_Waves_ABusyServiceRegisteredWithTeardownReflectionDisabledIsN
     }, RegisterOptions{TeardownReflectionDisabled: true})
 
     MustRegister[*reflectionBusyHolder](serviceContainer, "app.busy.holder", func(resolver containercontract.Resolver) (*reflectionBusyHolder, error) {
-        busy, busyErr := FromResolver[*reflectionBusyService](ContextOf(resolver), resolver, "app.busy")
+        busy, busyErr := FromResolver[*reflectionBusyService](resolver.Runtime().Context(), resolver, "app.busy")
         if nil != busyErr {
             return nil, busyErr
         }

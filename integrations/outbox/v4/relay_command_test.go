@@ -290,6 +290,10 @@ func (instance nilYieldingResolver) MustGetByType(ctx context.Context, targetTyp
 func (instance nilYieldingResolver) Has(serviceName string) bool               { return true }
 func (instance nilYieldingResolver) HasType(targetType reflect.Type) bool      { return true }
 
+func (instance nilYieldingResolver) Runtime() containercontract.Runtime {
+    return nil
+}
+
 func TestRelayCommand_ANilRelayYieldIsAnErrorNotAPanic(t *testing.T) {
     relayCommand := NewRelayCommandFromResolver(nilYieldingResolver{}, RelayCommandConfig{})
 

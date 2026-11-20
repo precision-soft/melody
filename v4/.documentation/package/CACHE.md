@@ -142,7 +142,7 @@ func registerCacheOverrides(
         cache.ServiceCacheBackend,
         func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
             clockInstance := clock.ClockMustFromResolver(
-                container.ContextOf(resolver),
+                resolver.Runtime().Context(),
                 resolver,
             )
 
@@ -161,11 +161,11 @@ func registerCacheOverrides(
         cache.ServiceCache,
         func(resolver containercontract.Resolver) (cachecontract.Cache, error) {
             backend := cache.CacheBackendMustFromResolver(
-                container.ContextOf(resolver),
+                resolver.Runtime().Context(),
                 resolver,
             )
             serializerInstance := cache.CacheSerializerMustFromResolver(
-                container.ContextOf(resolver),
+                resolver.Runtime().Context(),
                 resolver,
             )
 

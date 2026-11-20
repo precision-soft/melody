@@ -646,6 +646,10 @@ func (instance *testScope) Has(serviceName string) bool { return false }
 
 func (instance *testScope) HasType(targetType reflect.Type) bool { return false }
 
+func (instance *testScope) Runtime() containercontract.Runtime {
+    return nil
+}
+
 func (instance *testScope) OverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) error { return nil }
 
 func (instance *testScope) MustOverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) {}

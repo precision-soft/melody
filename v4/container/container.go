@@ -241,6 +241,11 @@ func (instance *container) MustGetByType(ctx context.Context, targetType reflect
     return resolver.MustGetByType(ctx, targetType)
 }
 
+/* nothing resolves in flight on the container itself, so its detached runtime is over a suspended scope */
+func (instance *container) Runtime() containercontract.Runtime {
+    return newDetachedRuntime(&suspendedScope{resolver: instance})
+}
+
 func (instance *container) Has(serviceName string) bool {
     if "" == serviceName {
         return false

@@ -70,7 +70,7 @@ func RegisterDatabaseServices(registrar applicationcontract.ServiceRegistrar) {
         func(resolver containercontract.Resolver) (*melodybunorm.ManagerRegistry, error) {
             return melodybunorm.NewManagerRegistry(
                 context.Background(),
-                logging.LoggerMustFromResolver(container.ContextOf(resolver), resolver),
+                logging.LoggerMustFromResolver(resolver.Runtime().Context(), resolver),
                 []melodybunorm.ProviderDefinition{
                     melodybunorm.ProviderDefinition{
                         Name:     ManagerPrimaryName,
@@ -104,7 +104,7 @@ func RegisterDatabaseServices(registrar applicationcontract.ServiceRegistrar) {
     registrar.RegisterService(
         ServiceManagerDefaultId,
         func(resolver containercontract.Resolver) (*melodybunorm.Manager, error) {
-            registry := container.MustFromResolver[*melodybunorm.ManagerRegistry](container.ContextOf(resolver), resolver, ServiceManagerRegistryId)
+            registry := container.MustFromResolver[*melodybunorm.ManagerRegistry](resolver.Runtime().Context(), resolver, ServiceManagerRegistryId)
 
             return registry.DefaultManager()
         },

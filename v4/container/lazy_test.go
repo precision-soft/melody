@@ -612,7 +612,7 @@ func TestLazyService_AProviderResolverBackedHandleServesTheClosingServiceDuringT
     MustRegister[*lazyTeardownReader](serviceContainer, "app.reader", func(resolver containercontract.Resolver) (*lazyTeardownReader, error) {
         reader.lazyHandle = Lazy[*lazyProbeItem](resolver, "app.dependency")
         reader.directResolve = func() (*lazyProbeItem, error) {
-            return FromResolver[*lazyProbeItem](ContextOf(resolver), resolver, "app.dependency")
+            return FromResolver[*lazyProbeItem](resolver.Runtime().Context(), resolver, "app.dependency")
         }
 
         return reader, nil
@@ -799,11 +799,11 @@ func TestLazyService_AGoroutineStartedByAProviderDoesNotRaceItsChain(t *testing.
             go func() {
                 defer close(done)
 
-                _, _ = handle.Resolve(ContextOf(resolver))
+                _, _ = handle.Resolve(resolver.Runtime().Context())
             }()
 
             for resolution := 0; 50 > resolution; resolution++ {
-                if _, otherErr := FromResolver[lazyRaceOther](ContextOf(resolver), resolver, "service.other"); nil != otherErr {
+                if _, otherErr := FromResolver[lazyRaceOther](resolver.Runtime().Context(), resolver, "service.other"); nil != otherErr {
                     return "", otherErr
                 }
             }

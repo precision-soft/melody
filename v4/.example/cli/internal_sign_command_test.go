@@ -40,7 +40,7 @@ func newInternalSignTestCommand(newSigner func(ctx context.Context, ttl bound.Du
         containerInstance,
         internalSignTestSignerService,
         func(resolver melodycontainercontract.Resolver) (*melodysecurity.HmacEnvelopeSigner, error) {
-            return newInternalSignTestSigner(melodycontainer.ContextOf(resolver), bound.Duration{}), nil
+            return newInternalSignTestSigner(resolver.Runtime().Context(), bound.Duration{}), nil
         },
         melodycontainer.RegisterOptions{},
     )

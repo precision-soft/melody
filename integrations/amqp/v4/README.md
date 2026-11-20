@@ -134,7 +134,7 @@ amqp.RegisterTransportService(registrar, "async", transport)
 ```
 
 ```go
-ctx := container.ContextOf(resolver)
+ctx := resolver.Runtime().Context()
 
 connection := amqp.ConnectionMustFromResolver(ctx, resolver)
 transport := amqp.TransportMustFromResolver(ctx, resolver, "async")

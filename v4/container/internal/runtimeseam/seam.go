@@ -11,3 +11,7 @@ type Token struct{}
 type ChildScopeSpawner interface {
     SpawnChildScope(token Token) (containercontract.Scope, error)
 }
+
+type KindBinder interface {
+    BindRuntimeKind(token Token, kind containercontract.Kind) error
+}

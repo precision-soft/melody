@@ -260,6 +260,10 @@ func (instance *testScope) HasType(targetType reflect.Type) bool {
     return false
 }
 
+func (instance *testScope) Runtime() containercontract.Runtime {
+    return nil
+}
+
 func (instance *testScope) OverrideInstance(serviceName string, value any, options containercontract.OverrideOptions) error {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()

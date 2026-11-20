@@ -995,7 +995,7 @@ func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing
             close(firstEntered)
             <-releaseFirst
 
-            _, getErr := resolver.Get(ContextOf(resolver), "app.cycle.second")
+            _, getErr := resolver.Get(resolver.Runtime().Context(), "app.cycle.second")
             if nil != getErr {
                 return nil, getErr
             }
@@ -1014,7 +1014,7 @@ func TestCreationGuard_ACycleAcrossTwoConcurrentResolutionsIsReported(t *testing
             close(secondEntered)
             <-releaseSecond
 
-            _, getErr := resolver.Get(ContextOf(resolver), "app.cycle.first")
+            _, getErr := resolver.Get(resolver.Runtime().Context(), "app.cycle.first")
             if nil != getErr {
                 return nil, getErr
             }
@@ -2208,7 +2208,7 @@ func TestCreationGuard_AProvidersNestedWaitEndsWithItsFirstCallersContext(t *tes
     }, RegisterOptions{})
 
     MustRegister[*testService](serviceContainer, "app.nested.outer", func(resolver containercontract.Resolver) (*testService, error) {
-        if _, nestedErr := resolver.Get(ContextOf(resolver), "app.nested.held"); nil != nestedErr {
+        if _, nestedErr := resolver.Get(resolver.Runtime().Context(), "app.nested.held"); nil != nestedErr {
             return nil, nestedErr
         }
 

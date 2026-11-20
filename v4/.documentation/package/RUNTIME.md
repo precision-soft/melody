@@ -106,6 +106,8 @@ func example() int64 {
     - Implementation: [`selectRuntimeResolver`](../../container/runtime/resolver.go), [`(*scope).Get`](../../container/scope.go)
 - The constructors require a non-nil `context.Context` and `Scope` and fail-fast panic on invalid construction; `WithContext` keeps the kind, so a runtime derived for a deadline stays the phase it was.
     - Implementation: [`NewRequest`, `NewRun`, `WithContext`](../../container/runtime/runtime.go)
+- `NewRequest` and `NewRun` bind their kind to the scope, so a provider whose creation enters through that scope reads it as `resolver.Runtime().Kind()`, and a singleton reads the kind of the call that built it first. One scope serves one kind: a constructor of another kind over a bound scope panics naming both; give each kind its own scope. A scope of another implementation is accepted and not bound. A resolution through the container itself, or through a scope no constructor bound, hands its provider `KindDetached`.
+    - Implementation: [`(*scope).BindRuntimeKind`](../../container/scope_runtime_seam.go), [`(*resolverContext).Runtime`](../../container/resolver_context.go)
 - The runtime itself does not own lifecycle cleanup; the caller is responsible for closing the scope (and container when appropriate).
 
 ## Userland API

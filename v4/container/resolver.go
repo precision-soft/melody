@@ -218,14 +218,3 @@ func ForGoroutine(resolver containercontract.Resolver) containercontract.Resolve
 
     return resolver
 }
-
-/* ContextOf answers the context a resolver carries through containercontract.ResolutionContext: inside a provider, the context of the call that started the creation, so the provider's own resolutions wait under it. A resolver without the capability, the container and a scope among them, answers context.Background(). */
-func ContextOf(resolver containercontract.Resolver) context.Context {
-    if resolutionContext, isResolutionContext := resolver.(containercontract.ResolutionContext); true == isResolutionContext && false == internal.IsNilInterface(resolutionContext) {
-        if ctx := resolutionContext.Context(); false == internal.IsNilInterface(ctx) {
-            return ctx
-        }
-    }
-
-    return context.Background()
-}

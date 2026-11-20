@@ -18,4 +18,7 @@ type Resolver interface {
     Has(serviceName string) bool
 
     HasType(targetType reflect.Type) bool
+
+    /* Runtime answers the runtime of the resolution in flight. Inside a provider it is the kind of the scope the call that started the creation entered through, over the context that call waits under, and a scope that resolves through the provider's chain, so a cycle closed through the runtime is refused as circular: a scoped provider's hands its registrations, overrides and close to the real scope, a container-owned provider's is suspended, resolving what the container holds and refusing a registration, an override and a close. The answer is a snapshot of the resolution; a provider keeps the resolver, not its runtime. A singleton reads the runtime of its first creator, never a waiter's. Where no resolution is in flight — the container, a scope, a resolver retained after its provider returned, a goroutine view — it answers a detached runtime over context.Background(), never nil; a Lazy that creates its service after the provider returned therefore creates it detached. */
+    Runtime() Runtime
 }

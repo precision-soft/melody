@@ -231,7 +231,7 @@ func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *
     registerErr = serviceContainer.Register(
         "app.dependent",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            dependency := resolver.MustGet(ContextOf(resolver), "app.dependency").(*resolverContextMustProbe)
+            dependency := resolver.MustGet(resolver.Runtime().Context(), "app.dependency").(*resolverContextMustProbe)
 
             return &resolverContextMustDependent{dependency: dependency}, nil
         },
@@ -254,7 +254,7 @@ func TestResolverContext_MustGet_AnswersInsideAProviderAndNamesItsOwnFailure(t *
     registerErr = serviceContainer.Register(
         "app.broken",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            _ = resolver.MustGet(ContextOf(resolver), "app.never.declared")
+            _ = resolver.MustGet(resolver.Runtime().Context(), "app.never.declared")
 
             return &resolverContextMustDependent{}, nil
         },
@@ -299,7 +299,7 @@ func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailu
     registerErr = serviceContainer.Register(
         "app.dependent",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            dependency := resolver.MustGetByType(ContextOf(resolver), reflect.TypeOf((*resolverContextMustProbe)(nil))).(*resolverContextMustProbe)
+            dependency := resolver.MustGetByType(resolver.Runtime().Context(), reflect.TypeOf((*resolverContextMustProbe)(nil))).(*resolverContextMustProbe)
 
             return &resolverContextMustDependent{dependency: dependency}, nil
         },
@@ -322,7 +322,7 @@ func TestResolverContext_MustGetByType_AnswersInsideAProviderAndNamesItsOwnFailu
     registerErr = serviceContainer.Register(
         "app.broken",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            _ = resolver.MustGetByType(ContextOf(resolver), reflect.TypeOf((*resolverRaceProbeFirst)(nil)))
+            _ = resolver.MustGetByType(resolver.Runtime().Context(), reflect.TypeOf((*resolverRaceProbeFirst)(nil)))
 
             return &resolverContextMustDependent{}, nil
         },
@@ -456,13 +456,13 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.scoped.parent",
         func(resolver containercontract.Resolver) (*resolverContextGraphParent, error) {
-            dependency, getErr := resolver.Get(ContextOf(resolver), "app.container.dependency")
+            dependency, getErr := resolver.Get(resolver.Runtime().Context(), "app.container.dependency")
             if nil != getErr {
                 return nil, getErr
             }
 
             /* the by-type door runs the same filter at its own site, so both writes are exercised by the one scoped parent */
-            if _, getByTypeErr := resolver.GetByType(ContextOf(resolver), reflect.TypeOf((*resolverContextGraphDependency)(nil))); nil != getByTypeErr {
+            if _, getByTypeErr := resolver.GetByType(resolver.Runtime().Context(), reflect.TypeOf((*resolverContextGraphDependency)(nil))); nil != getByTypeErr {
                 return nil, getByTypeErr
             }
 
@@ -497,7 +497,7 @@ func TestResolverContext_AScopedParentWritesNoEdgeIntoTheContainerGraph(t *testi
     serviceContainer.MustRegister(
         "app.container.parent",
         func(resolver containercontract.Resolver) (*resolverContextGraphControlParent, error) {
-            dependency, getErr := resolver.Get(ContextOf(resolver), "app.container.dependency")
+            dependency, getErr := resolver.Get(resolver.Runtime().Context(), "app.container.dependency")
             if nil != getErr {
                 return nil, getErr
             }
@@ -571,13 +571,13 @@ func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependency(t 
     }, RegisterOptions{})
 
     MustRegister[*closeOrderServiceB](serviceContainer, "service.b", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-        owner, ownerErr := FromResolver[*lateViewOwner](ContextOf(resolver), resolver, "app.owner")
+        owner, ownerErr := FromResolver[*lateViewOwner](resolver.Runtime().Context(), resolver, "app.owner")
         if nil != ownerErr {
             return nil, ownerErr
         }
 
         /* the owner's provider has returned and this provider is still running on the same chain */
-        if _, lateErr := FromResolver[*closeOrderServiceA](ContextOf(resolver), owner.resolver, "service.a"); nil != lateErr {
+        if _, lateErr := FromResolver[*closeOrderServiceA](resolver.Runtime().Context(), owner.resolver, "service.a"); nil != lateErr {
             return nil, lateErr
         }
 
@@ -615,13 +615,13 @@ func TestResolverContext_AViewWhoseProviderReturnedRecordsItsOwnersDependencyByT
     }, RegisterOptions{})
 
     MustRegister[*closeOrderServiceB](serviceContainer, "service.b", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-        owner, ownerErr := FromResolver[*lateViewOwner](ContextOf(resolver), resolver, "app.owner")
+        owner, ownerErr := FromResolver[*lateViewOwner](resolver.Runtime().Context(), resolver, "app.owner")
         if nil != ownerErr {
             return nil, ownerErr
         }
 
         /* the owner's provider has returned and this provider is still running on the same chain */
-        if _, lateErr := FromResolverByType[*closeOrderServiceA](ContextOf(resolver), owner.resolver); nil != lateErr {
+        if _, lateErr := FromResolverByType[*closeOrderServiceA](resolver.Runtime().Context(), owner.resolver); nil != lateErr {
             return nil, lateErr
         }
 
@@ -659,7 +659,7 @@ func TestResolverContext_ConcurrentFirstUsesOfALazyOverAProvidersResolverAllReso
         }, RegisterOptions{})
 
         MustRegister[*lateLeafB](serviceContainer, "leaf.b", func(resolver containercontract.Resolver) (*lateLeafB, error) {
-            leafA, leafErr := FromResolver[*lateLeafA](ContextOf(resolver), resolver, "leaf.a")
+            leafA, leafErr := FromResolver[*lateLeafA](resolver.Runtime().Context(), resolver, "leaf.a")
             if nil != leafErr {
                 return nil, leafErr
             }
@@ -720,7 +720,7 @@ func TestResolverContext_ACollectionAndAResolutionThroughARunningProvidersResolv
         }, RegisterOptions{})
 
         MustRegister[*lateLeafB](serviceContainer, "leaf.b", func(resolver containercontract.Resolver) (*lateLeafB, error) {
-            leafA, leafErr := FromResolver[*lateLeafA](ContextOf(resolver), resolver, "leaf.a")
+            leafA, leafErr := FromResolver[*lateLeafA](resolver.Runtime().Context(), resolver, "leaf.a")
             if nil != leafErr {
                 return nil, leafErr
             }
@@ -738,12 +738,12 @@ func TestResolverContext_ACollectionAndAResolutionThroughARunningProvidersResolv
                     <-start
 
                     if 0 == worker%2 {
-                        _, _ = FromResolver[*lateLeafB](ContextOf(resolver), resolver, "leaf.b")
+                        _, _ = FromResolver[*lateLeafB](resolver.Runtime().Context(), resolver, "leaf.b")
 
                         return
                     }
 
-                    _, _ = AllImplementing[lateLeafNamer](ContextOf(resolver), resolver)
+                    _, _ = AllImplementing[lateLeafNamer](resolver.Runtime().Context(), resolver)
                 }(worker)
             }
 
@@ -782,7 +782,7 @@ func newLateCycleContainer(parentBody func(holder *lateCycleHolder) error, leafN
 
     MustRegister[*lateCycleLeaf](serviceContainer, "late.leaf", func(resolver containercontract.Resolver) (*lateCycleLeaf, error) {
         if true == leafNeedsParent {
-            if _, parentErr := FromResolver[*lateCycleParent](ContextOf(resolver), resolver, "late.parent"); nil != parentErr {
+            if _, parentErr := FromResolver[*lateCycleParent](resolver.Runtime().Context(), resolver, "late.parent"); nil != parentErr {
                 return nil, parentErr
             }
         }
@@ -795,7 +795,7 @@ func newLateCycleContainer(parentBody func(holder *lateCycleHolder) error, leafN
     }, RegisterOptions{})
 
     MustRegister[*lateCycleParent](serviceContainer, "late.parent", func(resolver containercontract.Resolver) (*lateCycleParent, error) {
-        holder, holderErr := FromResolver[*lateCycleHolder](ContextOf(resolver), resolver, "late.holder")
+        holder, holderErr := FromResolver[*lateCycleHolder](resolver.Runtime().Context(), resolver, "late.holder")
         if nil != holderErr {
             return nil, holderErr
         }
@@ -934,7 +934,7 @@ func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsC
     }, RegisterOptions{})
 
     MustRegisterScoped[*lateScopedCycleLeaf](serviceContainer, "late.scoped.leaf", func(resolver containercontract.Resolver) (*lateScopedCycleLeaf, error) {
-        if _, parentErr := FromResolver[*lateScopedCycleParent](ContextOf(resolver), resolver, "late.scoped.parent"); nil != parentErr {
+        if _, parentErr := FromResolver[*lateScopedCycleParent](resolver.Runtime().Context(), resolver, "late.scoped.parent"); nil != parentErr {
             return nil, parentErr
         }
 
@@ -942,12 +942,12 @@ func TestResolverContext_ACycleClosedThroughALazyAmongScopedServicesIsRefusedAsC
     }, RegisterOptions{})
 
     MustRegisterScoped[*lateScopedCycleParent](serviceContainer, "late.scoped.parent", func(resolver containercontract.Resolver) (*lateScopedCycleParent, error) {
-        holder, holderErr := FromResolver[*lateScopedCycleHolder](ContextOf(resolver), resolver, "late.scoped.holder")
+        holder, holderErr := FromResolver[*lateScopedCycleHolder](resolver.Runtime().Context(), resolver, "late.scoped.holder")
         if nil != holderErr {
             return nil, holderErr
         }
 
-        if _, leafErr := holder.handle.Resolve(ContextOf(resolver)); nil != leafErr {
+        if _, leafErr := holder.handle.Resolve(resolver.Runtime().Context()); nil != leafErr {
             return nil, leafErr
         }
 
@@ -996,7 +996,7 @@ func TestResolverContext_MustGet_KeepsTheServiceNameANestedFailureCarries(t *tes
     registerErr = serviceContainer.Register(
         "app.outer",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            _ = resolver.MustGet(ContextOf(resolver), "app.failing")
+            _ = resolver.MustGet(resolver.Runtime().Context(), "app.failing")
 
             return &resolverContextMustDependent{}, nil
         },
@@ -1061,7 +1061,7 @@ func TestResolverContext_MustGetByType_KeepsTheTypeANestedFailureCarries(t *test
     registerErr := serviceContainer.Register(
         "app.outer",
         func(resolver containercontract.Resolver) (*resolverContextMustDependent, error) {
-            _, innerErr := resolver.GetByType(ContextOf(resolver), innerType)
+            _, innerErr := resolver.GetByType(resolver.Runtime().Context(), innerType)
 
             return nil, innerErr
         },

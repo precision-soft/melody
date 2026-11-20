@@ -638,7 +638,7 @@ func TestScope_RootContainerDoesNotSeeTheScopeBoundInstance(t *testing.T) {
     registerErr := serviceContainer.Register(
         "app.consumer",
         func(resolver containercontract.Resolver) (*scopeTestService, error) {
-            tag, getErr := resolver.Get(ContextOf(resolver), "app.tag")
+            tag, getErr := resolver.Get(resolver.Runtime().Context(), "app.tag")
             if nil != getErr {
                 return &scopeTestService{value: "no-tag"}, nil
             }
@@ -783,7 +783,7 @@ func TestScope_AContainerServiceStaysASingletonWhenResolvedThroughAScope(t *test
         func(resolver containercontract.Resolver) (*scopeLifetimeProbe, error) {
             buildCount.Add(1)
 
-            logger, getErr := resolver.Get(ContextOf(resolver), "infrastructure.logger")
+            logger, getErr := resolver.Get(resolver.Runtime().Context(), "infrastructure.logger")
             if nil != getErr {
                 return nil, getErr
             }
@@ -833,7 +833,7 @@ func TestScope_AContainerProviderCannotReachAScopeOnlyEntry(t *testing.T) {
     registerErr := serviceContainer.Register(
         "app.reporter",
         func(resolver containercontract.Resolver) (string, error) {
-            requestContext, getErr := resolver.Get(ContextOf(resolver), "request.context")
+            requestContext, getErr := resolver.Get(resolver.Runtime().Context(), "request.context")
             if nil != getErr {
                 return "", getErr
             }
@@ -885,7 +885,7 @@ func TestScopeClose_TypeAliasClosesAfterDependent(t *testing.T) {
     registerRepositoryErr := serviceContainer.RegisterScoped(
         "app.alias.repository",
         func(resolver containercontract.Resolver) (*aliasRepositoryService, error) {
-            _, getErr := resolver.GetByType(ContextOf(resolver), reflect.TypeOf((*recordingScopedService)(nil)))
+            _, getErr := resolver.GetByType(resolver.Runtime().Context(), reflect.TypeOf((*recordingScopedService)(nil)))
             if nil != getErr {
                 return nil, getErr
             }
@@ -2377,7 +2377,7 @@ func TestScope_ARingClosedThroughALazyHandleIsRefusedAtTheResolutionThatClosesIt
     if registerErr := serviceContainer.RegisterScoped(
         "app.scoped.lazy.partner",
         func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
-            holder, getErr := FromResolver[*lazyRingHolder](ContextOf(resolver), resolver, "app.scoped.lazy.holder")
+            holder, getErr := FromResolver[*lazyRingHolder](resolver.Runtime().Context(), resolver, "app.scoped.lazy.holder")
             if nil != getErr {
                 return nil, getErr
             }
@@ -2438,7 +2438,7 @@ func TestScope_ARingClosedOntoAScopedCreationInFlightIsRefused(t *testing.T) {
                     close(firstEntered)
                     <-releaseFirst
 
-                    if _, getErr := resolver.Get(ContextOf(resolver), "app.scoped.second"); nil != getErr {
+                    if _, getErr := resolver.Get(resolver.Runtime().Context(), "app.scoped.second"); nil != getErr {
                         return nil, getErr
                     }
 
@@ -2453,7 +2453,7 @@ func TestScope_ARingClosedOntoAScopedCreationInFlightIsRefused(t *testing.T) {
                     close(secondEntered)
                     <-releaseSecond
 
-                    if resolveErr := resolution.resolve(ContextOf(resolver), resolver); nil != resolveErr {
+                    if resolveErr := resolution.resolve(resolver.Runtime().Context(), resolver); nil != resolveErr {
                         return nil, resolveErr
                     }
 
@@ -2516,7 +2516,7 @@ func TestScope_AFailedScopedLookupLeavesNoDependency(t *testing.T) {
             serviceContainer.MustRegisterScoped(
                 "app.scoped.optional.holder",
                 func(resolver containercontract.Resolver) (*lazyRingHolder, error) {
-                    lookup.resolve(ContextOf(resolver), resolver)
+                    lookup.resolve(resolver.Runtime().Context(), resolver)
 
                     return &lazyRingHolder{}, nil
                 },
@@ -2530,7 +2530,7 @@ func TestScope_AFailedScopedLookupLeavesNoDependency(t *testing.T) {
                         return nil, errors.New("first attempt fails")
                     }
 
-                    if _, getErr := resolver.Get(ContextOf(resolver), "app.scoped.optional.holder"); nil != getErr {
+                    if _, getErr := resolver.Get(resolver.Runtime().Context(), "app.scoped.optional.holder"); nil != getErr {
                         return nil, getErr
                     }
 
@@ -2567,7 +2567,7 @@ func TestScope_ARingClosedThroughALazyByTypeHandleIsRefused(t *testing.T) {
     serviceContainer.MustRegisterScoped(
         "app.scoped.lazy.partner",
         func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
-            if _, getErr := resolver.Get(ContextOf(resolver), "app.scoped.lazy.holder"); nil != getErr {
+            if _, getErr := resolver.Get(resolver.Runtime().Context(), "app.scoped.lazy.holder"); nil != getErr {
                 return nil, getErr
             }
 
@@ -2607,7 +2607,7 @@ func TestScope_ARingClosedByTypeOntoABuiltInstanceIsRefused(t *testing.T) {
     serviceContainer.MustRegisterScoped(
         "app.scoped.lazy.partner",
         func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
-            if _, getErr := resolver.GetByType(ContextOf(resolver), reflect.TypeFor[*lazyRingHolder]()); nil != getErr {
+            if _, getErr := resolver.GetByType(resolver.Runtime().Context(), reflect.TypeFor[*lazyRingHolder]()); nil != getErr {
                 return nil, getErr
             }
 

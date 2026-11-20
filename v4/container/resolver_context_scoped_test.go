@@ -190,12 +190,12 @@ func TestScope_AScopedServiceSeesTheScopesOverridesAndTheContainersSingletons(t 
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
-            requestValue, getErr := resolver.Get(ContextOf(resolver), "app.request.id")
+            requestValue, getErr := resolver.Get(resolver.Runtime().Context(), "app.request.id")
             if nil != getErr {
                 return nil, getErr
             }
 
-            writerValue, getErr := resolver.Get(ContextOf(resolver), "app.writer")
+            writerValue, getErr := resolver.Get(resolver.Runtime().Context(), "app.writer")
             if nil != getErr {
                 return nil, getErr
             }
@@ -244,7 +244,7 @@ func TestScope_AContainerProviderStillCannotSeeAScopedService(t *testing.T) {
     registerErr := serviceContainer.Register(
         "app.singleton",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
-            _, getErr := resolver.Get(ContextOf(resolver), "app.request.id")
+            _, getErr := resolver.Get(resolver.Runtime().Context(), "app.request.id")
             if nil != getErr {
                 return nil, getErr
             }
@@ -290,7 +290,7 @@ func TestScope_AContainerSingletonReachedFromAScopedServiceStaysASingleton(t *te
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
-            writerValue, getErr := resolver.Get(ContextOf(resolver), "app.writer")
+            writerValue, getErr := resolver.Get(resolver.Runtime().Context(), "app.writer")
             if nil != getErr {
                 return nil, getErr
             }
@@ -341,7 +341,7 @@ func TestScope_AScopedProviderResolvingItsOwnNameIsReportedAsACycle(t *testing.T
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.request.trail",
         func(resolver containercontract.Resolver) (*scopedProbe, error) {
-            selfValue, getErr := resolver.Get(ContextOf(resolver), "app.request.trail")
+            selfValue, getErr := resolver.Get(resolver.Runtime().Context(), "app.request.trail")
             if nil != getErr {
                 return nil, getErr
             }
@@ -473,7 +473,7 @@ func TestScope_ScopedServicesAreClosedDependentsBeforeDependencies(t *testing.T)
     registerScopedErr := serviceContainer.RegisterScoped(
         "app.aaa.dependent",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
-            _, getErr := resolver.Get(ContextOf(resolver), "app.zzz.dependency")
+            _, getErr := resolver.Get(resolver.Runtime().Context(), "app.zzz.dependency")
             if nil != getErr {
                 return nil, getErr
             }
@@ -539,7 +539,7 @@ func TestScopedResolution_ExistingInstanceRecordsDependencyEdge(t *testing.T) {
     registerDependentErr := serviceContainer.RegisterScoped(
         "app.aaa.dependent",
         func(resolver containercontract.Resolver) (*recordingScopedService, error) {
-            _, getErr := resolver.Get(ContextOf(resolver), "app.zzz.dependency")
+            _, getErr := resolver.Get(resolver.Runtime().Context(), "app.zzz.dependency")
             if nil != getErr {
                 return nil, getErr
             }

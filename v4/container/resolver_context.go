@@ -27,6 +27,7 @@ func newResolverContext(containerInstance *container) *resolverContext {
         contextId:         containerInstance.resolverContextIdCounter.Add(1),
         rootRequestedKey:  "",
         stack:             newResolutionStack(),
+        kind:              containercontract.KindDetached,
     }
 }
 
@@ -37,6 +38,7 @@ func newScopeResolverContext(containerInstance *container, scopeInstance *scope)
         contextId:         containerInstance.resolverContextIdCounter.Add(1),
         rootRequestedKey:  "",
         stack:             newResolutionStack(),
+        kind:              scopeInstance.boundRuntimeKind(),
     }
 }
 
@@ -76,6 +78,8 @@ type resolverContext struct {
     ownerKey string
     /* scopeSuspended is set while a container-owned provider builds its service, which may read only what the container holds. Suspension is a refusal: a scope-only service is reported as not existing, and the logger is the container's */
     scopeSuspended bool
+    /* the kind a creation started through this view hands its provider's runtime */
+    kind containercontract.Kind
     /* providerReturned is set once the provider that received this view has returned; from then on the live chain belongs to the resolution above it, and a resolution through the view starts a chain of its own */
     providerReturned atomic.Bool
 }
@@ -90,6 +94,7 @@ func (instance *resolverContext) childOwnedBy(ctx context.Context, nodeKey strin
         stack:             instance.stack,
         ownerKey:          nodeKey,
         scopeSuspended:    scopeSuspended,
+        kind:              instance.kind,
     }
 
     child.ctx.Store(&contextHolder{ctx: ctx})
@@ -97,7 +102,7 @@ func (instance *resolverContext) childOwnedBy(ctx context.Context, nodeKey strin
     return child
 }
 
-/* ForGoroutine answers a view for a goroutine the provider starts: it behaves as this view does once its provider has returned, so every resolution through it starts a chain of its own while the owner's dependency edge is still recorded, and it never reads the chain the provider is resolving on. It carries no context, so ContextOf answers context.Background() and the goroutine passes its own to every door. */
+/* ForGoroutine answers a view for a goroutine the provider starts: it behaves as this view does once its provider has returned, so every resolution through it starts a chain of its own while the owner's dependency edge is still recorded, and it never reads the chain the provider is resolving on. It carries no context, so its Runtime() is detached and the goroutine passes its own context to every door. */
 func (instance *resolverContext) ForGoroutine() containercontract.Resolver {
     goroutineView := &resolverContext{
         containerInstance: instance.containerInstance,
@@ -107,6 +112,7 @@ func (instance *resolverContext) ForGoroutine() containercontract.Resolver {
         stack:             newResolutionStack(),
         ownerKey:          instance.ownerKey,
         scopeSuspended:    instance.scopeSuspended,
+        kind:              instance.lateKind(),
     }
 
     goroutineView.providerReturned.Store(true)
@@ -128,6 +134,7 @@ func (instance *resolverContext) lateResolution() (*resolverContext, func()) {
         stack:             newResolutionStack(),
         ownerKey:          instance.ownerKey,
         scopeSuspended:    instance.scopeSuspended,
+        kind:              instance.lateKind(),
     }
 
     containerInstance := instance.containerInstance
@@ -199,6 +206,15 @@ func (instance *resolverContext) claimRootRequestedKey(requestedKey string) stri
     }
 
     return instance.rootRequestedKey
+}
+
+/* a suspended view points at its singleton's first creator's scope, possibly long closed, so its late creations are detached */
+func (instance *resolverContext) lateKind() containercontract.Kind {
+    if true == instance.scopeVisible() {
+        return instance.scopeInstance.boundRuntimeKind()
+    }
+
+    return containercontract.KindDetached
 }
 
 func (instance *resolverContext) scopeVisible() bool {
@@ -840,14 +856,18 @@ func (instance *resolverContext) MustGetByType(ctx context.Context, targetType r
     return value
 }
 
-/* Context answers nil once the provider returned, which ContextOf reads as context.Background() */
-func (instance *resolverContext) Context() context.Context {
+/* Runtime is a snapshot of the resolution in flight: a provider keeps the resolver, not its runtime */
+func (instance *resolverContext) Runtime() containercontract.Runtime {
     holder := instance.ctx.Load()
-    if nil == holder {
-        return nil
+    if nil == holder || true == internal.IsNilInterface(holder.ctx) {
+        return newDetachedRuntime(&suspendedScope{resolver: instance})
     }
 
-    return holder.ctx
+    if true == instance.scopeVisible() {
+        return &resolutionRuntime{ctx: holder.ctx, kind: instance.kind, scope: newProviderScope(instance, instance.scopeInstance)}
+    }
+
+    return &resolutionRuntime{ctx: holder.ctx, kind: instance.kind, scope: &suspendedScope{resolver: instance}}
 }
 
 func (instance *resolverContext) markProviderReturned() {

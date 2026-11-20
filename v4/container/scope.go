@@ -54,6 +54,8 @@ func newScope(containerInstance *container, plan *scopePlan) containercontract.S
 type scope struct {
     mutex     sync.RWMutex
     container atomic.Pointer[container]
+    /* the containercontract.Kind of the runtime built over this scope: KindUnspecified until a runtime constructor binds it, then fixed */
+    runtimeKind atomic.Uint32
     /* the immutable plan this scope was created against, shared by reference so creating a scope is O(1) */
     plan          *scopePlan
 
@@ -183,6 +185,11 @@ func (instance *scope) MustGetByType(ctx context.Context, targetType reflect.Typ
     }
 
     return value
+}
+
+/* the caller already holds the scope, so its detached runtime answers it unsuspended */
+func (instance *scope) Runtime() containercontract.Runtime {
+    return newDetachedRuntime(instance)
 }
 
 func (instance *scope) Has(serviceName string) bool {

@@ -19,7 +19,7 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 		func(resolver containercontract.Resolver) (domain.AuditTrail, error) {
 			var zeroValue domain.AuditTrail
 
-			repository, repositoryErr := melodycontainer.FromResolverByType[*domain.UserRepository](melodycontainer.ContextOf(resolver), resolver)
+			repository, repositoryErr := melodycontainer.FromResolverByType[*domain.UserRepository](resolver.Runtime().Context(), resolver)
 			if nil != repositoryErr {
 				return zeroValue, repositoryErr
 			}
@@ -35,24 +35,24 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 		registrar,
 		domain.ServiceCollisionProbe,
 		func(resolver containercontract.Resolver) (*domain.CollisionProbe, error) {
-			configuration := melodyconfig.ConfigMustFromResolver(melodycontainer.ContextOf(resolver), resolver)
+			configuration := melodyconfig.ConfigMustFromResolver(resolver.Runtime().Context(), resolver)
 
-			domain2, domain2Err := melodycontainer.FromResolverByType[*domain.UserRepository](melodycontainer.ContextOf(resolver), resolver)
+			domain2, domain2Err := melodycontainer.FromResolverByType[*domain.UserRepository](resolver.Runtime().Context(), resolver)
 			if nil != domain2Err {
 				return nil, domain2Err
 			}
 
-			contract2, contract2Err := melodycontainer.FromResolverByType[contract.Logger](melodycontainer.ContextOf(resolver), resolver)
+			contract2, contract2Err := melodycontainer.FromResolverByType[contract.Logger](resolver.Runtime().Context(), resolver)
 			if nil != contract2Err {
 				return nil, contract2Err
 			}
 
-			configuration2, configuration2Err := melodycontainer.FromResolverByType[*domain.UserRepository](melodycontainer.ContextOf(resolver), resolver)
+			configuration2, configuration2Err := melodycontainer.FromResolverByType[*domain.UserRepository](resolver.Runtime().Context(), resolver)
 			if nil != configuration2Err {
 				return nil, configuration2Err
 			}
 
-			resolver2, resolver2Err := melodycontainer.FromResolverByType[*domain.UserRepository](melodycontainer.ContextOf(resolver), resolver)
+			resolver2, resolver2Err := melodycontainer.FromResolverByType[*domain.UserRepository](resolver.Runtime().Context(), resolver)
 			if nil != resolver2Err {
 				return nil, resolver2Err
 			}
@@ -96,9 +96,9 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 	melodycontainer.MustRegisterType(
 		registrar,
 		func(resolver containercontract.Resolver) (*domain.InvoiceService, error) {
-			configuration := melodyconfig.ConfigMustFromResolver(melodycontainer.ContextOf(resolver), resolver)
+			configuration := melodyconfig.ConfigMustFromResolver(resolver.Runtime().Context(), resolver)
 
-			repository, repositoryErr := melodycontainer.FromResolverByType[*domain.UserRepository](melodycontainer.ContextOf(resolver), resolver)
+			repository, repositoryErr := melodycontainer.FromResolverByType[*domain.UserRepository](resolver.Runtime().Context(), resolver)
 			if nil != repositoryErr {
 				return nil, repositoryErr
 			}
@@ -122,7 +122,7 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 	melodycontainer.MustRegisterType(
 		registrar,
 		func(resolver containercontract.Resolver) (*domain.ParameterEcho, error) {
-			parameter, parameterErr := melodycontainer.FromResolverByType[*melodyconfig.Parameter](melodycontainer.ContextOf(resolver), resolver)
+			parameter, parameterErr := melodycontainer.FromResolverByType[*melodyconfig.Parameter](resolver.Runtime().Context(), resolver)
 			if nil != parameterErr {
 				return nil, parameterErr
 			}
@@ -137,7 +137,7 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 	melodycontainer.MustRegisterType(
 		registrar,
 		func(resolver containercontract.Resolver) (*domain.ReportingService, error) {
-			configuration := melodyconfig.ConfigMustFromResolver(melodycontainer.ContextOf(resolver), resolver)
+			configuration := melodyconfig.ConfigMustFromResolver(resolver.Runtime().Context(), resolver)
 
 			reportingUrl := configuration.MustGet("fixture.reporting_url").MustString()
 
@@ -151,7 +151,7 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 	melodycontainer.MustRegisterType(
 		registrar,
 		func(resolver containercontract.Resolver) (*domain.RetryPolicy, error) {
-			configuration := melodyconfig.ConfigMustFromResolver(melodycontainer.ContextOf(resolver), resolver)
+			configuration := melodyconfig.ConfigMustFromResolver(resolver.Runtime().Context(), resolver)
 
 			maxAttemptsValue, maxAttemptsErr := configuration.MustGet("fixture.max_attempts").Int()
 			if nil != maxAttemptsErr {
@@ -190,14 +190,14 @@ func RegisterFixtureServices(registrar containercontract.Registrar) {
 	melodycontainer.MustRegisterType(
 		registrar,
 		func(resolver containercontract.Resolver) (*domain.UserService, error) {
-			configuration := melodyconfig.ConfigMustFromResolver(melodycontainer.ContextOf(resolver), resolver)
+			configuration := melodyconfig.ConfigMustFromResolver(resolver.Runtime().Context(), resolver)
 
-			repository, repositoryErr := melodycontainer.FromResolverByType[*domain.UserRepository](melodycontainer.ContextOf(resolver), resolver)
+			repository, repositoryErr := melodycontainer.FromResolverByType[*domain.UserRepository](resolver.Runtime().Context(), resolver)
 			if nil != repositoryErr {
 				return nil, repositoryErr
 			}
 
-			logger, loggerErr := melodycontainer.FromResolverByType[contract.Logger](melodycontainer.ContextOf(resolver), resolver)
+			logger, loggerErr := melodycontainer.FromResolverByType[contract.Logger](resolver.Runtime().Context(), resolver)
 			if nil != loggerErr {
 				return nil, loggerErr
 			}

@@ -178,7 +178,7 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
     serviceContainer.MustRegister(
         "cycle.b",
         func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
-            if _, resolveErr := resolver.Get(ContextOf(resolver), "cycle.c"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "cycle.c"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -190,7 +190,7 @@ func TestTeardownPlan_APureDependencyOfARingMemberIsNotFlaggedAsACycle(t *testin
     serviceContainer.MustRegister(
         "cycle.a",
         func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
-            if _, resolveErr := resolver.Get(ContextOf(resolver), "cycle.b"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "cycle.b"); nil != resolveErr {
                 return nil, resolveErr
             }
 

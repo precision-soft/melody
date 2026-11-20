@@ -10,14 +10,14 @@ import (
     "github.com/precision-soft/melody/v4/internal"
 )
 
-/* NewRequest builds the runtime of one http request. */
+/* NewRequest builds the runtime of one http request and binds KindRequest to its scope; a scope bound to another kind panics. */
 func NewRequest(ctx context.Context, scope containercontract.Scope) containercontract.Runtime {
-    return newRuntime(ctx, scope, containercontract.KindRequest)
+    return newBoundRuntime(ctx, scope, containercontract.KindRequest)
 }
 
-/* NewRun builds the runtime of one cli run, of one message delivery or of one cron tick. */
+/* NewRun builds the runtime of one cli run, message delivery or cron tick and binds KindRun to its scope. */
 func NewRun(ctx context.Context, scope containercontract.Scope) containercontract.Runtime {
-    return newRuntime(ctx, scope, containercontract.KindRun)
+    return newBoundRuntime(ctx, scope, containercontract.KindRun)
 }
 
 /* NewChildRun opens a new scope of the container behind the parent's scope and builds a run runtime over it: the runtime of one message delivery or one cron tick. The caller closes the child through child.Scope().Close(). A parent whose scope is closed, or whose scope is not the container's own, answers an error. */
@@ -60,6 +60,21 @@ func WithContext(runtimeInstance containercontract.Runtime, ctx context.Context)
     }
 
     return newRuntime(ctx, runtimeInstance.Scope(), runtimeInstance.Kind())
+}
+
+/* a scope of another implementation is not bound; the runtime still answers its own kind */
+func newBoundRuntime(ctx context.Context, scope containercontract.Scope, kind containercontract.Kind) containercontract.Runtime {
+    runtimeInstance := newRuntime(ctx, scope, kind)
+
+    if binder, isBinder := scope.(runtimeseam.KindBinder); true == isBinder {
+        if bindErr := binder.BindRuntimeKind(runtimeseam.Token{}, kind); nil != bindErr {
+            exception.Panic(
+                exception.NewError("scope cannot serve the runtime", exceptioncontract.Context{"argument": "scope"}, bindErr),
+            )
+        }
+    }
+
+    return runtimeInstance
 }
 
 func newRuntime(ctx context.Context, scope containercontract.Scope, kind containercontract.Kind) containercontract.Runtime {

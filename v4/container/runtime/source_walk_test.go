@@ -86,3 +86,19 @@ func TestSourceWalk_NoProductionFileRebuildsARuntimeFromAnothersScope(t *testing
         }
     }
 }
+
+func TestSourceWalk_NoFileNamesTheRemovedResolutionContextDoors(t *testing.T) {
+    /* spelled in pieces so this file does not match itself */
+    removed := regexp.MustCompile(`(^|[^A-Za-z0-9_])(Context` + `Of\b|Resolution` + `Context\b)`)
+
+    for _, source := range fourthMajorSourceList(t) {
+        content, readErr := os.ReadFile(source)
+        if nil != readErr {
+            t.Fatalf("read %s: %v", source, readErr)
+        }
+
+        if match := removed.Find(content); nil != match {
+            t.Fatalf("%s names a removed door (%s); read resolver.Runtime().Context()", source, match)
+        }
+    }
+}

@@ -17,12 +17,14 @@ func TestNewRequestAndNewRun_AnswerTheirKindOverTheContextAndScopeGiven(t *testi
     defer cancel()
 
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    scope := serviceContainer.NewScope()
 
-    for expectedKind, runtimeInstance := range map[containercontract.Kind]containercontract.Runtime{
-        containercontract.KindRequest: NewRequest(ctx, scope),
-        containercontract.KindRun:     NewRun(ctx, scope),
+    for expectedKind, constructor := range map[containercontract.Kind]func(context.Context, containercontract.Scope) containercontract.Runtime{
+        containercontract.KindRequest: NewRequest,
+        containercontract.KindRun:     NewRun,
     } {
+        scope := serviceContainer.NewScope()
+        runtimeInstance := constructor(ctx, scope)
+
         if expectedKind != runtimeInstance.Kind() {
             t.Fatalf("expected kind %s, got %s", expectedKind, runtimeInstance.Kind())
         }
@@ -39,14 +41,13 @@ func TestNewRequestAndNewRun_AnswerTheirKindOverTheContextAndScopeGiven(t *testi
 
 func TestWithContext_KeepsTheKindAndTheScopeAndAnswersTheContextGiven(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
-    scope := serviceContainer.NewScope()
 
     derivedContext, cancel := context.WithTimeout(context.Background(), time.Minute)
     defer cancel()
 
     for _, parent := range []containercontract.Runtime{
-        NewRequest(context.Background(), scope),
-        NewRun(context.Background(), scope),
+        NewRequest(context.Background(), serviceContainer.NewScope()),
+        NewRun(context.Background(), serviceContainer.NewScope()),
     } {
         derived := WithContext(parent, derivedContext)
 
@@ -54,7 +55,7 @@ func TestWithContext_KeepsTheKindAndTheScopeAndAnswersTheContextGiven(t *testing
             t.Fatalf("expected the derived runtime to keep kind %s, got %s", parent.Kind(), derived.Kind())
         }
 
-        if scope != derived.Scope() {
+        if parent.Scope() != derived.Scope() {
             t.Fatalf("expected the derived runtime to keep the scope")
         }
 

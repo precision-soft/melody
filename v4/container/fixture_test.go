@@ -409,7 +409,7 @@ func registerLazyRing(t *testing.T, serviceContainer *container, recorder *close
         func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
             partner := &lazyRingPartner{recorder: recorder}
             if true == withPartnerDependency {
-                holder, getErr := FromResolver[*lazyRingHolder](ContextOf(resolver), resolver, "app.lazy.holder")
+                holder, getErr := FromResolver[*lazyRingHolder](resolver.Runtime().Context(), resolver, "app.lazy.holder")
                 if nil != getErr {
                     return nil, getErr
                 }

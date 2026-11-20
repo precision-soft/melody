@@ -1410,7 +1410,7 @@ func TestContainerCommand_TheTeardownBlockNamesTheWaveAndTheUnorderedServices(t 
     serviceContainer.MustRegister(
         "teardown.holder",
         func(resolver containercontract.Resolver) (*teardownProbeHolder, error) {
-            storage, resolveErr := container.FromResolver[*teardownProbeStorage](container.ContextOf(resolver), resolver, "teardown.storage")
+            storage, resolveErr := container.FromResolver[*teardownProbeStorage](resolver.Runtime().Context(), resolver, "teardown.storage")
             if nil != resolveErr {
                 return nil, resolveErr
             }
@@ -1518,7 +1518,7 @@ func newTeardownViewTestContainer(t *testing.T) containercontract.Container {
     serviceContainer.MustRegister(
         "view.holder",
         func(resolver containercontract.Resolver) (*teardownViewHolder, error) {
-            storage, resolveErr := container.FromResolver[*teardownViewStorage](container.ContextOf(resolver), resolver, "view.storage")
+            storage, resolveErr := container.FromResolver[*teardownViewStorage](resolver.Runtime().Context(), resolver, "view.storage")
             if nil != resolveErr {
                 return nil, resolveErr
             }
@@ -1765,7 +1765,7 @@ func TestContainerCommand_AnAliasOfOneInstanceCarriesTheTeardownOfTheNodeItWasCo
     serviceContainer.MustRegister(
         "view.alias",
         func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
-            return container.FromResolver[*teardownViewStorage](container.ContextOf(resolver), resolver, "view.canonical")
+            return container.FromResolver[*teardownViewStorage](resolver.Runtime().Context(), resolver, "view.canonical")
         },
         container.RegisterOptions{TypeRegistrationDisabled: true},
     )
@@ -1873,7 +1873,7 @@ func TestContainerCommand_TheTeardownBlockNamesACycleRemainder(t *testing.T) {
     serviceContainer.MustRegister(
         "cycle.a",
         func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
-            if _, resolveErr := container.FromResolver[*teardownViewStorage](container.ContextOf(resolver), resolver, "cycle.b"); nil != resolveErr {
+            if _, resolveErr := container.FromResolver[*teardownViewStorage](resolver.Runtime().Context(), resolver, "cycle.b"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -1885,7 +1885,7 @@ func TestContainerCommand_TheTeardownBlockNamesACycleRemainder(t *testing.T) {
     serviceContainer.MustRegister(
         "cycle.c",
         func(resolver containercontract.Resolver) (*teardownViewStorage, error) {
-            if _, resolveErr := container.FromResolver[*teardownViewStorage](container.ContextOf(resolver), resolver, "cycle.a"); nil != resolveErr {
+            if _, resolveErr := container.FromResolver[*teardownViewStorage](resolver.Runtime().Context(), resolver, "cycle.a"); nil != resolveErr {
                 return nil, resolveErr
             }
 

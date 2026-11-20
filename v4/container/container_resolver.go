@@ -219,7 +219,7 @@ func (instance *container) serviceWithCreationGuardLocked(
 
     instance.mutex.Unlock()
 
-    /* a container-owned provider resolves from the container alone, so a process singleton never holds one request's values; a scoped provider reads both levels. Both ride on the view handed to the provider, which carries the waiting context of the call that started the creation for ContextOf */
+    /* a container-owned provider resolves from the container alone, so a process singleton never holds one request's values; a scoped provider reads both levels. Both ride on the view handed to the provider, which carries the waiting context of the call that started the creation for Runtime() */
     providerResolver := resolver.childOwnedBy(creation.waitContext, creation.ownerNodeKey, creation.suspendsScope)
 
     /* runtime.Goexit passes the recover below, a t.Fatal inside a provider among its callers: without this the mutex stays unlocked and the waiters parked */

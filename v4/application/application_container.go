@@ -161,7 +161,7 @@ func (instance *Application) bootContainer() {
         instance.RegisterService(
             logging.ServiceLogger,
             func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
-                resolutionContext := container.ContextOf(resolver)
+                resolutionContext := resolver.Runtime().Context()
                 resolvedConfiguration := config.ConfigMustFromResolver(resolutionContext, resolver)
 
                 return newContainerLogger(
@@ -205,7 +205,7 @@ func (instance *Application) bootContainer() {
         instance.RegisterService(
             http.ServiceUrlGenerator,
             func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
-                return http.NewUrlGenerator(container.MustFromResolver[httpcontract.RouteRegistry](container.ContextOf(resolver), resolver, http.ServiceRouteRegistry)), nil
+                return http.NewUrlGenerator(container.MustFromResolver[httpcontract.RouteRegistry](resolver.Runtime().Context(), resolver, http.ServiceRouteRegistry)), nil
             },
             container.RegisterOptions{},
         )
@@ -389,7 +389,7 @@ func (instance *Application) registerCache() {
         instance.RegisterService(
             cache.ServiceCacheBackend,
             func(resolver containercontract.Resolver) (cachecontract.Backend, error) {
-                clockInstance := clock.ClockMustFromResolver(container.ContextOf(resolver), resolver)
+                clockInstance := clock.ClockMustFromResolver(resolver.Runtime().Context(), resolver)
 
                 return cache.NewInMemoryBackend(
                     cache.InMemoryBackendConfig{
@@ -405,8 +405,8 @@ func (instance *Application) registerCache() {
         instance.RegisterService(
             cache.ServiceCache,
             func(resolver containercontract.Resolver) (cachecontract.Cache, error) {
-                backend := cache.CacheBackendMustFromResolver(container.ContextOf(resolver), resolver)
-                serializerInstance := cache.CacheSerializerMustFromResolver(container.ContextOf(resolver), resolver)
+                backend := cache.CacheBackendMustFromResolver(resolver.Runtime().Context(), resolver)
+                serializerInstance := cache.CacheSerializerMustFromResolver(resolver.Runtime().Context(), resolver)
 
                 return cache.NewManager(
                     backend,
@@ -431,7 +431,7 @@ func (instance *Application) registerHttpSession() {
                 return session.NewInMemoryStorage(
                     session.InMemoryStorageConfig{
                         MaxSessions: instance.configuration.Http().SessionMaxSessions().Limit(),
-                        Clock:       clock.ClockMustFromResolver(container.ContextOf(resolver), resolver),
+                        Clock:       clock.ClockMustFromResolver(resolver.Runtime().Context(), resolver),
                     },
                 ), nil
             },
@@ -443,7 +443,7 @@ func (instance *Application) registerHttpSession() {
         instance.RegisterService(
             session.ServiceSessionManager,
             func(resolver containercontract.Resolver) (sessioncontract.Manager, error) {
-                resolutionContext := container.ContextOf(resolver)
+                resolutionContext := resolver.Runtime().Context()
                 storage := session.SessionStorageMustFromResolver(resolutionContext, resolver)
                 resolvedConfiguration := config.ConfigMustFromResolver(resolutionContext, resolver)
 

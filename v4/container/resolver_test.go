@@ -82,6 +82,10 @@ func (instance *resolverTestResolver) HasType(targetType reflect.Type) bool {
     return true == exists
 }
 
+func (instance *resolverTestResolver) Runtime() containercontract.Runtime {
+    return nil
+}
+
 func TestFromResolver_HappyPath(t *testing.T) {
     resolver := &resolverTestResolver{
         servicesByName: map[string]any{
@@ -305,7 +309,7 @@ func TestResolution_SameStringTypesFromDifferentPackagesDoNotAlias(t *testing.T)
 
     MustRegister(serviceContainer, "bus.alpha", func(resolver containercontract.Resolver) (*alpha.Bus, error) {
         /* the alpha provider resolves the beta bus by type: both nodes key on "contract.Bus" through String(), so a shared key would flag a false cycle here */
-        betaBus, betaErr := FromResolverByType[*beta.Bus](ContextOf(resolver), resolver)
+        betaBus, betaErr := FromResolverByType[*beta.Bus](resolver.Runtime().Context(), resolver)
         if nil != betaErr {
             return nil, betaErr
         }
@@ -366,6 +370,10 @@ func (instance *melodyErrorResolver) Has(serviceName string) bool {
 
 func (instance *melodyErrorResolver) HasType(targetType reflect.Type) bool {
     return false
+}
+
+func (instance *melodyErrorResolver) Runtime() containercontract.Runtime {
+    return nil
 }
 
 func TestFromResolver_MelodyErrorPassesThroughWithServiceName(t *testing.T) {
@@ -437,6 +445,10 @@ func (instance *resolverTestTypedNilErrorResolver) Has(serviceName string) bool 
 
 func (instance *resolverTestTypedNilErrorResolver) HasType(targetType reflect.Type) bool {
     return true
+}
+
+func (instance *resolverTestTypedNilErrorResolver) Runtime() containercontract.Runtime {
+    return nil
 }
 
 func TestFromResolver_TypedNilErrorReadsAsSuccess(t *testing.T) {
@@ -664,19 +676,19 @@ func TestFromResolverByType_MismatchNamesTheRequestedTypeBesideTheCanonical(t *t
 
 type resolutionContextKey struct{}
 
-func TestContextOf_AProvidersResolverAnswersTheContextOfTheCallThatStartedTheCreation(t *testing.T) {
+func TestRuntime_AProvidersResolverAnswersTheContextOfTheCallThatStartedTheCreation(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     seen := make(chan context.Context, 1)
-    MustRegister[*testService](serviceContainer, "app.context.of", func(resolver containercontract.Resolver) (*testService, error) {
-        seen <- ContextOf(resolver)
+    MustRegister[*testService](serviceContainer, "app.runtime.context", func(resolver containercontract.Resolver) (*testService, error) {
+        seen <- resolver.Runtime().Context()
 
         return &testService{Value: "built"}, nil
     }, RegisterOptions{})
 
     outerContext := context.WithValue(context.Background(), resolutionContextKey{}, "outer call")
 
-    if _, getErr := serviceContainer.Get(outerContext, "app.context.of"); nil != getErr {
+    if _, getErr := serviceContainer.Get(outerContext, "app.runtime.context"); nil != getErr {
         t.Fatalf("unexpected error: %v", getErr)
     }
 
@@ -685,7 +697,7 @@ func TestContextOf_AProvidersResolverAnswersTheContextOfTheCallThatStartedTheCre
     }
 }
 
-func TestContextOf_TheContainerAScopeAndAForeignResolverAnswerBackground(t *testing.T) {
+func TestRuntime_TheContainerAndAScopeAnswerADetachedRuntimeOverBackground(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
     scopeInstance := serviceContainer.NewScope()
     defer func() {
@@ -695,11 +707,27 @@ func TestContextOf_TheContainerAScopeAndAForeignResolverAnswerBackground(t *test
     for name, resolver := range map[string]containercontract.Resolver{
         "container": serviceContainer,
         "scope":     scopeInstance,
-        "foreign":   &resolverTestResolver{},
     } {
-        if context.Background() != ContextOf(resolver) {
+        runtimeInstance := resolver.Runtime()
+        if nil == runtimeInstance {
+            t.Fatalf("expected %s to answer a runtime, never nil", name)
+        }
+
+        if context.Background() != runtimeInstance.Context() {
             t.Fatalf("expected %s to answer context.Background()", name)
         }
+
+        if containercontract.KindDetached != runtimeInstance.Kind() {
+            t.Fatalf("expected %s to answer a detached runtime, got %s", name, runtimeInstance.Kind())
+        }
+    }
+
+    if scopeInstance != scopeInstance.Runtime().Scope() {
+        t.Fatalf("expected a scope's detached runtime to answer the scope itself")
+    }
+
+    if _, isSuspended := serviceContainer.Runtime().Scope().(*suspendedScope); false == isSuspended {
+        t.Fatalf("expected the container's detached runtime to answer a suspended scope")
     }
 }
 
@@ -750,7 +778,7 @@ func TestResolverDoors_ANilContextIsRefused(t *testing.T) {
     }
 }
 
-func TestContextOf_ARetainedProviderResolverAnswersBackgroundOnceItsProviderReturned(t *testing.T) {
+func TestRuntime_ARetainedProviderResolverAnswersADetachedRuntimeOnceItsProviderReturned(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     retained := make(chan containercontract.Resolver, 1)
@@ -766,8 +794,17 @@ func TestContextOf_ARetainedProviderResolverAnswersBackgroundOnceItsProviderRetu
         t.Fatalf("unexpected error: %v", getErr)
     }
 
-    if context.Background() != ContextOf(<-retained) {
+    retainedRuntime := (<-retained).Runtime()
+    if context.Background() != retainedRuntime.Context() {
         t.Fatalf("expected a provider's resolver retained past its provider to answer context.Background()")
+    }
+
+    if containercontract.KindDetached != retainedRuntime.Kind() {
+        t.Fatalf("expected a retained resolver's runtime to be detached, got %s", retainedRuntime.Kind())
+    }
+
+    if _, isSuspended := retainedRuntime.Scope().(*suspendedScope); false == isSuspended {
+        t.Fatalf("expected a retained resolver's runtime to answer a suspended scope")
     }
 }
 
@@ -849,7 +886,7 @@ func TestForGoroutine_AGoroutineAProviderStartsResolvesAsTheProvidersDependency(
         go func() {
             defer close(goroutineDone)
 
-            goroutineContexts <- ContextOf(goroutineResolver)
+            goroutineContexts <- goroutineResolver.Runtime().Context()
 
             _, handleErr := handle.Resolve(context.Background())
             goroutineErrors <- handleErr
@@ -858,7 +895,7 @@ func TestForGoroutine_AGoroutineAProviderStartsResolvesAsTheProvidersDependency(
             goroutineErrors <- typedErr
         }()
 
-        if _, otherErr := FromResolver[goroutineViewOther](ContextOf(resolver), resolver, "app.goroutine.other"); nil != otherErr {
+        if _, otherErr := FromResolver[goroutineViewOther](resolver.Runtime().Context(), resolver, "app.goroutine.other"); nil != otherErr {
             return "", otherErr
         }
 
@@ -934,7 +971,7 @@ func TestForGoroutine_TheProviderWaitsOnACreationItsGoroutineRuns(t *testing.T) 
             }
         }()
 
-        if _, sharedErr := FromResolver[goroutineViewDependency](ContextOf(resolver), resolver, "app.goroutine.shared"); nil != sharedErr {
+        if _, sharedErr := FromResolver[goroutineViewDependency](resolver.Runtime().Context(), resolver, "app.goroutine.shared"); nil != sharedErr {
             return "", sharedErr
         }
 
@@ -1072,7 +1109,7 @@ func TestForGoroutine_AGoroutineWaitingOnACreationTheProvidersResolutionHoldsIsR
         return "worker", nil
     }, RegisterOptions{})
     MustRegister[goroutineViewOuter](serviceContainer, "app.goroutine.held.outer", func(resolver containercontract.Resolver) (goroutineViewOuter, error) {
-        if _, workerErr := FromResolver[goroutineViewWorker](ContextOf(resolver), resolver, "app.goroutine.held.worker"); nil != workerErr {
+        if _, workerErr := FromResolver[goroutineViewWorker](resolver.Runtime().Context(), resolver, "app.goroutine.held.worker"); nil != workerErr {
             return "", workerErr
         }
 
@@ -1153,7 +1190,7 @@ func TestForGoroutine_AContainerProvidersViewReadsOnlyTheContainerUnderAScope(t 
         return "scoped", nil
     }, RegisterOptions{})
     MustRegister[goroutineViewWorker](serviceContainer, "app.goroutine.suspended.worker", func(resolver containercontract.Resolver) (goroutineViewWorker, error) {
-        _, ownErr := resolver.Get(ContextOf(resolver), "app.goroutine.suspended.scoped")
+        _, ownErr := resolver.Get(resolver.Runtime().Context(), "app.goroutine.suspended.scoped")
         viewErrors <- ownErr
 
         goroutineResolver := ForGoroutine(resolver)

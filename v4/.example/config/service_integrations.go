@@ -61,7 +61,7 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
         registrar.RegisterService(
             melodylock.ServiceLocker,
             func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
-                database, resolveErr := melodycontainer.FromResolver[*bun.DB](melodycontainer.ContextOf(resolver), resolver, serviceDatabase)
+                database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver.Runtime().Context(), resolver, serviceDatabase)
                 if nil != resolveErr {
                     return nil, resolveErr
                 }
@@ -77,7 +77,7 @@ func (instance *Module) registerLockerService(registrar melodyapplicationcontrac
     registrar.RegisterService(
         melodylock.ServiceLocker,
         func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
-            clockInstance, clockErr := melodycontainer.FromResolver[melodyclockcontract.Clock](melodycontainer.ContextOf(resolver), resolver, melodyclock.ServiceClock)
+            clockInstance, clockErr := melodycontainer.FromResolver[melodyclockcontract.Clock](resolver.Runtime().Context(), resolver, melodyclock.ServiceClock)
             if nil != clockErr {
                 return nil, clockErr
             }
@@ -94,7 +94,7 @@ func (instance *Module) registerArchiveLockerService(registrar melodyapplication
         persistence.ServiceArchiveLocker,
         func(resolver melodycontainercontract.Resolver) (melodylockcontract.Locker, error) {
             if false == instance.archiveWired {
-                clockInstance, clockErr := melodycontainer.FromResolver[melodyclockcontract.Clock](melodycontainer.ContextOf(resolver), resolver, melodyclock.ServiceClock)
+                clockInstance, clockErr := melodycontainer.FromResolver[melodyclockcontract.Clock](resolver.Runtime().Context(), resolver, melodyclock.ServiceClock)
                 if nil != clockErr {
                     return nil, clockErr
                 }
@@ -102,7 +102,7 @@ func (instance *Module) registerArchiveLockerService(registrar melodyapplication
                 return melodylock.NewInMemoryLocker(clockInstance), nil
             }
 
-            database, resolveErr := melodycontainer.FromResolver[*bun.DB](melodycontainer.ContextOf(resolver), resolver, serviceArchiveDatabase)
+            database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver.Runtime().Context(), resolver, serviceArchiveDatabase)
             if nil != resolveErr {
                 return nil, resolveErr
             }

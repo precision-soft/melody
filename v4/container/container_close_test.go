@@ -52,7 +52,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByServiceName(t *tes
     err = serviceContainer.Register(
         "service.b",
         func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-            _, err := resolver.Get(ContextOf(resolver), "service.a")
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.a")
             if nil != err {
                 return nil, err
             }
@@ -116,7 +116,7 @@ func TestContainer_TheSequentialCloseOrderInterleavesTheWaves(t *testing.T) {
     serviceContainer.MustRegister(
         "service.c",
         func(resolver containercontract.Resolver) (*closeOrderServiceC, error) {
-            if _, resolveErr := resolver.Get(ContextOf(resolver), "service.a"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "service.a"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -186,7 +186,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_ByTypeResolution(t *
     err = RegisterType[*closeOrderTypeDependent](
         serviceContainer,
         func(resolver containercontract.Resolver) (*closeOrderTypeDependent, error) {
-            _, err := resolver.GetByType(ContextOf(resolver), reflect.TypeOf((*closeOrderTypeDependency)(nil)))
+            _, err := resolver.GetByType(resolver.Runtime().Context(), reflect.TypeOf((*closeOrderTypeDependency)(nil)))
             if nil != err {
                 return nil, err
             }
@@ -382,7 +382,7 @@ func TestContainer_Close_ClosesDependentsBeforeDependencies_NamedServiceDependsB
         serviceContainer,
         "service.a",
         func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
-            _, dependencyErr := FromResolverByType[*closeOrderServiceB](ContextOf(resolver), resolver)
+            _, dependencyErr := FromResolverByType[*closeOrderServiceB](resolver.Runtime().Context(), resolver)
             if nil != dependencyErr {
                 return nil, dependencyErr
             }
@@ -427,7 +427,7 @@ func TestContainer_Get_DetectsCircularDependency_SameResolverContext(t *testing.
     err := serviceContainer.Register(
         "service.a",
         func(resolver containercontract.Resolver) (*circularServiceA, error) {
-            _, err := resolver.Get(ContextOf(resolver), "service.b")
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.b")
             if nil != err {
                 return nil, err
             }
@@ -443,7 +443,7 @@ func TestContainer_Get_DetectsCircularDependency_SameResolverContext(t *testing.
     err = serviceContainer.Register(
         "service.b",
         func(resolver containercontract.Resolver) (*circularServiceB, error) {
-            _, err := resolver.Get(ContextOf(resolver), "service.a")
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.a")
             if nil != err {
                 return nil, err
             }
@@ -486,7 +486,7 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
     err = serviceContainer.Register(
         "service.b",
         func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-            _, err := resolver.Get(ContextOf(resolver), "service.d")
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.d")
             if nil != err {
                 return nil, err
             }
@@ -502,7 +502,7 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
     err = serviceContainer.Register(
         "service.c",
         func(resolver containercontract.Resolver) (*closeOrderServiceC, error) {
-            _, err := resolver.Get(ContextOf(resolver), "service.d")
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.d")
             if nil != err {
                 return nil, err
             }
@@ -518,12 +518,12 @@ func TestContainer_Close_ClosesDiamondDependencyInDeterministicOrder(t *testing.
     err = serviceContainer.Register(
         "service.a",
         func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
-            _, err := resolver.Get(ContextOf(resolver), "service.b")
+            _, err := resolver.Get(resolver.Runtime().Context(), "service.b")
             if nil != err {
                 return nil, err
             }
 
-            _, err = resolver.Get(ContextOf(resolver), "service.c")
+            _, err = resolver.Get(resolver.Runtime().Context(), "service.c")
             if nil != err {
                 return nil, err
             }
@@ -1002,7 +1002,7 @@ func TestContainer_Close_ResolverMediatedZeroSizeAliasClosesOnce(t *testing.T) {
         serviceContainer,
         "zero.size.alias",
         func(resolver containercontract.Resolver) (*sameTypeZeroSizeCloser, error) {
-            return FromResolver[*sameTypeZeroSizeCloser](ContextOf(resolver), resolver, "zero.size.origin")
+            return FromResolver[*sameTypeZeroSizeCloser](resolver.Runtime().Context(), resolver, "zero.size.origin")
         },
         RegisterOptions{TypeRegistrationDisabled: true},
     )
@@ -1793,7 +1793,7 @@ func TestContainer_Close_ADeclaredEdgeIsHonoured(t *testing.T) {
     if registerErr := serviceContainer.Register(
         "service.dependent",
         func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-            if _, resolveErr := resolver.Get(ContextOf(resolver), "service.dependency"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "service.dependency"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -3359,7 +3359,7 @@ func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
     serviceContainer.MustRegister(
         "cycle.b",
         func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
-            if _, resolveErr := resolver.Get(ContextOf(resolver), "cycle.c"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "cycle.c"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -3371,7 +3371,7 @@ func TestContainer_Close_TheCycleReportNamesTheRingMembersAlone(t *testing.T) {
     serviceContainer.MustRegister(
         "cycle.a",
         func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
-            if _, resolveErr := resolver.Get(ContextOf(resolver), "cycle.b"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "cycle.b"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -4030,7 +4030,7 @@ func TestContainer_ADeclarationOnATypeRefusesTheTypeResolutionClosingARing(t *te
     serviceContainer.MustRegister(
         "app.pool.first",
         func(resolver containercontract.Resolver) (*sharedPoolService, error) {
-            if _, resolveErr := resolver.Get(ContextOf(resolver), "app.declarer"); nil != resolveErr {
+            if _, resolveErr := resolver.Get(resolver.Runtime().Context(), "app.declarer"); nil != resolveErr {
                 return nil, resolveErr
             }
 
@@ -4115,7 +4115,7 @@ func TestContainer_TeardownPlan_AResolutionBetweenTwoNamesOfOneInstanceIsNoEdge(
     serviceContainer.MustRegister(
         "app.b",
         func(resolver containercontract.Resolver) (*poolDeclarerService, error) {
-            value, resolveErr := resolver.Get(ContextOf(resolver), "app.a")
+            value, resolveErr := resolver.Get(resolver.Runtime().Context(), "app.a")
             if nil != resolveErr {
                 return nil, resolveErr
             }
@@ -4544,7 +4544,7 @@ func TestContainer_ADeclaredRingIsRefusedAtTheDeclaration(t *testing.T) {
     t.Run("AResolutionByTypeAgainstADeclaration", func(t *testing.T) {
         serviceContainer := NewContainer(ContainerConfig{})
         serviceContainer.MustRegister("app.first", func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
-            if _, getErr := resolver.GetByType(ContextOf(resolver), reflect.TypeFor[*closeOrderServiceB]()); nil != getErr {
+            if _, getErr := resolver.GetByType(resolver.Runtime().Context(), reflect.TypeFor[*closeOrderServiceB]()); nil != getErr {
                 return nil, getErr
             }
 
@@ -4560,7 +4560,7 @@ func TestContainer_ADeclaredRingIsRefusedAtTheDeclaration(t *testing.T) {
     t.Run("AResolutionAgainstADeclaration", func(t *testing.T) {
         serviceContainer := newDeclaredPair(t)
         serviceContainer.MustRegister("app.second", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-            if _, getErr := resolver.Get(ContextOf(resolver), "app.first"); nil != getErr {
+            if _, getErr := resolver.Get(resolver.Runtime().Context(), "app.first"); nil != getErr {
                 return nil, getErr
             }
 
@@ -4578,11 +4578,11 @@ func TestContainer_AFailedLookupLeavesNoDependency(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{}).(*container)
 
     serviceContainer.MustRegister("app.fallback", func(resolver containercontract.Resolver) (*closeOrderServiceA, error) {
-        if _, getErr := resolver.Get(ContextOf(resolver), "app.optional"); nil == getErr {
+        if _, getErr := resolver.Get(resolver.Runtime().Context(), "app.optional"); nil == getErr {
             t.Fatalf("expected the optional collaborator to be missing")
         }
 
-        if _, getErr := resolver.GetByType(ContextOf(resolver), reflect.TypeFor[*closeOrderServiceB]()); nil == getErr {
+        if _, getErr := resolver.GetByType(resolver.Runtime().Context(), reflect.TypeFor[*closeOrderServiceB]()); nil == getErr {
             t.Fatalf("expected the optional collaborator's type to be missing")
         }
 
@@ -4601,7 +4601,7 @@ func TestContainer_AFailedLookupLeavesNoDependency(t *testing.T) {
     }
 
     serviceContainer.MustRegister("app.optional", func(resolver containercontract.Resolver) (*closeOrderServiceB, error) {
-        if _, getErr := resolver.Get(ContextOf(resolver), "app.fallback"); nil != getErr {
+        if _, getErr := resolver.Get(resolver.Runtime().Context(), "app.fallback"); nil != getErr {
             return nil, getErr
         }
 
@@ -4697,7 +4697,7 @@ func TestContainer_ASecondNameUnderATypeDoesNotUnfoldAResolvedEdge(t *testing.T)
     }, RegisterOptions{TypeRegistrationDisabled: true})
 
     dependentContainer.MustRegister("app.partner", func(resolver containercontract.Resolver) (*lazyRingPartner, error) {
-        holder, getErr := FromResolver[*lazyRingHolder](ContextOf(resolver), resolver, "app.holder")
+        holder, getErr := FromResolver[*lazyRingHolder](resolver.Runtime().Context(), resolver, "app.holder")
         if nil != getErr {
             return nil, getErr
         }

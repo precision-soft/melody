@@ -38,7 +38,7 @@ func RegisterConnectionService(registrar ServiceRegistrar, connection *Connectio
 /* resolveConnectionEdge records the consumer-to-connection dependency edge when a connection service is registered: resolving it through the resolver building the consumer orders the teardown, consumers first and the connection after. Without a registered connection the edge is skipped. */
 func resolveConnectionEdge(resolver containercontract.Resolver) {
     if true == resolver.Has(ServiceConnection) {
-        container.MustFromResolver[*Connection](container.ContextOf(resolver), resolver, ServiceConnection)
+        container.MustFromResolver[*Connection](resolver.Runtime().Context(), resolver, ServiceConnection)
     }
 }
 
@@ -91,7 +91,7 @@ func RegisterTokenStoreService(registrar ServiceRegistrar, client rueidis.Client
 
             storeConfig := resolved
             if nil == storeConfig.clock {
-                if clockInstance, clockErr := container.FromResolver[clockcontract.Clock](container.ContextOf(resolver), resolver, melodyclock.ServiceClock); nil == clockErr {
+                if clockInstance, clockErr := container.FromResolver[clockcontract.Clock](resolver.Runtime().Context(), resolver, melodyclock.ServiceClock); nil == clockErr {
                     storeConfig.clock = clockInstance
                 }
             }

@@ -272,11 +272,17 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
                 return
             }
 
-            /* not writeResponse: no runtime exists in this window and the request never reached its session */
+            /* not writeResponse: the request never reached its session */
             _ = WriteToHttpResponseWriter(nil, nil, writer, JsonErrorResponse(nethttp.StatusInternalServerError, "internal server error"))
         }()
 
-        requestLogger, requestId, requestIdLoggerErr := instance.requestIdLogger(request.Context(), serviceContainer, scope)
+        /* before the first resolution, so a singleton the request path builds first reads KindRequest */
+        runtimeInstance := runtime.NewRequest(
+            request.Context(),
+            scope,
+        )
+
+        requestLogger, requestId, requestIdLoggerErr := instance.requestIdLogger(runtimeInstance)
         if nil != requestIdLoggerErr {
             exception.Panic(
                 exception.NewError("failed to create request logger", nil, requestIdLoggerErr),
@@ -293,12 +299,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         writer.Header().Set(HeaderRequestId, requestId)
 
-        runtimeInstance := runtime.NewRequest(
-            request.Context(),
-            scope,
-)
-
-        configuration := config.ConfigMustFromResolver(request.Context(), serviceContainer)
+        configuration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
         defaultLocale := configuration.Http().DefaultLocale()
         debugMode := config.EnvironmentDevelopment == configuration.Kernel().Environment()
 
@@ -456,7 +457,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         /* the recovery defer reads this before finalResponse is assigned */
         chainResponse := (httpcontract.Response)(nil)
 
-        eventDispatcher := event.EventDispatcherMustFromResolver(request.Context(), serviceContainer)
+        eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         var sessionManager sessioncontract.Manager
 
@@ -546,7 +547,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }()
 
         /* resolved below the recovery defer, since a replaceable container may panic */
-        sessionManager = session.SessionMustFromResolver(request.Context(), serviceContainer)
+        sessionManager = session.SessionMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
 
         cookieValue := ""
         cookie, _ := request.Cookie(session.SessionCookieName)
@@ -925,14 +926,14 @@ func renderExceptionSafely(
     return RenderExceptionResponse(runtimeInstance, request, err, renderConfig)
 }
 
+/* resolved before the request logger is installed over it, so the scope still answers the container's */
 func (instance *Kernel) requestIdLogger(
-    ctx context.Context,
-    serviceContainer containercontract.Container,
-    scope containercontract.Scope,
+    runtimeInstance containercontract.Runtime,
 ) (loggingcontract.Logger, string, error) {
     requestId := logging.GenerateProcessId()
+    scope := runtimeInstance.Scope()
 
-    baseLogger := logging.LoggerMustFromResolver(ctx, serviceContainer)
+    baseLogger := logging.LoggerMustFromResolver(runtimeInstance.Context(), scope)
     if nil == baseLogger {
         return nil, requestId, exception.NewError("failed to get base logger", nil, nil)
     }

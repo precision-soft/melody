@@ -79,7 +79,7 @@ func TestAllImplementing_CollectsFromInsideAProvider(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*handlerDispatcher, error) {
-        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver.Runtime().Context(), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }
@@ -215,7 +215,7 @@ func TestAllImplementing_ExcludesTheServiceBeingCreated(t *testing.T) {
     serviceContainer := newCollectionContainer(t)
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*compositeDispatcher, error) {
-        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver.Runtime().Context(), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }
@@ -286,7 +286,7 @@ func TestAllImplementing_AncestorOnTheResolutionPathFailsLoudly(t *testing.T) {
     serviceContainer := NewContainer(ContainerConfig{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*auditHandler, error) {
-        _, dispatcherErr := FromResolverByType[*handlerDispatcher](ContextOf(resolver), resolver)
+        _, dispatcherErr := FromResolverByType[*handlerDispatcher](resolver.Runtime().Context(), resolver)
         if nil != dispatcherErr {
             return nil, dispatcherErr
         }
@@ -295,7 +295,7 @@ func TestAllImplementing_AncestorOnTheResolutionPathFailsLoudly(t *testing.T) {
     }, RegisterOptions{})
 
     MustRegisterType(serviceContainer, func(resolver containercontract.Resolver) (*handlerDispatcher, error) {
-        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver.Runtime().Context(), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }
@@ -377,7 +377,7 @@ func TestAllImplementing_SiblingNameOfTheCollectorTypeIsCollected(t *testing.T) 
             return &namedHandler{name: "sibling"}, nil
         }, RegisterOptions{TypeRegistrationRelaxed: true})
 
-        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver.Runtime().Context(), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }
@@ -409,7 +409,7 @@ func TestAllImplementing_SiblingNameIsCollectedWhenTheCollectorResolvesByType(t 
             return &namedHandler{name: "sibling"}, nil
         }, RegisterOptions{TypeRegistrationRelaxed: true})
 
-        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver.Runtime().Context(), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }
@@ -501,7 +501,7 @@ func TestAllImplementing_AContainerProviderCollectingThroughAScopeExcludesScoped
     registerErr := serviceContainer.Register(
         "app.dispatcher",
         func(resolver containercontract.Resolver) (*plainService, error) {
-            handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
+            handlers, allImplementingErr := AllImplementing[collectableHandler](resolver.Runtime().Context(), resolver)
             if nil != allImplementingErr {
                 return nil, allImplementingErr
             }
@@ -590,7 +590,7 @@ func TestAllImplementing_ExcludesTheScopedServiceBeingCreatedByType(t *testing.T
     serviceContainer := newCollectionContainer(t)
 
     MustRegisterScopedType(serviceContainer, func(resolver containercontract.Resolver) (*compositeDispatcher, error) {
-        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver.Runtime().Context(), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }
@@ -617,7 +617,7 @@ func TestAllImplementing_ExcludesTheScopedServiceBeingCreatedByName(t *testing.T
     serviceContainer := newCollectionContainer(t)
 
     MustRegisterScoped(serviceContainer, "dispatcher.request", func(resolver containercontract.Resolver) (*compositeDispatcher, error) {
-        handlers, allImplementingErr := AllImplementing[collectableHandler](ContextOf(resolver), resolver)
+        handlers, allImplementingErr := AllImplementing[collectableHandler](resolver.Runtime().Context(), resolver)
         if nil != allImplementingErr {
             return nil, allImplementingErr
         }

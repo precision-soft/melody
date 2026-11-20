@@ -43,7 +43,7 @@ func (instance *Module) registerTwoFactorStoreService(registrar melodyapplicatio
         twofactor.ServiceStore,
         func(resolver melodycontainercontract.Resolver) (*twofactor.Store, error) {
             /* the handle is resolved by name, the way the catalogue storage resolves it, so the store closes ahead of the pool it reads through */
-            database, resolveErr := melodycontainer.FromResolver[*bun.DB](melodycontainer.ContextOf(resolver), resolver, serviceDatabase)
+            database, resolveErr := melodycontainer.FromResolver[*bun.DB](resolver.Runtime().Context(), resolver, serviceDatabase)
             if nil != resolveErr {
                 return nil, resolveErr
             }

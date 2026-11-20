@@ -166,7 +166,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
         serviceDatabaseRegistry,
         func(resolver melodycontainercontract.Resolver) (*melodybunorm.ManagerRegistry, error) {
             /* the logger is resolved rather than captured, for two reasons: the registry, built on the emergency logger during wiring, gets the application's journal for its opens, its retries and bun's diagnostics; and the resolution writes the teardown edge, so the registry closes and hands bun's diagnostic channel back while the journal is still open. */
-            logger, loggerErr := melodylogging.LoggerFromResolver(melodycontainer.ContextOf(resolver), resolver)
+            logger, loggerErr := melodylogging.LoggerFromResolver(resolver.Runtime().Context(), resolver)
             if nil != loggerErr {
                 return nil, loggerErr
             }
@@ -185,7 +185,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
             serviceArchiveDatabase,
             func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
                 /* the registry is RESOLVED for the teardown edge, exactly as the catalogue handle below resolves it, and the OPEN happens here rather than in buildDatabase: this provider runs at the first resolution, so a process that never reaches the archive never dials postgres. */
-                resolvedRegistry, registryErr := melodycontainer.FromResolver[*melodybunorm.ManagerRegistry](melodycontainer.ContextOf(resolver), resolver, serviceDatabaseRegistry)
+                resolvedRegistry, registryErr := melodycontainer.FromResolver[*melodybunorm.ManagerRegistry](resolver.Runtime().Context(), resolver, serviceDatabaseRegistry)
                 if nil != registryErr {
                     return nil, registryErr
                 }
@@ -205,7 +205,7 @@ func (instance *Module) registerDatabaseServices(registrar melodyapplicationcont
         /* both handles are kept off the type index: a resolution by type between two handles of one concrete type can only answer with whichever registered first, so a handle is asked for by naming its connection. Every consumer in this example resolves serviceDatabase by name, and the generated wiring never references bun.DB, which is why the handle lives in the unscanned persistence package. */
         func(resolver melodycontainercontract.Resolver) (*bun.DB, error) {
             /* the registry is resolved here for the teardown edge: this name publishes the registry's pool under a second identity, so the edge makes the handle close ahead of its owner, in the order handle, registry, journal, and the registry closes the pool. */
-            resolvedRegistry, registryErr := melodycontainer.FromResolver[*melodybunorm.ManagerRegistry](melodycontainer.ContextOf(resolver), resolver, serviceDatabaseRegistry)
+            resolvedRegistry, registryErr := melodycontainer.FromResolver[*melodybunorm.ManagerRegistry](resolver.Runtime().Context(), resolver, serviceDatabaseRegistry)
             if nil != registryErr {
                 return nil, registryErr
             }

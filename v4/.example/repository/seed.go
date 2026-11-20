@@ -163,7 +163,7 @@ func RegisterSeeders(registrar melodycontainercontract.Registrar) {
             registrar,
             seeder.serviceName,
             func(resolver melodycontainercontract.Resolver) (Seeder, error) {
-                storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](melodycontainer.ContextOf(resolver), resolver, persistence.ServiceCatalogStorage)
+                storage, storageErr := melodycontainer.FromResolver[*persistence.CatalogStorage](resolver.Runtime().Context(), resolver, persistence.ServiceCatalogStorage)
                 if nil != storageErr {
                     return nil, storageErr
                 }

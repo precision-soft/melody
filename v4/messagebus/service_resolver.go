@@ -61,7 +61,7 @@ func RegisterTransports(registrar ServiceRegistrar, transports map[string]messag
         ServiceTransports,
         func(resolver containercontract.Resolver) (map[string]messagebuscontract.Transport, error) {
             /* resolving the closer through this provider records the dependency edge the teardown orders by: the map's consumers close first, the transports after them */
-            container.MustFromResolver[*TransportsCloser](container.ContextOf(resolver), resolver, ServiceTransportsCloser)
+            container.MustFromResolver[*TransportsCloser](resolver.Runtime().Context(), resolver, ServiceTransportsCloser)
 
             return transports, nil
         },
