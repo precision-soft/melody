@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-    "context"
     "fmt"
     "strings"
     "testing"
@@ -128,7 +127,7 @@ func (instance *gatingTestKernel) Config() configcontract.Configuration { return
 
 func (instance *gatingTestKernel) HttpRouter() httpcontract.Router { return nil }
 
-func (instance *gatingTestKernel) Context() context.Context { return context.Background() }
+func (instance *gatingTestKernel) BootRuntime() containercontract.Runtime { return nil }
 
 func (instance *gatingTestKernel) HttpKernel() httpcontract.Kernel { return nil }
 

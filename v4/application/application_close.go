@@ -35,6 +35,10 @@ func (instance *Application) close(closeContext context.Context) error {
         return nil
     }
 
+    if nil != instance.finishBoot {
+        _ = instance.finishBoot()
+    }
+
     performed := false
     var performErr error
 

@@ -93,6 +93,15 @@ func (instance *Application) MustRegister(
     }
 }
 
+/* ReservePhaseService reserves an application's own name for the phase that installs it; the framework's phase names are reserved by the application itself and refused here. */
+func (instance *Application) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    if http.ServiceRequestContext == serviceName || securitycontract.ServiceSecurityContext == serviceName || ServiceProcessContext == serviceName {
+        return exception.NewError("the framework reserves this phase service", exceptioncontract.Context{"serviceName": serviceName}, nil)
+    }
+
+    return instance.kernel.ServiceContainer().ReservePhaseService(serviceName, kind)
+}
+
 /* RegisterScopedService declares a service the application's scopes own, one instance per http request or command run, closed with it. */
 func (instance *Application) RegisterScopedService(
     serviceName string,
@@ -148,6 +157,21 @@ func (instance *Application) MustRegisterScoped(
     registerScopedErr := instance.RegisterScoped(serviceName, provider, options)
     if nil != registerScopedErr {
         exception.Panic(exception.FromError(registerScopedErr))
+    }
+}
+
+/* the names a phase installs into its scopes: a scope of another kind, the boot's among them, refuses them by name */
+func (instance *Application) reservePhaseServices() {
+    serviceContainer := instance.kernel.ServiceContainer()
+
+    for serviceName, kind := range map[string]containercontract.Kind{
+        http.ServiceRequestContext:              containercontract.KindRequest,
+        securitycontract.ServiceSecurityContext: containercontract.KindRequest,
+        ServiceProcessContext:                   containercontract.KindRun,
+    } {
+        if reserveErr := serviceContainer.ReservePhaseService(serviceName, kind); nil != reserveErr {
+            exception.Panic(exception.NewError("could not reserve a phase service", exceptioncontract.Context{"serviceName": serviceName}, reserveErr))
+        }
     }
 }
 
@@ -279,7 +303,8 @@ func (instance *Application) bootContainer() {
     instance.registerSecurity()
 
     /* resolved eagerly so a failing provider fails the boot step that owns it */
-    _, loggerProbeErr := logging.LoggerFromResolver(instance.ctx, serviceContainer)
+    bootRuntime := instance.kernel.BootRuntime()
+    _, loggerProbeErr := logging.LoggerFromResolver(bootRuntime.Context(), bootRuntime.Scope())
     if nil != loggerProbeErr {
         exception.Panic(
             exception.NewError(
@@ -550,9 +575,10 @@ func (instance *Application) buildMessageBusTransportsCloser() {
         }
     }
 
+    bootRuntime := instance.kernel.BootRuntime()
     _, closerErr := container.FromResolver[*messagebus.TransportsCloser](
-        instance.ctx,
-        serviceContainer,
+        bootRuntime.Context(),
+        bootRuntime.Scope(),
         messagebus.ServiceTransportsCloser,
     )
     if nil != closerErr {

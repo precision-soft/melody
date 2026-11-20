@@ -6,6 +6,7 @@ import (
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
 
 /* RegisterScoped adds a service to this one scope, layered over the plan: built on the first Get through the scope and closed with it. A name the scope itself already registered is refused; one the plan or the container holds is refused unless ReplacesContainerService was declared. */
@@ -14,6 +15,14 @@ func (instance *scope) RegisterScoped(
     provider any,
     options containercontract.RegisterOptions,
 ) error {
+    if true == instance.boot {
+        return exception.NewError(
+            "the boot scope builds no scoped service",
+            exceptioncontract.Context{"serviceName": serviceName},
+            ErrScopedServiceAtBoot,
+        )
+    }
+
     if "" == serviceName {
         return exception.NewError(
             "service name is required to register a scoped service",

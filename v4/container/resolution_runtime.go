@@ -98,6 +98,14 @@ func (instance *suspendedScope) isResolvingReference(reference containercontract
     return true == isResolutionChecker && true == resolutionChecker.isResolvingReference(reference)
 }
 
+func (instance *suspendedScope) scopedMembersRefusal(interfaceType reflect.Type) error {
+    if bootChecker, checksBoot := instance.resolver.(scopedMembersChecker); true == checksBoot {
+        return bootChecker.scopedMembersRefusal(interfaceType)
+    }
+
+    return nil
+}
+
 func (instance *suspendedScope) recordLazyHandle(record lazyHandleRecord) {
     if recorder, records := instance.resolver.(lazyHandleRecorder); true == records {
         recorder.recordLazyHandle(record)

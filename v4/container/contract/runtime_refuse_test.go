@@ -2,6 +2,7 @@ package contract
 
 import (
     "context"
+    "errors"
     "testing"
 
     "github.com/precision-soft/melody/v4/exception"
@@ -37,5 +38,36 @@ func TestRefuseNilRuntime_RefusesNilATypedNilAndANilContextNamingTheArgument(t *
 func TestRefuseNilRuntime_AdmitsARuntimeWithAContext(t *testing.T) {
     if refusal := RefuseNilRuntime(&contextOnlyRuntime{ctx: context.Background()}); nil != refusal {
         t.Fatalf("expected a runtime with a context admitted, got %v", refusal)
+    }
+}
+
+type kindOnlyRuntime struct {
+    contextOnlyRuntime
+    kind Kind
+}
+
+func (instance *kindOnlyRuntime) Kind() Kind {
+    return instance.kind
+}
+
+func TestRefuseRuntimeKind_AdmitsARequiredKindAndRefusesAnotherNamingTheLookupAndBothKinds(t *testing.T) {
+    requestRuntime := &kindOnlyRuntime{contextOnlyRuntime: contextOnlyRuntime{ctx: context.Background()}, kind: KindRequest}
+
+    if refusal := RefuseRuntimeKind(requestRuntime, "Lookup", []Kind{KindRun, KindRequest}); nil != refusal {
+        t.Fatalf("expected a required kind to be admitted, got %v", refusal)
+    }
+
+    refusal := RefuseRuntimeKind(requestRuntime, "Lookup", []Kind{KindBoot, KindRun})
+    if false == errors.Is(refusal, ErrRuntimeKindRefused) {
+        t.Fatalf("expected a refusal under ErrRuntimeKindRefused, got %v", refusal)
+    }
+
+    var melodyErr *exception.Error
+    if false == errors.As(refusal, &melodyErr) || "Lookup" != melodyErr.Context()["lookup"] || "boot, run" != melodyErr.Context()["required"] || "request" != melodyErr.Context()["given"] {
+        t.Fatalf("expected the refusal to name the lookup and both kinds, got %v", refusal)
+    }
+
+    if nil == RefuseRuntimeKind(nil, "Lookup", []Kind{KindRequest}) {
+        t.Fatalf("expected a nil runtime to be refused")
     }
 }

@@ -1,7 +1,6 @@
 package opentelemetry
 
 import (
-    "context"
     nethttp "net/http"
     "strings"
     "testing"
@@ -34,9 +33,6 @@ type spyKernel struct {
     router *spyRouter
 }
 
-func (instance *spyKernel) Context() context.Context {
-    return context.Background()
-}
 
 func (instance *spyKernel) HttpRouter() httpcontract.Router {
     return instance.router

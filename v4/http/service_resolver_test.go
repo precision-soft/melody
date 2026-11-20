@@ -1,11 +1,14 @@
 package http
 
 import (
+    "errors"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
 )
 
@@ -116,8 +119,7 @@ func TestRoutingServiceNames_AreDistinct(t *testing.T) {
     }
 }
 
-/* the request context lives only on a request scope — the kernel installs it per request and the root container never carries it — so its accessor takes a resolver: the door the documentation's scoped-provider example already used before the function existed */
-func TestRequestContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T) {
+func TestRequestContextFromRuntime_ResolvesTheInstalledContext(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     requestScope := serviceContainer.NewScope()
@@ -130,7 +132,7 @@ func TestRequestContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    resolved := RequestContextMustFromResolver(t.Context(), requestScope)
+    resolved := RequestContextMustFromRuntime(runtime.NewRequest(t.Context(), requestScope))
 
     if "request-1" != resolved.RequestId() {
         t.Fatalf("expected the installed request id, got %q", resolved.RequestId())
@@ -139,25 +141,25 @@ func TestRequestContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
     if false == startedAt.Equal(resolved.StartedAt()) {
         t.Fatalf("expected the installed start moment, got %v", resolved.StartedAt())
     }
-
-    tolerantAnswer := RequestContextFromResolver(t.Context(), requestScope)
-    if nil == tolerantAnswer || "request-1" != tolerantAnswer.RequestId() {
-        t.Fatalf("expected the tolerant form to answer the installed context, got %v", tolerantAnswer)
-    }
 }
 
-/* absence — a console process, the root container — answers nil from the tolerant form, so code shared between the two process shapes can treat the request context as optional without recovering a panic */
-func TestRequestContextFromResolver_AnswersNilWhenAbsent(t *testing.T) {
+func TestRequestContextFromRuntime_ARuntimeOfAnotherKindIsRefusedNamingBothKinds(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    requestScope := serviceContainer.NewScope()
-    defer requestScope.Close()
+    bootRuntime, finish := runtime.NewBoot(t.Context(), serviceContainer)
+    defer func() {
+        _ = finish()
+    }()
 
-    if nil != RequestContextFromResolver(t.Context(), requestScope) {
-        t.Fatalf("expected nil for a scope without the request context")
-    }
+    for _, runtimeInstance := range []containercontract.Runtime{runtime.NewRun(t.Context(), serviceContainer.NewScope()), bootRuntime} {
+        _, lookupErr := RequestContextFromRuntime(runtimeInstance)
+        if false == errors.Is(lookupErr, containercontract.ErrRuntimeKindRefused) {
+            t.Fatalf("expected a %s runtime to be refused, got %v", runtimeInstance.Kind(), lookupErr)
+        }
 
-    if nil != RequestContextFromResolver(t.Context(), serviceContainer) {
-        t.Fatalf("expected nil for the root container")
+        var refusal *exception.Error
+        if false == errors.As(lookupErr, &refusal) || "request" != refusal.Context()["required"] || runtimeInstance.Kind().String() != refusal.Context()["given"] {
+            t.Fatalf("expected the refusal to name both kinds, got %v", lookupErr)
+        }
     }
 }

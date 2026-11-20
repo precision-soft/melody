@@ -182,8 +182,6 @@ func (instance *Application) runCli() error {
 
     serviceContainer := kernelInstance.ServiceContainer()
 
-    logger := logging.LoggerMustFromResolver(instance.ctx, serviceContainer)
-
     scope := serviceContainer.NewScope()
 
     /* a last-resort net for a panic between the scope's creation and the action dispatch; a run that reaches the action has its scope closed there, so this second close answers nil */
@@ -195,6 +193,9 @@ func (instance *Application) runCli() error {
     }()
 
     runtimeInstance := runtime.NewRun(instance.ctx, scope)
+
+    /* through the run's scope, before the process logger is installed over it, so a logger first built here reads KindRun */
+    logger := logging.LoggerMustFromResolver(runtimeInstance.Context(), scope)
 
     processId := logging.GenerateProcessId()
     loggerWithProcess := logging.NewProcessLogger(logger, processId, "processId")

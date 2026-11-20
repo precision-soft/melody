@@ -115,3 +115,7 @@ func TestModule_ATypedNilClientIsNoClient(t *testing.T) {
 
     NewModule(ModuleConfig{Client: client, Backend: BackendConfig{Prefix: "cache"}}).RegisterServices(&spyServiceRegistrar{})
 }
+
+func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    return nil
+}

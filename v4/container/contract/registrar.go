@@ -39,4 +39,7 @@ type Registrar interface {
     Register(serviceName string, provider any, options RegisterOptions) error
 
     MustRegister(serviceName string, provider any, options RegisterOptions)
+
+    /* ReservePhaseService reserves a name a phase installs into its scopes, so a scope a runtime of another kind bound refuses it under ErrRuntimeKindRefused instead of answering it is not registered; Has stays false. A registration of the name wins over the reservation. */
+    ReservePhaseService(serviceName string, kind Kind) error
 }

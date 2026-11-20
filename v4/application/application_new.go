@@ -134,7 +134,6 @@ func NewApplication(
     clockInstance := clock.NewSystemClock()
 
     kernelInstance := kernel.NewKernel(
-        ctx,
         configuration,
         container.NewContainer(container.ContainerConfig{
             ScopeTeardownTimeout: scopeTeardownTimeout.Limit(),

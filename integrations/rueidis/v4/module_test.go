@@ -198,3 +198,7 @@ func TestModule_AClientAndTheConnectionThatWrapsItAreAdmitted(t *testing.T) {
         t.Fatalf("expected the pair registered, got %v", registrar.names)
     }
 }
+
+func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    return nil
+}

@@ -339,8 +339,7 @@ func run(ctx context.Context, embeddedEnvironmentFiles fs.FS, embeddedPublicFile
 - [`ServiceProcessRole`](../../application/service_resolver.go) — resolves to the process role string, so a service can gate background work without reaching back to the application instance
     - [`ProcessRoleMustFromResolver(ctx, resolver)`](../../application/service_resolver.go)
 - [`ServiceProcessContext`](../../application/service_resolver.go) — resolves to the console run's `ProcessContext`. The cli entry point installs it into the run's scope, so it takes a resolver rather than the container
-    - [`ProcessContextMustFromResolver(ctx, resolver)`](../../application/service_resolver.go)
-    - [`ProcessContextFromResolver(ctx, resolver)`](../../application/service_resolver.go) — the error-tolerant form, for code that runs on both process shapes: absence — an http process, the root container — answers nil
+    - [`ProcessContextFromRuntime(runtimeInstance)`](../../application/service_resolver.go), [`ProcessContextMustFromRuntime(runtimeInstance)`](../../application/service_resolver.go) — a runtime that is not a run's answers an error under `containercontract.ErrRuntimeKindRefused` naming both kinds, so code that runs on both process shapes tells absence apart by the error
 
 ### Constructors
 

@@ -1,8 +1,6 @@
 package contract
 
 import (
-    "context"
-
     clockcontract "github.com/precision-soft/melody/v4/clock/contract"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -11,8 +9,8 @@ import (
 )
 
 type Kernel interface {
-    /* Context is the context the application was built with, the one a boot hook resolves under */
-    Context() context.Context
+    /* BootRuntime is the runtime of the application's boot, the one a boot hook resolves and calls its doors under; once Boot returned its context is done with containercontract.ErrBootFinished as its cause and its scope is closed. It is nil before Boot. */
+    BootRuntime() containercontract.Runtime
 
     Environment() string
 

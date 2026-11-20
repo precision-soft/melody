@@ -142,3 +142,7 @@ func TestModule_SeveralNilTransportsAreRefusedNamingTheFirstInNameOrder(t *testi
         }()
     }
 }
+
+func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    return nil
+}

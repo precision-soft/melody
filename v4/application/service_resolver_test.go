@@ -1,12 +1,15 @@
 package application
 
 import (
+    "errors"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
 )
 
 /* the process role is what a background worker consults before it starts doing work — a web process that read it as "worker" would run the cron dispatch of every replica — and the service NAME is the contract every such caller reaches it by. */
@@ -50,8 +53,7 @@ func TestProcessRoleMustFromResolver_PanicsWhenTheRoleIsNotRegistered(t *testing
     _ = ProcessRoleMustFromResolver(t.Context(), serviceContainer)
 }
 
-/* the process context lives only on a console run's scope — the cli entry point installs it and the root container never carries it — so its accessor takes a resolver, the same door the request context takes on the http side */
-func TestProcessContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T) {
+func TestProcessContextFromRuntime_ResolvesTheInstalledContext(t *testing.T) {
     if "service.application.process_context" != ServiceProcessContext {
         t.Fatalf("the process context service name is a cross-package contract, got %q", ServiceProcessContext)
     }
@@ -68,7 +70,7 @@ func TestProcessContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
         t.Fatalf("unexpected override error: %v", overrideErr)
     }
 
-    resolved := ProcessContextMustFromResolver(t.Context(), runScope)
+    resolved := ProcessContextMustFromRuntime(runtime.NewRun(t.Context(), runScope))
 
     if "process-1" != resolved.ProcessId() {
         t.Fatalf("expected the installed process id, got %q", resolved.ProcessId())
@@ -77,25 +79,18 @@ func TestProcessContextMustFromResolver_ResolvesTheInstalledContext(t *testing.T
     if false == startedAt.Equal(resolved.StartedAt()) {
         t.Fatalf("expected the installed start moment, got %v", resolved.StartedAt())
     }
-
-    tolerantAnswer := ProcessContextFromResolver(t.Context(), runScope)
-    if nil == tolerantAnswer || "process-1" != tolerantAnswer.ProcessId() {
-        t.Fatalf("expected the tolerant form to answer the installed context, got %v", tolerantAnswer)
-    }
 }
 
-/* absence — an http process, the root container — answers nil from the tolerant form, so code shared between the two process shapes can treat the process context as optional without recovering a panic */
-func TestProcessContextFromResolver_AnswersNilWhenAbsent(t *testing.T) {
+func TestProcessContextFromRuntime_ARequestRuntimeIsRefusedNamingBothKinds(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
 
-    runScope := serviceContainer.NewScope()
-    defer runScope.Close()
-
-    if nil != ProcessContextFromResolver(t.Context(), runScope) {
-        t.Fatalf("expected nil for a scope without the process context")
+    _, lookupErr := ProcessContextFromRuntime(runtime.NewRequest(t.Context(), serviceContainer.NewScope()))
+    if false == errors.Is(lookupErr, containercontract.ErrRuntimeKindRefused) {
+        t.Fatalf("expected a request runtime to be refused, got %v", lookupErr)
     }
 
-    if nil != ProcessContextFromResolver(t.Context(), serviceContainer) {
-        t.Fatalf("expected nil for the root container")
+    var refusal *exception.Error
+    if false == errors.As(lookupErr, &refusal) || "run" != refusal.Context()["required"] || "request" != refusal.Context()["given"] {
+        t.Fatalf("expected the refusal to name both kinds, got %v", lookupErr)
     }
 }

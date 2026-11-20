@@ -7,6 +7,8 @@ type ScopeManager interface {
     ScopedRegistrar
 
     NewScope() Scope
+    /* NewBootScope opens the scope of the application's boot: it builds no scoped service, refusing one by name or type with the container's ErrScopedServiceAtBoot, and serves KindBoot. */
+    NewBootScope() Scope
 }
 
 /* Scope is one live scope; a scoped registration on it adds a service to that scope alone. */

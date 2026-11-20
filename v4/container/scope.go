@@ -56,6 +56,8 @@ type scope struct {
     container atomic.Pointer[container]
     /* the containercontract.Kind of the runtime built over this scope: KindUnspecified until a runtime constructor binds it, then fixed */
     runtimeKind atomic.Uint32
+    /* the boot scope builds no scoped service */
+    boot bool
     /* the immutable plan this scope was created against, shared by reference so creating a scope is O(1) */
     plan          *scopePlan
 
@@ -185,6 +187,29 @@ func (instance *scope) MustGetByType(ctx context.Context, targetType reflect.Typ
     }
 
     return value
+}
+
+func (instance *scope) scopedMembersRefusal(interfaceType reflect.Type) error {
+    if false == instance.boot {
+        return nil
+    }
+
+    containerInstance := instance.container.Load()
+    if nil == containerInstance {
+        return nil
+    }
+
+    for scopedType := range containerInstance.scopePlanForNewScope().typeProviders {
+        if true == scopedType.Implements(interfaceType) || (reflect.Interface != scopedType.Kind() && reflect.PointerTo(scopedType).Implements(interfaceType)) {
+            return exception.NewError(
+                "a scoped service is not built at boot",
+                exceptioncontract.Context{"interface": interfaceType.String(), "type": scopedType.String()},
+                ErrScopedServiceAtBoot,
+            )
+        }
+    }
+
+    return nil
 }
 
 /* the caller already holds the scope, so its detached runtime answers it unsuspended */

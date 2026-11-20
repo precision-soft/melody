@@ -46,6 +46,9 @@ var ErrScopedServiceTypeAlreadyRegistered = errors.New("scoped service type alre
 /* ErrScopeClosed is the cause of every refusal a closed scope answers — resolution, registration and collection — and of a lazy handle's refusal over it. */
 var ErrScopeClosed = errors.New("scope is closed")
 
+/* ErrScopedServiceAtBoot is the cause of the boot scope's refusal of a scoped service, by name or type, and of a scoped registration on it: a scoped service is built inside a request, a delivery or a run. */
+var ErrScopedServiceAtBoot = errors.New("a scoped service is not built at boot")
+
 /* ErrContainerClosed is the cause of every refusal the container answers after Close, distinct from ErrScopeClosed. */
 var ErrContainerClosed = errors.New("container is closed")
 

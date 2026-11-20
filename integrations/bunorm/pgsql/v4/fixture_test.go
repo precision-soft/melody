@@ -211,3 +211,7 @@ func newReleaseRecordingDatabase(t *testing.T, connector *releaseRecordingConnec
 
     return database
 }
+
+func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    return nil
+}

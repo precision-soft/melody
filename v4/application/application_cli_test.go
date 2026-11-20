@@ -271,11 +271,12 @@ func (instance *processContextProbeCliCommand) Flags() []clicontract.Flag {
 }
 
 func (instance *processContextProbeCliCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
-    processContext := ProcessContextMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    processContext := ProcessContextMustFromRuntime(runtimeInstance)
 
     instance.seenProcessId = processContext.ProcessId()
     instance.seenStartedAt = processContext.StartedAt()
-    instance.accessorAnswers = nil != ProcessContextFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    tolerantAnswer, tolerantErr := ProcessContextFromRuntime(runtimeInstance)
+    instance.accessorAnswers = nil == tolerantErr && nil != tolerantAnswer
 
     return nil
 }

@@ -149,3 +149,7 @@ func TestModule_ABucketOrAStorageWithNoClientIsRefusedNamingIt(t *testing.T) {
         }()
     }
 }
+
+func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    return nil
+}

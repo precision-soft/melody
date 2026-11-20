@@ -37,3 +37,5 @@ This is an internal integration package. Userland code should not construct a ke
 ### Constructors (`kernel`)
 
 - [`NewKernel(...) kernelcontract.Kernel`](../../kernel/kernel.go)
+
+`Kernel.BootRuntime()` answers the runtime of the application's boot, installed by `Boot` before its first step: a module hook resolves and calls its doors under it. Once `Boot` returned its context is done with `containercontract.ErrBootFinished` as its cause and its scope is closed; before `Boot` it is nil.

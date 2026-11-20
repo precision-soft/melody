@@ -34,7 +34,7 @@ func (instance *Module) RegisterCliCommands(kernelInstance melodykernelcontract.
     /* the custom dialect carries the application's name read off the configuration the kernel holds, so its ownership line names this application as the builtin dialects' line does */
     generateCommand.RegisterTemplate(&AnsibleCronTemplate{
         TaskNamePrefix:  "billing cron: ",
-        ApplicationName: melodyconfig.ConfigMustFromResolver(kernelInstance.Context(), kernelInstance.ServiceContainer()).Cli().Name(),
+        ApplicationName: melodyconfig.ConfigMustFromResolver(kernelInstance.BootRuntime().Context(), kernelInstance.BootRuntime().Scope()).Cli().Name(),
     })
 
     return []melodyclicontract.Command{

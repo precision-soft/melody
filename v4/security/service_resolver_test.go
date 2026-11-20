@@ -268,3 +268,14 @@ func TestFirewallManagerMustFromResolver_PanicsWhenUnregisteredThroughAScope(t *
 
     _ = FirewallManagerMustFromResolver(t.Context(), container.NewContainer(container.ContainerConfig{}).NewScope())
 }
+
+func TestSecurityContextSetOnRuntime_ABootRuntimeIsRefused(t *testing.T) {
+    bootRuntime, finish := runtime.NewBoot(t.Context(), container.NewContainer(container.ContainerConfig{}))
+    defer func() {
+        _ = finish()
+    }()
+
+    testhelper.AssertPanicsWithError(t, func() {
+        SecurityContextSetOnRuntime(bootRuntime, &SecurityContext{})
+    }, "the security context is set in a request or a run")
+}

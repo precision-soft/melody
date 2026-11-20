@@ -14,6 +14,11 @@ type referenceResolutionChecker interface {
     isResolvingReference(reference containercontract.ServiceReference) bool
 }
 
+/* scopedMembersChecker is implemented by the boot scope and the views over it, so a collection the boot scope would answer without its scoped members is refused */
+type scopedMembersChecker interface {
+    scopedMembersRefusal(interfaceType reflect.Type) error
+}
+
 /* closedScopeChecker is implemented by the request scope, so a collection refuses a closed scope as its Get does instead of answering an empty set. */
 type closedScopeChecker interface {
     isScopeClosed() bool
@@ -50,6 +55,12 @@ func AllImplementing[T any](ctx context.Context, resolver containercontract.Reso
             },
             nil,
         )
+    }
+
+    if bootChecker, checksBoot := resolver.(scopedMembersChecker); true == checksBoot {
+        if bootErr := bootChecker.scopedMembersRefusal(interfaceType); nil != bootErr {
+            return nil, bootErr
+        }
     }
 
     references := typeLister.ReferencesImplementing(interfaceType)

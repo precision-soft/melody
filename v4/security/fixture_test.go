@@ -354,8 +354,8 @@ func (instance *testKernel) EventDispatcher() eventcontract.EventDispatcher {
 
 func (instance *testKernel) Config() configcontract.Configuration { return nil }
 
-func (instance *testKernel) Context() context.Context {
-    return context.Background()
+func (instance *testKernel) BootRuntime() containercontract.Runtime {
+    return nil
 }
 
 func (instance *testKernel) HttpKernel() httpcontract.Kernel {

@@ -5,8 +5,8 @@ import (
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
-    "github.com/precision-soft/melody/v4/internal"
 )
 
 const (
@@ -28,17 +28,20 @@ func RouterMustFromResolver(ctx context.Context, resolver containercontract.Reso
     return container.MustFromResolver[httpcontract.Router](ctx, resolver, ServiceRouter)
 }
 
-/* RequestContextMustFromResolver resolves the current request's context, its id and start moment. It takes a resolver, since the kernel installs the service on each request scope only: resolved from the root container or a console process it panics with the service not registered. */
-func RequestContextMustFromResolver(ctx context.Context, resolver containercontract.Resolver) httpcontract.RequestContext {
-    return container.MustFromResolver[httpcontract.RequestContext](ctx, resolver, ServiceRequestContext)
-}
-
-/* RequestContextFromResolver is the error-tolerant form of RequestContextMustFromResolver: absent, as on the root container or in a console process, it answers nil. */
-func RequestContextFromResolver(ctx context.Context, resolver containercontract.Resolver) httpcontract.RequestContext {
-    requestContextInstance, err := container.FromResolver[httpcontract.RequestContext](ctx, resolver, ServiceRequestContext)
-    if nil != err || true == internal.IsNilInterface(requestContextInstance) {
-        return nil
+/* RequestContextFromRuntime answers the request's context, its id and start moment; a runtime that is not a request's answers an error under containercontract.ErrRuntimeKindRefused naming both kinds. */
+func RequestContextFromRuntime(runtimeInstance containercontract.Runtime) (httpcontract.RequestContext, error) {
+    if kindErr := containercontract.RefuseRuntimeKind(runtimeInstance, "RequestContextFromRuntime", []containercontract.Kind{containercontract.KindRequest}); nil != kindErr {
+        return nil, kindErr
     }
 
-    return requestContextInstance
+    return container.FromResolver[httpcontract.RequestContext](runtimeInstance.Context(), runtimeInstance.Scope(), ServiceRequestContext)
+}
+
+func RequestContextMustFromRuntime(runtimeInstance containercontract.Runtime) httpcontract.RequestContext {
+    requestContext, err := RequestContextFromRuntime(runtimeInstance)
+    if nil != err {
+        exception.Panic(exception.NewError("could not resolve the request context", nil, err))
+    }
+
+    return requestContext
 }

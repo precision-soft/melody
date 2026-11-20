@@ -2,6 +2,7 @@ package runtime
 
 import (
     "context"
+    "sync"
 
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/internal/runtimeseam"
@@ -34,6 +35,14 @@ func NewChildRun(parent containercontract.Runtime, ctx context.Context) (contain
         )
     }
 
+    if containercontract.KindBoot == parent.Kind() {
+        return nil, exception.NewError(
+            "the boot runtime opens no child run",
+            exceptioncontract.Context{"argument": "parent"},
+            containercontract.ErrRuntimeKindRefused,
+        )
+    }
+
     spawner, isSpawner := parent.Scope().(runtimeseam.ChildScopeSpawner)
     if false == isSpawner {
         return nil, exception.NewError(
@@ -49,6 +58,38 @@ func NewChildRun(parent containercontract.Runtime, ctx context.Context) (contain
     }
 
     return NewRun(ctx, childScope), nil
+}
+
+/* NewBoot opens the runtime of the application's boot over a boot scope of the container: finish closes the scope, then ends the context with ErrBootFinished as its cause, and answers the close's error; a second finish answers nil. */
+func NewBoot(ctx context.Context, serviceContainer containercontract.Container) (containercontract.Runtime, func() error) {
+    if true == internal.IsNilInterface(ctx) {
+        exception.Panic(
+            exception.NewError("context may not be nil on runtime", nil, nil),
+        )
+    }
+
+    if true == internal.IsNilInterface(serviceContainer) {
+        exception.Panic(
+            exception.NewError("container may not be nil on boot runtime", nil, nil),
+        )
+    }
+
+    bootContext, cancel := context.WithCancelCause(ctx)
+    bootScope := serviceContainer.NewBootScope()
+    runtimeInstance := newRuntime(bootContext, bootScope, containercontract.KindBoot)
+
+    var finishOnce sync.Once
+    finish := func() error {
+        var closeErr error
+        finishOnce.Do(func() {
+            closeErr = bootScope.Close()
+            cancel(containercontract.ErrBootFinished)
+        })
+
+        return closeErr
+    }
+
+    return runtimeInstance, finish
 }
 
 /* WithContext answers the same runtime over another context: the kind and the scope are kept. */

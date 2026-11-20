@@ -716,7 +716,7 @@ Where the list itself comes from is the application's business — a constant as
     - [`RouteRegistryMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go)
     - [`UrlGeneratorMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go)
     - [`RouterMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go)
-    - [`RequestContextMustFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go) / [`RequestContextFromResolver(context.Context, containercontract.Resolver)`](../../http/service_resolver.go) — the only accessors of `ServiceRequestContext`, which lives on the request scope and so takes a resolver rather than the container; the second answers nil where the first panics
+    - [`RequestContextFromRuntime(runtimeInstance)`](../../http/service_resolver.go) / [`RequestContextMustFromRuntime(runtimeInstance)`](../../http/service_resolver.go) — the only accessors of `ServiceRequestContext`, which lives on the request scope; a runtime that is not a request's answers an error under `containercontract.ErrRuntimeKindRefused` naming both kinds, where the second panics
 
 ### CORS (`http/cors`)
 

@@ -95,6 +95,9 @@ func NewContainer(config ContainerConfig) containercontract.Container {
 
 type container struct {
     mutex                       sync.RWMutex
+    /* the kind each phase name is installed under, read where a scope answers that a name is not registered */
+    phaseReservationMutex sync.RWMutex
+    phaseReservations     map[string]containercontract.Kind
     providers                   map[string]providerAny
     instances                   map[string]any
     typeProviders               map[reflect.Type]providerAny
@@ -467,6 +470,57 @@ func (instance *container) MustOverrideProtectedInstance(serviceName string, val
 
 func (instance *container) NewScope() containercontract.Scope {
     return newScope(instance, instance.scopePlanForNewScope())
+}
+
+/* the boot scope keeps an empty plan of its own: its refusal reads the container's live plan, which grows after it opens */
+func (instance *container) NewBootScope() containercontract.Scope {
+    bootScope := newScope(instance, nil).(*scope)
+    bootScope.boot = true
+    bootScope.runtimeKind.Store(uint32(containercontract.KindBoot))
+
+    return bootScope
+}
+
+func (instance *container) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    if "" == serviceName {
+        return exception.NewError("service name is required to reserve a phase service", nil, nil)
+    }
+
+    if containercontract.KindBoot != kind && containercontract.KindRequest != kind && containercontract.KindRun != kind {
+        return exception.NewError(
+            "a phase service is reserved for the boot, a request or a run",
+            exceptioncontract.Context{"serviceName": serviceName, "kind": kind.String()},
+            nil,
+        )
+    }
+
+    instance.phaseReservationMutex.Lock()
+    defer instance.phaseReservationMutex.Unlock()
+
+    if reservedKind, reserved := instance.phaseReservations[serviceName]; true == reserved && reservedKind != kind {
+        return exception.NewError(
+            "the phase service is already reserved for another kind",
+            exceptioncontract.Context{"serviceName": serviceName, "reservedKind": reservedKind.String(), "kind": kind.String()},
+            nil,
+        )
+    }
+
+    if nil == instance.phaseReservations {
+        instance.phaseReservations = make(map[string]containercontract.Kind)
+    }
+
+    instance.phaseReservations[serviceName] = kind
+
+    return nil
+}
+
+func (instance *container) phaseReservation(serviceName string) (containercontract.Kind, bool) {
+    instance.phaseReservationMutex.RLock()
+    defer instance.phaseReservationMutex.RUnlock()
+
+    kind, reserved := instance.phaseReservations[serviceName]
+
+    return kind, reserved
 }
 
 /* serviceNamesForRegisteredType lists the service names a type is registered under. */

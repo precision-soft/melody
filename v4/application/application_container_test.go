@@ -25,10 +25,12 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal/kernelseam"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
@@ -46,6 +48,7 @@ import (
 )
 
 type testKernel struct {
+    bootRuntime containercontract.Runtime
     configuration    configcontract.Configuration
     serviceContainer containercontract.Container
     eventDispatcher  eventcontract.EventDispatcher
@@ -87,8 +90,12 @@ func (instance *testKernel) Config() configcontract.Configuration {
     return instance.configuration
 }
 
-func (instance *testKernel) Context() context.Context {
-    return context.Background()
+func (instance *testKernel) BootRuntime() containercontract.Runtime {
+    return instance.bootRuntime
+}
+
+func (instance *testKernel) InstallBootRuntime(token kernelseam.Token, bootRuntime containercontract.Runtime) {
+    instance.bootRuntime = bootRuntime
 }
 
 func (instance *testKernel) HttpKernel() httpcontract.Kernel {
@@ -616,6 +623,7 @@ func TestBootContainer_AFailingLoggerProviderFailsTheBoot(t *testing.T) {
     )
 
     testhelper.AssertPanicsWithError(t, func() {
+        openBootRuntime(t, applicationInstance)
         applicationInstance.bootContainer()
     }, "the configured logger cannot be built")
 }
@@ -933,6 +941,7 @@ func TestBootContainer_TheJournalOfAConsoleProcessReopensOnSighup(t *testing.T) 
     rotatedPath := filepath.Join(directory, "application.log.1")
 
     applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: "dev", config.LogPathKey: logPath})
+    openBootRuntime(t, applicationInstance)
     applicationInstance.bootContainer()
 
     logger, resolveErr := logging.LoggerFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
@@ -974,6 +983,7 @@ func TestBootContainer_ARelativeLogPathIsAnchoredToTheProjectDirectoryUnderACrea
     relativePath := filepath.Join("var", "log", "nested", "application.log")
 
     applicationInstance := newEnvironmentRefusalApplication(t, config.ModeCli, map[string]string{config.EnvironmentNameKey: "dev", config.LogPathKey: relativePath})
+    openBootRuntime(t, applicationInstance)
     applicationInstance.bootContainer()
 
     logger, resolveErr := logging.LoggerFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
@@ -1081,6 +1091,8 @@ func TestBuildMessageBusTransportsCloser_FailsWhenTheBusCannotBeOrderedBeforeIts
                 }
             }()
 
+            openBootRuntime(t, applicationInstance)
+
             applicationInstance.buildMessageBusTransportsCloser()
         })
     }
@@ -1113,6 +1125,8 @@ func TestBuildMessageBusTransportsCloser_FailsWhenTheTransportsCloserCannotBeBui
             t.Fatalf("expected the provider's error in the chain, got %v", panicErr)
         }
     }()
+
+    openBootRuntime(t, applicationInstance)
 
     applicationInstance.buildMessageBusTransportsCloser()
 }
@@ -1187,6 +1201,7 @@ func TestBootContainer_TheConsoleJournalOfACommandIsStandardError(t *testing.T) 
         os.Stdout, os.Stderr = stdoutWrite, stderrWrite
 
         applicationInstance := newEnvironmentRefusalApplication(t, testCase.mode, map[string]string{config.EnvironmentNameKey: "dev", config.LogPathKey: ""})
+        openBootRuntime(t, applicationInstance)
         applicationInstance.bootContainer()
 
         logger, resolveErr := logging.LoggerFromResolver(t.Context(), applicationInstance.kernel.ServiceContainer())
@@ -1305,4 +1320,15 @@ func TestSessionStorageTimeoutDefaultsAgree(t *testing.T) {
     if config.DefaultSessionStorageTimeout != session.DefaultStorageTimeout {
         t.Fatalf("expected the configuration's and the manager's defaults to agree, got %s and %s", config.DefaultSessionStorageTimeout, session.DefaultStorageTimeout)
     }
+}
+
+/* a boot step driven outside Boot reads the boot runtime Boot would have opened */
+func openBootRuntime(t *testing.T, applicationInstance *Application) {
+    t.Helper()
+
+    bootRuntime, finish := runtime.NewBoot(t.Context(), applicationInstance.kernel.ServiceContainer())
+    applicationInstance.kernel.(kernelseam.BootRuntimeInstaller).InstallBootRuntime(kernelseam.Token{}, bootRuntime)
+    t.Cleanup(func() {
+        _ = finish()
+    })
 }

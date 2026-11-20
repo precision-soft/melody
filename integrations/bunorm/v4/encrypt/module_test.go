@@ -403,8 +403,8 @@ func (instance *fakeKernel) HttpRouter() httpcontract.Router {
     return nil
 }
 
-func (instance *fakeKernel) Context() context.Context {
-    return context.Background()
+func (instance *fakeKernel) BootRuntime() containercontract.Runtime {
+    return nil
 }
 
 func (instance *fakeKernel) HttpKernel() httpcontract.Kernel {

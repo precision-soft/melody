@@ -1,7 +1,6 @@
 package outbox
 
 import (
-    "context"
     "fmt"
     "strings"
     "testing"
@@ -174,9 +173,6 @@ type moduleTestKernel struct {
     serviceContainer containercontract.Container
 }
 
-func (instance *moduleTestKernel) Context() context.Context {
-    return context.Background()
-}
 
 func (instance *moduleTestKernel) ServiceContainer() containercontract.Container {
     return instance.serviceContainer
@@ -225,4 +221,8 @@ func TestModule_ARelayCommandConfigurationBesideARelayIsAdmitted(t *testing.T) {
         RelayFactory: func(resolver containercontract.Resolver) (*Relay, error) { return newModuleTestRelay(), nil },
         RelayCommand: config,
     }).RegisterServices(&spyServiceRegistrar{})
+}
+
+func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    return nil
 }

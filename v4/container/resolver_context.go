@@ -217,6 +217,63 @@ func (instance *resolverContext) lateKind() containercontract.Kind {
     return containercontract.KindDetached
 }
 
+/* bootScopedRefusal refuses at boot a name or type the container's live plan holds as scoped, read from the live plan since the boot scope opens before the registrations, and before the container's own answer, so a scoped service replacing a container one is refused too. It reads the scope even while suspended: a singleton built at boot that depends on a scoped service is the likeliest way here. */
+func (instance *resolverContext) bootScopedRefusal(serviceName string, serviceType reflect.Type) error {
+    if nil == instance.scopeInstance || false == instance.scopeInstance.boot {
+        return nil
+    }
+
+    plan := instance.containerInstance.scopePlanForNewScope()
+    _, scopedName := plan.providers[serviceName]
+    _, scopedType := plan.typeProviders[serviceType]
+    if ("" != serviceName && true == scopedName) || (nil != serviceType && true == scopedType) {
+        refusalContext := exceptioncontract.Context{"serviceName": serviceName}
+        if nil != serviceType {
+            refusalContext = exceptioncontract.Context{"type": serviceType.String()}
+        }
+
+        return exception.NewError("a scoped service is not built at boot", refusalContext, ErrScopedServiceAtBoot)
+    }
+
+    return nil
+}
+
+/* phaseRefusal answers, for a name nothing registered answers through a scope a runtime bound, the refusal of a name reserved for another phase; an unbound scope keeps answering that the name is not registered, as the container does. */
+func (instance *resolverContext) phaseRefusal(serviceName string, serviceType reflect.Type) error {
+    if nil == instance.scopeInstance || "" == serviceName {
+        return nil
+    }
+
+    reservedKind, reserved := instance.containerInstance.phaseReservation(serviceName)
+    if false == reserved {
+        return nil
+    }
+
+    scopeKind := instance.scopeInstance.boundRuntimeKind()
+    if reservedKind == scopeKind || containercontract.KindDetached == scopeKind {
+        return nil
+    }
+
+    return exception.NewError(
+        "the service is installed by another phase",
+        exceptioncontract.Context{
+            "serviceName": serviceName,
+            "required":    reservedKind.String(),
+            "given":       scopeKind.String(),
+        },
+        containercontract.ErrRuntimeKindRefused,
+    )
+}
+
+/* scopedMembersRefusal refuses at boot a collection the live plan holds a scoped member of, which a scope would gather and the boot scope would silently omit */
+func (instance *resolverContext) scopedMembersRefusal(interfaceType reflect.Type) error {
+    if nil == instance.scopeInstance {
+        return nil
+    }
+
+    return instance.scopeInstance.scopedMembersRefusal(interfaceType)
+}
+
 func (instance *resolverContext) scopeVisible() bool {
     return nil != instance.scopeInstance && false == instance.scopeSuspended
 }
@@ -294,6 +351,10 @@ func (instance *resolverContext) Get(ctx context.Context, serviceName string) (a
 
     if "" == serviceName {
         return nil, exception.NewError("service name is required in get", nil, nil)
+    }
+
+    if bootErr := instance.bootScopedRefusal(serviceName, nil); nil != bootErr {
+        return nil, bootErr
     }
 
     if lateResolver, release := instance.lateResolution(); nil != lateResolver {
@@ -421,6 +482,10 @@ func (instance *resolverContext) Get(ctx context.Context, serviceName string) (a
             lookup: instance.lookupByName(serviceName),
             create: func(resolver containercontract.Resolver) (any, error, *providerDebugInfo) {
                 if false == providerExists {
+                    if phaseErr := instance.phaseRefusal(serviceName, nil); nil != phaseErr {
+                        return nil, phaseErr, nil
+                    }
+
                     return nil, exception.NewError(
                         "service is not registered",
                         exceptioncontract.Context{
@@ -534,6 +599,10 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
             nil,
             nil,
         )
+    }
+
+    if bootErr := instance.bootScopedRefusal("", canonicalTargetType); nil != bootErr {
+        return nil, bootErr
     }
 
     if lateResolver, release := instance.lateResolution(); nil != lateResolver {
@@ -733,6 +802,10 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
                 lookup: instance.lookupByName(serviceName),
                 create: func(resolver containercontract.Resolver) (any, error, *providerDebugInfo) {
                     if false == providerExists {
+                        if phaseErr := instance.phaseRefusal(serviceName, nil); nil != phaseErr {
+                            return nil, phaseErr, nil
+                        }
+
                         return nil, exception.NewError(
                             "service is not registered",
                             exceptioncontract.Context{
@@ -789,6 +862,10 @@ func (instance *resolverContext) GetByType(ctx context.Context, targetType refle
             lookup: instance.lookupByType(canonicalTargetType),
             create: func(resolver containercontract.Resolver) (any, error, *providerDebugInfo) {
                 if false == providerExists {
+                    if phaseErr := instance.phaseRefusal("", canonicalTargetType); nil != phaseErr {
+                        return nil, phaseErr, nil
+                    }
+
                     return nil, exception.NewError(
                         "service type is not registered",
                         exceptioncontract.Context{

@@ -73,7 +73,7 @@ func ActorFromRuntime(runtimeInstance melodycontainercontract.Runtime) string {
         }
     }
 
-    if processContext := melodyapplication.ProcessContextFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()); nil != processContext {
+    if processContext, processContextErr := melodyapplication.ProcessContextFromRuntime(runtimeInstance); nil == processContextErr && nil != processContext {
         return CatalogJournalActorProcessPrefix + processContext.ProcessId()
     }
 

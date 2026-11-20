@@ -8,8 +8,10 @@ import (
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     "github.com/precision-soft/melody/v4/http"
+    "github.com/precision-soft/melody/v4/internal/kernelseam"
 )
 
 type testEnvironmentSource struct {
@@ -59,7 +61,6 @@ func TestNewKernel_InitialState(t *testing.T) {
     httpRouter := http.NewRouterWithRouteRegistry(routeRegistry)
 
     kernelInstance := NewKernel(
-        t.Context(),
         configuration,
         serviceContainer,
         httpRouter,
@@ -93,7 +94,6 @@ func TestKernel_DebugModeFalseOutsideDevelopment(t *testing.T) {
     clockInstance := clock.NewSystemClock()
 
     kernelInstance := NewKernel(
-        t.Context(),
         newTestConfiguration(t, config.EnvironmentProduction),
         container.NewContainer(container.ContainerConfig{}),
         httpRouter,
@@ -126,7 +126,6 @@ func TestNewKernel_ATypedNilCollaboratorIsRefusedByName(t *testing.T) {
     }()
 
     NewKernel(
-        t.Context(),
         absentConfiguration,
         container.NewContainer(container.ContainerConfig{}),
         http.NewRouterWithRouteRegistry(routeRegistry),
@@ -135,49 +134,32 @@ func TestNewKernel_ATypedNilCollaboratorIsRefusedByName(t *testing.T) {
     )
 }
 
-type kernelContextKey struct{}
 
-func TestNewKernel_TheKernelAnswersTheContextItWasBuiltWith(t *testing.T) {
+func TestKernel_BootRuntimeAnswersTheRuntimeTheApplicationInstalled(t *testing.T) {
     clockInstance := clock.NewSystemClock()
-    applicationContext := context.WithValue(context.Background(), kernelContextKey{}, "application")
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
 
     kernelInstance := NewKernel(
-        applicationContext,
         newTestConfiguration(t, config.EnvironmentProduction),
-        container.NewContainer(container.ContainerConfig{}),
+        serviceContainer,
         http.NewRouterWithRouteRegistry(http.NewRouteRegistry()),
         event.NewEventDispatcher(clockInstance),
         clockInstance,
     )
 
-    if "application" != kernelInstance.Context().Value(kernelContextKey{}) {
-        t.Fatalf("expected the kernel to answer the context it was built with")
+    if nil != kernelInstance.BootRuntime() {
+        t.Fatalf("expected no boot runtime before one is installed")
+    }
+
+    bootRuntime, finish := runtime.NewBoot(t.Context(), serviceContainer)
+    defer func() {
+        _ = finish()
+    }()
+
+    kernelInstance.(kernelseam.BootRuntimeInstaller).InstallBootRuntime(kernelseam.Token{}, bootRuntime)
+
+    if bootRuntime != kernelInstance.BootRuntime() {
+        t.Fatalf("expected the kernel to answer the installed boot runtime")
     }
 }
 
-func TestNewKernel_RefusesANilContext(t *testing.T) {
-    clockInstance := clock.NewSystemClock()
-
-    defer func() {
-        recovered := recover()
-        if nil == recovered {
-            t.Fatalf("expected a nil context to be refused at construction")
-        }
-
-        recoveredErr, isErr := recovered.(error)
-        if false == isErr || "context is required for new kernel" != recoveredErr.Error() {
-            t.Fatalf("expected the refusal to name the context, got %v", recovered)
-        }
-    }()
-
-    var nilContext context.Context
-
-    NewKernel(
-        nilContext,
-        newTestConfiguration(t, config.EnvironmentProduction),
-        container.NewContainer(container.ContainerConfig{}),
-        http.NewRouterWithRouteRegistry(http.NewRouteRegistry()),
-        event.NewEventDispatcher(clockInstance),
-        clockInstance,
-    )
-}

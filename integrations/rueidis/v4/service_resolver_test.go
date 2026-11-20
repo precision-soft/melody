@@ -225,3 +225,7 @@ func TestRegisterTokenStoreService_HandsTheConfigToTheStore(t *testing.T) {
         }
     }
 }
+
+func (instance *containerRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    return nil
+}

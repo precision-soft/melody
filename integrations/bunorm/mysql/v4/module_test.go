@@ -118,3 +118,7 @@ func TestModule_AnEmptyConfigRegistersNothing(t *testing.T) {
         t.Fatalf("expected no service from an empty module, got %v", registrar.names)
     }
 }
+
+func (instance *spyServiceRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    return nil
+}

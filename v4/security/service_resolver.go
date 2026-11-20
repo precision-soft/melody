@@ -37,6 +37,10 @@ func SecurityContextSetOnRuntime(runtimeInstance containercontract.Runtime, secu
         exception.Panic(exception.NewError("security context is nil for runtime", nil, nil))
     }
 
+    if kindErr := containercontract.RefuseRuntimeKind(runtimeInstance, "SecurityContextSetOnRuntime", []containercontract.Kind{containercontract.KindRequest, containercontract.KindRun}); nil != kindErr {
+        exception.Panic(exception.NewError("the security context is set in a request or a run", nil, kindErr))
+    }
+
     scope := runtimeInstance.Scope()
     if true == internal.IsNilInterface(scope) {
         exception.Panic(exception.NewError("runtime scope is nil for security context", nil, nil))

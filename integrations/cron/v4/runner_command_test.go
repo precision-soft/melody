@@ -2176,8 +2176,8 @@ func (instance *identityProbeCommand) Flags() []clicontract.Flag {
 func (instance *identityProbeCommand) Run(runtimeInstance containercontract.Runtime, commandContext *clicontract.CommandContext) error {
     logging.LoggerFromRuntime(runtimeInstance).Info("job line", nil)
 
-    processContext := application.ProcessContextFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
-    if nil != processContext {
+    processContext, processContextErr := application.ProcessContextFromRuntime(runtimeInstance)
+    if nil == processContextErr && nil != processContext {
         instance.processResolved = true
         instance.observedRunId = processContext.ProcessId()
     }

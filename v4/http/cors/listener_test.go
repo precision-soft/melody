@@ -291,7 +291,7 @@ func (instance *corsListenerTestKernel) EventDispatcher() eventcontract.EventDis
 
 func (instance *corsListenerTestKernel) Config() configcontract.Configuration { return nil }
 
-func (instance *corsListenerTestKernel) Context() context.Context { return context.Background() }
+func (instance *corsListenerTestKernel) BootRuntime() containercontract.Runtime { return nil }
 
 func (instance *corsListenerTestKernel) HttpKernel() httpcontract.Kernel { return nil }
 

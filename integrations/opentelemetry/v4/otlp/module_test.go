@@ -9,6 +9,7 @@ import (
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -169,10 +170,15 @@ var _ applicationcontract.ServiceRegistrar = (*moduleSpyRegistrar)(nil)
 type otlpSpyKernel struct {
     kernelcontract.Kernel
     serviceContainer containercontract.Container
+    bootRuntime      containercontract.Runtime
 }
 
-func (instance *otlpSpyKernel) Context() context.Context {
-    return context.Background()
+func (instance *otlpSpyKernel) BootRuntime() containercontract.Runtime {
+    if nil == instance.bootRuntime {
+        instance.bootRuntime, _ = runtime.NewBoot(context.Background(), instance.serviceContainer)
+    }
+
+    return instance.bootRuntime
 }
 
 func (instance *otlpSpyKernel) ServiceContainer() containercontract.Container {
@@ -221,4 +227,8 @@ func TestProviderHandle_ACloseWithoutADeadlineHandsShutdownNoDeadline(t *testing
     if true == processor.shutdownBounded {
         t.Fatalf("expected a close with no deadline to hand the span processor none, got one at %s", processor.shutdownDeadline)
     }
+}
+
+func (instance *moduleSpyRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
+    return nil
 }

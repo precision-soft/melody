@@ -2,6 +2,7 @@ package application
 
 import (
     "context"
+    "fmt"
     "io/fs"
     "os"
     "slices"
@@ -16,10 +17,12 @@ import (
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
+    "github.com/precision-soft/melody/v4/internal/kernelseam"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
@@ -63,6 +66,8 @@ type Application struct {
     defaultInMemorySessionStorage bool
     /* runs the one close that performs the teardown and holds every sibling until it has finished: the container's own closedness cannot answer "was it me", since two concurrent closes both probe it open. The zero value works, which an Application built by literal needs. */
     closePerformerOnce sync.Once
+    /* finishes the boot runtime once: at the tail of Boot, or at the teardown of a refused boot */
+    finishBoot func() error
 }
 
 func (instance *Application) Boot() kernelcontract.Kernel {
@@ -84,6 +89,19 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     instance.booting = true
 
     defer instance.logOnRecoverAndExit()
+
+    installer, installs := instance.kernel.(kernelseam.BootRuntimeInstaller)
+    if false == installs {
+        exception.Panic(exception.NewError("the kernel cannot hold the boot runtime", exceptioncontract.Context{"kernel": fmt.Sprintf("%T", instance.kernel)}, nil))
+    }
+
+    bootRuntime, finishBoot := runtime.NewBoot(instance.ctx, instance.kernel.ServiceContainer())
+    installer.InstallBootRuntime(kernelseam.Token{}, bootRuntime)
+
+    /* the teardown finishes it too: a refused boot exits through closeBeforeExit, after its exit record and before the container closes */
+    instance.finishBoot = finishBoot
+
+    instance.reservePhaseServices()
 
     instance.refuseDuplicateModules()
 
@@ -167,6 +185,12 @@ func (instance *Application) Boot() kernelcontract.Kernel {
     instance.verifyDeclaredTeardownDependencies()
 
     instance.verifyLazyHandles()
+
+    if finishErr := finishBoot(); nil != finishErr {
+        exception.Panic(
+            exception.NewError("the boot scope could not be closed", nil, finishErr),
+        )
+    }
 
     instance.booted = true
     instance.booting = false
