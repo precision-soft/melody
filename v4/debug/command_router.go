@@ -50,7 +50,7 @@ func (instance *RouterCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    router := http.RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    router := http.RouterMustFromRuntime(runtimeInstance)
     routes := router.RouteDefinitions()
 
     items := make([]routeListItem, 0, len(routes))
@@ -207,7 +207,6 @@ type routeListItem struct {
     Attributes   map[string]any    `json:"attributes"`
 }
 
-/* renderCompactStringMap folds a discriminator map into one sorted k=v cell. */
 func renderCompactStringMap(values map[string]string) string {
     if 0 == len(values) {
         return "-"

@@ -10,6 +10,7 @@ import (
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
@@ -61,7 +62,7 @@ func (instance *Module) RegisterServices(registrar applicationcontract.ServiceRe
 
 /* RegisterHttpMiddlewares resolves the tracer provider, which instantiates it so the container tracks it for shutdown, and installs the tracing middleware; the boot calls every module's RegisterServices before any module's RegisterHttpMiddlewares, so the service is registered here. */
 func (instance *Module) RegisterHttpMiddlewares(kernelInstance kernelcontract.Kernel, registrar applicationcontract.HttpMiddlewareRegistrar) {
-    handle := container.MustFromResolver[*providerHandle](kernelInstance.BootRuntime().Context(), kernelInstance.BootRuntime().Scope(), ServiceTracerProvider)
+    handle := runtime.MustFromRuntime[*providerHandle](kernelInstance.BootRuntime(), ServiceTracerProvider)
 
     tracerName := instance.config.TracerName
     if "" == tracerName {

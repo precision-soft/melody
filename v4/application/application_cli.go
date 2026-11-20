@@ -195,7 +195,7 @@ func (instance *Application) runCli() error {
     runtimeInstance := runtime.NewRun(instance.ctx, scope)
 
     /* through the run's scope, before the process logger is installed over it, so a logger first built here reads KindRun */
-    logger := logging.LoggerMustFromResolver(runtimeInstance.Context(), scope)
+    logger := logging.LoggerMustFromRuntime(runtimeInstance)
 
     processId := logging.GenerateProcessId()
     loggerWithProcess := logging.NewProcessLogger(logger, processId, "processId")

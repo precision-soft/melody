@@ -47,7 +47,7 @@ func RequestContextFromRuntime(runtimeInstance containercontract.Runtime) (httpc
         return nil, kindErr
     }
 
-    return container.FromResolver[httpcontract.RequestContext](runtimeInstance.Context(), runtimeInstance.Scope(), ServiceRequestContext)
+    return runtime.FromRuntime[httpcontract.RequestContext](runtimeInstance, ServiceRequestContext)
 }
 
 func RequestContextMustFromRuntime(runtimeInstance containercontract.Runtime) httpcontract.RequestContext {

@@ -68,7 +68,7 @@ func (instance *EventCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    dispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    dispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
 
     inspector, ok := dispatcher.(eventcontract.EventDispatcherInspector)
     if false == ok {
@@ -298,7 +298,6 @@ func selectSortedRegisteredEvents(
     return sortedRegisteredEvents
 }
 
-/* collectListenerListItems flattens the windowed listener detail for the json document, in dispatch order. */
 func collectListenerListItems(
     registeredEvents []eventcontract.RegisteredEvent,
     items []eventListItem,
@@ -327,7 +326,6 @@ func collectListenerListItems(
     return listenerItems
 }
 
-/* renderRequiredListenerMark answers whether a listener is protected from being skipped, or may skip the ones that are. */
 func renderRequiredListenerMark(listener eventcontract.RegisteredListener) string {
     if true == listener.Required {
         if true == listener.MaySkipRequiredListeners {
@@ -375,7 +373,6 @@ type eventListPayload struct {
     ServingProcessListeners []DeferredListener `json:"servingProcessListeners,omitempty"`
 }
 
-/* renderDeferredListenerBlock is called from both branches, since the declaration does not depend on inspecting the dispatcher. */
 func renderDeferredListenerBlock(builder *output.TableBuilder, deferredListeners []DeferredListener) {
     if 0 == len(deferredListeners) {
         return

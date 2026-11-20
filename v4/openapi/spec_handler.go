@@ -10,7 +10,7 @@ import (
 
 func SpecificationHandler(info Info, registry *Registry) httpcontract.Handler {
     return func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
-        router := melodyhttp.RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        router := melodyhttp.RouterMustFromRuntime(runtimeInstance)
 
         document := Generate(info, router.RouteDefinitions(), registry)
 

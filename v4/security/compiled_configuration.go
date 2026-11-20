@@ -202,7 +202,6 @@ func (instance *CompiledFirewall) Rules() []securitycontract.Rule {
     return append([]securitycontract.Rule{}, instance.rules...)
 }
 
-/* UnavailableRetryAfter answers the Retry-After delay of the 503 this firewall refuses an unavailable token with. */
 func (instance *CompiledFirewall) UnavailableRetryAfter() time.Duration {
     return instance.unavailableRetryAfter
 }
@@ -322,7 +321,6 @@ func (instance *CompiledFirewall) Logout(
     return result, nil
 }
 
-/* runLogoutHandler raises security.logout.failure for a handler's error and leaves the success to its caller */
 func (instance *CompiledFirewall) runLogoutHandler(
     runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
@@ -379,7 +377,7 @@ func (instance *CompiledFirewall) dispatchLoginSuccess(
     request httpcontract.Request,
     token securitycontract.Token,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    eventDispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,
@@ -395,7 +393,7 @@ func (instance *CompiledFirewall) dispatchLoginFailure(
     request httpcontract.Request,
     failureErr error,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    eventDispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,
@@ -410,7 +408,7 @@ func (instance *CompiledFirewall) dispatchLogoutSuccess(
     runtimeInstance containercontract.Runtime,
     request httpcontract.Request,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    eventDispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,
@@ -426,7 +424,7 @@ func (instance *CompiledFirewall) dispatchLogoutFailure(
     request httpcontract.Request,
     failureErr error,
 ) error {
-    eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    eventDispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
 
     _, err := eventDispatcher.DispatchName(
         runtimeInstance,

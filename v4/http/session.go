@@ -1,7 +1,7 @@
 package http
 
 import (
-    "github.com/precision-soft/melody/v4/container"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -38,10 +38,7 @@ func RegenerateRequestSession(request httpcontract.Request) (sessioncontract.Ses
         return nil, exception.NewError("request has no runtime in regenerate request session", nil, nil)
     }
 
-    sessionManager, sessionManagerErr := container.FromResolver[sessioncontract.Manager](
-        runtimeInstance.Context(),
-        runtimeInstance.Scope(),
-        session.ServiceSessionManager,
+    sessionManager, sessionManagerErr := runtime.FromRuntime[sessioncontract.Manager](runtimeInstance, session.ServiceSessionManager,
     )
     if nil != sessionManagerErr {
         return nil, sessionManagerErr

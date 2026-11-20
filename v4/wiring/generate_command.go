@@ -13,7 +13,6 @@ import (
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
-    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
@@ -99,7 +98,7 @@ func (instance *GenerateCommand) Run(
         return exception.NewError("the wiring generate command requires a bind set", nil, nil)
     }
 
-    applicationConfiguration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    applicationConfiguration := config.ConfigMustFromRuntime(runtimeInstance)
 
     projectDirectory := applicationConfiguration.MustGet(config.KernelProjectDirectory).MustString()
 
@@ -350,12 +349,11 @@ func (instance *GenerateCommand) journal(runtimeInstance containercontract.Runti
 
 /* journalSharesStdout reads what the container reads when it builds the logger: an empty log path, which made the journal write to stdout before a command's console journal moved to stderr. The configuration is read tolerantly, answering false when it is absent or fails to resolve. A logger the application substituted is not readable here, so such an application gives the command --out. */
 func journalSharesStdout(runtimeInstance containercontract.Runtime) bool {
-    configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Context(), runtimeInstance.Scope(), config.ServiceConfig)
+    configuration, resolveErr := runtime.FromRuntime[configcontract.Configuration](runtimeInstance, config.ServiceConfig)
     if nil != resolveErr || nil == configuration {
         return false
     }
 
-    /* the kernel section is read with the same tolerance */
     kernelConfiguration := configuration.Kernel()
     if true == internal.IsNilInterface(kernelConfiguration) {
         return false

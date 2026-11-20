@@ -1,6 +1,10 @@
 package runtime
 
 import (
+    "go/ast"
+    "go/parser"
+    "go/token"
+    "go/types"
     "io/fs"
     "os"
     "path/filepath"
@@ -179,6 +183,303 @@ func TestSourceWalk_EveryNamedResolverAccessorHasARuntimeFormOrADecision(t *test
 
         if false == seen[key] {
             t.Errorf("the decision for %s names no accessor any more; drop it from the list", key)
+        }
+    }
+}
+
+/* the calls a runtime-holding framework file still makes with a runtime's context and its scope apart, each counted; a provider-only accessor's decision is the one in accessorWithoutRuntimeForm */
+var runtimeHeldResolverCallAllowed = map[string]runtimeHeldResolverAllowance{
+    "v4/openapi/generate_command.go:InfoFromResolver":             {count: 1, decision: "provider"},
+    "v4/openapi/generate_command.go:RegistryMustFromResolver":     {count: 1, decision: "provider"},
+    "v4/messagebus/consume_command.go:ConsumeBusFromResolver":     {count: 1, decision: "provider"},
+    "v4/messagebus/consume_command.go:TransportsMustFromResolver": {count: 1, decision: "provider"},
+    "v4/messagebus/consume_command.go:RetryPolicyFromResolver":    {count: 1, decision: "provider"},
+    "v4/http/router_utility.go:GetByType":                         {count: 1, decision: "by type, which has no runtime form"},
+}
+
+type runtimeHeldResolverAllowance struct {
+    count    int
+    decision string
+}
+
+type runtimeHeldResolverCall struct {
+    callee string
+    line   int
+}
+
+/* runtimeHeldResolverCalls answers the calls of one source that take a runtime's context and the same runtime's scope apart, as their two leading arguments or as a method of the scope handed the context; a context or a scope held in a local of the same function counts, and so does the scope a runtime was built over */
+func runtimeHeldResolverCalls(source string, content []byte) ([]runtimeHeldResolverCall, error) {
+    fileSet := token.NewFileSet()
+    file, parseErr := parser.ParseFile(fileSet, source, content, parser.SkipObjectResolution)
+    if nil != parseErr {
+        return nil, parseErr
+    }
+
+    callList := []runtimeHeldResolverCall{}
+
+    for _, declaration := range file.Decls {
+        function, isFunction := declaration.(*ast.FuncDecl)
+        if false == isFunction || nil == function.Body {
+            continue
+        }
+
+        contextOf := map[string]string{}
+        scopeOf := map[string]string{}
+
+        bind := func(left ast.Expr, right ast.Expr) {
+            name := types.ExprString(ast.Unparen(left))
+            if receiver := runtimeOfContext(right, contextOf); "" != receiver {
+                contextOf[name] = receiver
+            }
+
+            if receiver := runtimeOfScope(right, scopeOf); "" != receiver {
+                scopeOf[name] = receiver
+            }
+
+            if built, isCall := ast.Unparen(right).(*ast.CallExpr); true == isCall && 2 == len(built.Args) {
+                if constructor := calleeName(built.Fun); "NewRun" == constructor || "NewRequest" == constructor {
+                    scopeOf[types.ExprString(ast.Unparen(built.Args[1]))] = name
+                }
+            }
+        }
+
+        ast.Inspect(function.Body, func(node ast.Node) bool {
+            switch statement := node.(type) {
+            case *ast.AssignStmt:
+                if len(statement.Lhs) == len(statement.Rhs) {
+                    for index := range statement.Lhs {
+                        bind(statement.Lhs[index], statement.Rhs[index])
+                    }
+                } else if 1 == len(statement.Rhs) {
+                    bind(statement.Lhs[0], statement.Rhs[0])
+                }
+            case *ast.ValueSpec:
+                if len(statement.Names) == len(statement.Values) {
+                    for index := range statement.Names {
+                        bind(statement.Names[index], statement.Values[index])
+                    }
+                } else if 1 == len(statement.Values) && 0 < len(statement.Names) {
+                    bind(statement.Names[0], statement.Values[0])
+                }
+            }
+
+            return true
+        })
+
+        ast.Inspect(function.Body, func(node ast.Node) bool {
+            call, isCall := node.(*ast.CallExpr)
+            if false == isCall || 0 == len(call.Args) {
+                return true
+            }
+
+            callee := calleeName(call.Fun)
+            if "NewRun" == callee || "NewRequest" == callee || "NewChildRun" == callee {
+                return true
+            }
+
+            contextReceiver := runtimeOfContext(call.Args[0], contextOf)
+            if "" == contextReceiver {
+                return true
+            }
+
+            if 2 <= len(call.Args) && contextReceiver == runtimeOfScope(call.Args[1], scopeOf) {
+                callList = append(callList, runtimeHeldResolverCall{callee: callee, line: fileSet.Position(call.Pos()).Line})
+
+                return true
+            }
+
+            if method, isMethod := ast.Unparen(call.Fun).(*ast.SelectorExpr); true == isMethod && contextReceiver == runtimeOfScope(method.X, scopeOf) {
+                callList = append(callList, runtimeHeldResolverCall{callee: callee, line: fileSet.Position(call.Pos()).Line})
+            }
+
+            return true
+        })
+    }
+
+    return callList, nil
+}
+
+/* runtimeOfContext answers the runtime whose Context() the expression is, holds, or derives a context from as its first argument */
+func runtimeOfContext(expression ast.Expr, contextOf map[string]string) string {
+    switch typed := ast.Unparen(expression).(type) {
+    case *ast.CallExpr:
+        if selector, isSelector := ast.Unparen(typed.Fun).(*ast.SelectorExpr); true == isSelector && "Context" == selector.Sel.Name && 0 == len(typed.Args) {
+            return types.ExprString(ast.Unparen(selector.X))
+        }
+
+        if 0 < len(typed.Args) {
+            return runtimeOfContext(typed.Args[0], contextOf)
+        }
+    case *ast.Ident, *ast.SelectorExpr:
+        return contextOf[types.ExprString(typed)]
+    }
+
+    return ""
+}
+
+/* runtimeOfScope answers the runtime whose Scope() the expression is or holds, through a type assertion */
+func runtimeOfScope(expression ast.Expr, scopeOf map[string]string) string {
+    switch typed := ast.Unparen(expression).(type) {
+    case *ast.CallExpr:
+        if selector, isSelector := ast.Unparen(typed.Fun).(*ast.SelectorExpr); true == isSelector && "Scope" == selector.Sel.Name && 0 == len(typed.Args) {
+            return types.ExprString(ast.Unparen(selector.X))
+        }
+    case *ast.TypeAssertExpr:
+        return runtimeOfScope(typed.X, scopeOf)
+    case *ast.Ident, *ast.SelectorExpr:
+        return scopeOf[types.ExprString(typed)]
+    }
+
+    return ""
+}
+
+func calleeName(function ast.Expr) string {
+    switch typed := ast.Unparen(function).(type) {
+    case *ast.IndexExpr:
+        return calleeName(typed.X)
+    case *ast.IndexListExpr:
+        return calleeName(typed.X)
+    case *ast.SelectorExpr:
+        return typed.Sel.Name
+    case *ast.Ident:
+        return typed.Name
+    }
+
+    return ""
+}
+
+/* code holding a runtime resolves through it; a resolver door handed the runtime's context and scope bypasses the runtime's refusals */
+func TestSourceWalk_NoFrameworkFileHandsARuntimesContextAndScopeToAResolverDoor(t *testing.T) {
+    seen := map[string]int{}
+
+    for key, allowance := range runtimeHeldResolverCallAllowed {
+        if "provider" != allowance.decision {
+            continue
+        }
+
+        directory := key[:strings.LastIndex(key[:strings.Index(key, ":")], "/")]
+        decisionKey := directory + key[strings.Index(key, ":"):]
+        if "provider" != accessorWithoutRuntimeForm[decisionKey] {
+            t.Errorf("the allowance for %s names an accessor %s does not list as provider-only", key, decisionKey)
+        }
+    }
+
+    for _, source := range fourthMajorSourceList(t) {
+        slashed := filepath.ToSlash(source)
+        if true == strings.HasSuffix(source, "_test.go") || true == strings.Contains(slashed, "/.example/") {
+            continue
+        }
+
+        content, readErr := os.ReadFile(source)
+        if nil != readErr {
+            t.Fatalf("read %s: %v", source, readErr)
+        }
+
+        file := "v4/" + strings.TrimPrefix(slashed, "../../")
+        if true == strings.HasPrefix(slashed, "../../../integrations/") {
+            file = strings.TrimPrefix(slashed, "../../../")
+        }
+
+        callList, parseErr := runtimeHeldResolverCalls(source, content)
+        if nil != parseErr {
+            t.Fatalf("parse %s: %v", source, parseErr)
+        }
+
+        for _, call := range callList {
+            key := file + ":" + call.callee
+            if _, allowed := runtimeHeldResolverCallAllowed[key]; true == allowed {
+                seen[key]++
+
+                continue
+            }
+
+            t.Errorf("%s:%d hands %s a runtime's context and scope apart; resolve through the runtime (XMustFromRuntime(runtimeInstance), runtime.FromRuntime[T])", file, call.line, call.callee)
+        }
+    }
+
+    for key, allowance := range runtimeHeldResolverCallAllowed {
+        if allowance.count != seen[key] {
+            t.Errorf("the allowance for %s counts %d calls, the tree holds %d", key, allowance.count, seen[key])
+        }
+    }
+}
+
+func TestRuntimeHeldResolverCalls_FindsEachSpelling(t *testing.T) {
+    content := []byte(`package probe
+
+func probe(runtimeInstance Runtime, request Request, list []Runtime) {
+    _ = config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    _, _ = container.FromResolver[Configuration](
+        request.RuntimeInstance().Context(),
+        request.RuntimeInstance().Scope(),
+        name,
+    )
+    _ = container.FromResolver[[]Foo](runtimeInstance.Context(), runtimeInstance.Scope(), name)
+    _ = container.MustFromResolver[map[string]Foo](runtimeInstance.Context(), runtimeInstance.Scope(), name)
+    _ = container.MustFromResolver[*pkg.Type[int]]((runtimeInstance).Context(), runtimeInstance.Scope(), name)
+    _ = Door(list[0].Context(), list[0].Scope())
+    _ = Door(a.B().C().Context(), a.B().C().Scope())
+    _ = Door(context.WithoutCancel(runtimeInstance.Context()), runtimeInstance.Scope())
+    scope := runtimeInstance.Scope()
+    _ = logging.LoggerMustFromResolver(runtimeInstance.Context(), scope)
+    ctx := runtimeInstance.Context()
+    _ = Door(ctx, runtimeInstance.Scope())
+    _ = Door(ctx, scope)
+    var typedScope Scope = runtimeInstance.Scope()
+    _ = Door(ctx, typedScope)
+    asserted, ok := runtimeInstance.Scope().(Scoped)
+    _ = Door(ctx, asserted)
+    session.scope = runtimeInstance.Scope()
+    _ = Door(ctx, session.scope)
+    built := runtime.NewRun(ctx, runScope)
+    _ = event.EventDispatcherMustFromResolver(built.Context(), runScope)
+    _, _ = runtimeInstance.Scope().Get(runtimeInstance.Context(), name)
+    _, _ = scope.GetByType(ctx, paramType)
+    /* config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()) */
+    _ = "Door(runtimeInstance.Context(), runtimeInstance.Scope())"
+    _ = runtime.NewRun(runtimeInstance.Context(), runtimeInstance.Scope())
+    _ = config.ConfigMustFromResolver(ctx, resolver)
+    _ = config.ConfigMustFromResolver(first.Context(), second.Scope())
+    _ = ok
+}
+
+func other(runtimeInstance Runtime, scope Resolver) {
+    _ = Door(runtimeInstance.Context(), scope)
+}
+`)
+
+    callList, parseErr := runtimeHeldResolverCalls("probe.go", content)
+    if nil != parseErr {
+        t.Fatalf("parse: %v", parseErr)
+    }
+
+    expected := []runtimeHeldResolverCall{
+        {callee: "ConfigMustFromResolver", line: 4},
+        {callee: "FromResolver", line: 5},
+        {callee: "FromResolver", line: 10},
+        {callee: "MustFromResolver", line: 11},
+        {callee: "MustFromResolver", line: 12},
+        {callee: "Door", line: 13},
+        {callee: "Door", line: 14},
+        {callee: "Door", line: 15},
+        {callee: "LoggerMustFromResolver", line: 17},
+        {callee: "Door", line: 19},
+        {callee: "Door", line: 20},
+        {callee: "Door", line: 22},
+        {callee: "Door", line: 24},
+        {callee: "Door", line: 26},
+        {callee: "EventDispatcherMustFromResolver", line: 28},
+        {callee: "Get", line: 29},
+        {callee: "GetByType", line: 30},
+    }
+
+    if len(expected) != len(callList) {
+        t.Fatalf("expected %v, got %v", expected, callList)
+    }
+
+    for index, call := range expected {
+        if call != callList[index] {
+            t.Fatalf("expected %v at %d, got %v", call, index, callList[index])
         }
     }
 }

@@ -80,7 +80,7 @@ func SecurityContextFromRuntime(runtimeInstance containercontract.Runtime) (*Sec
         return nil, false
     }
 
-    securityContext, err := container.FromResolver[*SecurityContext](runtimeInstance.Context(), scope, securitycontract.ServiceSecurityContext)
+    securityContext, err := runtime.FromRuntime[*SecurityContext](runtimeInstance, securitycontract.ServiceSecurityContext)
 
     if nil != err {
         /* the logger is resolved without panicking: a handler may call IsGranted from a goroutine that outlives the request, after the kernel closed the scope */

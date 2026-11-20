@@ -299,7 +299,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
 
         writer.Header().Set(HeaderRequestId, requestId)
 
-        configuration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        configuration := config.ConfigMustFromRuntime(runtimeInstance)
         defaultLocale := configuration.Http().DefaultLocale()
         debugMode := config.EnvironmentDevelopment == configuration.Kernel().Environment()
 
@@ -457,7 +457,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         /* the recovery defer reads this before finalResponse is assigned */
         chainResponse := (httpcontract.Response)(nil)
 
-        eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        eventDispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
 
         var sessionManager sessioncontract.Manager
 
@@ -547,7 +547,7 @@ func (instance *Kernel) ServeHttp(serviceContainer containercontract.Container) 
         }()
 
         /* resolved below the recovery defer, since a replaceable container may panic */
-        sessionManager = session.SessionMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        sessionManager = session.SessionMustFromRuntime(runtimeInstance)
 
         cookieValue := ""
         cookie, _ := request.Cookie(session.SessionCookieName)
@@ -933,7 +933,7 @@ func (instance *Kernel) requestIdLogger(
     requestId := logging.GenerateProcessId()
     scope := runtimeInstance.Scope()
 
-    baseLogger := logging.LoggerMustFromResolver(runtimeInstance.Context(), scope)
+    baseLogger := logging.LoggerMustFromRuntime(runtimeInstance)
     if nil == baseLogger {
         return nil, requestId, exception.NewError("failed to get base logger", nil, nil)
     }

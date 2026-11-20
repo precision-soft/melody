@@ -148,7 +148,7 @@ func exceptionListenerDebugMode(runtimeInstance containercontract.Runtime) bool 
         return false
     }
 
-    configuration, configurationErr := config.ConfigFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    configuration, configurationErr := config.ConfigFromRuntime(runtimeInstance)
     if nil != configurationErr {
         return false
     }

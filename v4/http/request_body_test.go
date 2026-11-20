@@ -253,7 +253,6 @@ func TestRequest_BindJsonAndValidateCarriesTheValidationErrorsContextKey(t *test
     }
 }
 
-/* a body of many failing elements is refused with at most the validator's error budget and its closing entry under the validationErrors context key, whatever the number of elements */
 func TestRequest_BindJsonAndValidateBoundsTheViolationsOfABodyOfManyFailingElements(t *testing.T) {
     type element struct {
         Name string `json:"name" validate:"notBlank"`
@@ -410,4 +409,47 @@ func TestRequest_BindJsonReturnsOnACyclicChainFromTheBody(t *testing.T) {
     if nil == bindErr {
         t.Fatal("expected the refusal of a body that cannot be read")
     }
+}
+
+func TestRequest_BindJsonOverANilRuntimeIsRefusedNamingTheRuntime(t *testing.T) {
+    for name, bind := range map[string]func(request *Request, target any) error{
+        "BindJson":            func(request *Request, target any) error { return request.BindJson(target) },
+        "BindJsonAndValidate": func(request *Request, target any) error { return request.BindJsonAndValidate(target) },
+    } {
+        t.Run(name, func(t *testing.T) {
+            httpRequest := httptest.NewRequest(nethttp.MethodPost, "/bind", strings.NewReader(`{"name":"value"}`))
+            httpRequest.Header.Set("Content-Type", "application/json")
+            request := NewRequest(httpRequest, nil, nil, nil)
+
+            defer func() {
+                recoveredErr, isError := recover().(error)
+                if false == isError {
+                    t.Fatalf("expected a panic carrying an error")
+                }
+
+                if false == strings.Contains(recoveredErr.Error(), "runtime may not be nil") {
+                    t.Fatalf("expected the nil runtime refusal, got %v", recoveredErr)
+                }
+            }()
+
+            var target map[string]any
+            _ = bind(request, &target)
+        })
+    }
+}
+
+func TestRequest_ValidateBoundBodyOverANilRuntimeIsRefusedNamingTheRuntime(t *testing.T) {
+    defer func() {
+        recoveredErr, isError := recover().(error)
+        if false == isError {
+            t.Fatalf("expected a panic carrying an error")
+        }
+
+        if false == strings.Contains(recoveredErr.Error(), "runtime may not be nil") {
+            t.Fatalf("expected the nil runtime refusal, got %v", recoveredErr)
+        }
+    }()
+
+    target := map[string]any{"name": "value"}
+    _ = validateBoundBody(nil, &target)
 }

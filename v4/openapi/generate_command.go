@@ -9,7 +9,6 @@ import (
     "github.com/precision-soft/melody/v4/cli/output"
     "github.com/precision-soft/melody/v4/config"
     configcontract "github.com/precision-soft/melody/v4/config/contract"
-    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
@@ -69,7 +68,7 @@ func (instance *GenerateCommand) Run(
     runtimeInstance containercontract.Runtime,
     commandContext *clicontract.CommandContext,
 ) error {
-    router := http.RouterMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    router := http.RouterMustFromRuntime(runtimeInstance)
 
     out := commandContext.String("out")
 
@@ -111,7 +110,7 @@ func (instance *GenerateCommand) Run(
 
     /* a relative path is anchored at the project directory, as the wiring command anchors its --out, so the document lands in one tree whatever directory the process started in */
     if false == filepath.IsAbs(out) {
-        applicationConfiguration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        applicationConfiguration := config.ConfigMustFromRuntime(runtimeInstance)
         out = filepath.Join(applicationConfiguration.MustGet(config.KernelProjectDirectory).MustString(), out)
     }
 
@@ -144,7 +143,7 @@ func (instance *GenerateCommand) journal(runtimeInstance containercontract.Runti
 
 /* journalSharesStdout reports whether the kernel log path is empty, which made the journal write to stdout before a command's console journal moved to stderr; the emergency journal it then selects writes to stderr as well. A configuration it cannot read answers false, so the command never fails on its journal; a substituted logger that writes to stdout is the application's to keep off it. */
 func journalSharesStdout(runtimeInstance containercontract.Runtime) bool {
-    configuration, resolveErr := container.FromResolver[configcontract.Configuration](runtimeInstance.Context(), runtimeInstance.Scope(), config.ServiceConfig)
+    configuration, resolveErr := runtime.FromRuntime[configcontract.Configuration](runtimeInstance, config.ServiceConfig)
     if nil != resolveErr || nil == configuration {
         return false
     }

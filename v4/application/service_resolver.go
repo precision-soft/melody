@@ -30,7 +30,7 @@ func ProcessContextFromRuntime(runtimeInstance containercontract.Runtime) (appli
         return nil, kindErr
     }
 
-    return container.FromResolver[applicationcontract.ProcessContext](runtimeInstance.Context(), runtimeInstance.Scope(), ServiceProcessContext)
+    return runtime.FromRuntime[applicationcontract.ProcessContext](runtimeInstance, ServiceProcessContext)
 }
 
 func ProcessContextMustFromRuntime(runtimeInstance containercontract.Runtime) applicationcontract.ProcessContext {

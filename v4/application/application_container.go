@@ -16,6 +16,7 @@ import (
     configcontract "github.com/precision-soft/melody/v4/config/contract"
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/event"
     eventcontract "github.com/precision-soft/melody/v4/event/contract"
     "github.com/precision-soft/melody/v4/exception"
@@ -160,7 +161,6 @@ func (instance *Application) MustRegisterScoped(
     }
 }
 
-/* buildServicesBuiltAtBoot builds the services registered with BuiltAtBoot through the boot runtime, in registration order */
 func (instance *Application) buildServicesBuiltAtBoot(bootRuntime containercontract.Runtime) {
     lister, lists := instance.kernel.ServiceContainer().(interface{ BuiltAtBootServiceNames() []string })
     if false == lists {
@@ -168,7 +168,7 @@ func (instance *Application) buildServicesBuiltAtBoot(bootRuntime containercontr
     }
 
     for _, serviceName := range lister.BuiltAtBootServiceNames() {
-        if _, buildErr := bootRuntime.Scope().Get(bootRuntime.Context(), serviceName); nil != buildErr {
+        if _, buildErr := runtime.FromRuntime[any](bootRuntime, serviceName); nil != buildErr {
             exception.Panic(
                 exception.NewError("a service built at boot cannot be built", exceptioncontract.Context{"serviceName": serviceName}, buildErr),
             )
@@ -320,7 +320,7 @@ func (instance *Application) bootContainer() {
 
     /* resolved eagerly so a failing provider fails the boot step that owns it */
     bootRuntime := instance.kernel.BootRuntime()
-    _, loggerProbeErr := logging.LoggerFromResolver(bootRuntime.Context(), bootRuntime.Scope())
+    _, loggerProbeErr := runtime.FromRuntime[loggingcontract.Logger](bootRuntime, logging.ServiceLogger)
     if nil != loggerProbeErr {
         exception.Panic(
             exception.NewError(
@@ -592,10 +592,7 @@ func (instance *Application) buildMessageBusTransportsCloser() {
     }
 
     bootRuntime := instance.kernel.BootRuntime()
-    _, closerErr := container.FromResolver[*messagebus.TransportsCloser](
-        bootRuntime.Context(),
-        bootRuntime.Scope(),
-        messagebus.ServiceTransportsCloser,
+    _, closerErr := runtime.FromRuntime[*messagebus.TransportsCloser](bootRuntime, messagebus.ServiceTransportsCloser,
     )
     if nil != closerErr {
         exception.Panic(

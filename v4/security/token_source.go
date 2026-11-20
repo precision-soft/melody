@@ -64,7 +64,7 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance containercontr
     token, usedAuthenticator, err := instance.manager.Authenticate(runtimeInstance, request)
     if nil != err {
         if true == usedAuthenticator && true == raisesLoginFailure(err) {
-            eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+            eventDispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
             _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
                 runtimeInstance,
                 securitycontract.EventSecurityLoginFailure,
@@ -105,7 +105,7 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance containercontr
 
         failureErr := exception.NewError(failureMessage, nil, nil)
 
-        eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        eventDispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
         _, eventSecurityLoginFailureErr := eventDispatcher.DispatchName(
             runtimeInstance,
             securitycontract.EventSecurityLoginFailure,
@@ -126,7 +126,7 @@ func (instance *AuthenticatorTokenSource) Resolve(runtimeInstance containercontr
     }
 
     if true == usedAuthenticator && true == token.IsAuthenticated() {
-        eventDispatcher := event.EventDispatcherMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        eventDispatcher := event.EventDispatcherMustFromRuntime(runtimeInstance)
         _, eventSecurityLoginSuccessErr := eventDispatcher.DispatchName(
             runtimeInstance,
             securitycontract.EventSecurityLoginSuccess,

@@ -53,7 +53,7 @@ func (instance *ParameterCommand) Run(
 
     envelope := output.NewEnvelope(meta)
 
-    applicationConfiguration := config.ConfigMustFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    applicationConfiguration := config.ConfigMustFromRuntime(runtimeInstance)
 
     names := applicationConfiguration.Names()
     if 0 == len(names) {

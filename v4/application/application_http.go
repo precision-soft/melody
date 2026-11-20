@@ -10,8 +10,8 @@ import (
     applicationcontract "github.com/precision-soft/melody/v4/application/contract"
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/config"
-    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/http"
@@ -126,7 +126,7 @@ func (instance *Application) registerKernelHttpListeners() {
 
 /* bootHttpPipeline judges the session manager's storage timeout and builds the middleware pipeline under the boot runtime, once */
 func (instance *Application) bootHttpPipeline(bootRuntime containercontract.Runtime) {
-    if refusedErr := refuseSessionStorageTimeout(bootRuntime.Context(), bootRuntime.Scope()); nil != refusedErr {
+    if refusedErr := refuseSessionStorageTimeout(bootRuntime); nil != refusedErr {
         exception.Panic(exception.FromError(refusedErr))
     }
 
@@ -213,12 +213,12 @@ func (instance *Application) runHttp(
 }
 
 /* refuseSessionStorageTimeout judges the registered manager's bound once at boot, so a replaced manager declaring one the rule refuses fails the boot rather than every saving request. */
-func refuseSessionStorageTimeout(ctx context.Context, resolver containercontract.Resolver) error {
-    if false == resolver.Has(session.ServiceSessionManager) {
+func refuseSessionStorageTimeout(bootRuntime containercontract.Runtime) error {
+    if false == bootRuntime.Scope().Has(session.ServiceSessionManager) {
         return nil
     }
 
-    sessionManager, sessionManagerErr := container.FromResolver[sessioncontract.Manager](ctx, resolver, session.ServiceSessionManager)
+    sessionManager, sessionManagerErr := runtime.FromRuntime[sessioncontract.Manager](bootRuntime, session.ServiceSessionManager)
     if nil != sessionManagerErr {
         return sessionManagerErr
     }
