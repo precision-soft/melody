@@ -1620,6 +1620,14 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Remedy.** `IdleTimeout: bound.Of(30 * time.Second)`, or leave it out for the same interval; `ReadLimit: bound.UnlimitedCount()` where you wrote a negative value, `bound.Of(n)` for a cap; `WriteTimeout: bound.Of(d)`.
 
+### Opentelemetry: the tracer provider takes the runtime
+
+**What changed.** [`otlp.NewTracerProvider(runtimeInstance, config)`](../../integrations/opentelemetry/v4/otlp/tracer_provider.go) takes the runtime in place of a context: it dials its exporter under the runtime's context, refuses a nil runtime and refuses a runtime whose context is already done before the dial. The module's provider hands it `resolver.Runtime()`, and `RegisterHttpMiddlewares` resolves it through `Kernel.BootRuntime()`.
+
+**Symptom.** `cannot use ctx (context.Context) as containercontract.Runtime` in a call of `otlp.NewTracerProvider`.
+
+**Remedy.** Inside a container provider pass `resolver.Runtime()`; in a boot hook resolve the provider through `kernelInstance.BootRuntime()`.
+
 ### Opentelemetry: the sampling is a typed value with none written out, the batch timeout and the shutdown bound are bound limits, and the prometheus composing twin is removed
 
 **What changed.** [`otlp.Config.SampleRatio`](../../integrations/opentelemetry/v4/otlp/tracer_provider.go) is replaced by `Config.Sampling`, an [`otlp.Sampling`](../../integrations/opentelemetry/v4/otlp/sampling.go) whose zero value samples every trace, `SampleRatio(x)` a fraction in `(0, 1]` and `SampleNone()` none; a ratio of 0, one above 1 and NaN are refused at `NewTracerProvider` naming `Config.Sampling`. `Config.BatchTimeout` is a `bound.Duration`, 5s when left out, at least 1ms, unlimited refused. `NewMetricsMiddlewareWithPrometheus` is removed.

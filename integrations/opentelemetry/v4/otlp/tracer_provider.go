@@ -14,6 +14,7 @@ import (
     "google.golang.org/grpc"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
 )
@@ -61,8 +62,14 @@ func (instance Config) Format(state fmt.State, verb rune) {
     _, _ = state.Write([]byte(instance.String()))
 }
 
-/* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter; an empty endpoint, a sampling or a batch timeout outside its rule is answered as the error, naming the field. The caller owns its lifecycle and runs Shutdown on exit to flush pending spans; the Module in this package does so by registering it as a container-managed service. */
-func NewTracerProvider(ctx context.Context, config Config) (*sdktrace.TracerProvider, error) {
+/* NewTracerProvider builds a batching TracerProvider wired to an OTLP exporter under the runtime's context; a nil runtime, a runtime whose context is already done, an empty endpoint, a sampling or a batch timeout outside its rule is answered as the error, naming the field. The caller owns its lifecycle and runs Shutdown on exit to flush pending spans; the Module in this package does so by registering it as a container-managed service. */
+func NewTracerProvider(runtimeInstance containercontract.Runtime, config Config) (*sdktrace.TracerProvider, error) {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return nil, runtimeErr
+    }
+
+    ctx := runtimeInstance.Context()
+
     if "" == config.Endpoint {
         return nil, exception.NewError("otlp tracer provider endpoint is required", exceptioncontract.Context{"field": "Config.Endpoint"}, nil)
     }
@@ -75,6 +82,10 @@ func NewTracerProvider(ctx context.Context, config Config) (*sdktrace.TracerProv
     batchTimeout, batchTimeoutErr := bound.Resolve(config.BatchTimeout, batchTimeoutRule)
     if nil != batchTimeoutErr {
         return nil, batchTimeoutErr
+    }
+
+    if contextErr := ctx.Err(); nil != contextErr {
+        return nil, exception.NewError("the runtime's context is done before the otlp exporter is dialled", nil, context.Cause(ctx))
     }
 
     exporter, exporterErr := newExporter(ctx, config)

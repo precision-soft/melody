@@ -12,12 +12,15 @@ import (
     "go.opentelemetry.io/otel/trace"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
 )
 
 /* a missing endpoint is a configuration error, not a silent no-op exporter. */
 func TestNewTracerProvider_RequiresEndpoint(t *testing.T) {
-    provider, err := NewTracerProvider(context.Background(), Config{})
+    provider, err := NewTracerProvider(tracerTestRuntime(), Config{})
     if nil == err {
         t.Fatalf("expected an error for an empty endpoint")
     }
@@ -28,7 +31,7 @@ func TestNewTracerProvider_RequiresEndpoint(t *testing.T) {
 
 /* an unknown protocol is rejected rather than defaulting silently to the wrong transport. */
 func TestNewTracerProvider_RejectsUnsupportedProtocol(t *testing.T) {
-    provider, err := NewTracerProvider(context.Background(), Config{Endpoint: "collector:4317", Protocol: "carrier-pigeon"})
+    provider, err := NewTracerProvider(tracerTestRuntime(), Config{Endpoint: "collector:4317", Protocol: "carrier-pigeon"})
     if nil == err {
         t.Fatalf("expected an error for an unsupported protocol")
     }
@@ -39,7 +42,7 @@ func TestNewTracerProvider_RejectsUnsupportedProtocol(t *testing.T) {
 
 /* grpc (default when unset) builds a provider without dialing — otlptracegrpc connects lazily. */
 func TestNewTracerProvider_BuildsWithDefaultProtocol(t *testing.T) {
-    provider, err := NewTracerProvider(context.Background(), Config{Endpoint: "collector:4317", Insecure: true})
+    provider, err := NewTracerProvider(tracerTestRuntime(), Config{Endpoint: "collector:4317", Insecure: true})
     if nil != err {
         t.Fatalf("unexpected error building the provider: %v", err)
     }
@@ -90,7 +93,7 @@ func TestNewTracerProvider_RefusesAValueOutsideItsRuleNamingTheField(t *testing.
     }
 
     for _, testCase := range cases {
-        provider, providerErr := NewTracerProvider(context.Background(), testCase.config)
+        provider, providerErr := NewTracerProvider(tracerTestRuntime(), testCase.config)
         if nil != provider {
             t.Fatalf("%s: expected no provider", testCase.name)
         }
@@ -103,7 +106,7 @@ func TestNewTracerProvider_RefusesAValueOutsideItsRuleNamingTheField(t *testing.
 }
 
 func TestNewTracerProvider_SampleNoneSamplesNoRootSpan(t *testing.T) {
-    provider, providerErr := NewTracerProvider(context.Background(), Config{Endpoint: "collector:4317", Insecure: true, Sampling: SampleNone()})
+    provider, providerErr := NewTracerProvider(tracerTestRuntime(), Config{Endpoint: "collector:4317", Insecure: true, Sampling: SampleNone()})
     if nil != providerErr {
         t.Fatalf("unexpected error: %v", providerErr)
     }
@@ -131,7 +134,7 @@ func TestNewTracerProvider_SampleNoneSamplesNoRootSpan(t *testing.T) {
         t.Fatal("expected a sampled inbound parent to keep deciding for its trace under SampleNone")
     }
 
-    everyProvider, everyErr := NewTracerProvider(context.Background(), Config{Endpoint: "collector:4317", Insecure: true})
+    everyProvider, everyErr := NewTracerProvider(tracerTestRuntime(), Config{Endpoint: "collector:4317", Insecure: true})
     if nil != everyErr {
         t.Fatalf("unexpected error: %v", everyErr)
     }
@@ -175,5 +178,23 @@ func TestConfig_RedactsHeadersOnEveryFmtVerb(t *testing.T) {
     pointerRendered := fmt.Sprintf("%v", &config)
     if true == strings.Contains(pointerRendered, "super-secret-token") {
         t.Fatalf("a *Config leaked the header credential: %s", pointerRendered)
+    }
+}
+
+func tracerTestRuntime() containercontract.Runtime {
+    return runtime.NewRun(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+}
+
+func TestNewTracerProvider_RefusesANilRuntimeAndADoneContextBeforeTheDial(t *testing.T) {
+    if _, nilErr := NewTracerProvider(nil, Config{Endpoint: "collector:4317"}); nil == nilErr {
+        t.Fatalf("expected a nil runtime to be refused")
+    }
+
+    doneContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    doneRuntime := runtime.NewRun(doneContext, container.NewContainer(container.ContainerConfig{}).NewScope())
+    if _, doneErr := NewTracerProvider(doneRuntime, Config{Endpoint: "collector:4317"}); nil == doneErr || false == strings.Contains(doneErr.Error(), "before the otlp exporter is dialled") {
+        t.Fatalf("expected a done runtime context to be refused before the dial, got %v", doneErr)
     }
 }

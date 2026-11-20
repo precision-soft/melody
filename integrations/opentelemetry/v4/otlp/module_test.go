@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
     kernelcontract "github.com/precision-soft/melody/v4/kernel/contract"
     sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -231,4 +232,54 @@ func TestProviderHandle_ACloseWithoutADeadlineHandsShutdownNoDeadline(t *testing
 
 func (instance *moduleSpyRegistrar) ReservePhaseService(serviceName string, kind containercontract.Kind) error {
     return nil
+}
+
+func TestModule_RegisterHttpMiddlewaresBuildsTheProviderUnderTheBootRuntime(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    seenKind := containercontract.KindUnspecified
+    serviceContainer.MustRegister(
+        ServiceTracerProvider,
+        func(resolver containercontract.Resolver) (*providerHandle, error) {
+            seenKind = resolver.Runtime().Kind()
+
+            return &providerHandle{provider: sdktrace.NewTracerProvider()}, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    NewModule(ModuleConfig{}).RegisterHttpMiddlewares(&otlpSpyKernel{serviceContainer: serviceContainer}, &otlpSpyMiddlewareRegistrar{})
+
+    if containercontract.KindBoot != seenKind {
+        t.Fatalf("expected the tracer provider built under the boot runtime, got %s", seenKind)
+    }
+
+    _ = serviceContainer.CloseWithContext(context.Background())
+}
+
+func TestModule_TheModulesProviderBuildsUnderTheRuntimeItIsResolvedThrough(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    registrar := &containerServiceRegistrar{Container: serviceContainer}
+    NewModule(ModuleConfig{Config: Config{Endpoint: "collector:4317"}}).RegisterServices(registrar)
+
+    doneContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    bootRuntime, finish := runtime.NewBoot(doneContext, serviceContainer)
+    defer func() {
+        _ = finish()
+    }()
+
+    _, resolveErr := bootRuntime.Scope().Get(bootRuntime.Context(), ServiceTracerProvider)
+    if nil == resolveErr || false == strings.Contains(strings.Join(exception.BuildCauseChain(resolveErr, 8), " "), "before the otlp exporter is dialled") {
+        t.Fatalf("expected the module's provider to dial under the resolving runtime and refuse its done context, got %v", resolveErr)
+    }
+}
+
+/* containerServiceRegistrar hands a module's registrations to a real container */
+type containerServiceRegistrar struct {
+    containercontract.Container
+}
+
+func (instance *containerServiceRegistrar) RegisterService(serviceName string, provider any, options containercontract.RegisterOptions) {
+    instance.Container.MustRegister(serviceName, provider, options)
 }
