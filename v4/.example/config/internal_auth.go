@@ -1,7 +1,6 @@
 package config
 
 import (
-    "context"
     "strings"
     "time"
 
@@ -49,14 +48,14 @@ func (instance *Module) registerInternalAuthSignerService(registrar melodyapplic
     registrar.RegisterService(
         ServiceInternalAuthSigner,
         func(resolver melodycontainercontract.Resolver) (*melodysecurity.HmacEnvelopeSigner, error) {
-            return instance.internalAuthSigner(resolver.Runtime().Context(), bound.Duration{}), nil
+            return instance.internalAuthSigner(resolver.Runtime(), bound.Duration{}), nil
         },
         melodycontainer.RegisterOptions{BuiltAtBoot: true},
     )
 }
 
-func (instance *Module) internalAuthSigner(ctx context.Context, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
-    return melodysecurity.NewHmacEnvelopeSigner(ctx, instance.hmacSecrets, melodysecurity.HmacEnvelopeSignerConfig{
+func (instance *Module) internalAuthSigner(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
+    return melodysecurity.NewHmacEnvelopeSigner(runtimeInstance, instance.hmacSecrets, melodysecurity.HmacEnvelopeSignerConfig{
         Application: instance.internalAuthApplication,
         Ttl:         ttl,
     })

@@ -1,7 +1,6 @@
 package security
 
 import (
-    "context"
     "encoding/base64"
     "encoding/json"
     "strings"
@@ -51,7 +50,7 @@ func TestHashBody_HashesTheEmptyBodyToo(t *testing.T) {
 }
 
 func TestEncodeHmacHeaderValue_RoundTripsThroughTheDecoder(t *testing.T) {
-    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(context.Background(), "key-current")
+    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(hmacTestRuntime(), "key-current")
 
     headerValue, encodeErr := encodeHmacHeaderValue("key-current", hmacEnvelopeProbe(), secret)
     if nil != encodeErr {
@@ -78,7 +77,7 @@ func TestEncodeHmacHeaderValue_RoundTripsThroughTheDecoder(t *testing.T) {
 
 /* the decoder fails closed on every structural problem: each of these would otherwise reach the signature comparison or past it with a half-read envelope */
 func TestDecodeHmacHeaderValue_RefusesEveryStructuralDamage(t *testing.T) {
-    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(context.Background(), "key-current")
+    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(hmacTestRuntime(), "key-current")
     valid, _ := encodeHmacHeaderValue("key-current", hmacEnvelopeProbe(), secret)
     parts := strings.Split(valid, ".")
 
@@ -102,7 +101,7 @@ func TestDecodeHmacHeaderValue_RefusesEveryStructuralDamage(t *testing.T) {
 
 /* the algorithm and the type are the domain separation: a JSON web token is byte-identical in shape and signs through the same primitive, so without a type of its own the only thing keeping one credential from verifying as the other is the two secrets happening to differ */
 func TestDecodeHmacHeaderValue_RefusesAnyOtherAlgorithmOrType(t *testing.T) {
-    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(context.Background(), "key-current")
+    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(hmacTestRuntime(), "key-current")
 
     for _, probe := range []struct {
         header   hmacEnvelopeHeader
@@ -160,7 +159,7 @@ func TestDecodeHmacHeaderValue_RefusalsBoundTheCallerChosenHeaderFields(t *testi
 
 /* a signed envelope carrying no typ, or a wrong one, is refused: the typ is what keeps a JSON web token from verifying on this header. */
 func TestDecodeHmacHeaderValue_RefusesAnAbsentTypeAndAWrongOne(t *testing.T) {
-    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(context.Background(), "key-current")
+    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(hmacTestRuntime(), "key-current")
 
     encode := func(headerType string) string {
         headerBytes, _ := json.Marshal(hmacEnvelopeHeader{Algorithm: hmacEnvelopeAlgorithm, Type: headerType, KeyId: "key-current"})
@@ -181,7 +180,7 @@ func TestDecodeHmacHeaderValue_RefusesAnAbsentTypeAndAWrongOne(t *testing.T) {
 }
 
 func TestDecodeHmacHeaderValue_RefusesASignatureOverOtherContent(t *testing.T) {
-    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(context.Background(), "key-current")
+    secret, _, _ := hmacEnvelopeProbeSecrets().Secret(hmacTestRuntime(), "key-current")
     valid, _ := encodeHmacHeaderValue("key-current", hmacEnvelopeProbe(), secret)
     parts := strings.Split(valid, ".")
 
@@ -208,7 +207,7 @@ func TestDecodeHmacHeaderValue_RefusesASignatureOverOtherContent(t *testing.T) {
 }
 
 func TestHmacEnvelope_TheWireFieldOfTheApplicationIsApp(t *testing.T) {
-    signer := NewHmacEnvelopeSigner(context.Background(), hmacTestSecrets(), HmacEnvelopeSignerConfig{Application: "wms-service"})
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacTestSecrets(), HmacEnvelopeSignerConfig{Application: "wms-service"})
     headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal/ping", nil, nil)
     if nil != signErr {
         t.Fatalf("expected the envelope to sign, got %v", signErr)

@@ -1,20 +1,18 @@
 package security
 
 import (
-    "context"
-
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
-    "github.com/precision-soft/melody/v4/internal"
 )
 
-/* HmacSecretProvider resolves the shared secret for the internal-auth HMAC source. CurrentKeyId names the key a signer uses now, Secret looks up the secret for a presented key id, and ApplicationForKeyId names the one application a key id is issued to. Several resolvable keys allow a rotation without a gap. Every door takes the caller's context first: the request's on the verifying side, and on the signing side the context the signer was built under at construction and the runtime's context at Sign. A nil context is refused. An answer of false says the key id is not known and refuses the envelope; an error says the provider could not answer, and is never used for an unknown key: the verifier answers it as unavailable, the signer returns it marked with exception.MarkInfrastructureFailure. */
+/* HmacSecretProvider resolves the shared secret for the internal-auth HMAC source. CurrentKeyId names the key a signer uses now, Secret looks up the secret for a presented key id, and ApplicationForKeyId names the one application a key id is issued to. Several resolvable keys allow a rotation without a gap. Every door takes the caller's runtime first: the request's on the verifying side, and on the signing side the boot runtime the signer was built under and the caller's runtime at Sign. A nil runtime is refused. An answer of false says the key id is not known and refuses the envelope; an error says the provider could not answer, and is never used for an unknown key: the verifier answers it as unavailable, the signer returns it marked with exception.MarkInfrastructureFailure. */
 type HmacSecretProvider interface {
-    CurrentKeyId(ctx context.Context) (string, error)
+    CurrentKeyId(runtimeInstance containercontract.Runtime) (string, error)
 
-    Secret(ctx context.Context, keyId string) ([]byte, bool, error)
+    Secret(runtimeInstance containercontract.Runtime, keyId string) ([]byte, bool, error)
 
-    ApplicationForKeyId(ctx context.Context, keyId string) (string, bool, error)
+    ApplicationForKeyId(runtimeInstance containercontract.Runtime, keyId string) (string, bool, error)
 }
 
 /* HmacKey is one entry in a static secret provider: the secret bytes for a key id and the application that key id belongs to. A key id is owned by exactly one application; an application may own several key ids (rotation overlap), all naming the same application. */
@@ -114,17 +112,17 @@ type StaticHmacSecretProvider struct {
     applicationsByKeyId map[string]string
 }
 
-func (instance *StaticHmacSecretProvider) CurrentKeyId(ctx context.Context) (string, error) {
-    if contextErr := refuseNilHmacProviderContext(ctx); nil != contextErr {
-        return "", contextErr
+func (instance *StaticHmacSecretProvider) CurrentKeyId(runtimeInstance containercontract.Runtime) (string, error) {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return "", runtimeErr
     }
 
     return instance.currentKeyId, nil
 }
 
-func (instance *StaticHmacSecretProvider) Secret(ctx context.Context, keyId string) ([]byte, bool, error) {
-    if contextErr := refuseNilHmacProviderContext(ctx); nil != contextErr {
-        return nil, false, contextErr
+func (instance *StaticHmacSecretProvider) Secret(runtimeInstance containercontract.Runtime, keyId string) ([]byte, bool, error) {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return nil, false, runtimeErr
     }
 
     secret, exists := instance.secretsByKeyId[keyId]
@@ -135,9 +133,9 @@ func (instance *StaticHmacSecretProvider) Secret(ctx context.Context, keyId stri
     return append([]byte{}, secret...), true, nil
 }
 
-func (instance *StaticHmacSecretProvider) ApplicationForKeyId(ctx context.Context, keyId string) (string, bool, error) {
-    if contextErr := refuseNilHmacProviderContext(ctx); nil != contextErr {
-        return "", false, contextErr
+func (instance *StaticHmacSecretProvider) ApplicationForKeyId(runtimeInstance containercontract.Runtime, keyId string) (string, bool, error) {
+    if runtimeErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != runtimeErr {
+        return "", false, runtimeErr
     }
 
     application, exists := instance.applicationsByKeyId[keyId]
@@ -146,14 +144,6 @@ func (instance *StaticHmacSecretProvider) ApplicationForKeyId(ctx context.Contex
     }
 
     return application, true, nil
-}
-
-func refuseNilHmacProviderContext(ctx context.Context) error {
-    if true == internal.IsNilInterface(ctx) {
-        return exception.NewError("hmac secret provider context is nil", map[string]any{"argument": "ctx"}, nil)
-    }
-
-    return nil
 }
 
 var _ HmacSecretProvider = (*StaticHmacSecretProvider)(nil)

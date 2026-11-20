@@ -149,7 +149,7 @@ func (instance *HmacTokenSource) Resolve(
     }
 
     /* otherwise any holder of a valid secret could impersonate another application */
-    boundApplication, keyBound, boundErr := instance.secrets.ApplicationForKeyId(runtimeInstance.Context(), keyId)
+    boundApplication, keyBound, boundErr := instance.secrets.ApplicationForKeyId(runtimeInstance, keyId)
     if nil != boundErr {
         return instance.reject(
             runtimeInstance,

@@ -106,7 +106,7 @@ func decodeHmacHeaderValue(
         )
     }
 
-    secret, secretExists, secretErr := secrets.Secret(runtimeInstance.Context(), header.KeyId)
+    secret, secretExists, secretErr := secrets.Secret(runtimeInstance, header.KeyId)
     if nil != secretErr {
         return hmacEnvelope{}, "", exception.NewError(
             "internal-auth secret provider failed",

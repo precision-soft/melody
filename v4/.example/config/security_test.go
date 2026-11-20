@@ -376,7 +376,7 @@ func TestRegisterSecurity_TheInternalFirewallAnswersAGuardOutageWith503AndRetryA
         UnavailableRetryAfter: bound.Of(internalFirewall.UnavailableRetryAfter()),
     })
 
-    signer := moduleInstance.internalAuthSigner(context.Background(), bound.Duration{})
+    signer := moduleInstance.internalAuthSigner(hmacTestRuntime(), bound.Duration{})
     headerValue, signErr := signer.Sign(configTestRuntime(), nethttp.MethodGet, route.InternalWhoamiPattern, nil, nil)
     if nil != signErr {
         t.Fatalf("sign: %v", signErr)

@@ -9,6 +9,9 @@ import (
 
     melodyclock "github.com/precision-soft/melody/v4/clock"
     melodyconfig "github.com/precision-soft/melody/v4/config"
+    melodycontainer "github.com/precision-soft/melody/v4/container"
+    melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
+    melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
@@ -97,13 +100,13 @@ func TestBuildInternalAuth_ReadsTheKeyIdApplicationAndSecretFromConfiguration(t 
     })
     moduleInstance.buildInternalAuth()
 
-    secret, found, _ := moduleInstance.hmacSecrets.Secret(context.Background(), "erp-key-7")
-    application, _, _ := moduleInstance.hmacSecrets.ApplicationForKeyId(context.Background(), "erp-key-7")
+    secret, found, _ := moduleInstance.hmacSecrets.Secret(hmacTestRuntime(), "erp-key-7")
+    application, _, _ := moduleInstance.hmacSecrets.ApplicationForKeyId(hmacTestRuntime(), "erp-key-7")
     if false == found || "an-operator-chosen-shared-secret" != string(secret) || "erp-service" != application || "erp-key-7" != currentKeyIdOf(t, moduleInstance) {
         t.Fatalf("expected the configured key, got %q %v %q", secret, found, application)
     }
 
-    if _, found, _ := moduleInstance.hmacSecrets.Secret(context.Background(), internalCallerKeyId); true == found {
+    if _, found, _ := moduleInstance.hmacSecrets.Secret(hmacTestRuntime(), internalCallerKeyId); true == found {
         t.Fatal("expected the committed key id unknown once another is configured")
     }
 
@@ -117,10 +120,14 @@ func TestBuildInternalAuth_ReadsTheKeyIdApplicationAndSecretFromConfiguration(t 
 func currentKeyIdOf(t *testing.T, moduleInstance *Module) string {
     t.Helper()
 
-    keyId, keyIdErr := moduleInstance.hmacSecrets.CurrentKeyId(context.Background())
+    keyId, keyIdErr := moduleInstance.hmacSecrets.CurrentKeyId(hmacTestRuntime())
     if nil != keyIdErr {
         t.Fatalf("current key id: %v", keyIdErr)
     }
 
     return keyId
+}
+
+func hmacTestRuntime() melodycontainercontract.Runtime {
+    return melodyruntime.NewRun(context.Background(), melodycontainer.NewContainer(melodycontainer.ContainerConfig{}).NewScope())
 }

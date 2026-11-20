@@ -1,7 +1,6 @@
 package cli
 
 import (
-    "context"
     "fmt"
     "strings"
     "time"
@@ -15,17 +14,17 @@ import (
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* NewInternalSignCommand mints the internal-auth (HMAC) header a caller service would send to reach the /internal firewall. It signs with the same shared secret the firewall verifies against, so the printed header authenticates. The signed method/path/body must match the request exactly, so pass the same values to curl. signer is the one built at boot, with the signer's default lifetime; newSigner builds one under the run's context only for the lifetime asked with --ttl. */
+/* NewInternalSignCommand mints the internal-auth (HMAC) header a caller service would send to reach the /internal firewall. It signs with the same shared secret the firewall verifies against, so the printed header authenticates. The signed method/path/body must match the request exactly, so pass the same values to curl. signer is the one built at boot, with the signer's default lifetime; newSigner builds one under the run's runtime only for the lifetime asked with --ttl. */
 func NewInternalSignCommand(
     signer *melodycontainer.LazyService[*melodysecurity.HmacEnvelopeSigner],
-    newSigner func(ctx context.Context, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner,
+    newSigner func(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner,
 ) *InternalSignCommand {
     return &InternalSignCommand{signer: signer, newSigner: newSigner}
 }
 
 type InternalSignCommand struct {
     signer    *melodycontainer.LazyService[*melodysecurity.HmacEnvelopeSigner]
-    newSigner func(ctx context.Context, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner
+    newSigner func(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner
 }
 
 func (instance *InternalSignCommand) Name() string {
@@ -148,7 +147,7 @@ func (instance *InternalSignCommand) signerFor(runtimeInstance melodycontainerco
         return nil, fmt.Errorf("internal:sign --ttl %q is not a go duration of at least 1s", rawTtl)
     }
 
-    return instance.newSigner(runtimeInstance.Context(), bound.Of(parsedTtl)), nil
+    return instance.newSigner(runtimeInstance, bound.Of(parsedTtl)), nil
 }
 
 const (

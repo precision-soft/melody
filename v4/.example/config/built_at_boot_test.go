@@ -121,3 +121,49 @@ func buildServicesBuiltAtBoot(t *testing.T, containerInstance melodycontainercon
 
     return nil
 }
+
+/* kindRecordingSecrets records the kind of the runtime each provider door is asked under */
+type kindRecordingSecrets struct {
+    melodysecurity.HmacSecretProvider
+    kinds []melodycontainercontract.Kind
+}
+
+func (instance *kindRecordingSecrets) CurrentKeyId(runtimeInstance melodycontainercontract.Runtime) (string, error) {
+    instance.kinds = append(instance.kinds, runtimeInstance.Kind())
+
+    return instance.HmacSecretProvider.CurrentKeyId(runtimeInstance)
+}
+
+func (instance *kindRecordingSecrets) Secret(runtimeInstance melodycontainercontract.Runtime, keyId string) ([]byte, bool, error) {
+    instance.kinds = append(instance.kinds, runtimeInstance.Kind())
+
+    return instance.HmacSecretProvider.Secret(runtimeInstance, keyId)
+}
+
+func (instance *kindRecordingSecrets) ApplicationForKeyId(runtimeInstance melodycontainercontract.Runtime, keyId string) (string, bool, error) {
+    instance.kinds = append(instance.kinds, runtimeInstance.Kind())
+
+    return instance.HmacSecretProvider.ApplicationForKeyId(runtimeInstance, keyId)
+}
+
+func TestBuiltAtBoot_TheInternalAuthSignerIsJudgedUnderTheBootRuntime(t *testing.T) {
+    moduleInstance := moduleWithEnvironment(t, map[string]string{})
+    moduleInstance.buildInternalAuth()
+    recording := &kindRecordingSecrets{HmacSecretProvider: moduleInstance.hmacSecrets}
+    moduleInstance.hmacSecrets = recording
+    containerInstance := bootContainerWithInternalAuthSigner(t, moduleInstance)
+
+    if buildErr := buildServicesBuiltAtBoot(t, containerInstance); nil != buildErr {
+        t.Fatalf("unexpected boot build error: %v", buildErr)
+    }
+
+    if 3 != len(recording.kinds) {
+        t.Fatalf("expected the current key, its binding and its secret read at boot, got %d reads", len(recording.kinds))
+    }
+
+    for _, kind := range recording.kinds {
+        if melodycontainercontract.KindBoot != kind {
+            t.Fatalf("expected every read under the boot runtime, got %s", kind)
+        }
+    }
+}

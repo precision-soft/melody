@@ -18,7 +18,7 @@ import (
     melodysecurity "github.com/precision-soft/melody/v4/security"
 )
 
-func newInternalSignTestSigner(ctx context.Context, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
+func newInternalSignTestSigner(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
     secrets := melodysecurity.NewStaticHmacSecretProvider(melodysecurity.HmacKeyRing{
         CurrentKeyId: "key-current",
         Keys: map[string]melodysecurity.HmacKey{
@@ -26,7 +26,7 @@ func newInternalSignTestSigner(ctx context.Context, ttl bound.Duration) *melodys
         },
     })
 
-    return melodysecurity.NewHmacEnvelopeSigner(ctx, secrets, melodysecurity.HmacEnvelopeSignerConfig{
+    return melodysecurity.NewHmacEnvelopeSigner(runtimeInstance, secrets, melodysecurity.HmacEnvelopeSignerConfig{
         Application: "wms-service",
         Ttl:         ttl,
     })
@@ -34,13 +34,13 @@ func newInternalSignTestSigner(ctx context.Context, ttl bound.Duration) *melodys
 
 const internalSignTestSignerService = "service.test.internal_sign.signer"
 
-func newInternalSignTestCommand(newSigner func(ctx context.Context, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner) *InternalSignCommand {
+func newInternalSignTestCommand(newSigner func(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner) *InternalSignCommand {
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
     melodycontainer.MustRegister[*melodysecurity.HmacEnvelopeSigner](
         containerInstance,
         internalSignTestSignerService,
         func(resolver melodycontainercontract.Resolver) (*melodysecurity.HmacEnvelopeSigner, error) {
-            return newInternalSignTestSigner(resolver.Runtime().Context(), bound.Duration{}), nil
+            return newInternalSignTestSigner(resolver.Runtime(), bound.Duration{}), nil
         },
         melodycontainer.RegisterOptions{},
     )
@@ -58,7 +58,7 @@ func signTestRuntime() melodycontainercontract.Runtime {
 }
 
 func TestInternalSignCommandPrintsTheHeaderNameAndValueOnTheCommandWriter(t *testing.T) {
-    signer := newInternalSignTestSigner(context.Background(), bound.Duration{})
+    signer := newInternalSignTestSigner(signTestRuntime(), bound.Duration{})
     captured := &bytes.Buffer{}
 
     runErr := newInternalSignTestCommand(newInternalSignTestSigner).Run(signTestRuntime(), newStringFlagContext(nil, captured))
@@ -97,10 +97,10 @@ func TestInternalSignCommandHandsTheSignerTheTtlAsked(t *testing.T) {
 
     for rawTtl, expected := range cases {
         handed := bound.Of(time.Duration(-1))
-        newSigner := func(ctx context.Context, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
+        newSigner := func(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
             handed = ttl
 
-            return newInternalSignTestSigner(ctx, ttl)
+            return newInternalSignTestSigner(runtimeInstance, ttl)
         }
 
         runErr := newInternalSignTestCommand(newSigner).Run(signTestRuntime(), newStringFlagContext(map[string]string{"ttl": rawTtl}, &bytes.Buffer{}))
@@ -112,10 +112,10 @@ func TestInternalSignCommandHandsTheSignerTheTtlAsked(t *testing.T) {
 
 func TestInternalSignCommandSignsWithTheBootSignerWhenNoTtlIsAsked(t *testing.T) {
     built := 0
-    newSigner := func(ctx context.Context, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
+    newSigner := func(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
         built++
 
-        return newInternalSignTestSigner(ctx, ttl)
+        return newInternalSignTestSigner(runtimeInstance, ttl)
     }
 
     command := newInternalSignTestCommand(newSigner)
@@ -265,6 +265,85 @@ func TestInternalSignCommand_RefusesAnActorFlagWithoutTheActor(t *testing.T) {
         runErr := newInternalSignTestCommand(newInternalSignTestSigner).Run(signTestRuntime(), newStringFlagContext(map[string]string{flagName: "x=y"}, captured))
         if nil == runErr || false == strings.Contains(runErr.Error(), "--"+flagName) || 0 != captured.Len() {
             t.Fatalf("expected --%s without --actor refused naming it, got %v and %q", flagName, runErr, captured.String())
+        }
+    }
+}
+
+/* recordingSignSecrets records the runtime each provider door is asked under */
+type recordingSignSecrets struct {
+    melodysecurity.HmacSecretProvider
+    seen []melodycontainercontract.Runtime
+}
+
+func (instance *recordingSignSecrets) CurrentKeyId(runtimeInstance melodycontainercontract.Runtime) (string, error) {
+    instance.seen = append(instance.seen, runtimeInstance)
+
+    return instance.HmacSecretProvider.CurrentKeyId(runtimeInstance)
+}
+
+func (instance *recordingSignSecrets) Secret(runtimeInstance melodycontainercontract.Runtime, keyId string) ([]byte, bool, error) {
+    instance.seen = append(instance.seen, runtimeInstance)
+
+    return instance.HmacSecretProvider.Secret(runtimeInstance, keyId)
+}
+
+func (instance *recordingSignSecrets) ApplicationForKeyId(runtimeInstance melodycontainercontract.Runtime, keyId string) (string, bool, error) {
+    instance.seen = append(instance.seen, runtimeInstance)
+
+    return instance.HmacSecretProvider.ApplicationForKeyId(runtimeInstance, keyId)
+}
+
+func TestInternalSignCommandAsksTheProviderUnderTheBootRuntimeAtBootAndTheRunsRuntimeAtTheRun(t *testing.T) {
+    secrets := &recordingSignSecrets{HmacSecretProvider: melodysecurity.NewStaticHmacSecretProvider(melodysecurity.HmacKeyRing{
+        CurrentKeyId: "key-current",
+        Keys: map[string]melodysecurity.HmacKey{
+            "key-current": {Application: "wms-service", Secret: []byte("internal-sign-command-test-secret")},
+        },
+    })}
+    newSigner := func(runtimeInstance melodycontainercontract.Runtime, ttl bound.Duration) *melodysecurity.HmacEnvelopeSigner {
+        return melodysecurity.NewHmacEnvelopeSigner(runtimeInstance, secrets, melodysecurity.HmacEnvelopeSignerConfig{Application: "wms-service", Ttl: ttl})
+    }
+
+    containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
+    melodycontainer.MustRegister[*melodysecurity.HmacEnvelopeSigner](
+        containerInstance,
+        internalSignTestSignerService,
+        func(resolver melodycontainercontract.Resolver) (*melodysecurity.HmacEnvelopeSigner, error) {
+            return newSigner(resolver.Runtime(), bound.Duration{}), nil
+        },
+        melodycontainer.RegisterOptions{BuiltAtBoot: true},
+    )
+
+    bootRuntime, finish := melodyruntime.NewBoot(context.Background(), containerInstance)
+    if _, buildErr := bootRuntime.Scope().Get(bootRuntime.Context(), internalSignTestSignerService); nil != buildErr {
+        t.Fatalf("unexpected boot build error: %v", buildErr)
+    }
+    _ = finish()
+
+    for _, seen := range secrets.seen {
+        if melodycontainercontract.KindBoot != seen.Kind() {
+            t.Fatalf("expected the boot signer judged under the boot runtime, got %s", seen.Kind())
+        }
+    }
+
+    command := NewInternalSignCommand(melodycontainer.Lazy[*melodysecurity.HmacEnvelopeSigner](containerInstance, internalSignTestSignerService), newSigner)
+
+    for _, rawTtl := range []string{"", "1m"} {
+        secrets.seen = nil
+        runRuntime := signTestRuntime()
+
+        if runErr := command.Run(runRuntime, newStringFlagContext(map[string]string{"ttl": rawTtl}, &bytes.Buffer{})); nil != runErr {
+            t.Fatalf("--ttl %q: expected the header minted, got %v", rawTtl, runErr)
+        }
+
+        if 0 == len(secrets.seen) {
+            t.Fatalf("--ttl %q: expected the provider asked during the run", rawTtl)
+        }
+
+        for _, seen := range secrets.seen {
+            if runRuntime != seen {
+                t.Fatalf("--ttl %q: expected every read under the run's runtime, by identity", rawTtl)
+            }
         }
     }
 }

@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/bound"
     "github.com/precision-soft/melody/v4/clock"
     "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     "github.com/precision-soft/melody/v4/internal/testhelper"
@@ -26,23 +27,23 @@ func hmacSignerProbeSecrets() *StaticHmacSecretProvider {
 
 func TestNewHmacEnvelopeSigner_RefusesASignerThatCanNotIdentifyItself(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(context.Background(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: ""})
+        _ = NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: ""})
     }, "hmac signer application is empty")
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(context.Background(), nil, HmacEnvelopeSignerConfig{Application: "billing"})
+        _ = NewHmacEnvelopeSigner(hmacTestRuntime(), nil, HmacEnvelopeSignerConfig{Application: "billing"})
     }, "hmac signer secrets provider is nil")
 
     var typedNilSecrets HmacSecretProvider = (*StaticHmacSecretProvider)(nil)
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(context.Background(), typedNilSecrets, HmacEnvelopeSignerConfig{Application: "billing"})
+        _ = NewHmacEnvelopeSigner(hmacTestRuntime(), typedNilSecrets, HmacEnvelopeSignerConfig{Application: "billing"})
     }, "hmac signer secrets provider is nil")
 }
 
 /* the verifier refuses an envelope whose key id is not bound to its claimed application, so a signer whose current key belongs to someone else would emit envelopes that are silently rejected on the other side, one request at a time, with nothing on this end to say why */
 func TestNewHmacEnvelopeSigner_RefusesACurrentKeyIssuedToAnotherApplication(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(context.Background(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "crm"})
+        _ = NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "crm"})
     }, "hmac signer current key id is not bound to the signer application")
 
     defer func() {
@@ -52,24 +53,24 @@ func TestNewHmacEnvelopeSigner_RefusesACurrentKeyIssuedToAnotherApplication(t *t
         }
     }()
 
-    _ = NewHmacEnvelopeSigner(context.Background(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "crm"})
+    _ = NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "crm"})
 }
 
 func TestNewHmacEnvelopeSigner_FallsBackToTheDefaultHeaderName(t *testing.T) {
-    signer := NewHmacEnvelopeSigner(context.Background(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "billing"})
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "billing"})
 
     if DefaultHmacHeaderName != signer.HeaderName() {
         t.Fatalf("expected the default header name, got %q", signer.HeaderName())
     }
 
-    named := NewHmacEnvelopeSigner(context.Background(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "billing", HeaderName: "X-Own-Auth"})
+    named := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "billing", HeaderName: "X-Own-Auth"})
     if "X-Own-Auth" != named.HeaderName() {
         t.Fatalf("expected the configured header name, got %q", named.HeaderName())
     }
 }
 
 func TestHmacEnvelopeSigner_AnAbsentTtlSignsForThirtySeconds(t *testing.T) {
-    signer := NewHmacEnvelopeSigner(context.Background(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{
         Application: "billing",
         Clock:       clock.NewFrozenClock(time.Unix(1000, 0)),
     })
@@ -92,14 +93,14 @@ func TestHmacEnvelopeSigner_AnAbsentTtlSignsForThirtySeconds(t *testing.T) {
 func TestHmacEnvelopeSigner_RefusesATtlUnderASecondAndUnlimited(t *testing.T) {
     for _, ttl := range []bound.Duration{bound.Of(500 * time.Millisecond), bound.Of(-time.Minute), bound.UnlimitedDuration()} {
         expectPanicNamingField(t, "HmacEnvelopeSignerConfig.Ttl", func() {
-            NewHmacEnvelopeSigner(context.Background(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "billing", Ttl: ttl})
+            NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "billing", Ttl: ttl})
         })
     }
 }
 
 /* the path argument may arrive with a query string attached; the envelope signs the two separately because the callee matches them against the request's path and its raw query, which are separate there too */
 func TestHmacEnvelopeSigner_SignSplitsTheQueryOffThePath(t *testing.T) {
-    signer := NewHmacEnvelopeSigner(context.Background(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{
         Application: "billing",
         Audience:    "warehouse",
         Clock:       clock.NewFrozenClock(time.Unix(1000, 0)),
@@ -138,7 +139,7 @@ func TestHmacEnvelopeSigner_SignSplitsTheQueryOffThePath(t *testing.T) {
 
 /* the nonce is what makes an envelope single-use, so two envelopes signed by the same signer at the same frozen instant must still differ */
 func TestHmacEnvelopeSigner_SignMintsAFreshNonceEachTime(t *testing.T) {
-    signer := NewHmacEnvelopeSigner(context.Background(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{
         Application: "billing",
         Clock:       clock.NewFrozenClock(time.Unix(1000, 0)),
     })
@@ -167,7 +168,7 @@ func TestHmacEnvelopeSigner_SignReturnsAProviderFailureMarked(t *testing.T) {
         "ApplicationForKeyId": func(provider *customHmacSecretProvider) { provider.applicationErr = failure; provider.keyId = "key-rotated" },
     } {
         provider := &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret)}
-        signer := NewHmacEnvelopeSigner(context.Background(), provider, HmacEnvelopeSignerConfig{Application: "wms-service"})
+        signer := NewHmacEnvelopeSigner(hmacTestRuntime(), provider, HmacEnvelopeSignerConfig{Application: "wms-service"})
         fail(provider)
 
         headerValue, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, nil)
@@ -178,7 +179,7 @@ func TestHmacEnvelopeSigner_SignReturnsAProviderFailureMarked(t *testing.T) {
 }
 
 func TestHmacEnvelopeSigner_SignRefusesANilRuntime(t *testing.T) {
-    signer := NewHmacEnvelopeSigner(context.Background(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "billing"})
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "billing"})
 
     if _, signErr := signer.Sign(nil, "GET", "/internal", nil, nil); "runtimeInstance" != exception.LogContext(signErr, exception.LogContextConfig{})["argument"] {
         t.Fatalf("expected a nil runtime refused naming the argument, got %v", signErr)
@@ -187,7 +188,7 @@ func TestHmacEnvelopeSigner_SignRefusesANilRuntime(t *testing.T) {
 
 func TestHmacEnvelopeSigner_SignRefusesACurrentKeyMovedToAnotherApplication(t *testing.T) {
     provider := &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret)}
-    signer := NewHmacEnvelopeSigner(context.Background(), provider, HmacEnvelopeSignerConfig{Application: "wms-service"})
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), provider, HmacEnvelopeSignerConfig{Application: "wms-service"})
 
     provider.keyId = "key-rotated"
     provider.application = "crm"
@@ -204,7 +205,7 @@ func TestHmacEnvelopeSigner_SignRefusesACurrentKeyMovedToAnotherApplication(t *t
 
 func TestHmacEnvelopeSigner_SignJudgesTheBindingOnlyWhenTheCurrentKeyIdChanges(t *testing.T) {
     provider := &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret)}
-    signer := NewHmacEnvelopeSigner(context.Background(), provider, HmacEnvelopeSignerConfig{Application: "wms-service"})
+    signer := NewHmacEnvelopeSigner(hmacTestRuntime(), provider, HmacEnvelopeSignerConfig{Application: "wms-service"})
 
     provider.application = "crm"
     if _, signErr := signer.Sign(newTestRuntime(), "GET", "/internal", nil, nil); nil != signErr {
@@ -224,53 +225,56 @@ func TestHmacEnvelopeSigner_SignJudgesTheBindingOnlyWhenTheCurrentKeyIdChanges(t
 
 func TestHmacEnvelopeSigner_AnyProvidersUnboundKeyIsRefusedAtConstruction(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(context.Background(), &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret), application: "crm"}, HmacEnvelopeSignerConfig{Application: "wms-service"})
+        _ = NewHmacEnvelopeSigner(hmacTestRuntime(), &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret), application: "crm"}, HmacEnvelopeSignerConfig{Application: "wms-service"})
     }, "hmac signer current key id is not bound to the signer application")
 
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(context.Background(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "crm"})
+        _ = NewHmacEnvelopeSigner(hmacTestRuntime(), hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "crm"})
     }, "hmac signer current key id is not bound to the signer application")
 }
 
 func TestHmacEnvelopeSigner_AProviderThatCannotAnswerPanicsAtConstruction(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(context.Background(), &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret), secretErr: errors.New("down")}, HmacEnvelopeSignerConfig{Application: "wms-service"})
+        _ = NewHmacEnvelopeSigner(hmacTestRuntime(), &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret), secretErr: errors.New("down")}, HmacEnvelopeSignerConfig{Application: "wms-service"})
     }, "hmac signer secret provider failed")
 
 }
 
-func TestHmacEnvelopeSigner_ANilContextPanicsAtConstruction(t *testing.T) {
-    var typedNilContext *nilContextProbe
+type typedNilSignerRuntime struct {
+    containercontract.Runtime
+}
 
-    for name, ctx := range map[string]context.Context{"nil": nil, "typed nil": typedNilContext} {
+func TestHmacEnvelopeSigner_ANilRuntimePanicsAtConstruction(t *testing.T) {
+    var typedNil *typedNilSignerRuntime
+
+    for name, runtimeInstance := range map[string]containercontract.Runtime{"nil": nil, "typed nil": typedNil} {
         t.Run(name, func(t *testing.T) {
             testhelper.AssertPanicsWithError(t, func() {
-                _ = NewHmacEnvelopeSigner(ctx, hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "billing"})
-            }, "hmac signer context is nil")
+                _ = NewHmacEnvelopeSigner(runtimeInstance, hmacSignerProbeSecrets(), HmacEnvelopeSignerConfig{Application: "billing"})
+            }, "the runtime is nil or carries no context")
         })
     }
 }
 
-type nilContextProbe struct {
-    context.Context
-}
-
 type hmacSignerContextKey struct{}
 
-func TestHmacEnvelopeSigner_AsksTheProviderUnderTheConstructionContextThenTheRuntimesContext(t *testing.T) {
+func TestHmacEnvelopeSigner_AsksTheProviderUnderTheConstructionRuntimeThenTheCallersRuntimeByIdentity(t *testing.T) {
     provider := &customHmacSecretProvider{secret: []byte(thirtyTwoByteSecret)}
-    bootContext := context.WithValue(context.Background(), hmacSignerContextKey{}, "boot")
+    bootRuntime, finish := runtime.NewBoot(context.WithValue(context.Background(), hmacSignerContextKey{}, "boot"), container.NewContainer(container.ContainerConfig{}))
+    defer func() {
+        _ = finish()
+    }()
 
-    signer := NewHmacEnvelopeSigner(bootContext, provider, HmacEnvelopeSignerConfig{Application: "wms-service"})
+    signer := NewHmacEnvelopeSigner(bootRuntime, provider, HmacEnvelopeSignerConfig{Application: "wms-service"})
 
-    constructionContexts := provider.contextsSeen()
-    if 3 != len(constructionContexts) {
-        t.Fatalf("expected the current key, its binding and its secret read at construction, got %d reads", len(constructionContexts))
+    constructionRuntimes := provider.runtimesSeen()
+    if 3 != len(constructionRuntimes) {
+        t.Fatalf("expected the current key, its binding and its secret read at construction, got %d reads", len(constructionRuntimes))
     }
 
-    for _, seen := range constructionContexts {
-        if bootContext != seen {
-            t.Fatalf("expected every construction read under the context given to the constructor")
+    for _, seen := range constructionRuntimes {
+        if bootRuntime != seen || containercontract.KindBoot != seen.Kind() {
+            t.Fatalf("expected every construction read under the boot runtime given to the constructor")
         }
     }
 
@@ -280,21 +284,21 @@ func TestHmacEnvelopeSigner_AsksTheProviderUnderTheConstructionContextThenTheRun
         t.Fatalf("sign: %v", signErr)
     }
 
-    signContexts := provider.contextsSeen()[len(constructionContexts):]
-    if 0 == len(signContexts) {
+    signRuntimes := provider.runtimesSeen()[len(constructionRuntimes):]
+    if 0 == len(signRuntimes) {
         t.Fatalf("expected Sign to read the provider")
     }
 
-    for _, seen := range signContexts {
-        if signRuntime.Context() != seen {
-            t.Fatalf("expected every Sign read under the runtime's context")
+    for _, seen := range signRuntimes {
+        if signRuntime != seen {
+            t.Fatalf("expected every Sign read under the caller's runtime, by identity")
         }
     }
 }
 
 func TestHmacEnvelopeSigner_ACurrentKeyWithoutASecretIsRefusedAtConstruction(t *testing.T) {
     testhelper.AssertPanicsWithError(t, func() {
-        _ = NewHmacEnvelopeSigner(context.Background(), &missingSecretHmacProvider{}, HmacEnvelopeSignerConfig{Application: "wms-service"})
+        _ = NewHmacEnvelopeSigner(hmacTestRuntime(), &missingSecretHmacProvider{}, HmacEnvelopeSignerConfig{Application: "wms-service"})
     }, "hmac signer has no secret for the current key id")
 }
 
@@ -302,6 +306,6 @@ type missingSecretHmacProvider struct {
     customHmacSecretProvider
 }
 
-func (instance *missingSecretHmacProvider) Secret(_ context.Context, _ string) ([]byte, bool, error) {
+func (instance *missingSecretHmacProvider) Secret(_ containercontract.Runtime, _ string) ([]byte, bool, error) {
     return nil, false, nil
 }

@@ -1,7 +1,6 @@
 package security
 
 import (
-    "context"
     "testing"
 
     "github.com/precision-soft/melody/v4/exception"
@@ -36,7 +35,7 @@ func TestStaticHmacSecretProvider_AllowsMultipleKeysForOneApplication(t *testing
         },
     })
 
-    if application, bound, _ := provider.ApplicationForKeyId(context.Background(), "key-previous"); false == bound || "wms-service" != application {
+    if application, bound, _ := provider.ApplicationForKeyId(hmacTestRuntime(), "key-previous"); false == bound || "wms-service" != application {
         t.Fatalf("expected key-previous bound to wms-service, got %q bound=%v", application, bound)
     }
 }
@@ -75,15 +74,15 @@ func TestNewStaticHmacSecretProvider_RefusesAKeyThatCanNotIdentifyItsOwner(t *te
 func TestStaticHmacSecretProvider_AnswersFalseForAnUnknownKeyId(t *testing.T) {
     provider := NewStaticHmacSecretProvider(HmacKeyRing{CurrentKeyId: "key-a", Keys: map[string]HmacKey{"key-a": {Application: "app-a", Secret: []byte("secret-value-of-thirty-two-bytes")}}})
 
-    if currentKeyId, currentKeyIdErr := provider.CurrentKeyId(context.Background()); "key-a" != currentKeyId || nil != currentKeyIdErr {
+    if currentKeyId, currentKeyIdErr := provider.CurrentKeyId(hmacTestRuntime()); "key-a" != currentKeyId || nil != currentKeyIdErr {
         t.Fatalf("expected the current key id to be reported, got %q, %v", currentKeyId, currentKeyIdErr)
     }
 
-    if secret, exists, _ := provider.Secret(context.Background(), "key-absent"); true == exists || nil != secret {
+    if secret, exists, _ := provider.Secret(hmacTestRuntime(), "key-absent"); true == exists || nil != secret {
         t.Fatalf("expected an unknown key id to resolve to no secret, got %v", secret)
     }
 
-    if application, exists, _ := provider.ApplicationForKeyId(context.Background(), "key-absent"); true == exists || "" != application {
+    if application, exists, _ := provider.ApplicationForKeyId(hmacTestRuntime(), "key-absent"); true == exists || "" != application {
         t.Fatalf("expected an unknown key id to be bound to no application, got %q", application)
     }
 }
@@ -95,14 +94,14 @@ func TestStaticHmacSecretProvider_OwnsItsSecretBytes(t *testing.T) {
 
     callerSecret[0] = 'X'
 
-    secret, _, _ := provider.Secret(context.Background(), "key-a")
+    secret, _, _ := provider.Secret(hmacTestRuntime(), "key-a")
     if 's' != secret[0] {
         t.Fatalf("expected the provider to keep its own copy, got %q", string(secret))
     }
 
     secret[0] = 'X'
 
-    readAgain, _, _ := provider.Secret(context.Background(), "key-a")
+    readAgain, _, _ := provider.Secret(hmacTestRuntime(), "key-a")
     if 's' != readAgain[0] {
         t.Fatalf("expected the provider to hand out a copy, got %q", string(readAgain))
     }
@@ -122,18 +121,16 @@ func TestNewStaticHmacSecretProvider_NamesTheKeyRingFieldItRefuses(t *testing.T)
     })
 }
 
-func TestStaticHmacSecretProvider_RefusesANilContext(t *testing.T) {
+func TestStaticHmacSecretProvider_RefusesANilRuntime(t *testing.T) {
     provider := hmacTestSecrets()
 
-    var nilContext context.Context
-
-    _, keyIdErr := provider.CurrentKeyId(nilContext)
-    _, _, secretErr := provider.Secret(nilContext, "key-current")
-    _, _, applicationErr := provider.ApplicationForKeyId(nilContext, "key-current")
+    _, keyIdErr := provider.CurrentKeyId(nil)
+    _, _, secretErr := provider.Secret(nil, "key-current")
+    _, _, applicationErr := provider.ApplicationForKeyId(nil, "key-current")
 
     for door, doorErr := range map[string]error{"CurrentKeyId": keyIdErr, "Secret": secretErr, "ApplicationForKeyId": applicationErr} {
-        if "ctx" != exception.LogContext(doorErr, exception.LogContextConfig{})["argument"] {
-            t.Fatalf("expected %s to refuse a nil context naming the argument, got %v", door, doorErr)
+        if "runtimeInstance" != exception.LogContext(doorErr, exception.LogContextConfig{})["argument"] {
+            t.Fatalf("expected %s to refuse a nil runtime naming the argument, got %v", door, doorErr)
         }
     }
 }
