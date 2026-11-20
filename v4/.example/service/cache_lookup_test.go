@@ -11,6 +11,7 @@ import (
     "github.com/precision-soft/melody/v4/.example/persistence"
     "github.com/precision-soft/melody/v4/.example/repository"
     melodybound "github.com/precision-soft/melody/v4/bound"
+    melodycache "github.com/precision-soft/melody/v4/cache"
     melodyclock "github.com/precision-soft/melody/v4/clock"
 )
 
@@ -110,17 +111,12 @@ func TestRememberEntityOrAbsenceLeavesAFoundEntityUnbounded(t *testing.T) {
     }
 
     writes := cacheInstance.writesFor("found-key")
-    if 0 == len(writes) {
-        t.Fatalf("expected the value to be written")
-    }
-
-    lastWrite := writes[len(writes)-1]
-    if melodybound.Of(10*time.Minute) != lastWrite.ttl {
-        t.Fatalf("expected the found value to end under the ten-minute entity bound, got %s", lastWrite.ttl)
+    if 1 != len(writes) || melodybound.Of(10*time.Minute) != writes[0].ttl {
+        t.Fatalf("expected the found value written once, under the ten-minute entity bound, got %+v", writes)
     }
 }
 
-/* the probe is on a hit that found something, because that is the only hit the early return changes: a remembered absence is answered the same way with or without it, since Remember reads the store itself and writes nothing on a hit and a nil computed value is returned before the second write, while a found entity would be re-stored by every reader, one cache write per request served from memory. */
+/* a found entity re-stored on a hit would cost one cache write per request served from memory */
 func TestRememberEntityOrAbsenceAnswersAFoundHitWithoutWritingItBack(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
     if setErr := cacheInstance.Set(context.Background(), "hit-key", lookupTestEntity(), melodybound.Of(entityCacheTtl)); nil != setErr {
@@ -225,7 +221,7 @@ func TestFindByUsernameBoundsTheAbsenceItRemembers(t *testing.T) {
     }
 }
 
-/* a loader that parks until it is released puts twenty readers of one key in flight together, so Remember coalesces them onto one loader; what is counted is who writes the found value unbounded: the reader that loaded it, once, and no waiter, since a waiter's write lands after the leader's and would re-install, unbounded, whatever a listener cleared in between. */
+/* a loader that parks until it is released puts twenty readers of one key in flight together, so Remember coalesces them onto one loader; what is counted is the writes of the found value: one, under the entity bound, and none under the absence bound, since a waiter that wrote after the leader would re-install whatever a listener cleared in between. */
 func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *testing.T) {
     cacheInstance := newTtlRecordingCache()
 
@@ -285,8 +281,29 @@ func TestRememberEntityOrAbsenceWritesAFoundValueOnceForEveryWaiterOfOneLoad(t *
         }
     }
 
-    if 1 != entityWrites {
-        t.Fatalf("expected the found value to be written under the entity bound exactly once, by the reader that loaded it, got %d such writes among %d", entityWrites, len(writes))
+    if 1 != entityWrites || 1 != len(writes) {
+        t.Fatalf("expected the found value to be written once, under the entity bound, got %d such writes among %d", entityWrites, len(writes))
+    }
+}
+
+/* the helper reads the store only through Remember: a read of its own before it would add one read to every miss */
+func TestRememberEntityOrAbsenceReadsTheStoreAsRememberAloneDoes(t *testing.T) {
+    helperCache := newTtlRecordingCache()
+    if _, rememberErr := rememberEntityOrAbsence(context.Background(), helperCache, "read-key", func(ctx context.Context) (*string, error) {
+        return lookupTestEntity(), nil
+    }); nil != rememberErr {
+        t.Fatalf("helper: %v", rememberErr)
+    }
+
+    bareCache := newTtlRecordingCache()
+    if _, rememberErr := melodycache.Remember(context.Background(), bareCache, "read-key", melodycache.RememberConfig{Ttl: melodybound.Of(absenceCacheTtl)}, func(ctx context.Context, _ *melodycache.RememberItem) (*string, error) {
+        return lookupTestEntity(), nil
+    }); nil != rememberErr {
+        t.Fatalf("remember: %v", rememberErr)
+    }
+
+    if bareCache.readsFor("read-key") != helperCache.readsFor("read-key") {
+        t.Fatalf("expected the helper's miss to read the store %d times, as Remember alone does, got %d", bareCache.readsFor("read-key"), helperCache.readsFor("read-key"))
     }
 }
 

@@ -36,6 +36,14 @@ type ttlRecordingCache struct {
     writes      []cacheWrite
     deletes     int
     deletedKeys []string
+    reads       map[string]int
+}
+
+func (instance *ttlRecordingCache) readsFor(key string) int {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.reads[key]
 }
 
 func (instance *ttlRecordingCache) deleteCount() int {
@@ -51,7 +59,7 @@ type cacheWrite struct {
 }
 
 func newTtlRecordingCache() *ttlRecordingCache {
-    return &ttlRecordingCache{values: map[string]any{}}
+    return &ttlRecordingCache{values: map[string]any{}, reads: map[string]int{}}
 }
 
 func (instance *ttlRecordingCache) writesFor(key string) []cacheWrite {
@@ -71,6 +79,8 @@ func (instance *ttlRecordingCache) writesFor(key string) []cacheWrite {
 func (instance *ttlRecordingCache) Get(ctx context.Context, key string, target any) (bool, error) {
     instance.mutex.Lock()
     defer instance.mutex.Unlock()
+
+    instance.reads[key] = instance.reads[key] + 1
 
     value, exists := instance.values[key]
     if false == exists {

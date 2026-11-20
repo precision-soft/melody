@@ -12,49 +12,34 @@ import (
 /* absenceCacheTtl bounds how long a lookup that found nothing is remembered. A found entity is cleared by the listeners under its own key and keeps the longer entityCacheTtl; an absence has no such owner, and its key is spelled by whoever asked, so an unbounded one would let a client write one permanent entry per name it invents. */
 const absenceCacheTtl = time.Minute
 
-/* rememberEntityOrAbsence answers a cached entity, computing it through the loader on a miss: an absence is stored under the bounded ttl Remember writes, and only a value this call found is written again, under entityCacheTtl. A hit is returned as it is, so an entity served from memory costs no cache write. The loader answers nil for "there is no such entity". */
+/* rememberEntityOrAbsence answers a cached entity, computing it through the loader on a miss: the loader answers nil for "there is no such entity", which is remembered under the short absenceCacheTtl, and a found entity is stored under entityCacheTtl by the one call that loaded it. A hit writes nothing. */
 func rememberEntityOrAbsence[T any](
     ctx context.Context,
     cacheInstance melodycachecontract.Cache,
     cacheKey string,
     loader func(ctx context.Context) (*T, error),
 ) (*T, error) {
-    cached, exists, getErr := melodycache.Get[*T](ctx, cacheInstance, cacheKey)
-    if nil == getErr && true == exists {
-        return cached, nil
-    }
-
-    /* Remember runs the loader on the leader's goroutine alone and hands its answer to every waiter, so the flag marks the one call that computed the value: a waiter's late write would re-install an entity a listener cleared after the leader's load. */
-    computedHere := false
-
-    /* a failed read is left to Remember, which treats an undecodable payload as a miss and heals the key and answers any other cache failure unchanged */
-    computed, rememberErr := melodycache.Remember(
+    return melodycache.Remember(
         ctx,
         cacheInstance,
         cacheKey,
         melodycache.RememberConfig{
+            /* the short bound is the default, so a path that forgets to raise it leaves an entry that expires soon rather than an absence kept for long */
             Ttl: melodybound.Of(absenceCacheTtl),
         },
-        func(ctx context.Context, _ *melodycache.RememberItem) (*T, error) {
-            computedHere = true
+        func(ctx context.Context, item *melodycache.RememberItem) (*T, error) {
+            loaded, loadErr := loader(ctx)
+            if nil != loadErr {
+                return nil, loadErr
+            }
 
-            return loader(ctx)
+            if nil != loaded {
+                item.SetTtl(melodybound.Of(entityCacheTtl))
+            }
+
+            return loaded, nil
         },
     )
-    if nil != rememberErr {
-        return nil, rememberErr
-    }
-
-    if nil == computed || false == computedHere {
-        return computed, nil
-    }
-
-    setErr := cacheInstance.Set(ctx, cacheKey, computed, melodybound.Of(entityCacheTtl))
-    if nil != setErr {
-        return nil, setErr
-    }
-
-    return computed, nil
 }
 
 /* entityCacheTtl bounds a found entity. The listeners that watch the write events clear these entries by name, but the leader's write lands after its load, and a write and its invalidation that run inside that window leave the entity read before the write: the bound is how long such an entry can be served. */
