@@ -62,7 +62,7 @@ func TestStore_ClaimMarksInFlightAndHidesFromNextClaim(t *testing.T) {
 
     enqueueOutboxRows(t, store, 3)
 
-    claimed, claimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if nil != claimErr {
         t.Fatalf("claim: %v", claimErr)
     }
@@ -71,7 +71,7 @@ func TestStore_ClaimMarksInFlightAndHidesFromNextClaim(t *testing.T) {
     }
 
     /* the same rows are now in-flight with a future visibility, so an immediate second claim sees nothing */
-    again, againErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    again, againErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if nil != againErr {
         t.Fatalf("second claim: %v", againErr)
     }
@@ -109,7 +109,7 @@ func TestStore_ClaimSkipsRowLockedByAnotherTransaction(t *testing.T) {
     claimCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
     defer cancel()
 
-    claimed, claimErr := store.ClaimDueMessages(claimCtx, rowCount, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(claimCtx), rowCount, time.Minute)
     if nil != claimErr {
         t.Fatalf("claim blocked or errored; a held row must be skipped, not waited on: %v", claimErr)
     }
@@ -132,19 +132,19 @@ func TestStore_StaleResolveDoesNotClobberResolvedRow(t *testing.T) {
 
     enqueueOutboxRows(t, store, 1)
 
-    claimed, claimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if nil != claimErr || 1 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
     id := claimed[0].Id
 
     /* the current owner resolves the row as sent */
-    if sentErr := store.MarkSent(ctx, id, claimed[0].ClaimToken); nil != sentErr {
+    if sentErr := store.MarkSent(outboxTestRuntime(ctx), id, claimed[0].ClaimToken); nil != sentErr {
         t.Fatalf("mark sent: %v", sentErr)
     }
 
     /* a stale run (its claim long lapsed) tries to reschedule the same id under its old fencing token; both the in-flight guard and the token guard must make it a no-op */
-    if rescheduleErr := store.Reschedule(ctx, id, 1, time.Now(), "stale", "stale-claim-token"); nil != rescheduleErr {
+    if rescheduleErr := store.Reschedule(outboxTestRuntime(ctx), id, 1, time.Now(), "stale", "stale-claim-token"); nil != rescheduleErr {
         t.Fatalf("stale reschedule: %v", rescheduleErr)
     }
 
@@ -165,7 +165,7 @@ func TestStore_RecordDeliveryAttemptIncrementsPerRowNotClaim(t *testing.T) {
 
     enqueueOutboxRows(t, store, 1)
 
-    claimed, claimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if nil != claimErr || 1 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
@@ -174,7 +174,7 @@ func TestStore_RecordDeliveryAttemptIncrementsPerRowNotClaim(t *testing.T) {
     }
     id := claimed[0].Id
 
-    first, claimedOk, recordErr := store.RecordDeliveryAttempt(ctx, id, claimed[0].ClaimToken)
+    first, claimedOk, recordErr := store.RecordDeliveryAttempt(outboxTestRuntime(ctx), id, claimed[0].ClaimToken)
     if nil != recordErr {
         t.Fatalf("record delivery attempt: %v", recordErr)
     }
@@ -182,7 +182,7 @@ func TestStore_RecordDeliveryAttemptIncrementsPerRowNotClaim(t *testing.T) {
         t.Fatalf("expected the first recorded attempt to return 1 and claimed, got %d claimed=%v", first, claimedOk)
     }
 
-    second, _, secondErr := store.RecordDeliveryAttempt(ctx, id, claimed[0].ClaimToken)
+    second, _, secondErr := store.RecordDeliveryAttempt(outboxTestRuntime(ctx), id, claimed[0].ClaimToken)
     if nil != secondErr {
         t.Fatalf("second record: %v", secondErr)
     }
@@ -198,17 +198,17 @@ func TestStore_RecordDeliveryAttemptReportsUnclaimedWhenNotInFlight(t *testing.T
 
     enqueueOutboxRows(t, store, 1)
 
-    claimed, claimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if nil != claimErr || 1 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
     id := claimed[0].Id
 
-    if sentErr := store.MarkSent(ctx, id, claimed[0].ClaimToken); nil != sentErr {
+    if sentErr := store.MarkSent(outboxTestRuntime(ctx), id, claimed[0].ClaimToken); nil != sentErr {
         t.Fatalf("mark sent: %v", sentErr)
     }
 
-    _, claimedOk, recordErr := store.RecordDeliveryAttempt(ctx, id, claimed[0].ClaimToken)
+    _, claimedOk, recordErr := store.RecordDeliveryAttempt(outboxTestRuntime(ctx), id, claimed[0].ClaimToken)
     if nil != recordErr {
         t.Fatalf("record delivery attempt: %v", recordErr)
     }
@@ -224,7 +224,7 @@ func TestStore_StaleClaimTokenCannotClobberReclaimedRow(t *testing.T) {
 
     enqueueOutboxRows(t, store, 1)
 
-    firstClaim, firstErr := store.ClaimDueMessages(ctx, 10, 1*time.Millisecond)
+    firstClaim, firstErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, 1*time.Millisecond)
     if nil != firstErr || 1 != len(firstClaim) {
         t.Fatalf("first claim: %v (got %d)", firstErr, len(firstClaim))
     }
@@ -232,7 +232,7 @@ func TestStore_StaleClaimTokenCannotClobberReclaimedRow(t *testing.T) {
     /* let the visibility window lapse so the row is due again, then re-claim it under a fresh token */
     time.Sleep(10 * time.Millisecond)
 
-    secondClaim, secondErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    secondClaim, secondErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if nil != secondErr || 1 != len(secondClaim) {
         t.Fatalf("second claim: %v (got %d)", secondErr, len(secondClaim))
     }
@@ -242,7 +242,7 @@ func TestStore_StaleClaimTokenCannotClobberReclaimedRow(t *testing.T) {
 
     id := firstClaim[0].Id
 
-    _, staleClaimed, staleRecordErr := store.RecordDeliveryAttempt(ctx, id, firstClaim[0].ClaimToken)
+    _, staleClaimed, staleRecordErr := store.RecordDeliveryAttempt(outboxTestRuntime(ctx), id, firstClaim[0].ClaimToken)
     if nil != staleRecordErr {
         t.Fatalf("stale record: %v", staleRecordErr)
     }
@@ -251,11 +251,11 @@ func TestStore_StaleClaimTokenCannotClobberReclaimedRow(t *testing.T) {
     }
 
     /* a stale resolution must not clobber the new owner: this MarkSent matches no row */
-    if sentErr := store.MarkSent(ctx, id, firstClaim[0].ClaimToken); nil != sentErr {
+    if sentErr := store.MarkSent(outboxTestRuntime(ctx), id, firstClaim[0].ClaimToken); nil != sentErr {
         t.Fatalf("stale mark sent: %v", sentErr)
     }
 
-    _, freshClaimed, freshRecordErr := store.RecordDeliveryAttempt(ctx, id, secondClaim[0].ClaimToken)
+    _, freshClaimed, freshRecordErr := store.RecordDeliveryAttempt(outboxTestRuntime(ctx), id, secondClaim[0].ClaimToken)
     if nil != freshRecordErr {
         t.Fatalf("fresh record: %v", freshRecordErr)
     }
@@ -271,7 +271,7 @@ func TestStore_InFlightRowResurfacesAfterVisibility(t *testing.T) {
 
     enqueueOutboxRows(t, store, 1)
 
-    first, firstErr := store.ClaimDueMessages(ctx, 10, 50*time.Millisecond)
+    first, firstErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, 50*time.Millisecond)
     if nil != firstErr {
         t.Fatalf("first claim: %v", firstErr)
     }
@@ -281,7 +281,7 @@ func TestStore_InFlightRowResurfacesAfterVisibility(t *testing.T) {
 
     time.Sleep(120 * time.Millisecond)
 
-    second, secondErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    second, secondErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if nil != secondErr {
         t.Fatalf("second claim: %v", secondErr)
     }
@@ -318,7 +318,7 @@ func TestStore_ClaimDueMessagesRefusesANonPositiveLimitBeforeAnyQuery(t *testing
 
     store := NewStore(bun.NewDB(sqldb, pgdialect.New()), &stringCodec{})
 
-    pending, claimErr := store.ClaimDueMessages(context.Background(), 0, time.Minute)
+    pending, claimErr := store.ClaimDueMessages(outboxTestRuntime(context.Background()), 0, time.Minute)
     if nil == claimErr || nil != pending {
         t.Fatalf("expected the zero limit refused before any query, got %v, %v", pending, claimErr)
     }
@@ -348,7 +348,7 @@ func TestStore_AnOversizedClaimLimitIsRefusedBeforeAnyQuery(t *testing.T) {
     hook := &claimQueryHook{}
     store.database.AddQueryHook(hook)
 
-    if _, claimErr := store.ClaimDueMessages(context.Background(), math.MaxInt32, time.Minute); nil == claimErr {
+    if _, claimErr := store.ClaimDueMessages(outboxTestRuntime(context.Background()), math.MaxInt32, time.Minute); nil == claimErr {
         t.Fatalf("expected an oversized claim limit refused")
     }
 
@@ -356,7 +356,7 @@ func TestStore_AnOversizedClaimLimitIsRefusedBeforeAnyQuery(t *testing.T) {
         t.Fatalf("expected no query for a refused limit, got %v", hook.queries)
     }
 
-    if _, claimErr := store.ClaimDueMessages(context.Background(), maximumBatchSize, time.Minute); nil != claimErr {
+    if _, claimErr := store.ClaimDueMessages(outboxTestRuntime(context.Background()), maximumBatchSize, time.Minute); nil != claimErr {
         t.Fatalf("claim: %v", claimErr)
     }
 
@@ -375,20 +375,20 @@ func TestStore_RescheduleUnchargedHandsTheRowBackAsNeverTried(t *testing.T) {
 
     enqueueOutboxRows(t, store, 1)
 
-    claimed, claimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if nil != claimErr || 1 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
 
-    if _, _, recordErr := store.RecordDeliveryAttempt(ctx, claimed[0].Id, claimed[0].ClaimToken); nil != recordErr {
+    if _, _, recordErr := store.RecordDeliveryAttempt(outboxTestRuntime(ctx), claimed[0].Id, claimed[0].ClaimToken); nil != recordErr {
         t.Fatalf("record delivery attempt: %v", recordErr)
     }
 
-    if handBackErr := store.RescheduleUncharged(ctx, claimed[0].Id, time.Now().Add(-time.Second), "broker unreachable", claimed[0].ClaimToken); nil != handBackErr {
+    if handBackErr := store.RescheduleUncharged(outboxTestRuntime(ctx), claimed[0].Id, time.Now().Add(-time.Second), "broker unreachable", claimed[0].ClaimToken); nil != handBackErr {
         t.Fatalf("hand back: %v", handBackErr)
     }
 
-    reclaimed, reclaimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    reclaimed, reclaimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if nil != reclaimErr || 1 != len(reclaimed) {
         t.Fatalf("expected the row pending and due again: %v (got %d)", reclaimErr, len(reclaimed))
     }
@@ -397,15 +397,15 @@ func TestStore_RescheduleUnchargedHandsTheRowBackAsNeverTried(t *testing.T) {
         t.Fatalf("expected neither counter charged, got attempts %d delivery attempts %d", reclaimed[0].Attempts, reclaimed[0].DeliveryAttempts)
     }
 
-    if _, _, recordErr := store.RecordDeliveryAttempt(ctx, reclaimed[0].Id, reclaimed[0].ClaimToken); nil != recordErr {
+    if _, _, recordErr := store.RecordDeliveryAttempt(outboxTestRuntime(ctx), reclaimed[0].Id, reclaimed[0].ClaimToken); nil != recordErr {
         t.Fatalf("record the re-claim's delivery attempt: %v", recordErr)
     }
 
-    if staleErr := store.RescheduleUncharged(ctx, reclaimed[0].Id, time.Now(), "stale", claimed[0].ClaimToken); nil != staleErr {
+    if staleErr := store.RescheduleUncharged(outboxTestRuntime(ctx), reclaimed[0].Id, time.Now(), "stale", claimed[0].ClaimToken); nil != staleErr {
         t.Fatalf("a stale hand back answers no error: %v", staleErr)
     }
 
-    again, _ := store.ClaimDueMessages(ctx, 10, time.Minute)
+    again, _ := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if 0 != len(again) {
         t.Fatalf("expected the stale claim token to leave the re-claimed row in flight, got %d due", len(again))
     }
@@ -417,21 +417,238 @@ func TestStore_RescheduleUnchargedHandsBackARowWhoseDeliveryCountIsZero(t *testi
 
     enqueueOutboxRows(t, store, 1)
 
-    claimed, claimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    claimed, claimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if nil != claimErr || 1 != len(claimed) {
         t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
     }
 
-    if handBackErr := store.RescheduleUncharged(ctx, claimed[0].Id, time.Now().Add(-time.Second), "broker unreachable", claimed[0].ClaimToken); nil != handBackErr {
+    if handBackErr := store.RescheduleUncharged(outboxTestRuntime(ctx), claimed[0].Id, time.Now().Add(-time.Second), "broker unreachable", claimed[0].ClaimToken); nil != handBackErr {
         t.Fatalf("hand back: %v", handBackErr)
     }
 
-    reclaimed, reclaimErr := store.ClaimDueMessages(ctx, 10, time.Minute)
+    reclaimed, reclaimErr := store.ClaimDueMessages(outboxTestRuntime(ctx), 10, time.Minute)
     if nil != reclaimErr || 1 != len(reclaimed) {
         t.Fatalf("expected the row pending and due again with its count left at zero: %v (got %d)", reclaimErr, len(reclaimed))
     }
 
     if 0 != reclaimed[0].DeliveryAttempts {
         t.Fatalf("expected the delivery count floored at zero, got %d", reclaimed[0].DeliveryAttempts)
+    }
+}
+
+func reloadOutboxRow(t *testing.T, store *Store, id int64) Message {
+    t.Helper()
+
+    var row Message
+    if scanErr := store.database.NewSelect().Model(&row).Where("id = ?", id).Scan(context.Background()); nil != scanErr {
+        t.Fatalf("reload row %d: %v", id, scanErr)
+    }
+
+    return row
+}
+
+func TestStore_ReleaseClaimsHandsBackOnlyTheTokensStillClaimedRows(t *testing.T) {
+    store := outboxTestStore(t)
+    runtimeInstance := outboxTestRuntime(context.Background())
+
+    enqueueOutboxRows(t, store, 3)
+
+    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 3, time.Hour)
+    if nil != claimErr || 3 != len(claimed) {
+        t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
+    }
+
+    token := claimed[0].ClaimToken
+    if _, _, recordErr := store.RecordDeliveryAttempt(runtimeInstance, claimed[0].Id, token); nil != recordErr {
+        t.Fatalf("record: %v", recordErr)
+    }
+
+    if sentErr := store.MarkSent(runtimeInstance, claimed[1].Id, token); nil != sentErr {
+        t.Fatalf("mark sent: %v", sentErr)
+    }
+
+    enqueueOutboxRows(t, store, 1)
+    other, otherErr := store.ClaimDueMessages(runtimeInstance, 1, time.Hour)
+    if nil != otherErr || 1 != len(other) {
+        t.Fatalf("second claim: %v (got %d)", otherErr, len(other))
+    }
+
+    released, releaseErr := store.ReleaseClaims(runtimeInstance, token)
+    if nil != releaseErr || 2 != released {
+        t.Fatalf("expected the two rows still claimed under the token released, got %d: %v", released, releaseErr)
+    }
+
+    for _, id := range []int64{claimed[0].Id, claimed[2].Id} {
+        row := reloadOutboxRow(t, store, id)
+        if StatusPending != row.Status || row.AvailableAt.After(time.Now()) || 0 != row.Attempts {
+            t.Fatalf("expected row %d pending, available now, attempts unchanged, got %+v", id, row)
+        }
+    }
+
+    if 1 != reloadOutboxRow(t, store, claimed[0].Id).DeliveryAttempts {
+        t.Fatal("expected the recorded delivery attempt kept")
+    }
+
+    if StatusSent != reloadOutboxRow(t, store, claimed[1].Id).Status {
+        t.Fatal("expected the sent row untouched")
+    }
+
+    if StatusInFlight != reloadOutboxRow(t, store, other[0].Id).Status {
+        t.Fatal("expected the row claimed under another token untouched")
+    }
+}
+
+func markOutboxRowsDead(t *testing.T, store *Store, count int) []int64 {
+    t.Helper()
+
+    runtimeInstance := outboxTestRuntime(context.Background())
+    enqueueOutboxRows(t, store, count)
+
+    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, count, time.Hour)
+    if nil != claimErr || count != len(claimed) {
+        t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
+    }
+
+    ids := make([]int64, 0, count)
+    for _, pending := range claimed {
+        if _, _, recordErr := store.RecordDeliveryAttempt(runtimeInstance, pending.Id, pending.ClaimToken); nil != recordErr {
+            t.Fatalf("record: %v", recordErr)
+        }
+
+        if deadErr := store.MarkDead(runtimeInstance, pending.Id, 3, "poison", pending.ClaimToken); nil != deadErr {
+            t.Fatalf("mark dead: %v", deadErr)
+        }
+
+        ids = append(ids, pending.Id)
+    }
+
+    return ids
+}
+
+func TestStore_RequeueDeadReturnsTheSelectedDeadRowsWithTheirCountersReset(t *testing.T) {
+    store := outboxTestStore(t)
+    runtimeInstance := outboxTestRuntime(context.Background())
+
+    dead := markOutboxRowsDead(t, store, 3)
+    enqueueOutboxRows(t, store, 1)
+
+    requeued, requeueErr := store.RequeueDead(runtimeInstance, RequeueDeadOptions{Ids: []int64{dead[1]}})
+    if nil != requeueErr || 1 != requeued {
+        t.Fatalf("expected the one named dead row requeued, got %d: %v", requeued, requeueErr)
+    }
+
+    row := reloadOutboxRow(t, store, dead[1])
+    if StatusPending != row.Status || 0 != row.Attempts || 0 != row.DeliveryAttempts || "poison" != row.LastError || row.AvailableAt.After(time.Now()) {
+        t.Fatalf("expected the row pending, counters reset, last_error kept, got %+v", row)
+    }
+
+    if StatusDead != reloadOutboxRow(t, store, dead[0]).Status {
+        t.Fatal("expected the row not named left dead")
+    }
+
+    limited, limitedErr := store.RequeueDead(runtimeInstance, RequeueDeadOptions{Limit: 1})
+    if nil != limitedErr || 1 != limited {
+        t.Fatalf("expected the limit to bound the requeue to one row, got %d: %v", limited, limitedErr)
+    }
+
+    rest, restErr := store.RequeueDead(runtimeInstance, RequeueDeadOptions{})
+    if nil != restErr || 1 != rest {
+        t.Fatalf("expected the last dead row requeued, got %d: %v", rest, restErr)
+    }
+
+    if _, negativeErr := store.RequeueDead(runtimeInstance, RequeueDeadOptions{Limit: -1}); nil == negativeErr {
+        t.Fatal("expected a negative limit refused")
+    }
+}
+
+func TestStore_PruneSentDeletesOnlySentRowsEnqueuedBeforeTheCutOff(t *testing.T) {
+    store := outboxTestStore(t)
+    runtimeInstance := outboxTestRuntime(context.Background())
+
+    if _, zeroErr := store.PruneSent(runtimeInstance, PruneSentOptions{}); nil == zeroErr {
+        t.Fatal("expected a zero cut-off refused")
+    } else {
+        expectErrorNamingField(t, zeroErr, "PruneSentOptions.SentBefore")
+    }
+
+    enqueueOutboxRows(t, store, 3)
+    claimed, claimErr := store.ClaimDueMessages(runtimeInstance, 3, time.Hour)
+    if nil != claimErr || 3 != len(claimed) {
+        t.Fatalf("claim: %v (got %d)", claimErr, len(claimed))
+    }
+
+    for _, pending := range claimed[:2] {
+        if sentErr := store.MarkSent(runtimeInstance, pending.Id, pending.ClaimToken); nil != sentErr {
+            t.Fatalf("mark sent: %v", sentErr)
+        }
+    }
+
+    old := time.Now().Add(-48 * time.Hour)
+    if _, updateErr := store.database.NewUpdate().Model((*Message)(nil)).Set("created_at = ?", old).Where("id IN (?)", bun.In([]int64{claimed[0].Id, claimed[2].Id})).Exec(context.Background()); nil != updateErr {
+        t.Fatalf("age rows: %v", updateErr)
+    }
+
+    dead := markOutboxRowsDead(t, store, 1)
+    if _, updateErr := store.database.NewUpdate().Model((*Message)(nil)).Set("created_at = ?", old).Where("id = ?", dead[0]).Exec(context.Background()); nil != updateErr {
+        t.Fatalf("age dead row: %v", updateErr)
+    }
+
+    pruned, pruneErr := store.PruneSent(runtimeInstance, PruneSentOptions{SentBefore: time.Now().Add(-24 * time.Hour)})
+    if nil != pruneErr || 1 != pruned {
+        t.Fatalf("expected the one old sent row pruned, got %d: %v", pruned, pruneErr)
+    }
+
+    remaining := 0
+    countErr := store.database.NewSelect().Model((*Message)(nil)).ColumnExpr("count(*)").Where("id IN (?)", bun.In([]int64{claimed[0].Id, claimed[1].Id, claimed[2].Id, dead[0]})).Scan(context.Background(), &remaining)
+    if nil != countErr || 3 != remaining {
+        t.Fatalf("expected the recent sent row, the old in-flight row and the old dead row kept, got %d: %v", remaining, countErr)
+    }
+
+    enqueueOutboxRows(t, store, 2)
+    more, moreErr := store.ClaimDueMessages(runtimeInstance, 2, time.Hour)
+    if nil != moreErr || 2 != len(more) {
+        t.Fatalf("claim: %v (got %d)", moreErr, len(more))
+    }
+
+    for _, pending := range more {
+        if sentErr := store.MarkSent(runtimeInstance, pending.Id, pending.ClaimToken); nil != sentErr {
+            t.Fatalf("mark sent: %v", sentErr)
+        }
+    }
+
+    limited, limitedErr := store.PruneSent(runtimeInstance, PruneSentOptions{SentBefore: time.Now().Add(time.Hour), Limit: 1})
+    if nil != limitedErr || 1 != limited {
+        t.Fatalf("expected the limit to bound the prune to one row, got %d: %v", limited, limitedErr)
+    }
+
+    afterAnInFlightRow, afterErr := store.PruneSent(runtimeInstance, PruneSentOptions{SentBefore: time.Now().Add(time.Hour), Limit: 1})
+    if nil != afterErr || 1 != afterAnInFlightRow {
+        t.Fatalf("expected the limit to count sent rows only, an older in-flight row passed over, got %d: %v", afterAnInFlightRow, afterErr)
+    }
+}
+
+func TestStore_EveryRepositoryDoorRefusesANilRuntime(t *testing.T) {
+    store := &Store{}
+
+    _, claimErr := store.ClaimDueMessages(nil, 1, time.Minute)
+    _, _, recordErr := store.RecordDeliveryAttempt(nil, 1, "token")
+    _, releaseErr := store.ReleaseClaims(nil, "token")
+    _, requeueErr := store.RequeueDead(nil, RequeueDeadOptions{})
+    _, pruneErr := store.PruneSent(nil, PruneSentOptions{SentBefore: time.Now()})
+
+    for name, doorErr := range map[string]error{
+        "ClaimDueMessages":      claimErr,
+        "RecordDeliveryAttempt": recordErr,
+        "MarkSent":              store.MarkSent(nil, 1, "token"),
+        "Reschedule":            store.Reschedule(nil, 1, 1, time.Now(), "", "token"),
+        "RescheduleUncharged":   store.RescheduleUncharged(nil, 1, time.Now(), "", "token"),
+        "MarkDead":              store.MarkDead(nil, 1, 1, "", "token"),
+        "ReleaseClaims":         releaseErr,
+        "RequeueDead":           requeueErr,
+        "PruneSent":             pruneErr,
+    } {
+        if nil == doorErr || false == strings.Contains(doorErr.Error(), "the runtime is nil or carries no context") {
+            t.Fatalf("%s: expected a nil runtime refused, got %v", name, doorErr)
+        }
     }
 }

@@ -1,7 +1,6 @@
 package outbox
 
 import (
-    "context"
     "time"
 
     "github.com/precision-soft/melody/v4/container"
@@ -13,7 +12,7 @@ import (
 /* lazyRepository defers resolving the registered outbox Store until the first repository call, so a component assembled during boot can hold the Repository before the container is safe to resolve. A store that cannot be resolved is the call's error, never a panic, since the relay drives this Repository from its backoff-and-retry loop. */
 type lazyRepository struct {
     store *container.LazyService[*Store]
-    /* the doors take a context, not a runtime, so the store is created under the resolver's own runtime over the call's context */
+    /* the store is created under the resolver's own runtime over the call's context */
     resolver containercontract.Resolver
 }
 
@@ -30,12 +29,12 @@ func NewLazyRepository(resolver containercontract.Resolver) Repository {
 }
 
 /* resolveStore resolves the registered store, reporting a resolution failure — or a nil yield — as an error the caller returns from its own call, so the relay's retry loop owns the failure instead of a panic owning the process. */
-func (instance *lazyRepository) resolveStore(ctx context.Context) (*Store, error) {
-    if nil == ctx {
-        return nil, exception.NewError("outbox: the lazy repository was handed a nil context", nil, nil)
+func (instance *lazyRepository) resolveStore(runtimeInstance containercontract.Runtime) (*Store, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return nil, refuseErr
     }
 
-    store, resolveErr := instance.store.Resolve(runtime.WithContext(instance.resolver.Runtime(), ctx))
+    store, resolveErr := instance.store.Resolve(runtime.WithContext(instance.resolver.Runtime(), runtimeInstance.Context()))
     if nil != resolveErr {
         return nil, resolveErr
     }
@@ -47,58 +46,85 @@ func (instance *lazyRepository) resolveStore(ctx context.Context) (*Store, error
     return store, nil
 }
 
-func (instance *lazyRepository) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
-    store, resolveErr := instance.resolveStore(ctx)
+func (instance *lazyRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
+    store, resolveErr := instance.resolveStore(runtimeInstance)
     if nil != resolveErr {
         return nil, resolveErr
     }
 
-    return store.ClaimDueMessages(ctx, limit, visibility)
+    return store.ClaimDueMessages(runtimeInstance, limit, visibility)
 }
 
-func (instance *lazyRepository) RecordDeliveryAttempt(ctx context.Context, id int64, claimToken string) (int, bool, error) {
-    store, resolveErr := instance.resolveStore(ctx)
+func (instance *lazyRepository) RecordDeliveryAttempt(runtimeInstance containercontract.Runtime, id int64, claimToken string) (int, bool, error) {
+    store, resolveErr := instance.resolveStore(runtimeInstance)
     if nil != resolveErr {
         return 0, false, resolveErr
     }
 
-    return store.RecordDeliveryAttempt(ctx, id, claimToken)
+    return store.RecordDeliveryAttempt(runtimeInstance, id, claimToken)
 }
 
-func (instance *lazyRepository) MarkSent(ctx context.Context, id int64, claimToken string) error {
-    store, resolveErr := instance.resolveStore(ctx)
+func (instance *lazyRepository) MarkSent(runtimeInstance containercontract.Runtime, id int64, claimToken string) error {
+    store, resolveErr := instance.resolveStore(runtimeInstance)
     if nil != resolveErr {
         return resolveErr
     }
 
-    return store.MarkSent(ctx, id, claimToken)
+    return store.MarkSent(runtimeInstance, id, claimToken)
 }
 
-func (instance *lazyRepository) Reschedule(ctx context.Context, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
-    store, resolveErr := instance.resolveStore(ctx)
+func (instance *lazyRepository) Reschedule(runtimeInstance containercontract.Runtime, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
+    store, resolveErr := instance.resolveStore(runtimeInstance)
     if nil != resolveErr {
         return resolveErr
     }
 
-    return store.Reschedule(ctx, id, attempts, availableAt, lastError, claimToken)
+    return store.Reschedule(runtimeInstance, id, attempts, availableAt, lastError, claimToken)
 }
 
-func (instance *lazyRepository) RescheduleUncharged(ctx context.Context, id int64, availableAt time.Time, lastError string, claimToken string) error {
-    store, resolveErr := instance.resolveStore(ctx)
+func (instance *lazyRepository) RescheduleUncharged(runtimeInstance containercontract.Runtime, id int64, availableAt time.Time, lastError string, claimToken string) error {
+    store, resolveErr := instance.resolveStore(runtimeInstance)
     if nil != resolveErr {
         return resolveErr
     }
 
-    return store.RescheduleUncharged(ctx, id, availableAt, lastError, claimToken)
+    return store.RescheduleUncharged(runtimeInstance, id, availableAt, lastError, claimToken)
 }
 
-func (instance *lazyRepository) MarkDead(ctx context.Context, id int64, attempts int, lastError string, claimToken string) error {
-    store, resolveErr := instance.resolveStore(ctx)
+func (instance *lazyRepository) MarkDead(runtimeInstance containercontract.Runtime, id int64, attempts int, lastError string, claimToken string) error {
+    store, resolveErr := instance.resolveStore(runtimeInstance)
     if nil != resolveErr {
         return resolveErr
     }
 
-    return store.MarkDead(ctx, id, attempts, lastError, claimToken)
+    return store.MarkDead(runtimeInstance, id, attempts, lastError, claimToken)
+}
+
+func (instance *lazyRepository) ReleaseClaims(runtimeInstance containercontract.Runtime, claimToken string) (int, error) {
+    store, resolveErr := instance.resolveStore(runtimeInstance)
+    if nil != resolveErr {
+        return 0, resolveErr
+    }
+
+    return store.ReleaseClaims(runtimeInstance, claimToken)
+}
+
+func (instance *lazyRepository) RequeueDead(runtimeInstance containercontract.Runtime, options RequeueDeadOptions) (int, error) {
+    store, resolveErr := instance.resolveStore(runtimeInstance)
+    if nil != resolveErr {
+        return 0, resolveErr
+    }
+
+    return store.RequeueDead(runtimeInstance, options)
+}
+
+func (instance *lazyRepository) PruneSent(runtimeInstance containercontract.Runtime, options PruneSentOptions) (int, error) {
+    store, resolveErr := instance.resolveStore(runtimeInstance)
+    if nil != resolveErr {
+        return 0, resolveErr
+    }
+
+    return store.PruneSent(runtimeInstance, options)
 }
 
 var _ Repository = (*lazyRepository)(nil)

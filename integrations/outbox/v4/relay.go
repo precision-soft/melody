@@ -101,7 +101,7 @@ type Relay struct {
     outageReported atomic.Bool
 }
 
-/* RunOnce drains one batch of due messages and returns how many were published; when a Locker is configured and another instance holds the lease, it returns 0. The lease is an optimisation: every claimed row carries this run's claim token, so a lease lost mid-batch hands no claimed row to the new holder, and the batch is drained to its end, or to a failed send, with the refresh failure reported after it. A repository failure mid-batch ends the run where it happened, and the visibility timeout re-surfaces the unreached rows. A failed send ends the batch too, the unreached rows handed back uncharged and held until the failed row is tried again; the failed row is charged an attempt, unless the transport marked the failure with exception.MarkInfrastructureFailure and the next row failed too, an outage, which charges it nothing, or the run's cancellation cut the send, which hands the row back due at once, uncharged, and is reported as the run's error. */
+/* RunOnce drains one batch of due messages and returns how many were published; when a Locker is configured and another instance holds the lease, it returns 0. The lease is an optimisation: every claimed row carries this run's claim token, so a lease lost mid-batch hands no claimed row to the new holder, and the batch is drained to its end, or to a failed send, with the refresh failure reported after it. A repository failure mid-batch ends the run where it happened, and the rows it left claimed after that point are handed back through Repository.ReleaseClaims, the visibility timeout re-surfacing them when the release fails. A failed send ends the batch too, the unreached rows handed back uncharged and held until the failed row is tried again; the failed row is charged an attempt, unless the transport marked the failure with exception.MarkInfrastructureFailure and the next row failed too, an outage, which charges it nothing, or the run's cancellation cut the send, which hands the row back due at once, uncharged, and is reported as the run's error. */
 func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, error) {
     release, refresh, acquired, lockErr := instance.acquireLease(runtimeInstance)
     if nil != lockErr {
@@ -118,9 +118,7 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
     refreshInterval := instance.config.LockTtl / 2
     lastRefresh := time.Now()
 
-    ctx := runtimeInstance.Context()
-
-    due, dueErr := instance.config.Repository.ClaimDueMessages(ctx, instance.config.BatchSize, instance.config.VisibilityTimeout)
+    due, dueErr := instance.config.Repository.ClaimDueMessages(runtimeInstance, instance.config.BatchSize, instance.config.VisibilityTimeout)
     if nil != dueErr {
         return 0, dueErr
     }
@@ -140,6 +138,15 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
         }
     }
 
+    /* endBatch ends the batch on a failure, handing back the claimed rows after the one it stopped at */
+    endBatch := func(index int, batchErr error) error {
+        if index+1 < len(due) {
+            instance.releaseClaims(runtimeInstance, due[index].ClaimToken)
+        }
+
+        return instance.batchFailureOutcome(batchErr, refreshErr)
+    }
+
     for index := 0; index < len(due); index++ {
         pending := due[index]
         keepLease()
@@ -151,7 +158,7 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
         }
 
         if nil != deliverErr {
-            return published, instance.batchFailureOutcome(deliverErr, refreshErr)
+            return published, endBatch(index, deliverErr)
         }
 
         if nil == failure {
@@ -165,7 +172,7 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
             }
 
             if nil != resolveErr {
-                return published, instance.batchFailureOutcome(resolveErr, refreshErr)
+                return published, endBatch(index, resolveErr)
             }
 
             if nil == resolved {
@@ -179,8 +186,8 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
             index = index + probed
         }
 
-        if holdErr := instance.holdUnreached(ctx, pending.Id, *failure, due[index+1:], keepLease); nil != holdErr {
-            return published, instance.batchFailureOutcome(holdErr, refreshErr)
+        if holdErr := instance.holdUnreached(runtimeInstance, pending.Id, *failure, due[index+1:], keepLease); nil != holdErr {
+            return published, endBatch(index, holdErr)
         }
 
         break
@@ -195,6 +202,30 @@ func (instance *Relay) RunOnce(runtimeInstance containercontract.Runtime) (int, 
     }
 
     return published, nil
+}
+
+/* releaseClaims hands back the rows a failed batch left claimed, detached from the run's cancellation and bounded as a resolution is; a failed release is logged and never replaces the batch's own error, the visibility timeout re-surfacing the rows. */
+func (instance *Relay) releaseClaims(runtimeInstance containercontract.Runtime, claimToken string) {
+    releaseErr := instance.resolve(runtimeInstance, func(resolutionRuntime containercontract.Runtime) error {
+        _, releaseErr := instance.config.Repository.ReleaseClaims(resolutionRuntime, claimToken)
+
+        return releaseErr
+    })
+    if nil == releaseErr {
+        return
+    }
+
+    logger := logging.LoggerFromRuntime(runtimeInstance)
+    if nil == logger {
+        return
+    }
+
+    _ = runContained(func() {
+        logger.Error(
+            "outbox relay claim release failed - the claimed rows re-surface after the visibility timeout",
+            exception.LogContext(releaseErr, exception.LogContextConfig{}),
+        )
+    })
 }
 
 /* batchFailureOutcome reports the repository failure that ended a batch; when the lease was lost earlier in the batch, the refresh failure travels in the context so neither is dropped, while the repository failure stays the cause — it is the one the command's loop classifies, and a cancellation that explains it has to stay reachable through errors.Is. */
@@ -281,7 +312,7 @@ type unavailableSend struct {
 }
 
 /* holdUnreached hands the rows a failed send left unreached back to the pending state with their attempts unchanged, available again when the failed row is tried, each write on a context of its own like a resolution: they were claimed but never tried, so they are charged nothing, and their last_error names the row whose failed send held them. The lease is kept before every write, as before every row the batch reaches. A write that fails, or a cancellation of the run, ends the hold, and the rows not handed back re-surface after the visibility timeout. */
-func (instance *Relay) holdUnreached(ctx context.Context, failedId int64, failure failedSend, unreached []Pending, keepLease func()) error {
+func (instance *Relay) holdUnreached(runtimeInstance containercontract.Runtime, failedId int64, failure failedSend, unreached []Pending, keepLease func()) error {
     if 0 == len(unreached) {
         return nil
     }
@@ -290,7 +321,7 @@ func (instance *Relay) holdUnreached(ctx context.Context, failedId int64, failur
 
     for _, held := range unreached {
         /* a cancelled run stops handing rows back: each write runs detached and bounded, so a signal would otherwise wait out one write per remaining row, and a row left claimed costs no more than the visibility timeout every interrupted batch already pays */
-        if cancelErr := ctx.Err(); nil != cancelErr {
+        if cancelErr := runtimeInstance.Context().Err(); nil != cancelErr {
             return exception.NewError(
                 "outbox relay hold interrupted by the run's cancellation - the rows not handed back re-surface after the visibility timeout",
                 exceptioncontract.Context{"failedId": failedId},
@@ -300,8 +331,8 @@ func (instance *Relay) holdUnreached(ctx context.Context, failedId int64, failur
 
         keepLease()
 
-        holdErr := instance.resolve(ctx, func(resolutionContext context.Context) error {
-            return instance.config.Repository.Reschedule(resolutionContext, held.Id, held.Attempts, failure.retryAt, heldError, held.ClaimToken)
+        holdErr := instance.resolve(runtimeInstance, func(resolutionRuntime containercontract.Runtime) error {
+            return instance.config.Repository.Reschedule(resolutionRuntime, held.Id, held.Attempts, failure.retryAt, heldError, held.ClaimToken)
         })
         if nil != holdErr {
             return exception.NewError(
@@ -337,7 +368,7 @@ func (instance *Relay) deliver(runtimeInstance containercontract.Runtime, pendin
     ctx := runtimeInstance.Context()
 
     /* record this delivery attempt — and persist it — before decoding or sending, either of which can hang the relay. Charging the attempt per row at this point (rather than to the whole batch at claim time) means a row that keeps hanging advances only its own poison counter; a batch-mate the relay never reaches is never charged an attempt it never received, so it is never falsely dead-lettered. */
-    deliveryAttempts, claimed, recordErr := instance.config.Repository.RecordDeliveryAttempt(ctx, pending.Id, pending.ClaimToken)
+    deliveryAttempts, claimed, recordErr := instance.config.Repository.RecordDeliveryAttempt(runtimeInstance, pending.Id, pending.ClaimToken)
     if nil != recordErr {
         return false, nil, recordErr
     }
@@ -397,8 +428,8 @@ func (instance *Relay) deliver(runtimeInstance containercontract.Runtime, pendin
     if nil == sendErr {
         instance.endOutage(runtimeInstance)
 
-        return true, nil, instance.resolve(ctx, func(resolutionContext context.Context) error {
-            return instance.config.Repository.MarkSent(resolutionContext, pending.Id, pending.ClaimToken)
+        return true, nil, instance.resolve(runtimeInstance, func(resolutionRuntime containercontract.Runtime) error {
+            return instance.config.Repository.MarkSent(resolutionRuntime, pending.Id, pending.ClaimToken)
         })
     }
 
@@ -417,7 +448,6 @@ func (instance *Relay) deliver(runtimeInstance containercontract.Runtime, pendin
 
 /* chargeFailedSend charges a failed send an attempt: rescheduled under the growing backoff, or dead-lettered at MaxAttempts. A failure the transport answered about the message proves it reachable, so it ends a running outage. */
 func (instance *Relay) chargeFailedSend(runtimeInstance containercontract.Runtime, pending Pending, sendErr error, storedError string, panicked bool) (bool, *failedSend, error) {
-    ctx := runtimeInstance.Context()
     sendPanic := panicked
 
     if false == exception.IsInfrastructureFailure(sendErr) {
@@ -442,8 +472,8 @@ func (instance *Relay) chargeFailedSend(runtimeInstance containercontract.Runtim
     availableAt := time.Now().Add(instance.nextBackoff(attempts))
 
     rescheduleErr := resolutionWriteOutcome(
-        instance.resolve(ctx, func(resolutionContext context.Context) error {
-            return instance.config.Repository.Reschedule(resolutionContext, pending.Id, attempts, availableAt, storedError, pending.ClaimToken)
+        instance.resolve(runtimeInstance, func(resolutionRuntime containercontract.Runtime) error {
+            return instance.config.Repository.Reschedule(resolutionRuntime, pending.Id, attempts, availableAt, storedError, pending.ClaimToken)
         }),
         storedError,
     )
@@ -460,8 +490,8 @@ func (instance *Relay) handBackCut(runtimeInstance containercontract.Runtime, pe
     ctx := runtimeInstance.Context()
 
     writeErr := resolutionWriteOutcome(
-        instance.resolve(ctx, func(resolutionContext context.Context) error {
-            return instance.config.Repository.Reschedule(resolutionContext, pending.Id, pending.Attempts, time.Now(), storedError, pending.ClaimToken)
+        instance.resolve(runtimeInstance, func(resolutionRuntime containercontract.Runtime) error {
+            return instance.config.Repository.Reschedule(resolutionRuntime, pending.Id, pending.Attempts, time.Now(), storedError, pending.ClaimToken)
         }),
         storedError,
     )
@@ -475,8 +505,8 @@ func (instance *Relay) handBackCut(runtimeInstance containercontract.Runtime, pe
 /* handBackUncharged resolves a send that met an unreachable transport: the row goes back uncharged, available at availableAt; the first row of an outage whose write succeeds writes one ERROR record, the later ones none. */
 func (instance *Relay) handBackUncharged(runtimeInstance containercontract.Runtime, unavailable unavailableSend, availableAt time.Time, mayReport bool) error {
     handBackErr := resolutionWriteOutcome(
-        instance.resolve(runtimeInstance.Context(), func(resolutionContext context.Context) error {
-            return instance.config.Repository.RescheduleUncharged(resolutionContext, unavailable.pending.Id, availableAt, unavailable.storedError, unavailable.pending.ClaimToken)
+        instance.resolve(runtimeInstance, func(resolutionRuntime containercontract.Runtime) error {
+            return instance.config.Repository.RescheduleUncharged(resolutionRuntime, unavailable.pending.Id, availableAt, unavailable.storedError, unavailable.pending.ClaimToken)
         }),
         unavailable.storedError,
     )
@@ -573,17 +603,17 @@ func (instance *Relay) endOutage(runtimeInstance containercontract.Runtime) {
 }
 
 /* resolve runs a resolution write — sent, rescheduled or dead — on a context the run's cancellation does not reach, bounded by the resolution timeout: a SIGTERM landing between a send and its mark would otherwise fail the mark, and the row the transport already published would come back after the visibility timeout and publish again. */
-func (instance *Relay) resolve(ctx context.Context, write func(resolutionContext context.Context) error) error {
-    resolutionContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), instance.config.ResolutionTimeout)
+func (instance *Relay) resolve(runtimeInstance containercontract.Runtime, write func(resolutionRuntime containercontract.Runtime) error) error {
+    resolutionContext, cancel := context.WithTimeout(context.WithoutCancel(runtimeInstance.Context()), instance.config.ResolutionTimeout)
     defer cancel()
 
-    return write(resolutionContext)
+    return write(runtime.WithContext(runtimeInstance, resolutionContext))
 }
 
 /* markDead dead-letters a row through resolve and, once it is marked, writes one WARNING naming it with the stored error: the row left the at-least-once path, and last_error is otherwise its only trace. The record runs contained, since the logger is the application's collaborator. */
 func (instance *Relay) markDead(runtimeInstance containercontract.Runtime, pending Pending, attempts int, storedError string) error {
-    markErr := instance.resolve(runtimeInstance.Context(), func(resolutionContext context.Context) error {
-        return instance.config.Repository.MarkDead(resolutionContext, pending.Id, attempts, storedError, pending.ClaimToken)
+    markErr := instance.resolve(runtimeInstance, func(resolutionRuntime containercontract.Runtime) error {
+        return instance.config.Repository.MarkDead(resolutionRuntime, pending.Id, attempts, storedError, pending.ClaimToken)
     })
     if nil != markErr {
         return markErr

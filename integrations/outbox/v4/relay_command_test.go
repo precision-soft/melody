@@ -23,7 +23,7 @@ type failingClaimRepository struct {
     claims       int
 }
 
-func (instance *failingClaimRepository) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
+func (instance *failingClaimRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
     instance.claims++
 
     if 0 < instance.failuresLeft {
@@ -32,7 +32,7 @@ func (instance *failingClaimRepository) ClaimDueMessages(ctx context.Context, li
         return nil, errors.New("repository down")
     }
 
-    return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
+    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility)
 }
 
 func runRelayCommand(t *testing.T, runtimeInstance containercontract.Runtime, relay *Relay, arguments []string) error {
@@ -338,12 +338,12 @@ type cancellationEchoRepository struct {
     fakeRepository
 }
 
-func (instance *cancellationEchoRepository) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
-    if nil != ctx.Err() {
-        return nil, fmt.Errorf("claim aborted: %w", ctx.Err())
+func (instance *cancellationEchoRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
+    if nil != runtimeInstance.Context().Err() {
+        return nil, fmt.Errorf("claim aborted: %w", runtimeInstance.Context().Err())
     }
 
-    return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
+    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility)
 }
 
 /* capturingCommand delegates to the command under test and keeps its error, so a test can tell a refused command line — which the dispatch answers — from the command's own failure, which is what it is asserting. */
@@ -447,7 +447,7 @@ type cyclicClaimRepository struct {
     fakeRepository
 }
 
-func (instance *cyclicClaimRepository) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
+func (instance *cyclicClaimRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
     return nil, newCyclicChainError()
 }
 

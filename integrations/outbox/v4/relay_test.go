@@ -122,9 +122,12 @@ type fakeRepository struct {
     claimDelay    time.Duration
     markDeadErr   error
     rescheduleErr error
+    /* releasedTokens records ReleaseClaims apart from calls, so the exact resolution-call assertions stay meaningful */
+    releasedTokens []string
+    releaseErr     error
 }
 
-func (instance *fakeRepository) ClaimDueMessages(_ context.Context, limit int, _ time.Duration) ([]Pending, error) {
+func (instance *fakeRepository) ClaimDueMessages(_ containercontract.Runtime, limit int, _ time.Duration) ([]Pending, error) {
     instance.claimLimits = append(instance.claimLimits, limit)
 
     if 0 < instance.claimDelay {
@@ -135,7 +138,7 @@ func (instance *fakeRepository) ClaimDueMessages(_ context.Context, limit int, _
 }
 
 /* models the store: charges a delivery attempt to a single row (advancing its stored count) only when that row is actually reached, and reports the row missing (claimed=false) when it is not among the due rows. It does not append to calls so the exact resolution-call assertions elsewhere stay meaningful. */
-func (instance *fakeRepository) RecordDeliveryAttempt(_ context.Context, id int64, _ string) (int, bool, error) {
+func (instance *fakeRepository) RecordDeliveryAttempt(_ containercontract.Runtime, id int64, _ string) (int, bool, error) {
     for index := range instance.due {
         if id == instance.due[index].Id {
             instance.due[index].DeliveryAttempts++
@@ -147,19 +150,19 @@ func (instance *fakeRepository) RecordDeliveryAttempt(_ context.Context, id int6
     return 0, false, nil
 }
 
-func (instance *fakeRepository) MarkSent(_ context.Context, id int64, _ string) error {
+func (instance *fakeRepository) MarkSent(_ containercontract.Runtime, id int64, _ string) error {
     instance.calls = append(instance.calls, repoCall{kind: "sent", id: id})
 
     return nil
 }
 
-func (instance *fakeRepository) Reschedule(_ context.Context, id int64, attempts int, availableAt time.Time, lastError string, _ string) error {
+func (instance *fakeRepository) Reschedule(_ containercontract.Runtime, id int64, attempts int, availableAt time.Time, lastError string, _ string) error {
     instance.calls = append(instance.calls, repoCall{kind: "reschedule", id: id, attempts: attempts, lastError: lastError, availableAt: availableAt})
 
     return instance.rescheduleErr
 }
 
-func (instance *fakeRepository) RescheduleUncharged(_ context.Context, id int64, availableAt time.Time, lastError string, _ string) error {
+func (instance *fakeRepository) RescheduleUncharged(_ containercontract.Runtime, id int64, availableAt time.Time, lastError string, _ string) error {
     instance.calls = append(instance.calls, repoCall{kind: "uncharged", id: id, lastError: lastError, availableAt: availableAt})
 
     for index := range instance.due {
@@ -171,10 +174,24 @@ func (instance *fakeRepository) RescheduleUncharged(_ context.Context, id int64,
     return instance.rescheduleErr
 }
 
-func (instance *fakeRepository) MarkDead(_ context.Context, id int64, attempts int, lastError string, _ string) error {
+func (instance *fakeRepository) MarkDead(_ containercontract.Runtime, id int64, attempts int, lastError string, _ string) error {
     instance.calls = append(instance.calls, repoCall{kind: "dead", id: id, attempts: attempts, lastError: lastError})
 
     return instance.markDeadErr
+}
+
+func (instance *fakeRepository) ReleaseClaims(_ containercontract.Runtime, claimToken string) (int, error) {
+    instance.releasedTokens = append(instance.releasedTokens, claimToken)
+
+    return 0, instance.releaseErr
+}
+
+func (instance *fakeRepository) RequeueDead(_ containercontract.Runtime, _ RequeueDeadOptions) (int, error) {
+    return 0, nil
+}
+
+func (instance *fakeRepository) PruneSent(_ containercontract.Runtime, _ PruneSentOptions) (int, error) {
+    return 0, nil
 }
 
 type fakeTransport struct {
@@ -426,7 +443,7 @@ type markSentFailingRepository struct {
     fakeRepository
 }
 
-func (instance *markSentFailingRepository) MarkSent(_ context.Context, _ int64, _ string) error {
+func (instance *markSentFailingRepository) MarkSent(_ containercontract.Runtime, _ int64, _ string) error {
     return errors.New("mark sent failed")
 }
 
@@ -658,10 +675,10 @@ type cancellingRepository struct {
     cancel context.CancelFunc
 }
 
-func (instance *cancellingRepository) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
+func (instance *cancellingRepository) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
     instance.cancel()
 
-    return instance.fakeRepository.ClaimDueMessages(ctx, limit, visibility)
+    return instance.fakeRepository.ClaimDueMessages(runtimeInstance, limit, visibility)
 }
 
 /* a signal cancels the run context mid-drain, so a release riding it would never reach the backend and the lease would survive its whole ttl, stalling every other replica. */
@@ -1073,10 +1090,10 @@ type contextRecordingRepository struct {
     markSentContextErr error
 }
 
-func (instance *contextRecordingRepository) MarkSent(ctx context.Context, id int64, claimToken string) error {
-    instance.markSentContextErr = ctx.Err()
+func (instance *contextRecordingRepository) MarkSent(runtimeInstance containercontract.Runtime, id int64, claimToken string) error {
+    instance.markSentContextErr = runtimeInstance.Context().Err()
 
-    return instance.fakeRepository.MarkSent(ctx, id, claimToken)
+    return instance.fakeRepository.MarkSent(runtimeInstance, id, claimToken)
 }
 
 /* cancellingTransport cancels the run context as it sends, a SIGTERM landing between the send and its mark */
@@ -1311,17 +1328,17 @@ type rescheduleRefusingRepository struct {
     refusedId int64
 }
 
-func (instance *rescheduleRefusingRepository) Reschedule(ctx context.Context, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
+func (instance *rescheduleRefusingRepository) Reschedule(runtimeInstance containercontract.Runtime, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
     if id == instance.refusedId {
         instance.calls = append(instance.calls, repoCall{kind: "refused", id: id})
 
         return errors.New("database unreachable")
     }
 
-    return instance.fakeRepository.Reschedule(ctx, id, attempts, availableAt, lastError, claimToken)
+    return instance.fakeRepository.Reschedule(runtimeInstance, id, attempts, availableAt, lastError, claimToken)
 }
 
-/* a hold write that fails ends the hold and the run with the repository's failure, and the rows after it stay claimed for the visibility timeout to re-surface */
+/* a hold write that fails ends the hold and the run with the repository's failure, and the rows after it are handed back through ReleaseClaims */
 func TestRelay_AFailedHoldWriteEndsTheRun(t *testing.T) {
     repository := &rescheduleRefusingRepository{
         fakeRepository: fakeRepository{due: []Pending{
@@ -1443,15 +1460,15 @@ type deadlineRecordingRepository struct {
     deadlines []time.Duration
 }
 
-func (instance *deadlineRecordingRepository) Reschedule(ctx context.Context, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
-    deadline, hasDeadline := ctx.Deadline()
+func (instance *deadlineRecordingRepository) Reschedule(runtimeInstance containercontract.Runtime, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
+    deadline, hasDeadline := runtimeInstance.Context().Deadline()
     if false == hasDeadline {
         instance.deadlines = append(instance.deadlines, -1)
     } else {
         instance.deadlines = append(instance.deadlines, time.Until(deadline))
     }
 
-    return instance.fakeRepository.Reschedule(ctx, id, attempts, availableAt, lastError, claimToken)
+    return instance.fakeRepository.Reschedule(runtimeInstance, id, attempts, availableAt, lastError, claimToken)
 }
 
 func TestRelay_ReleasesTheLeaseWithNoDeadlineOfItsOwn(t *testing.T) {
@@ -1932,5 +1949,91 @@ func TestRelay_ALockerAnsweringNoLockIsTheRunsError(t *testing.T) {
     published, runErr := relay.RunOnce(relayTestRuntime())
     if nil == runErr || false == strings.Contains(runErr.Error(), "the locker answered no lock") || 0 != published || 0 != len(transport.sent) {
         t.Fatalf("expected the no-lock refusal as the run's error and no work, got %d %v", published, runErr)
+    }
+}
+
+func TestRelay_ABatchEndedByAFailureReleasesItsClaimOnceWithTheBatchsToken(t *testing.T) {
+    repository := &rescheduleRefusingRepository{
+        fakeRepository: fakeRepository{due: []Pending{
+            {Id: 1, TypeName: "string", Payload: []byte("a"), ClaimToken: "batch-token"},
+            {Id: 2, TypeName: "string", Payload: []byte("b"), ClaimToken: "batch-token"},
+            {Id: 3, TypeName: "string", Payload: []byte("c"), ClaimToken: "batch-token"},
+        }},
+        refusedId: 2,
+    }
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}})
+
+    if _, runErr := relay.RunOnce(relayTestRuntime()); nil == runErr {
+        t.Fatal("expected the failed hold write reported")
+    }
+
+    if 1 != len(repository.releasedTokens) || "batch-token" != repository.releasedTokens[0] {
+        t.Fatalf("expected one release under the batch's token, got %v", repository.releasedTokens)
+    }
+}
+
+func TestRelay_ABatchThatResolvesEveryRowReleasesNothing(t *testing.T) {
+    drained := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a"), ClaimToken: "batch-token"},
+        {Id: 2, TypeName: "string", Payload: []byte("b"), ClaimToken: "batch-token"},
+    }}
+
+    if _, runErr := NewRelay(RelayConfig{Repository: drained, Transport: &fakeTransport{}, Codec: &stringCodec{}}).RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    held := &fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a"), ClaimToken: "batch-token"},
+        {Id: 2, TypeName: "string", Payload: []byte("b"), ClaimToken: "batch-token"},
+    }}
+
+    if _, runErr := NewRelay(RelayConfig{Repository: held, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}}).RunOnce(relayTestRuntime()); nil != runErr {
+        t.Fatalf("unexpected run error: %v", runErr)
+    }
+
+    lastRow := &markSentFailingRepository{fakeRepository{due: []Pending{
+        {Id: 1, TypeName: "string", Payload: []byte("a"), ClaimToken: "batch-token"},
+    }}}
+
+    if _, runErr := NewRelay(RelayConfig{Repository: lastRow, Transport: &fakeTransport{}, Codec: &stringCodec{}}).RunOnce(relayTestRuntime()); nil == runErr {
+        t.Fatal("expected the failing MarkSent to surface")
+    }
+
+    if 0 != len(drained.releasedTokens) || 0 != len(held.releasedTokens) || 0 != len(lastRow.releasedTokens) {
+        t.Fatalf("expected no release once every row is resolved or handed back, or when the failure is at the last row, got %v, %v and %v", drained.releasedTokens, held.releasedTokens, lastRow.releasedTokens)
+    }
+}
+
+func TestRelay_AFailedReleaseIsLoggedAndTheBatchsOwnErrorIsAnswered(t *testing.T) {
+    repository := &rescheduleRefusingRepository{
+        fakeRepository: fakeRepository{
+            due: []Pending{
+                {Id: 1, TypeName: "string", Payload: []byte("a"), ClaimToken: "batch-token"},
+                {Id: 2, TypeName: "string", Payload: []byte("b"), ClaimToken: "batch-token"},
+                {Id: 3, TypeName: "string", Payload: []byte("c"), ClaimToken: "batch-token"},
+            },
+            releaseErr: errors.New("release refused"),
+        },
+        refusedId: 2,
+    }
+    logger := &recordingLogger{}
+
+    relay := NewRelay(RelayConfig{Repository: repository, Transport: &fakeTransport{fail: true}, Codec: &stringCodec{}})
+
+    _, runErr := relay.RunOnce(relayTestRuntimeWithLogger(logger))
+    if nil == runErr || false == strings.Contains(runErr.Error(), "hold write failed") || true == strings.Contains(fmt.Sprint(exception.BuildCauseChain(runErr, 8)), "release refused") {
+        t.Fatalf("expected the hold failure answered without the release failure, got %v", runErr)
+    }
+
+    released := 0
+    for _, message := range logger.errorMessages() {
+        if true == strings.Contains(message, "claim release failed") {
+            released++
+        }
+    }
+
+    if 1 != released {
+        t.Fatalf("expected one claim release failure record, got %v", logger.errorMessages())
     }
 }

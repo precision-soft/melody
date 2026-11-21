@@ -8,6 +8,7 @@ import (
     "errors"
     "time"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     bun "github.com/uptrace/bun"
 )
@@ -85,7 +86,13 @@ func (instance *Store) Enqueue(ctx context.Context, executor bun.IDB, message an
 }
 
 /* ClaimDueMessages atomically claims a batch of due rows so that concurrent relay instances — even without a shared Locker — never grab the same row. It requires a backend that supports SELECT … FOR UPDATE SKIP LOCKED (PostgreSQL, or MySQL 8+). It selects due rows FOR UPDATE SKIP LOCKED inside a transaction (so a row another instance is claiming is skipped, not blocked on) and flips them to the in-flight state with available_at pushed out by the visibility timeout. A claimed row is therefore invisible to every other claimer until either the relay resolves it (sent/rescheduled/dead) or the visibility timeout lapses — which re-surfaces rows an instance claimed but crashed before resolving. A due row is one that is pending, or already in-flight but past its visibility deadline. Claiming does NOT touch delivery_attempts — that counter is advanced per row when the relay actually attempts delivery (RecordDeliveryAttempt), so a row the relay never reaches (a batch-mate behind a crashing row) is not charged a delivery attempt it never received. */
-func (instance *Store) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
+func (instance *Store) ClaimDueMessages(runtimeInstance containercontract.Runtime, limit int, visibility time.Duration) ([]Pending, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return nil, refuseErr
+    }
+
+    ctx := runtimeInstance.Context()
+
     limit, limitErr := claimLimit(limit)
     if nil != limitErr {
         return nil, limitErr
@@ -177,7 +184,13 @@ func newClaimToken() (string, error) {
 }
 
 /* RecordDeliveryAttempt increments a single in-flight row's delivery_attempts and returns the post-increment count, charging only a row the relay actually reached. The read and write run in one transaction under FOR UPDATE, so a concurrent claimer cannot lose an increment. A row whose claim_token does not match this claim, re-claimed by another instance or already resolved, returns claimed=false so the relay skips it; the token, not the status, tells "still mine" from "re-claimed", since a re-claim returns the row to the same in-flight state. */
-func (instance *Store) RecordDeliveryAttempt(ctx context.Context, id int64, claimToken string) (int, bool, error) {
+func (instance *Store) RecordDeliveryAttempt(runtimeInstance containercontract.Runtime, id int64, claimToken string) (int, bool, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return 0, false, refuseErr
+    }
+
+    ctx := runtimeInstance.Context()
+
     deliveryAttempts := 0
     claimed := false
 
@@ -222,7 +235,13 @@ func (instance *Store) RecordDeliveryAttempt(ctx context.Context, id int64, clai
 }
 
 /* MarkSent resolves the row as sent. Every resolution write is guarded on status in-flight and on the claim's fencing token, since a lapsed claim can be re-claimed back to in-flight by another instance and a status-only write would clobber that owner; with the token a stale run's write matches no row. */
-func (instance *Store) MarkSent(ctx context.Context, id int64, claimToken string) error {
+func (instance *Store) MarkSent(runtimeInstance containercontract.Runtime, id int64, claimToken string) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
+    ctx := runtimeInstance.Context()
+
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
         Set("status = ?", StatusSent).
@@ -238,13 +257,19 @@ func (instance *Store) MarkSent(ctx context.Context, id int64, claimToken string
 }
 
 func (instance *Store) Reschedule(
-    ctx context.Context,
+    runtimeInstance containercontract.Runtime,
     id int64,
     attempts int,
     availableAt time.Time,
     lastError string,
     claimToken string,
 ) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
+    ctx := runtimeInstance.Context()
+
     /* a rescheduled row was claimed (in-flight); return it to pending so it is eligible again once available_at arrives, rather than waiting out the visibility timeout. Guarded on in-flight AND the claim token so a stale run whose claim already lapsed cannot revive a row another instance has since re-claimed, marked sent or dead. */
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
@@ -263,7 +288,13 @@ func (instance *Store) Reschedule(
     return nil
 }
 
-func (instance *Store) RescheduleUncharged(ctx context.Context, id int64, availableAt time.Time, lastError string, claimToken string) error {
+func (instance *Store) RescheduleUncharged(runtimeInstance containercontract.Runtime, id int64, availableAt time.Time, lastError string, claimToken string) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
+    ctx := runtimeInstance.Context()
+
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
         Set("status = ?", StatusPending).
@@ -281,7 +312,13 @@ func (instance *Store) RescheduleUncharged(ctx context.Context, id int64, availa
     return nil
 }
 
-func (instance *Store) MarkDead(ctx context.Context, id int64, attempts int, lastError string, claimToken string) error {
+func (instance *Store) MarkDead(runtimeInstance containercontract.Runtime, id int64, attempts int, lastError string, claimToken string) error {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return refuseErr
+    }
+
+    ctx := runtimeInstance.Context()
+
     _, updateErr := instance.database.NewUpdate().
         Model((*Message)(nil)).
         Set("status = ?", StatusDead).
@@ -296,6 +333,135 @@ func (instance *Store) MarkDead(ctx context.Context, id int64, attempts int, las
     }
 
     return nil
+}
+
+func (instance *Store) ReleaseClaims(runtimeInstance containercontract.Runtime, claimToken string) (int, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return 0, refuseErr
+    }
+
+    result, updateErr := instance.database.NewUpdate().
+        Model((*Message)(nil)).
+        Set("status = ?", StatusPending).
+        Set("available_at = ?", time.Now()).
+        Where("status = ?", StatusInFlight).
+        Where("claim_token = ?", claimToken).
+        Exec(runtimeInstance.Context())
+    if nil != updateErr {
+        return 0, exception.NewError("could not release outbox claims", nil, updateErr)
+    }
+
+    return affectedRows(result)
+}
+
+func (instance *Store) RequeueDead(runtimeInstance containercontract.Runtime, options RequeueDeadOptions) (int, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return 0, refuseErr
+    }
+
+    limit, limitErr := maintenanceLimit(options.Limit)
+    if nil != limitErr {
+        return 0, limitErr
+    }
+
+    ctx := runtimeInstance.Context()
+
+    selected := instance.database.NewSelect().
+        Model((*Message)(nil)).
+        Column("id").
+        Where("status = ?", StatusDead).
+        Order("id ASC").
+        Limit(limit)
+    if 0 < len(options.Ids) {
+        selected = selected.Where("id IN (?)", bun.In(options.Ids))
+    }
+
+    ids := make([]int64, 0)
+    if scanErr := selected.Scan(ctx, &ids); nil != scanErr {
+        return 0, exception.NewError("could not select dead outbox messages", nil, scanErr)
+    }
+
+    if 0 == len(ids) {
+        return 0, nil
+    }
+
+    result, updateErr := instance.database.NewUpdate().
+        Model((*Message)(nil)).
+        Set("status = ?", StatusPending).
+        Set("attempts = 0").
+        Set("delivery_attempts = 0").
+        Set("available_at = ?", time.Now()).
+        Where("id IN (?)", bun.In(ids)).
+        Where("status = ?", StatusDead).
+        Exec(ctx)
+    if nil != updateErr {
+        return 0, exception.NewError("could not requeue dead outbox messages", nil, updateErr)
+    }
+
+    return affectedRows(result)
+}
+
+func (instance *Store) PruneSent(runtimeInstance containercontract.Runtime, options PruneSentOptions) (int, error) {
+    if refuseErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != refuseErr {
+        return 0, refuseErr
+    }
+
+    if true == options.SentBefore.IsZero() {
+        return 0, exception.NewError("outbox prune cut-off is zero", map[string]any{"field": "PruneSentOptions.SentBefore"}, nil)
+    }
+
+    limit, limitErr := maintenanceLimit(options.Limit)
+    if nil != limitErr {
+        return 0, limitErr
+    }
+
+    ctx := runtimeInstance.Context()
+
+    ids := make([]int64, 0)
+    scanErr := instance.database.NewSelect().
+        Model((*Message)(nil)).
+        Column("id").
+        Where("status = ?", StatusSent).
+        Where("created_at < ?", options.SentBefore).
+        Order("id ASC").
+        Limit(limit).
+        Scan(ctx, &ids)
+    if nil != scanErr {
+        return 0, exception.NewError("could not select sent outbox messages", nil, scanErr)
+    }
+
+    if 0 == len(ids) {
+        return 0, nil
+    }
+
+    result, deleteErr := instance.database.NewDelete().
+        Model((*Message)(nil)).
+        Where("id IN (?)", bun.In(ids)).
+        Where("status = ?", StatusSent).
+        Exec(ctx)
+    if nil != deleteErr {
+        return 0, exception.NewError("could not prune sent outbox messages", nil, deleteErr)
+    }
+
+    return affectedRows(result)
+}
+
+/* maintenanceLimit answers the rows a maintenance door may touch: 0 is the maximum batch size, a negative value and one above it are refused by name. */
+func maintenanceLimit(limit int) (int, error) {
+    if 0 == limit {
+        return maximumBatchSize, nil
+    }
+
+    return claimLimit(limit)
+}
+
+func affectedRows(result sql.Result) (int, error) {
+    affected, affectedErr := result.RowsAffected()
+    if nil != affectedErr {
+        return 0, exception.NewError("could not read the outbox rows affected", nil, affectedErr)
+    }
+
+    return int(affected), nil
 }
 
 var _ Repository = (*Store)(nil)

@@ -22,6 +22,14 @@ Every entry below that the third major shipped is the consequence of fixing a de
 
 The fourth major takes the forms the third major kept compatible: a section that names a sibling interface, a deprecated door or a released signature on the third major describes here the form the fourth major carries instead, and this major's [`CHANGELOG.md`](../CHANGELOG.md) marks each **Breaking**.
 
+### Outbox: the repository releases claims, requeues dead rows and prunes sent ones
+
+**What changed.** [`outbox.Repository`](../../integrations/outbox/v4/repository.go)'s six doors take the runtime they run under first, where they took a `context.Context`, and the contract gains `ReleaseClaims(runtimeInstance, claimToken) (int, error)`, `RequeueDead(runtimeInstance, RequeueDeadOptions{Ids, Limit}) (int, error)` and `PruneSent(runtimeInstance, PruneSentOptions{SentBefore, Limit}) (int, error)`, implemented by `*Store` and the lazy repository. A batch a repository failure, a failed hold write or the run's cancellation ended hands back the rows it left claimed through `ReleaseClaims`, where they waited out `VisibilityTimeout`.
+
+**Symptom.** A custom repository: `*R does not implement outbox.Repository (missing method ReleaseClaims)` and `(wrong type for method ClaimDueMessages)`; a caller of the store: `cannot use ctx (variable of interface type context.Context) as contract.Runtime value in argument to store.MarkSent`.
+
+**Remedy.** Take `runtimeInstance containercontract.Runtime` first and read `runtimeInstance.Context()`; add the three doors, a release fenced by the claim token on in-flight rows. A caller holding a context builds its runtime with `runtime.NewRun(ctx, scope)` or derives one with `runtime.WithContext(runtimeInstance, ctx)`.
+
 ### Outbox: the module takes factories; one relay command constructor
 
 **What changed.** [`outbox.ModuleConfig`](../../integrations/outbox/v4/module.go) is `{Store, Relay, RelayCommand}`, where `Store` and `Relay` are the providers of `service.outbox.store` and `service.outbox.relay`, `func(resolver containercontract.Resolver) (*outbox.Store, error)` and `(*outbox.Relay, error)`, run at first resolution; the prebuilt `Store *Store` and `Relay *Relay`, `StoreFactory`, `RelayFactory` and the two "set exactly one" refusals are removed, and a nil `Relay` registers no relay and no command. [`NewRelayCommand(config)`](../../integrations/outbox/v4/relay_command.go) is the one constructor of `melody:outbox:relay`: it resolves `service.outbox.relay` from the run's scope at the first batch and keeps it for the run. `NewRelayCommandFromResolver`, `RegisterStoreService`, `RegisterRelayService` and the `outbox.ServiceRegistrar` interface are removed.

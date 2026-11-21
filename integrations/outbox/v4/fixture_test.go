@@ -1,8 +1,12 @@
 package outbox
 
 import (
+    "context"
     "testing"
 
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     lockcontract "github.com/precision-soft/melody/v4/lock/contract"
 )
@@ -43,4 +47,9 @@ func mustCreateLock(lock lockcontract.Lock, createErr error) lockcontract.Lock {
     }
 
     return lock
+}
+
+/* outboxTestRuntime answers a run's runtime over ctx and an empty container's scope, the runtime a repository door takes */
+func outboxTestRuntime(ctx context.Context) containercontract.Runtime {
+    return runtime.NewRun(ctx, container.NewContainer(container.ContainerConfig{}).NewScope())
 }
