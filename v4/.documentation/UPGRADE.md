@@ -405,6 +405,14 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** Add the runtime as the first parameter and `nil` as the second result; a voter that implemented `VoteWithError` renames it `Vote` and deletes the old one; a handler calls `DecideAll(runtimeInstance, token, attributes, subject)`; read a repository through `runtimeInstance.Scope()` under `runtimeInstance.Context()` instead of asserting the subject to a request.
 
+### Security: the decision manager's strategy is named, its outcomes are a config
+
+**What changed.** [`NewAccessDecisionManager`](../security/access_decision_manager.go) is `NewAccessDecisionManager(strategy, voters, config AccessDecisionManagerConfig)`. [`DecisionStrategyUnspecified`](../security/contract/decision.go) is the zero value of `DecisionStrategy` and is refused at construction, so the three strategies are 1, 2 and 3. `AccessDecisionManagerConfig{AllowIfAllAbstain, AllowIfTied}` carries the two outcomes no vote decides; its zero value refuses both, as the manager did. `AccessDecisionManager.WithVoters(voters)` answers a copy under the same strategy and config, and the compiler adds a role hierarchy through it.
+
+**Symptom.** `NewAccessDecisionManager(strategy, voters)` reports not enough arguments; the boot panics with `access decision strategy is missing` for a strategy written as `0` or left to a zero-valued variable; a strategy number kept in the application's own configuration reads one lower than its meaning.
+
+**Remedy.** Pass `security.AccessDecisionManagerConfig{}` for the outcomes as they were; name the strategy constant rather than its number.
+
 ### Security: an authenticator, a rule and a token resolver receive the runtime
 
 **What changed.** [`Authenticator.Authenticate`](../security/contract/authenticator.go) is `Authenticate(runtimeInstance, request) (Token, error)`, [`Rule.Check`](../security/contract/rule.go) is `Check(runtimeInstance, request) error` and [`TokenResolver`](../security/contract/token.go) is `func(runtimeInstance, request) (Token, error)`; `AuthenticatorManager.Authenticate` and `Firewall.Check` take the runtime first. The framework hands the runtime of the request it serves, and the TOTP second factor reads its stores through it. A resolver's error is answered as a token source's: refused with its status, `500` for a plain one, and read as unavailable when it carries `exception.MarkInfrastructureFailure`; a typed nil error is no error. `Supports`, `Applies` and `Matches` are unchanged.
@@ -1357,7 +1365,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **Symptom.** `security.NewAuthenticatorManager(a, b)`, `security.NewAccessDecisionManager(strategy, voter)`, `security.NewAccessControl(rule, ...)`, `NewFirewall(rule)`, `builder.Require(prefix, "ROLE_ADMIN")` and the four rule constructors no longer compile.
 
-**Remedy.** `security.NewAuthenticatorManager([]securitycontract.Authenticator{a, b})`; `security.NewAccessDecisionManager(strategy, []securitycontract.Voter{voter})`, the slice handed as it was to `NewAccessDecisionManagerWithVoters`; `security.NewAccessControl([]security.AccessControlRule{...})`, `nil` for the empty control; `builder.Require(prefix, []string{"ROLE_ADMIN"})`; `accesscontrol.NewRawPrefixRule(path, accesscontrol.RuleConfig{Attributes: []string{...}})` for `NewAccessControlRule`, and `NewSegmentPrefixRule`, `NewExactRule` and `NewRegexRule` for the other three.
+**Remedy.** `security.NewAuthenticatorManager([]securitycontract.Authenticator{a, b})`; `security.NewAccessDecisionManager(strategy, []securitycontract.Voter{voter}, security.AccessDecisionManagerConfig{})`, the slice handed as it was to `NewAccessDecisionManagerWithVoters`; `security.NewAccessControl([]security.AccessControlRule{...})`, `nil` for the empty control; `builder.Require(prefix, []string{"ROLE_ADMIN"})`; `accesscontrol.NewRawPrefixRule(path, accesscontrol.RuleConfig{Attributes: []string{...}})` for `NewAccessControlRule`, and `NewSegmentPrefixRule`, `NewExactRule` and `NewRegexRule` for the other three.
 
 ### Security: a value with one optional dependency is built through one door
 

@@ -1593,7 +1593,7 @@ func TestServeHttp_AnAsteriskFormTargetAnswersTheRootFirewallsRefusal(t *testing
         }),
         AccessDecisionManager: security.NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
-            []securitycontract.Voter{security.NewRoleVoter()}),
+            []securitycontract.Voter{security.NewRoleVoter()}, security.AccessDecisionManagerConfig{}),
         RoleHierarchy:               security.NewRoleHierarchy(map[string][]string{}),
         RoleHierarchySource:         security.SourceFirewall,
         AccessDecisionManagerSource: security.SourceFirewall,
@@ -1670,7 +1670,7 @@ func TestServeHttp_ASlashLessPathThatFoldsIsRefusedBeforeTheFirewallAndTheRouter
         }),
         AccessDecisionManager: security.NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
-            []securitycontract.Voter{security.NewRoleVoter()}),
+            []securitycontract.Voter{security.NewRoleVoter()}, security.AccessDecisionManagerConfig{}),
         RoleHierarchy:               security.NewRoleHierarchy(map[string][]string{}),
         RoleHierarchySource:         security.SourceFirewall,
         AccessDecisionManagerSource: security.SourceFirewall,

@@ -966,7 +966,7 @@ func TestAccessControlListener_AFailedDeniedHandlerKeepsItsErrorBesideTheDecisio
         Matcher:                     NewPathPrefixMatcher("/"),
         MatcherDescription:          "m",
         AccessControl:               NewAccessControl([]AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
-        AccessDecisionManager:       NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}),
+        AccessDecisionManager:       NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}, AccessDecisionManagerConfig{}),
         AccessDeniedHandler:         &accessControlListenerTestAccessDeniedHandler{response: nil, err: handlerErr},
         LoginPath:                   "/admin/login",
         LogoutPath:                  "/admin/logout",
@@ -1549,6 +1549,7 @@ func TestAccessControlListener_AVotersOutageIsRefusedWith503AndTheFirewallDelay(
             NewRoleVoter(),
             &fallibleTestVoter{attribute: "ROLE_ADMIN", err: decisionStoreErr},
         },
+        AccessDecisionManagerConfig{},
     )
     fixture := newDecisionOutageFixture(decisionManager, bound.Of(9*time.Second))
 
@@ -1631,6 +1632,7 @@ func TestAccessControlListener_AVotersHandMade503IsTheFirewalls503(t *testing.T)
     decisionManager := NewAccessDecisionManager(
         securitycontract.DecisionStrategyAffirmative,
         []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", err: exception.NewHttpException(nethttp.StatusServiceUnavailable, "policy store down")}},
+        AccessDecisionManagerConfig{},
     )
     fixture := newDecisionOutageFixture(decisionManager, bound.Of(9*time.Second))
 

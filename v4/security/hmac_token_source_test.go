@@ -618,7 +618,7 @@ func hmacE2EFirewall(source securitycontract.TokenSource) *FirewallRegistry {
         AccessControl:      NewAccessControl(nil),
         AccessDecisionManager: NewAccessDecisionManager(
             securitycontract.DecisionStrategyAffirmative,
-            []securitycontract.Voter{NewRoleHierarchyVoter(NewRoleHierarchy(map[string][]string{}), NewRoleVoter())}),
+            []securitycontract.Voter{NewRoleHierarchyVoter(NewRoleHierarchy(map[string][]string{}), NewRoleVoter())}, AccessDecisionManagerConfig{}),
         RoleHierarchy:               NewRoleHierarchy(map[string][]string{}),
         LoginPath:                   "/login",
         LogoutPath:                  "/logout",

@@ -50,7 +50,7 @@ func expectRefusalNamingField(t *testing.T, message string, field string, callba
 }
 
 func roleDecisionManager() securitycontract.AccessDecisionManager {
-    return security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()})
+    return security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}, security.AccessDecisionManagerConfig{})
 }
 
 func openFirewallConfig() FirewallConfig {

@@ -1,13 +1,16 @@
 package config
 
 import (
+    "context"
     "errors"
     "strings"
     "testing"
     "time"
 
     "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/security"
@@ -24,7 +27,7 @@ func TestBuilder_GlobalAccessControlWithoutFirewallStillCompiles(t *testing.T) {
     builder.SetGlobal(
         GlobalConfig{
             AccessControl:         globalAccessControl,
-            AccessDecisionManager: security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}),
+            AccessDecisionManager: security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}, security.AccessDecisionManagerConfig{}),
         },
     )
 
@@ -628,5 +631,54 @@ func TestCompile_TheUnavailableRetryAfterIsInheritedOverriddenAndDefaulted(t *te
                 t.Fatalf("expected %s, got %s", testCase.expected, actual)
             }
         })
+    }
+}
+
+type fixedVoteVoter struct {
+    attribute string
+    result    securitycontract.VoteResult
+}
+
+func (instance *fixedVoteVoter) Supports(attribute string, subject any) bool {
+    return instance.attribute == attribute
+}
+
+func (instance *fixedVoteVoter) Vote(runtimeInstance containercontract.Runtime, token securitycontract.Token, attribute string, subject any) (securitycontract.VoteResult, error) {
+    return instance.result, nil
+}
+
+func TestCompile_TheRoleHierarchyUpgradeKeepsTheManagersStrategyAndConfig(t *testing.T) {
+    hierarchy := security.NewRoleHierarchy(map[string][]string{"ROLE_ADMIN": {"ROLE_USER"}})
+
+    config := firewallConfigWithHierarchy(hierarchy)
+    config.Override.AccessDecisionManager = security.NewAccessDecisionManager(
+        securitycontract.DecisionStrategyConsensus,
+        []securitycontract.Voter{
+            security.NewRoleVoter(),
+            &fixedVoteVoter{attribute: "ROLE_USER", result: securitycontract.VoteDenied},
+        },
+        security.AccessDecisionManagerConfig{AllowIfTied: true},
+    )
+
+    builder := NewBuilder()
+    builder.AddFirewall("api", security.NewPathPrefixMatcher("/"), &anonymousTokenSource{}, config)
+
+    compiled, isConcrete := builder.BuildAndCompile().Firewalls()[0].AccessDecisionManager().(*security.AccessDecisionManager)
+    if false == isConcrete {
+        t.Fatalf("expected the compiled manager to stay the framework's")
+    }
+
+    if securitycontract.DecisionStrategyConsensus != compiled.Strategy() {
+        t.Fatalf("expected the upgrade to keep the consensus strategy, got %d", compiled.Strategy())
+    }
+
+    if _, isHierarchyVoter := compiled.Voters()[0].(*security.RoleHierarchyVoter); false == isHierarchyVoter {
+        t.Fatalf("expected the role voter to be the hierarchy one")
+    }
+
+    runtimeInstance := runtime.NewRequest(context.Background(), container.NewContainer(container.ContainerConfig{}).NewScope())
+    token := security.NewAuthenticatedToken("u", []string{"ROLE_ADMIN"}, nil)
+    if err := compiled.DecideAll(runtimeInstance, token, []string{"ROLE_USER"}, nil); nil != err {
+        t.Fatalf("expected the upgraded manager to keep AllowIfTied and grant the 1-1 tie, got %v", err)
     }
 }

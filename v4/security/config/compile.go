@@ -114,7 +114,7 @@ func Compile(configuration Configuration) (*security.CompiledConfiguration, erro
                 }
 
                 if true == upgraded {
-                    effectiveDecisionManager = security.NewAccessDecisionManager(decisionManager.Strategy(), upgradedVoters)
+                    effectiveDecisionManager = decisionManager.WithVoters(upgradedVoters)
                 }
             }
         }

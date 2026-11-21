@@ -148,6 +148,7 @@ func (instance *Module) RegisterSecurity(builder *melodysecurityconfig.Builder) 
     accessDecisionManager := melodysecurity.NewAccessDecisionManager(
         melodysecuritycontract.DecisionStrategyAffirmative,
         []melodysecuritycontract.Voter{melodysecurity.NewRoleVoter()},
+        melodysecurity.AccessDecisionManagerConfig{},
     )
 
     entryPoint := security.NewLoginRedirectEntryPoint(route.LoginPagePattern)

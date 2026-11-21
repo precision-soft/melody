@@ -43,6 +43,7 @@ func TestAccessDecisionManager_InvalidStrategyPanics(t *testing.T) {
     _ = NewAccessDecisionManager(
         securitycontract.DecisionStrategy(999),
         nil,
+        AccessDecisionManagerConfig{},
     )
 }
 
@@ -51,7 +52,7 @@ func TestAccessDecisionManager_Affirmative_GrantsIfAnyGranted(t *testing.T) {
         securitycontract.DecisionStrategyAffirmative,
         []securitycontract.Voter{&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
             &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
-        })
+        }, AccessDecisionManagerConfig{})
 
     token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
 
@@ -66,7 +67,7 @@ func TestAccessDecisionManager_Unanimous_DeniesIfAnyDenied(t *testing.T) {
         securitycontract.DecisionStrategyUnanimous,
         []securitycontract.Voter{&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
             &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
-        })
+        }, AccessDecisionManagerConfig{})
 
     token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
 
@@ -77,7 +78,7 @@ func TestAccessDecisionManager_Unanimous_DeniesIfAnyDenied(t *testing.T) {
 }
 
 func TestAccessDecisionManager_DecideAllRefusesAnEmptyAttributeList(t *testing.T) {
-    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()})
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{NewRoleVoter()}, AccessDecisionManagerConfig{})
 
     err := manager.DecideAll(nil, NewAuthenticatedToken("u1", []string{"ROLE_ADMIN"}, nil), []string{}, nil)
     if nil == err {
@@ -87,7 +88,7 @@ func TestAccessDecisionManager_DecideAllRefusesAnEmptyAttributeList(t *testing.T
 
 func TestNewAccessDecisionManager_CopiesTheCallersVoters(t *testing.T) {
     voters := []securitycontract.Voter{NewRoleVoter()}
-    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, voters)
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, voters, AccessDecisionManagerConfig{})
 
     voters[0] = &securityTestVoter{attribute: "ROLE_X", result: securitycontract.VoteGranted}
 
@@ -116,6 +117,7 @@ func TestAccessDecisionManager_AVotersErrorEndsTheDecisionMarked(t *testing.T) {
                     fallible,
                     later,
                 },
+                AccessDecisionManagerConfig{},
             )
 
             err := manager.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil)
@@ -136,6 +138,7 @@ func TestAccessDecisionManager_AVoterThatAnswersNoErrorIsCountedAsAVote(t *testi
     granting := NewAccessDecisionManager(
         securitycontract.DecisionStrategyUnanimous,
         []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted}},
+        AccessDecisionManagerConfig{},
     )
     if err := granting.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil); nil != err {
         t.Fatalf("expected the fallible grant counted, got %v", err)
@@ -147,6 +150,7 @@ func TestAccessDecisionManager_AVoterThatAnswersNoErrorIsCountedAsAVote(t *testi
             &fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
             &fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
         },
+        AccessDecisionManagerConfig{},
     )
     err := denying.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil)
     if answer := exception.AsHttpException(err); nil == answer || 403 != answer.StatusCode() || true == exception.IsInfrastructureFailure(err) {
@@ -157,6 +161,7 @@ func TestAccessDecisionManager_AVoterThatAnswersNoErrorIsCountedAsAVote(t *testi
     typedNil := NewAccessDecisionManager(
         securitycontract.DecisionStrategyAffirmative,
         []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted, err: typedNilErr}},
+        AccessDecisionManagerConfig{},
     )
     if err := typedNil.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil); nil != err {
         t.Fatalf("expected a typed nil error read as none, got %v", err)
@@ -174,6 +179,7 @@ func TestAccessDecisionManager_AVoterErrorAnsweringAStatusOrAlreadyMarkedIsKeptA
             manager := NewAccessDecisionManager(
                 securitycontract.DecisionStrategyAffirmative,
                 []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", err: voterErr}},
+                AccessDecisionManagerConfig{},
             )
 
             if err := manager.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil); voterErr != err {
@@ -191,6 +197,7 @@ func TestAccessDecisionManager_DecideAnyGrantsOverAnotherAttributesOutage(t *tes
             &fallibleTestVoter{attribute: "ROLE_AUDIT", err: decisionStoreErr},
             &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
         },
+        AccessDecisionManagerConfig{},
     )
 
     if err := manager.DecideAny(nil, token, []string{"ROLE_AUDIT", "ROLE_ADMIN"}, nil); nil != err {
@@ -206,6 +213,7 @@ func TestAccessDecisionManager_DecideAnyWithNoGrantAnswersTheOutageNotForbidden(
             &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
             &fallibleTestVoter{attribute: "ROLE_AUDIT", err: decisionStoreErr},
         },
+        AccessDecisionManagerConfig{},
     )
 
     err := manager.DecideAny(nil, token, []string{"ROLE_ADMIN", "ROLE_AUDIT"}, nil)
@@ -219,6 +227,7 @@ func TestAccessDecisionManager_DecideAnyWithNoGrantAnswersTheOutageNotForbidden(
             &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
             &fallibleTestVoter{attribute: "ROLE_AUDIT", err: exception.Conflict("the policy says no")},
         },
+        AccessDecisionManagerConfig{},
     )
     err = denied.DecideAny(nil, token, []string{"ROLE_ADMIN", "ROLE_AUDIT"}, nil)
     if answer := exception.AsHttpException(err); nil == answer || 403 != answer.StatusCode() {
@@ -237,6 +246,7 @@ func TestAccessDecisionManager_AVoterErrorAnsweringA5xxIsMarked(t *testing.T) {
             manager := NewAccessDecisionManager(
                 securitycontract.DecisionStrategyAffirmative,
                 []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", err: voterErr}},
+                AccessDecisionManagerConfig{},
             )
 
             err := manager.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil)
@@ -255,6 +265,7 @@ func TestAccessDecisionManager_AnOutageLosesADenialAlreadyCast(t *testing.T) {
             &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
             &fallibleTestVoter{attribute: "ROLE_ADMIN", err: decisionStoreErr},
         },
+        AccessDecisionManagerConfig{},
     )
 
     if err := manager.DecideAll(nil, token, []string{"ROLE_ADMIN"}, nil); false == exception.AnswersUnavailable(err) {
@@ -271,6 +282,7 @@ func TestAccessDecisionManager_DecideAnyAnswersTheFirstOutage(t *testing.T) {
             &fallibleTestVoter{attribute: "ROLE_AUDIT", err: decisionStoreErr},
             &fallibleTestVoter{attribute: "ROLE_ADMIN", err: secondStoreErr},
         },
+        AccessDecisionManagerConfig{},
     )
 
     err := manager.DecideAny(nil, token, []string{"ROLE_AUDIT", "ROLE_ADMIN"}, nil)
@@ -290,7 +302,7 @@ func TestAccessDecisionManager_DecideAllAndDecideAnyHandTheirRuntimeToEveryVoter
         t.Run(name, func(t *testing.T) {
             first := &fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted}
             second := &fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted}
-            manager := NewAccessDecisionManager(securitycontract.DecisionStrategyConsensus, []securitycontract.Voter{first, second})
+            manager := NewAccessDecisionManager(securitycontract.DecisionStrategyConsensus, []securitycontract.Voter{first, second}, AccessDecisionManagerConfig{})
 
             if decideErr := decide(manager); nil != decideErr {
                 t.Fatalf("expected a grant, got %v", decideErr)
@@ -311,7 +323,7 @@ func (instance *typedNilVoterError) Error() string { return "never rendered" }
 
 func TestAccessDecisionManager_ATypedNilVoterErrorIsNoError(t *testing.T) {
     var typedNil *typedNilVoterError
-    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted, err: typedNil}})
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted, err: typedNil}}, AccessDecisionManagerConfig{})
 
     if decideErr := manager.DecideAll(nil, &securityTestToken{roles: []string{"ROLE_ADMIN"}}, []string{"ROLE_ADMIN"}, nil); nil != decideErr {
         t.Fatalf("expected the typed nil error read as no error, got %v", decideErr)
@@ -319,9 +331,161 @@ func TestAccessDecisionManager_ATypedNilVoterErrorIsNoError(t *testing.T) {
 }
 
 func TestAccessDecisionManager_TheResultBesideAnErrorIsNotRead(t *testing.T) {
-    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted, err: exception.Forbidden("the voter refused")}})
+    manager := NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{&fallibleTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted, err: exception.Forbidden("the voter refused")}}, AccessDecisionManagerConfig{})
 
     if decideErr := manager.DecideAll(nil, &securityTestToken{roles: []string{"ROLE_ADMIN"}}, []string{"ROLE_ADMIN"}, nil); nil == decideErr {
         t.Fatalf("expected the grant beside the error not counted")
     }
+}
+
+func TestNewAccessDecisionManager_AnUnspecifiedStrategyIsRefused(t *testing.T) {
+    for name, strategy := range map[string]securitycontract.DecisionStrategy{
+        "the named zero": securitycontract.DecisionStrategyUnspecified,
+        "the untyped 0":  0,
+    } {
+        t.Run(name, func(t *testing.T) {
+            defer func() {
+                recoveredValue := recover()
+                if nil == recoveredValue {
+                    t.Fatalf("expected a panic for a strategy left out")
+                }
+
+                recoveredErr, isError := recoveredValue.(error)
+                if false == isError || "access decision strategy is missing" != recoveredErr.Error() {
+                    t.Fatalf("expected the refusal to name the missing strategy, got %v", recoveredValue)
+                }
+            }()
+
+            _ = NewAccessDecisionManager(strategy, []securitycontract.Voter{NewRoleVoter()}, AccessDecisionManagerConfig{})
+        })
+    }
+}
+
+func decisionStrategies() map[string]securitycontract.DecisionStrategy {
+    return map[string]securitycontract.DecisionStrategy{
+        "affirmative": securitycontract.DecisionStrategyAffirmative,
+        "consensus":   securitycontract.DecisionStrategyConsensus,
+        "unanimous":   securitycontract.DecisionStrategyUnanimous,
+    }
+}
+
+func TestAccessDecisionManager_TheZeroConfigRefusesWhereNoVoteDecided(t *testing.T) {
+    token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
+
+    for name, strategy := range decisionStrategies() {
+        t.Run(name, func(t *testing.T) {
+            manager := NewAccessDecisionManager(
+                strategy,
+                []securitycontract.Voter{&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteAbstain}},
+                AccessDecisionManagerConfig{},
+            )
+
+            if nil == manager.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil) {
+                t.Fatalf("expected an attribute every voter abstained on to be refused")
+            }
+        })
+    }
+
+    tied := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyConsensus,
+        []securitycontract.Voter{
+            &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
+            &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+        },
+        AccessDecisionManagerConfig{},
+    )
+    if nil == tied.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil) {
+        t.Fatalf("expected a consensus tie to be refused under the zero config")
+    }
+}
+
+func TestAccessDecisionManager_AllowIfAllAbstainGrantsAnAttributeEveryVoterAbstainedOn(t *testing.T) {
+    token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
+
+    for name, strategy := range decisionStrategies() {
+        t.Run(name, func(t *testing.T) {
+            manager := NewAccessDecisionManager(
+                strategy,
+                []securitycontract.Voter{&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteAbstain}},
+                AccessDecisionManagerConfig{AllowIfAllAbstain: true},
+            )
+
+            if err := manager.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil); nil != err {
+                t.Fatalf("expected an attribute every supporting voter abstained on to be granted, got %v", err)
+            }
+
+            if nil == manager.DecideAll(testRuntime(), token, []string{"ROLE_UNSUPPORTED"}, nil) {
+                t.Fatalf("expected an attribute no voter supports to stay refused")
+            }
+        })
+    }
+}
+
+func TestAccessDecisionManager_AllowIfTiedGrantsAConsensusTieOnly(t *testing.T) {
+    token := &securityTestToken{roles: []string{"ROLE_ADMIN"}}
+    tiedVoters := []securitycontract.Voter{
+        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted},
+        &securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied},
+    }
+    config := AccessDecisionManagerConfig{AllowIfTied: true}
+
+    consensus := NewAccessDecisionManager(securitycontract.DecisionStrategyConsensus, tiedVoters, config)
+    if err := consensus.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil); nil != err {
+        t.Fatalf("expected a 1-1 consensus tie to be granted, got %v", err)
+    }
+
+    abstaining := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyConsensus,
+        []securitycontract.Voter{&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteAbstain}},
+        config,
+    )
+    if nil == abstaining.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil) {
+        t.Fatalf("expected 0-0 not to be read as a tie")
+    }
+
+    unanimous := NewAccessDecisionManager(securitycontract.DecisionStrategyUnanimous, tiedVoters, config)
+    if nil == unanimous.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil) {
+        t.Fatalf("expected AllowIfTied to change nothing under the unanimous strategy")
+    }
+
+    affirmativeDenied := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyAffirmative,
+        []securitycontract.Voter{&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteDenied}},
+        config,
+    )
+    if nil == affirmativeDenied.DecideAll(testRuntime(), token, []string{"ROLE_ADMIN"}, nil) {
+        t.Fatalf("expected AllowIfTied to change nothing under the affirmative strategy")
+    }
+}
+
+func TestAccessDecisionManager_WithVoters_CopiesAndRefusesANilVoter(t *testing.T) {
+    original := NewAccessDecisionManager(
+        securitycontract.DecisionStrategyConsensus,
+        []securitycontract.Voter{NewRoleVoter()},
+        AccessDecisionManagerConfig{AllowIfTied: true},
+    )
+
+    voters := []securitycontract.Voter{&securityTestVoter{attribute: "ROLE_ADMIN", result: securitycontract.VoteGranted}}
+    copied := original.WithVoters(voters)
+    voters[0] = &securityTestVoter{attribute: "ROLE_OTHER", result: securitycontract.VoteDenied}
+
+    if testVoter, isTestVoter := copied.Voters()[0].(*securityTestVoter); false == isTestVoter || "ROLE_ADMIN" != testVoter.attribute {
+        t.Fatalf("expected the copy to keep its own slice, not the caller's mutated one")
+    }
+
+    if _, isRoleVoter := original.Voters()[0].(*RoleVoter); false == isRoleVoter || 1 != len(original.Voters()) {
+        t.Fatalf("expected the receiver to keep its own voters")
+    }
+
+    if securitycontract.DecisionStrategyConsensus != copied.Strategy() {
+        t.Fatalf("expected the copy to keep the receiver's strategy, got %d", copied.Strategy())
+    }
+
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected a nil voter to be refused")
+        }
+    }()
+
+    _ = original.WithVoters([]securitycontract.Voter{nil})
 }

@@ -10,8 +10,29 @@ import (
     securitycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
-/* NewAccessDecisionManager decides with the voters under the strategy; an unknown strategy and a nil voter are refused, and the caller's slice is copied. */
-func NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter) *AccessDecisionManager {
+/* AccessDecisionManagerConfig: the zero value refuses where no vote decided. */
+type AccessDecisionManagerConfig struct {
+    /* AllowIfAllAbstain grants an attribute at least one voter supported and every supporting voter abstained on; an attribute no voter supports stays refused. */
+    AllowIfAllAbstain bool
+
+    /* AllowIfTied grants, under DecisionStrategyConsensus, an attribute whose granted and denied counts are equal and not zero; the other strategies do not read it. */
+    AllowIfTied bool
+}
+
+/* NewAccessDecisionManager decides with the voters under the strategy and the config; a missing or unknown strategy and a nil voter are refused, and the caller's slice is copied. */
+func NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter, config AccessDecisionManagerConfig) *AccessDecisionManager {
+    if securitycontract.DecisionStrategyUnspecified == strategy {
+        exception.Panic(
+            exception.NewError(
+                "access decision strategy is missing",
+                exceptioncontract.Context{
+                    "strategy": int(strategy),
+                },
+                nil,
+            ),
+        )
+    }
+
     if false == isValidDecisionStrategy(strategy) {
         exception.Panic(
             exception.NewError(
@@ -24,29 +45,26 @@ func NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters
         )
     }
 
-    for index, voter := range voters {
-        if true == internal.IsNilInterface(voter) {
-            exception.Panic(
-                exception.NewError(
-                    "security voter is nil",
-                    exceptioncontract.Context{
-                        "index": index,
-                    },
-                    nil,
-                ),
-            )
-        }
-    }
-
     return &AccessDecisionManager{
-        voters:   append([]securitycontract.Voter{}, voters...),
+        voters:   copyVoters(voters),
         strategy: strategy,
+        config:   config,
     }
 }
 
 type AccessDecisionManager struct {
     voters   []securitycontract.Voter
     strategy securitycontract.DecisionStrategy
+    config   AccessDecisionManagerConfig
+}
+
+/* WithVoters answers a copy deciding with the given voters under the receiver's strategy and config; a nil voter is refused, the caller's slice is copied and the receiver is left as it is. */
+func (instance *AccessDecisionManager) WithVoters(voters []securitycontract.Voter) *AccessDecisionManager {
+    return &AccessDecisionManager{
+        voters:   copyVoters(voters),
+        strategy: instance.strategy,
+        config:   instance.config,
+    }
 }
 
 func (instance *AccessDecisionManager) Voters() []securitycontract.Voter {
@@ -119,11 +137,15 @@ func (instance *AccessDecisionManager) decideSingleAttribute(runtimeInstance con
         }
     }
 
-    if 0 == grantedCount && 0 == deniedCount && 0 < abstainCount {
+    if 0 == grantedCount && 0 == deniedCount && 0 == abstainCount {
         return exception.Forbidden("forbidden")
     }
 
-    if 0 == grantedCount && 0 == deniedCount && 0 == abstainCount {
+    if 0 == grantedCount && 0 == deniedCount {
+        if true == instance.config.AllowIfAllAbstain {
+            return nil
+        }
+
         return exception.Forbidden("forbidden")
     }
 
@@ -141,6 +163,10 @@ func (instance *AccessDecisionManager) decideSingleAttribute(runtimeInstance con
         }
 
         if grantedCount > deniedCount {
+            return nil
+        }
+
+        if true == instance.config.AllowIfTied {
             return nil
         }
 
@@ -178,6 +204,24 @@ func castVote(runtimeInstance containercontract.Runtime, voter securitycontract.
 }
 
 var _ securitycontract.AccessDecisionManager = (*AccessDecisionManager)(nil)
+
+func copyVoters(voters []securitycontract.Voter) []securitycontract.Voter {
+    for index, voter := range voters {
+        if true == internal.IsNilInterface(voter) {
+            exception.Panic(
+                exception.NewError(
+                    "security voter is nil",
+                    exceptioncontract.Context{
+                        "index": index,
+                    },
+                    nil,
+                ),
+            )
+        }
+    }
+
+    return append([]securitycontract.Voter{}, voters...)
+}
 
 func isValidDecisionStrategy(strategy securitycontract.DecisionStrategy) bool {
     if securitycontract.DecisionStrategyAffirmative == strategy {

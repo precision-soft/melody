@@ -107,7 +107,7 @@ func TestBuilder_RoleHierarchy_AutoUpgradesRoleVoterToRoleHierarchyVoter(t *test
             RoleHierarchy: roleHierarchy,
             AccessDecisionManager: security.NewAccessDecisionManager(
                 securitycontract.DecisionStrategyAffirmative,
-                []securitycontract.Voter{security.NewRoleVoter()}),
+                []securitycontract.Voter{security.NewRoleVoter()}, security.AccessDecisionManagerConfig{}),
         },
     )
 
@@ -171,7 +171,7 @@ func TestBuilder_ZeroValueOverrideInheritsGlobalAccessControl(t *testing.T) {
     builder.SetGlobal(
         GlobalConfig{
             AccessControl:         globalAccessControl,
-            AccessDecisionManager: security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}),
+            AccessDecisionManager: security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}, security.AccessDecisionManagerConfig{}),
         },
     )
 
@@ -297,7 +297,7 @@ func TestFirewallOverride_GlobalAccessControlDisabledEnforcesOnlyTheFirewallsOwn
     builder.SetGlobal(
         GlobalConfig{
             AccessControl:         security.NewAccessControl([]security.AccessControlRule{accesscontrol.NewRawPrefixRule("/admin", accesscontrol.RuleConfig{Attributes: []string{"ROLE_ADMIN"}})}),
-            AccessDecisionManager: security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}),
+            AccessDecisionManager: security.NewAccessDecisionManager(securitycontract.DecisionStrategyAffirmative, []securitycontract.Voter{security.NewRoleVoter()}, security.AccessDecisionManagerConfig{}),
         },
     )
 

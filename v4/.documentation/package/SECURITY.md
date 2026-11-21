@@ -100,6 +100,8 @@ A path no rule claims reaches its handler without an authorization decision: `Ma
 
 A rule's attributes are a conjunction: the decision manager grants a request only when every attribute of the matched rule is granted, the first refused one refusing it (`DecideAll`), so a rule naming `ROLE_A` and `ROLE_B` admits a caller who holds both, not either, where Symfony's `roles: [ROLE_A, ROLE_B]` reads either. For either-of, give both roles a common one through the role hierarchy (`ROLE_A` and `ROLE_B` each implying `ROLE_REPORTS`) and require that one.
 
+The framework's [`AccessDecisionManager`](../../security/access_decision_manager.go) is built with a named strategy, `DecisionStrategyAffirmative` (one grant), `DecisionStrategyConsensus` (more grants than denials) or `DecisionStrategyUnanimous` (no denial and one grant); `DecisionStrategyUnspecified`, the zero value, is refused at construction (`access decision strategy is missing`), so a strategy left out is never read as the most permissive one. Its [`AccessDecisionManagerConfig`](../../security/access_decision_manager.go) carries the two outcomes no vote decides, both refused by the zero value: `AllowIfAllAbstain` grants an attribute every supporting voter abstained on, an attribute no voter supports staying refused, and `AllowIfTied` grants a consensus whose granted and denied counts are equal and not zero, the other strategies not reading it. When a firewall has a role hierarchy, the compiler wraps the manager's role voters through `WithVoters`, which keeps the strategy and the config.
+
 The rule that decided a request is kept on the security context, [`SecurityContext.MatchedRule`](../../security/security_context.go): its `PathPrefix` names an exact or prefix rule and is empty for a regex rule, whose `Pattern` names it instead; `Matching` answers the mode, which tells an exact rule from a segment or raw prefix over the same path; `Rule` answers the rule as the control compiled it, its path folded and its attributes trimmed, and `RuleIndex`, `Source` and `Firewall` where it was declared.
 
 Every rule path begins with a slash: `admin` could never match the canonicalized request path, so the exact, segment and raw constructors refuse it at declaration (`access control rule path must begin with a slash`), and so do `Require` and `AllowAnonymous`. For the same reason a path carrying an empty, `.` or `..` segment, `//admin` or `/x/../admin`, is refused (`access control rule path must be canonical`), since the request path is matched cleaned. A raw prefix rule refuses a trailing slash as well: stored without it, `/api/` would claim `/api-internal`, so the reach is declared instead, a segment prefix rule or the raw prefix without the slash. A `Rule` carries its attributes only when a constructor built it, and `NewControl` refuses the zero `Rule`.
@@ -230,6 +232,7 @@ func (instance *adminSecurityModule) RegisterSecurity(builder *securityconfig.Bu
     accessDecisionManager := security.NewAccessDecisionManager(
         securitycontract.DecisionStrategyAffirmative,
         []securitycontract.Voter{roleVoter},
+        security.AccessDecisionManagerConfig{},
     )
 
     builder.SetGlobal(securityconfig.GlobalConfig{
@@ -592,7 +595,7 @@ A configuration whose hazard has no legitimate reading is refused where it is co
 - [`NewResolverTokenSource(resolver securitycontract.TokenResolver)`](../../security/token_source.go)
 - [`NewJsonEntryPoint()`](../../security/json_entry_point.go)
 - [`NewJsonAccessDeniedHandler()`](../../security/json_access_denied_handler.go)
-- [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter)`](../../security/access_decision_manager.go)
+- [`NewAccessDecisionManager(strategy securitycontract.DecisionStrategy, voters []securitycontract.Voter, config AccessDecisionManagerConfig)`](../../security/access_decision_manager.go) — `DecisionStrategyUnspecified`, the zero value, refused; `AccessDecisionManagerConfig{AllowIfAllAbstain, AllowIfTied}`, the zero value refusing where no vote decided; `WithVoters(voters)` answers a copy under the same strategy and config
 - [`NewRoleVoter()`](../../security/voter.go)
 - [`NewRoleHierarchyVoter(roleHierarchy *RoleHierarchy, delegate *RoleVoter)`](../../security/role_hierarchy_voter.go)
 - [`NewSecurityContext(firewall *CompiledFirewall, token securitycontract.Token)`](../../security/security_context.go)
