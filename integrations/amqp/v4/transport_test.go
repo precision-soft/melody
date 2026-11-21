@@ -261,10 +261,13 @@ func TestTransport_SendReceiveAck(t *testing.T) {
         }
     }
 
-    queue, receiveErr := transport.Receive(runtimeInstance)
+    queueSubscription, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
         t.Fatalf("receive: %v", receiveErr)
     }
+
+
+    queue := queueSubscription.Envelopes()
 
     received := make(map[int]string)
     timeout := time.After(10 * time.Second)
@@ -329,10 +332,13 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
         t.Fatalf("send: %v", sendErr)
     }
 
-    queue, receiveErr := transport.Receive(runtimeInstance)
+    queueSubscription, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
         t.Fatalf("receive: %v", receiveErr)
     }
+
+
+    queue := queueSubscription.Envelopes()
 
     first := receiveWithin(t, queue, 10*time.Second)
     if 0 != melodymessagebus.RedeliveryCount(first) {
@@ -340,7 +346,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
     }
 
     retried := first.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}})
-    if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("nack requeue: %v", nackErr)
     }
 
@@ -349,7 +355,7 @@ func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
         t.Fatalf("expected persisted redelivery count 1, got %d", melodymessagebus.RedeliveryCount(second))
     }
 
-    if nackErr := transport.Nack(runtimeInstance, second, false); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, second, messagebuscontract.NackConfig{}); nil != nackErr {
         t.Fatalf("nack dead-letter: %v", nackErr)
     }
 
@@ -392,10 +398,13 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
         t.Fatalf("send: %v", sendErr)
     }
 
-    queue, receiveErr := transport.Receive(runtimeInstance)
+    queueSubscription, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
         t.Fatalf("receive: %v", receiveErr)
     }
+
+
+    queue := queueSubscription.Envelopes()
 
     first := receiveWithin(t, queue, 10*time.Second)
 
@@ -404,7 +413,7 @@ func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
         WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 1500 * time.Millisecond}})
 
     start := time.Now()
-    if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("nack requeue: %v", nackErr)
     }
 
@@ -459,10 +468,13 @@ func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
     runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
     defer transport.CloseWithContext(context.Background())
 
-    queue, receiveErr := transport.Receive(runtimeInstance)
+    queueSubscription, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
         t.Fatalf("receive: %v", receiveErr)
     }
+
+
+    queue := queueSubscription.Envelopes()
 
     if dropErr := connection.Close(); nil != dropErr {
         t.Fatalf("drop connection: %v", dropErr)
@@ -646,7 +658,7 @@ func TestConsumeLoop_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
     done := make(chan struct{})
 
     go func() {
-        instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, out)
+        instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, &subscription{envelopes: out})
         close(done)
     }()
 
@@ -726,7 +738,7 @@ func TestConsumeLoop_NoDialerClosesOut(t *testing.T) {
     instance := &Transport{queue: "orders"}
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.consumeLoop(newReconnectRuntime(context.Background()), nil, 0, deliveries, out)
+    go instance.consumeLoop(newReconnectRuntime(context.Background()), nil, 0, deliveries, &subscription{envelopes: out})
 
     select {
     case _, open := <-out:
@@ -747,7 +759,7 @@ func TestConsumeLoop_NoDialerLogsWhyTheConsumerStops(t *testing.T) {
     instance := &Transport{queue: "orders"}
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, out)
+    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, &subscription{envelopes: out})
 
     awaitClosedOutput(t, out)
 
@@ -761,6 +773,50 @@ func TestConsumeLoop_NoDialerLogsWhyTheConsumerStops(t *testing.T) {
     }
 }
 
+func TestConsumeLoop_NoDialerEndsTheSubscriptionWithItsReason(t *testing.T) {
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    instance := &Transport{queue: "orders"}
+    subscriptionInstance := &subscription{envelopes: make(chan messagebuscontract.Envelope)}
+
+    go instance.consumeLoop(newReconnectRuntime(context.Background()), nil, 0, deliveries, subscriptionInstance)
+
+    awaitClosedOutput(t, subscriptionInstance.Envelopes())
+
+    if nil == subscriptionInstance.Err() || false == strings.Contains(subscriptionInstance.Err().Error(), "the connection is gone with no dialer") {
+        t.Fatalf("expected the subscription to name why it ended, got %v", subscriptionInstance.Err())
+    }
+}
+
+func TestConsumeLoop_AStopThroughTheRuntimeOrTheCloseEndsTheSubscriptionWithNoReason(t *testing.T) {
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    for name, instance := range map[string]*Transport{
+        "closing":   {queue: "orders", closing: true, closeSignal: make(chan struct{})},
+        "cancelled": {queue: "orders"},
+    } {
+        deliveries := make(chan amqp091.Delivery)
+        close(deliveries)
+
+        runtimeContext := context.Background()
+        if "cancelled" == name {
+            runtimeContext = cancelledContext
+        }
+
+        subscriptionInstance := &subscription{envelopes: make(chan messagebuscontract.Envelope)}
+
+        go instance.consumeLoop(newReconnectRuntime(runtimeContext), nil, 0, deliveries, subscriptionInstance)
+
+        awaitClosedOutput(t, subscriptionInstance.Envelopes())
+
+        if nil != subscriptionInstance.Err() {
+            t.Fatalf("%s: expected no reason for a stop the consumer asked for, got %v", name, subscriptionInstance.Err())
+        }
+    }
+}
+
 func TestConsumeLoop_ClosingTransportStopsWithoutLogging(t *testing.T) {
     runtimeInstance, logger := newRecordingLoggerRuntime(context.Background())
 
@@ -770,7 +826,7 @@ func TestConsumeLoop_ClosingTransportStopsWithoutLogging(t *testing.T) {
     instance := &Transport{queue: "orders", closing: true, closeSignal: make(chan struct{})}
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, out)
+    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, &subscription{envelopes: out})
 
     awaitClosedOutput(t, out)
 
@@ -791,7 +847,7 @@ func TestConsumeLoop_CancelledContextStopsWithoutLogging(t *testing.T) {
     instance := &Transport{queue: "orders", closeSignal: make(chan struct{})}
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, out)
+    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, &subscription{envelopes: out})
 
     awaitClosedOutput(t, out)
 
@@ -874,7 +930,7 @@ func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.
     done := make(chan struct{})
 
     go func() {
-        instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, out)
+        instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, &subscription{envelopes: out})
         close(done)
     }()
 
@@ -1051,11 +1107,11 @@ func TestAckNack_StaleGenerationIsNoOp(t *testing.T) {
         t.Fatalf("expected a stale-generation ack to be a no-op, got %v", ackErr)
     }
 
-    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, false); nil != nackErr {
+    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, messagebuscontract.NackConfig{}); nil != nackErr {
         t.Fatalf("expected a stale-generation drop nack to be a no-op, got %v", nackErr)
     }
 
-    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, true); nil != nackErr {
+    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("expected a stale-generation requeue nack to be a no-op, got %v", nackErr)
     }
 }
@@ -1067,7 +1123,7 @@ func TestConsumeLoop_ContextDoneClosesOut(t *testing.T) {
     deliveries := make(chan amqp091.Delivery)
     out := make(chan messagebuscontract.Envelope)
 
-    go instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, out)
+    go instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, &subscription{envelopes: out})
 
     cancel()
 
@@ -1195,7 +1251,7 @@ func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
     runtimeInstance := newReconnectRuntime(context.Background())
     out := make(chan messagebuscontract.Envelope)
 
-    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out)
+    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, &subscription{envelopes: out})
 
     select {
     case <-serializer.entered:
@@ -1262,7 +1318,7 @@ func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
     runtimeInstance := newReconnectRuntime(context.Background())
     out := make(chan messagebuscontract.Envelope)
 
-    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out)
+    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, &subscription{envelopes: out})
 
     select {
     case <-dialing:
@@ -1357,7 +1413,7 @@ func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
     }
 
     select {
-    case envelopeInstance, open := <-out:
+    case envelopeInstance, open := <-out.Envelopes():
         if true == open {
             t.Fatalf("an envelope reached the application after Close returned: %+v", envelopeInstance.Message())
         }
@@ -1740,10 +1796,13 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
     runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
     defer transport.CloseWithContext(context.Background())
 
-    queue, receiveErr := transport.Receive(runtimeInstance)
+    queueSubscription, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
         t.Fatalf("receive: %v", receiveErr)
     }
+
+
+    queue := queueSubscription.Envelopes()
 
     for draining := true; true == draining; {
         select {
@@ -1774,10 +1833,10 @@ func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
         WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 2 * time.Second}})
 
     start := time.Now()
-    if nackErr := transport.Nack(runtimeInstance, longDelayed, true); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, longDelayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("nack long: %v", nackErr)
     }
-    if nackErr := transport.Nack(runtimeInstance, shortDelayed, true); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, shortDelayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("nack short: %v", nackErr)
     }
 
@@ -1828,7 +1887,7 @@ func TestStartConsumeLoop_RefusesOnceCloseHasBegun(t *testing.T) {
     deliveries := make(chan amqp091.Delivery)
     out := make(chan messagebuscontract.Envelope)
 
-    if true == instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out) {
+    if true == instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, &subscription{envelopes: out}) {
         t.Fatalf("expected a closing transport to refuse a new consume loop")
     }
 
@@ -1938,10 +1997,13 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
         t.Fatalf("send: %v", sendErr)
     }
 
-    queue, receiveErr := transport.Receive(runtimeInstance)
+    queueSubscription, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
         t.Fatalf("receive: %v", receiveErr)
     }
+
+
+    queue := queueSubscription.Envelopes()
 
     delivered := receiveWithin(t, queue, 10*time.Second)
     if 0 != melodymessagebus.RedeliveryCount(delivered) {
@@ -1954,7 +2016,7 @@ func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(
         WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}}).
         WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 100 * time.Millisecond}})
 
-    if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("nack requeue: %v", nackErr)
     }
 
@@ -2130,7 +2192,7 @@ func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
     runtimeInstance := newReconnectRuntime(context.Background())
     out := make(chan messagebuscontract.Envelope)
 
-    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out)
+    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, &subscription{envelopes: out})
 
     <-dialing
 
@@ -3076,10 +3138,13 @@ func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testin
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
 
-    queue, receiveErr := transport.Receive(runtimeInstance)
+    queueSubscription, receiveErr := transport.Receive(runtimeInstance)
     if nil != receiveErr {
         t.Fatalf("receive: %v", receiveErr)
     }
+
+
+    queue := queueSubscription.Envelopes()
 
     channel, channelErr := connection.Channel()
     if nil != channelErr {

@@ -221,6 +221,7 @@ The consequence to plan for: **an effective delay quantizes DOWN to its bucket.*
 
 A delay **below the smallest bucket** keeps the legacy `<queue>.delay` queue with a precise per-message `expiration`, where head-of-line waiting is bounded by that smallest bucket. That queue is always declared, so messages parked by an older deployment still drain. A per-message expiration is clamped to ~49.7 days, the range RabbitMQ's 32-bit millisecond parse allows.
 
+- `Receive` answers a subscription; when the consume loop ends for good — the connection gone with no dialer, a channel it could not reopen — its `Err()` names why, and the consume command reports it. A stop through the runtime or `CloseWithContext` ends it with no reason.
 - A delivery that cannot be decoded (missing or unknown `x-message-type`, bad body) is `Nack`ed without requeue. It is dead-lettered only when `DeadLetter` is enabled; otherwise the broker discards it (enable `DeadLetter` in production so undecodable deliveries are retained).
 
 ## Server-Sent Events backplane

@@ -134,7 +134,7 @@ app melody:messagebus:consume --transport=async --limit=100
 app melody:messagebus:consume --transport=async --concurrency=8
 ```
 
-The consumer loops over the transport, dispatches each received envelope to a handle-only bus, and acknowledges on success or negatively acknowledges (with requeue) on failure. It shuts down cooperatively on `SIGINT`/`SIGTERM` or when the runtime context is cancelled. The transport's lifecycle is owned by the container's ordered teardown, not the consumer — the consumer does **not** call `CloseWithContext` on exit, so a transport shared between the dispatcher and the consumer in the same process keeps working after the consume command returns; `RegisterTransports` registers a `TransportsCloser` beside the map, resolved as a dependency of it, so the teardown closes every registered transport after everything that depends on the map, in deterministic name order. If the delivery channel closes without a cancelled context (for example a lost broker connection), the consumer returns an error rather than reporting a clean exit, so a supervisor can tell a crash from a graceful stop.
+The consumer loops over the transport's subscription, dispatches each received envelope to a handle-only bus, and acknowledges on success or negatively acknowledges (with requeue) on failure. It shuts down cooperatively on `SIGINT`/`SIGTERM` or when the runtime context is cancelled. The transport's lifecycle is owned by the container's ordered teardown, not the consumer — the consumer does **not** call `CloseWithContext` on exit, so a transport shared between the dispatcher and the consumer in the same process keeps working after the consume command returns; `RegisterTransports` registers a `TransportsCloser` beside the map, resolved as a dependency of it, so the teardown closes every registered transport after everything that depends on the map, in deterministic name order. If the delivery channel closes without a cancelled context (for example a lost broker connection), the consumer returns an error rather than reporting a clean exit, so a supervisor can tell a crash from a graceful stop. A subscription that ends without the stop answers its `Err()` as the cause of `transport delivery channel closed`, and `transport delivery channel closed unexpectedly` when it gives no reason.
 
 By default the consumer handles one message at a time (so the broker's prefetch only buffers). Pass `--concurrency=N` to run N worker goroutines reading the same transport; per-transport `Ack`/`Nack` stay serialized, so this is safe. On shutdown the consumer waits a bounded grace period (30s when `ConsumeCommandConfig.ShutdownTimeout` is left out) for in-flight handlers to drain, then returns even if a handler is still running — handlers are not context-aware, so this stops a wedged handler from blocking shutdown forever. Messages already received but not yet acked are redelivered on the next run (at-least-once), so handlers must be idempotent.
 
@@ -166,7 +166,9 @@ A runnable end-to-end demonstration lives in the example application: [`messageb
 - [`type StackNext`](../../messagebus/contract/middleware.go)
 - [`type Middleware`](../../messagebus/contract/middleware.go)
 - [`type Bus`](../../messagebus/contract/bus.go)
-- [`type Transport`](../../messagebus/contract/transport.go)
+- [`type Transport`](../../messagebus/contract/transport.go) — `Receive(runtime)` answers a `Subscription`, `Nack(runtime, envelope, NackConfig)`
+- [`type Subscription`](../../messagebus/contract/transport.go) — `Envelopes()` closed when the stream ends, `Err()` then why, nil for an end through the runtime's context or the transport's close
+- [`type NackConfig`](../../messagebus/contract/transport.go) — `Requeue`, the zero value refusing without a requeue
 
 ### Implementations (`messagebus`)
 

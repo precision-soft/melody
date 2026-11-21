@@ -311,10 +311,16 @@ func (instance *consumeSession) consumeFrom(
     signalRuntime := runtime.WithContext(runtimeInstance, signalContext)
     handlerRuntime := runtime.WithContext(runtimeInstance, handlerContext)
 
-    queue, receiveErr := transport.Receive(signalRuntime)
+    subscription, receiveErr := transport.Receive(signalRuntime)
     if nil != receiveErr {
         return receiveErr
     }
+
+    if true == internal.IsNilInterface(subscription) {
+        return exception.NewError("the transport answered no subscription", nil, nil)
+    }
+
+    queue := subscription.Envelopes()
 
     workerContext, cancelWorkers := context.WithCancel(signalContext)
     defer cancelWorkers()
@@ -348,7 +354,14 @@ func (instance *consumeSession) consumeFrom(
                     if false == open {
                         if nil == signalContext.Err() {
                             loopErrOnce.Do(func() {
-                                loopErr = exception.NewError("transport delivery channel closed unexpectedly", nil, nil)
+                                streamErr := subscription.Err()
+                                if nil == streamErr {
+                                    loopErr = exception.NewError("transport delivery channel closed unexpectedly", nil, nil)
+
+                                    return
+                                }
+
+                                loopErr = exception.NewError("transport delivery channel closed", nil, streamErr)
                             })
                         }
                         cancelWorkers()
@@ -444,7 +457,7 @@ func (instance *consumeSession) consume(
             retried = withReplacedStamp(retried, DelayStamp{Delay: delay})
         }
 
-        if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
+        if nackErr := transport.Nack(runtimeInstance, retried, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
             instance.logError(runtimeInstance, "message requeue failed", nackErr)
         }
 
@@ -462,7 +475,7 @@ func (instance *consumeSession) consume(
             )
         }
 
-        if nackErr := transport.Nack(runtimeInstance, envelopeInstance, false); nil != nackErr {
+        if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackConfig{}); nil != nackErr {
             instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
         }
 
@@ -477,7 +490,7 @@ func (instance *consumeSession) consume(
             if false == instance.retryPolicy.MaxDeadLetterAttemptsUnlimited && deadLetterAttempts+1 >= instance.retryPolicy.MaxDeadLetterAttempts {
                 instance.logError(runtimeInstance, "exhausted message dead-letter attempts; giving up requeue", sendErr)
 
-                if nackErr := transport.Nack(runtimeInstance, envelopeInstance, false); nil != nackErr {
+                if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackConfig{}); nil != nackErr {
                     instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
                 }
 
@@ -488,7 +501,7 @@ func (instance *consumeSession) consume(
                 withReplacedStamp(envelopeInstance, DeadLetterAttemptStamp{Count: deadLetterAttempts + 1}),
                 DelayStamp{Delay: instance.failureRequeueDelay()},
             )
-            if nackErr := transport.Nack(runtimeInstance, requeued, true); nil != nackErr {
+            if nackErr := transport.Nack(runtimeInstance, requeued, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
                 instance.logError(runtimeInstance, "message requeue failed after failure transport rejection", nackErr)
             }
 
@@ -509,7 +522,7 @@ func (instance *consumeSession) consume(
         )
     }
 
-    if nackErr := transport.Nack(runtimeInstance, envelopeInstance, false); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackConfig{}); nil != nackErr {
         instance.logError(runtimeInstance, "message dead-letter failed", nackErr)
     }
 }

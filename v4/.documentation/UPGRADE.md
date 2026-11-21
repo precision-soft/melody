@@ -477,6 +477,14 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** A listener whose failure must keep every listener behind it from running declares `FailureEndsDispatch: true`. Read every failure through `errors.Is` / `errors.As`, or through `Unwrap() []error` on a joined answer. A listener that answers a request returns nil.
 
+### Messagebus: `Receive` answers a subscription, `Nack` takes a config
+
+**What changed.** [`messagebuscontract.Transport`](../messagebus/contract/transport.go)'s `Receive(runtime)` answers a `Subscription` of `Envelopes()` and `Err()`, where it answered a channel, and `Nack(runtime, envelope, NackConfig{Requeue})` takes a config where it took a bool. The consume command reads `Err()` when the stream ends without the stop: the reason travels as the cause of `transport delivery channel closed`. The amqp transport's subscription names the connection gone with no dialer or the channel it could not reopen; the in-memory one answers nil.
+
+**Symptom.** `*T does not implement messagebuscontract.Transport (wrong type for method Receive)` or `(wrong type for method Nack)`; `cannot range over queue` or `cannot receive from non-channel` on a `Receive` answer; `cannot use true (untyped bool constant) as messagebuscontract.NackConfig value`.
+
+**Remedy.** A transport of the application's own answers a `Subscription` whose `Envelopes()` is its channel and whose `Err()` says why it closed, nil for a stop; read `subscription.Envelopes()` where the channel was read; write `Nack(runtime, envelope, messagebuscontract.NackConfig{Requeue: true})` for `true` and `NackConfig{}` for `false`.
+
 ### Messagebus: a handler receives the envelope; one stamping and one send door
 
 **What changed.** [`MessageHandler.Handle`](../messagebus/contract/handler.go) is `Handle(runtimeInstance, envelope)` and the function [`RegisterHandler[T]`](../messagebus/locator.go) registers is `func(runtimeInstance, message T, envelope Envelope) error`, so a handler reads `messagebus.MessageId(envelope)` and the redelivery count of the delivery it handles. `Envelope.WithStamp` is removed beside `WithStamps`. [`NewSendMessageMiddleware`](../messagebus/middleware_send.go) takes the `*Routing` that `NewRouting` and `RouteType[T]` build; its map form, `NewSendMessageMiddlewareFromRouting` and `TransportRouting` are removed.

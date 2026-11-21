@@ -37,7 +37,9 @@ func TestSendMiddleware_RoutesToTransportAndWorkerHandles(t *testing.T) {
 
     consumeBus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(locator, HandleOptions{})})
 
-    queue, receiveErr := transport.Receive(runtimeInstance)
+    queueSubscription, receiveErr := transport.Receive(runtimeInstance)
+
+    queue := queueSubscription.Envelopes()
     if nil != receiveErr {
         t.Fatalf("unexpected receive error: %v", receiveErr)
     }

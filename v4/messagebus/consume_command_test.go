@@ -1,6 +1,7 @@
 package messagebus
 
 import (
+    "errors"
     "context"
     "strings"
     "sync"
@@ -22,6 +23,7 @@ import (
 )
 
 type closedQueueTransport struct {
+    streamErr error
     queue chan messagebuscontract.Envelope
 }
 
@@ -29,15 +31,15 @@ func (instance *closedQueueTransport) Send(runtimeInstance containercontract.Run
     return nil
 }
 
-func (instance *closedQueueTransport) Receive(runtimeInstance containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
-    return instance.queue, nil
+func (instance *closedQueueTransport) Receive(runtimeInstance containercontract.Runtime) (messagebuscontract.Subscription, error) {
+    return &queueSubscription{queue: instance.queue, err: instance.streamErr}, nil
 }
 
 func (instance *closedQueueTransport) Ack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
     return nil
 }
 
-func (instance *closedQueueTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+func (instance *closedQueueTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
     return nil
 }
 
@@ -142,7 +144,9 @@ func TestConsume_ExhaustsRetriesAndRoutesToFailureTransport(t *testing.T) {
         t.Fatalf("expected exactly three handling attempts, got %d", attempts)
     }
 
-    failureQueue, _ := failure.Receive(runtimeInstance)
+    failureQueueSubscription, _ := failure.Receive(runtimeInstance)
+
+    failureQueue := failureQueueSubscription.Envelopes()
     select {
     case deadLettered := <-failureQueue:
         if 2 != RedeliveryCount(deadLettered) {
@@ -182,7 +186,9 @@ func TestConsume_AMessageExhaustedOnTheFailureTransportItselfIsNotSentBackToIt(t
         t.Fatalf("expected the exhausted message handled once and not cycled through its own transport, got %d attempts", attempts)
     }
 
-    failureQueue, _ := failure.Receive(runtimeInstance)
+    failureQueueSubscription, _ := failure.Receive(runtimeInstance)
+
+    failureQueue := failureQueueSubscription.Envelopes()
     select {
     case leftover := <-failureQueue:
         t.Fatalf("expected the message not sent back to the failure transport, found %v", leftover.Message())
@@ -218,7 +224,9 @@ func TestConsume_ExhaustedWithoutFailureTransportDropsMessage(t *testing.T) {
         t.Fatalf("expected exactly three handling attempts, got %d", attempts)
     }
 
-    sourceQueue, _ := source.Receive(runtimeInstance)
+    sourceQueueSubscription, _ := source.Receive(runtimeInstance)
+
+    sourceQueue := sourceQueueSubscription.Envelopes()
     select {
     case leftover := <-sourceQueue:
         t.Fatalf("expected the exhausted message to be dropped, found %v still queued", leftover.Message())
@@ -238,7 +246,7 @@ func (instance *recordingNackTransport) Send(runtimeInstance containercontract.R
     return nil
 }
 
-func (instance *recordingNackTransport) Receive(runtimeInstance containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+func (instance *recordingNackTransport) Receive(runtimeInstance containercontract.Runtime) (messagebuscontract.Subscription, error) {
     return nil, nil
 }
 
@@ -246,9 +254,9 @@ func (instance *recordingNackTransport) Ack(runtimeInstance containercontract.Ru
     return nil
 }
 
-func (instance *recordingNackTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+func (instance *recordingNackTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
     instance.nackCount++
-    instance.nackRequeue = requeue
+    instance.nackRequeue = config.Requeue
     instance.nackEnvelope = envelope
     return nil
 }
@@ -263,7 +271,7 @@ func (instance *alwaysFailingTransport) Send(runtimeInstance containercontract.R
     return exception.NewError("failure transport is down", nil, nil)
 }
 
-func (instance *alwaysFailingTransport) Receive(runtimeInstance containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+func (instance *alwaysFailingTransport) Receive(runtimeInstance containercontract.Runtime) (messagebuscontract.Subscription, error) {
     return nil, nil
 }
 
@@ -271,7 +279,7 @@ func (instance *alwaysFailingTransport) Ack(runtimeInstance containercontract.Ru
     return nil
 }
 
-func (instance *alwaysFailingTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+func (instance *alwaysFailingTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
     return nil
 }
 
@@ -464,6 +472,59 @@ func TestConsumeFrom_AbnormalChannelCloseReturnsError(t *testing.T) {
     }
 }
 
+func TestConsumeFrom_AStreamThatEndsWithAReasonAnswersIt(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
+
+    queue := make(chan messagebuscontract.Envelope)
+    close(queue)
+
+    streamErr := errors.New("the broker connection is gone")
+
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleOptions{})})
+    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+
+    consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue, streamErr: streamErr}, 0, 1)
+    if false == errors.Is(consumeErr, streamErr) {
+        t.Fatalf("expected the stream's reason in the error, got %v", consumeErr)
+    }
+
+    if false == strings.Contains(consumeErr.Error(), "transport delivery channel closed") {
+        t.Fatalf("expected the error to name the closed channel, got %v", consumeErr)
+    }
+}
+
+func TestConsumeFrom_AStreamThatEndsAfterTheStopAnswersNilWhateverItsReason(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    consumeContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    runtimeInstance := runtime.NewRun(consumeContext, serviceContainer.NewScope())
+
+    queue := make(chan messagebuscontract.Envelope)
+    close(queue)
+
+    bus := NewManager("default", []messagebuscontract.Middleware{NewHandleMessageMiddleware(NewHandlerLocator(), HandleOptions{})})
+    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+
+    consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &closedQueueTransport{queue: queue, streamErr: errors.New("ignored after the stop")}, 0, 1)
+    if nil != consumeErr {
+        t.Fatalf("expected no error for a stream that ended after the stop, got %v", consumeErr)
+    }
+}
+
+func TestConsumeFrom_ATransportThatAnswersNoSubscriptionIsRefused(t *testing.T) {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
+
+    bus := NewManager("default", []messagebuscontract.Middleware{})
+    command := NewConsumeCommand(bus, nil, ConsumeCommandConfig{})
+
+    consumeErr := mustConsumeSession(command, runtimeInstance).consumeFrom(runtimeInstance, &recordingNackTransport{}, 0, 1)
+    if nil == consumeErr || false == strings.Contains(consumeErr.Error(), "the transport answered no subscription") {
+        t.Fatalf("expected the absent subscription refused, got %v", consumeErr)
+    }
+}
+
 func TestConsumeFrom_ShutdownTimeoutTimesOutWedgedHandler(t *testing.T) {
     serviceContainer := container.NewContainer(container.ContainerConfig{})
     consumeContext, cancel := context.WithCancel(context.Background())
@@ -516,6 +577,7 @@ func TestConsumeFrom_ShutdownTimeoutTimesOutWedgedHandler(t *testing.T) {
 }
 
 type contextAwareTransport struct {
+    streamErr error
     queue chan messagebuscontract.Envelope
 
     ackCalls     int
@@ -530,8 +592,8 @@ func (instance *contextAwareTransport) Send(runtimeInstance containercontract.Ru
     return nil
 }
 
-func (instance *contextAwareTransport) Receive(runtimeInstance containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
-    return instance.queue, nil
+func (instance *contextAwareTransport) Receive(runtimeInstance containercontract.Runtime) (messagebuscontract.Subscription, error) {
+    return &queueSubscription{queue: instance.queue, err: instance.streamErr}, nil
 }
 
 func (instance *contextAwareTransport) Ack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope) error {
@@ -541,9 +603,9 @@ func (instance *contextAwareTransport) Ack(runtimeInstance containercontract.Run
     return instance.ackErr
 }
 
-func (instance *contextAwareTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+func (instance *contextAwareTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
     instance.nackCalls++
-    instance.nackRequeue = requeue
+    instance.nackRequeue = config.Requeue
     instance.nackEnvelope = envelope
     instance.nackErr = runtimeInstance.Context().Err()
 
@@ -749,7 +811,9 @@ func TestConsume_PanickingHandlerFlowsIntoRetryPipeline(t *testing.T) {
         t.Fatalf("expected the panicking handler to be retried like an erroring one (three attempts), got %d", attempts)
     }
 
-    failureQueue, _ := failure.Receive(runtimeInstance)
+    failureQueueSubscription, _ := failure.Receive(runtimeInstance)
+
+    failureQueue := failureQueueSubscription.Envelopes()
     select {
     case deadLettered := <-failureQueue:
         if 2 != RedeliveryCount(deadLettered) {

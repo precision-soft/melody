@@ -129,3 +129,17 @@ func recoveredPanicContext(callback func()) (context exceptioncontract.Context) 
 
     return nil
 }
+
+/* queueSubscription answers a test transport's queue as its subscription, and the reason the test gave for its end */
+type queueSubscription struct {
+    queue chan messagebuscontract.Envelope
+    err   error
+}
+
+func (instance *queueSubscription) Envelopes() <-chan messagebuscontract.Envelope {
+    return instance.queue
+}
+
+func (instance *queueSubscription) Err() error {
+    return instance.err
+}

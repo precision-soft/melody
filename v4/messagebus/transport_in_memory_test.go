@@ -22,7 +22,7 @@ func TestInMemoryTransport_RequeueOnFullQueueDoesNotBlock(t *testing.T) {
         t.Fatalf("unexpected send error: %v", sendErr)
     }
 
-    nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 2}, nil), true)
+    nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 2}, nil), messagebuscontract.NackConfig{Requeue: true})
     if nil == nackErr {
         t.Fatalf("expected nack to report a dropped message when the queue is full")
     }
@@ -62,7 +62,7 @@ func TestInMemoryTransport_RequeueAfterCloseIsRefusedDeterministically(t *testin
 
     /* before the guard, one select weighed a ready queue slot against the closed transport and Go picks between ready cases at RANDOM — a post-Close requeue succeeded about half the time, so "closed" was enforced on Send and coin-flipped on Nack; fifty attempts make a surviving coin flip astronomically unlikely */
     for attempt := 0; attempt < 50; attempt++ {
-        if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: attempt}, nil), true); nil == nackErr {
+        if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: attempt}, nil), messagebuscontract.NackConfig{Requeue: true}); nil == nackErr {
             t.Fatalf("expected every post-close requeue to be refused, attempt %d landed", attempt)
         }
     }
@@ -79,7 +79,7 @@ func TestInMemoryTransport_DroppedDelayedRequeueIsLoggedThroughTheRuntime(t *tes
     }
 
     delayed := NewEnvelope(taskCreated{TaskId: 2}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: 20 * time.Millisecond}})
-    if nackErr := transport.Nack(runtimeInstance, delayed, true); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, delayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
@@ -98,7 +98,9 @@ func TestInMemoryTransport_DroppedDelayedRequeueIsLoggedThroughTheRuntime(t *tes
 func TestInMemoryTransport_CloseClosesTheReceiveChannelSoAConsumerSeesEndOfStream(t *testing.T) {
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
-    queue, receiveErr := transport.Receive(newTestRuntime())
+    queueSubscription, receiveErr := transport.Receive(newTestRuntime())
+
+    queue := queueSubscription.Envelopes()
     if nil != receiveErr {
         t.Fatalf("receive: %v", receiveErr)
     }
@@ -135,7 +137,8 @@ func TestInMemoryTransport_ConcurrentSendsAndCloseAreRaceFreeAndNeverPanic(t *te
 
     /* a reader drains so unbuffered sends can make progress until Close lands */
     stopReader := make(chan struct{})
-    queue, _ := transport.Receive(runtimeInstance)
+    queueSubscription, _ := transport.Receive(runtimeInstance)
+    queue := queueSubscription.Envelopes()
     go func() {
         for {
             select {
@@ -165,7 +168,7 @@ func TestInMemoryTransport_ADelayedRequeueDroppedAtCloseIsLogged(t *testing.T) {
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
     delayed := NewEnvelope(taskCreated{TaskId: 3}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: time.Hour}})
-    if nackErr := transport.Nack(runtimeInstance, delayed, true); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, delayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
@@ -250,7 +253,7 @@ func TestInMemoryTransport_ADelayedNackOnARuntimeWithoutALoggerWritesNoEmergency
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
     delayed := NewEnvelope(taskCreated{TaskId: 4}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: time.Hour}})
-    if nackErr := transport.Nack(newTestRuntime(), delayed, true); nil != nackErr {
+    if nackErr := transport.Nack(newTestRuntime(), delayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
@@ -274,7 +277,7 @@ func TestInMemoryTransport_ADropOnARuntimeWithoutALoggerIsJournaledOnTheEmergenc
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(4)})
 
     delayed := NewEnvelope(taskCreated{TaskId: 5}, nil).WithStamps([]messagebuscontract.Stamp{DelayStamp{Delay: time.Hour}})
-    if nackErr := transport.Nack(newTestRuntime(), delayed, true); nil != nackErr {
+    if nackErr := transport.Nack(newTestRuntime(), delayed, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 
@@ -298,7 +301,9 @@ func TestInMemoryTransport_ARequeueOnAnUnbufferedQueueReachesTheNextReceive(t *t
         transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(bufferSize)})
         runtimeInstance := newTestRuntime()
 
-        received, _ := transport.Receive(runtimeInstance)
+        receivedSubscription, _ := transport.Receive(runtimeInstance)
+
+        received := receivedSubscription.Envelopes()
 
         go func() {
             _ = transport.Send(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}, nil))
@@ -310,7 +315,7 @@ func TestInMemoryTransport_ARequeueOnAnUnbufferedQueueReachesTheNextReceive(t *t
             case envelopeInstance := <-received:
                 attempts++
                 if 3 > attempts {
-                    if nackErr := transport.Nack(runtimeInstance, envelopeInstance, true); nil != nackErr {
+                    if nackErr := transport.Nack(runtimeInstance, envelopeInstance, messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
                         t.Fatalf("size %d: unexpected nack error on attempt %d: %v", bufferSize, attempts, nackErr)
                     }
                 }
@@ -327,7 +332,7 @@ func TestInMemoryTransport_ARequeueWaitingOnAnUnbufferedQueueIsDroppedAtCloseAnd
     transport := NewInMemoryTransport(InMemoryTransportConfig{BufferSize: bound.Of(0)})
     runtimeInstance, logger := newTestRuntimeWithRecordingLogger()
 
-    if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}, nil), true); nil != nackErr {
+    if nackErr := transport.Nack(runtimeInstance, NewEnvelope(taskCreated{TaskId: 1}, nil), messagebuscontract.NackConfig{Requeue: true}); nil != nackErr {
         t.Fatalf("unexpected nack error: %v", nackErr)
     }
 

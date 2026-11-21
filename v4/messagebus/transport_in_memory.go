@@ -96,10 +96,23 @@ func (instance *InMemoryTransport) Send(
     }
 }
 
+/* Receive answers the queue as the subscription; it ends only when the transport is closed, so its Err is always nil. */
 func (instance *InMemoryTransport) Receive(
     runtimeInstance containercontract.Runtime,
-) (<-chan messagebuscontract.Envelope, error) {
-    return instance.queue, nil
+) (messagebuscontract.Subscription, error) {
+    return &inMemorySubscription{queue: instance.queue}, nil
+}
+
+type inMemorySubscription struct {
+    queue chan messagebuscontract.Envelope
+}
+
+func (instance *inMemorySubscription) Envelopes() <-chan messagebuscontract.Envelope {
+    return instance.queue
+}
+
+func (instance *inMemorySubscription) Err() error {
+    return nil
 }
 
 /* CloseWithContext ends the transport at once: a parked send leaves through its done case, and the queue closes once the sends in flight release their lock, which none holds past a send. */
@@ -126,9 +139,9 @@ func (instance *InMemoryTransport) Ack(
 func (instance *InMemoryTransport) Nack(
     runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
-    requeue bool,
+    config messagebuscontract.NackConfig,
 ) error {
-    if false == requeue {
+    if false == config.Requeue {
         return nil
     }
 

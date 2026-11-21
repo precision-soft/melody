@@ -60,10 +60,12 @@ func (instance *MessageBusDispatchCommand) Run(
         _, _ = fmt.Fprintln(writer, "dispatched welcome email for user:", messageInstance.UserId)
     }
 
-    queue, receiveErr := instance.transport.Receive(runtimeInstance)
+    subscription, receiveErr := instance.transport.Receive(runtimeInstance)
     if nil != receiveErr {
         return receiveErr
     }
+
+    queue := subscription.Envelopes()
 
     for index := 0; index < len(messages); index++ {
         select {

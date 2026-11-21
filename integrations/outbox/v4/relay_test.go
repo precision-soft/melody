@@ -206,7 +206,7 @@ func (instance *fakeTransport) Send(_ containercontract.Runtime, envelope messag
     return nil
 }
 
-func (instance *fakeTransport) Receive(_ containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+func (instance *fakeTransport) Receive(_ containercontract.Runtime) (messagebuscontract.Subscription, error) {
     return nil, nil
 }
 
@@ -214,7 +214,7 @@ func (instance *fakeTransport) Ack(_ containercontract.Runtime, _ messagebuscont
     return nil
 }
 
-func (instance *fakeTransport) Nack(_ containercontract.Runtime, _ messagebuscontract.Envelope, _ bool) error {
+func (instance *fakeTransport) Nack(_ containercontract.Runtime, _ messagebuscontract.Envelope, _ messagebuscontract.NackConfig) error {
     return nil
 }
 

@@ -861,7 +861,7 @@ func (instance *recordingCloseTransport) Send(runtimeInstance containercontract.
     return nil
 }
 
-func (instance *recordingCloseTransport) Receive(runtimeInstance containercontract.Runtime) (<-chan messagebuscontract.Envelope, error) {
+func (instance *recordingCloseTransport) Receive(runtimeInstance containercontract.Runtime) (messagebuscontract.Subscription, error) {
     return nil, nil
 }
 
@@ -869,7 +869,7 @@ func (instance *recordingCloseTransport) Ack(runtimeInstance containercontract.R
     return nil
 }
 
-func (instance *recordingCloseTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, requeue bool) error {
+func (instance *recordingCloseTransport) Nack(runtimeInstance containercontract.Runtime, envelope messagebuscontract.Envelope, config messagebuscontract.NackConfig) error {
     return nil
 }
 

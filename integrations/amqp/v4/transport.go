@@ -221,24 +221,53 @@ func (instance *Transport) Send(
     return instance.publish(runtimeInstance.Context(), exchange, routingKey, publishing)
 }
 
+/* Receive answers a subscription whose Err, once its envelopes are closed, names why the consume loop ended for good: the connection gone with no dialer, or a channel that could not be reopened; an end through the runtime's context or the transport's close answers nil. */
 func (instance *Transport) Receive(
     runtimeInstance containercontract.Runtime,
-) (<-chan messagebuscontract.Envelope, error) {
+) (messagebuscontract.Subscription, error) {
     channel, generation, deliveries, subscribeErr := instance.subscribeWithRetry(runtimeInstance)
     if nil != subscribeErr {
         return nil, subscribeErr
     }
 
-    out := make(chan messagebuscontract.Envelope)
+    subscriptionInstance := &subscription{envelopes: make(chan messagebuscontract.Envelope)}
 
-    if false == instance.startConsumeLoop(runtimeInstance, channel, generation, deliveries, out) {
+    if false == instance.startConsumeLoop(runtimeInstance, channel, generation, deliveries, subscriptionInstance) {
         channel.Close()
 
         return nil, exception.NewError("amqp transport is closing", nil, nil)
     }
 
-    return out, nil
+    return subscriptionInstance, nil
 }
+
+/* subscription is written by its consume loop alone: the reason is set before the envelopes are closed, and read after */
+type subscription struct {
+    envelopes chan messagebuscontract.Envelope
+    mutex     sync.Mutex
+    err       error
+}
+
+func (instance *subscription) Envelopes() <-chan messagebuscontract.Envelope {
+    return instance.envelopes
+}
+
+func (instance *subscription) Err() error {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    return instance.err
+}
+
+func (instance *subscription) end(endErr error) {
+    instance.mutex.Lock()
+    instance.err = endErr
+    instance.mutex.Unlock()
+
+    close(instance.envelopes)
+}
+
+var _ messagebuscontract.Subscription = (*subscription)(nil)
 
 func (instance *Transport) subscribeWithRetry(
     runtimeInstance containercontract.Runtime,
@@ -273,7 +302,7 @@ func (instance *Transport) Ack(
 func (instance *Transport) Nack(
     runtimeInstance containercontract.Runtime,
     envelopeInstance messagebuscontract.Envelope,
-    requeue bool,
+    config messagebuscontract.NackConfig,
 ) error {
     stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance)
     if false == exists {
@@ -290,7 +319,7 @@ func (instance *Transport) Nack(
         return nil
     }
 
-    if false == requeue {
+    if false == config.Requeue {
         return instance.nackChannel(channel, stamp.Tag, false)
     }
 
@@ -960,7 +989,7 @@ func (instance *Transport) startConsumeLoop(
     channel *amqp091.Channel,
     generation uint64,
     deliveries <-chan amqp091.Delivery,
-    out chan messagebuscontract.Envelope,
+    subscriptionInstance *subscription,
 ) bool {
     instance.mutex.Lock()
 
@@ -977,7 +1006,7 @@ func (instance *Transport) startConsumeLoop(
     go func() {
         defer instance.wait.Done()
 
-        instance.consumeLoop(runtimeInstance, channel, generation, deliveries, out)
+        instance.consumeLoop(runtimeInstance, channel, generation, deliveries, subscriptionInstance)
     }()
 
     return true
@@ -988,9 +1017,14 @@ func (instance *Transport) consumeLoop(
     channel *amqp091.Channel,
     generation uint64,
     deliveries <-chan amqp091.Delivery,
-    out chan messagebuscontract.Envelope,
+    subscriptionInstance *subscription,
 ) {
-    defer close(out)
+    var endErr error
+    defer func() {
+        subscriptionInstance.end(endErr)
+    }()
+
+    out := subscriptionInstance.envelopes
 
     backoff := instance.reconnect.initialBackoff
 
@@ -1006,6 +1040,8 @@ func (instance *Transport) consumeLoop(
 
         if false == instance.subscribeRetryable() {
             if nil == runtimeInstance.Context().Err() && false == instance.isClosing() {
+                endErr = exception.NewError("amqp deliveries channel closed and the connection is gone with no dialer", map[string]any{"queue": instance.queue}, nil)
+
                 instance.logError(
                     runtimeInstance,
                     "amqp deliveries channel closed and the connection is gone with no dialer, consumer is stopping",
@@ -1037,6 +1073,8 @@ func (instance *Transport) consumeLoop(
         reopenedChannel, reopenedGeneration, reopenedDeliveries, reopenErr := instance.reopenConsume(runtimeInstance, &backoff)
         if nil != reopenErr {
             if nil == runtimeInstance.Context().Err() && false == instance.isClosing() {
+                endErr = reopenErr
+
                 instance.logError(runtimeInstance, "amqp consumer failed to reopen its channel and is stopping", reopenErr)
             }
 
