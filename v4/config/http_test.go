@@ -511,6 +511,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
         t.Run(testCase.name, func(t *testing.T) {
             httpConfigurationInstance, httpErr := newHttpConfiguration(
                 testCase.address,
+                "",
                 testCase.defaultLocale,
                 testCase.publicDirectory,
                 testCase.staticIndexFile,
@@ -544,6 +545,7 @@ func TestNewHttpConfiguration_RefusesEveryValueItCannotAct(t *testing.T) {
 func TestNewHttpConfiguration_CompletesABarePortAndKeepsEveryAcceptedValue(t *testing.T) {
     httpConfigurationInstance, httpErr := newHttpConfiguration(
         "8080",
+        "",
         "en-GB",
         "public",
         "index.html",
@@ -606,5 +608,46 @@ func TestHttpConfiguration_AnInvalidPublicDirectoryIsNamedUnderPublicDirectory(t
     refusal, isRefusal := err.(*exception.Error)
     if false == isRefusal || "public/../.." != refusal.Context()["publicDirectory"] {
         t.Fatalf("expected the refusal to name the directory under publicDirectory, got %v", err)
+    }
+}
+
+func TestHttpConfiguration_RefusesAPublicUrlThatIsNoCleanBase(t *testing.T) {
+    for _, value := range []string{"ftp://x", "//x", "https://", "https://u:p@x", "https://x?a=1", "https://x/app?a=1", "https://x#f", "https://x?", "x.example.com", "mailto:x@example.com"} {
+        _, err := newConfigurationFromValues(map[string]string{HttpPublicUrlKey: value})
+        refusal, isRefusal := err.(*exception.Error)
+        if false == isRefusal {
+            t.Fatalf("expected %q refused, got %v", value, err)
+        }
+
+        context := exception.FromError(refusal).Context()
+        for nil == context["key"] && nil != refusal.Unwrap() {
+            refusal, isRefusal = refusal.Unwrap().(*exception.Error)
+            if false == isRefusal {
+                break
+            }
+            context = refusal.Context()
+        }
+
+        if HttpPublicUrlKey != context["key"] || value != context["value"] {
+            t.Fatalf("expected %q refused naming %s, got %v", value, HttpPublicUrlKey, err)
+        }
+    }
+}
+
+func TestHttpConfiguration_AdmitsAPublicUrlAndTrimsItsTrailingSlash(t *testing.T) {
+    cases := map[string]string{
+        "":                          "",
+        "https://x":                 "https://x",
+        "https://x/":                "https://x",
+        "http://x.example.com:8080": "http://x.example.com:8080",
+        "https://x/app":             "https://x/app",
+        "https://x/app/":            "https://x/app",
+        "https://x/my%20app//":      "https://x/my%20app",
+    }
+
+    for value, expected := range cases {
+        if publicUrl := mustConfigurationFromValues(t, map[string]string{HttpPublicUrlKey: value}).Http().PublicUrl(); expected != publicUrl {
+            t.Fatalf("expected %q read as %q, got %q", value, expected, publicUrl)
+        }
     }
 }

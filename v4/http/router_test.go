@@ -324,9 +324,9 @@ func TestRouter_AddRoute_AcceptsANonTrailingOptionalSegmentThatHasADefault(t *te
         },
     )
 
-    urlGenerator := NewUrlGenerator(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
 
-    generatedPath, generateErr := urlGenerator.GeneratePath("list", map[string]string{"page": "2"})
+    generatedPath, generateErr := urlGenerator.GeneratePath("list", httpcontract.PathConfig{Parameters: map[string]string{"page": "2"}})
     if nil != generateErr {
         t.Fatalf("unexpected generate error: %v", generateErr)
     }
@@ -375,15 +375,12 @@ func TestRouter_AddRoute_NonTrailingOptionalWithADefaultSurvivesASuppliedEmptyVa
         },
     )
 
-    urlGenerator := NewUrlGenerator(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
 
-    generatedPath, generateErr := urlGenerator.GeneratePath(
-        "list",
-        map[string]string{
+    generatedPath, generateErr := urlGenerator.GeneratePath("list", httpcontract.PathConfig{Parameters: map[string]string{
             "locale": "",
             "page":   "2",
-        },
-    )
+        }})
     if nil != generateErr {
         t.Fatalf("unexpected generate error: %v", generateErr)
     }
@@ -427,13 +424,13 @@ func TestRouter_AddRoute_NonTrailingOptionalWithAGroupSuppliedDefaultSurvivesASu
         RouteOptions{Name: "shop.list", Methods: []string{nethttp.MethodGet}},
     )
 
-    urlGenerator := NewUrlGenerator(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
 
     for _, parameters := range []map[string]string{
         {"page": "2"},
         {"locale": "", "page": "2"},
     } {
-        generatedPath, generateErr := urlGenerator.GeneratePath("shop.list", parameters)
+        generatedPath, generateErr := urlGenerator.GeneratePath("shop.list", httpcontract.PathConfig{Parameters: parameters})
         if nil != generateErr {
             t.Fatalf("unexpected generate error: %v", generateErr)
         }
@@ -486,9 +483,9 @@ func TestRouter_AddRoute_ServesATrailingOptionalReachedThroughTheRoot(t *testing
         },
     )
 
-    urlGenerator := NewUrlGenerator(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
 
-    generatedPath, generateErr := urlGenerator.GeneratePath("home", nil)
+    generatedPath, generateErr := urlGenerator.GeneratePath("home", httpcontract.PathConfig{})
     if nil != generateErr {
         t.Fatalf("unexpected generate error: %v", generateErr)
     }

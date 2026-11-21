@@ -38,6 +38,7 @@ func frameworkEnvironmentKeys() []configcontract.EnvironmentKey {
         frameworkEnvironmentKey(ScopeTeardownTimeoutKey, KernelScopeTeardownTimeout, ""),
         frameworkEnvironmentKey(ContainerCreationWaitersKey, KernelContainerCreationWaiters, ""),
         frameworkEnvironmentKey(ContainerTeardownSequentialKey, KernelContainerTeardownSequential, ""),
+        frameworkEnvironmentKey(HttpPublicUrlKey, KernelHttpPublicUrl, ""),
         frameworkEnvironmentKey(HttpReadTimeoutKey, KernelHttpReadTimeout, ""),
         frameworkEnvironmentKey(HttpReadHeaderTimeoutKey, KernelHttpReadHeaderTimeout, ""),
         frameworkEnvironmentKey(HttpWriteTimeoutKey, KernelHttpWriteTimeout, ""),

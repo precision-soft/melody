@@ -721,6 +721,7 @@ func (instance *Configuration) buildHttpConfiguration() error {
 
     httpConfigurationInstance, newHttpConfigurationErr := newHttpConfiguration(
         instance.MustGet(KernelHttpAddress).MustString(),
+        instance.MustGet(KernelHttpPublicUrl).MustString(),
         instance.MustGet(KernelDefaultLocale).MustString(),
         instance.MustGet(KernelPublicDirectory).MustString(),
         instance.MustGet(KernelStaticIndexFile).MustString(),

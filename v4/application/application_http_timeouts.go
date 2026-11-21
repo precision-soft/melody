@@ -10,6 +10,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    "github.com/precision-soft/melody/v4/internal"
     "github.com/precision-soft/melody/v4/logging"
     loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
 )
@@ -58,6 +59,24 @@ func resolveHttpServerLimits(configuration configcontract.Configuration, applica
         idleTimeout:       idleTimeout.Value,
         maxHeaderBytes:    maxHeaderBytes.Value,
     }, nil
+}
+
+/* resolveHttpPublicUrl answers the key when the deployment set it and the application's field otherwise, the field judged as the key is. */
+func resolveHttpPublicUrl(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (string, error) {
+    if publicUrl := configuration.Http().PublicUrl(); "" != publicUrl {
+        return publicUrl, nil
+    }
+
+    publicUrl, publicUrlRefusal := internal.NormalizePublicUrl(applicationConfig.HttpPublicUrl)
+    if "" != publicUrlRefusal {
+        return "", exception.NewError(
+            "the public url is refused",
+            exceptioncontract.Context{"field": "ApplicationConfig.HttpPublicUrl", "key": config.HttpPublicUrlKey, "value": applicationConfig.HttpPublicUrl, "reason": publicUrlRefusal},
+            nil,
+        )
+    }
+
+    return publicUrl, nil
 }
 
 func resolveContainerCreationWaiters(configuration configcontract.Configuration, applicationConfig ApplicationConfig) (bound.Resolved[int], error) {

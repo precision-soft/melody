@@ -9,6 +9,9 @@ import (
 type HttpConfiguration interface {
     Address() string
 
+    /* PublicUrl is the public base MELODY_HTTP_PUBLIC_URL names, an http or https url whose path carries no trailing slash, empty when the key is unset. */
+    PublicUrl() string
+
     DefaultLocale() string
 
     PublicDirectory() string

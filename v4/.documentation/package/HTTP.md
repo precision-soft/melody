@@ -178,7 +178,7 @@ The route table is a tree of plain maps that every request goroutine reads, so w
 
 ## Url generation
 
-[`UrlGenerator.GeneratePath`](../../http/url_generator.go) builds a path from a route name and a parameter map, and a route's `Defaults` ([`RouteOptions`](../../http/contract/route_option.go)) fill the gaps. A path the kernel would refuse as non-canonical, a parameter of `.` or `..` or a last value ending in a space, is answered as an error rather than minted:
+[`UrlGenerator.GeneratePath`](../../http/url_generator.go) builds a path from a route name and a [`PathConfig`](../../http/contract/url_generator.go)`{Parameters, Query, Fragment}`, and a route's `Defaults` ([`RouteOptions`](../../http/contract/route_option.go)) fill the gaps. A path the kernel would refuse as non-canonical, a parameter of `.` or `..` or a last value ending in a space, is answered as an error rather than minted:
 
 - A parameter the caller **omits** — a `:name`, a single-segment `*name` wildcard or a catch-all — takes the route default, whatever that default is.
 - A `:name` or single-segment `*name` parameter the caller supplies **empty** takes the route default when that default is non-empty; a catch-all supplied empty is emitted empty. This is what keeps a non-trailing optional segment — the shape [`rejectNonTrailingOptionalParameter`](../../http/router.go) admits precisely because its default keeps the segment present — generating a path the matcher answers: `/:locale?/list/:page` with `{"locale": "", "page": "2"}` yields `/en/list/2` under a `locale` default of `en`, not the `/list/2` the router replies to with a `404`.
@@ -186,6 +186,10 @@ The route table is a tree of plain maps that every request goroutine reads, so w
 
 A requirement declared on a parameter is validated against the value that is actually emitted, catch-all remainders included, so generation and matching agree. A catch-all remainder keeps an encoded separator inside the segment the client put it in: the request path is split on the separators actually sent and each segment unescaped on its own, so `/files/a%2Fb/c` binds `a%2Fb/c` and stays distinguishable from `/files/a/b/c`, which binds `a/b/c`. A handler that reassembles a storage key or a proxy target from the remainder replaces the re-escaped separator (`strings.ReplaceAll(value, "%2F", "/")`) when it wants the literal slash — not `url.PathUnescape`, which would decode a second time every other escape the segment already had decoded.
 
+
+### Absolute urls
+
+`GeneratePath` answers a relative reference: the route's path, then `?` and the query when `PathConfig.Query` carries a key, then `#` and the fragment. [`UrlGenerator.GenerateUrl`](../../http/url_generator.go) answers the same reference behind the application's public base, `MELODY_HTTP_PUBLIC_URL`, whose default is `ApplicationConfig.HttpPublicUrl`; the base is configuration, so a request's `Host` header, which a client chooses, is never read. A base is an `http` or `https` url with a host and no user info, query or fragment, judged at boot and refused naming the key or the field; its trailing `/` is trimmed and a path it carries (`https://example.com/app`) is joined before every route's path with one `/`, so `/products` answers `https://example.com/app/products`. `GeneratePath` does not carry that prefix. With no base set, `GenerateUrl` answers an error naming `MELODY_HTTP_PUBLIC_URL` and the route: nothing at boot knows that a handler will ask for an absolute url.
 ## HTTP method semantics
 
 - [`HEAD`](../../http) requests are matched against explicit `HEAD` routes and also against `GET` routes. When a `GET` route handles a `HEAD` request, Melody keeps the same status code and headers as the `GET` handler while suppressing the response body during [`WriteToHttpResponseWriter`](../../http/response_writer.go).
@@ -342,7 +346,7 @@ func handleRedirectToPing() httpcontract.Handler {
 
         path, generateErr := urlGenerator.GeneratePath(
             pingRouteName,
-            map[string]string{},
+            httpcontract.PathConfig{},
         )
         if nil != generateErr {
             return nil, generateErr
@@ -628,7 +632,8 @@ Where the list itself comes from is the application's business — a constant as
 - [`type RouteOptions`](../../http/contract/route_option.go)
 - [`type RouteDefinition`](../../http/contract/route_definition.go)
 - [`type RouteRegistry`](../../http/contract/route_registry.go)
-- [`type UrlGenerator`](../../http/contract/url_generator.go)
+- [`type UrlGenerator`](../../http/contract/url_generator.go) — `GeneratePath(routeName, PathConfig) (string, error)` and `GenerateUrl(routeName, PathConfig) (string, error)`
+- [`type PathConfig`](../../http/contract/url_generator.go) — `Parameters`, `Query` (`url.Values`, an empty key skipped, the keys sorted, a repeated key's values in order) and `Fragment`, written after the query
 - [`type Kernel`](../../http/contract/kernel.go)
 - [`type SessionCookiePolicy`](../../http/contract/kernel.go)
 - [`type SessionCookieSecurePolicy`](../../http/contract/kernel.go) — `SessionCookieSecureFromScheme` (zero value), `SessionCookieSecureAlways`, `SessionCookieSecureNever`
@@ -662,7 +667,7 @@ Where the list itself comes from is the application's business — a constant as
     - [`type RouteOptions`](../../http/contract/route_option.go) — `Name`, `Methods`, `Host`, `Schemes`, `Requirements`, `Defaults`, `Locales`, `Priority` and `Attributes`, the zero value a route under no name for every method, host and scheme; `Handle` takes it by value and copies its lists and maps
 
 - URL generator:
-    - [`NewUrlGenerator(httpcontract.RouteRegistry)`](../../http/url_generator.go)
+    - [`NewUrlGenerator(httpcontract.RouteRegistry, UrlGeneratorConfig)`](../../http/url_generator.go) — `UrlGeneratorConfig{PublicUrl}`, the base `GenerateUrl` answers behind, a base that is no clean http or https url refused with a panic naming the field
 
 - Route parameter requirements:
     - [`type Requirement`](../../http/constraint.go)

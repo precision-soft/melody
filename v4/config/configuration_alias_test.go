@@ -7,8 +7,8 @@ import (
 
 func TestFrameworkEnvironmentKeys_EachKeyFeedsOneKernelParameter(t *testing.T) {
     keys := frameworkEnvironmentKeys()
-    if 33 != len(keys) || len(keys) != len(frameworkEnvironmentKeyIndex) {
-        t.Fatalf("expected 33 distinct framework keys, got %d listed and %d indexed", len(keys), len(frameworkEnvironmentKeyIndex))
+    if 34 != len(keys) || len(keys) != len(frameworkEnvironmentKeyIndex) {
+        t.Fatalf("expected 34 distinct framework keys, got %d listed and %d indexed", len(keys), len(frameworkEnvironmentKeyIndex))
     }
 
     parameters := make(map[string]bool, len(keys))

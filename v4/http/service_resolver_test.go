@@ -31,7 +31,7 @@ func newRoutingServiceContainer() (containercontract.Container, *RouteRegistry, 
     serviceContainer.MustRegister(
         ServiceUrlGenerator,
         func(resolver containercontract.Resolver) (httpcontract.UrlGenerator, error) {
-            return NewUrlGenerator(routeRegistry), nil
+            return NewUrlGenerator(routeRegistry, UrlGeneratorConfig{}), nil
         },
         container.RegisterOptions{},
     )
@@ -72,7 +72,7 @@ func TestUrlGeneratorMustFromResolver_ResolvesTheRegisteredGenerator(t *testing.
         t.Fatalf("expected the url generator to resolve")
     }
 
-    generatedPath, generateErr := resolved.GeneratePath("article.show", map[string]string{"id": "42"})
+    generatedPath, generateErr := resolved.GeneratePath("article.show", httpcontract.PathConfig{Parameters: map[string]string{"id": "42"}})
     if nil != generateErr {
         t.Fatalf("unexpected generation error: %v", generateErr)
     }

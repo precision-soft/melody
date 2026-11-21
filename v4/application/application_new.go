@@ -31,6 +31,8 @@ type ApplicationConfig struct {
     EnvironmentFiles fs.FS
     /* PublicFiles is the embedded filesystem the file server serves under melody_static_embedded. */
     PublicFiles fs.FS
+    /* HttpPublicUrl is the public base an absolute url is generated behind, the default of MELODY_HTTP_PUBLIC_URL, which wins when a deployment sets it: an http or https url with a host and no user info, query or fragment, its path joined before every route's; empty is none. */
+    HttpPublicUrl string
     /* ReadTimeout bounds reading one whole request, headers and body: at least 1ms, unlimited refused. */
     ReadTimeout bound.Duration
     /* ReadHeaderTimeout bounds reading the request headers: at least 1ms, unlimited refused. */
@@ -128,6 +130,11 @@ func NewApplication(
         exception.Panic(exception.NewError("the unavailable retry after is refused", nil, unavailableRetryAfterErr))
     }
 
+    httpPublicUrl, httpPublicUrlErr := resolveHttpPublicUrl(configuration, applicationConfig)
+    if nil != httpPublicUrlErr {
+        exception.Panic(exception.NewError("the http public url is refused", nil, httpPublicUrlErr))
+    }
+
     routeRegistry := http.NewRouteRegistry()
     httpRouter := http.NewRouterWithRouteRegistry(routeRegistry)
 
@@ -157,6 +164,7 @@ func NewApplication(
         ctx:                  ctx,
         applicationConfig:    applicationConfig,
         configuration:        configuration,
+        httpPublicUrl:        httpPublicUrl,
         runtimeFlags:         ParseRuntimeFlags(RuntimeFlagsConfig{Mode: configuration.Kernel().DefaultMode(), Role: configuration.Kernel().ProcessRole()}),
         kernel:               kernelInstance,
         embeddedPublicFiles:  embeddedPublicFiles,

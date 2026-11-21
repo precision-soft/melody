@@ -4,22 +4,92 @@ import (
     "net/url"
     "strings"
 
+    "github.com/precision-soft/melody/v4/config"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
+    "github.com/precision-soft/melody/v4/internal"
 )
 
-func NewUrlGenerator(routeRegistry httpcontract.RouteRegistry) *UrlGenerator {
+/* UrlGeneratorConfig carries the public base GenerateUrl answers behind, empty for none; a base that is not an http or https url with a host, or that carries user info, a query or a fragment, is refused. */
+type UrlGeneratorConfig struct {
+    PublicUrl string
+}
+
+func NewUrlGenerator(routeRegistry httpcontract.RouteRegistry, generatorConfig UrlGeneratorConfig) *UrlGenerator {
+    publicUrl, publicUrlRefusal := internal.NormalizePublicUrl(generatorConfig.PublicUrl)
+    if "" != publicUrlRefusal {
+        exception.Panic(
+            exception.NewError(
+                "the public url is refused",
+                exceptioncontract.Context{"field": "UrlGeneratorConfig.PublicUrl", "key": config.HttpPublicUrlKey, "value": generatorConfig.PublicUrl, "reason": publicUrlRefusal},
+                nil,
+            ),
+        )
+    }
+
     return &UrlGenerator{
         routeRegistry: routeRegistry,
+        publicUrl:     publicUrl,
     }
 }
 
 type UrlGenerator struct {
     routeRegistry httpcontract.RouteRegistry
+    publicUrl     string
 }
 
-func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[string]string) (string, error) {
+func (instance *UrlGenerator) GeneratePath(routeName string, pathConfig httpcontract.PathConfig) (string, error) {
+    generatedPath, generateErr := instance.generateRoutePath(routeName, pathConfig.Parameters)
+    if nil != generateErr {
+        return "", generateErr
+    }
+
+    return composeReference(url.URL{}, generatedPath, pathConfig), nil
+}
+
+func (instance *UrlGenerator) GenerateUrl(routeName string, pathConfig httpcontract.PathConfig) (string, error) {
+    if "" == instance.publicUrl {
+        return "", exception.NewError(
+            "an absolute url needs the public url",
+            exceptioncontract.Context{"key": config.HttpPublicUrlKey, "routeName": routeName},
+            nil,
+        )
+    }
+
+    generatedPath, generateErr := instance.generateRoutePath(routeName, pathConfig.Parameters)
+    if nil != generateErr {
+        return "", generateErr
+    }
+
+    base, _ := url.Parse(instance.publicUrl)
+
+    return composeReference(url.URL{Scheme: base.Scheme, Host: base.Host}, base.EscapedPath()+generatedPath, pathConfig), nil
+}
+
+/* composeReference writes the escaped path, the query without its empty key and the fragment through url.URL, so each part is escaped where it stands. */
+func composeReference(reference url.URL, escapedPath string, pathConfig httpcontract.PathConfig) string {
+    reference.Path, _ = url.PathUnescape(escapedPath)
+    reference.RawPath = escapedPath
+
+    queryValues := url.Values{}
+    for key, values := range pathConfig.Query {
+        if "" == key {
+            continue
+        }
+
+        for _, value := range values {
+            queryValues.Add(key, value)
+        }
+    }
+
+    reference.RawQuery = queryValues.Encode()
+    reference.Fragment = pathConfig.Fragment
+
+    return reference.String()
+}
+
+func (instance *UrlGenerator) generateRoutePath(routeName string, parameters map[string]string) (string, error) {
     routeDefinition, exists := instance.routeRegistry.RouteDefinitionForUrlGeneration(routeName)
     if false == exists {
         return "", exception.NewError(
@@ -290,29 +360,6 @@ func (instance *UrlGenerator) GeneratePath(routeName string, parameters map[stri
     }
 
     return generatedPath, nil
-}
-
-func (instance *UrlGenerator) GenerateUrl(routeName string, parameters map[string]string, queryParameters map[string]string) (string, error) {
-    pathValue, err := instance.GeneratePath(routeName, parameters)
-    if nil != err {
-        return "", err
-    }
-
-    queryValues := url.Values{}
-    for key, value := range queryParameters {
-        if "" == key {
-            continue
-        }
-
-        queryValues.Set(key, value)
-    }
-
-    queryString := queryValues.Encode()
-    if "" == queryString {
-        return pathValue, nil
-    }
-
-    return pathValue + "?" + queryString, nil
 }
 
 var _ httpcontract.UrlGenerator = (*UrlGenerator)(nil)

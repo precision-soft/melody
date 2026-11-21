@@ -751,7 +751,7 @@ func newSecondFactorLoginWith(t *testing.T, options secondFactorLoginOptions) *s
         containerInstance,
         melodyhttp.ServiceUrlGenerator,
         func(resolver melodycontainercontract.Resolver) (melodyhttpcontract.UrlGenerator, error) {
-            return melodyhttp.NewUrlGenerator(landingPageRouter().RouteRegistry()), nil
+            return melodyhttp.NewUrlGenerator(landingPageRouter().RouteRegistry(), melodyhttp.UrlGeneratorConfig{}), nil
         },
         melodycontainer.RegisterOptions{},
     )

@@ -14,6 +14,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/http"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/internal/testhelper"
     "github.com/precision-soft/melody/v4/logging"
@@ -370,5 +371,51 @@ func TestResolveSessionEmptyOnOutage_TheKeyWinsOverTheField(t *testing.T) {
         if testCase.expected != resolveSessionEmptyOnOutage(newLimitConfiguration(t, values), ApplicationConfig{SessionEmptyOnOutage: testCase.field}) {
             t.Fatalf("%s: expected %v", name, testCase.expected)
         }
+    }
+}
+
+func TestResolveHttpPublicUrl_TheKeyWinsOverTheFieldAndTheFieldIsJudged(t *testing.T) {
+    publicUrl, publicUrlErr := resolveHttpPublicUrl(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{HttpPublicUrl: "https://field.example.com/app/"})
+    if nil != publicUrlErr || "https://field.example.com/app" != publicUrl {
+        t.Fatalf("expected the field normalised, got %q, %v", publicUrl, publicUrlErr)
+    }
+
+    publicUrl, publicUrlErr = resolveHttpPublicUrl(newLimitConfiguration(t, map[string]string{config.HttpPublicUrlKey: "https://key.example.com"}), ApplicationConfig{HttpPublicUrl: "https://field.example.com"})
+    if nil != publicUrlErr || "https://key.example.com" != publicUrl {
+        t.Fatalf("expected the key to win, got %q, %v", publicUrl, publicUrlErr)
+    }
+
+    publicUrl, publicUrlErr = resolveHttpPublicUrl(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{})
+    if nil != publicUrlErr || "" != publicUrl {
+        t.Fatalf("expected no base, got %q, %v", publicUrl, publicUrlErr)
+    }
+
+    _, publicUrlErr = resolveHttpPublicUrl(newLimitConfiguration(t, map[string]string{}), ApplicationConfig{HttpPublicUrl: "https://x?a=1"})
+    if nil == publicUrlErr || "ApplicationConfig.HttpPublicUrl" != exception.FromError(publicUrlErr).Context()["field"] {
+        t.Fatalf("expected the field refused naming it, got %v", publicUrlErr)
+    }
+}
+
+func TestNewApplication_TheHttpPublicUrlFieldReachesTheUrlGenerator(t *testing.T) {
+    applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs(), HttpPublicUrl: "https://app.example.com/shop"})
+    serviceContainer := applicationInstance.kernel.ServiceContainer()
+    defer func() {
+        _ = serviceContainer.CloseWithContext(context.Background())
+    }()
+
+    applicationInstance.Boot()
+
+    applicationInstance.kernel.HttpRouter().Handle(
+        "/products",
+        func(runtimeInstance containercontract.Runtime, writer nethttp.ResponseWriter, request httpcontract.Request) (httpcontract.Response, error) {
+            return nil, nil
+        },
+        httpcontract.RouteOptions{Name: "product.list"},
+    )
+
+    urlGenerator := container.MustFromResolver[httpcontract.UrlGenerator](context.Background(), serviceContainer, http.ServiceUrlGenerator)
+    urlValue, urlErr := urlGenerator.GenerateUrl("product.list", httpcontract.PathConfig{})
+    if nil != urlErr || "https://app.example.com/shop/products" != urlValue {
+        t.Fatalf("expected the field's base before the route, got %q, %v", urlValue, urlErr)
     }
 }

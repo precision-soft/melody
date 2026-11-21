@@ -280,6 +280,14 @@ A lock store closed by the teardown while the work still winds down now reads as
 
 **Remedy.** Read through `value, exists, err := cache.Get[T](boundCache, key)`, and declare the callback's result type of `Remember` and drop the assertion that follows it; `cache.Get[any]` and `Remember[any]` keep the generic answer. A serializer implements `Deserialize(payload, target)` by decoding into the target, `json.Unmarshal(payload, target)` for json. A decorator that embeds `cachecontract.Cache` needs nothing; a full implementation adds `RoundTrip` and fills its read targets. Give each type its own key.
 
+### Http: `GeneratePath` takes a config, `GenerateUrl` is absolute
+
+**What changed.** [`UrlGenerator.GeneratePath`](../http/url_generator.go) takes the route name and a [`PathConfig`](../http/contract/url_generator.go)`{Parameters, Query, Fragment}`, where it took a `map[string]string` of parameters; the query is a `url.Values`, so a repeated key is expressible, an empty key skipped and the keys written sorted, and the fragment is written after it. [`GenerateUrl`](../http/url_generator.go) is the absolute door: the same reference behind the public base `MELODY_HTTP_PUBLIC_URL`, whose default is the new `ApplicationConfig.HttpPublicUrl`, a path the base carries joined before the route's with one `/`; a request's `Host` is never read. `NewUrlGenerator(registry, UrlGeneratorConfig{PublicUrl})` takes the base.
+
+**Symptom.** A `GenerateUrl` call that compiled answers an error naming `MELODY_HTTP_PUBLIC_URL` when no base is set, where it answered the path and its query. A `map[string]string` handed to `GeneratePath` or `GenerateUrl`, and `NewUrlGenerator(registry)`, no longer compile. A base that is not an `http` or `https` url with a host, or that carries user info, a query or a fragment, refuses the boot naming the key or the field.
+
+**Remedy.** `GeneratePath(name, httpcontract.PathConfig{Parameters: parameters})`; where a relative path with a query is wanted, `GeneratePath(name, httpcontract.PathConfig{Parameters: parameters, Query: url.Values{"page": {"2"}}})` in place of `GenerateUrl`. Set `MELODY_HTTP_PUBLIC_URL` or `ApplicationConfig.HttpPublicUrl` to the url the application is served under before calling `GenerateUrl`.
+
 ### Cors: `AllowOrigin` receives the request
 
 **What changed.** [`cors.Config`](../http/cors/service.go)'s origin function is `AllowOrigin func(request httpcontract.Request, origin string) bool`, where it was `AllowOriginFunc func(origin string) bool`, and `Service.OriginAllowed` takes the request first: `OriginAllowed(request, origin)`. The request's `RuntimeInstance()` reaches the context and the container, so a per-tenant decision reads its store through it; a lookup the function cannot make answers false, refusing the origin. A nil request handed to `OriginAllowed` while a function is configured panics naming `cors.Service.OriginAllowed`.

@@ -687,7 +687,7 @@ func TestBootContainer_TheValidatorAndUrlGeneratorAreSubstitutedNotCollided(t *t
     applicationInstance := NewApplication(context.Background(), ApplicationConfig{EnvironmentFiles: testhelper.NewEmbeddedEnvironmentFs(), PublicFiles: testhelper.NewEmbeddedStaticFs()})
 
     ownValidator := validation.NewValidator(validation.ValidatorConfig{})
-    ownUrlGenerator := http.NewUrlGenerator(http.NewRouteRegistry())
+    ownUrlGenerator := http.NewUrlGenerator(http.NewRouteRegistry(), http.UrlGeneratorConfig{})
 
     applicationInstance.RegisterService(
         validation.ServiceValidator,

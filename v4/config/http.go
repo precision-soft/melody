@@ -53,6 +53,7 @@ const DefaultHttpShutdownTimeout = 5 * time.Second
 
 func newHttpConfiguration(
     address string,
+    publicUrl string,
     defaultLocale string,
     publicDirectory string,
     staticIndexFile string,
@@ -75,6 +76,15 @@ func newHttpConfiguration(
         address = ":" + address
     }
 
+    normalizedPublicUrl, publicUrlRefusal := internal.NormalizePublicUrl(publicUrl)
+    if "" != publicUrlRefusal {
+        return nil, exception.NewError(
+            "the public url is refused",
+            exceptioncontract.Context{"key": HttpPublicUrlKey, "value": publicUrl, "reason": publicUrlRefusal},
+            nil,
+        )
+    }
+
     copiedStaticExcludedPaths := []string{}
     if nil != staticExcludedPaths {
         copiedStaticExcludedPaths = append([]string{}, staticExcludedPaths...)
@@ -82,6 +92,7 @@ func newHttpConfiguration(
 
     httpConfigurationInstance := &httpConfiguration{
         address:                   address,
+        publicUrl:                 normalizedPublicUrl,
         defaultLocale:             defaultLocale,
         publicDirectory:           publicDirectory,
         staticIndexFile:           staticIndexFile,
@@ -107,6 +118,7 @@ func newHttpConfiguration(
 
 type httpConfiguration struct {
     address                   string
+    publicUrl                 string
     defaultLocale             string
     publicDirectory           string
     staticIndexFile           string
@@ -135,6 +147,11 @@ type httpServerLimits struct {
 
 func (instance *httpConfiguration) Address() string {
     return instance.address
+}
+
+/* PublicUrl is MELODY_HTTP_PUBLIC_URL as the deployment set it, its trailing slash trimmed, empty when unset. */
+func (instance *httpConfiguration) PublicUrl() string {
+    return instance.publicUrl
 }
 
 func (instance *httpConfiguration) DefaultLocale() string {

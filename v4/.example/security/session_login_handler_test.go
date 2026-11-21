@@ -276,6 +276,6 @@ func registerLandingUrlGenerator(t *testing.T, containerInstance melodycontainer
     t.Helper()
 
     melodycontainer.MustRegister[melodyhttpcontract.UrlGenerator](containerInstance, melodyhttp.ServiceUrlGenerator, func(resolver melodycontainercontract.Resolver) (melodyhttpcontract.UrlGenerator, error) {
-        return melodyhttp.NewUrlGenerator(melodyhttp.NewRouter().RouteRegistry()), nil
+        return melodyhttp.NewUrlGenerator(melodyhttp.NewRouter().RouteRegistry(), melodyhttp.UrlGeneratorConfig{}), nil
     }, melodycontainer.RegisterOptions{})
 }

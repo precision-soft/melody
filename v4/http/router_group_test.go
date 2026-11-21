@@ -27,7 +27,7 @@ func TestRouteGroup_PanicsWhenRouterIsNil(t *testing.T) {
 func TestRouteGroup_JoinsPathAndPrefixesName(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
-    urlGenerator := NewUrlGenerator(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
     group := router.Group(GroupConfig{PathPrefix: "/api", NamePrefix: "api."})
 
     defer func() {
@@ -44,7 +44,7 @@ func TestRouteGroup_JoinsPathAndPrefixesName(t *testing.T) {
         RouteOptions{Name: "user_show", Methods: []string{nethttp.MethodGet}},
     )
 
-    pathValue, err := urlGenerator.GeneratePath("api.user_show", map[string]string{"id": "1"})
+    pathValue, err := urlGenerator.GeneratePath("api.user_show", httpcontract.PathConfig{Parameters: map[string]string{"id": "1"}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -57,7 +57,7 @@ func TestRouteGroup_JoinsPathAndPrefixesName(t *testing.T) {
 func TestRouteGroup_MergesDefaultsAndDoesNotOverrideRouteDefault(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
-    urlGenerator := NewUrlGenerator(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
     group := router.Group(
         GroupConfig{
             PathPrefix: "/api",
@@ -88,7 +88,7 @@ func TestRouteGroup_MergesDefaultsAndDoesNotOverrideRouteDefault(t *testing.T) {
         },
     )
 
-    pathValue, err := urlGenerator.GeneratePath("list", map[string]string{})
+    pathValue, err := urlGenerator.GeneratePath("list", httpcontract.PathConfig{Parameters: map[string]string{}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -101,7 +101,7 @@ func TestRouteGroup_MergesDefaultsAndDoesNotOverrideRouteDefault(t *testing.T) {
 func TestRouteGroup_MergesRequirementsAndDoesNotOverrideRouteRequirement(t *testing.T) {
     routeRegistry := NewRouteRegistry()
     router := NewRouterWithRouteRegistry(routeRegistry)
-    urlGenerator := NewUrlGenerator(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
     group := router.Group(
         GroupConfig{
             PathPrefix: "/api",
@@ -131,12 +131,12 @@ func TestRouteGroup_MergesRequirementsAndDoesNotOverrideRouteRequirement(t *test
         },
     )
 
-    _, err := urlGenerator.GeneratePath("user", map[string]string{"id": "abc"})
+    _, err := urlGenerator.GeneratePath("user", httpcontract.PathConfig{Parameters: map[string]string{"id": "abc"}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
 
-    _, err = urlGenerator.GeneratePath("user", map[string]string{"id": "123"})
+    _, err = urlGenerator.GeneratePath("user", httpcontract.PathConfig{Parameters: map[string]string{"id": "123"}})
     if nil == err {
         t.Fatalf("expected error")
     }
@@ -199,9 +199,9 @@ func TestRouteGroup_Handle_LeavesTheCallersOptionsUntouched(t *testing.T) {
         t.Fatalf("expected the group default to stay out of the caller's map, got %v", options.Defaults)
     }
 
-    urlGenerator := NewUrlGenerator(routeRegistry)
+    urlGenerator := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{})
 
-    generatedPath, generateErr := urlGenerator.GeneratePath("api.users.show", map[string]string{"id": "7"})
+    generatedPath, generateErr := urlGenerator.GeneratePath("api.users.show", httpcontract.PathConfig{Parameters: map[string]string{"id": "7"}})
     if nil != generateErr {
         t.Fatalf("unexpected generate error: %v", generateErr)
     }
@@ -231,7 +231,7 @@ func TestRouteGroup_TheZeroConfigRegistersThePatternAndTheNameAsGiven(t *testing
 
     router.Group(GroupConfig{}).Handle("/plain/:id", newRouteGroupTestHandler(), RouteOptions{Name: "plain", Methods: []string{nethttp.MethodGet}})
 
-    pathValue, err := NewUrlGenerator(routeRegistry).GeneratePath("plain", map[string]string{"id": "1"})
+    pathValue, err := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{}).GeneratePath("plain", httpcontract.PathConfig{Parameters: map[string]string{"id": "1"}})
     if nil != err {
         t.Fatalf("unexpected error: %v", err)
     }
@@ -267,7 +267,7 @@ func TestRouteGroup_KeepsItsOwnCopyOfTheMaps(t *testing.T) {
 
     group.Handle("/user/:id/:page?", newRouteGroupTestHandler(), RouteOptions{Name: "user", Methods: []string{nethttp.MethodGet}})
 
-    _, err := NewUrlGenerator(routeRegistry).GeneratePath("user", map[string]string{"id": "abc"})
+    _, err := NewUrlGenerator(routeRegistry, UrlGeneratorConfig{}).GeneratePath("user", httpcontract.PathConfig{Parameters: map[string]string{"id": "abc"}})
     if nil == err {
         t.Fatalf("expected the group's requirement as built, a mutation of the caller's map reached the group")
     }
