@@ -1,0 +1,34 @@
+/var/
+/generated_conf/
+/.env.local
+
+/melody_default
+/melody_melody_env_embedded
+/melody_melody_env_embedded_melody_static_embedded
+/melody_melody_static_embedded
+/melody-example-e2e
+
+# everything below is PRODUCED by `cd assets && npm ci && npm run build`, which is the one step a
+# fresh clone needs before the application works in a browser. <root>/.assets is the single source of
+# the icons and they live nowhere else in the tree; assets/sync-icons.mjs copies them here, and the
+# container entrypoint runs the same script for each major at startup
+
+# shared icons copied from <root>/.assets by assets/sync-icons.mjs
+/public/favicon.ico
+/public/assets/favicon.svg
+/public/assets/logo.png
+/public/assets/apple-touch-icon.png
+
+# frontend bundle built from assets/app.ts by esbuild
+/public/assets/app.js
+
+# everything below is written by `go generate` from the code. The service wiring melody:wiring:generate renders,
+# through the generator under wiring/generate (the directive in generated/generate.go), without which the application
+# does not compile; .dev/generate.sh writes it at the dev container's start and before every gate
+/generated/wiring_gen.go
+# the frontend route manifest exported from the route table (the directive in main.go); only the usage sample
+# assets/routes-usage.ts reads it, `npm run typecheck` generating it first, and the pages receive the manifest
+# from the server
+/assets/routes.json
+
+/.example

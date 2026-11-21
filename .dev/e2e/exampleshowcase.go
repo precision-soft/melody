@@ -226,7 +226,7 @@ func assertExampleGzipCompression(major exampleMajor) {
     }
 
     if false == major.showcaseProbes.apiKey {
-        signIn := client.call("POST", exampleLoginRoute, "application/json", "application/json", exampleCredentialBody(exampleEditorUsername, exampleEditorPassword))
+        signIn := client.call("POST", exampleSignInRoute(major), "application/json", "application/json", exampleCredentialBody(exampleEditorUsername, exampleEditorPassword))
         if http.StatusOK != signIn.statusCode {
             fail("[%s] the seeded editor could not sign in (%d) to read the listing compressed: %s", major.label, signIn.statusCode, exampleTruncate(signIn.body))
         }
@@ -250,12 +250,26 @@ func assertExampleGzipCompression(major exampleMajor) {
     if http.StatusOK != compressed.statusCode {
         fail("[%s] %s answered %d to the gzip read, wanted 200", major.label, exampleProductListRoute, compressed.statusCode)
     }
-    if "gzip" != compressed.headerList.Get("Content-Encoding") {
-        fail("[%s] the gzip read answered Content-Encoding %q, wanted gzip", major.label, compressed.headerList.Get("Content-Encoding"))
-    }
     /* the cors response listener adds its own Vary: Origin line, so the field is read whole rather than as its first line */
     if false == strings.Contains(strings.Join(compressed.headerList.Values("Vary"), ", "), "Accept-Encoding") {
         fail("[%s] the compressed answer does not vary on Accept-Encoding, so a shared cache may hand gzip to an identity client", major.label)
+    }
+
+    /* the fourth major leaves an answer to a session holder uncompressed unless the application opts in, against the BREACH class */
+    if 4 <= major.number {
+        if "" != compressed.headerList.Get("Content-Encoding") {
+            fail("[%s] the read under a session answered Content-Encoding %q, wanted none", major.label, compressed.headerList.Get("Content-Encoding"))
+        }
+        if compressed.body != identity.body {
+            fail("[%s] the read under a session differs from the identity read", major.label)
+        }
+        pass("[%s] the listing read under a session travels uncompressed", major.label)
+
+        return
+    }
+
+    if "gzip" != compressed.headerList.Get("Content-Encoding") {
+        fail("[%s] the gzip read answered Content-Encoding %q, wanted gzip", major.label, compressed.headerList.Get("Content-Encoding"))
     }
 
     gzipReader, gzipErr := gzip.NewReader(strings.NewReader(compressed.body))
@@ -398,7 +412,7 @@ func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *examp
     pass("[%s] a product id the cache-key grammar refuses is turned away 400 before the row lands", major.label)
 
     admin := newExampleClient(major)
-    adminSignIn := admin.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("admin", "admin"))
+    adminSignIn := admin.call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody("admin", "admin"))
     if http.StatusOK != adminSignIn.statusCode {
         fail("[%s] the seeded admin could not sign in (%d): %s", major.label, adminSignIn.statusCode, exampleTruncate(adminSignIn.body))
     }
@@ -422,13 +436,13 @@ func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *examp
     }{}
     decodeExampleData(major.label, "/users/api/create/", created.body, &createdUser)
 
-    stripped := newExampleClient(major).call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("cafe-probe", "probe-pass"))
+    stripped := newExampleClient(major).call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody("cafe-probe", "probe-pass"))
     if http.StatusUnauthorized != stripped.statusCode {
         fail("[%s] the accent-stripped spelling signed in (%d) — the lookup is riding the column collation again", major.label, stripped.statusCode)
     }
 
     properClient := newExampleClient(major)
-    proper := properClient.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("café-probe", "probe-pass"))
+    proper := properClient.call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody("café-probe", "probe-pass"))
     if http.StatusOK != proper.statusCode {
         fail("[%s] the proper accented spelling could not sign in (%d): %s", major.label, proper.statusCode, exampleTruncate(proper.body))
     }
@@ -457,12 +471,12 @@ func assertExampleIdentityAndGrammarDoors(major exampleMajor, application *examp
         fail("[%s] renaming the probe user answered %d: %s", major.label, renamed.statusCode, exampleTruncate(renamed.body))
     }
 
-    oldSpelling := newExampleClient(major).call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("café-probe", "probe-pass"))
+    oldSpelling := newExampleClient(major).call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody("café-probe", "probe-pass"))
     if http.StatusUnauthorized != oldSpelling.statusCode {
         fail("[%s] the pre-rename spelling still signs in (%d) — the ttl-less cache entry survived the rename", major.label, oldSpelling.statusCode)
     }
 
-    newSpelling := newExampleClient(major).call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody("cafe-probe-renamed", "probe-pass"))
+    newSpelling := newExampleClient(major).call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody("cafe-probe-renamed", "probe-pass"))
     if http.StatusOK != newSpelling.statusCode {
         fail("[%s] the renamed spelling could not sign in (%d): %s", major.label, newSpelling.statusCode, exampleTruncate(newSpelling.body))
     }

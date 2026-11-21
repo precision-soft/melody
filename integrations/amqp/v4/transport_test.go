@@ -1,0 +1,3824 @@
+package amqp
+
+import (
+    "context"
+    "encoding/json"
+    "errors"
+    "math"
+    "os"
+    "strconv"
+    "strings"
+    "sync"
+    "testing"
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
+    "github.com/precision-soft/melody/v4/logging"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+    melodymessagebus "github.com/precision-soft/melody/v4/messagebus"
+    messagebuscontract "github.com/precision-soft/melody/v4/messagebus/contract"
+    melodyserializer "github.com/precision-soft/melody/v4/serializer"
+    serializercontract "github.com/precision-soft/melody/v4/serializer/contract"
+    amqp091 "github.com/rabbitmq/amqp091-go"
+)
+
+type testMessage struct {
+    Id   int
+    Name string
+}
+
+type reconnectMessage struct {
+    Id int
+}
+
+type closeUnblockMessage struct {
+    Id int
+}
+
+type closeJoinMessage struct {
+    Id int
+}
+
+type blockingDeserializer struct {
+    inner   serializercontract.Serializer
+    once    sync.Once
+    entered chan struct{}
+    release chan struct{}
+}
+
+func newBlockingDeserializer() *blockingDeserializer {
+    return &blockingDeserializer{
+        inner:   melodyserializer.NewJsonSerializer(),
+        entered: make(chan struct{}),
+        release: make(chan struct{}),
+    }
+}
+
+func (instance *blockingDeserializer) Serialize(value any) ([]byte, error) {
+    return instance.inner.Serialize(value)
+}
+
+func (instance *blockingDeserializer) Deserialize(payload []byte, target any) error {
+    instance.once.Do(func() {
+        close(instance.entered)
+    })
+
+    <-instance.release
+
+    return instance.inner.Deserialize(payload, target)
+}
+
+func (instance *blockingDeserializer) ContentType() string {
+    return instance.inner.ContentType()
+}
+
+var _ serializercontract.Serializer = (*blockingDeserializer)(nil)
+
+func newReconnectRuntime(ctx context.Context) containercontract.Runtime {
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    return runtime.NewRun(ctx, serviceContainer.NewScope())
+}
+
+type logRecord struct {
+    level   loggingcontract.Level
+    message string
+}
+
+type recordingLogger struct {
+    mutex   sync.Mutex
+    records []logRecord
+}
+
+func (instance *recordingLogger) Log(level loggingcontract.Level, message string, logContext loggingcontract.Context) {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    instance.records = append(instance.records, logRecord{level: level, message: message})
+}
+
+func (instance *recordingLogger) Debug(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelDebug, message, logContext)
+}
+
+func (instance *recordingLogger) Info(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelInfo, message, logContext)
+}
+
+func (instance *recordingLogger) Warning(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelWarning, message, logContext)
+}
+
+func (instance *recordingLogger) Error(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelError, message, logContext)
+}
+
+func (instance *recordingLogger) Emergency(message string, logContext loggingcontract.Context) {
+    instance.Log(loggingcontract.LevelEmergency, message, logContext)
+}
+
+func (instance *recordingLogger) errorMessages() []string {
+    instance.mutex.Lock()
+    defer instance.mutex.Unlock()
+
+    messages := make([]string, 0, len(instance.records))
+    for _, record := range instance.records {
+        if loggingcontract.LevelError != record.level {
+            continue
+        }
+
+        messages = append(messages, record.message)
+    }
+
+    return messages
+}
+
+var _ loggingcontract.Logger = (*recordingLogger)(nil)
+
+func newRecordingLoggerRuntime(ctx context.Context) (containercontract.Runtime, *recordingLogger) {
+    logger := &recordingLogger{}
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    container.MustRegister[loggingcontract.Logger](
+        serviceContainer,
+        logging.ServiceLogger,
+        func(resolver containercontract.Resolver) (loggingcontract.Logger, error) {
+            return logger, nil
+        },
+        container.RegisterOptions{},
+    )
+
+    return runtime.NewRun(ctx, serviceContainer.NewScope()), logger
+}
+
+func awaitClosedOutput(t *testing.T, out <-chan messagebuscontract.Envelope) {
+    t.Helper()
+
+    select {
+    case _, open := <-out:
+        if true == open {
+            t.Fatalf("expected out to be closed without delivering a message")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected consumeLoop to close out")
+    }
+}
+
+func receiveWithin(t *testing.T, queue <-chan messagebuscontract.Envelope, timeout time.Duration) messagebuscontract.Envelope {
+    t.Helper()
+
+    select {
+    case envelopeInstance := <-queue:
+        return envelopeInstance
+    case <-time.After(timeout):
+        t.Fatalf("timed out waiting for a message")
+        return nil
+    }
+}
+
+func drainedToDeadLetter(t *testing.T, connection *amqp091.Connection, deadLetterQueue string, timeout time.Duration) bool {
+    t.Helper()
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("open inspection channel: %v", channelErr)
+    }
+    defer channel.Close()
+
+    deadline := time.After(timeout)
+    for {
+        select {
+        case <-deadline:
+            return false
+        default:
+            message, ok, getErr := channel.Get(deadLetterQueue, true)
+            if nil != getErr {
+                t.Fatalf("get from dead-letter queue: %v", getErr)
+            }
+
+            if true == ok {
+                _ = message
+
+                return true
+            }
+
+            time.Sleep(100 * time.Millisecond)
+        }
+    }
+}
+
+func TestTransport_SendReceiveAck(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.message")
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      "melody.amqp.test",
+        Prefetch:   bound.Of(10),
+        Registry:   registry,
+        DeadLetter: true,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+    defer transport.CloseWithContext(context.Background())
+
+    sent := []testMessage{
+        {Id: 1, Name: "one"},
+        {Id: 2, Name: "two"},
+    }
+
+    for _, messageInstance := range sent {
+        sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(messageInstance, nil))
+        if nil != sendErr {
+            t.Fatalf("send: %v", sendErr)
+        }
+    }
+
+    queue, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    received := make(map[int]string)
+    timeout := time.After(10 * time.Second)
+
+    for len(received) < len(sent) {
+        select {
+        case envelopeInstance := <-queue:
+            messageInstance, isType := envelopeInstance.Message().(testMessage)
+            if false == isType {
+                t.Fatalf("unexpected message type %T", envelopeInstance.Message())
+            }
+
+            received[messageInstance.Id] = messageInstance.Name
+
+            ackErr := transport.Ack(runtimeInstance, envelopeInstance)
+            if nil != ackErr {
+                t.Fatalf("ack: %v", ackErr)
+            }
+        case <-timeout:
+            t.Fatalf("timed out waiting for messages, received=%v", received)
+        }
+    }
+
+    if "one" != received[1] || "two" != received[2] {
+        t.Fatalf("unexpected payloads: %v", received)
+    }
+}
+
+func TestTransport_RequeuePersistsRedeliveryCountThenDeadLetters(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.retry")
+
+    queueName := "melody.amqp.retry"
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      queueName,
+        Prefetch:   bound.Of(1),
+        Registry:   registry,
+        DeadLetter: true,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+    defer transport.CloseWithContext(context.Background())
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "retry"}, nil)); nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    queue, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    first := receiveWithin(t, queue, 10*time.Second)
+    if 0 != melodymessagebus.RedeliveryCount(first) {
+        t.Fatalf("expected initial redelivery count 0, got %d", melodymessagebus.RedeliveryCount(first))
+    }
+
+    retried := first.WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}})
+    if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
+        t.Fatalf("nack requeue: %v", nackErr)
+    }
+
+    second := receiveWithin(t, queue, 10*time.Second)
+    if 1 != melodymessagebus.RedeliveryCount(second) {
+        t.Fatalf("expected persisted redelivery count 1, got %d", melodymessagebus.RedeliveryCount(second))
+    }
+
+    if nackErr := transport.Nack(runtimeInstance, second, false); nil != nackErr {
+        t.Fatalf("nack dead-letter: %v", nackErr)
+    }
+
+    if false == drainedToDeadLetter(t, connection, queueName+".dlq", 5*time.Second) {
+        t.Fatalf("expected the message to land in the dead-letter queue")
+    }
+}
+
+func TestTransport_DelayStampRoutesThroughDelayQueue(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.delay")
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      "melody.amqp.delay",
+        Prefetch:   bound.Of(1),
+        Registry:   registry,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+    defer transport.CloseWithContext(context.Background())
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "delay"}, nil)); nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    queue, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    first := receiveWithin(t, queue, 10*time.Second)
+
+    retried := first.
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}}).
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 1500 * time.Millisecond}})
+
+    start := time.Now()
+    if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
+        t.Fatalf("nack requeue: %v", nackErr)
+    }
+
+    select {
+    case <-queue:
+        t.Fatalf("delayed message arrived before its delay elapsed")
+    case <-time.After(700 * time.Millisecond):
+    }
+
+    second := receiveWithin(t, queue, 5*time.Second)
+    if elapsed := time.Since(start); elapsed < 1200*time.Millisecond {
+        t.Fatalf("delayed message returned too early after %s", elapsed)
+    }
+
+    if 1 != melodymessagebus.RedeliveryCount(second) {
+        t.Fatalf("expected the delayed message to keep redelivery count 1, got %d", melodymessagebus.RedeliveryCount(second))
+    }
+
+    if ackErr := transport.Ack(runtimeInstance, second); nil != ackErr {
+        t.Fatalf("ack: %v", ackErr)
+    }
+}
+
+func TestTransport_ReconnectsAfterConnectionDrop(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.reconnect")
+
+    queueName := "melody.amqp.reconnect"
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Dialer:     provider.Dialer(dsn),
+        Queue:      queueName,
+        Prefetch:   bound.Of(1),
+        Registry:   registry,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+    defer transport.CloseWithContext(context.Background())
+
+    queue, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    if dropErr := connection.Close(); nil != dropErr {
+        t.Fatalf("drop connection: %v", dropErr)
+    }
+
+    publisherConnection, publisherErr := provider.Open(dsn)
+    if nil != publisherErr {
+        t.Fatalf("open publisher connection: %v", publisherErr)
+    }
+    defer provider.Close(publisherConnection)
+
+    publisher := NewTransport(TransportConfig{
+        Connection: publisherConnection,
+        Queue:      queueName,
+        Registry:   registry,
+    })
+    defer publisher.CloseWithContext(context.Background())
+
+    if sendErr := publisher.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 7, Name: "after-reconnect"}, nil)); nil != sendErr {
+        t.Fatalf("send after drop: %v", sendErr)
+    }
+
+    deadline := time.After(20 * time.Second)
+    for {
+        select {
+        case envelopeInstance := <-queue:
+            messageInstance, isType := envelopeInstance.Message().(testMessage)
+            if true == isType && 7 == messageInstance.Id {
+                if ackErr := transport.Ack(runtimeInstance, envelopeInstance); nil != ackErr {
+                    t.Logf("ack after reconnect (expected to occasionally fail on a rotated channel): %v", ackErr)
+                }
+
+                return
+            }
+        case <-deadline:
+            t.Fatalf("expected the consumer to reconnect and deliver the message")
+        }
+    }
+}
+
+func TestNextBackoff_GrowsAndCaps(t *testing.T) {
+    expected := []time.Duration{
+        2 * time.Second,
+        4 * time.Second,
+        8 * time.Second,
+        16 * time.Second,
+        30 * time.Second,
+        30 * time.Second,
+    }
+
+    instance := &Transport{reconnect: defaultReconnect}
+
+    current := instance.reconnect.initialBackoff
+    for index, want := range expected {
+        current = nextReconnectBackoff(instance.reconnect, current)
+        if want != current {
+            t.Fatalf("step %d: expected %s, got %s", index, want, current)
+        }
+    }
+}
+
+func TestConnect_NoDialerReturnsError(t *testing.T) {
+    instance := &Transport{queue: "orders"}
+
+    _, connectErr := instance.connect()
+    if nil == connectErr {
+        t.Fatalf("expected an error when no connection and no dialer are configured")
+    }
+}
+
+func TestConnect_DialFailureIsWrapped(t *testing.T) {
+    calls := 0
+    instance := &Transport{
+        queue: "orders",
+        dialer: func() (*amqp091.Connection, error) {
+            calls++
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    _, connectErr := instance.connect()
+    if nil == connectErr {
+        t.Fatalf("expected the dial failure to surface")
+    }
+
+    if 1 != calls {
+        t.Fatalf("expected the dialer to be invoked once, got %d", calls)
+    }
+
+    if true == instance.reconnecting {
+        t.Fatalf("expected the reconnecting flag to be cleared after a failed dial")
+    }
+}
+
+func TestSubscribeWithRetry_NoDialerDoesNotLoop(t *testing.T) {
+    instance := &Transport{queue: "orders", closeSignal: make(chan struct{})}
+
+    _, _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(context.Background()))
+    if nil == subscribeErr {
+        t.Fatalf("expected an error when no connection and no dialer are configured")
+    }
+}
+
+func TestSubscribeWithRetry_RetriesThenStopsOnContextCancel(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+
+    calls := 0
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 2},
+        dialer: func() (*amqp091.Connection, error) {
+            calls++
+            if 3 <= calls {
+                cancel()
+            }
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    _, _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(ctx))
+    if nil == subscribeErr {
+        t.Fatalf("expected an error after the context is cancelled")
+    }
+
+    if 3 > calls {
+        t.Fatalf("expected the initial subscribe to be retried, got %d calls", calls)
+    }
+}
+
+func TestSubscribeWithRetry_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+
+    calls := 0
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   resolvedReconnect{initialBackoff: 0, maxBackoff: time.Second, backoffFactor: 2},
+        dialer: func() (*amqp091.Connection, error) {
+            calls++
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    go func() {
+        time.Sleep(50 * time.Millisecond)
+        cancel()
+    }()
+
+    _, _, _, subscribeErr := instance.subscribeWithRetry(newReconnectRuntime(ctx))
+    if nil == subscribeErr {
+        t.Fatalf("expected an error after the context is cancelled")
+    }
+
+    if 100 < calls {
+        t.Fatalf("expected the zero initial backoff to be clamped, got %d dial attempts in 50ms", calls)
+    }
+}
+
+func TestConsumeLoop_ZeroBackoffDoesNotBusyLoop(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+
+    calls := 0
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   resolvedReconnect{initialBackoff: 0, maxBackoff: time.Second, backoffFactor: 2},
+        dialer: func() (*amqp091.Connection, error) {
+            calls++
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    out := make(chan messagebuscontract.Envelope)
+    done := make(chan struct{})
+
+    go func() {
+        instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, out)
+        close(done)
+    }()
+
+    go func() {
+        time.Sleep(50 * time.Millisecond)
+        cancel()
+    }()
+
+    select {
+    case <-done:
+    case <-time.After(2 * time.Second):
+        cancel()
+        t.Fatalf("consumeLoop did not return after context cancellation")
+    }
+
+    if 100 < calls {
+        t.Fatalf("expected the zero initial backoff to be clamped, got %d reconnect attempts in 50ms", calls)
+    }
+}
+
+func TestConnect_SingleFlight(t *testing.T) {
+    entered := make(chan struct{})
+    release := make(chan struct{})
+
+    instance := &Transport{
+        queue: "orders",
+        dialer: func() (*amqp091.Connection, error) {
+            close(entered)
+            <-release
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    go instance.connect()
+
+    <-entered
+
+    _, secondErr := instance.connect()
+    if false == errors.Is(secondErr, errReconnectInProgress) {
+        t.Fatalf("expected a concurrent connect to report reconnect-in-progress, got %v", secondErr)
+    }
+
+    close(release)
+}
+
+func TestForwardDeliveries_ChannelLost(t *testing.T) {
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    instance := &Transport{queue: "orders"}
+    out := make(chan messagebuscontract.Envelope, 1)
+
+    reason := instance.forwardDeliveries(newReconnectRuntime(context.Background()), nil, 0, deliveries, out)
+    if forwardChannelLost != reason {
+        t.Fatalf("expected forwardChannelLost, got %v", reason)
+    }
+}
+
+func TestForwardDeliveries_ContextDone(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    instance := &Transport{queue: "orders"}
+    deliveries := make(chan amqp091.Delivery)
+    out := make(chan messagebuscontract.Envelope, 1)
+
+    reason := instance.forwardDeliveries(newReconnectRuntime(ctx), nil, 0, deliveries, out)
+    if forwardDone != reason {
+        t.Fatalf("expected forwardDone, got %v", reason)
+    }
+}
+
+func TestConsumeLoop_NoDialerClosesOut(t *testing.T) {
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    instance := &Transport{queue: "orders"}
+    out := make(chan messagebuscontract.Envelope)
+
+    go instance.consumeLoop(newReconnectRuntime(context.Background()), nil, 0, deliveries, out)
+
+    select {
+    case _, open := <-out:
+        if true == open {
+            t.Fatalf("expected out to be closed without delivering a message")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected consumeLoop to close out after the channel was lost")
+    }
+}
+
+func TestConsumeLoop_NoDialerLogsWhyTheConsumerStops(t *testing.T) {
+    runtimeInstance, logger := newRecordingLoggerRuntime(context.Background())
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    instance := &Transport{queue: "orders"}
+    out := make(chan messagebuscontract.Envelope)
+
+    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, out)
+
+    awaitClosedOutput(t, out)
+
+    errorMessages := logger.errorMessages()
+    if 1 != len(errorMessages) {
+        t.Fatalf("expected exactly one error record naming the stop, got %v", errorMessages)
+    }
+
+    if false == strings.Contains(errorMessages[0], "consumer is stopping") {
+        t.Fatalf("expected the record to name the stop, got %q", errorMessages[0])
+    }
+}
+
+func TestConsumeLoop_ClosingTransportStopsWithoutLogging(t *testing.T) {
+    runtimeInstance, logger := newRecordingLoggerRuntime(context.Background())
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    instance := &Transport{queue: "orders", closing: true, closeSignal: make(chan struct{})}
+    out := make(chan messagebuscontract.Envelope)
+
+    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, out)
+
+    awaitClosedOutput(t, out)
+
+    if errorMessages := logger.errorMessages(); 0 != len(errorMessages) {
+        t.Fatalf("expected a closing transport to stop silently, got %v", errorMessages)
+    }
+}
+
+func TestConsumeLoop_CancelledContextStopsWithoutLogging(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    runtimeInstance, logger := newRecordingLoggerRuntime(ctx)
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    instance := &Transport{queue: "orders", closeSignal: make(chan struct{})}
+    out := make(chan messagebuscontract.Envelope)
+
+    go instance.consumeLoop(runtimeInstance, nil, 0, deliveries, out)
+
+    awaitClosedOutput(t, out)
+
+    if errorMessages := logger.errorMessages(); 0 != len(errorMessages) {
+        t.Fatalf("expected a cancelled context to stop the consumer silently, got %v", errorMessages)
+    }
+}
+
+func TestConnectionAlive_ReportsLiveAndGone(t *testing.T) {
+    gone := &Transport{queue: "orders"}
+    if true == gone.connectionAlive() {
+        t.Fatalf("expected connectionAlive to report false without a connection")
+    }
+
+    live := &Transport{queue: "orders", connection: &amqp091.Connection{}}
+    if false == live.connectionAlive() {
+        t.Fatalf("expected connectionAlive to report true for a non-nil open connection")
+    }
+}
+
+func TestPublishRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T) {
+    liveStatic := &Transport{queue: "orders", connection: &amqp091.Connection{}}
+    if false == liveStatic.publishRetryable() {
+        t.Fatalf("expected a publish on a live static connection to be retryable without a dialer")
+    }
+
+    gone := &Transport{queue: "orders"}
+    if true == gone.publishRetryable() {
+        t.Fatalf("expected no retry when there is no dialer and no live connection")
+    }
+
+    dialerBacked := &Transport{queue: "orders", dialer: func() (*amqp091.Connection, error) { return nil, nil }}
+    if false == dialerBacked.publishRetryable() {
+        t.Fatalf("expected a dialer-backed transport to stay retryable")
+    }
+
+    closing := &Transport{queue: "orders", connection: &amqp091.Connection{}, closing: true}
+    if true == closing.publishRetryable() {
+        t.Fatalf("expected a closing transport never to retry a publish")
+    }
+}
+
+func TestSubscribeRetryable_LiveStaticConnectionRetriesWithoutDialer(t *testing.T) {
+    liveStatic := &Transport{queue: "orders", connection: &amqp091.Connection{}}
+    if false == liveStatic.subscribeRetryable() {
+        t.Fatalf("expected a subscribe on a live static connection to be retryable without a dialer")
+    }
+
+    gone := &Transport{queue: "orders"}
+    if true == gone.subscribeRetryable() {
+        t.Fatalf("expected no retry when there is no dialer and no live connection")
+    }
+
+    dialerBacked := &Transport{queue: "orders", dialer: func() (*amqp091.Connection, error) { return nil, nil }}
+    if false == dialerBacked.subscribeRetryable() {
+        t.Fatalf("expected a dialer-backed transport to stay retryable")
+    }
+
+    closing := &Transport{queue: "orders", connection: &amqp091.Connection{}, closing: true}
+    if true == closing.subscribeRetryable() {
+        t.Fatalf("expected a closing transport never to retry a subscribe")
+    }
+}
+
+func TestConsumeLoop_StaticLiveConnectionRecoversFromChannelOnlyLoss(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    instance := &Transport{
+        queue:       "orders",
+        connection:  &amqp091.Connection{},
+        closeSignal: make(chan struct{}),
+        reconnect:   resolvedReconnect{initialBackoff: 5 * time.Second, maxBackoff: 5 * time.Second, backoffFactor: 2},
+    }
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    out := make(chan messagebuscontract.Envelope)
+    done := make(chan struct{})
+
+    go func() {
+        instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, out)
+        close(done)
+    }()
+
+    select {
+    case _, open := <-out:
+        if false == open {
+            t.Fatalf("consumer closed out and stopped on a channel-only loss even though the static connection is still alive")
+        }
+
+        t.Fatalf("did not expect a delivery on a bare consume loop")
+    case <-done:
+        t.Fatalf("consumeLoop returned instead of recovering on the live static connection")
+    case <-time.After(200 * time.Millisecond):
+    }
+
+    cancel()
+
+    select {
+    case <-done:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("consumeLoop did not return after context cancellation")
+    }
+}
+
+func TestDecode_StampsCurrentGeneration(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.gen")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    body, serializeErr := serializer.Serialize(reconnectMessage{Id: 1})
+    if nil != serializeErr {
+        t.Fatalf("serialize: %v", serializeErr)
+    }
+
+    delivery := amqp091.Delivery{
+        Headers:     amqp091.Table{headerMessageType: "amqp.test.gen"},
+        DeliveryTag: 5,
+        Body:        body,
+    }
+
+    envelopeInstance, decodeErr := instance.decode(delivery, 9)
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance)
+    if false == exists {
+        t.Fatalf("expected a delivery stamp on the decoded envelope")
+    }
+
+    if 9 != stamp.Generation {
+        t.Fatalf("expected the delivery to carry generation 9, got %d", stamp.Generation)
+    }
+}
+
+func TestTransport_RequeuePersistsDeadLetterAttemptCount(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.deadletter")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.DeadLetterAttemptStamp{Count: 2}})
+
+    publishing, buildErr := instance.buildPublishing(envelope, "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    delivery := amqp091.Delivery{Headers: publishing.Headers, Body: publishing.Body}
+    decoded, decodeErr := instance.decode(delivery, 1)
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    if 2 != melodymessagebus.DeadLetterAttemptCount(decoded) {
+        t.Fatalf("expected the decoded envelope to keep dead-letter attempt count 2, got %d", melodymessagebus.DeadLetterAttemptCount(decoded))
+    }
+}
+
+func TestTransport_BuildPublishingCarriesMessageId(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.messageid")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    envelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"}})
+
+    publishing, buildErr := instance.buildPublishing(envelope, "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    if "melody-outbox-42" != publishing.MessageId {
+        t.Fatalf("expected the stamped message id on the publishing, got %q", publishing.MessageId)
+    }
+}
+
+func TestTransport_MessageIdSurvivesDecodeAndRepublish(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.messageid.roundtrip")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    sent := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil).
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.MessageIdStamp{MessageId: "melody-outbox-42"}})
+    published, buildErr := instance.buildPublishing(sent, "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    delivery := amqp091.Delivery{
+        Headers:   published.Headers,
+        Body:      published.Body,
+        MessageId: published.MessageId,
+    }
+    decoded, decodeErr := instance.decode(delivery, 1)
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    roundTripped, present := melodymessagebus.MessageId(decoded)
+    if false == present || "melody-outbox-42" != roundTripped {
+        t.Fatalf("expected decode to surface the message id, got %q present=%v", roundTripped, present)
+    }
+
+    republished, republishErr := instance.buildPublishing(decoded, "")
+    if nil != republishErr {
+        t.Fatalf("rebuild publishing: %v", republishErr)
+    }
+
+    if "melody-outbox-42" != republished.MessageId {
+        t.Fatalf("expected the republished message to keep its id, got %q", republished.MessageId)
+    }
+}
+
+func TestTransport_BuildPublishingWithoutMessageIdStampLeavesItEmpty(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.nomessageid")
+
+    serializer := melodyserializer.NewJsonSerializer()
+    instance := &Transport{queue: "orders", registry: registry, serializer: serializer}
+
+    publishing, buildErr := instance.buildPublishing(melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, nil), "")
+    if nil != buildErr {
+        t.Fatalf("build publishing: %v", buildErr)
+    }
+
+    if "" != publishing.MessageId {
+        t.Fatalf("expected no message id without a stamp, got %q", publishing.MessageId)
+    }
+}
+
+func TestAckNack_StaleGenerationIsNoOp(t *testing.T) {
+    runtimeInstance := newReconnectRuntime(context.Background())
+
+    newInstance := func() *Transport {
+        return &Transport{
+            queue:             "orders",
+            consumeChannel:    &amqp091.Channel{},
+            consumeGeneration: 2,
+        }
+    }
+
+    staleEnvelope := melodymessagebus.NewEnvelope(reconnectMessage{Id: 1}, []messagebuscontract.Stamp{DeliveryStamp{Tag: 5, Generation: 1}})
+
+    if ackErr := newInstance().Ack(runtimeInstance, staleEnvelope); nil != ackErr {
+        t.Fatalf("expected a stale-generation ack to be a no-op, got %v", ackErr)
+    }
+
+    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, false); nil != nackErr {
+        t.Fatalf("expected a stale-generation drop nack to be a no-op, got %v", nackErr)
+    }
+
+    if nackErr := newInstance().Nack(runtimeInstance, staleEnvelope, true); nil != nackErr {
+        t.Fatalf("expected a stale-generation requeue nack to be a no-op, got %v", nackErr)
+    }
+}
+
+func TestConsumeLoop_ContextDoneClosesOut(t *testing.T) {
+    ctx, cancel := context.WithCancel(context.Background())
+
+    instance := &Transport{queue: "orders"}
+    deliveries := make(chan amqp091.Delivery)
+    out := make(chan messagebuscontract.Envelope)
+
+    go instance.consumeLoop(newReconnectRuntime(ctx), nil, 0, deliveries, out)
+
+    cancel()
+
+    select {
+    case _, open := <-out:
+        if true == open {
+            t.Fatalf("expected out to be closed on context cancellation")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("expected consumeLoop to close out after context cancellation")
+    }
+}
+
+func TestForwardDeliveries_CloseUnblocksGoroutineParkedOnOutput(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[closeUnblockMessage](registry, "amqp.test.close-unblock")
+
+    transport := NewTransport(TransportConfig{
+        Dialer:   func() (*amqp091.Connection, error) { return nil, nil },
+        Queue:    "melody.amqp.close-unblock",
+        Registry: registry,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+
+    body, marshalErr := json.Marshal(closeUnblockMessage{Id: 1})
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    deliveries := make(chan amqp091.Delivery, 1)
+    deliveries <- amqp091.Delivery{
+        Headers:     amqp091.Table{headerMessageType: "amqp.test.close-unblock"},
+        Body:        body,
+        DeliveryTag: 1,
+    }
+
+    out := make(chan messagebuscontract.Envelope)
+    done := make(chan forwardReason, 1)
+
+    go func() {
+        done <- transport.forwardDeliveries(runtimeInstance, nil, 0, deliveries, out)
+    }()
+
+    time.Sleep(50 * time.Millisecond)
+
+    transport.CloseWithContext(t.Context())
+
+    select {
+    case reason := <-done:
+        if forwardDone != reason {
+            t.Fatalf("expected forwardDone after Close, got %v", reason)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("forwardDeliveries did not return after Close — the consume goroutine leaked")
+    }
+}
+
+func TestReopenConsume_CloseUnblocksGoroutineParkedOnBackoff(t *testing.T) {
+    transport := NewTransport(TransportConfig{
+        Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("broker down") },
+        Queue:    "melody.amqp.reopen-backoff",
+        Registry: NewMessageRegistry(),
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+
+    backoff := 10 * time.Second
+    done := make(chan error, 1)
+
+    go func() {
+        _, _, _, reopenErr := transport.reopenConsume(runtimeInstance, &backoff)
+        done <- reopenErr
+    }()
+
+    time.Sleep(50 * time.Millisecond)
+
+    transport.CloseWithContext(t.Context())
+
+    select {
+    case reopenErr := <-done:
+        if nil == reopenErr {
+            t.Fatalf("expected reopenConsume to return an error after Close")
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("reopenConsume did not return after Close — the reconnect goroutine leaked while parked on backoff")
+    }
+}
+
+func TestClose_WaitsForTheConsumeGoroutine(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[closeJoinMessage](registry, "amqp.test.close-join")
+
+    serializer := newBlockingDeserializer()
+
+    instance := &Transport{
+        queue:       "orders",
+        registry:    registry,
+        serializer:  serializer,
+        closeSignal: make(chan struct{}),
+        reconnect:   defaultReconnect,
+        publishHalf: publishHalf{joinBound: closeJoinTimeout},
+    }
+
+    body, marshalErr := json.Marshal(closeJoinMessage{Id: 1})
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    deliveries := make(chan amqp091.Delivery, 1)
+    deliveries <- amqp091.Delivery{
+        Headers:     amqp091.Table{headerMessageType: "amqp.test.close-join"},
+        Body:        body,
+        DeliveryTag: 1,
+    }
+
+    runtimeInstance := newReconnectRuntime(context.Background())
+    out := make(chan messagebuscontract.Envelope)
+
+    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out)
+
+    select {
+    case <-serializer.entered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the consume goroutine never reached the deserializer")
+    }
+
+    closed := make(chan struct{})
+    go func() {
+        instance.CloseWithContext(t.Context())
+
+        close(closed)
+    }()
+
+    select {
+    case <-closed:
+        t.Fatalf("Close returned while the consume goroutine was still inside the deserializer")
+    case <-time.After(100 * time.Millisecond):
+    }
+
+    close(serializer.release)
+
+    select {
+    case <-closed:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("Close did not return after the consume goroutine finished")
+    }
+
+    select {
+    case envelopeInstance, open := <-out:
+        if true == open {
+            t.Fatalf("an envelope reached the application after Close returned: %+v", envelopeInstance.Message())
+        }
+    default:
+        t.Fatalf("expected the consume goroutine to have closed out before Close returned")
+    }
+}
+
+func TestClose_ReturnsPromptlyWhileALoopIsStuckInTheDialer(t *testing.T) {
+    dialing := make(chan struct{})
+    release := make(chan struct{})
+
+    var once sync.Once
+
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 2},
+        dialer: func() (*amqp091.Connection, error) {
+            once.Do(func() {
+                close(dialing)
+            })
+
+            <-release
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+        publishHalf: publishHalf{joinBound: closeJoinTimeout},
+    }
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    runtimeInstance := newReconnectRuntime(context.Background())
+    out := make(chan messagebuscontract.Envelope)
+
+    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out)
+
+    select {
+    case <-dialing:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("the consume goroutine never reached the dialer")
+    }
+
+    dialDuration := 200 * time.Millisecond
+
+    go func() {
+        time.Sleep(dialDuration)
+
+        close(release)
+    }()
+
+    start := time.Now()
+    instance.CloseWithContext(t.Context())
+    elapsed := time.Since(start)
+
+    if elapsed >= dialDuration {
+        t.Fatalf("Close blocked %s on a dialer it can now interrupt through the close signal", elapsed)
+    }
+}
+
+func TestTransport_CloseJoinsTheConsumerStartedByReceive(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[closeJoinMessage](registry, "amqp.test.close-join.live")
+
+    queueName := "melody.amqp.close-join"
+    serializer := newBlockingDeserializer()
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      queueName,
+        Prefetch:   bound.Of(1),
+        Registry:   registry,
+        Serializer: serializer,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(closeJoinMessage{Id: 1}, nil)); nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    out, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    select {
+    case <-serializer.entered:
+    case <-time.After(10 * time.Second):
+        t.Fatalf("the consumer never reached the deserializer")
+    }
+
+    closed := make(chan struct{})
+    go func() {
+        transport.CloseWithContext(t.Context())
+
+        close(closed)
+    }()
+
+    select {
+    case <-closed:
+        t.Fatalf("Close returned while the consumer was still inside the deserializer")
+    case <-time.After(100 * time.Millisecond):
+    }
+
+    close(serializer.release)
+
+    select {
+    case <-closed:
+    case <-time.After(5 * time.Second):
+        t.Fatalf("Close did not return after the consumer finished")
+    }
+
+    select {
+    case envelopeInstance, open := <-out:
+        if true == open {
+            t.Fatalf("an envelope reached the application after Close returned: %+v", envelopeInstance.Message())
+        }
+    default:
+        t.Fatalf("expected the consumer to have closed its output before Close returned")
+    }
+
+    admin, adminErr := connection.Channel()
+    if nil != adminErr {
+        t.Fatalf("open admin channel: %v", adminErr)
+    }
+    defer admin.Close()
+
+    if _, purgeErr := admin.QueuePurge(queueName, false); nil != purgeErr {
+        t.Fatalf("purge queue: %v", purgeErr)
+    }
+}
+
+func TestTransport_SendSurfacesUnroutablePublishAfterQueueDelete(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.confirm.message")
+
+    queueName := "melody.amqp.confirm-unroutable"
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      queueName,
+        Registry:   registry,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+    defer transport.CloseWithContext(context.Background())
+
+    firstErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "routable"}, nil))
+    if nil != firstErr {
+        t.Fatalf("first send: %v", firstErr)
+    }
+
+    admin, adminErr := connection.Channel()
+    if nil != adminErr {
+        t.Fatalf("open admin channel: %v", adminErr)
+    }
+    defer admin.Close()
+
+    if _, deleteErr := admin.QueueDelete(queueName, false, false, false); nil != deleteErr {
+        t.Fatalf("delete queue: %v", deleteErr)
+    }
+
+    secondErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "unroutable"}, nil))
+    if nil == secondErr {
+        t.Fatalf("expected Send to fail after the queue was deleted; the broker silently discarded the message")
+    }
+
+    if true == exception.IsInfrastructureFailure(secondErr) {
+        t.Fatalf("expected the broker's verdict on the message left unmarked, got %v", secondErr)
+    }
+}
+
+func TestEnsurePublishChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      "melody.amqp.reopen-publish",
+        Registry:   NewMessageRegistry(),
+    })
+
+    first, _, _, firstErr := transport.ensurePublishChannel()
+    if nil != firstErr {
+        t.Fatalf("first ensurePublishChannel: %v", firstErr)
+    }
+
+    first.Close()
+    if false == first.IsClosed() {
+        t.Fatalf("expected the channel to report closed after Close")
+    }
+
+    second, _, _, secondErr := transport.ensurePublishChannel()
+    if nil != secondErr {
+        t.Fatalf("second ensurePublishChannel: %v", secondErr)
+    }
+    if true == second.IsClosed() {
+        t.Fatalf("expected a fresh open channel, got a closed one (the stale channel was reused)")
+    }
+    if second == first {
+        t.Fatalf("expected the stale closed channel to be replaced, got the same channel")
+    }
+}
+
+func TestEnsureConsumeChannel_ReopensClosedChannelWithoutDialer(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      "melody.amqp.reopen-consume",
+        Registry:   NewMessageRegistry(),
+    })
+
+    first, firstGeneration, firstErr := transport.ensureConsumeChannel()
+    if nil != firstErr {
+        t.Fatalf("first ensureConsumeChannel: %v", firstErr)
+    }
+
+    first.Close()
+    if false == first.IsClosed() {
+        t.Fatalf("expected the channel to report closed after Close")
+    }
+
+    second, secondGeneration, secondErr := transport.ensureConsumeChannel()
+    if nil != secondErr {
+        t.Fatalf("second ensureConsumeChannel: %v", secondErr)
+    }
+
+    if secondGeneration != firstGeneration+1 {
+        t.Fatalf("expected the fresh channel answered with the generation minted for it (%d), got %d", firstGeneration+1, secondGeneration)
+    }
+    if true == second.IsClosed() {
+        t.Fatalf("expected a fresh open channel, got a closed one (the stale channel was reused)")
+    }
+    if second == first {
+        t.Fatalf("expected the stale closed channel to be replaced, got the same channel")
+    }
+}
+
+func TestDelayExpirationMilliseconds_ClampsSubMillisecondToOne(t *testing.T) {
+    if 1 != delayExpirationMilliseconds(200*time.Microsecond) {
+        t.Fatalf("expected a sub-millisecond delay to clamp to 1ms, got %d (a \"0\" TTL expires immediately and drops the backoff)", delayExpirationMilliseconds(200*time.Microsecond))
+    }
+
+    if 1 != delayExpirationMilliseconds(999*time.Microsecond) {
+        t.Fatalf("expected 999us to clamp to 1ms, got %d", delayExpirationMilliseconds(999*time.Microsecond))
+    }
+
+    if 5 != delayExpirationMilliseconds(5*time.Millisecond) {
+        t.Fatalf("expected 5ms to stay 5, got %d", delayExpirationMilliseconds(5*time.Millisecond))
+    }
+}
+
+func TestDelayExpirationMilliseconds_ClampsHugeDelayToCap(t *testing.T) {
+    huge := time.Duration(math.MaxUint32+1000) * time.Millisecond
+    if maxDelayExpirationMilliseconds != delayExpirationMilliseconds(huge) {
+        t.Fatalf("expected a huge delay to clamp to %d, got %d", maxDelayExpirationMilliseconds, delayExpirationMilliseconds(huge))
+    }
+
+    atCap := time.Duration(maxDelayExpirationMilliseconds) * time.Millisecond
+    if maxDelayExpirationMilliseconds != delayExpirationMilliseconds(atCap) {
+        t.Fatalf("expected a delay at the cap to stay %d, got %d", maxDelayExpirationMilliseconds, delayExpirationMilliseconds(atCap))
+    }
+}
+
+func TestDrainPublishReturn_DrainsEveryQueuedReturn(t *testing.T) {
+    returns := make(chan amqp091.Return, 8)
+    returns <- amqp091.Return{ReplyCode: 312, ReplyText: "first"}
+    returns <- amqp091.Return{ReplyCode: 312, ReplyText: "second"}
+    returns <- amqp091.Return{ReplyCode: 312, ReplyText: "third"}
+
+    last, drained := drainPublishReturn(returns)
+    if false == drained {
+        t.Fatal("expected drained to report the accumulated returns")
+    }
+
+    if "third" != last.ReplyText {
+        t.Fatalf("expected the last return reported, got %q", last.ReplyText)
+    }
+
+    if 0 != len(returns) {
+        t.Fatalf("expected every queued return drained, %d left", len(returns))
+    }
+
+    if _, stillDrained := drainPublishReturn(returns); true == stillDrained {
+        t.Fatal("expected an empty channel to report nothing drained")
+    }
+}
+
+func TestRedeliveryCountFromHeader(t *testing.T) {
+    cases := []struct {
+        name     string
+        headers  amqp091.Table
+        expected int
+    }{
+        {name: "missing", headers: amqp091.Table{}, expected: 0},
+        {name: "int64", headers: amqp091.Table{headerRedeliveryCount: int64(3)}, expected: 3},
+        {name: "int32", headers: amqp091.Table{headerRedeliveryCount: int32(2)}, expected: 2},
+        {name: "int", headers: amqp091.Table{headerRedeliveryCount: 5}, expected: 5},
+        {name: "float64", headers: amqp091.Table{headerRedeliveryCount: float64(4)}, expected: 4},
+        {name: "float32", headers: amqp091.Table{headerRedeliveryCount: float32(6)}, expected: 6},
+        {name: "uint", headers: amqp091.Table{headerRedeliveryCount: uint(8)}, expected: 8},
+        {name: "uint32", headers: amqp091.Table{headerRedeliveryCount: uint32(9)}, expected: 9},
+        {name: "text", headers: amqp091.Table{headerRedeliveryCount: "7"}, expected: 7},
+        {name: "wrong type", headers: amqp091.Table{headerRedeliveryCount: true}, expected: math.MaxInt},
+    }
+
+    for _, testCase := range cases {
+        t.Run(testCase.name, func(t *testing.T) {
+            got := redeliveryCountFromHeader(testCase.headers)
+            if testCase.expected != got {
+                t.Fatalf("expected %d, got %d", testCase.expected, got)
+            }
+        })
+    }
+}
+
+func TestNewTransport_RefusesAPrefetchAboveTheWireMaximum(t *testing.T) {
+    newInstance := func(prefetch int) *Transport {
+        return newTransport(TransportConfig{
+            Dialer:   func() (*amqp091.Connection, error) { return nil, nil },
+            Queue:    "orders",
+            Prefetch: bound.Of(prefetch),
+            Registry: NewMessageRegistry(),
+        }, defaultComponentParent)
+    }
+
+    for _, refused := range []int{65536, 70000, 0} {
+        expectPanicNamingField(t, "TransportConfig.Prefetch", func() {
+            newInstance(refused)
+        })
+    }
+
+    if 65535 != newInstance(65535).prefetch {
+        t.Fatalf("expected a prefetch at the wire maximum to stay 65535, got %d", newInstance(65535).prefetch)
+    }
+
+    if 10 != newInstance(10).prefetch {
+        t.Fatalf("expected an in-range prefetch to be preserved, got %d", newInstance(10).prefetch)
+    }
+}
+
+func TestMessageTypeName_NilDoesNotPanic(t *testing.T) {
+    if "<nil>" != messageTypeName(nil) {
+        t.Fatalf("expected a placeholder name for a nil message, got %q", messageTypeName(nil))
+    }
+}
+
+func TestMessageTypeName_ReportsConcreteType(t *testing.T) {
+    type sample struct{}
+
+    if "amqp.sample" != messageTypeName(sample{}) {
+        t.Fatalf("unexpected type name: %q", messageTypeName(sample{}))
+    }
+}
+
+func TestResolveDelayBuckets_DefaultsWhenEmpty(t *testing.T) {
+    buckets := resolveDelayBuckets(nil)
+
+    if 4 != len(buckets) || 5*time.Second != buckets[0] || 1*time.Hour != buckets[3] {
+        t.Fatalf("unexpected default buckets: %v", buckets)
+    }
+}
+
+func TestResolveDelayBuckets_RejectsNonAscending(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected non-ascending buckets to be rejected")
+        }
+    }()
+
+    _ = resolveDelayBuckets([]time.Duration{time.Minute, time.Second})
+}
+
+func TestResolveDelayBuckets_RejectsNonPositive(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected a non-positive bucket to be rejected")
+        }
+    }()
+
+    _ = resolveDelayBuckets([]time.Duration{0, time.Second})
+}
+
+func TestResolveDelayBuckets_RejectsTooMany(t *testing.T) {
+    tooMany := make([]time.Duration, maxDelayBuckets+1)
+    for index := range tooMany {
+        tooMany[index] = time.Duration(index+1) * time.Second
+    }
+
+    defer func() {
+        if nil == recover() {
+            t.Fatalf("expected more than %d buckets to be rejected", maxDelayBuckets)
+        }
+    }()
+
+    _ = resolveDelayBuckets(tooMany)
+}
+
+func TestDelayBucketFor_SelectsLargestNotExceeding(t *testing.T) {
+    buckets := []time.Duration{5 * time.Second, time.Minute, 10 * time.Minute, time.Hour}
+
+    cases := []struct {
+        name  string
+        delay time.Duration
+        want  time.Duration
+        found bool
+    }{
+        {name: "below smallest keeps legacy queue", delay: time.Second, want: 0, found: false},
+        {name: "exact smallest", delay: 5 * time.Second, want: 5 * time.Second, found: true},
+        {name: "between buckets quantizes down", delay: 90 * time.Second, want: time.Minute, found: true},
+        {name: "exact middle", delay: 10 * time.Minute, want: 10 * time.Minute, found: true},
+        {name: "above largest clamps to largest", delay: 3 * time.Hour, want: time.Hour, found: true},
+        {name: "just below smallest", delay: 5*time.Second - time.Millisecond, want: 0, found: false},
+    }
+
+    for _, current := range cases {
+        got, found := delayBucketFor(buckets, current.delay)
+        if current.found != found || current.want != got {
+            t.Fatalf("%s: delayBucketFor(%v) = (%v, %v), want (%v, %v)", current.name, current.delay, got, found, current.want, current.found)
+        }
+    }
+}
+
+func TestDelayBucketQueueName_IsDeterministic(t *testing.T) {
+    if "orders.delay.60000ms" != delayBucketQueueName("orders", time.Minute) {
+        t.Fatalf("unexpected bucket queue name: %s", delayBucketQueueName("orders", time.Minute))
+    }
+}
+
+func TestTransport_BucketedDelaysAvoidHeadOfLineBlocking(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.delay.bucket")
+
+    transport := NewTransport(TransportConfig{
+        Connection:   connection,
+        Queue:        "melody.amqp.delay.bucket",
+        Prefetch:     bound.Of(2),
+        Registry:     registry,
+        DelayBuckets: []time.Duration{2 * time.Second, 8 * time.Second},
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+    defer transport.CloseWithContext(context.Background())
+
+    queue, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    for draining := true; true == draining; {
+        select {
+        case leftover := <-queue:
+            if ackErr := transport.Ack(runtimeInstance, leftover); nil != ackErr {
+                t.Fatalf("ack leftover: %v", ackErr)
+            }
+        case <-time.After(1500 * time.Millisecond):
+            draining = false
+        }
+    }
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "long"}, nil)); nil != sendErr {
+        t.Fatalf("send long: %v", sendErr)
+    }
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "short"}, nil)); nil != sendErr {
+        t.Fatalf("send short: %v", sendErr)
+    }
+
+    first := receiveWithin(t, queue, 10*time.Second)
+    second := receiveWithin(t, queue, 10*time.Second)
+
+    longDelayed := first.
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}}).
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 8 * time.Second}})
+    shortDelayed := second.
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}}).
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 2 * time.Second}})
+
+    start := time.Now()
+    if nackErr := transport.Nack(runtimeInstance, longDelayed, true); nil != nackErr {
+        t.Fatalf("nack long: %v", nackErr)
+    }
+    if nackErr := transport.Nack(runtimeInstance, shortDelayed, true); nil != nackErr {
+        t.Fatalf("nack short: %v", nackErr)
+    }
+
+    redelivered := receiveWithin(t, queue, 6*time.Second)
+
+    elapsed := time.Since(start)
+    if 6*time.Second <= elapsed {
+        t.Fatalf("short delay stalled behind the long one for %s", elapsed)
+    }
+
+    shortMessage, isShort := redelivered.Message().(testMessage)
+    if false == isShort || "short" != shortMessage.Name {
+        t.Fatalf("expected the short-delayed message first, got %+v", redelivered.Message())
+    }
+
+    if ackErr := transport.Ack(runtimeInstance, redelivered); nil != ackErr {
+        t.Fatalf("ack: %v", ackErr)
+    }
+
+    longRedelivered := receiveWithin(t, queue, 12*time.Second)
+
+    longMessage, isLong := longRedelivered.Message().(testMessage)
+    if false == isLong || "long" != longMessage.Name {
+        t.Fatalf("expected the long-delayed message second, got %+v", longRedelivered.Message())
+    }
+
+    if ackErr := transport.Ack(runtimeInstance, longRedelivered); nil != ackErr {
+        t.Fatalf("ack long: %v", ackErr)
+    }
+}
+
+func TestStartConsumeLoop_RefusesOnceCloseHasBegun(t *testing.T) {
+    instance := &Transport{
+        queue:       "orders",
+        registry:    NewMessageRegistry(),
+        serializer:  melodyserializer.NewJsonSerializer(),
+        closeSignal: make(chan struct{}),
+        reconnect:   defaultReconnect,
+        publishHalf: publishHalf{joinBound: closeJoinTimeout},
+    }
+
+    runtimeInstance := newReconnectRuntime(context.Background())
+
+    if closeErr := instance.CloseWithContext(t.Context()); nil != closeErr {
+        t.Fatalf("close: %v", closeErr)
+    }
+
+    deliveries := make(chan amqp091.Delivery)
+    out := make(chan messagebuscontract.Envelope)
+
+    if true == instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out) {
+        t.Fatalf("expected a closing transport to refuse a new consume loop")
+    }
+
+    joined := make(chan struct{})
+    go func() {
+        instance.wait.Wait()
+
+        close(joined)
+    }()
+
+    select {
+    case <-joined:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("a refused start must leave the wait group at zero, so nothing outlives the join")
+    }
+}
+
+func TestPublishRequeue_RetriesABoundedNumberOfTimesBeforeGivingUp(t *testing.T) {
+    dialCount := 0
+
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 1},
+        dialer: func() (*amqp091.Connection, error) {
+            dialCount++
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    publishErr := instance.publishRequeue(
+        newReconnectRuntime(context.Background()),
+        "",
+        "orders",
+        amqp091.Publishing{},
+    )
+    if nil == publishErr {
+        t.Fatalf("expected the re-publish to fail once every attempt is spent")
+    }
+
+    if 2*republishAttemptCount != dialCount {
+        t.Fatalf("expected %d dial attempts across %d re-publish attempts, got %d", 2*republishAttemptCount, republishAttemptCount, dialCount)
+    }
+}
+
+func TestPublishRequeue_ClosingTransportStopsWithoutRetrying(t *testing.T) {
+    dialCount := 0
+
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 1},
+        closing:     true,
+        dialer: func() (*amqp091.Connection, error) {
+            dialCount++
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    if publishErr := instance.publishRequeue(newReconnectRuntime(context.Background()), "", "orders", amqp091.Publishing{}); nil == publishErr {
+        t.Fatalf("expected the re-publish to fail on a closing transport")
+    }
+
+    if 0 != dialCount {
+        t.Fatalf("expected a closing transport never to dial, got %d", dialCount)
+    }
+}
+
+func TestTransport_RequeueThatCannotCarryItsCountersDeadLettersInsteadOfLooping(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.uncounted")
+
+    queueName := "melody.amqp.uncounted"
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      queueName,
+        Prefetch:   bound.Of(1),
+        Registry:   registry,
+        DeadLetter: true,
+    })
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+    defer transport.CloseWithContext(context.Background())
+
+    purgeQueue(t, connection, queueName)
+    purgeQueue(t, connection, queueName+".dlq")
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "uncounted"}, nil)); nil != sendErr {
+        t.Fatalf("send: %v", sendErr)
+    }
+
+    queue, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    delivered := receiveWithin(t, queue, 10*time.Second)
+    if 0 != melodymessagebus.RedeliveryCount(delivered) {
+        t.Fatalf("expected initial redelivery count 0, got %d", melodymessagebus.RedeliveryCount(delivered))
+    }
+
+    deleteQueue(t, connection, queueName+".delay")
+
+    retried := delivered.
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.RedeliveryStamp{Count: 1}}).
+        WithStamps([]messagebuscontract.Stamp{melodymessagebus.DelayStamp{Delay: 100 * time.Millisecond}})
+
+    if nackErr := transport.Nack(runtimeInstance, retried, true); nil != nackErr {
+        t.Fatalf("nack requeue: %v", nackErr)
+    }
+
+    select {
+    case looped := <-queue:
+        t.Fatalf("expected no redelivery, got the message back with redelivery count %d", melodymessagebus.RedeliveryCount(looped))
+    case <-time.After(3 * time.Second):
+    }
+
+    if false == drainedToDeadLetter(t, connection, queueName+".dlq", 10*time.Second) {
+        t.Fatalf("expected the requeue that could not carry its counters to reach the dead-letter queue")
+    }
+}
+
+func deleteQueue(t *testing.T, connection *amqp091.Connection, queueName string) {
+    t.Helper()
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("open delete channel: %v", channelErr)
+    }
+    defer channel.Close()
+
+    if _, deleteErr := channel.QueueDelete(queueName, false, false, false); nil != deleteErr {
+        t.Fatalf("delete queue %q: %v", queueName, deleteErr)
+    }
+}
+
+func purgeQueue(t *testing.T, connection *amqp091.Connection, queueName string) {
+    t.Helper()
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("open purge channel: %v", channelErr)
+    }
+    defer channel.Close()
+
+    _, _ = channel.QueuePurge(queueName, false)
+}
+
+func TestRequeueOnRejectedRepublish_KeepsTheMessageWhenNothingElseWould(t *testing.T) {
+    if false == requeueOnRejectedRepublish(false) {
+        t.Fatal("without a dead-letter queue a refusal discards the message, so it must be requeued instead: at-least-once becomes at-most-once otherwise")
+    }
+
+    if true == requeueOnRejectedRepublish(true) {
+        t.Fatal("with a dead-letter queue the refusal routes the message there, which keeps it and preserves the counts; requeuing instead would loop it")
+    }
+}
+
+func TestResetConsumeChannel_ANilFailedChannelIdentifiesNothingAndIsANoOp(t *testing.T) {
+    instance := &Transport{queue: "orders", publishHalf: publishHalf{joinBound: closeJoinTimeout}}
+
+    instance.resetConsumeChannel(nil)
+
+    if nil != instance.consumeChannel {
+        t.Fatal("expected no consume channel")
+    }
+}
+
+func TestIntFromHeader_ClampsOutOfRangeCountsInsteadOfWrapping(t *testing.T) {
+    headers := amqp091.Table{
+        "wrapping-uint":  uint64(1) << 63,
+        "negative":       int64(-5),
+        "huge-float":     float64(1e30),
+        "nan":            math.NaN(),
+        "ordinary":       int64(7),
+        "negative-float": float64(-3.5),
+    }
+
+    if clamped := intFromHeader(headers, "wrapping-uint"); math.MaxInt != clamped {
+        t.Fatalf("expected the wrapping uint clamped high (fail-closed), got %d", clamped)
+    }
+
+    if clamped := intFromHeader(headers, "huge-float"); math.MaxInt != clamped {
+        t.Fatalf("expected the huge float clamped high, got %d", clamped)
+    }
+
+    for _, key := range []string{"negative", "nan", "negative-float"} {
+        if clamped := intFromHeader(headers, key); 0 != clamped {
+            t.Fatalf("expected %q read as absence, got %d", key, clamped)
+        }
+    }
+
+    if clamped := intFromHeader(headers, "ordinary"); 7 != clamped {
+        t.Fatalf("expected the ordinary count untouched, got %d", clamped)
+    }
+}
+
+func TestResolveDelayBuckets_RefusesABucketPastTheWireTtlLimit(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatal("expected a bucket past the 32-bit millisecond wire limit to be refused: its queue name would promise a delay its clamped ttl cannot honour")
+        }
+    }()
+
+    resolveDelayBuckets([]time.Duration{time.Minute, 60 * 24 * time.Hour})
+}
+
+func TestResolveDelayBuckets_RefusesASubMillisecondBucket(t *testing.T) {
+    defer func() {
+        if nil == recover() {
+            t.Fatal("expected a sub-millisecond bucket to be refused: it truncates to a 0ms queue name and collapses declared tiers")
+        }
+    }()
+
+    resolveDelayBuckets([]time.Duration{500 * time.Microsecond, time.Second})
+}
+
+func TestPublishRecoverable_ACancelledCallerContextDoesNotRetryOrResetTheSharedChannel(t *testing.T) {
+    dialCalls := 0
+
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        dialer: func() (*amqp091.Connection, error) {
+            dialCalls++
+
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    _, publishErr := instance.publishRecoverable(cancelledContext, "", "orders", amqp091.Publishing{})
+
+    if nil == publishErr {
+        t.Fatal("expected the publish to fail")
+    }
+
+    if 1 != dialCalls {
+        t.Fatalf("expected no retry against the dead context - the failure is the caller's, not the channel's; dialer ran %d times", dialCalls)
+    }
+}
+
+func TestClose_DrainsAConnectionTheDialYieldsAfterTheInterrupt(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    dialing := make(chan struct{})
+    release := make(chan struct{})
+    dialed := make(chan *amqp091.Connection, 1)
+
+    var once sync.Once
+
+    instance := &Transport{
+        queue:       "orders",
+        closeSignal: make(chan struct{}),
+        reconnect:   resolvedReconnect{initialBackoff: time.Millisecond, maxBackoff: time.Millisecond, backoffFactor: 2},
+        dialer: func() (*amqp091.Connection, error) {
+            once.Do(func() {
+                close(dialing)
+            })
+
+            <-release
+
+            connection, dialErr := amqp091.Dial(dsn)
+            if nil == dialErr {
+                dialed <- connection
+            }
+
+            return connection, dialErr
+        },
+        publishHalf: publishHalf{joinBound: closeJoinTimeout},
+    }
+
+    deliveries := make(chan amqp091.Delivery)
+    close(deliveries)
+
+    runtimeInstance := newReconnectRuntime(context.Background())
+    out := make(chan messagebuscontract.Envelope)
+
+    instance.startConsumeLoop(runtimeInstance, nil, 0, deliveries, out)
+
+    <-dialing
+
+    closeDone := make(chan struct{})
+    go func() {
+        instance.CloseWithContext(t.Context())
+        close(closeDone)
+    }()
+
+    <-closeDone
+    close(release)
+
+    select {
+    case connection := <-dialed:
+        deadline := time.Now().Add(5 * time.Second)
+        for false == connection.IsClosed() {
+            if true == time.Now().After(deadline) {
+                t.Fatal("the connection the dial yielded after Close was never drained: it would leak a broker connection per interrupted dial")
+            }
+            time.Sleep(10 * time.Millisecond)
+        }
+    case <-time.After(5 * time.Second):
+        t.Fatal("the dialer never completed against the live broker")
+    }
+}
+
+func TestForwardDeliveries_StampsTheGenerationOfItsOwnChannelNotTheTransportCounter(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.paired-generation")
+
+    serializer := melodyserializer.NewJsonSerializer()
+
+    transport := NewTransport(TransportConfig{
+        Dialer:     func() (*amqp091.Connection, error) { return nil, errors.New("no broker in this test") },
+        Queue:      "melody.amqp.paired-generation",
+        Registry:   registry,
+        Serializer: serializer,
+    })
+
+    transport.mutex.Lock()
+    transport.consumeGeneration = 3
+    transport.mutex.Unlock()
+
+    body, serializeErr := serializer.Serialize(reconnectMessage{Id: 1})
+    if nil != serializeErr {
+        t.Fatalf("serialize: %v", serializeErr)
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    runtimeInstance := newReconnectRuntime(ctx)
+
+    deliveries := make(chan amqp091.Delivery, 1)
+    deliveries <- amqp091.Delivery{
+        Headers:     amqp091.Table{headerMessageType: "amqp.test.paired-generation"},
+        Body:        body,
+        DeliveryTag: 7,
+    }
+    close(deliveries)
+
+    out := make(chan messagebuscontract.Envelope)
+    done := make(chan forwardReason, 1)
+
+    go func() {
+        done <- transport.forwardDeliveries(runtimeInstance, nil, 2, deliveries, out)
+    }()
+
+    var envelopeInstance messagebuscontract.Envelope
+
+    select {
+    case envelopeInstance = <-out:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("forwardDeliveries did not forward the buffered delivery")
+    }
+
+    select {
+    case reason := <-done:
+        if forwardChannelLost != reason {
+            t.Fatalf("expected forwardChannelLost after the deliveries channel closed, got %v", reason)
+        }
+    case <-time.After(2 * time.Second):
+        t.Fatalf("forwardDeliveries did not return after the deliveries channel closed")
+    }
+
+    stamp, exists := melodymessagebus.LastStampOfType[DeliveryStamp](envelopeInstance)
+    if false == exists {
+        t.Fatalf("expected a delivery stamp on the forwarded envelope")
+    }
+
+    if 2 != stamp.Generation {
+        t.Fatalf("expected the delivery stamped with the generation of its own channel (2), got %d", stamp.Generation)
+    }
+
+    if stamp.Generation == transport.currentGeneration() {
+        t.Fatalf("expected the stamp to disagree with the transport counter, so the ack guard refuses the dead channel's tag")
+    }
+}
+
+func TestEnsureConsumeChannel_AnswersTheCachedChannelWithItsOwnGeneration(t *testing.T) {
+    transport := NewTransport(TransportConfig{
+        Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("no broker in this test") },
+        Queue:    "melody.amqp.cached-generation",
+        Registry: NewMessageRegistry(),
+    })
+
+    cachedChannel := &amqp091.Channel{}
+
+    transport.mutex.Lock()
+    transport.consumeChannel = cachedChannel
+    transport.consumeGeneration = 4
+    transport.mutex.Unlock()
+
+    channel, generation, channelErr := transport.ensureConsumeChannel()
+    if nil != channelErr {
+        t.Fatalf("ensureConsumeChannel: %v", channelErr)
+    }
+
+    if channel != cachedChannel {
+        t.Fatalf("expected the cached open channel to be answered")
+    }
+
+    if 4 != generation {
+        t.Fatalf("expected the cached channel answered with its own generation 4, got %d", generation)
+    }
+}
+
+const (
+    wedgePublishTimeout       = 200 * time.Millisecond
+    wedgeWarmupPublishTimeout = 5 * time.Second
+)
+
+func newWedgeTestTransport(t *testing.T, connection *amqp091.Connection, dialer func() (*amqp091.Connection, error)) (*Transport, containercontract.Runtime) {
+    t.Helper()
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.wedge.message")
+
+    transport := NewTransport(TransportConfig{
+        Connection:     connection,
+        Dialer:         dialer,
+        Queue:          "melody.amqp.test.wedge",
+        Registry:       registry,
+        PublishTimeout: bound.Of(wedgeWarmupPublishTimeout),
+    })
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "healthy"}, nil)); nil != sendErr {
+        t.Fatalf("healthy send: %v", sendErr)
+    }
+
+    transport.publishTimeout = wedgePublishTimeout
+
+    return transport, runtimeInstance
+}
+
+func TestTransport_SendReturnsWithinThePublishTimeoutOnAWedgedWrite(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    gated.Wedge()
+
+    outcome := make(chan error, 1)
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
+
+    sendErr := awaitOutcome(t, "send on a wedged write", outcome, 2*time.Second)
+    if nil == sendErr {
+        t.Fatalf("expected the wedged send to fail")
+    }
+
+    if false == errors.Is(sendErr, errPublishTimedOut) {
+        t.Fatalf("expected the publish-timeout sentinel, got: %v", sendErr)
+    }
+
+    if 1 != gated.BlockedWrites() {
+        t.Fatalf("expected exactly one write to have been blocked, got %d", gated.BlockedWrites())
+    }
+}
+
+func TestTransport_ATimedOutSendOnAnOwnedConnectionRedialsAndDelivers(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, nil, dialer.Dial)
+    defer transport.CloseWithContext(context.Background())
+
+    if 1 != dialer.Dials() {
+        t.Fatalf("expected one dial before the wedge, got %d", dialer.Dials())
+    }
+
+    dialer.Latest().Wedge()
+
+    outcome := make(chan error, 1)
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
+
+    if sendErr := awaitOutcome(t, "send on a wedged owned connection", outcome, 5*time.Second); nil != sendErr {
+        t.Fatalf("expected the send to be retried on a fresh connection and succeed, got: %v", sendErr)
+    }
+
+    if 2 != dialer.Dials() {
+        t.Fatalf("expected the wedged connection to have been cut and redialed once, got %d dials", dialer.Dials())
+    }
+}
+
+func TestTransport_ASecondSendOnAWedgedCallerOwnedConnectionIsRefusedAtOnce(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    gated.Wedge()
+
+    outcome := make(chan error, 1)
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
+
+    firstErr := awaitOutcome(t, "send on a wedged write", outcome, 2*time.Second)
+    if nil == firstErr || false == strings.Contains(firstErr.Error(), "did not return within the publish timeout on a caller-owned connection") {
+        t.Fatalf("expected the first send to report the publish timeout on a caller-owned connection, got: %v", firstErr)
+    }
+
+    go func() { outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "while-wedged"}, nil)) }()
+
+    secondErr := awaitOutcome(t, "send while wedged", outcome, 2*time.Second)
+    if nil == secondErr || false == strings.Contains(secondErr.Error(), "an earlier write is still blocked on this connection") {
+        t.Fatalf("expected the second send to be refused for the earlier blocked write, got: %v", secondErr)
+    }
+
+    if 1 != gated.BlockedWrites() {
+        t.Fatalf("expected the refusal to reach the socket zero times, got %d blocked writes", gated.BlockedWrites())
+    }
+}
+
+func TestTransport_CloseReturnsWhileASendWriteIsWedgedOnAnOwnedConnection(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, nil, dialer.Dial)
+
+    dialer.Latest().Wedge()
+
+    sendOutcome := make(chan error, 1)
+    go func() { sendOutcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
+
+    closeOutcome := make(chan error, 1)
+    go func() { closeOutcome <- transport.CloseWithContext(t.Context()) }()
+
+    awaitOutcome(t, "close while a send write is wedged", closeOutcome, 3*time.Second)
+    awaitOutcome(t, "the wedged send after close", sendOutcome, 3*time.Second)
+}
+
+func TestTransport_CloseReturnsAndNamesTheBlockedWriteOnAWedgedCallerOwnedConnection(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    gated.Wedge()
+
+    sendOutcome := make(chan error, 1)
+    go func() { sendOutcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedged"}, nil)) }()
+
+    if sendErr := awaitOutcome(t, "send on a wedged write", sendOutcome, 2*time.Second); nil == sendErr {
+        t.Fatalf("expected the wedged send to fail")
+    }
+
+    closeOutcome := make(chan error, 1)
+    go func() { closeOutcome <- transport.CloseWithContext(t.Context()) }()
+
+    closeErr := awaitOutcome(t, "close on a wedged caller-owned connection", closeOutcome, 3*time.Second)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "left a publish write blocked on a caller-owned connection") {
+        t.Fatalf("expected close to name the write it could not end, got: %v", closeErr)
+    }
+}
+
+func TestClose_WaitsForTheInFlightPublishBeforeClosingTheChannel(t *testing.T) {
+    instance := &Transport{
+        queue:          "orders",
+        closeSignal:    make(chan struct{}),
+        reconnect:      defaultReconnect,
+        publishTimeout: 2 * time.Second,
+        publishHalf:    publishHalf{joinBound: closeJoinTimeout},
+    }
+
+    releaseInstancePublish := holdPublishMutex(t, &instance.publishMutex)
+
+    closed := make(chan error, 1)
+    go func() { closed <- instance.CloseWithContext(t.Context()) }()
+
+    refuseOutcome(t, "close while a publish holds the mutex", closed, 200*time.Millisecond)
+
+    releaseInstancePublish()
+
+    awaitOutcome(t, "close after the publish released the mutex", closed, 2*time.Second)
+}
+
+func TestClose_GivesUpOnThePublishHalfAfterThePublishTimeout(t *testing.T) {
+    instance := &Transport{
+        queue:          "orders",
+        closeSignal:    make(chan struct{}),
+        reconnect:      defaultReconnect,
+        publishTimeout: 100 * time.Millisecond,
+        publishHalf:    publishHalf{joinBound: closeJoinTimeout},
+    }
+
+    releaseInstancePublish := holdPublishMutex(t, &instance.publishMutex)
+    defer releaseInstancePublish()
+
+    closed := make(chan error, 1)
+    go func() { closed <- instance.CloseWithContext(t.Context()) }()
+
+    awaitOutcome(t, "close past the publish timeout", closed, 2*time.Second)
+}
+
+func TestDecode_ReadsAByteArrayMessageTypeHeader(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.message")
+
+    instance := &Transport{
+        queue:      "orders",
+        registry:   registry,
+        serializer: melodyserializer.NewJsonSerializer(),
+    }
+
+    body, marshalErr := json.Marshal(testMessage{Id: 7, Name: "bytes"})
+    if nil != marshalErr {
+        t.Fatalf("marshal: %v", marshalErr)
+    }
+
+    envelopeInstance, decodeErr := instance.decode(amqp091.Delivery{
+        Headers:     amqp091.Table{headerMessageType: []byte("amqp.test.message")},
+        Body:        body,
+        DeliveryTag: 1,
+    }, 1)
+    if nil != decodeErr {
+        t.Fatalf("decode: %v", decodeErr)
+    }
+
+    message, ok := envelopeInstance.Message().(testMessage)
+    if false == ok || 7 != message.Id {
+        t.Fatalf("expected the byte-array typed delivery to decode into the registered message, got %#v", envelopeInstance.Message())
+    }
+
+    _, untypedErr := instance.decode(amqp091.Delivery{
+        Headers: amqp091.Table{headerMessageType: int32(7)},
+        Body:    body,
+    }, 1)
+    if nil == untypedErr || false == strings.Contains(untypedErr.Error(), "missing the message type header") {
+        t.Fatalf("expected a header of another type to read as absent, got: %v", untypedErr)
+    }
+}
+
+func TestTransport_CloseReturnsWhenTheSocketWedgedWhileIdle(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+    transport, _ := newWedgeTestTransport(t, nil, dialer.Dial)
+
+    dialer.Latest().Wedge()
+
+    closeOutcome := make(chan error, 1)
+    go func() { closeOutcome <- transport.CloseWithContext(t.Context()) }()
+
+    awaitOutcome(t, "close on a socket that wedged while idle", closeOutcome, 3*time.Second)
+}
+
+func TestTransport_SendIsBoundedWhenTheBrokerNeverConfirms(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+    defer gated.ReleaseReplies()
+
+    gated.HoldReplies()
+
+    outcome := make(chan error, 1)
+    go func() {
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "unconfirmed"}, nil))
+    }()
+
+    sendErr := awaitOutcome(t, "send whose confirmation never arrives", outcome, 3*time.Second)
+    if nil == sendErr {
+        t.Fatalf("expected the unconfirmed send to fail")
+    }
+
+    if false == strings.Contains(sendErr.Error(), "confirmation wait failed") {
+        t.Fatalf("expected the refusal to name the confirmation wait, got: %v", sendErr)
+    }
+}
+
+func TestTransport_ASendQueuedBehindAnotherIsNotReportedAsAWedgedWrite(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, _ := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
+
+    outcome := make(chan error, 1)
+    go func() {
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "queued"}, nil))
+    }()
+
+    sendErr := awaitOutcome(t, "send queued behind the publish mutex", outcome, 3*time.Second)
+
+    releaseTransportPublish()
+
+    if nil == sendErr || false == strings.Contains(sendErr.Error(), "did not reach the socket within the publish timeout") {
+        t.Fatalf("expected the refusal to name the queue rather than a blocked write, got: %v", sendErr)
+    }
+
+    if false == errors.Is(sendErr, errPublishTimedOut) {
+        t.Fatalf("expected the publish-timeout sentinel, got: %v", sendErr)
+    }
+
+    transport.mutex.Lock()
+    wedged := transport.wedged
+    transport.mutex.Unlock()
+
+    if true == wedged {
+        t.Fatalf("a send that never reached the socket marked the transport wedged")
+    }
+}
+
+func TestTransport_APublishAbandonedWhileQueuedIsNeverWritten(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, _ := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    before := publishedFrameCount(t, connection)
+
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
+
+    outcome := make(chan error, 1)
+    go func() {
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "abandoned"}, nil))
+    }()
+
+    if sendErr := awaitOutcome(t, "abandoned send", outcome, 3*time.Second); nil == sendErr {
+        t.Fatalf("expected the queued send to fail")
+    }
+
+    releaseTransportPublish()
+
+    awaitNoPublishGoroutine(t, "(*Transport).publishOnce.func", 3*time.Second)
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "fence"}, nil)); nil != sendErr {
+        t.Fatalf("fence send: %v", sendErr)
+    }
+
+    after := publishedFrameCount(t, connection)
+    if before+1 != after {
+        t.Fatalf("the abandoned publish reached the broker: the queue went from %d to %d, and only the fence was sent after it", before, after)
+    }
+}
+
+func publishedFrameCount(t *testing.T, connection *amqp091.Connection) int {
+    t.Helper()
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("inspect channel: %v", channelErr)
+    }
+    defer channel.Close()
+
+    queue, inspectErr := channel.QueueInspect("melody.amqp.test.wedge")
+    if nil != inspectErr {
+        t.Fatalf("inspect: %v", inspectErr)
+    }
+
+    return queue.Messages
+}
+
+func TestTransport_IsClosingAnswersWhileAChannelCloseIsOnAWedgedSocket(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, _ := newWedgeTestTransport(t, connection, nil)
+
+    channel, _, _, channelErr := transport.ensurePublishChannel()
+    if nil != channelErr {
+        t.Fatalf("ensurePublishChannel: %v", channelErr)
+    }
+
+    gated.Wedge()
+
+    go transport.resetPublishChannel(channel)
+
+    awaitBlockedWrites(t, gated, 1)
+
+    answered := make(chan bool, 1)
+    go func() { answered <- transport.isClosing() }()
+
+    select {
+    case <-answered:
+    case <-time.After(2 * time.Second):
+        t.Fatalf("isClosing did not answer while a channel close was on the wedged socket")
+    }
+}
+
+func TestTransport_AWedgedRefusalIsNotReportedAsRetryable(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    gated.Wedge()
+
+    outcome := make(chan error, 1)
+    go func() {
+        outcome <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 2, Name: "wedging"}, nil))
+    }()
+
+    if firstErr := awaitOutcome(t, "wedging send", outcome, 3*time.Second); nil == firstErr {
+        t.Fatalf("expected the wedging send to fail")
+    }
+
+    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "refused"}, nil), "")
+    if nil != buildErr {
+        t.Fatalf("buildPublishing: %v", buildErr)
+    }
+
+    exchange, routingKey := transport.mainTarget()
+
+    recoverable, refusalErr := transport.publishRecoverable(runtimeInstance.Context(), exchange, routingKey, publishing)
+    if nil == refusalErr {
+        t.Fatalf("expected the send to be refused while the earlier write is blocked")
+    }
+
+    if true == recoverable {
+        t.Fatalf("the refusal was reported as recoverable, so a caller that keeps trying would spend its attempts on it")
+    }
+}
+
+func TestTransport_CloseClosesTheChannelsWhenNoWriteIsInFlight(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, _ := dialGated(t, dsn)
+    transport, _ := newWedgeTestTransport(t, connection, nil)
+
+    channel, _, _, channelErr := transport.ensurePublishChannel()
+    if nil != channelErr {
+        t.Fatalf("ensurePublishChannel: %v", channelErr)
+    }
+
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
+    defer releaseTransportPublish()
+
+    closeErr := transport.CloseWithContext(t.Context())
+
+    if nil != closeErr && true == strings.Contains(closeErr.Error(), "left a publish write blocked") {
+        t.Fatalf("close named a blocked write over a socket that was never wedged: %v", closeErr)
+    }
+
+    if false == channel.IsClosed() {
+        t.Fatalf("close left the publish channel open on a caller-owned connection with nothing in flight")
+    }
+}
+
+func TestTransport_ATurnTimeoutIsWorthAFurtherAttemptWithoutFaultingTheChannel(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, _ := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 4, Name: "queued"}, nil), "")
+    if nil != buildErr {
+        t.Fatalf("buildPublishing: %v", buildErr)
+    }
+
+    exchange, routingKey := transport.mainTarget()
+
+    transport.mutex.Lock()
+    channelBefore := transport.publishChannel
+    transport.mutex.Unlock()
+
+    releaseTransportPublish := holdPublishMutex(t, &transport.publishMutex)
+
+    outcome := make(chan error, 1)
+    var disposition publishDisposition
+    go func() {
+        _, once, onceErr := transport.publishOnce(runtimeInstance.Context(), exchange, routingKey, publishing)
+        disposition = once
+        outcome <- onceErr
+    }()
+
+    onceErr := awaitOutcome(t, "publish that only stood in the queue", outcome, 3*time.Second)
+
+    recoverableOutcome := make(chan error, 1)
+    var recoverable bool
+    go func() {
+        answer, recoverableErr := transport.publishRecoverable(runtimeInstance.Context(), exchange, routingKey, publishing)
+        recoverable = answer
+        recoverableOutcome <- recoverableErr
+    }()
+
+    awaitOutcome(t, "publishRecoverable on a turn timeout", recoverableOutcome, 3*time.Second)
+
+    releaseTransportPublish()
+
+    if nil == onceErr || false == errors.Is(onceErr, errPublishTimedOut) {
+        t.Fatalf("expected the queued send to be refused with the publish-timeout sentinel, got: %v", onceErr)
+    }
+
+    if true == disposition.channelFaulted {
+        t.Fatalf("a publish that never reached the socket blamed the channel, so the retry would tear down a channel it never used")
+    }
+
+    if false == disposition.furtherAttemptMayRecover {
+        t.Fatalf("a publish that only waited for its turn was reported as unrecoverable, so a requeue gives up its remaining attempts on it")
+    }
+
+    if false == recoverable {
+        t.Fatalf("publishRecoverable did not pass the turn timeout on as recoverable, which is the answer publishRequeue reads")
+    }
+
+    transport.mutex.Lock()
+    channelAfter := transport.publishChannel
+    transport.mutex.Unlock()
+
+    if channelBefore != channelAfter {
+        t.Fatalf("the cached publish channel was torn down over a publish that never reached the socket")
+    }
+}
+
+func TestTransport_ResolveExpiredWriteAnswersAWriteThatAlreadyReturned(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    dialer := newGatedDialer(t, dsn)
+    transport, _ := newWedgeTestTransport(t, nil, dialer.Dial)
+
+    transport.mutex.Lock()
+    connection := transport.connection
+    transport.mutex.Unlock()
+
+    if nil == connection || true == connection.IsClosed() {
+        t.Fatalf("the transport must own a live connection for this probe to mean anything")
+    }
+
+    written := make(chan struct{})
+    close(written)
+
+    finished := errors.New("the outcome the write itself produced")
+    outcome := make(chan publishOutcome, 1)
+    outcome <- publishOutcome{disposition: publishDisposition{channelFaulted: true, furtherAttemptMayRecover: true}, err: finished}
+
+    exchange, routingKey := transport.mainTarget()
+
+    disposition, resolvedErr := transport.resolveExpiredWrite(exchange, routingKey, nil, written, outcome)
+
+    if false == errors.Is(resolvedErr, finished) {
+        t.Fatalf("expected the publish's own outcome, got: %v", resolvedErr)
+    }
+
+    if false == disposition.channelFaulted || false == disposition.furtherAttemptMayRecover {
+        t.Fatalf("the publish's own disposition was replaced by the abandon's, got %+v", disposition)
+    }
+
+    if true == connection.IsClosed() {
+        t.Fatalf("a write that had already returned was abandoned: the connection was cut under a publish that was done")
+    }
+}
+
+func TestTeardownStretchWithin_AnswersTheRemainderOrThePackageBound(t *testing.T) {
+    if answered := teardownStretchWithin(context.Background(), closeJoinTimeout); closeJoinTimeout != answered {
+        t.Fatalf("a context with no deadline answered %s, wanted the package bound %s", answered, closeJoinTimeout)
+    }
+
+    boundedContext, cancelBounded := context.WithTimeout(context.Background(), 250*time.Millisecond)
+    defer cancelBounded()
+
+    answered := teardownStretchWithin(boundedContext, closeJoinTimeout)
+    if 0 >= answered || 250*time.Millisecond < answered {
+        t.Fatalf("a 250ms deadline answered %s", answered)
+    }
+
+    spentContext, cancelSpent := context.WithTimeout(context.Background(), time.Nanosecond)
+    defer cancelSpent()
+
+    time.Sleep(5 * time.Millisecond)
+
+    if answered := teardownStretchWithin(spentContext, closeJoinTimeout); 0 != answered {
+        t.Fatalf("a spent deadline answered %s, wanted zero", answered)
+    }
+}
+
+func TestTeardownStretchWithin_ClampsAGenerousDeadlineToThePackageBound(t *testing.T) {
+    generousContext, cancelGenerous := context.WithTimeout(context.Background(), time.Hour)
+    defer cancelGenerous()
+
+    if answered := teardownStretchWithin(generousContext, closeJoinTimeout); closeJoinTimeout != answered {
+        t.Fatalf("an hour-long deadline gave one stretch %s, wanted it clamped to the package bound %s", answered, closeJoinTimeout)
+    }
+}
+
+func TestTeardownStretchWithin_ACancelledContextWithoutADeadlineDoesNotWait(t *testing.T) {
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, hasDeadline := cancelledContext.Deadline(); true == hasDeadline {
+        t.Fatalf("the probe needs a context with a cancellation and NO deadline, this one carries a deadline")
+    }
+
+    if answered := teardownStretchWithin(cancelledContext, closeJoinTimeout); 0 != answered {
+        t.Fatalf("a cancelled context answered %s, wanted zero", answered)
+    }
+}
+
+func TestTransport_LockWithinTakesAFreeMutexAtAZeroBound(t *testing.T) {
+    var mutex sync.Mutex
+
+    if false == lockWithin(&mutex, 0) {
+        t.Fatalf("a free mutex was reported as a failed join at a zero bound")
+    }
+
+    mutex.Unlock()
+}
+
+func TestTransport_LockWithinStillRefusesAHeldMutexAtAZeroBound(t *testing.T) {
+    var mutex sync.Mutex
+
+    mutex.Lock()
+    defer mutex.Unlock()
+
+    if true == lockWithin(&mutex, 0) {
+        t.Fatalf("a held mutex was reported as joined at a zero bound")
+    }
+}
+
+func TestTransport_CloseChannelsWithinAnswersNothingToCloseAtAZeroBound(t *testing.T) {
+    if closeErrs := closeChannelsWithin(0); 0 != len(closeErrs) {
+        t.Fatalf("closing no channels at all reported %d failures: %v", len(closeErrs), closeErrs)
+    }
+
+    if closeErrs := closeChannelsWithin(0, nil, nil); 0 != len(closeErrs) {
+        t.Fatalf("closing two nil channels reported %d failures: %v", len(closeErrs), closeErrs)
+    }
+}
+
+func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderACancelledContext(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+
+    transport := NewTransport(TransportConfig{
+        Dialer:   func() (*amqp091.Connection, error) { return amqp091.Dial(dsn) },
+        Queue:    "melody.amqp.test.spent.teardown",
+        Registry: NewMessageRegistry(),
+    })
+
+    if _, connectErr := transport.connect(); nil != connectErr {
+        t.Fatalf("the connection was not opened, so nothing below measures a healthy close: %v", connectErr)
+    }
+
+    if false == transport.ownsConnection {
+        t.Fatalf("this test needs a transport that OWNS its connection; it measures the owned branch")
+    }
+
+    cancelledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    if _, hasDeadline := cancelledContext.Deadline(); true == hasDeadline {
+        t.Fatalf("this test needs a cancellation with NO deadline, this context carries one")
+    }
+
+    if closeErr := transport.CloseWithContext(cancelledContext); nil != closeErr {
+        t.Fatalf("a healthy owned connection closed under a cancellation reported a failure: %v", closeErr)
+    }
+}
+
+func TestTransport_CloseWithContextClosesAnOwnedConnectionUnderASpentDeadline(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+
+    transport := NewTransport(TransportConfig{
+        Dialer:   func() (*amqp091.Connection, error) { return amqp091.Dial(dsn) },
+        Queue:    "melody.amqp.test.spent.teardown.deadline",
+        Registry: NewMessageRegistry(),
+    })
+
+    if _, connectErr := transport.connect(); nil != connectErr {
+        t.Fatalf("the connection was not opened, so nothing below measures a healthy close: %v", connectErr)
+    }
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := transport.CloseWithContext(spentContext); nil != closeErr {
+        t.Fatalf("a healthy owned connection closed under a spent deadline reported a failure: %v", closeErr)
+    }
+}
+
+func TestTransport_CloseWithContextStillReportsACutWedgedWrite(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, nil, func() (*amqp091.Connection, error) { return connection, nil })
+
+    if false == transport.ownsConnection {
+        t.Fatalf("this test needs a transport that OWNS its connection; it measures the cut of the owned branch")
+    }
+
+    gated.Wedge()
+
+    sending := make(chan error, 1)
+    go func() {
+        sending <- transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 3, Name: "wedged"}, nil))
+    }()
+
+    deadline := time.Now().Add(2 * time.Second)
+    for 0 == transport.writesInFlight.Load() {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("the send never reached the socket; there is nothing wedged for the close to cut")
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    closeErr := transport.CloseWithContext(spentContext)
+
+    <-sending
+
+    if nil == closeErr {
+        t.Fatalf("a cut wedged write was reported as a clean close")
+    }
+}
+
+func TestTransport_CloseWithContextLeavesTheChannelsOfACallerOwnedConnectionToCloseUnderASpentDeadline(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, _ := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    if true == transport.ownsConnection {
+        t.Fatalf("this test needs a connection the CALLER owns; it measures the channel branch")
+    }
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 4, Name: "healthy"}, nil)); nil != sendErr {
+        t.Fatalf("the send did not open the publish channel, so nothing below measures an open channel: %v", sendErr)
+    }
+
+    transport.mutex.Lock()
+    publishChannel := transport.publishChannel
+    transport.mutex.Unlock()
+
+    if nil == publishChannel {
+        t.Fatalf("expected the send to leave a publish channel open")
+    }
+
+    spentContext, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+    defer cancel()
+
+    if closeErr := transport.CloseWithContext(spentContext); nil != closeErr {
+        t.Fatalf("a channel close given no time was reported as a failure: %v", closeErr)
+    }
+
+    deadline := time.Now().Add(2 * time.Second)
+    for false == publishChannel.IsClosed() {
+        if true == time.Now().After(deadline) {
+            t.Fatalf("the channel left to close on its own never did")
+        }
+
+        time.Sleep(5 * time.Millisecond)
+    }
+}
+
+func TestTransport_CloseWithContextStillReportsTheChannelsOfACallerOwnedConnectionThatOutliveAPositiveBound(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+
+    if true == transport.ownsConnection {
+        t.Fatalf("this test needs a connection the CALLER owns; it measures the channel branch")
+    }
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 5, Name: "healthy"}, nil)); nil != sendErr {
+        t.Fatalf("the send did not open the publish channel: %v", sendErr)
+    }
+
+    gated.Wedge()
+
+    boundedContext, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+    defer cancel()
+
+    closeErr := transport.CloseWithContext(boundedContext)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "did not return within the bound") {
+        t.Fatalf("a channel close that outlived a positive bound was not reported: %v", closeErr)
+    }
+}
+
+func TestTransport_CloseWithContextStillReportsAnOwnedConnectionThatOutlivesAPositiveBound(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, gated := dialGated(t, dsn)
+    transport, _ := newWedgeTestTransport(t, nil, func() (*amqp091.Connection, error) { return connection, nil })
+
+    if _, connectErr := transport.connect(); nil != connectErr {
+        t.Fatalf("the connection was not opened: %v", connectErr)
+    }
+
+    if false == transport.ownsConnection {
+        t.Fatalf("this test needs a transport that OWNS its connection")
+    }
+
+    gated.Wedge()
+
+    boundedContext, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+    defer cancel()
+
+    if closeErr := transport.CloseWithContext(boundedContext); nil == closeErr {
+        t.Fatalf("an owned connection whose close outlived a positive bound was reported as a clean close")
+    }
+}
+
+func TestTransport_MainTargetIsTheConfiguredExchangeAndRoutingKey(t *testing.T) {
+    routed := &Transport{queue: "orders.queue", exchange: "orders.direct", routingKey: "orders"}
+    if exchange, routingKey := routed.mainTarget(); "orders.direct" != exchange || "orders" != routingKey {
+        t.Fatalf("expected the configured exchange and routing key, got %q %q", exchange, routingKey)
+    }
+
+    direct := &Transport{queue: "orders.queue", routingKey: "ignored"}
+    if exchange, routingKey := direct.mainTarget(); "" != exchange || "orders.queue" != routingKey {
+        t.Fatalf("expected the default exchange keyed by the queue, got %q %q", exchange, routingKey)
+    }
+}
+
+func TestTransport_SendRoutesThroughTheConfiguredExchangeAndRoutingKey(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+    defer provider.Close(connection)
+
+    suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+    queueName := "melody.amqp.test.routed." + suffix
+    exchangeName := "melody.amqp.test.direct." + suffix
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.test.message")
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      queueName,
+        Exchange:   exchangeName,
+        RoutingKey: "orders",
+        Registry:   registry,
+    })
+    defer transport.CloseWithContext(context.Background())
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(ctx, serviceContainer.NewScope())
+
+    queue, receiveErr := transport.Receive(runtimeInstance)
+    if nil != receiveErr {
+        t.Fatalf("receive: %v", receiveErr)
+    }
+
+    channel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("open channel: %v", channelErr)
+    }
+    defer channel.Close()
+    defer func() {
+        _, _ = channel.QueueDelete(queueName, false, false, false)
+        _, _ = channel.QueueDelete(queueName+".delay", false, false, false)
+        for _, bucket := range transport.delayBuckets {
+            _, _ = channel.QueueDelete(delayBucketQueueName(queueName, bucket), false, false, false)
+        }
+        _ = channel.ExchangeDelete(exchangeName, false, false)
+    }()
+
+    probeQueue, probeErr := channel.QueueDeclare("", false, true, true, false, nil)
+    if nil != probeErr {
+        t.Fatalf("declare probe queue: %v", probeErr)
+    }
+
+    if bindErr := channel.QueueBind(probeQueue.Name, "orders", exchangeName, false, nil); nil != bindErr {
+        t.Fatalf("bind probe queue: %v", bindErr)
+    }
+
+    if sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 7, Name: "routed"}, nil)); nil != sendErr {
+        t.Fatalf("send through the exchange: %v", sendErr)
+    }
+
+    select {
+    case envelopeInstance := <-queue:
+        messageInstance, isType := envelopeInstance.Message().(testMessage)
+        if false == isType || 7 != messageInstance.Id {
+            t.Fatalf("unexpected message %#v", envelopeInstance.Message())
+        }
+
+        if ackErr := transport.Ack(runtimeInstance, envelopeInstance); nil != ackErr {
+            t.Fatalf("ack: %v", ackErr)
+        }
+    case <-time.After(10 * time.Second):
+        t.Fatalf("timed out waiting for the message routed through the exchange")
+    }
+
+    delivery, delivered, getErr := channel.Get(probeQueue.Name, true)
+    if nil != getErr {
+        t.Fatalf("read the probe queue: %v", getErr)
+    }
+
+    if false == delivered || "amqp.test.message" != delivery.Headers["x-message-type"] {
+        t.Fatalf("expected the probe queue bound under the routing key to hold a copy of the send, delivered=%v headers=%v", delivered, delivery.Headers)
+    }
+}
+
+func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhileTheClientShutdownIsStalled(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    transport := NewTransport(TransportConfig{
+        Dialer:   func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
+        Queue:    "melody.amqp.test.fake.broker",
+        Registry: NewMessageRegistry(),
+    })
+
+    transport.mutex.Lock()
+    transport.connection = wedge.connection
+    transport.ownsConnection = true
+    transport.publishChannel = wedge.channel
+    transport.mutex.Unlock()
+
+    holdPublishMutex(t, &transport.publishMutex)
+    transport.writesInFlight.Add(1)
+    defer transport.writesInFlight.Add(-1)
+
+    bound := 500 * time.Millisecond
+    closeContext, cancel := context.WithTimeout(context.Background(), bound)
+    defer cancel()
+
+    closeOutcome := make(chan error, 1)
+    started := time.Now()
+    go func() { closeOutcome <- transport.CloseWithContext(closeContext) }()
+
+    select {
+    case closeErr := <-closeOutcome:
+        t.Logf("close returned after %s under a deadline of %s: %v", time.Since(started), bound, closeErr)
+
+        if nil == closeErr {
+            t.Fatal("expected the close that could not finish reported")
+        }
+    case <-time.After(bound + 2*time.Second):
+        t.Fatalf("the close did not return within the deadline %s plus two seconds; it is held behind the client's stalled shutdown", bound)
+    }
+}
+
+func TestTransport_AResetOfAChannelWhoseWriteIsWedgedReturnsWithinItsBoundWhileTheClientShutdownIsStalled(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    bound := 300 * time.Millisecond
+    instance := &Transport{queue: "orders", publishChannel: wedge.channel}
+    instance.joinBound = bound
+
+    reset := make(chan struct{})
+    go func() {
+        instance.resetPublishChannel(wedge.channel)
+        close(reset)
+    }()
+
+    select {
+    case <-reset:
+    case <-time.After(bound + 2*time.Second):
+        t.Fatalf("the reset did not return within its bound %s plus two seconds; the channel close is parked on the mutex the wedged write holds", bound)
+    }
+
+    if true == writeReturned(wedge.written) {
+        t.Fatal("the wedged write returned, so the client's shutdown was not stalled behind it and nothing was measured")
+    }
+}
+
+func TestTransport_ACutThatDidNotFreeTheWriteIsNoChannelFaultAndASecondSendIsRefusedAtOnce(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    instance := &Transport{queue: "orders", ownsConnection: true, connection: wedge.connection, publishChannel: wedge.channel}
+    instance.joinBound = 300 * time.Millisecond
+
+    disposition, abandonErr := instance.abandonWedgedPublish("", "orders", wedge.connection, wedge.written)
+    if true == disposition.channelFaulted || false == disposition.furtherAttemptMayRecover || false == errors.Is(abandonErr, errPublishTimedOut) {
+        t.Fatalf("expected a timed-out publish that is no channel fault, got %+v %v", disposition, abandonErr)
+    }
+
+    started := time.Now()
+    _, _, _, channelErr := instance.ensurePublishChannel()
+    elapsed := time.Since(started)
+
+    if false == errors.Is(channelErr, errPublishTimedOut) || false == strings.Contains(channelErr.Error(), "still blocked on this connection") {
+        t.Fatalf("expected the second send refused over the blocked write, got %v", channelErr)
+    }
+
+    if elapsed > 50*time.Millisecond {
+        t.Fatalf("expected the refusal at once, it took %s", elapsed)
+    }
+}
+
+func TestTransport_ACutOwnedConnectionIsLetGoBeforeTheAbandonReturns(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    redialed := dialFakeBroker(t)
+
+    dials := 0
+    publishReturns := make(chan amqp091.Return)
+    instance := &Transport{
+        queue:          "orders",
+        publishTimeout: time.Second,
+        closeSignal:    make(chan struct{}),
+        ownsConnection: true,
+        connection:     wedge.connection,
+        publishChannel: wedge.channel,
+        publishReturns: publishReturns,
+        consumeChannel: wedge.channel,
+        dialer: func() (*amqp091.Connection, error) {
+            dials++
+
+            return redialed.connection, nil
+        },
+    }
+    instance.joinBound = 2 * time.Second
+
+    _, abandonErr := instance.abandonWedgedPublish("", "orders", wedge.connection, wedge.written)
+    if false == errors.Is(abandonErr, errPublishTimedOut) {
+        t.Fatalf("expected the publish-timeout sentinel, got %v", abandonErr)
+    }
+
+    instance.mutex.Lock()
+    connection := instance.connection
+    publishChannel := instance.publishChannel
+    returns := instance.publishReturns
+    consumeChannel := instance.consumeChannel
+    instance.mutex.Unlock()
+
+    if nil != connection || nil != publishChannel || nil != returns || nil != consumeChannel {
+        t.Fatalf("expected the cut connection and its channels let go of, got connection %v publish channel %v returns %v consume channel %v", connection, publishChannel, returns, consumeChannel)
+    }
+
+    connected, connectErr := instance.connect()
+    if nil != connectErr {
+        t.Fatalf("expected the next connect to redial, got %v", connectErr)
+    }
+
+    if redialed.connection != connected || 1 != dials {
+        t.Fatalf("expected the next connect to hand back the redialed connection after one dial, got the cut one %v after %d dials", wedge.connection == connected, dials)
+    }
+}
+
+func TestTransport_CloseNamesTheWriteLeftBlockedOnAConnectionAnEarlierAbandonCut(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginClientShutdown(t)
+
+    transport := NewTransport(TransportConfig{
+        Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
+        Queue:          "melody.amqp.test.fake.broker",
+        Registry:       NewMessageRegistry(),
+        PublishTimeout: bound.Of(200 * time.Millisecond),
+        CloseTimeout:   bound.Of(300 * time.Millisecond),
+    })
+
+    transport.mutex.Lock()
+    transport.connection = wedge.connection
+    transport.ownsConnection = true
+    transport.publishChannel = wedge.channel
+    transport.mutex.Unlock()
+
+    holdPublishMutex(t, &transport.publishMutex)
+    transport.writesInFlight.Add(1)
+    defer transport.writesInFlight.Add(-1)
+
+    disposition, abandonErr := transport.abandonWedgedPublish("", "orders", wedge.connection, wedge.written)
+    if true == disposition.channelFaulted || false == errors.Is(abandonErr, errPublishTimedOut) {
+        t.Fatalf("expected a cut that did not free the write, got %+v %v", disposition, abandonErr)
+    }
+
+    closeContext, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+    defer cancel()
+
+    closeErr := transport.CloseWithContext(closeContext)
+    if nil == closeErr || false == strings.Contains(closeErr.Error(), "the owned connection, already cut") {
+        t.Fatalf("expected the close to name the write left blocked on the cut connection, got %v", closeErr)
+    }
+}
+
+func TestIntFromHeader_ReadsTheTextBytesAndDecimalFormsAndAnUnreadableValueDeadLetters(t *testing.T) {
+    headers := amqp091.Table{
+        "text":            "7",
+        "padded-text":     " 7 ",
+        "bytes":           []byte("7"),
+        "decimal":         amqp091.Decimal{Scale: 0, Value: 7},
+        "scaled-decimal":  amqp091.Decimal{Scale: 1, Value: 75},
+        "unreadable-text": "x",
+        "unreadable-type": true,
+        "void":            nil,
+    }
+
+    for _, key := range []string{"text", "padded-text", "bytes", "decimal", "scaled-decimal"} {
+        if count := intFromHeader(headers, key); 7 != count {
+            t.Fatalf("expected %q read as 7, got %d", key, count)
+        }
+    }
+
+    for _, key := range []string{"unreadable-text", "unreadable-type"} {
+        if count := intFromHeader(headers, key); math.MaxInt != count {
+            t.Fatalf("expected %q read as math.MaxInt so the message dead-letters, got %d", key, count)
+        }
+    }
+
+    if count := intFromHeader(headers, "void"); 0 != count {
+        t.Fatalf("expected a void header read as absence, got %d", count)
+    }
+}
+
+func TestUnackedPublishOutcome_AChannelThatClosedBeforeTheConfirmationIsNotReportedAsANack(t *testing.T) {
+    closed := unackedPublishOutcome(true, false, "orders")
+    if true == closed.disposition.channelFaulted || false == closed.disposition.furtherAttemptMayRecover || false == strings.Contains(closed.err.Error(), "closed before the confirmation") {
+        t.Fatalf("expected a closed channel reported as an unknown fate a further attempt may recover, got %+v %v", closed.disposition, closed.err)
+    }
+
+}
+
+func TestUnackedPublishOutcome_ANackIsAnOutageAFurtherAttemptMayRecover(t *testing.T) {
+    nacked := unackedPublishOutcome(false, true, "orders")
+
+    if true == nacked.disposition.channelFaulted {
+        t.Fatalf("expected a nack to fault no channel, got %+v", nacked.disposition)
+    }
+
+    if false == nacked.disposition.furtherAttemptMayRecover {
+        t.Fatalf("expected a nack to be worth a further attempt, got %+v", nacked.disposition)
+    }
+
+    if false == strings.Contains(nacked.err.Error(), "nacked by the broker") {
+        t.Fatalf("expected the nack named, got %v", nacked.err)
+    }
+
+    if false == exception.ChainIs(nacked.err, errBrokerNack) {
+        t.Fatalf("expected the nack sentinel in the chain, got %v", nacked.err)
+    }
+
+    if true == exception.ChainIs(nacked.err, errBrokerVerdict) {
+        t.Fatalf("expected a nack to carry no broker verdict, got %v", nacked.err)
+    }
+}
+
+func TestTransport_CloseWithContextReturnsWithinTheDeadlineWhenAnEarlierCutHasNotFreedTheWrite(t *testing.T) {
+    wedge := wedgeAPublishOnAFakeBroker(t)
+    wedge.beginUnfreedCut(t, 4*time.Second)
+
+    transport := NewTransport(TransportConfig{
+        Dialer:         func() (*amqp091.Connection, error) { return nil, errors.New("the fake broker is dialed once, by the test") },
+        Queue:          "melody.amqp.test.fake.broker",
+        Registry:       NewMessageRegistry(),
+        PublishTimeout: bound.Of(200 * time.Millisecond),
+    })
+
+    transport.mutex.Lock()
+    transport.connection = wedge.connection
+    transport.ownsConnection = true
+    transport.publishChannel = wedge.channel
+    transport.mutex.Unlock()
+
+    holdPublishMutex(t, &transport.publishMutex)
+    transport.writesInFlight.Add(1)
+    defer transport.writesInFlight.Add(-1)
+
+    bound := 500 * time.Millisecond
+    closeContext, cancel := context.WithTimeout(context.Background(), bound)
+    defer cancel()
+
+    closeOutcome := make(chan error, 1)
+    started := time.Now()
+    go func() { closeOutcome <- transport.CloseWithContext(closeContext) }()
+
+    select {
+    case closeErr := <-closeOutcome:
+        t.Logf("close returned after %s under a deadline of %s: %v", time.Since(started), bound, closeErr)
+    case <-time.After(bound + time.Second):
+        t.Fatalf("the close did not return within the deadline %s plus one second; the channel close is parked on the mutex the unfreed write holds", bound)
+    }
+}
+
+func TestConnect_ADialThatLandsAfterCloseBeganIsClosedOffTheMutex(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    var transport *Transport
+    transport = &Transport{
+        queue:          "orders",
+        publishTimeout: time.Second,
+        closeSignal:    make(chan struct{}),
+        dialer: func() (*amqp091.Connection, error) {
+            transport.mutex.Lock()
+            transport.closing = true
+            transport.mutex.Unlock()
+
+            fake.gated.Wedge()
+
+            return fake.connection, nil
+        },
+    }
+
+    connectOutcome := make(chan error, 1)
+    go func() {
+        _, connectErr := transport.connect()
+        connectOutcome <- connectErr
+    }()
+
+    select {
+    case connectErr := <-connectOutcome:
+        if nil == connectErr {
+            t.Fatal("expected connect to refuse a dial that landed after Close began")
+        }
+    case <-time.After(300 * time.Millisecond):
+        t.Fatal("connect did not return before the late connection's close budget ran out; the close is held on the wedged socket")
+    }
+
+    if false == transport.mutex.TryLock() {
+        t.Fatal("instance.mutex is still held after connect returned")
+    }
+    transport.mutex.Unlock()
+
+    select {
+    case <-fake.gated.closed:
+    case <-time.After(3 * time.Second):
+        t.Fatal("the late connection's socket was never closed; the dial that landed after Close began is leaked")
+    }
+}
+
+func TestDialInterruptibly_ADialThatLandsAfterTheCloseSignalIsClosedWithinOnePublishTimeout(t *testing.T) {
+    fake := dialFakeBroker(t)
+
+    release := make(chan struct{})
+    transport := &Transport{
+        queue:          "orders",
+        publishTimeout: 200 * time.Millisecond,
+        closeSignal:    make(chan struct{}),
+        dialer: func() (*amqp091.Connection, error) {
+            <-release
+
+            fake.gated.Wedge()
+
+            return fake.connection, nil
+        },
+    }
+
+    dialOutcome := make(chan error, 1)
+    go func() {
+        _, dialErr := transport.dialInterruptibly()
+        dialOutcome <- dialErr
+    }()
+
+    close(transport.closeSignal)
+
+    select {
+    case dialErr := <-dialOutcome:
+        if nil == dialErr {
+            t.Fatal("expected the interrupted dial to report the closing transport")
+        }
+    case <-time.After(time.Second):
+        t.Fatal("the close signal did not interrupt the dial")
+    }
+
+    close(release)
+
+    select {
+    case <-fake.gated.closed:
+    case <-time.After(2 * time.Second):
+        t.Fatal("the late connection's socket was never closed; its close is parked behind a write the broker never reads")
+    }
+}
+
+func TestConnect_TheFirstDialIsNotAReconnect(t *testing.T) {
+    instance := &Transport{
+        queue: "orders",
+        dialer: func() (*amqp091.Connection, error) {
+            return nil, exception.NewError("dial refused", nil, nil)
+        },
+    }
+
+    _, connectErr := instance.connect()
+    firstRefusal, isFirstRefusal := connectErr.(*exception.Error)
+    if false == isFirstRefusal || "amqp first dial failed" != firstRefusal.Message() || "first" != firstRefusal.Context()["attempt"] {
+        t.Fatalf("expected the first dial named, got %v", connectErr)
+    }
+
+    instance.connectedOnce = true
+
+    _, reconnectErr := instance.connect()
+    reconnectRefusal, isReconnectRefusal := reconnectErr.(*exception.Error)
+    if false == isReconnectRefusal || "amqp reconnect dial failed" != reconnectRefusal.Message() || "reconnect" != reconnectRefusal.Context()["attempt"] {
+        t.Fatalf("expected the reconnect named after a connection was held, got %v", reconnectErr)
+    }
+}
+
+func TestConnect_APanickingDialerIsAnsweredAsADialFailure(t *testing.T) {
+    instance := &Transport{
+        queue: "orders",
+        dialer: func() (*amqp091.Connection, error) {
+            panic("the application's dialer exploded")
+        },
+    }
+
+    _, connectErr := instance.connect()
+    refusal, isRefusal := connectErr.(*exception.Error)
+    if false == isRefusal || "amqp first dial failed" != refusal.Message() {
+        t.Fatalf("expected the dial failure, got %v", connectErr)
+    }
+
+    cause, isCause := errors.Unwrap(connectErr).(*exception.Error)
+    if false == isCause || "amqp dialer panicked" != cause.Message() {
+        t.Fatalf("expected the dialer's panic as the cause, got %v", errors.Unwrap(connectErr))
+    }
+}
+
+type panickingDecodeSerializer struct{}
+
+func (instance panickingDecodeSerializer) Serialize(value any) ([]byte, error) {
+    return nil, nil
+}
+
+func (instance panickingDecodeSerializer) Deserialize(payload []byte, target any) error {
+    panic("the application's serializer exploded")
+}
+
+func (instance panickingDecodeSerializer) ContentType() string {
+    return "application/json"
+}
+
+func TestDecode_APanickingSerializerIsAnsweredAsADecodeError(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[reconnectMessage](registry, "amqp.test.panic")
+
+    instance := &Transport{queue: "orders", registry: registry, serializer: panickingDecodeSerializer{}}
+
+    _, decodeErr := instance.decode(amqp091.Delivery{Headers: amqp091.Table{headerMessageType: "amqp.test.panic"}, Body: []byte("{}")}, 1)
+    refusal, isRefusal := decodeErr.(*exception.Error)
+    if false == isRefusal || "amqp message decode panicked" != refusal.Message() || "amqp.test.panic" != refusal.Context()["messageType"] {
+        t.Fatalf("expected the serializer's panic answered as a decode error, got %v", decodeErr)
+    }
+}
+
+func TestConnect_TheAttemptWordIsReadUnderTheMutex(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    liveDialer := NewProvider(ProviderConfig{}).Dialer(dsn)
+
+    for round := 0; round < 10; round++ {
+        release := make(chan struct{})
+        instance := &Transport{
+            queue: "melody.amqp.attempt",
+            dialer: func() (*amqp091.Connection, error) {
+                <-release
+
+                return liveDialer()
+            },
+            publishHalf: publishHalf{joinBound: closeJoinTimeout},
+        }
+
+        firstDone := make(chan error, 1)
+        go func() {
+            _, firstErr := instance.connect()
+            firstDone <- firstErr
+        }()
+
+        for {
+            instance.mutex.Lock()
+            parked := instance.reconnecting
+            instance.mutex.Unlock()
+            if true == parked {
+                break
+            }
+
+            time.Sleep(time.Millisecond)
+        }
+
+        if _, secondErr := instance.connect(); false == errors.Is(secondErr, errReconnectInProgress) {
+            t.Fatalf("expected the second connect refused as in progress, got %v", secondErr)
+        }
+
+        close(release)
+
+        landed := false
+        for false == landed {
+            select {
+            case firstErr := <-firstDone:
+                if nil != firstErr {
+                    t.Fatalf("expected the first dial to land on the broker, got %v", firstErr)
+                }
+                landed = true
+            default:
+                _, _ = instance.connect()
+            }
+        }
+
+        instance.mutex.Lock()
+        connection := instance.connection
+        instance.mutex.Unlock()
+        if nil != connection {
+            _ = connection.Close()
+        }
+    }
+}
+
+func TestTransport_SendReturnsOnACyclicChainFromTheDialer(t *testing.T) {
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "test")
+
+    transport := NewTransport(TransportConfig{
+        Queue:    "q",
+        Registry: registry,
+        Dialer: func() (*amqp091.Connection, error) {
+            return nil, newCyclicChainError()
+        },
+    })
+
+    assertReturnsOnACyclicChain(t, func() {
+        if sendErr := transport.Send(newReconnectRuntime(context.Background()), melodymessagebus.NewEnvelope(testMessage{Id: 1}, nil)); nil == sendErr {
+            t.Error("expected the dialer's refusal")
+        }
+    })
+}
+
+func TestIgnoringAlreadyClosed_ReturnsOnACyclicChain(t *testing.T) {
+    assertReturnsOnACyclicChain(t, func() {
+        chain := newCyclicChainError()
+
+        if closeErr := ignoringAlreadyClosed(chain); chain != closeErr {
+            t.Errorf("expected the failure kept, got: %v", closeErr)
+        }
+
+        if closeErr := ignoringAlreadyClosed(errors.Join(amqp091.ErrClosed, chain)); nil != closeErr {
+            t.Errorf("expected the already closed connection ignored, got: %v", closeErr)
+        }
+    })
+}
+
+func TestTransport_MarksANackUnavailableAndKeepsTheReturnAVerdict(t *testing.T) {
+    transport := &Transport{}
+    transportFailure := exception.NewError("amqp channel open failed", nil, errors.New("connection refused"))
+    verdict := exception.NewError("amqp publish was returned as unroutable", nil, errBrokerVerdict)
+    nack := unackedPublishOutcome(false, true, "orders").err
+
+    if false == exception.IsInfrastructureFailure(transport.markTransportUnavailable(context.Background(), nack)) {
+        t.Fatal("expected a nack marked unavailable")
+    }
+
+    if nil != transport.markTransportUnavailable(context.Background(), nil) {
+        t.Fatal("expected no error left as none")
+    }
+
+    if false == exception.IsInfrastructureFailure(transport.markTransportUnavailable(context.Background(), transportFailure)) {
+        t.Fatal("expected a transport failure marked unavailable")
+    }
+
+    if true == exception.IsInfrastructureFailure(transport.markTransportUnavailable(context.Background(), verdict)) {
+        t.Fatal("expected the broker's verdict left unmarked")
+    }
+
+    canceledContext, cancel := context.WithCancel(context.Background())
+    cancel()
+    if true == exception.IsInfrastructureFailure(transport.markTransportUnavailable(canceledContext, transportFailure)) {
+        t.Fatal("expected a failure the caller's own context explains left unmarked")
+    }
+
+    transport.closing = true
+    if true == exception.IsInfrastructureFailure(transport.markTransportUnavailable(context.Background(), transportFailure)) {
+        t.Fatal("expected a failure of a closing transport left unmarked")
+    }
+}
+
+func TestUnackedPublishOutcome_AChannelTheBrokerClosedOverALiveConnectionCarriesTheVerdict(t *testing.T) {
+    closedOverLiveConnection := unackedPublishOutcome(true, true, "orders").err
+    if false == exception.ChainIs(closedOverLiveConnection, errBrokerVerdict) || true == exception.ChainIs(closedOverLiveConnection, errBrokerNack) {
+        t.Fatalf("expected a channel the broker closed over a live connection to carry the verdict alone, got %v", closedOverLiveConnection)
+    }
+
+    diedWithItsConnection := unackedPublishOutcome(true, false, "orders").err
+    if true == exception.ChainIs(diedWithItsConnection, errBrokerVerdict) || true == exception.ChainIs(diedWithItsConnection, errBrokerNack) {
+        t.Fatalf("expected a channel that died with its connection to carry neither sentinel, got %v", diedWithItsConnection)
+    }
+}
+
+func TestTransport_ARequeueRepublishKeepsTryingThroughANack(t *testing.T) {
+    dsn := amqpDsnOrSkip(t)
+    connection, _ := dialGated(t, dsn)
+    transport, runtimeInstance := newWedgeTestTransport(t, connection, nil)
+    transport.publishTimeout = 5 * time.Second
+
+    fullQueue := "melody.amqp.test.reject-publish"
+    declareChannel, channelErr := connection.Channel()
+    if nil != channelErr {
+        t.Fatalf("channel: %v", channelErr)
+    }
+    defer declareChannel.Close()
+
+    _, _ = declareChannel.QueueDelete(fullQueue, false, false, false)
+    if _, declareErr := declareChannel.QueueDeclare(fullQueue, false, true, false, false, amqp091.Table{"x-max-length": int32(1), "x-overflow": "reject-publish"}); nil != declareErr {
+        t.Fatalf("declare the full queue: %v", declareErr)
+    }
+    defer func() { _, _ = declareChannel.QueueDelete(fullQueue, false, false, false) }()
+
+    publishing, buildErr := transport.buildPublishing(melodymessagebus.NewEnvelope(testMessage{Id: 5, Name: "overflow"}, nil), "")
+    if nil != buildErr {
+        t.Fatalf("buildPublishing: %v", buildErr)
+    }
+
+    if _, firstErr := transport.publishRecoverable(runtimeInstance.Context(), "", fullQueue, publishing); nil != firstErr {
+        t.Fatalf("expected the first publish to fill the queue, got %v", firstErr)
+    }
+
+    transport.mutex.Lock()
+    channelBefore := transport.publishChannel
+    transport.mutex.Unlock()
+
+    recoverable, nackErr := transport.publishRecoverable(runtimeInstance.Context(), "", fullQueue, publishing)
+    if nil == nackErr || false == exception.ChainIs(nackErr, errBrokerNack) {
+        t.Fatalf("expected the publish over a full reject-publish queue nacked, got %v", nackErr)
+    }
+
+    if false == recoverable {
+        t.Fatal("expected a nack answered recoverable, which is what publishRequeue reads to keep trying")
+    }
+
+    transport.mutex.Lock()
+    channelAfter := transport.publishChannel
+    transport.mutex.Unlock()
+
+    if channelBefore != channelAfter {
+        t.Fatal("expected a nack to keep the healthy publish channel")
+    }
+
+    if false == exception.IsInfrastructureFailure(transport.markTransportUnavailable(runtimeInstance.Context(), nackErr)) {
+        t.Fatal("expected a reject-publish overflow marked unavailable")
+    }
+
+    retryBackoff := 50 * time.Millisecond
+    transport.reconnect = resolvedReconnect{initialBackoff: retryBackoff, maxBackoff: retryBackoff, backoffFactor: 1}
+    loggerRuntime, logger := newRecordingLoggerRuntime(context.Background())
+
+    startedAt := time.Now()
+    requeueErr := transport.publishRequeue(loggerRuntime, "", fullQueue, publishing)
+    elapsed := time.Since(startedAt)
+
+    if nil == requeueErr || false == exception.ChainIs(requeueErr, errBrokerNack) {
+        t.Fatalf("expected the requeue re-publish to end on the nack, got %v", requeueErr)
+    }
+
+    retryCount := 0
+    for _, message := range logger.errorMessages() {
+        if "amqp requeue re-publish failed, retrying with the advanced retry counters" == message {
+            retryCount++
+        }
+    }
+
+    if republishAttemptCount-1 != retryCount {
+        t.Fatalf("expected %d publishes through the nack, %d of them retried, got %d retries", republishAttemptCount, republishAttemptCount-1, retryCount)
+    }
+
+    if time.Duration(republishAttemptCount-1)*retryBackoff > elapsed {
+        t.Fatalf("expected a backoff between the attempts, the re-publish took %s", elapsed)
+    }
+
+    inspected, inspectErr := declareChannel.QueueDeclarePassive(fullQueue, false, true, false, false, amqp091.Table{"x-max-length": int32(1), "x-overflow": "reject-publish"})
+    if nil != inspectErr {
+        t.Fatalf("inspect the full queue: %v", inspectErr)
+    }
+
+    if 1 != inspected.Messages {
+        t.Fatalf("expected the full queue to keep its one message, got %d", inspected.Messages)
+    }
+}
+
+func TestTransport_SendOverAConnectionThatIsGoneIsMarkedUnavailable(t *testing.T) {
+    dsn := os.Getenv("AMQP_DSN")
+    if "" == dsn {
+        t.Skip("AMQP_DSN not set; skipping amqp integration test")
+    }
+
+    provider := NewProvider(ProviderConfig{})
+    connection, openErr := provider.Open(dsn)
+    if nil != openErr {
+        t.Fatalf("open connection: %v", openErr)
+    }
+
+    registry := NewMessageRegistry()
+    RegisterMessage[testMessage](registry, "amqp.unavailable.message")
+
+    transport := NewTransport(TransportConfig{
+        Connection: connection,
+        Queue:      "melody.amqp.unavailable-mark",
+        Registry:   registry,
+    })
+    defer transport.CloseWithContext(context.Background())
+
+    provider.Close(connection)
+
+    serviceContainer := container.NewContainer(container.ContainerConfig{})
+    runtimeInstance := runtime.NewRun(context.Background(), serviceContainer.NewScope())
+
+    sendErr := transport.Send(runtimeInstance, melodymessagebus.NewEnvelope(testMessage{Id: 1, Name: "gone"}, nil))
+    if nil == sendErr || false == exception.IsInfrastructureFailure(sendErr) {
+        t.Fatalf("expected a send over a connection that is gone marked unavailable, got %v", sendErr)
+    }
+}

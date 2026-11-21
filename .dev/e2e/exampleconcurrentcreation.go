@@ -35,7 +35,7 @@ func assertExampleCreatesConcurrentlyWithDistinctIdentifiers(major exampleMajor,
     rateLimitPrefix := exampleMajorRateLimitPrefix(major)
 
     client := newExampleClient(major)
-    signedIn := client.call("POST", exampleLoginRoute, "", "application/json", exampleCredentialBody(exampleAdminUsername, exampleAdminPassword))
+    signedIn := client.call("POST", exampleSignInRoute(major), "", "application/json", exampleCredentialBody(exampleAdminUsername, exampleAdminPassword))
     if http.StatusOK != signedIn.statusCode {
         fail("%s: the seeded admin could not sign in (%d): %s", label, signedIn.statusCode, exampleTruncate(signedIn.body))
     }
@@ -150,10 +150,10 @@ func createExampleUser(client *exampleClient, username string) (int, string) {
     return response.statusCode, created.Payload.Id
 }
 
-/* removeExampleUsers deletes each probe account through the application, and on the third major the audit trail its writes left, so a run leaves the trail as it found it */
+/* removeExampleUsers deletes each probe account through the application, and from the third major on the audit trail its writes left, so a run leaves the trail as it found it */
 func removeExampleUsers(label string, client *exampleClient, mysqlDsn string, major exampleMajor, idList []string) {
     var database *bun.DB
-    if 3 == major.number {
+    if 3 <= major.number {
         database = openMysql(label, mysqlDsn)
         defer database.Close()
     }

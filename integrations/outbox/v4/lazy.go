@@ -1,0 +1,104 @@
+package outbox
+
+import (
+    "context"
+    "time"
+
+    "github.com/precision-soft/melody/v4/container"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
+    "github.com/precision-soft/melody/v4/exception"
+)
+
+/* lazyRepository defers resolving the registered outbox Store until the first repository call, so a component assembled during boot can hold the Repository before the container is safe to resolve. A store that cannot be resolved is the call's error, never a panic, since the relay drives this Repository from its backoff-and-retry loop. */
+type lazyRepository struct {
+    store *container.LazyService[*Store]
+    /* the doors take a context, not a runtime, so the store is created under the resolver's own runtime over the call's context */
+    resolver containercontract.Resolver
+}
+
+/* NewLazyRepository returns a Repository that resolves the registered service.outbox.store on first use; the underlying Store is resolved once and reused, and a failed resolution is retried on the next call. */
+func NewLazyRepository(resolver containercontract.Resolver) Repository {
+    if nil == resolver {
+        exception.Panic(exception.NewError("outbox lazy repository resolver is nil", nil, nil))
+    }
+
+    return &lazyRepository{
+        store:    container.Lazy[*Store](resolver, ServiceStore),
+        resolver: resolver,
+    }
+}
+
+/* resolveStore resolves the registered store, reporting a resolution failure — or a nil yield — as an error the caller returns from its own call, so the relay's retry loop owns the failure instead of a panic owning the process. */
+func (instance *lazyRepository) resolveStore(ctx context.Context) (*Store, error) {
+    if nil == ctx {
+        return nil, exception.NewError("outbox: the lazy repository was handed a nil context", nil, nil)
+    }
+
+    store, resolveErr := instance.store.Resolve(runtime.WithContext(instance.resolver.Runtime(), ctx))
+    if nil != resolveErr {
+        return nil, resolveErr
+    }
+
+    if nil == store {
+        return nil, exception.NewError("outbox: the registered store resolved to nil", nil, nil)
+    }
+
+    return store, nil
+}
+
+func (instance *lazyRepository) ClaimDueMessages(ctx context.Context, limit int, visibility time.Duration) ([]Pending, error) {
+    store, resolveErr := instance.resolveStore(ctx)
+    if nil != resolveErr {
+        return nil, resolveErr
+    }
+
+    return store.ClaimDueMessages(ctx, limit, visibility)
+}
+
+func (instance *lazyRepository) RecordDeliveryAttempt(ctx context.Context, id int64, claimToken string) (int, bool, error) {
+    store, resolveErr := instance.resolveStore(ctx)
+    if nil != resolveErr {
+        return 0, false, resolveErr
+    }
+
+    return store.RecordDeliveryAttempt(ctx, id, claimToken)
+}
+
+func (instance *lazyRepository) MarkSent(ctx context.Context, id int64, claimToken string) error {
+    store, resolveErr := instance.resolveStore(ctx)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return store.MarkSent(ctx, id, claimToken)
+}
+
+func (instance *lazyRepository) Reschedule(ctx context.Context, id int64, attempts int, availableAt time.Time, lastError string, claimToken string) error {
+    store, resolveErr := instance.resolveStore(ctx)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return store.Reschedule(ctx, id, attempts, availableAt, lastError, claimToken)
+}
+
+func (instance *lazyRepository) RescheduleUncharged(ctx context.Context, id int64, availableAt time.Time, lastError string, claimToken string) error {
+    store, resolveErr := instance.resolveStore(ctx)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return store.RescheduleUncharged(ctx, id, availableAt, lastError, claimToken)
+}
+
+func (instance *lazyRepository) MarkDead(ctx context.Context, id int64, attempts int, lastError string, claimToken string) error {
+    store, resolveErr := instance.resolveStore(ctx)
+    if nil != resolveErr {
+        return resolveErr
+    }
+
+    return store.MarkDead(ctx, id, attempts, lastError, claimToken)
+}
+
+var _ Repository = (*lazyRepository)(nil)

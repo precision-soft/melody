@@ -253,8 +253,8 @@ func assertExampleTextPlainErrorsAreReadable(major exampleMajor) {
             fail("[%s] %s accepting text/plain carries %d time lines, wanted one: %s", major.label, door.path, timeLines, exampleTruncate(answered.body))
         }
 
-        /* the kernel's envelope names the request id on the third major only; the presenter's context names it on every major */
-        wantsRequestId := 3 == major.number || http.StatusNotFound == door.statusCode
+        /* the kernel's envelope names the request id from the third major on; the presenter's context names it on every major */
+        wantsRequestId := 3 <= major.number || http.StatusNotFound == door.statusCode
         if true == wantsRequestId && 1 != requestIdLines {
             fail("[%s] %s accepting text/plain does not name the request id %q of its response header: %s", major.label, door.path, requestIdLine, exampleTruncate(answered.body))
         }
@@ -266,7 +266,7 @@ func assertExampleTextPlainErrorsAreReadable(major exampleMajor) {
 func assertExampleRequestBodyLimit(major exampleMajor) {
     editor := newExampleClient(major)
 
-    signIn := editor.call("POST", exampleLoginRoute, "application/json", "application/json", exampleCredentialBody(exampleEditorUsername, exampleEditorPassword))
+    signIn := editor.call("POST", exampleSignInRoute(major), "application/json", "application/json", exampleCredentialBody(exampleEditorUsername, exampleEditorPassword))
     if http.StatusOK != signIn.statusCode {
         fail("[%s] the seeded editor could not sign in (%d) to drive the body limit: %s", major.label, signIn.statusCode, exampleTruncate(signIn.body))
     }
@@ -301,7 +301,7 @@ func assertExampleExcludedStaticPaths(major exampleMajor, application *exampleAp
     }()
 
     editor := newExampleClient(major)
-    signIn := editor.call("POST", exampleLoginRoute, "application/json", "application/json", exampleCredentialBody(exampleEditorUsername, exampleEditorPassword))
+    signIn := editor.call("POST", exampleSignInRoute(major), "application/json", "application/json", exampleCredentialBody(exampleEditorUsername, exampleEditorPassword))
     if http.StatusOK != signIn.statusCode {
         fail("[%s] the seeded editor could not sign in (%d) to drive the excluded static paths: %s", major.label, signIn.statusCode, exampleTruncate(signIn.body))
     }
@@ -341,7 +341,7 @@ func assertExampleOnePathDoorsArePublicForTheirOwnSpelling(major exampleMajor) {
 /* the example trusts the forwarded scheme from the private ranges and loopback, the harness's own peer: a sign-in that arrives with X-Forwarded-Proto: https, as a proxy that terminates tls forwards it, is answered with a Secure session cookie, and the same sign-in without the header is not, which is the control that the header, read from a trusted peer, decides it */
 func assertExampleSessionCookieFollowsTheForwardedScheme(major exampleMajor) {
     sessionCookieOf := func(headerList map[string]string) string {
-        response := newExampleClient(major).callWithHeaderList("POST", exampleLoginRoute, "application/json", "application/json", headerList, exampleCredentialBody(exampleUsername, examplePassword))
+        response := newExampleClient(major).callWithHeaderList("POST", exampleSignInRoute(major), "application/json", "application/json", headerList, exampleCredentialBody(exampleUsername, examplePassword))
         if http.StatusOK != response.statusCode {
             fail("[%s] the seeded user could not sign in (%d) to read the session cookie: %s", major.label, response.statusCode, exampleTruncate(response.body))
         }
@@ -367,12 +367,12 @@ func assertExampleSignInRefusesAFormBody(major exampleMajor, redisAddress string
         defer resetExampleRateLimitCounters(label, redisAddress, exampleMajorRateLimitPrefix(major))
     }
 
-    form := newExampleClient(major).call("POST", exampleLoginRoute, "application/json", "application/x-www-form-urlencoded", "username="+exampleUsername+"&password="+examplePassword)
+    form := newExampleClient(major).call("POST", exampleSignInRoute(major), "application/json", "application/x-www-form-urlencoded", "username="+exampleUsername+"&password="+examplePassword)
     if http.StatusUnsupportedMediaType != form.statusCode || 0 != len(form.headerList.Values("Set-Cookie")) {
         fail("[%s] a form-encoded sign-in answered %d with cookies %v, wanted 415 and no session: %s", major.label, form.statusCode, form.headerList.Values("Set-Cookie"), exampleTruncate(form.body))
     }
 
-    signedIn := newExampleClient(major).call("POST", exampleLoginRoute, "application/json", "application/json", exampleCredentialBody(exampleUsername, examplePassword))
+    signedIn := newExampleClient(major).call("POST", exampleSignInRoute(major), "application/json", "application/json", exampleCredentialBody(exampleUsername, examplePassword))
     if http.StatusOK != signedIn.statusCode {
         fail("[%s] the same credentials as json answered %d: %s", major.label, signedIn.statusCode, exampleTruncate(signedIn.body))
     }

@@ -3,6 +3,8 @@
 # Runs govulncheck over every Go module in the tree and gates on the REACHABLE findings.
 #
 #   .dev/validate/vulncheck.sh [--report]
+#   .dev/validate/vulncheck.sh --module DIR [--module DIR ...]
+#   .dev/validate/vulncheck.sh --list
 #
 # The band exists because no other lane asks the question at all: vet, the tests and the race detector
 # judge the code this repository writes, and the parity and citation bands judge what it documents — none
@@ -30,6 +32,10 @@
 #
 # `--report` prints the current reachable findings as baseline-shaped rows (reason left for the reader to
 # write at the site), for regenerating the baseline after a toolchain or dependency move.
+#
+# `--module DIR` scans only the named modules, each one a module the band discovers, and compares only the
+# baseline rows of those modules; a row naming no discovered module is still stale. `--list` prints the
+# discovered modules and needs no container: all.sh reads it to key the band per module.
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -46,10 +52,26 @@ fi
 cd "${REPOSITORY_ROOT_DIRECTORY_STRING}"
 
 REPORT_BOOLEAN="false"
-if [[ "--report" = "${1-}" ]]; then
-    REPORT_BOOLEAN="true"
-elif [[ "" != "${1-}" ]]; then
-    fail "unknown flag: ${1}"
+LIST_BOOLEAN="false"
+REQUESTED_MODULE_LIST_STRING=""
+while [[ 0 -lt $# ]]; do
+    case "${1}" in
+        --report) REPORT_BOOLEAN="true" ;;
+        --list) LIST_BOOLEAN="true" ;;
+        --module)
+            if [[ "" = "${2-}" ]]; then
+                fail "--module takes a module directory relative to the repository root"
+            fi
+            REQUESTED_MODULE_LIST_STRING="${REQUESTED_MODULE_LIST_STRING}${2}"$'\n'
+            shift
+            ;;
+        *) fail "unknown flag: ${1}" ;;
+    esac
+    shift
+done
+
+if [[ "" != "${REQUESTED_MODULE_LIST_STRING}" && ( "true" = "${REPORT_BOOLEAN}" || "true" = "${LIST_BOOLEAN}" ) ]]; then
+    fail "--module goes with neither --report nor --list: both answer for every module"
 fi
 
 SERVICE_NAME_STRING="dev"
@@ -62,17 +84,6 @@ BASELINE_FILE_PATH="${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/vulncheck.
 # whatever the tool version, so the pin costs nothing an advisory could name. It moves together with the
 # FROM line of `.dev/docker/Dockerfile`: v1.8.0 requires go 1.26, which the golang:1.26 image satisfies.
 GOVULNCHECK_VERSION_STRING="v1.8.0"
-
-acquire_validation_lock
-
-require_docker
-require_docker_daemon
-
-if ! docker_compose_service_exists "${SERVICE_NAME_STRING}"; then
-    fail "missing docker compose service: ${SERVICE_NAME_STRING}"
-fi
-
-ensure_service_running "${SERVICE_NAME_STRING}"
 
 # the same module set the --all lane of all.sh validates, from the same discovery: the root module, the
 # versioned majors, every example application, every integration module, and the e2e harness. Each one scans
@@ -118,21 +129,57 @@ get_scanned_module_relative_path_list() {
     } | sort -u
 }
 
+DISCOVERED_MODULE_LIST_STRING="$(get_scanned_module_relative_path_list)"
+
+if [[ "" = "${DISCOVERED_MODULE_LIST_STRING}" ]]; then
+    fail "no Go module found to scan — an empty module list here would report a pass over nothing"
+fi
+
+if [[ "true" = "${LIST_BOOLEAN}" ]]; then
+    printf '%s\n' "${DISCOVERED_MODULE_LIST_STRING}"
+    exit 0
+fi
+
+SELECTED_MODULE_LIST_STRING="${DISCOVERED_MODULE_LIST_STRING}"
+if [[ "" != "${REQUESTED_MODULE_LIST_STRING}" ]]; then
+    SELECTED_MODULE_LIST_STRING="$(select_requested_module_list "${REQUESTED_MODULE_LIST_STRING}" <<<"${DISCOVERED_MODULE_LIST_STRING}")"
+fi
+
 MODULE_RELATIVE_PATH_LIST=()
 while IFS= read -r MODULE_RELATIVE_PATH_STRING; do
     if [[ "" = "${MODULE_RELATIVE_PATH_STRING}" ]]; then
         continue
     fi
     MODULE_RELATIVE_PATH_LIST+=("${MODULE_RELATIVE_PATH_STRING}")
-done < <(get_scanned_module_relative_path_list)
+done <<<"${SELECTED_MODULE_LIST_STRING}"
 
-if [[ 0 -eq "${#MODULE_RELATIVE_PATH_LIST[@]}" ]]; then
-    fail "no Go module found to scan — an empty module list here would report a pass over nothing"
+acquire_validation_lock
+
+require_docker
+require_docker_daemon
+
+if ! docker_compose_service_exists "${SERVICE_NAME_STRING}"; then
+    fail "missing docker compose service: ${SERVICE_NAME_STRING}"
 fi
+
+ensure_service_running "${SERVICE_NAME_STRING}"
+
 
 # the modules the compatibility baseline files as not building against the framework version their own go.mod
 # pins: they cannot load with the workspace off, so they alone scan through go.work, and the run names them
 WORKSPACE_MODULE_LIST_STRING="$(grep -v '^#' "${REPOSITORY_ROOT_DIRECTORY_STRING}/.dev/validate/compatibility.baseline" 2>/dev/null | grep -v '^[[:space:]]*$' | awk -F' ~ ' '{ print $1 }' | tr '\n' ' ' || true)"
+
+# the modules that pin a melody major no tag has released yet cannot load with the workspace off either, since the
+# proxy serves no version of a major under construction: they scan through go.work as well, and the run names them
+RELEASED_MODULE_PATH_LIST_STRING="$(released_melody_module_path_list "${REPOSITORY_ROOT_DIRECTORY_STRING}")"
+if [[ "" = "${RELEASED_MODULE_PATH_LIST_STRING}" ]]; then
+    fail "no released melody major was read from the tags — without them every module would scan through the workspace"
+fi
+for MODULE_RELATIVE_PATH_STRING in "${MODULE_RELATIVE_PATH_LIST[@]}"; do
+    if [[ -n "$(unreleased_melody_requirement_list "${REPOSITORY_ROOT_DIRECTORY_STRING}/${MODULE_RELATIVE_PATH_STRING}/go.mod" "${RELEASED_MODULE_PATH_LIST_STRING}")" ]]; then
+        WORKSPACE_MODULE_LIST_STRING="${WORKSPACE_MODULE_LIST_STRING}${MODULE_RELATIVE_PATH_STRING} "
+    fi
+done
 
 # one container invocation for the whole scan: the loop runs inside, and every line of the protocol names
 # the module it is about, so a module that produced no line at all is detected on the host rather than
@@ -193,7 +240,7 @@ fi
 SCANNED_COUNT_NUMBER="$(printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep -c $'\tSCANNED$' || true)"
 WORKSPACE_SCANNED_LIST_STRING="$(printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep $'\tWORKSPACE$' | cut -f1 | tr '\n' ' ' || true)"
 if [[ "" != "${WORKSPACE_SCANNED_LIST_STRING}" ]]; then
-    info "scanned through go.work, since the compatibility baseline files them as not building against their own pin: ${WORKSPACE_SCANNED_LIST_STRING}"
+    info "scanned through go.work, since the compatibility baseline files them as not building against their own pin or they pin a melody major no tag has released yet: ${WORKSPACE_SCANNED_LIST_STRING}"
 fi
 ERROR_LINE_LIST_STRING="$(printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep $'\tERROR\t' || true)"
 FINDING_LINE_LIST_STRING="$(printf '%s\n' "${SCAN_OUTPUT_STRING}" | grep $'\tFINDING\t' || true)"
@@ -234,6 +281,11 @@ if [[ -f "${BASELINE_FILE_PATH}" ]]; then
         case "${BASELINE_MODULE_STRING}${BASELINE_FINDING_STRING}" in
             *'*'*) fail "wildcard refused in baseline line: ${BASELINE_LINE_STRING}" ;;
         esac
+        # a row of a discovered module this run does not scan is neither new nor stale here; a row naming no
+        # discovered module is compared whatever was asked, so it fails as stale on every run
+        if grep -Fxq -- "${BASELINE_MODULE_STRING}" <<<"${DISCOVERED_MODULE_LIST_STRING}" && ! grep -Fxq -- "${BASELINE_MODULE_STRING}" <<<"${SELECTED_MODULE_LIST_STRING}"; then
+            continue
+        fi
         BASELINE_KEY_LIST+=("${BASELINE_MODULE_STRING}"$'\t'"${BASELINE_FINDING_STRING}")
     done < "${BASELINE_FILE_PATH}"
 fi
@@ -269,7 +321,7 @@ if [[ "" != "${FOUND_KEY_LIST_STRING}" ]]; then
     FOUND_COUNT_NUMBER="$(printf '%s\n' "${FOUND_KEY_LIST_STRING}" | grep -c . || true)"
 fi
 
-info "${SCANNED_COUNT_NUMBER} module(s) scanned: ${FOUND_COUNT_NUMBER} reachable finding(s), ${#BASELINE_KEY_LIST[@]} baseline row(s)"
+info "${SCANNED_COUNT_NUMBER} of $(grep -c . <<<"${DISCOVERED_MODULE_LIST_STRING}") discovered module(s) scanned: ${FOUND_COUNT_NUMBER} reachable finding(s), ${#BASELINE_KEY_LIST[@]} baseline row(s)"
 
 FAILED_BOOLEAN="false"
 

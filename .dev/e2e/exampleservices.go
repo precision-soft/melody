@@ -102,6 +102,22 @@ type exampleContainerDescription struct {
     TypeName string `json:"typeName"`
 }
 
+/* exampleProcessServiceInventoryOf answers the inventory one major's example is held to: the rows name their module path, and the fourth major adds the cipher of its integration module, the internal-auth signer, whose judged key id is kept under its lock, and the bucket check it builds at boot */
+func exampleProcessServiceInventoryOf(major exampleMajor) map[string]processServiceClassification {
+    inventory := make(map[string]processServiceClassification, len(exampleProcessServiceInventory)+1)
+    for serviceName, classification := range exampleProcessServiceInventory {
+        inventory[strings.Replace(serviceName, "/melody/v3/", "/melody/"+major.label+"/", 1)] = classification
+    }
+
+    if 4 == major.number {
+        inventory["service.encrypt.cipher"] = processServiceClassification{typeName: "*encrypt.aes256Cipher", category: processServiceStore}
+        inventory["service.example.internal_auth.signer"] = processServiceClassification{typeName: "*security.HmacEnvelopeSigner", category: processServiceStore}
+        inventory["service.example.storage.bucket"] = processServiceClassification{typeName: "*config.storageBucketReady", category: processServiceStateless}
+    }
+
+    return inventory
+}
+
 /* exampleBootServiceNameList is the composition root's list of services built at boot rather than at first use (config.ResolveBootServices); the describing listing of a fresh console process, which builds nothing on its own, shows each one built */
 var exampleBootServiceNameList = []string{
     "service.example.catalog.notification.hub",
@@ -132,7 +148,7 @@ func runExampleCommandTolerantOfExit(major exampleMajor, workspace string, argum
 
 /* assertExampleProcessServicesAreClassified pins the form of the stateless-by-default class on the live composition root: the describing listing names every registration and its lifetime, the building sweep names the concrete type each process service resolves to, and each of them must be a row of the inventory above, with the type the row was measured on. A row that consumes no registration is dead and fails the same way a missing one does — a list of exceptions that tolerates dead entries grows into a list of excuses. */
 func assertExampleProcessServicesAreClassified(major exampleMajor, workspace string) {
-    describeOutput := runExampleCommand(major, workspace, "debug:container", "--limit=0", "--format=json")
+    describeOutput := runExampleCommand(major, workspace, "debug:container", "--format=json")
     describeEnvelope := struct {
         Data struct {
             Items []exampleContainerDescription `json:"items"`
@@ -153,7 +169,7 @@ func assertExampleProcessServicesAreClassified(major exampleMajor, workspace str
     }
     pass("[%s] the %d service(s) the composition root builds at boot are built before the first request", major.label, len(exampleBootServiceNameList))
 
-    buildOutput := runExampleCommandTolerantOfExit(major, workspace, "debug:container", "--build", "--limit=0", "--format=json")
+    buildOutput := runExampleCommandTolerantOfExit(major, workspace, "debug:container", "--build", "--format=json")
     buildEnvelope := struct {
         Data struct {
             Items []exampleContainerBuildItem `json:"items"`
@@ -168,7 +184,7 @@ func assertExampleProcessServicesAreClassified(major exampleMajor, workspace str
         concreteTypeByName[item.Name] = item.TypeName
     }
 
-    problems, processServices, scopedServices := exampleProcessServiceProblems(describeEnvelope.Data.Items, concreteTypeByName, exampleProcessServiceInventory)
+    problems, processServices, scopedServices := exampleProcessServiceProblems(describeEnvelope.Data.Items, concreteTypeByName, exampleProcessServiceInventoryOf(major))
 
     if 0 == processServices {
         fail("[%s] debug:container listed no process service, so the inventory pin below would be vacuous:\n%s", major.label, exampleTail(describeOutput, 20))

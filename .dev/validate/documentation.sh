@@ -1559,16 +1559,16 @@ while IFS= read -r COMMENT_FILE_STRING; do
     if [[ -f "${COMMENT_FILE_STRING}" ]]; then
         COMMENT_FILE_STRING_LIST+=("${COMMENT_FILE_STRING}")
     fi
-done < <(list_repository_path 'v3/*.go' 'integrations/*/v3/*.go')
+done < <(list_repository_path 'v3/*.go' 'integrations/*/v3/*.go' 'v4/*.go' 'integrations/*/v4/*.go')
 
-check_comment_baseline "${COMMENT_BASELINE_PATH_STRING}" "the third major" "${COMMENT_FILE_STRING_LIST[@]}"
+check_comment_baseline "${COMMENT_BASELINE_PATH_STRING}" "the third and fourth majors" "${COMMENT_FILE_STRING_LIST[@]}"
 
 # the first and second majors, their integrations and their example applications: every Go file outside the
 # third major and outside .dev.
 COMMENT_FROZEN_FILE_STRING_LIST=()
 while IFS= read -r COMMENT_FILE_STRING; do
     case "${COMMENT_FILE_STRING}" in
-        v3/* | integrations/*/v3/* | .dev/*) continue ;;
+        v3/* | integrations/*/v3/* | v4/* | integrations/*/v4/* | .dev/*) continue ;;
     esac
 
     if [[ -f "${COMMENT_FILE_STRING}" ]]; then

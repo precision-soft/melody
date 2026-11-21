@@ -46,3 +46,6 @@ func (instance *accessorOnlySession) All() map[string]any {
 func (instance *accessorOnlySession) IsModified() bool { return instance.modified }
 
 func (instance *accessorOnlySession) IsCleared() bool { return instance.cleared }
+
+/* /dev/zero takes a write at offset 0, reports size 0 and refuses truncate and fsync; /dev/null accepts all three since Linux 7.0 */
+const refusingCharacterDevice = "/dev/zero"

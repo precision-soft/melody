@@ -51,8 +51,8 @@
 # delta). The rule is repeated in .dev/e2e/examplehttp.go, beside the calls it governs.
 #
 # The per-major EXAMPLE APPLICATION sections drive a DIFFERENT application: for each major listed in
-# MELODY_E2E_MAJORS (all three by default) the harness builds that major's .example into its own workspace
-# under /tmp, boots it on its own port (18081/18082/18083) and asserts the surface all three majors share —
+# MELODY_E2E_MAJORS (all four by default) the harness builds that major's .example into its own workspace
+# under /tmp, boots it on its own port (18081/18082/18083/18094) and asserts the surface all four majors share —
 # a public route, a real login flow through a cookie jar, the protected route before and after login, logout,
 # encoded path-traversal containment, a 404, three command-line invocations and a single-SIGINT shutdown.
 # Every line those sections print is prefixed with the major it ran against.

@@ -1,0 +1,283 @@
+package config
+
+import (
+    "time"
+
+    "github.com/precision-soft/melody/v4/bound"
+    configcontract "github.com/precision-soft/melody/v4/config/contract"
+    "github.com/precision-soft/melody/v4/exception"
+    exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
+    loggingcontract "github.com/precision-soft/melody/v4/logging/contract"
+)
+
+/* DefaultTeardownTimeout is how long a process shutting down cleanly may spend releasing what it holds, when neither MELODY_TEARDOWN_TIMEOUT nor the application's ApplicationConfig names one, before the teardown is abandoned and the process exits non-zero. It is the budget of the whole ordered teardown, not one per service, since a supervisor budgets for the process. A stalled dependency can cost far more, and the default matches what the commonest supervisor grants before SIGKILL; a deployment granted longer raises it, so the teardown runs to its end and names the service that failed. Unlimited asks for no deadline; a budget below 1ms fails the boot. A budget hands the teardown a deadline at half of it and keeps the other half for the teardown to report in before it is abandoned. */
+const DefaultTeardownTimeout = 10 * time.Second
+
+func newKernelConfiguration(
+    defaultMode string,
+    processRole string,
+    environment string,
+    projectDirectory string,
+    logsDirectory string,
+    logPath string,
+    logLevel string,
+    cacheDirectory string,
+    teardownTimeout bound.Duration,
+    scopeTeardownTimeout bound.Duration,
+    containerCreationWaiters bound.Count,
+) (*kernelConfiguration, error) {
+    parsedLogLevel, parseLogLevelErr := parseKernelLogLevel(logLevel)
+    if nil != parseLogLevelErr {
+        return nil, parseLogLevelErr
+    }
+
+    kernelConfigurationInstance := &kernelConfiguration{
+        defaultMode:              defaultMode,
+        processRole:              processRole,
+        environment:              environment,
+        projectDirectory:         projectDirectory,
+        logsDirectory:            logsDirectory,
+        logPath:                  logPath,
+        logLevel:                 parsedLogLevel,
+        cacheDirectory:           cacheDirectory,
+        teardownTimeout:          teardownTimeout,
+        scopeTeardownTimeout:     scopeTeardownTimeout,
+        containerCreationWaiters: containerCreationWaiters,
+    }
+
+    validateErr := kernelConfigurationInstance.validate()
+    if nil != validateErr {
+        return nil, validateErr
+    }
+
+    return kernelConfigurationInstance, nil
+}
+
+type kernelConfiguration struct {
+    defaultMode                 string
+    processRole                 string
+    environment                 string
+    projectDirectory            string
+    logsDirectory               string
+    logPath                     string
+    logLevel                    loggingcontract.Level
+    cacheDirectory              string
+    teardownTimeout             bound.Duration
+    scopeTeardownTimeout        bound.Duration
+    containerCreationWaiters    bound.Count
+    containerTeardownSequential configcontract.Switch
+}
+
+func (instance *kernelConfiguration) DefaultMode() string {
+    return instance.defaultMode
+}
+
+func (instance *kernelConfiguration) ProcessRole() string {
+    return instance.processRole
+}
+
+func (instance *kernelConfiguration) Environment() string {
+    return instance.environment
+}
+
+func (instance *kernelConfiguration) ProjectDirectory() string {
+    return instance.projectDirectory
+}
+
+func (instance *kernelConfiguration) LogsDirectory() string {
+    return instance.logsDirectory
+}
+
+func (instance *kernelConfiguration) LogPath() string {
+    return instance.logPath
+}
+
+func (instance *kernelConfiguration) LogLevel() loggingcontract.Level {
+    return instance.logLevel
+}
+
+func (instance *kernelConfiguration) CacheDirectory() string {
+    return instance.cacheDirectory
+}
+
+func (instance *kernelConfiguration) validate() error {
+    validateDefaultModeErr := instance.validateDefaultMode()
+    if nil != validateDefaultModeErr {
+        return validateDefaultModeErr
+    }
+
+    validateProcessRoleErr := instance.validateProcessRole()
+    if nil != validateProcessRoleErr {
+        return validateProcessRoleErr
+    }
+
+    validateEnvironmentErr := instance.validateEnvironment()
+    if nil != validateEnvironmentErr {
+        return validateEnvironmentErr
+    }
+
+    validateProjectDirectoryErr := instance.validateProjectDirectory()
+    if nil != validateProjectDirectoryErr {
+        return validateProjectDirectoryErr
+    }
+
+    validateLogsDirectoryErr := instance.validateLogsDirectory()
+    if nil != validateLogsDirectoryErr {
+        return validateLogsDirectoryErr
+    }
+
+    validateCacheDirectoryErr := instance.validateCacheDirectory()
+    if nil != validateCacheDirectoryErr {
+        return validateCacheDirectoryErr
+    }
+
+    return nil
+}
+
+func (instance *kernelConfiguration) validateDefaultMode() error {
+    defaultMode := instance.DefaultMode()
+    if "" == defaultMode {
+        return exception.NewError("default mode may not be empty", nil, nil)
+    }
+
+    switch defaultMode {
+    case ModeHttp, ModeCli:
+        return nil
+    }
+
+    return exception.NewError(
+        "default mode is not supported",
+        exceptioncontract.Context{
+            "mode": defaultMode,
+        },
+        nil,
+    )
+}
+
+func (instance *kernelConfiguration) validateProcessRole() error {
+    processRole := instance.ProcessRole()
+    if "" == processRole {
+        return exception.NewError("process role may not be empty", nil, nil)
+    }
+
+    switch processRole {
+    case RoleWeb, RoleWorker, RoleAll:
+        return nil
+    }
+
+    return exception.NewError(
+        "process role is not supported",
+        exceptioncontract.Context{
+            "processRole": processRole,
+        },
+        nil,
+    )
+}
+
+/* validateEnvironment names the key and the files a refusal is about: the dotenv source reads a present-but-empty MELODY_ENV as "dev" and loads .env.dev before the boot dies here. */
+func (instance *kernelConfiguration) validateEnvironment() error {
+    environment := instance.Environment()
+    if "" == environment {
+        return exception.NewError(
+            "environment may not be empty",
+            exceptioncontract.Context{
+                "environmentKey": EnvironmentNameKey,
+                "parameterName":  KernelEnvironment,
+                "hint":           "give " + EnvironmentNameKey + " a value in .env or .env.local: an empty one still selects the .env." + EnvironmentDevelopment + " files, and a removed one is refused as a defaulted name",
+            },
+            nil,
+        )
+    }
+
+    switch environment {
+    case EnvironmentDevelopment, EnvironmentProduction:
+        return nil
+    }
+
+    return exception.NewError(
+        "environment is not supported",
+        exceptioncontract.Context{
+            "environment":    environment,
+            "environmentKey": EnvironmentNameKey,
+            "parameterName":  KernelEnvironment,
+        },
+        nil,
+    )
+}
+
+func (instance *kernelConfiguration) validateProjectDirectory() error {
+    if "" == instance.projectDirectory {
+        return exception.NewError("project directory may not be empty", nil, nil)
+    }
+
+    return nil
+}
+
+func (instance *kernelConfiguration) validateLogsDirectory() error {
+    if "" == instance.logsDirectory {
+        return exception.NewError("logs directory may not be empty", nil, nil)
+    }
+
+    return nil
+}
+
+func (instance *kernelConfiguration) validateCacheDirectory() error {
+    if "" == instance.cacheDirectory {
+        return exception.NewError("cache directory may not be empty", nil, nil)
+    }
+
+    return nil
+}
+
+/* TeardownTimeout is MELODY_TEARDOWN_TIMEOUT as the deployment set it, absent when the key says nothing; the application decides it against its own config and TeardownTimeoutRule. */
+func (instance *kernelConfiguration) TeardownTimeout() bound.Duration {
+    return instance.teardownTimeout
+}
+
+/* ScopeTeardownTimeout is MELODY_SCOPE_TEARDOWN_TIMEOUT as the deployment set it, absent when the key says nothing; the application decides it against its own config and container.ScopeTeardownTimeoutRule. */
+func (instance *kernelConfiguration) ScopeTeardownTimeout() bound.Duration {
+    return instance.scopeTeardownTimeout
+}
+
+/* ContainerCreationWaiters is MELODY_CONTAINER_CREATION_WAITERS as the deployment set it, absent when the key says nothing; the application decides it against its own config and container.CreationWaitersRule. */
+func (instance *kernelConfiguration) ContainerCreationWaiters() bound.Count {
+    return instance.containerCreationWaiters
+}
+
+/* ContainerTeardownSequential is MELODY_CONTAINER_TEARDOWN_SEQUENTIAL as the deployment set it, unset when the key says nothing; the application decides it against its own config. */
+func (instance *kernelConfiguration) ContainerTeardownSequential() configcontract.Switch {
+    return instance.containerTeardownSequential
+}
+
+var _ configcontract.KernelConfiguration = (*kernelConfiguration)(nil)
+
+func parseKernelLogLevel(logLevel string) (loggingcontract.Level, error) {
+    if "" == logLevel {
+        return loggingcontract.LevelUnknown, exception.NewError(
+            "log level may not be empty",
+            nil,
+            nil,
+        )
+    }
+
+    switch logLevel {
+    case string(loggingcontract.LevelDebug):
+        return loggingcontract.LevelDebug, nil
+    case string(loggingcontract.LevelInfo):
+        return loggingcontract.LevelInfo, nil
+    case string(loggingcontract.LevelWarning):
+        return loggingcontract.LevelWarning, nil
+    case string(loggingcontract.LevelError):
+        return loggingcontract.LevelError, nil
+    case string(loggingcontract.LevelEmergency):
+        return loggingcontract.LevelEmergency, nil
+    }
+
+    return loggingcontract.LevelUnknown, exception.NewError(
+        "log level is not supported",
+        exceptioncontract.Context{
+            "logLevel": logLevel,
+        },
+        nil,
+    )
+}

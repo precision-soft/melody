@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
-WORK_DIRECTORY=.temp/copy
+WORK_DIRECTORY="$(pwd)/.temp/copy"
 mkdir -p "${WORK_DIRECTORY}"
 
 pairs="v3:v4 v3/.example:v4/.example integrations/amqp/v3:integrations/amqp/v4 integrations/awss3/v3:integrations/aws/s3/v4 integrations/bunorm/v3:integrations/bunorm/v4 integrations/bunorm/migrate/v3:integrations/bunorm/migrate/v4 integrations/bunorm/mysql/v3:integrations/bunorm/mysql/v4 integrations/bunorm/pgsql/v3:integrations/bunorm/pgsql/v4 integrations/cron/v3:integrations/cron/v4 integrations/cron/v3/.example:integrations/cron/v4/.example integrations/opentelemetry/v3:integrations/opentelemetry/v4 integrations/outbox/v3:integrations/outbox/v4 integrations/rueidis/v3:integrations/rueidis/v4 integrations/websocket/v3:integrations/websocket/v4"
