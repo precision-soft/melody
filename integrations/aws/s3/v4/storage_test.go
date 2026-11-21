@@ -26,6 +26,7 @@ import (
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/container/runtime"
+    melodystorage "github.com/precision-soft/melody/v4/storage"
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
@@ -66,7 +67,7 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
         t.Fatalf("put: %v", putErr)
     }
 
-    exists, existsErr := store.Exists(runtimeInstance, key)
+    exists, existsErr := melodystorage.Exists(melodystorage.For(runtimeInstance, store), key)
     if nil != existsErr || false == exists {
         t.Fatalf("expected object to exist: %v %v", exists, existsErr)
     }
@@ -124,7 +125,7 @@ func TestObjectStorage_PutGetExistsPresignDelete(t *testing.T) {
         t.Fatalf("delete: %v", deleteErr)
     }
 
-    existsAfter, _ := store.Exists(runtimeInstance, key)
+    existsAfter, _ := melodystorage.Exists(melodystorage.For(runtimeInstance, store), key)
     if true == existsAfter {
         t.Fatalf("expected object to be gone after delete")
     }
@@ -727,7 +728,7 @@ func TestObjectStorage_RejectedPutPreservesTheStoredObject(t *testing.T) {
             t.Fatalf("%s: expected a body longer than the declared size to be rejected", testCase.name)
         }
 
-        exists, existsErr := store.Exists(runtimeInstance, key)
+        exists, existsErr := melodystorage.Exists(melodystorage.For(runtimeInstance, store), key)
         if nil != existsErr || false == exists {
             t.Fatalf("%s: the stored object must survive a rejected put: %v %v", testCase.name, exists, existsErr)
         }
@@ -1106,7 +1107,7 @@ func TestStorage_RefusesAParentSegmentAtEveryDoorBeforeTouchingTheBucket(t *test
     _, statErr := store.Stat(runtimeInstance, key)
     putErr := store.Put(runtimeInstance, key, strings.NewReader("B"), 1, storagecontract.PutOptions{})
     deleteErr := store.Delete(runtimeInstance, key)
-    _, existsErr := store.Exists(runtimeInstance, key)
+    _, existsErr := melodystorage.Exists(melodystorage.For(runtimeInstance, store), key)
     _, presignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Expiry: bound.Of(time.Minute)})
     _, unsupportedPresignErr := store.PresignedUrl(runtimeInstance, key, storagecontract.PresignConfig{Method: http.MethodDelete, Expiry: bound.UnlimitedDuration()})
 

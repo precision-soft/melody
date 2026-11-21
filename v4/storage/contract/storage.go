@@ -40,7 +40,7 @@ type PresignConfig struct {
     Method string
 }
 
-/* Storage stores objects under keys. A key is folded as the backends document: a backslash reads as a separator, "." and empty segments and a leading slash fold away, and a ".." segment is refused by name. Every door takes the runtime it runs under first and runs under its context. Get and Stat of a key that names no object answer an error whose chain carries ErrObjectNotFound, and a failure to ask the backend never carries it; Delete of such a key answers nil. Further verbs, List or Copy, arrive as optional capability interfaces once v4.0.0 is tagged, never as methods of Storage. */
+/* Storage stores objects under keys. A key is folded as the backends document: a backslash reads as a separator, "." and empty segments and a leading slash fold away, and a ".." segment is refused by name. Every door takes the runtime it runs under first and runs under its context. Get and Stat of a key that names no object answer an error whose chain carries ErrObjectNotFound, and a failure to ask the backend never carries it; Delete of such a key answers nil; whether a key names an object is storage.Exists, derived from Stat. Further verbs, List or Copy, arrive as optional capability interfaces once v4.0.0 is tagged, never as methods of Storage. */
 type Storage interface {
     /* Put stores the reader's bytes under the key. A non-negative size is a declaration the backend verifies, refusing a short or long stream; a negative size means the length is unknown, as http.Request.ContentLength uses it, and nothing is verified. */
     Put(runtimeInstance containercontract.Runtime, key string, reader io.Reader, size int64, options PutOptions) error
@@ -52,8 +52,6 @@ type Storage interface {
     Stat(runtimeInstance containercontract.Runtime, key string) (ObjectInfo, error)
 
     Delete(runtimeInstance containercontract.Runtime, key string) error
-
-    Exists(runtimeInstance containercontract.Runtime, key string) (bool, error)
 
     /* PresignedUrl answers a url that carries its own authorization, for a client that reads or writes the object straight at the backend. A backend that cannot sign, or cannot sign the method asked, answers an error whose chain carries ErrPresignUnsupported. Whether the object exists is not asked. */
     PresignedUrl(runtimeInstance containercontract.Runtime, key string, config PresignConfig) (string, error)

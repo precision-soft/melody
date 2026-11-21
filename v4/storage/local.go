@@ -425,39 +425,6 @@ func (instance *LocalStorage) Delete(
     return nil
 }
 
-func (instance *LocalStorage) Exists(
-    runtimeInstance containercontract.Runtime,
-    key string,
-) (bool, error) {
-    relativeKey, keyErr := storageRelativeKey(key)
-    if nil != keyErr {
-        return false, keyErr
-    }
-
-    root, rootErr := os.OpenRoot(instance.baseDirectory)
-    if nil != rootErr {
-        if true == os.IsNotExist(rootErr) {
-            return false, nil
-        }
-
-        return false, exception.NewError("could not stat the storage object", map[string]any{"key": key}, rootErr)
-    }
-    defer root.Close()
-
-    /* a symlink pointing outside is refused with an error that does not leak its target, as in Get and Delete */
-    info, statErr := root.Stat(relativeKey)
-    if nil == statErr {
-        /* only a regular file is an object Get can serve: a directory is a prefix, and a pipe or a device is refused by Get */
-        return info.Mode().IsRegular(), nil
-    }
-
-    if true == storageObjectAbsent(statErr) {
-        return false, nil
-    }
-
-    return false, exception.NewError("could not stat the storage object", map[string]any{"key": key}, statErr)
-}
-
 /* storageObjectAbsent reports an error that means the key names no object: nothing under that name, or a path that runs through a regular file, which locally cannot also be a prefix of other keys */
 func storageObjectAbsent(err error) bool {
     return true == os.IsNotExist(err) || true == errors.Is(err, syscall.ENOTDIR)

@@ -22,7 +22,6 @@ var _ interface {
     Get(key string, options storagecontract.GetOptions) (storagecontract.Object, error)
     Stat(key string) (storagecontract.ObjectInfo, error)
     Delete(key string) error
-    Exists(key string) (bool, error)
     PresignedUrl(key string, config storagecontract.PresignConfig) (string, error)
     Runtime() containercontract.Runtime
     Storage() storagecontract.Storage
@@ -118,12 +117,6 @@ func (instance *boundRecordingStorage) Delete(runtimeInstance containercontract.
     return boundStorageRecordedErr
 }
 
-func (instance *boundRecordingStorage) Exists(runtimeInstance containercontract.Runtime, key string) (bool, error) {
-    instance.record("Exists", runtimeInstance, key)
-
-    return true, boundStorageRecordedErr
-}
-
 func (instance *boundRecordingStorage) PresignedUrl(runtimeInstance containercontract.Runtime, key string, config storagecontract.PresignConfig) (string, error) {
     instance.record("PresignedUrl", runtimeInstance, key, config)
 
@@ -155,7 +148,6 @@ func TestBound_EveryMethodReachesItsDoorWithTheBoundRuntimeAndAnswersWhatItAnswe
     object, getErr := boundStorage.Get("got-key", storagecontract.GetOptions{})
     objectInfo, statErr := boundStorage.Stat("stated-key")
     deleteErr := boundStorage.Delete("deleted-key")
-    exists, existsErr := boundStorage.Exists("existing-key")
     url, presignErr := boundStorage.PresignedUrl("signed-key", presignConfig)
 
     expected := []boundStorageRecordedCall{
@@ -163,7 +155,6 @@ func TestBound_EveryMethodReachesItsDoorWithTheBoundRuntimeAndAnswersWhatItAnswe
         {door: "Get", arguments: []any{"got-key", storagecontract.GetOptions{}}},
         {door: "Stat", arguments: []any{"stated-key"}},
         {door: "Delete", arguments: []any{"deleted-key"}},
-        {door: "Exists", arguments: []any{"existing-key"}},
         {door: "PresignedUrl", arguments: []any{"signed-key", presignConfig}},
     }
 
@@ -191,10 +182,6 @@ func TestBound_EveryMethodReachesItsDoorWithTheBoundRuntimeAndAnswersWhatItAnswe
         t.Fatalf("expected Stat to answer the storage's info and its error, got %v %v", objectInfo, statErr)
     }
 
-    if false == exists || boundStorageRecordedErr != existsErr {
-        t.Fatalf("expected Exists to answer the storage's answer and its error, got %v %v", exists, existsErr)
-    }
-
     if "https://signed.example/signed-key" != url || boundStorageRecordedErr != presignErr {
         t.Fatalf("expected PresignedUrl to answer the storage's url and its error, got %q %v", url, presignErr)
     }
@@ -218,7 +205,7 @@ func TestBound_AViewOverNoStorageRefusesEveryDoor(t *testing.T) {
         object, getErr := boundStorage.Get("key", storagecontract.GetOptions{})
         objectInfo, statErr := boundStorage.Stat("key")
         deleteErr := boundStorage.Delete("key")
-        exists, existsErr := boundStorage.Exists("key")
+        exists, existsErr := Exists(boundStorage, "key")
         url, presignErr := boundStorage.PresignedUrl("key", storagecontract.PresignConfig{})
 
         for doorName, doorErr := range map[string]error{"Put": putErr, "Get": getErr, "Stat": statErr, "Delete": deleteErr, "Exists": existsErr, "PresignedUrl": presignErr} {

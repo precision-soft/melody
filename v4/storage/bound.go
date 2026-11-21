@@ -71,14 +71,6 @@ func (instance Bound) Delete(key string) error {
     return instance.storageInstance.Delete(instance.runtimeInstance, key)
 }
 
-func (instance Bound) Exists(key string) (bool, error) {
-    if nilErr := instance.refuseNilStorage(); nil != nilErr {
-        return false, nilErr
-    }
-
-    return instance.storageInstance.Exists(instance.runtimeInstance, key)
-}
-
 func (instance Bound) PresignedUrl(key string, config storagecontract.PresignConfig) (string, error) {
     if nilErr := instance.refuseNilStorage(); nil != nilErr {
         return "", nilErr

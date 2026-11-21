@@ -43,7 +43,7 @@ func TestLocalStorage_PutGetExistsDelete(t *testing.T) {
         t.Fatalf("put: %v", putErr)
     }
 
-    exists, existsErr := local.Exists(runtimeInstance, key)
+    exists, existsErr := Exists(For(runtimeInstance, local), key)
     if nil != existsErr || false == exists {
         t.Fatalf("expected object to exist: %v %v", exists, existsErr)
     }
@@ -63,7 +63,7 @@ func TestLocalStorage_PutGetExistsDelete(t *testing.T) {
         t.Fatalf("delete: %v", deleteErr)
     }
 
-    existsAfter, _ := local.Exists(runtimeInstance, key)
+    existsAfter, _ := Exists(For(runtimeInstance, local), key)
     if true == existsAfter {
         t.Fatalf("expected object to be gone after delete")
     }
@@ -187,7 +187,7 @@ func TestLocalStorage_RefusesAParentSegmentAtEveryDoor(t *testing.T) {
             t.Fatalf("expected Delete of %q to be refused by name, got %v", key, deleteErr)
         }
 
-        exists, existsErr := local.Exists(runtimeInstance, key)
+        exists, existsErr := Exists(For(runtimeInstance, local), key)
         if nil == existsErr || false == strings.Contains(existsErr.Error(), `".." segment`) || true == exists {
             t.Fatalf("expected Exists of %q to be refused by name, got %v, %v", key, exists, existsErr)
         }
@@ -297,7 +297,7 @@ func TestLocalStorage_RejectsSizeMismatch(t *testing.T) {
         t.Fatalf("expected a size-mismatch error when the reader length does not match the declared size")
     }
 
-    if exists, _ := local.Exists(runtimeInstance, "obj.bin"); true == exists {
+    if exists, _ := Exists(For(runtimeInstance, local), "obj.bin"); true == exists {
         t.Fatalf("expected the mismatched object to be removed")
     }
 }
@@ -355,7 +355,7 @@ func TestLocalStorage_PutRemovesPartialObjectOnReaderError(t *testing.T) {
         t.Fatalf("expected the failure to name the copy, got %v", putErr)
     }
 
-    exists, existsErr := local.Exists(runtimeInstance, key)
+    exists, existsErr := Exists(For(runtimeInstance, local), key)
     if nil != existsErr {
         t.Fatalf("exists: %v", existsErr)
     }
@@ -433,7 +433,7 @@ func TestLocalStorage_ExistsReturnsFalseForDirectoryKey(t *testing.T) {
         t.Fatalf("put: %v", putErr)
     }
 
-    exists, existsErr := local.Exists(runtimeInstance, "nested")
+    exists, existsErr := Exists(For(runtimeInstance, local), "nested")
     if nil != existsErr {
         t.Fatalf("exists: %v", existsErr)
     }
@@ -458,7 +458,7 @@ func TestLocalStorage_ExistsDoesNotFollowSymlinkToExternalTarget(t *testing.T) {
 
     local := NewLocalStorage(base, LocalStorageConfig{})
 
-    exists, _ := local.Exists(testRuntime(), "leak")
+    exists, _ := Exists(For(testRuntime(), local), "leak")
     if true == exists {
         t.Fatalf("Exists followed a symlink and reported an external target as existing")
     }
@@ -573,7 +573,7 @@ func TestLocalStorage_PutSweepsStaleTemporaryObjectsAndKeepsLiveOnes(t *testing.
         }
     }
 
-    exists, existsErr := storage.Exists(runtimeInstance, "report.txt.tmp-00112233445566aa")
+    exists, existsErr := Exists(For(runtimeInstance, storage), "report.txt.tmp-00112233445566aa")
     if nil != existsErr || false == exists {
         t.Fatalf("expected the lookalike key to stay stored, exists %v error %v", exists, existsErr)
     }
@@ -694,7 +694,7 @@ func TestLocalStorage_RefusesAKeySpelledLikeAReservedTemporaryObject(t *testing.
     if putErr := storage.Put(runtimeInstance, reservedKey, strings.NewReader("user data"), -1, storagecontract.PutOptions{}); nil == putErr || false == strings.Contains(putErr.Error(), "reserved .melody-storage- namespace") {
         t.Fatalf("expected a key spelled like a reserved temp object to be refused, got %v", putErr)
     }
-    if _, existsErr := storage.Exists(runtimeInstance, reservedKey); nil == existsErr {
+    if _, existsErr := Exists(For(runtimeInstance, storage), reservedKey); nil == existsErr {
         t.Fatalf("expected Exists to refuse the reserved spelling too")
     }
     if _, statErr := storage.Stat(runtimeInstance, reservedKey); nil == statErr || false == strings.Contains(statErr.Error(), "reserved .melody-storage- namespace") {
@@ -814,7 +814,7 @@ func TestLocalStorage_PutStopsReadingOneBytePastTheDeclaredSize(t *testing.T) {
         t.Fatalf("expected the copy to stop near the declared size, the reader yielded %d bytes", reader.yielded)
     }
 
-    if exists, _ := local.Exists(testRuntime(), "bounded.bin"); true == exists {
+    if exists, _ := Exists(For(testRuntime(), local), "bounded.bin"); true == exists {
         t.Fatal("expected no object behind a refused put")
     }
 }
@@ -909,7 +909,7 @@ func TestLocalStorage_AKeyUnderARegularFileIsAbsent(t *testing.T) {
         t.Fatalf("put: %v", putErr)
     }
 
-    exists, existsErr := local.Exists(runtimeInstance, "object.bin/child")
+    exists, existsErr := Exists(For(runtimeInstance, local), "object.bin/child")
     if nil != existsErr || true == exists {
         t.Fatalf("expected the key absent, got %v %v", exists, existsErr)
     }

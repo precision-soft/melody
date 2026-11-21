@@ -13,7 +13,7 @@ import (
     storagecontract "github.com/precision-soft/melody/v4/storage/contract"
 )
 
-/* a named pipe under a key is not an object: Get refuses it at once, where a blocking open waited for a writer forever, and Exists answers false */
+/* a named pipe under a key is not an object: Get refuses it at once, where a blocking open waited for a writer forever, and Exists answers the refusal Stat answers */
 func TestLocalStorage_GetRefusesANamedPipe(t *testing.T) {
     base := t.TempDir()
     local := NewLocalStorage(base, LocalStorageConfig{})
@@ -42,8 +42,8 @@ func TestLocalStorage_GetRefusesANamedPipe(t *testing.T) {
         t.Fatal("expected Get to answer at once on a named pipe")
     }
 
-    if exists, existsErr := local.Exists(runtimeInstance, "pipe"); nil != existsErr || true == exists {
-        t.Fatalf("expected the pipe not to exist as an object, got %v %v", exists, existsErr)
+    if exists, existsErr := Exists(For(runtimeInstance, local), "pipe"); nil == existsErr || false == strings.Contains(existsErr.Error(), "not a regular object") || true == exists {
+        t.Fatalf("expected the pipe refused as no regular object, got %v %v", exists, existsErr)
     }
 }
 

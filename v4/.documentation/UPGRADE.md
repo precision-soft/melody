@@ -30,13 +30,13 @@ The fourth major takes the forms the third major kept compatible: a section that
 
 **Remedy.** `object, getErr := storage.FromRuntime(runtimeInstance).Get(key, storagecontract.GetOptions{})`, read and close `object.Body`, exactly once, also after a failed read; beside an error the object is the zero value. An implementation answers `storagecontract.Object{Body: reader, Info: info}` and the zero `Object` beside every error.
 
-### Storage: `Stat` is part of the contract
+### Storage: `Stat` is part of the contract, and `Exists` is a function of the package
 
-**What changed.** [`Storage.Stat(runtime, key) (storagecontract.ObjectInfo, error)`](../storage/contract/storage.go) answers what the storage knows about the object without opening it: it refuses what `Get` refuses, by the same causes, and answers the info a `Get` would answer at that instant. The S3 storage sends one `HEAD`; `LocalStorage` judges the file without opening it, so a named pipe answers at once.
+**What changed.** [`Storage.Stat(runtime, key) (storagecontract.ObjectInfo, error)`](../storage/contract/storage.go) answers what the storage knows about the object without opening it: it refuses what `Get` refuses, by the same causes, and answers the info a `Get` would answer at that instant. The S3 storage sends one `HEAD`; `LocalStorage` judges the file without opening it, so a named pipe answers at once. `Exists` leaves the contract: [`storage.Exists(boundStorage, key)`](../storage/exists.go) answers `true` when `Stat` answers, `false` when it answers `ErrObjectNotFound` or `ErrKeyIsDirectory`, and `Stat`'s error otherwise. A named pipe or a device under a local key answers `Stat`'s refusal, `not a regular object`, where `LocalStorage.Exists` answered `false, nil`.
 
-**Symptom.** An implementation of the contract: `missing method Stat`.
+**Symptom.** An implementation of the contract: `missing method Stat`; a caller: `store.Exists undefined (type storagecontract.Storage has no field or method Exists)`.
 
-**Remedy.** Implement `Stat` by the rule "refuses what `Get` refuses": share one function between the two doors that judges what was found. A caller that asked `Exists` before reading the size or the content type asks `Stat`.
+**Remedy.** Implement `Stat` by the rule "refuses what `Get` refuses": share one function between the two doors that judges what was found, and delete the implementation's `Exists`. Call `storage.Exists(storage.For(runtimeInstance, store), key)`, or `storage.Exists(boundStorage, key)` over a view already bound; a caller that asked `Exists` before reading the size or the content type asks `Stat`.
 
 ### Storage: an absent object is `ErrObjectNotFound`
 
@@ -1792,7 +1792,7 @@ A waiter is released by what it waits in. The container's `Close` releases every
 
 **What changed.** `LocalStorage` and the awss3 `Storage` refuse, at every door, a key that holds a `..` segment once its backslashes are read as separators, with an error that names the segment. They used to fold it: `tenant-b/../tenant-a/secret.txt` addressed `tenant-a/secret.txt` on both backends.
 
-**Symptom.** `Put`, `Get`, `Stat`, `Delete`, `Exists` (and `PresignedUrl` on awss3) answer `storage key carries a ".." segment` or `object storage key carries a ".." segment` for a key they used to fold.
+**Symptom.** `Put`, `Get`, `Stat`, `Delete`, `storage.Exists` (and `PresignedUrl` on awss3) answer `storage key carries a ".." segment` or `object storage key carries a ".." segment` for a key they used to fold.
 
 **Remedy.** Address the object by the key it folds to: `b` for `a/../b`. A key built from a client-chosen name should refuse a separator in that name before it reaches the storage.
 

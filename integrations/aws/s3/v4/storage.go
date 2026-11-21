@@ -470,29 +470,6 @@ func (instance *Storage) Delete(
     return nil
 }
 
-func (instance *Storage) Exists(
-    runtimeInstance containercontract.Runtime,
-    key string,
-) (bool, error) {
-    instance.plaintextEndpointWarning.write(runtimeInstance)
-
-    normalizedKey, keyErr := normalizeObjectKey(key)
-    if nil != keyErr {
-        return false, keyErr
-    }
-
-    _, statErr := instance.client.StatObject(runtimeInstance.Context(), instance.bucket, normalizedKey, minio.StatObjectOptions{})
-    if nil == statErr {
-        return true, nil
-    }
-
-    if "NoSuchKey" == minio.ToErrorResponse(statErr).Code {
-        return false, nil
-    }
-
-    return false, exception.NewError("object storage stat failed", map[string]any{"key": key, "bucket": instance.bucket}, statErr)
-}
-
 func (instance *Storage) PresignedUrl(
     runtimeInstance containercontract.Runtime,
     key string,

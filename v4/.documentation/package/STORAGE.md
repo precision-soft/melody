@@ -14,7 +14,7 @@ Storage is opt-in. Userland builds a `Storage` and registers it under [`ServiceS
 ## Responsibilities
 
 - Define the abstraction:
-    - [`Storage`](../../storage/contract/storage.go) — `Put`, `Get`, `Stat`, `Delete`, `Exists`, `PresignedUrl`
+    - [`Storage`](../../storage/contract/storage.go) — `Put`, `Get`, `Stat`, `Delete`, `PresignedUrl`
     - [`PutOptions`](../../storage/contract/storage.go), [`GetOptions`](../../storage/contract/storage.go), [`Object`](../../storage/contract/storage.go), [`ObjectInfo`](../../storage/contract/storage.go), [`PresignConfig`](../../storage/contract/storage.go)
     - [`PresignExpiryRule`](../../storage/contract/presign.go), [`ResolvePresignExpiry`](../../storage/contract/presign.go), [`ResolvePresignMethod`](../../storage/contract/presign.go)
     - [`ErrKeyIsDirectory`](../../storage/contract/error.go) — the cause of a refusal of a key that names a directory, a prefix of other keys and not an object
@@ -24,6 +24,7 @@ Storage is opt-in. Userland builds a `Storage` and registers it under [`ServiceS
     - [`LocalStorage`](../../storage/local.go), [`NewLocalStorage`](../../storage/local.go)
 - Provide the bound view:
     - [`Bound`](../../storage/bound.go), [`For`](../../storage/bound.go), [`FromRuntime`](../../storage/bound.go)
+    - [`Exists`](../../storage/exists.go) — whether a key names an object, derived from `Stat`
 - Provide container resolver helpers:
     - [`ServiceStorage`](../../storage/service_resolver.go)
     - [`StorageMustFromResolver`](../../storage/service_resolver.go)
@@ -45,6 +46,8 @@ if nil == getErr {
 }
 
 objectInfo, statErr := labels.Stat("labels/awb-123.pdf")
+
+exists, existsErr := storage.Exists(labels, "labels/awb-123.pdf")
 
 link, presignErr := labels.PresignedUrl("labels/awb-123.pdf", storagecontract.PresignConfig{Expiry: bound.Of(10 * time.Minute)})
 ```
@@ -77,7 +80,8 @@ Every door of `storagecontract.Storage` takes the runtime it runs under first; t
 - `Put` takes the content size; pass `-1` when the size is unknown (S3 backends stream it, `LocalStorage` skips its length check). When a non-negative size is given, `LocalStorage` enforces it — a reader that does not yield exactly that many bytes returns an error. A failed `Put` leaves no object behind: `LocalStorage` removes the partially-written file on any write failure, including a size mismatch and a source reader that errors mid-stream (so a streaming `-1` upload whose reader fails does not leave a truncated object), matching the S3 backend's atomic-on-failure behaviour. What the in-process error paths cannot clean is a crash mid-write: the temp object it leaves behind is swept by a later `Put` of the same key, once its modification time is at least `LocalStorageConfig.TemporaryStaleAge` old, an hour when left out. Temp objects live in a reserved hidden namespace beside the key, `.melody-storage-<sha256 of the key's leaf>.<16 hex>.tmp`, which fits one path component whatever the leaf's length; only regular files of exactly that
   shape for that key are ever swept, so a concurrent writer's live temp, another key's temp and an ordinary key that reads like a temp name, such as `report.tmp-0123456789abcdef`, are never touched. A key whose leaf is spelled exactly like a temp object is refused at every door, since a later `Put` of the key its digest names would sweep it. A temp object a crash left under the naming of `v3.13.0`, `<leaf>.tmp-<16 hex>`, is not of the reserved shape and is never swept; remove it by hand.
 - On [`LocalStorage`](../../storage/local.go), a declared size bounds the copy at one byte past it, so a reader that runs longer is refused without being read to its end; a nil reader is refused before anything is created. A failed `Put` removes its temp object but keeps the directories it created for the key. A `Put` over an existing object replaces it with a new file of mode `0640` less the process umask, whatever the old one's mode. A writer that stalls for more than the stale age between two writes may have its temp object swept by a concurrent `Put` of the same key; its own `Put` then fails naming the sweep.
-- Locally a key names an object only when it resolves to a regular file. A key that is a directory is a prefix of other keys: `Get`, `Stat`, `Put` and `Delete` refuse it with [`storagecontract.ErrKeyIsDirectory`](../../storage/contract/error.go) in the chain, `Put` before it reads the payload and `Delete` removing nothing, and `Exists` answers `false`, since a directory is not an object. A symlink to a directory is refused by `Get` and `Stat`, which follow it, and removed as a link by `Delete`, which does not, its target kept. A key that runs through a regular file (`object.bin/child`) names no object, since locally an object and a prefix cannot share a name, where S3 allows both: `Get` and `Stat` answer `ErrObjectNotFound`, `Exists` answers `false` and `Delete` answers `nil`. A named pipe or a device under a key is refused by `Get` at once, by `Stat` without opening it, and is not reported by `Exists`.
+- Locally a key names an object only when it resolves to a regular file. A key that is a directory is a prefix of other keys: `Get`, `Stat`, `Put` and `Delete` refuse it with [`storagecontract.ErrKeyIsDirectory`](../../storage/contract/error.go) in the chain, `Put` before it reads the payload and `Delete` removing nothing, and [`storage.Exists`](../../storage/exists.go) answers `false`, since a directory is not an object. A symlink to a directory is refused by `Get` and `Stat`, which follow it, and removed as a link by `Delete`, which does not, its target kept. A key that runs through a regular file (`object.bin/child`) names no object, since locally an object and a prefix cannot share a name, where S3 allows both: `Get` and `Stat` answer `ErrObjectNotFound`, `Exists` answers `false` and `Delete` answers `nil`. A named pipe or a device under a key is refused by `Get` at once and by `Stat` without opening it, and `Exists` answers `Stat`'s refusal beside `false`.
+- [`storage.Exists(boundStorage, key)`](../../storage/exists.go) is no door of the contract: it answers `true` when `Stat` answers, `false` when `Stat` answers `ErrObjectNotFound` or `ErrKeyIsDirectory`, and `Stat`'s error beside `false` for anything else, a refused key included, so it cannot drift from what `Stat` and `Get` judge.
 - A key that names no object, a base directory that is gone included, answers an error whose chain carries [`storagecontract.ErrObjectNotFound`](../../storage/contract/error.go) at `Get` and `Stat` on both backends; a refusal of the key and a failure to ask the backend never carry it. `Delete` of such a key answers `nil`: the object is gone, which is what was asked.
 - `Get` answers a [`storagecontract.Object`](../../storage/contract/storage.go): the caller closes `Object.Body`, exactly once, also after a read failed; beside an error the object is the zero value and nothing is open. `Object.Info` and `Stat` answer the same [`ObjectInfo`](../../storage/contract/storage.go): `Size`, `ContentType` (what the `Put` declared, empty when the backend holds none: `LocalStorage` holds none), `ModifiedAt`, `EntityTag` without quotes and `Key`, the key asked as given. The local entity tag is derived from the size and the modification time as the static file server derives its own, so it is weak-equivalent: two stores of equal size in the same instant share it.
 - `PresignedUrl` takes a [`storagecontract.PresignConfig`](../../storage/contract/storage.go). `Expiry` is read against `PresignExpiryRule`: 15 minutes when left out, at least 1s, at most 7 days, unlimited refused, each refusal naming `PresignConfig.Expiry`. `Method` is `http.MethodGet`, a download, when left out, or `http.MethodPut`, an upload of the key; any other method is refused with `ErrPresignUnsupported`. A presigned upload binds neither a content type nor a size.
@@ -98,6 +102,7 @@ Every door of `storagecontract.Storage` takes the runtime it runs under first; t
 ### Bound view (`storage`)
 
 - [`Bound`](../../storage/bound.go) — [`For(containercontract.Runtime, storagecontract.Storage) Bound`](../../storage/bound.go), [`FromRuntime(containercontract.Runtime) Bound`](../../storage/bound.go)
+- [`Exists(Bound, string) (bool, error)`](../../storage/exists.go)
 
 ### Container helpers (`storage`)
 
