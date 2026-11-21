@@ -30,7 +30,7 @@ type customPayload struct {
 
 type customConstraint struct{}
 
-func (instance *customConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *customConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     stringValue, ok := value.(string)
     if false == ok {
         return NewValidationError("", "invalid type", "invalid_type", nil)
@@ -150,7 +150,7 @@ func TestValidator_DetectsErrors(t *testing.T) {
 
     payload := testPayload{}
 
-    err := validatorInstance.Validate(payload)
+    err := validatorInstance.Validate(testValidationRuntime(), payload)
     validationErrors := requireValidationErrors(t, err)
 
     if len(validationErrors) < 2 {
@@ -166,37 +166,37 @@ func TestValidator_AcceptsValidData(t *testing.T) {
         Name:  "John Doe",
     }
 
-    err := validatorInstance.Validate(payload)
+    err := validatorInstance.Validate(testValidationRuntime(), payload)
     requireNoValidationErrors(t, err)
 }
 
 func TestValidator_LessThanIsEnforcedAndNotUnknownRule(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 100}))
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 150}))
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithLessThan{Quantity: 99}))
+    requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithLessThan{Quantity: 100}))
+    requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithLessThan{Quantity: 150}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithLessThan{Quantity: 99}))
 
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithLessThanShorthand{Quantity: 150}))
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithLessThanShorthand{Quantity: 99}))
+    requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithLessThanShorthand{Quantity: 150}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithLessThanShorthand{Quantity: 99}))
 }
 
 func TestValidator_RegexShorthandIsEnforcedNotFailOpen(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthand{Value: "does-not-match"}))
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthand{Value: "abc"}))
+    requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithRegexShorthand{Value: "does-not-match"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithRegexShorthand{Value: "abc"}))
 }
 
 func TestValidator_RegexShorthandWithCommaMatchesParenthesizedForm(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "a"}))
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "b"}))
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInCharClass{Value: "z"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithRegexShorthandCommaInCharClass{Value: "a"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithRegexShorthandCommaInCharClass{Value: "b"}))
+    requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithRegexShorthandCommaInCharClass{Value: "z"}))
 
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInQuantifier{Value: "aa"}))
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithRegexShorthandCommaInQuantifier{Value: "aaa"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithRegexShorthandCommaInQuantifier{Value: "aa"}))
+    requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithRegexShorthandCommaInQuantifier{Value: "aaa"}))
 }
 
 func TestValidator_CustomConstraint(t *testing.T) {
@@ -207,7 +207,7 @@ func TestValidator_CustomConstraint(t *testing.T) {
         Code: "XYZ",
     }
 
-    err := validatorInstance.Validate(payload)
+    err := validatorInstance.Validate(testValidationRuntime(), payload)
     validationErrors := requireValidationErrors(t, err)
 
     validationError, ok := validationErrors[0].(*ValidationError)
@@ -220,7 +220,7 @@ func TestValidator_CustomConstraint(t *testing.T) {
     }
 
     payload.Code = "ABC"
-    err = validatorInstance.Validate(payload)
+    err = validatorInstance.Validate(testValidationRuntime(), payload)
     requireNoValidationErrors(t, err)
 }
 
@@ -240,7 +240,7 @@ func TestValidator_RegisterConstraint_PanicsOnDuplicateName(t *testing.T) {
 func TestValidator_ReturnsUnknownRuleError(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithUnknownRule{Name: "x"})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithUnknownRule{Name: "x"})
     validationErrors := requireValidationErrors(t, err)
 
     validationError, ok := validationErrors[0].(*ValidationError)
@@ -261,7 +261,7 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
         payloadWithMalformedGreaterThan{Quantity: 5},
         payloadWithMalformedMinLength{Name: "anything"},
     } {
-        validationErrors := requireValidationErrors(t, validatorInstance.Validate(payload))
+        validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payload))
 
         validationError, ok := validationErrors[0].(*ValidationError)
         if false == ok {
@@ -278,7 +278,7 @@ func TestValidator_MalformedNumericParameterFailsClosed(t *testing.T) {
     }
 
     /* a fractional bound is refused whole, not truncated: 3.9 read as 3 silently enforced a bound the tag does not declare, and on lessThan a truncated negative bound accepted values the tag as written refuses */
-    fractionalErrors := requireValidationErrors(t, validatorInstance.Validate(payloadWithFractionalMaxLength{Name: "abc"}))
+    fractionalErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithFractionalMaxLength{Name: "abc"}))
 
     fractionalError, ok := fractionalErrors[0].(*ValidationError)
     if false == ok {
@@ -325,7 +325,7 @@ func TestValidator_UnrecognizedParameterKeyFailsClosed(t *testing.T) {
         payloadWithMaxLengthUnknownParam{Name: "value"},
         payloadWithRegexUnknownParam{Value: "not-four-digits"},
     } {
-        validationErrors := requireValidationErrors(t, validatorInstance.Validate(payload))
+        validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payload))
 
         validationError, ok := validationErrors[0].(*ValidationError)
         if false == ok {
@@ -338,14 +338,14 @@ func TestValidator_UnrecognizedParameterKeyFailsClosed(t *testing.T) {
     }
 
     /* the shorthand form maps to the recognized `value` key, so it still configures and enforces the bound: 3 is not greater than 5, 9 is */
-    requireValidationErrors(t, validatorInstance.Validate(payloadWithGreaterThanShorthand{Count: 3}))
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithGreaterThanShorthand{Count: 9}))
+    requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithGreaterThanShorthand{Count: 3}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithGreaterThanShorthand{Count: 9}))
 }
 
 func TestValidator_MapsJsonTagNameAsField(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithJsonName{Value: ""})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithJsonName{Value: ""})
     validationErrors := requireValidationErrors(t, err)
 
     validationError, ok := validationErrors[0].(*ValidationError)
@@ -361,7 +361,7 @@ func TestValidator_MapsJsonTagNameAsField(t *testing.T) {
 func TestValidator_SkipsUnexportedFields(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithPrivateField{
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithPrivateField{
         value: "",
         Name:  "",
     })
@@ -375,21 +375,21 @@ func TestValidator_SkipsUnexportedFields(t *testing.T) {
 func TestValidator_IgnoresValidateDashTag(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithIgnoredTag{Name: ""})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithIgnoredTag{Name: ""})
     requireNoValidationErrors(t, err)
 }
 
 func TestValidator_Validate_ReturnsEmptyWhenNilInput(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(nil)
+    err := validatorInstance.Validate(testValidationRuntime(), nil)
     requireNoValidationErrors(t, err)
 }
 
 func TestValidator_Validate_ReturnsEmptyWhenNonStruct(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate("x")
+    err := validatorInstance.Validate(testValidationRuntime(), "x")
     requireNoValidationErrors(t, err)
 }
 
@@ -398,7 +398,7 @@ func TestValidator_Validate_WorksWithPointerToStruct(t *testing.T) {
 
     payload := &testPayload{}
 
-    err := validatorInstance.Validate(payload)
+    err := validatorInstance.Validate(testValidationRuntime(), payload)
     _ = requireValidationErrors(t, err)
 }
 
@@ -413,40 +413,40 @@ func TestValidator_Validate_TypedNilPointer_ReturnsEmptyWithoutPanic(t *testing.
 
     var payload *testPayload = nil
 
-    err := validatorInstance.Validate(payload)
+    err := validatorInstance.Validate(testValidationRuntime(), payload)
     requireNoValidationErrors(t, err)
 }
 
 func TestValidator_RegexConstraint_WithPatternParameter(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithRegex{Value: "zzz"})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithRegex{Value: "zzz"})
     _ = requireValidationErrors(t, err)
 
-    err = validatorInstance.Validate(payloadWithRegex{Value: "abc"})
+    err = validatorInstance.Validate(testValidationRuntime(), payloadWithRegex{Value: "abc"})
     requireNoValidationErrors(t, err)
 }
 
 func TestValidator_RegexConstraint_AllowsCommaInsideCharClass(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithRegexCommaInCharClass{Value: "z"})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithRegexCommaInCharClass{Value: "z"})
     _ = requireValidationErrors(t, err)
 
-    err = validatorInstance.Validate(payloadWithRegexCommaInCharClass{Value: "a"})
+    err = validatorInstance.Validate(testValidationRuntime(), payloadWithRegexCommaInCharClass{Value: "a"})
     requireNoValidationErrors(t, err)
 }
 
 func TestValidator_RegexConstraint_AllowsCommaInsideQuantifier(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithRegexCommaInQuantifier{Value: "aaa"})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithRegexCommaInQuantifier{Value: "aaa"})
     _ = requireValidationErrors(t, err)
 
-    err = validatorInstance.Validate(payloadWithRegexCommaInQuantifier{Value: "a"})
+    err = validatorInstance.Validate(testValidationRuntime(), payloadWithRegexCommaInQuantifier{Value: "a"})
     requireNoValidationErrors(t, err)
 
-    err = validatorInstance.Validate(payloadWithRegexCommaInQuantifier{Value: "aa"})
+    err = validatorInstance.Validate(testValidationRuntime(), payloadWithRegexCommaInQuantifier{Value: "aa"})
     requireNoValidationErrors(t, err)
 }
 
@@ -461,42 +461,42 @@ type payloadWithGreaterThanFloat struct {
 func TestValidator_GreaterThanConstraint_PassesForPositiveValue(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithGreaterThan{Age: 25})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithGreaterThan{Age: 25})
     requireNoValidationErrors(t, err)
 }
 
 func TestValidator_GreaterThanConstraint_FailsForZero(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithGreaterThan{Age: 0})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithGreaterThan{Age: 0})
     _ = requireValidationErrors(t, err)
 }
 
 func TestValidator_GreaterThanConstraint_FailsForNegativeValue(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithGreaterThan{Age: -5})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithGreaterThan{Age: -5})
     _ = requireValidationErrors(t, err)
 }
 
 func TestValidator_GreaterThanConstraint_Float64PassesForPositiveValue(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithGreaterThanFloat{Price: 0.01})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithGreaterThanFloat{Price: 0.01})
     requireNoValidationErrors(t, err)
 }
 
 func TestValidator_GreaterThanConstraint_Float64FailsForZero(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithGreaterThanFloat{Price: 0.0})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithGreaterThanFloat{Price: 0.0})
     _ = requireValidationErrors(t, err)
 }
 
 func TestValidator_Validate_ReturnsInvalidRuleSyntaxErrorForInvalidTag(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithInvalidTag{Name: "x"})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithInvalidTag{Name: "x"})
     validationErrors := requireValidationErrors(t, err)
 
     validationError, ok := validationErrors[0].(*ValidationError)
@@ -514,7 +514,7 @@ type betweenLengthConstraint struct {
     max int
 }
 
-func (instance *betweenLengthConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *betweenLengthConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     resolved, ok := dereferenceValue(value)
     if false == ok {
         return nil
@@ -522,7 +522,7 @@ func (instance *betweenLengthConstraint) Validate(value any, field string) valid
 
     stringValue := fmt.Sprintf("%v", resolved)
     if len(stringValue) < instance.min || len(stringValue) > instance.max {
-        return NewValidationError(field, "length out of bounds", "betweenLength", nil)
+        return NewValidationError(validationContext.Field, "length out of bounds", "betweenLength", nil)
     }
 
     return nil
@@ -552,7 +552,7 @@ func (instance *betweenLengthConstraint) WithParameters(parameters map[string]st
 
 type rigidConstraint struct{}
 
-func (instance *rigidConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *rigidConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     return nil
 }
 
@@ -569,15 +569,15 @@ func TestValidator_CustomParameterizedConstraintConsumesParameters(t *testing.T)
     validatorInstance.RegisterConstraint("betweenLength", &betweenLengthConstraint{min: 0, max: 1000})
 
     tooShort := payloadWithBetween{Code: "a"}
-    err := validatorInstance.Validate(tooShort)
+    err := validatorInstance.Validate(testValidationRuntime(), tooShort)
     requireValidationErrors(t, err)
 
     inBounds := payloadWithBetween{Code: "ab"}
-    err = validatorInstance.Validate(inBounds)
+    err = validatorInstance.Validate(testValidationRuntime(), inBounds)
     requireNoValidationErrors(t, err)
 
     tooLong := payloadWithBetween{Code: "abcd"}
-    err = validatorInstance.Validate(tooLong)
+    err = validatorInstance.Validate(testValidationRuntime(), tooLong)
     requireValidationErrors(t, err)
 }
 
@@ -585,7 +585,7 @@ func TestValidator_ParametersOnNonParameterizableConstraintFailClosed(t *testing
     validatorInstance := NewValidator(ValidatorConfig{})
     validatorInstance.RegisterConstraint("rigid", &rigidConstraint{})
 
-    err := validatorInstance.Validate(payloadWithRigidParameters{Code: "anything"})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithRigidParameters{Code: "anything"})
     validationErrors := requireValidationErrors(t, err)
 
     validationError, ok := validationErrors[0].(*ValidationError)
@@ -605,7 +605,7 @@ func TestValidator_ParametersOnNonParameterizableBuiltInFailClosed(t *testing.T)
         Email string `json:"email" validate:"email(strict=yes)"`
     }
 
-    err := validatorInstance.Validate(payloadWithParameterizedEmail{Email: "valid@example.com"})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithParameterizedEmail{Email: "valid@example.com"})
     requireValidationErrors(t, err)
 }
 
@@ -641,7 +641,7 @@ func TestValidator_EnforcesNestedConstraints(t *testing.T) {
         Bill:  nestedItem{Sku: "###"},
     }
 
-    err := validatorInstance.Validate(payload)
+    err := validatorInstance.Validate(testValidationRuntime(), payload)
     validationErrors := requireValidationErrors(t, err)
 
     if nil == findValidationErrorByField(validationErrors, "items[0].sku") {
@@ -661,7 +661,7 @@ func TestValidator_AcceptsValidNestedPayload(t *testing.T) {
         Bill:  nestedItem{Sku: "ZZZZ9999"},
     }
 
-    err := validatorInstance.Validate(payload)
+    err := validatorInstance.Validate(testValidationRuntime(), payload)
     requireNoValidationErrors(t, err)
 }
 
@@ -671,7 +671,7 @@ func TestValidator_CyclicPayloadTerminates(t *testing.T) {
     node := &cyclicNode{Name: "root"}
     node.Next = node
 
-    err := validatorInstance.Validate(node)
+    err := validatorInstance.Validate(testValidationRuntime(), node)
     requireNoValidationErrors(t, err)
 }
 
@@ -683,7 +683,7 @@ func TestValidateStruct_SkipsAFieldJsonNeverPopulates(t *testing.T) {
 
     validator := NewValidator(ValidatorConfig{})
 
-    validateErr := validator.Validate(&payload{Name: "ok"})
+    validateErr := validator.Validate(testValidationRuntime(), &payload{Name: "ok"})
     if nil != validateErr {
         t.Fatalf("expected the json:\"-\" field to be skipped, got %v", validateErr)
     }
@@ -701,7 +701,7 @@ type shadowingPayload struct {
 func TestValidateStruct_SkipsAPromotedFieldShadowedByTheOuterOne(t *testing.T) {
     validator := NewValidator(ValidatorConfig{})
 
-    validateErr := validator.Validate(&shadowingPayload{UpdatedBy: ""})
+    validateErr := validator.Validate(testValidationRuntime(), &shadowingPayload{UpdatedBy: ""})
     if nil != validateErr {
         t.Fatalf("expected the shadowed promoted field to be skipped, got %v", validateErr)
     }
@@ -723,7 +723,7 @@ type ambiguousPayload struct {
 func TestValidateStruct_DropsAnAmbiguousPromotedName(t *testing.T) {
     validator := NewValidator(ValidatorConfig{})
 
-    validateErr := validator.Validate(&ambiguousPayload{})
+    validateErr := validator.Validate(testValidationRuntime(), &ambiguousPayload{})
     if nil != validateErr {
         t.Fatalf("expected the ambiguous name to be dropped, got %v", validateErr)
     }
@@ -745,14 +745,14 @@ type taggedWinsPayload struct {
 func TestValidateStruct_TaggedPromotedFieldBeatsTheUntaggedTwin(t *testing.T) {
     validator := NewValidator(ValidatorConfig{})
 
-    validateErr := validator.Validate(&taggedWinsPayload{
+    validateErr := validator.Validate(testValidationRuntime(), &taggedWinsPayload{
         taggedTwin: taggedTwin{Source: "set"},
     })
     if nil != validateErr {
         t.Fatalf("expected only the tagged twin to be validated, got %v", validateErr)
     }
 
-    failingErr := validator.Validate(&taggedWinsPayload{})
+    failingErr := validator.Validate(testValidationRuntime(), &taggedWinsPayload{})
     if nil == failingErr {
         t.Fatalf("expected the tagged twin's tag to still run")
     }
@@ -796,7 +796,7 @@ func TestValidateStruct_AStackedDiamondKeepsThePopulatedNameValidated(t *testing
 
     validator := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validator.Validate(&StackedDiamondPayload{Title: "set"}))
+    validationErrors := requireValidationErrors(t, validator.Validate(testValidationRuntime(), &StackedDiamondPayload{Title: "set"}))
 
     for _, candidate := range validationErrors {
         if "CreatedBy" == candidate.Field() {
@@ -810,7 +810,7 @@ func TestValidateStruct_AStackedDiamondKeepsThePopulatedNameValidated(t *testing
 func TestValidateStruct_ValidatesFieldsPromotedThroughAnUnexportedEmbed(t *testing.T) {
     validator := NewValidator(ValidatorConfig{})
 
-    validateErr := validator.Validate(&struct {
+    validateErr := validator.Validate(testValidationRuntime(), &struct {
         shadowedStamp
         Name string `json:"name"`
     }{})
@@ -832,8 +832,8 @@ type valueEmbedPayload struct {
 func TestValidateStruct_ValidatesANilPointerEmbedAsAValueEmbed(t *testing.T) {
     validator := NewValidator(ValidatorConfig{})
 
-    pointerErrors := requireValidationErrors(t, validator.Validate(&nilEmbedPayload{Name: "ok"}))
-    valueErrors := requireValidationErrors(t, validator.Validate(&valueEmbedPayload{Name: "ok"}))
+    pointerErrors := requireValidationErrors(t, validator.Validate(testValidationRuntime(), &nilEmbedPayload{Name: "ok"}))
+    valueErrors := requireValidationErrors(t, validator.Validate(testValidationRuntime(), &valueEmbedPayload{Name: "ok"}))
 
     if pointerErrors.Error() != valueErrors.Error() {
         t.Fatalf(
@@ -861,7 +861,7 @@ type nilEmbedShadowingPayload struct {
 func TestValidateStruct_NilPointerEmbedKeepsItsPlaceInTheDominance(t *testing.T) {
     validator := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validator.Validate(&nilEmbedShadowingPayload{}))
+    validationErrors := requireValidationErrors(t, validator.Validate(testValidationRuntime(), &nilEmbedShadowingPayload{}))
 
     if "reason: this field is required" != validationErrors.Error() {
         t.Fatalf(
@@ -883,7 +883,7 @@ type taggedEmbedPayload struct {
 func TestValidateStruct_AppliesTheTagDeclaredOnAPromotedEmbed(t *testing.T) {
     validator := NewValidator(ValidatorConfig{})
 
-    validateErr := validator.Validate(&taggedEmbedPayload{})
+    validateErr := validator.Validate(testValidationRuntime(), &taggedEmbedPayload{})
     if nil == validateErr {
         t.Fatalf("expected the embed's own tag to run")
     }
@@ -896,8 +896,8 @@ type payloadWithPaddedSkipTag struct {
 func TestValidator_PaddedDashSkipsValidation(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithPaddedSkipTag{Anything: "x"}))
-    requireNoValidationErrors(t, validatorInstance.Validate(payloadWithPaddedSkipTag{}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithPaddedSkipTag{Anything: "x"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithPaddedSkipTag{}))
 }
 
 type payloadWithValueLessGreaterThan struct {
@@ -908,7 +908,7 @@ func TestValidator_ValueLessParameterizedRuleFailsClosed(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
     for _, count := range []int{0, 1} {
-        validationErrors := requireValidationErrors(t, validatorInstance.Validate(payloadWithValueLessGreaterThan{Count: count}))
+        validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payloadWithValueLessGreaterThan{Count: count}))
 
         validationError, ok := validationErrors[0].(*ValidationError)
         if false == ok {
@@ -943,14 +943,14 @@ func buildDeepValidationChain(levels int, deepestName string) *deepValidationNod
 func TestValidateStruct_EnforcesConstraintsAtTheDeepestAllowedNestingLevel(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireValidationErrors(t, validatorInstance.Validate(buildDeepValidationChain(32, "")))
-    requireNoValidationErrors(t, validatorInstance.Validate(buildDeepValidationChain(32, "leaf")))
+    requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildDeepValidationChain(32, "")))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildDeepValidationChain(32, "leaf")))
 }
 
 func TestValidateStruct_FailsClosedPastTheNestingDepthLimit(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(buildDeepValidationChain(33, "")))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildDeepValidationChain(33, "")))
 
     for _, validationError := range validationErrors {
         if ErrorNestingDepthExceeded == validationError.Code() {
@@ -965,7 +965,7 @@ type countingConstraint struct {
     withParametersCount int
 }
 
-func (instance *countingConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *countingConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     return nil
 }
 
@@ -991,7 +991,7 @@ func TestValidator_ConstructsAParameterizedConstraintOncePerTag(t *testing.T) {
 
     requireNoValidationErrors(
         t,
-        validatorInstance.Validate(memoizedConstraintPayload{
+        validatorInstance.Validate(testValidationRuntime(), memoizedConstraintPayload{
             Values: make([]memoizedConstraintElement, 64),
         }),
     )
@@ -1029,7 +1029,7 @@ type concurrentCountingConstraint struct {
     constructionCount atomic.Int64
 }
 
-func (instance *concurrentCountingConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *concurrentCountingConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     return nil
 }
 
@@ -1065,7 +1065,7 @@ func TestValidator_ValidatesConcurrentlyWithMemoizedConstraints(t *testing.T) {
             defer waitGroup.Done()
 
             for iteration := 0; iteration < iterationCount; iteration++ {
-                if validateErr := validatorInstance.Validate(payload); nil != validateErr {
+                if validateErr := validatorInstance.Validate(testValidationRuntime(), payload); nil != validateErr {
                     t.Errorf("unexpected validation error: %v", validateErr)
 
                     return
@@ -1120,12 +1120,12 @@ type mutuallyEmbeddingRight struct {
 func TestValidateStruct_TerminatesOnASelfReferentialNilPointerEmbed(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    selfErrors := requireValidationErrors(t, validatorInstance.Validate(&selfEmbeddingPayload{}))
+    selfErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), &selfEmbeddingPayload{}))
     if "label: this field is required" != selfErrors.Error() {
         t.Fatalf("expected the self-embedded field to be reported exactly once, got %q", selfErrors.Error())
     }
 
-    mutualErrors := requireValidationErrors(t, validatorInstance.Validate(&mutuallyEmbeddingLeft{}))
+    mutualErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), &mutuallyEmbeddingLeft{}))
     if "left: this field is required; right: this field is required" != mutualErrors.Error() {
         t.Fatalf("expected both sides of the cycle to be walked exactly once, got %q", mutualErrors.Error())
     }
@@ -1169,15 +1169,15 @@ func TestValidateStruct_FailsClosedPastTheNestingDepthLimitThroughCollections(t 
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireValidationErrors(t, validatorInstance.Validate(sliceNode))
-    requireValidationErrors(t, validatorInstance.Validate(mapNode))
+    requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), sliceNode))
+    requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), mapNode))
 }
 
 func TestValidator_FreeFormMapPayloadIsNotRejectedUpToTheNestingDepthLimit(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
     for _, levels := range []int{1, 8, 31, 32} {
-        errs := validatorInstance.Validate(freeFormPayload{Name: "given", Metadata: buildFreeFormNesting(levels)})
+        errs := validatorInstance.Validate(testValidationRuntime(), freeFormPayload{Name: "given", Metadata: buildFreeFormNesting(levels)})
         if nil != errs {
             t.Fatalf("expected %d levels of tag-free json to validate, got %v", levels, errs)
         }
@@ -1186,7 +1186,7 @@ func TestValidator_FreeFormMapPayloadIsNotRejectedUpToTheNestingDepthLimit(t *te
     for _, levels := range []int{33, 40, 80} {
         validationErrors := requireValidationErrors(
             t,
-            validatorInstance.Validate(freeFormPayload{Name: "given", Metadata: buildFreeFormNesting(levels)}),
+            validatorInstance.Validate(testValidationRuntime(), freeFormPayload{Name: "given", Metadata: buildFreeFormNesting(levels)}),
         )
 
         if ErrorNestingDepthExceeded != validationErrors[0].Code() {
@@ -1223,7 +1223,7 @@ func TestValidateStruct_PromotedTimeCodecLeavesNoSiblingToValidate(t *testing.T)
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireNoValidationErrors(t, validatorInstance.Validate(payload))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payload))
 
     encoded, marshalErr := json.Marshal(payload)
     if nil != marshalErr {
@@ -1239,7 +1239,7 @@ func TestValidateStruct_PromotedTimeCodecLeavesNoSiblingToValidate(t *testing.T)
 func TestValidateStruct_OrdinaryTimeFieldKeepsItsSiblingsValidated(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    errs := requireValidationErrors(t, validatorInstance.Validate(ordinaryTimeFieldPayload{}))
+    errs := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), ordinaryTimeFieldPayload{}))
     if "name: this field is required" != errs.Error() {
         t.Fatalf("expected the sibling constraint to be enforced, got %q", errs.Error())
     }
@@ -1279,7 +1279,7 @@ func buildNilLeafDepthChain(levels int) nilLeafDepthWrapper {
 func TestValidateStruct_DepthCutIgnoresANilMemberPastTheLimit(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireNoValidationErrors(t, validatorInstance.Validate(buildNilLeafDepthChain(33)))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildNilLeafDepthChain(33)))
 }
 
 type taglessDepthNode struct {
@@ -1304,7 +1304,7 @@ func TestValidateStruct_TaglessChainPastTheNestingDepthLimitIsAccepted(t *testin
     validatorInstance := NewValidator(ValidatorConfig{})
 
     for _, levels := range []int{33, 40, 80} {
-        errs := validatorInstance.Validate(buildTaglessDepthChain(levels))
+        errs := validatorInstance.Validate(testValidationRuntime(), buildTaglessDepthChain(levels))
         if nil != errs {
             t.Fatalf("expected %d tag-free levels to validate, got %v", levels, errs)
         }
@@ -1314,7 +1314,7 @@ func TestValidateStruct_TaglessChainPastTheNestingDepthLimitIsAccepted(t *testin
 func TestValidateStruct_DepthCutReportsOnlyTheTruncatedSubtree(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(buildDeepValidationChain(33, "")))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildDeepValidationChain(33, "")))
 
     if 1 != len(validationErrors) {
         t.Fatalf("expected exactly one error at the cut, got %q", validationErrors.Error())
@@ -1356,12 +1356,12 @@ func buildInterfaceMemberChain(levels int, payload any) *interfaceMemberNode {
 func TestValidateStruct_DepthCutAnswersForATagReachedThroughAnInterfaceMember(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    belowErrors := requireValidationErrors(t, validatorInstance.Validate(buildInterfaceMemberChain(20, interfaceMemberLeaf{})))
+    belowErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildInterfaceMemberChain(20, interfaceMemberLeaf{})))
     if ConstraintNotBlankErrorIsBlank != belowErrors[0].Code() {
         t.Fatalf("expected the tag below the cap to be enforced, got %q", belowErrors.Error())
     }
 
-    pastErrors := requireValidationErrors(t, validatorInstance.Validate(buildInterfaceMemberChain(33, interfaceMemberLeaf{})))
+    pastErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildInterfaceMemberChain(33, interfaceMemberLeaf{})))
     if ErrorNestingDepthExceeded != pastErrors[0].Code() {
         t.Fatalf("expected the cut to report the truncated subtree, got %q", pastErrors.Error())
     }
@@ -1385,9 +1385,9 @@ func buildInterfaceSequenceChain(levels int, payload any) interfaceSequenceNode 
 func TestValidateStruct_DepthCutIgnoresANilInterfaceMemberPastTheLimit(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireNoValidationErrors(t, validatorInstance.Validate(buildInterfaceSequenceChain(33, nil)))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildInterfaceSequenceChain(33, nil)))
 
-    filledErrors := requireValidationErrors(t, validatorInstance.Validate(buildInterfaceSequenceChain(33, interfaceMemberLeaf{})))
+    filledErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildInterfaceSequenceChain(33, interfaceMemberLeaf{})))
     if 1 != len(filledErrors) {
         t.Fatalf("expected exactly one error at the cut, got %q", filledErrors.Error())
     }
@@ -1457,9 +1457,9 @@ func buildEmptyMemberDepthChain(levels int, items []emptyMemberDepthLeaf) emptyM
 func TestValidateStruct_DepthCutIgnoresAnEmptyMemberPastTheLimit(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireNoValidationErrors(t, validatorInstance.Validate(buildEmptyMemberDepthChain(33, []emptyMemberDepthLeaf{})))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildEmptyMemberDepthChain(33, []emptyMemberDepthLeaf{})))
 
-    filledErrors := requireValidationErrors(t, validatorInstance.Validate(buildEmptyMemberDepthChain(33, []emptyMemberDepthLeaf{{}})))
+    filledErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildEmptyMemberDepthChain(33, []emptyMemberDepthLeaf{{}})))
     if 1 != len(filledErrors) {
         t.Fatalf("expected only the populated member to be reported, got %q", filledErrors.Error())
     }
@@ -1514,9 +1514,9 @@ func TestValidateStruct_ADeclaredDecoderKeepsItsSiblingsValidated(t *testing.T) 
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireNoValidationErrors(t, validatorInstance.Validate(payload))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payload))
 
-    absentErrors := requireValidationErrors(t, validatorInstance.Validate(declaredDecoderTimePayload{}))
+    absentErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), declaredDecoderTimePayload{}))
     if "name: this field is required" != absentErrors.Error() {
         t.Fatalf("expected the sibling constraint to be enforced, got %q", absentErrors.Error())
     }
@@ -1571,7 +1571,7 @@ func TestValidateStruct_APromotedTextDecoderLeavesNoSiblingToValidate(t *testing
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireNoValidationErrors(t, validatorInstance.Validate(textDecoderTimePayload{}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), textDecoderTimePayload{}))
 }
 
 func TestValidateStruct_AnAmbiguousDecoderKeepsItsSiblingsValidated(t *testing.T) {
@@ -1591,7 +1591,7 @@ func TestValidateStruct_AnAmbiguousDecoderKeepsItsSiblingsValidated(t *testing.T
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    absentErrors := requireValidationErrors(t, validatorInstance.Validate(ambiguousDecoderTimePayload{}))
+    absentErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), ambiguousDecoderTimePayload{}))
     if "name: this field is required" != absentErrors.Error() {
         t.Fatalf("expected the sibling constraint to be enforced, got %q", absentErrors.Error())
     }
@@ -1662,7 +1662,7 @@ func TestValidateStruct_AShallowerCodecEmbedShadowingATimeCodecKeepsItsSiblingsV
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(timeShadowedByAnObjectCodecPayload{}))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), timeShadowedByAnObjectCodecPayload{}))
     if "name: this field is required" != validationErrors.Error() {
         t.Fatalf("expected the sibling constraint to be enforced, got %q", validationErrors.Error())
     }
@@ -1680,7 +1680,7 @@ func TestValidateStruct_ANonStructCodecEmbedShadowingATimeCodecKeepsItsSiblingsV
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(timeShadowedByAScalarCodecPayload{}))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), timeShadowedByAScalarCodecPayload{}))
     if "name: this field is required" != validationErrors.Error() {
         t.Fatalf("expected the sibling constraint to be enforced, got %q", validationErrors.Error())
     }
@@ -1702,7 +1702,7 @@ func TestValidateStruct_ATimeCodecOutrankingADeeperCodecEmbedLeavesNoSiblingToVa
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireNoValidationErrors(t, validatorInstance.Validate(timeOutrankingADeeperCodecPayload{}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), timeOutrankingADeeperCodecPayload{}))
 }
 
 func TestValidateStruct_ATimeCodecTiedWithACodecEmbedKeepsItsSiblingsValidated(t *testing.T) {
@@ -1712,7 +1712,7 @@ func TestValidateStruct_ATimeCodecTiedWithACodecEmbedKeepsItsSiblingsValidated(t
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(timeTiedWithACodecPayload{}))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), timeTiedWithACodecPayload{}))
     if "name: this field is required" != validationErrors.Error() {
         t.Fatalf("expected the sibling constraint to be enforced, got %q", validationErrors.Error())
     }
@@ -1732,7 +1732,7 @@ func TestValidateStruct_ATimeCodecBehindAnEmbedCycleKeepsItsSiblingsValidated(t 
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(timeCodecCyclePayload{}))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), timeCodecCyclePayload{}))
     if "name: this field is required" != validationErrors.Error() {
         t.Fatalf("expected the sibling constraint to be enforced, got %q", validationErrors.Error())
     }
@@ -1773,7 +1773,7 @@ func TestPromotedValidationMarshalerOrigin_APointerEmbedWithAPointerReceiverCode
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(pointerReceiverCodecHostPayload{}))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), pointerReceiverCodecHostPayload{}))
     if "name: this field is required" != validationErrors.Error() {
         t.Fatalf("expected the sibling constraint to be enforced, got %q", validationErrors.Error())
     }
@@ -1793,7 +1793,7 @@ func TestValidator_SharedPointerIsValidatedUnderEveryPath(t *testing.T) {
 
     shared := &sharedPointerItem{Name: ""}
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(sharedPointerBatch{Primary: shared, Secondary: shared}))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), sharedPointerBatch{Primary: shared, Secondary: shared}))
 
     if 2 != len(validationErrors) {
         t.Fatalf("expected the shared pointer to be validated under both paths, got %d errors: %v", len(validationErrors), validationErrors)
@@ -1811,7 +1811,7 @@ func TestValidator_SharedPointerIsValidatedUnderEveryPath(t *testing.T) {
 
 type typedNilErrorConstraint struct{}
 
-func (instance *typedNilErrorConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *typedNilErrorConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     var typedNil *ValidationError
 
     return typedNil
@@ -1825,7 +1825,7 @@ func TestValidator_TypedNilConstraintErrorIsSuccess(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
     validatorInstance.RegisterConstraint("typedNilError", &typedNilErrorConstraint{})
 
-    requireNoValidationErrors(t, validatorInstance.Validate(typedNilErrorPayload{Value: "anything"}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), typedNilErrorPayload{Value: "anything"}))
 }
 
 /* the registry is append-only, so the missing-name read is unreachable through Validate: the guard is latent and this pins it at the only level it is observable. */
@@ -1850,7 +1850,7 @@ type refusalCausePayload struct {
 func TestValidator_ParameterRefusalCauseReachesTheErrorContext(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(refusalCausePayload{Name: "anything"}))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), refusalCausePayload{Name: "anything"}))
 
     validationError, ok := validationErrors[0].(*ValidationError)
     if false == ok {
@@ -2007,7 +2007,7 @@ func TestValidator_AByteSliceIsAScalarPayloadRatherThanASequence(t *testing.T) {
         } `json:"members"`
     }
 
-    validateErr := validator.Validate(payloadHolder{
+    validateErr := validator.Validate(testValidationRuntime(), payloadHolder{
         Blob: []byte{0, 1, 2, 3},
         Members: []struct {
             Name string `json:"name" validate:"notBlank"`
@@ -2051,7 +2051,7 @@ func TestValidator_TheFieldNameFollowsEncodingJsonsOwnReadingOfTheTag(t *testing
         Plain       string `validate:"notBlank"`
     }
 
-    errors := validationErrorsFrom(t, validator.Validate(tagShapes{}))
+    errors := validationErrorsFrom(t, validator.Validate(testValidationRuntime(), tagShapes{}))
 
     reported := map[string]bool{}
     for _, validationError := range errors {
@@ -2072,7 +2072,7 @@ func TestValidator_TheFieldNameFollowsEncodingJsonsOwnReadingOfTheTag(t *testing
 func TestValidator_AnEmbedWithAJsonNameIsAnObjectRatherThanAPromotion(t *testing.T) {
     validator := NewValidator(ValidatorConfig{})
 
-    errors := validationErrorsFrom(t, validator.Validate(embedHolder{}))
+    errors := validationErrorsFrom(t, validator.Validate(testValidationRuntime(), embedHolder{}))
 
     reported := map[string]bool{}
     for _, validationError := range errors {
@@ -2116,7 +2116,7 @@ type nestedEmbedTagPayload struct {
 func TestValidateStruct_AnEmbedsOwnTagReportsUnderTheParentsPath(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(nestedEmbedTagPayload{}))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), nestedEmbedTagPayload{}))
 
     if "inner.NestedEmbedTagCore: value must be a string" != validationErrors.Error() {
         t.Fatalf("expected the embed's own tag to report under the parent's path, got %q", validationErrors.Error())
@@ -2144,7 +2144,7 @@ func TestIsPromotedValidationEmbed_ADashTaggedEmbedIsNeitherFlattenedNorNamed(t 
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    requireNoValidationErrors(t, validatorInstance.Validate(dashExcludedEmbedPayload{}))
+    requireNoValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), dashExcludedEmbedPayload{}))
 }
 
 type tiedTimeLeft struct {
@@ -2181,7 +2181,7 @@ func TestValidateStruct_ANestedCodecTieResolvesToTheCarrierAndKeepsItsSiblingsVa
 
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(tiedTimeHostPayload{}))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), tiedTimeHostPayload{}))
     if "name: this field is required" != validationErrors.Error() {
         t.Fatalf("expected the sibling constraint to be enforced, got %q", validationErrors.Error())
     }
@@ -2198,7 +2198,7 @@ type walkedPointerEmbedPayload struct {
 func TestValidator_ANonNilPointerEmbedIsWalkedThroughItsValue(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(walkedPointerEmbedPayload{WalkedPointerEmbedCore: &WalkedPointerEmbedCore{}}))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), walkedPointerEmbedPayload{WalkedPointerEmbedCore: &WalkedPointerEmbedCore{}}))
 
     if "value: this field is required" != validationErrors.Error() {
         t.Fatalf("expected the pointee's constraint to be enforced through the pointer embed, got %q", validationErrors.Error())
@@ -2207,7 +2207,7 @@ func TestValidator_ANonNilPointerEmbedIsWalkedThroughItsValue(t *testing.T) {
 
 type typedNilWithParametersConstraint struct{}
 
-func (instance *typedNilWithParametersConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *typedNilWithParametersConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     return nil
 }
 
@@ -2234,7 +2234,7 @@ func TestValidator_BuildConstraintWithParametersRefusesATypedNilConstruction(t *
 func TestValidator_TheRefusedTagSegmentReachesTheErrorContext(t *testing.T) {
     validatorInstance := NewValidator(ValidatorConfig{})
 
-    err := validatorInstance.Validate(payloadWithInvalidTag{Name: "x"})
+    err := validatorInstance.Validate(testValidationRuntime(), payloadWithInvalidTag{Name: "x"})
     validationErrors := requireValidationErrors(t, err)
 
     validationError, ok := validationErrors[0].(*ValidationError)
@@ -2283,7 +2283,7 @@ func TestValidator_ASharedSubtreeIsWalkedOnceAndReportedUnderEveryPath(t *testin
     validatorInstance := NewValidator(ValidatorConfig{})
 
     started := time.Now()
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(buildSharedSubtree(20)))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), buildSharedSubtree(20)))
     elapsed := time.Since(started)
 
     if 500*time.Millisecond < elapsed {
@@ -2337,7 +2337,7 @@ func TestValidator_ASharedPointerReachedAtTwoDepthsIsWalkedAtEach(t *testing.T) 
         deep = &sharedDepthLink{Next: deep}
     }
 
-    validationErrors := requireValidationErrors(t, validatorInstance.Validate(sharedDepthRoot{Shallow: holder, Deep: deep}))
+    validationErrors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), sharedDepthRoot{Shallow: holder, Deep: deep}))
 
     codesByPrefix := map[string][]string{}
     for _, validationError := range validationErrors {
@@ -2367,19 +2367,19 @@ func (instance *ownFieldConstraintError) Error() string           { return insta
 
 type ownFieldConstraint struct{}
 
-func (instance *ownFieldConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *ownFieldConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     return &ownFieldConstraintError{field: "custom"}
 }
 
 type ownTypeConstraint struct{}
 
-func (instance *ownTypeConstraint) Validate(value any, field string) validationcontract.ValidationError {
-    return &ownFieldConstraintError{field: field}
+func (instance *ownTypeConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
+    return &ownFieldConstraintError{field: validationContext.Field}
 }
 
 type ownFieldPackageTypeConstraint struct{}
 
-func (instance *ownFieldPackageTypeConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *ownFieldPackageTypeConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     return NewValidationError("custom", "own message", "own_code", nil)
 }
 
@@ -2396,7 +2396,7 @@ func TestValidator_AConstraintErrorWithItsOwnFieldIsAnsweredVerbatimUnderEveryPa
     validator.RegisterConstraint("ownField", &ownFieldConstraint{})
 
     shared := &sharedAddress{}
-    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+    errors := requireValidationErrors(t, validator.Validate(testValidationRuntime(), &order{Billing: shared, Shipping: shared}))
 
     if 2 != len(errors) {
         t.Fatalf("expected the shared pointer reported under both paths, got %v", errors)
@@ -2426,7 +2426,7 @@ func TestValidator_AConstraintErrorOfItsOwnTypeKeepsItsTypeAndItsPathUnderEveryP
     validator.RegisterConstraint("ownType", &ownTypeConstraint{})
 
     shared := &sharedAddress{}
-    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+    errors := requireValidationErrors(t, validator.Validate(testValidationRuntime(), &order{Billing: shared, Shipping: shared}))
 
     if 2 != len(errors) {
         t.Fatalf("expected the shared pointer reported under both paths, got %v", errors)
@@ -2447,7 +2447,7 @@ func TestValidator_AConstraintErrorOfItsOwnTypeKeepsItsTypeAndItsPathUnderEveryP
 type pathPrefixedOwnFieldConstraint struct{}
 
 /* the own field begins with the text of the walked path — BillingLine under Billing — without lying under it in the walk's grammar */
-func (instance *pathPrefixedOwnFieldConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *pathPrefixedOwnFieldConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     return NewValidationError("BillingLine", "own message", "own_code", nil)
 }
 
@@ -2465,7 +2465,7 @@ func TestValidator_AnOwnFieldThatOnlyBeginsWithThePathTextIsAnsweredVerbatimUnde
     validator.RegisterConstraint("pathPrefixedOwnField", &pathPrefixedOwnFieldConstraint{})
 
     shared := &sharedAddress{}
-    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+    errors := requireValidationErrors(t, validator.Validate(testValidationRuntime(), &order{Billing: shared, Shipping: shared}))
 
     if 2 != len(errors) || "BillingLine" != errors[0].Field() || "BillingLine" != errors[1].Field() {
         t.Fatalf("expected the constraint's own field kept verbatim under both paths, got %v", errors)
@@ -2493,7 +2493,7 @@ func TestValidator_APackageErrorUnderAFieldOfItsOwnIsAnsweredVerbatimUnderEveryP
     validator.RegisterConstraint("ownFieldPackageType", &ownFieldPackageTypeConstraint{})
 
     shared := &sharedAddress{}
-    errors := requireValidationErrors(t, validator.Validate(&order{Billing: shared, Shipping: shared}))
+    errors := requireValidationErrors(t, validator.Validate(testValidationRuntime(), &order{Billing: shared, Shipping: shared}))
 
     if 2 != len(errors) || "custom" != errors[0].Field() || "custom" != errors[1].Field() {
         t.Fatalf("expected the constraint's own field kept verbatim under both paths, got %v", errors)
@@ -2524,7 +2524,7 @@ func validationAllocation(validator *Validator, payload any) (uint64, error) {
     var before runtime.MemStats
     runtime.ReadMemStats(&before)
 
-    err := validator.Validate(payload)
+    err := validator.Validate(testValidationRuntime(), payload)
 
     var after runtime.MemStats
     runtime.ReadMemStats(&after)
@@ -2664,7 +2664,7 @@ func TestValidator_AMapKeyUpToTheBoundKeepsItsWholeNameInTheErrorField(t *testin
     }
 
     for _, key := range []string{"primary", strings.Repeat("k", maxRenderedMapKeyLength)} {
-        errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(&payload{Groups: map[string][]item{key: {{}}}}))
+        errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), &payload{Groups: map[string][]item{key: {{}}}}))
 
         expected := "groups[" + key + "][0].name"
         if 1 != len(errors) || expected != errors[0].Field() {
@@ -2682,7 +2682,7 @@ func TestValidator_AMapKeyOverTheBoundIsTruncatedWithTheMarkerInTheErrorField(t 
     }
 
     key := strings.Repeat("k", maxRenderedMapKeyLength+1)
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(&payload{Groups: map[string][]item{key: {{}}}}))
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), &payload{Groups: map[string][]item{key: {{}}}}))
 
     expected := "groups[" + key[:maxRenderedMapKeyLength] + truncatedMapKeyMarker + "][0].name"
     if 1 != len(errors) || expected != errors[0].Field() {
@@ -2697,7 +2697,7 @@ func TestValidator_AMapKeyTruncatedInsideARuneIsCutOnTheRuneBoundary(t *testing.
 
     /* one ASCII byte and then two-byte runes, so the bound falls on the second byte of a rune */
     key := "a" + strings.Repeat("é", maxRenderedMapKeyLength)
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(&payload{Groups: map[string][]testPayload{key: {{}}}}))
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), &payload{Groups: map[string][]testPayload{key: {{}}}}))
 
     expectedPrefix := "groups[" + key[:maxRenderedMapKeyLength-1] + truncatedMapKeyMarker + "][0]."
     for _, validationError := range errors {
@@ -2795,7 +2795,7 @@ func TestValidator_ATruncatedMapOfNonEmptyMembersAnswersOneEntryUnderTheMapsPath
         "third":  map[string]any{"leaf": "value"},
     })
 
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(freeFormPayload{Name: "given", Metadata: metadata}))
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), freeFormPayload{Name: "given", Metadata: metadata}))
 
     if 1 != len(errors) || ErrorNestingDepthExceeded != errors[0].Code() || mapPath != errors[0].Field() {
         t.Fatalf("expected one depth-cut entry under %q, got %q", mapPath, errors.Error())
@@ -2813,7 +2813,7 @@ func TestValidator_ATruncatedContainerOfNullOrEmptyMembersAnswersNoEntry(t *test
         "list":   []any{},
     })
 
-    requireNoValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(freeFormPayload{Name: "given", Metadata: metadata}))
+    requireNoValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), freeFormPayload{Name: "given", Metadata: metadata}))
 }
 
 /* the fields of a struct are fixed by its type, not by the client, so each truncated field keeps its own entry under its own path */
@@ -2827,7 +2827,7 @@ func TestValidator_TruncatedStructFieldsKeepOneEntryPerFieldUnderTheFieldsPath(t
         wrapper = &emptyMemberDepthWrapper{Inner: wrapper}
     }
 
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(*wrapper))
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), *wrapper))
 
     if 2 != len(errors) {
         t.Fatalf("expected one entry per truncated field, got %q", errors.Error())
@@ -2849,7 +2849,7 @@ type budgetPayload struct {
 }
 
 func TestValidator_AsManyErrorsAsTheBudgetHoldsAnswerEveryOneWithoutAClosingEntry(t *testing.T) {
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(budgetPayload{Items: make([]budgetElement, maxValidationErrors)}))
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), budgetPayload{Items: make([]budgetElement, maxValidationErrors)}))
 
     if maxValidationErrors != len(errors) {
         t.Fatalf("expected %d entries, got %d", maxValidationErrors, len(errors))
@@ -2863,7 +2863,7 @@ func TestValidator_AsManyErrorsAsTheBudgetHoldsAnswerEveryOneWithoutAClosingEntr
 }
 
 func TestValidator_OneErrorPastTheBudgetClosesTheAnswerWithTheLimitEntry(t *testing.T) {
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(budgetPayload{Items: make([]budgetElement, maxValidationErrors+1)}))
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), budgetPayload{Items: make([]budgetElement, maxValidationErrors+1)}))
 
     if maxValidationErrors+1 != len(errors) {
         t.Fatalf("expected %d entries, got %d", maxValidationErrors+1, len(errors))
@@ -2889,10 +2889,10 @@ type alwaysFailingCountingConstraint struct {
     calls int
 }
 
-func (instance *alwaysFailingCountingConstraint) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *alwaysFailingCountingConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     instance.calls++
 
-    return NewValidationError(field, "always fails", "alwaysFails", nil)
+    return NewValidationError(validationContext.Field, "always fails", "alwaysFails", nil)
 }
 
 /* the budget stops the walk, not only the answer: past the first error over the budget no rule runs, so a body of many failing elements costs no more than the budget */
@@ -2944,7 +2944,7 @@ func TestValidator_TheBudgetCountsTheErrorsOfEveryDoor(t *testing.T) {
         Items    []element      `json:"items"`
     }
 
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(payload{
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), payload{
         Metadata: buildFreeFormNesting(33),
         Items:    make([]element, maxValidationErrors/2),
     }))
@@ -3005,7 +3005,7 @@ func TestValidator_APathLongerThanTheBoundIsCutAtItsHeadAndKeepsItsTail(t *testi
         },
     }
 
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(payload))
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), payload))
     if 2 != len(errors) {
         t.Fatalf("expected one entry per path to the shared leaf, got %d", len(errors))
     }
@@ -3021,8 +3021,8 @@ func TestValidator_APathLongerThanTheBoundIsCutAtItsHeadAndKeepsItsTail(t *testi
 
 type longMessageConstraint struct{}
 
-func (instance *longMessageConstraint) Validate(value any, field string) validationcontract.ValidationError {
-    return NewValidationError(field, strings.Repeat("m", 2048), "longMessage", nil)
+func (instance *longMessageConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
+    return NewValidationError(validationContext.Field, strings.Repeat("m", 2048), "longMessage", nil)
 }
 
 /* an application's constraint whose message is long fills the answer's byte budget before its count: the answer closes with the size entry, the walk stopped there */
@@ -3038,7 +3038,7 @@ func TestValidator_AnAnswerPastTheByteBudgetClosesWithTheSizeEntry(t *testing.T)
     validatorInstance := NewValidator(ValidatorConfig{})
     validatorInstance.RegisterConstraint("longMessage", &longMessageConstraint{})
 
-    errors := requireValidationErrors(t, validatorInstance.Validate(payload{Items: make([]element, maxValidationErrors)}))
+    errors := requireValidationErrors(t, validatorInstance.Validate(testValidationRuntime(), payload{Items: make([]element, maxValidationErrors)}))
 
     spelled := 0
     for _, validationError := range errors[:len(errors)-1] {
@@ -3085,7 +3085,7 @@ func TestValidator_ADepthCutReachedThroughAStructFieldSpendsTheBudget(t *testing
         items[index] = depthCutChain(maxNestedValidationDepth)
     }
 
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(payload{Items: items}))
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), payload{Items: items}))
 
     if maxValidationErrors+1 != len(errors) || errorLimitExceededCode != errors[maxValidationErrors].Code() {
         t.Fatalf("expected the budget filled and closed, got %d entries ending in %q", len(errors), errors[len(errors)-1].Code())
@@ -3106,7 +3106,7 @@ func TestValidator_AMalformedTagOnEveryElementSpendsTheBudget(t *testing.T) {
         Items []element `json:"items"`
     }
 
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(payload{Items: make([]element, maxValidationErrors+1)}))
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), payload{Items: make([]element, maxValidationErrors+1)}))
 
     if maxValidationErrors+1 != len(errors) || errorLimitExceededCode != errors[maxValidationErrors].Code() || ErrorInvalidRuleSyntax != errors[0].Code() {
         t.Fatalf("expected the budget filled by the malformed tag and closed, got %d entries, the first %q", len(errors), errors[0].Code())
@@ -3125,7 +3125,7 @@ func TestValidator_AnAnswerRecalledFromTheMemoSpendsTheBudget(t *testing.T) {
         items[index] = sharedLeaf
     }
 
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(payload{Items: items}))
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), payload{Items: items}))
 
     if maxValidationErrors+1 != len(errors) || errorLimitExceededCode != errors[maxValidationErrors].Code() {
         t.Fatalf("expected the budget filled by recalled answers and closed, got %d entries", len(errors))
@@ -3194,34 +3194,34 @@ func TestNewValidator_AdmitsTheNestingDepthCeiling(t *testing.T) {
 
 /* each configured limit binds the answer in place of its default */
 func TestNewValidator_AppliesEachConfiguredLimit(t *testing.T) {
-    countErrors := requireValidationErrors(t, NewValidator(ValidatorConfig{MaxErrors: bound.Of(3)}).Validate(budgetPayload{Items: make([]budgetElement, 10)}))
+    countErrors := requireValidationErrors(t, NewValidator(ValidatorConfig{MaxErrors: bound.Of(3)}).Validate(testValidationRuntime(), budgetPayload{Items: make([]budgetElement, 10)}))
     if 4 != len(countErrors) || errorLimitExceededCode != countErrors[3].Code() || 3 != countErrors[3].Context()["maxErrors"] {
         t.Fatalf("expected three entries and the closing one, got %d", len(countErrors))
     }
 
-    pathErrors := requireValidationErrors(t, NewValidator(ValidatorConfig{MaxRenderedPathLength: bound.Of(8)}).Validate(budgetPayload{Items: make([]budgetElement, 1)}))
+    pathErrors := requireValidationErrors(t, NewValidator(ValidatorConfig{MaxRenderedPathLength: bound.Of(8)}).Validate(testValidationRuntime(), budgetPayload{Items: make([]budgetElement, 1)}))
     if truncatedPathMarker+"[0].name" != pathErrors[0].Field() {
         t.Fatalf("expected the path cut to its last 8 bytes, got %q", pathErrors[0].Field())
     }
 
     entryBytes := len("items[0].name") + len(pathErrors[0].Message())
-    byteErrors := requireValidationErrors(t, NewValidator(ValidatorConfig{MaxAnswerBytes: bound.Of(2 * entryBytes)}).Validate(budgetPayload{Items: make([]budgetElement, 5)}))
+    byteErrors := requireValidationErrors(t, NewValidator(ValidatorConfig{MaxAnswerBytes: bound.Of(2 * entryBytes)}).Validate(testValidationRuntime(), budgetPayload{Items: make([]budgetElement, 5)}))
     if 3 != len(byteErrors) || "validation stopped after the maximum size of the answer" != byteErrors[2].Message() {
         t.Fatalf("expected two entries and the size entry, got %d", len(byteErrors))
     }
 
     shallowValidator := NewValidator(ValidatorConfig{MaxNestingDepth: bound.Of(16)})
-    if errs := shallowValidator.Validate(freeFormPayload{Name: "given", Metadata: buildFreeFormNesting(8)}); nil != errs {
+    if errs := shallowValidator.Validate(testValidationRuntime(), freeFormPayload{Name: "given", Metadata: buildFreeFormNesting(8)}); nil != errs {
         t.Fatalf("expected 8 levels within a depth of 16, got %v", errs)
     }
     /* the map's own path is spelled only by the member check, the struct chain's cut only by the walk */
-    depthErrors := requireValidationErrors(t, shallowValidator.Validate(freeFormPayload{Name: "given", Metadata: buildFreeFormNesting(9)}))
+    depthErrors := requireValidationErrors(t, shallowValidator.Validate(testValidationRuntime(), freeFormPayload{Name: "given", Metadata: buildFreeFormNesting(9)}))
     if 1 != len(depthErrors) || ErrorNestingDepthExceeded != depthErrors[0].Code() || 16 != depthErrors[0].Context()["maxDepth"] || "metadata[k][k][k][k][k][k][k]" != depthErrors[0].Field() {
         t.Fatalf("expected 9 levels cut once at the configured depth of 16 under the map's path, got %v", depthErrors)
     }
 
-    requireNoValidationErrors(t, shallowValidator.Validate(buildDeepValidationChain(8, "leaf")))
-    chainErrors := requireValidationErrors(t, shallowValidator.Validate(buildDeepValidationChain(9, "leaf")))
+    requireNoValidationErrors(t, shallowValidator.Validate(testValidationRuntime(), buildDeepValidationChain(8, "leaf")))
+    chainErrors := requireValidationErrors(t, shallowValidator.Validate(testValidationRuntime(), buildDeepValidationChain(9, "leaf")))
     if 1 != len(chainErrors) || ErrorNestingDepthExceeded != chainErrors[0].Code() {
         t.Fatalf("expected a nine-level chain cut at the configured depth of 16, got %v", chainErrors)
     }
@@ -3232,7 +3232,7 @@ func TestNewValidator_AppliesEachConfiguredLimit(t *testing.T) {
     type payload struct {
         Groups map[string][]item `json:"groups"`
     }
-    keyErrors := requireValidationErrors(t, NewValidator(ValidatorConfig{MaxRenderedMapKeyLength: bound.Of(4)}).Validate(&payload{Groups: map[string][]item{"abcdef": {{}}}}))
+    keyErrors := requireValidationErrors(t, NewValidator(ValidatorConfig{MaxRenderedMapKeyLength: bound.Of(4)}).Validate(testValidationRuntime(), &payload{Groups: map[string][]item{"abcdef": {{}}}}))
     if "groups[abcd"+truncatedMapKeyMarker+"][0].name" != keyErrors[0].Field() {
         t.Fatalf("expected the key cut at its first 4 bytes, got %q", keyErrors[0].Field())
     }
@@ -3252,7 +3252,7 @@ func TestValidator_AClientSizedAnswerOfDeepPathsStaysUnderTheByteCeiling(t *test
 
     body := payload{Groups: map[string]map[string]map[string]map[string]map[string]*deepPathLeaf{key: {key: {key: {key: leaves}}}}}
 
-    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(body))
+    errors := requireValidationErrors(t, NewValidator(ValidatorConfig{}).Validate(testValidationRuntime(), body))
 
     spelled := 0
     for _, validationError := range errors {
@@ -3267,5 +3267,96 @@ func TestValidator_AClientSizedAnswerOfDeepPathsStaysUnderTheByteCeiling(t *test
 
     if maxValidationErrors*(maxRenderedPathLength+len(truncatedPathMarker)+len(errors[0].Message()))+len(errors[maxValidationErrors].Message()) < spelled {
         t.Fatalf("expected at most %d bytes of path per entry, got %d bytes in all", maxRenderedPathLength+len(truncatedPathMarker), spelled)
+    }
+}
+
+type recordingContextConstraint struct {
+    seen []validationcontract.ValidationContext
+}
+
+func (instance *recordingContextConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
+    instance.seen = append(instance.seen, validationContext)
+
+    return nil
+}
+
+type recordedOwnerItem struct {
+    Name string `json:"name" validate:"recording"`
+}
+
+type recordedOwnerRoot struct {
+    Title string              `json:"title" validate:"recording"`
+    Items []recordedOwnerItem `json:"items"`
+}
+
+func TestValidate_AConstraintIsHandedTheRuntimeThePathAndTheImmediateOwner(t *testing.T) {
+    validatorInstance := NewValidator(ValidatorConfig{})
+    recording := &recordingContextConstraint{}
+    validatorInstance.RegisterConstraint("recording", recording)
+
+    runtimeInstance := testValidationRuntime()
+    root := &recordedOwnerRoot{Title: "t", Items: []recordedOwnerItem{{Name: "a"}, {Name: "b"}}}
+
+    if validateErr := validatorInstance.Validate(runtimeInstance, root); nil != validateErr {
+        t.Fatalf("unexpected validation error: %v", validateErr)
+    }
+
+    if 3 != len(recording.seen) {
+        t.Fatalf("expected three constraint calls, got %d", len(recording.seen))
+    }
+
+    for _, seen := range recording.seen {
+        if runtimeInstance != seen.Runtime {
+            t.Fatalf("expected the runtime handed to Validate, got %v", seen.Runtime)
+        }
+    }
+
+    if "title" != recording.seen[0].Field {
+        t.Fatalf("expected the root field's path, got %q", recording.seen[0].Field)
+    }
+
+    if _, isRoot := recording.seen[0].Owner.(recordedOwnerRoot); false == isRoot {
+        t.Fatalf("expected the root struct as a value to own its field, got %T", recording.seen[0].Owner)
+    }
+
+    if "items[1].name" != recording.seen[2].Field {
+        t.Fatalf("expected the nested field's path, got %q", recording.seen[2].Field)
+    }
+
+    if owner, isItem := recording.seen[2].Owner.(recordedOwnerItem); false == isItem || "b" != owner.Name {
+        t.Fatalf("expected the nested item, not the root, to own its field, got %#v", recording.seen[2].Owner)
+    }
+}
+
+func TestValidate_RefusesANilRuntime(t *testing.T) {
+    validateErr := NewValidator(ValidatorConfig{}).Validate(nil, testPayload{})
+
+    var exceptionErr *exception.Error
+    if nil == validateErr || false == strings.Contains(validateErr.Error(), "the runtime is nil or carries no context") {
+        t.Fatalf("expected the nil runtime refused, got %v", validateErr)
+    }
+
+    if exceptionValue, isException := validateErr.(*exception.Error); true == isException {
+        exceptionErr = exceptionValue
+    }
+
+    if nil == exceptionErr || "runtimeInstance" != exceptionErr.Context()["argument"] {
+        t.Fatalf("expected the refusal to name runtimeInstance, got %v", validateErr)
+    }
+}
+
+func TestNewValidator_TheRegisteredParameterizedTemplatesCarryNoBound(t *testing.T) {
+    validatorInstance := NewValidator(ValidatorConfig{})
+
+    if 0 != validatorInstance.constraints[ConstraintMinLength].(*MinLength).min || 0 != validatorInstance.constraints[ConstraintMaxLength].(*MaxLength).max {
+        t.Fatalf("expected the length templates to carry no bound")
+    }
+
+    if "" != validatorInstance.constraints[ConstraintRegex].(*Regex).Pattern() {
+        t.Fatalf("expected the regex template to carry no pattern")
+    }
+
+    if 0 != validatorInstance.constraints[ConstraintGreaterThan].(*GreaterThan).min || 0 != validatorInstance.constraints[ConstraintLessThan].(*LessThan).max {
+        t.Fatalf("expected the comparison templates to carry no bound")
     }
 }

@@ -1,6 +1,7 @@
 package http
 
 import (
+    "context"
     nethttp "net/http"
     "net/http/httptest"
     "strings"
@@ -8,10 +9,12 @@ import (
 
     "github.com/precision-soft/melody/v4/config"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
+    "github.com/precision-soft/melody/v4/container/runtime"
     "github.com/precision-soft/melody/v4/exception"
     httpcontract "github.com/precision-soft/melody/v4/http/contract"
     "github.com/precision-soft/melody/v4/session"
     "github.com/precision-soft/melody/v4/validation"
+    validationcontract "github.com/precision-soft/melody/v4/validation/contract"
 )
 
 func TestRequest_BindJsonOversizedBodyReturns413(t *testing.T) {
@@ -452,4 +455,43 @@ func TestRequest_ValidateBoundBodyOverANilRuntimeIsRefusedNamingTheRuntime(t *te
 
     target := map[string]any{"name": "value"}
     _ = validateBoundBody(nil, &target)
+}
+
+type runtimeRecordingConstraint struct {
+    seen containercontract.Runtime
+}
+
+func (instance *runtimeRecordingConstraint) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
+    instance.seen = validationContext.Runtime
+
+    return nil
+}
+
+func TestValidateBoundBody_HandsTheRequestsRuntimeToTheConstraints(t *testing.T) {
+    recording := &runtimeRecordingConstraint{}
+    serviceContainer := newHttpTestContainer()
+    serviceContainer.MustRegister(
+        validation.ServiceValidator,
+        func(resolver containercontract.Resolver) (*validation.Validator, error) {
+            validatorInstance := validation.NewValidator(validation.ValidatorConfig{})
+            validatorInstance.RegisterConstraint("recording", recording)
+
+            return validatorInstance, nil
+        },
+        containercontract.RegisterOptions{},
+    )
+
+    runtimeInstance := runtime.NewRequest(context.Background(), serviceContainer.NewScope())
+
+    target := &struct {
+        Name string `json:"name" validate:"recording"`
+    }{Name: "a"}
+
+    if validateErr := validateBoundBody(runtimeInstance, target); nil != validateErr {
+        t.Fatalf("unexpected validation error: %v", validateErr)
+    }
+
+    if runtimeInstance != recording.seen {
+        t.Fatalf("expected the request's runtime handed to the constraint, got %v", recording.seen)
+    }
 }

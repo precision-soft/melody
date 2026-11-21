@@ -18,7 +18,7 @@ var (
 /* Numeric judges the digits of a string. A value of any other type is refused rather than skipped; a field that holds a number wants greaterThan or lessThan instead. */
 type Numeric struct{}
 
-func (instance *Numeric) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *Numeric) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     if nil == value {
         return nil
     }
@@ -30,7 +30,7 @@ func (instance *Numeric) Validate(value any, field string) validationcontract.Va
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return NewValidationError(field, "value must be a string", ConstraintNumericErrorNotNumeric, nil)
+        return NewValidationError(validationContext.Field, "value must be a string", ConstraintNumericErrorNotNumeric, nil)
     }
 
     if "" == stringValue {
@@ -38,7 +38,7 @@ func (instance *Numeric) Validate(value any, field string) validationcontract.Va
     }
 
     if false == numericRegexInstance.MatchString(stringValue) {
-        return NewValidationError(field, "this field must contain only numbers", ConstraintNumericErrorNotNumeric, nil)
+        return NewValidationError(validationContext.Field, "this field must contain only numbers", ConstraintNumericErrorNotNumeric, nil)
     }
 
     return nil

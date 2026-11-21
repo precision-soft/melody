@@ -13,6 +13,7 @@ import (
     "unicode/utf8"
 
     "github.com/precision-soft/melody/v4/bound"
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/exception"
     exceptioncontract "github.com/precision-soft/melody/v4/exception/contract"
     "github.com/precision-soft/melody/v4/internal"
@@ -175,6 +176,7 @@ func defaultValidationLimits() validationLimits {
 
 /* validationWalk is the state of one Validate call: the path-scoped set that closes reference cycles, the whole-call memo that answers a pointer already walked at the same depth with its first walk's errors, re-spelled under the new path, and the count of the errors and of the bytes the answer holds, which stops the walk at the first error past either bound. A walk cut short by an ancestor memoizes only what it saw; the ancestor's errors are reported under its own path. The paths stay whole during the walk, which the memo re-spells; they are cut once the answer is complete. */
 type validationWalk struct {
+    runtime       containercontract.Runtime
     limits        validationLimits
     onPath        map[cyclicReference]bool
     memo          map[validationMemoKey][]memoizedValidationError
@@ -184,9 +186,10 @@ type validationWalk struct {
     exceededBytes bool
 }
 
-func newValidationWalk(limits validationLimits) *validationWalk {
+func newValidationWalk(runtimeInstance containercontract.Runtime, limits validationLimits) *validationWalk {
     return &validationWalk{
-        limits: limits,
+        runtime: runtimeInstance,
+        limits:  limits,
         onPath: make(map[cyclicReference]bool),
         memo:   make(map[validationMemoKey][]memoizedValidationError),
     }
@@ -373,14 +376,14 @@ func NewValidator(config ValidatorConfig) *Validator {
 
     validator.RegisterConstraint(ConstraintNotBlank, &NotBlank{})
     validator.RegisterConstraint(ConstraintEmail, &Email{})
-    validator.RegisterConstraint(ConstraintMinLength, NewMinLength(1))
-    validator.RegisterConstraint(ConstraintMaxLength, NewMaxLength(100))
-    validator.RegisterConstraint(ConstraintRegex, NewRegex(".*"))
+    validator.RegisterConstraint(ConstraintMinLength, &MinLength{})
+    validator.RegisterConstraint(ConstraintMaxLength, &MaxLength{})
+    validator.RegisterConstraint(ConstraintRegex, &Regex{})
     validator.RegisterConstraint(ConstraintNumeric, &Numeric{})
     validator.RegisterConstraint(ConstraintAlpha, &Alpha{})
     validator.RegisterConstraint(ConstraintAlphanumeric, &Alphanumeric{})
-    validator.RegisterConstraint(ConstraintGreaterThan, NewGreaterThan(0))
-    validator.RegisterConstraint(ConstraintLessThan, NewLessThan(0))
+    validator.RegisterConstraint(ConstraintGreaterThan, &GreaterThan{})
+    validator.RegisterConstraint(ConstraintLessThan, &LessThan{})
     validator.RegisterConstraint(ConstraintNotEmpty, NewNotEmpty())
 
     return validator
@@ -455,6 +458,15 @@ func (instance *Validator) RegisterConstraint(name string, constraint validation
     instance.mutex.Unlock()
 }
 
+/* validationOwnerOf answers the struct as a value a constraint is handed as its owner, nil for one reached through an unexported field, whose value cannot be handed on. */
+func validationOwnerOf(value reflect.Value) any {
+    if false == value.IsValid() || false == value.CanInterface() {
+        return nil
+    }
+
+    return value.Interface()
+}
+
 /* validationLimits answers the limits the validator was built with; a Validator built as a zero value takes the defaults. */
 func (instance *Validator) validationLimits() validationLimits {
     if 0 == instance.limits.maxErrors {
@@ -464,8 +476,13 @@ func (instance *Validator) validationLimits() validationLimits {
     return instance.limits
 }
 
-func (instance *Validator) Validate(data any) error {
-    errors := instance.validateInternal(data)
+/* Validate judges the data under the runtime, which every constraint is handed; a nil runtime, a typed nil and one carrying no context are refused. */
+func (instance *Validator) Validate(runtimeInstance containercontract.Runtime, data any) error {
+    if nilErr := containercontract.RefuseNilRuntime(runtimeInstance); nil != nilErr {
+        return nilErr
+    }
+
+    errors := instance.validateInternal(runtimeInstance, data)
 
     if 0 == len(errors) {
         return nil
@@ -474,12 +491,12 @@ func (instance *Validator) Validate(data any) error {
     return errors
 }
 
-func (instance *Validator) validateInternal(data any) ValidationErrors {
+func (instance *Validator) validateInternal(runtimeInstance containercontract.Runtime, data any) ValidationErrors {
     if nil == data {
         return nil
     }
 
-    walk := newValidationWalk(instance.validationLimits())
+    walk := newValidationWalk(runtimeInstance, instance.validationLimits())
 
     errors := instance.validateReflected(reflect.ValueOf(data), nil, 0, walk)
 
@@ -696,6 +713,8 @@ func (instance *Validator) validateStruct(value reflect.Value, path *validationP
         count    int
     }
 
+    owner := validationOwnerOf(value)
+
     resolved := make(map[string]bool)
 
     embeddedSeen := make(map[reflect.Type]bool)
@@ -724,7 +743,7 @@ func (instance *Validator) validateStruct(value reflect.Value, path *validationP
                 if true == isPromotedValidationEmbed(field) {
                     /* the embed's own tag runs against the embed value, whose promoted fields a payload populates; an unexported embed's value cannot pass through Interface, so its tag stays out of reach */
                     if true == field.IsExported() {
-                        errors = append(errors, instance.applyFieldRules(field, fieldValue, embeddedFieldPath(field, path), walk)...)
+                        errors = append(errors, instance.applyFieldRules(field, fieldValue, embeddedFieldPath(field, path), owner, walk)...)
                     }
 
                     embeddedType := dereferencedValidationStructType(field.Type)
@@ -794,7 +813,7 @@ func (instance *Validator) validateStruct(value reflect.Value, path *validationP
                 continue
             }
 
-            errors = append(errors, instance.validateVisibleField(winner, jsonName, path, depth, walk)...)
+            errors = append(errors, instance.validateVisibleField(winner, jsonName, path, depth, owner, walk)...)
         }
 
         for _, nextItem := range nextLevel {
@@ -813,6 +832,7 @@ func (instance *Validator) validateVisibleField(
     jsonName string,
     path *validationPath,
     depth int,
+    owner any,
     walk *validationWalk,
 ) ValidationErrors {
     var errors ValidationErrors
@@ -823,13 +843,13 @@ func (instance *Validator) validateVisibleField(
 
     fieldPath := path.member(jsonName)
 
-    errors = append(errors, instance.applyFieldRules(candidate.field, candidate.value, fieldPath, walk)...)
+    errors = append(errors, instance.applyFieldRules(candidate.field, candidate.value, fieldPath, owner, walk)...)
 
     return append(errors, instance.validateReflected(candidate.value, fieldPath, depth+1, walk)...)
 }
 
 /* applyFieldRules spells the path only once the field carries a tag, since every rule and every error names the field. */
-func (instance *Validator) applyFieldRules(field reflect.StructField, value reflect.Value, path *validationPath, walk *validationWalk) ValidationErrors {
+func (instance *Validator) applyFieldRules(field reflect.StructField, value reflect.Value, path *validationPath, owner any, walk *validationWalk) ValidationErrors {
     var errors ValidationErrors
 
     if false == value.IsValid() || true == walk.exceeded {
@@ -871,7 +891,7 @@ func (instance *Validator) applyFieldRules(field reflect.StructField, value refl
             break
         }
 
-        validationError := instance.validateRule(value.Interface(), fieldPath, rule)
+        validationError := instance.validateRule(validationcontract.ValidationContext{Runtime: walk.runtime, Field: fieldPath, Owner: owner}, value.Interface(), rule)
         if false == internal.IsNilInterface(validationError) {
             errors = append(errors, walk.admit(ValidationErrors{validationError})...)
         }
@@ -1153,7 +1173,9 @@ func (instance *Validator) validateMap(value reflect.Value, path *validationPath
     return errors
 }
 
-func (instance *Validator) validateRule(value any, fieldName string, rule validationRule) validationcontract.ValidationError {
+func (instance *Validator) validateRule(validationContext validationcontract.ValidationContext, value any, rule validationRule) validationcontract.ValidationError {
+    fieldName := validationContext.Field
+
     instance.mutex.RLock()
     _, exists := instance.constraints[rule.name]
     instance.mutex.RUnlock()
@@ -1188,7 +1210,7 @@ func (instance *Validator) validateRule(value any, fieldName string, rule valida
         )
     }
 
-    err := constraint.Validate(value, fieldName)
+    err := constraint.Validate(validationContext, value)
     /* IsNilInterface, since a custom constraint returning a concrete error variable answers a typed nil on success */
     if true == internal.IsNilInterface(err) {
         return nil

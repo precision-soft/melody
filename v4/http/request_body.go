@@ -83,7 +83,7 @@ func (instance *Request) BindJsonAndValidate(target any) error {
 func validateBoundBody(runtimeInstance containercontract.Runtime, target any) error {
     validatorInstance := validation.ValidatorMustFromRuntime(runtimeInstance)
 
-    validationError := validatorInstance.Validate(target)
+    validationError := validatorInstance.Validate(runtimeInstance, target)
     if nil == validationError {
         return nil
     }

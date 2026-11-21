@@ -35,7 +35,7 @@ type MinLength struct {
     min int
 }
 
-func (instance *MinLength) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *MinLength) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     resolved, ok := dereferenceValue(value)
     if false == ok {
         return nil
@@ -44,13 +44,13 @@ func (instance *MinLength) Validate(value any, field string) validationcontract.
     stringValue, isString := resolved.(string)
     if false == isString {
         /* a length constraint measures a string, never a Go rendering of another value */
-        return NewValidationError(field, "value must be a string", ConstraintMinLengthErrorInsufficientLength, nil)
+        return NewValidationError(validationContext.Field, "value must be a string", ConstraintMinLengthErrorInsufficientLength, nil)
     }
 
     length := utf8.RuneCountInString(stringValue)
     if length < instance.min {
         return NewValidationError(
-            field,
+            validationContext.Field,
             fmt.Sprintf("this field must be at least %d characters long", instance.min),
             ConstraintMinLengthErrorInsufficientLength,
             map[string]any{

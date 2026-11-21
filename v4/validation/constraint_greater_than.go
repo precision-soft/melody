@@ -26,7 +26,7 @@ type GreaterThan struct {
     min int
 }
 
-func (instance *GreaterThan) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *GreaterThan) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     if nil == value {
         return nil
     }
@@ -34,13 +34,13 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
     reflectedValue := reflect.ValueOf(value)
     for {
         if reflect.Invalid == reflectedValue.Kind() {
-            return NewValidationError(field, "value is invalid", ConstraintGreaterThanErrorSmallerThan, nil)
+            return NewValidationError(validationContext.Field, "value is invalid", ConstraintGreaterThanErrorSmallerThan, nil)
         }
 
         if (reflect.Pointer == reflectedValue.Kind()) || (reflect.Interface == reflectedValue.Kind()) {
             if true == reflectedValue.IsNil() {
                 return NewValidationError(
-                    field,
+                    validationContext.Field,
                     fmt.Sprintf("value must be greater than %d", instance.min),
                     ConstraintGreaterThanErrorSmallerThan,
                     map[string]any{
@@ -61,7 +61,7 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
         actual := reflectedValue.Int()
         if actual <= int64(instance.min) {
             return NewValidationError(
-                field,
+                validationContext.Field,
                 fmt.Sprintf("value must be greater than %d", instance.min),
                 ConstraintGreaterThanErrorSmallerThan,
                 map[string]any{
@@ -82,7 +82,7 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
 
         if actual <= uint64(instance.min) {
             return NewValidationError(
-                field,
+                validationContext.Field,
                 fmt.Sprintf("value must be greater than %d", instance.min),
                 ConstraintGreaterThanErrorSmallerThan,
                 map[string]any{
@@ -99,7 +99,7 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
         /* the comparison is exact at every magnitude, since float64(instance.min) would round a bound above 2^53 */
         if true == math.IsNaN(actual) || 0 >= compareFloat64ToIntBound(actual, instance.min) {
             return NewValidationError(
-                field,
+                validationContext.Field,
                 fmt.Sprintf("value must be greater than %d", instance.min),
                 ConstraintGreaterThanErrorSmallerThan,
                 map[string]any{
@@ -112,7 +112,7 @@ func (instance *GreaterThan) Validate(value any, field string) validationcontrac
         return nil
 
     default:
-        return NewValidationError(field, "value must be numeric", ConstraintGreaterThanErrorNotNumeric, nil)
+        return NewValidationError(validationContext.Field, "value must be numeric", ConstraintGreaterThanErrorNotNumeric, nil)
     }
 }
 

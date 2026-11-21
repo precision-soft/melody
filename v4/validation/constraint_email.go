@@ -17,7 +17,7 @@ var (
 
 type Email struct{}
 
-func (instance *Email) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *Email) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     if nil == value {
         return nil
     }
@@ -29,7 +29,7 @@ func (instance *Email) Validate(value any, field string) validationcontract.Vali
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return NewValidationError(field, "value must be a string", ConstraintEmailErrorInvalidEmail, nil)
+        return NewValidationError(validationContext.Field, "value must be a string", ConstraintEmailErrorInvalidEmail, nil)
     }
 
     if "" == stringValue {
@@ -37,7 +37,7 @@ func (instance *Email) Validate(value any, field string) validationcontract.Vali
     }
 
     if false == emailRegexInstance.MatchString(stringValue) {
-        return NewValidationError(field, "invalid email format", ConstraintEmailErrorInvalidEmail, nil)
+        return NewValidationError(validationContext.Field, "invalid email format", ConstraintEmailErrorInvalidEmail, nil)
     }
 
     return nil

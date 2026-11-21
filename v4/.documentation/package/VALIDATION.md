@@ -37,6 +37,7 @@ package main
 import (
     "fmt"
 
+    containercontract "github.com/precision-soft/melody/v4/container/contract"
     "github.com/precision-soft/melody/v4/validation"
 )
 
@@ -46,10 +47,10 @@ type CreateUserInput struct {
     Age   int    `json:"age" validate:"greaterThan(value=0),lessThan(value=131)"`
 }
 
-func validateInput(input CreateUserInput) error {
-    validator := validation.NewValidator(validation.ValidatorConfig{})
+func validateInput(runtimeInstance containercontract.Runtime, input CreateUserInput) error {
+    validator := validation.ValidatorMustFromRuntime(runtimeInstance)
 
-    validationErr := validator.Validate(input)
+    validationErr := validator.Validate(runtimeInstance, input)
     if nil == validationErr {
         return nil
     }
@@ -78,7 +79,7 @@ func validateInput(input CreateUserInput) error {
 - The string-form constraints — `regex`, `email`, `alpha`, `alphanumeric`, `numeric`, `notBlank`, `min`, `max` — refuse a value that is not a string. A nil pointer and the empty string still pass `regex`/`email`/`alpha`/`alphanumeric`/`numeric`, which is what lets them compose with `notBlank` on optional fields; `notBlank` itself rejects a nil pointer, and `min` counts the empty string as zero runes. The numeric comparisons are the opposite: `greaterThan` and `lessThan` **reject** a nil pointer rather than passing it, so an optional `*int` carrying `greaterThan(value=0)` fails on every payload that omits it — pair the comparison with a presence check on the caller's side, or take the field by value.
 - `greaterThan`/`lessThan` operate on numeric fields only and reject a non-numeric value with `value must be numeric`; a floating-point `NaN` is rejected rather than silently passing the bound (`NaN` compares false against every threshold). The bound is an integer in its entirety: a fractional, suffixed or otherwise non-integer bound (`value=1.5`, `value=1e3`) fails the constraint's construction and the rule reports `invalidRuleSyntax` on every value it reaches. The [`openapi`](OPENAPI.md) mirror reads every numeric bound with the same all-or-nothing parse, so the published spec refuses exactly the tags the server refuses — an equivalence held by an executable proof, [`openapi/schema_test.go`](../../openapi/schema_test.go), which runs the generated document and this validator against the same values rather than trusting either side's prose. For a **float-typed** field the comparison is exact at every magnitude: the bound is never converted to `float64`, whose rounding above 2^53
   misjudged the values adjacent to an unrepresentable bound (a field holding `9007199254740996.0` was refused by `greaterThan` with bound `9007199254740995`, which rounds to `9007199254740996`). The frozen majors keep the converted comparison with the rounding documented; here the value a field holds is judged against the declared number, on every branch.
-- A parameterized rule named **without parameters** (`regex`, `max()`, `lessThan`) fails closed with `invalidRuleSyntax` — the registered instance is a template for `WithParameters`, never a fallback configuration. The regex constraint additionally refuses an empty pattern (`regex=`), which would otherwise compile to a match-everything expression. A tag that parses to no rule at all (`validate:","`) is refused the same way.
+- A parameterized rule named **without parameters** (`regex`, `max()`, `lessThan`) fails closed with `invalidRuleSyntax` — the registered instance is a template for `WithParameters`, never a fallback configuration. The regex constraint additionally refuses an empty pattern (`regex=`), which would otherwise compile to a match-everything expression. A tag that parses to no rule at all (`validate:","`) is refused the same way. The five parameterized constraints a fresh validator registers — `min`, `max`, `regex`, `greaterThan`, `lessThan` — are registered as zero templates (`&MinLength{}`, …) carrying no bound of their own; the constructors stay for a constraint called directly.
 - A rejected rule parameter carries the constraint's own refusal reason under `cause` in the error context, and a tag-syntax error names the comma-separated `part` the parser refused.
 - The nesting-depth ceiling counts **indirections**, not payload nesting levels: every pointer, interface, struct-field and collection-element hop costs one of the 64 (`ValidatorConfig.MaxNestingDepth`), so a `[]*T` chain spends three per JSON level and the deepest reachable payload nesting is correspondingly shallower than the ceiling.
 - A pointer several fields share is validated under **every** path that reaches it, and walked once per depth: the cycle set is scoped to the current path — only an ancestor still on the path can close a cycle — and a memo keyed on the pointer, its type and the depth it is reached at answers a later path with the errors of the first walk re-spelled under the new path. A payload decoded from json shares nothing; the memo is for a value the application built, which used to cost 2^N walks on N levels of two-way sharing through pointer fields — the memo keys pointers, so a value shared through slices or maps alone is still walked once per path. A genuinely cyclic value is validated once and then short-circuited on the path that closes it, with no entry naming the cycle; a node that is both shared and on a cycle is memoized as the first path saw it, so the paths its report is spelled under depend on which field reached it first. An error a constraint answers under a field of its own, or as
@@ -95,7 +96,10 @@ func validateInput(input CreateUserInput) error {
 #### Types
 
 - **Constraint** (`validation/contract.Constraint`)\
-  Implementations validate a single field value.
+  Implementations validate a single field value: `Validate(validationContext ValidationContext, value any) ValidationError`.
+
+- **ValidationContext** (`validation/contract.ValidationContext`) ([`validation/contract/constraint.go`](../../validation/contract/constraint.go))\
+  What a constraint is told about the value it judges: `Runtime`, the runtime handed to `Validator.Validate`; `Field`, the path from the validated root, as the error reports it (`items[2].name`); `Owner`, the struct that holds the field, as a value, the immediate struct of a nested one and the promoting struct of a promoted field, nil for a struct reached through an unexported field. A cross-field rule reads its sibling off `Owner`: a `passwordConfirmation` constraint asserts `Owner.(SignUpInput)` and compares `Password`.
 
 - **ValidationError** (`validation/contract.ValidationError`)\
   A typed error describing a single validation failure.
@@ -107,7 +111,7 @@ func validateInput(input CreateUserInput) error {
 
 - **validation.Validator**\
   Tag-driven validator that can register constraints.
-    - [`Validate(data any) error`](../../validation/validator.go) — the door: it answers `ValidationErrors` when a field fails and nil when none does
+    - [`Validate(runtimeInstance containercontract.Runtime, data any) error`](../../validation/validator.go) — the door: it answers `ValidationErrors` when a field fails and nil when none does; a nil runtime, a typed nil and one carrying no context are refused with "the runtime is nil or carries no context"
 
 - **validation.ValidationError**\
   Default `validation/contract.ValidationError` implementation.

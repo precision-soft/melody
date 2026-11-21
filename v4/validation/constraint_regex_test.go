@@ -1,13 +1,14 @@
 package validation
 
 import (
+    validationcontract "github.com/precision-soft/melody/v4/validation/contract"
     "testing"
 )
 
 func TestRegex_PointerToStringMismatchIsRejected(t *testing.T) {
     constraint := NewRegex(`^[0-9]{3}$`)
 
-    validationError := constraint.Validate(pointerOf("abcd"), "field")
+    validationError := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, pointerOf("abcd"))
 
     if nil == validationError {
         t.Fatalf("fail-open: regex mismatch via *string passed validation")
@@ -32,7 +33,7 @@ func TestRegex_WithParametersRefusesEmptyPattern(t *testing.T) {
 func TestRegex_NonStringIsRejected(t *testing.T) {
     constraint := NewRegex(`^[A-Za-z0-9]+$`)
 
-    validationError := constraint.Validate([]byte("<!-- injection -->"), "field")
+    validationError := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, []byte("<!-- injection -->"))
 
     if nil == validationError {
         t.Fatalf("fail-open: []byte passed a regex constraint without the pattern running")
@@ -54,12 +55,12 @@ func TestRegex_OptionalityExitsAndTheAccessorsThatDescribeThePattern(t *testing.
         t.Fatalf("expected a compilable pattern to carry no error, got %v", constraint.Error())
     }
 
-    if validationError := constraint.Validate(nil, "field"); nil != validationError {
+    if validationError := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, nil); nil != validationError {
         t.Fatalf("expected an absent value to pass, got %v", validationError)
     }
 
     var absentPointer *string
-    if validationError := constraint.Validate(absentPointer, "field"); nil != validationError {
+    if validationError := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, absentPointer); nil != validationError {
         t.Fatalf("expected a nil pointer to pass, got %v", validationError)
     }
 }
@@ -80,7 +81,7 @@ func TestRegex_AnUncompilablePatternRefusesEveryValueItIsAsked(t *testing.T) {
         t.Fatalf("expected the accessor to answer the pattern as written, got %q", constraint.Pattern())
     }
 
-    validationError := constraint.Validate("123", "field")
+    validationError := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, "123")
     if nil == validationError {
         t.Fatalf("expected an uncompilable pattern to refuse the value rather than pass it")
     }
@@ -94,7 +95,7 @@ func TestRegex_AnUncompilablePatternRefusesEveryValueItIsAsked(t *testing.T) {
     }
 
     /* the optionality exits still come first: an uncompilable pattern must not turn an unfilled optional field into a failure */
-    if validationError := constraint.Validate("", "field"); nil != validationError {
+    if validationError := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, ""); nil != validationError {
         t.Fatalf("expected an empty string to stay optional even under a broken pattern, got %v", validationError)
     }
 }
@@ -107,12 +108,12 @@ func TestRegex_TheConstructorRefusesAnEmptyPattern(t *testing.T) {
         t.Fatalf("expected the empty pattern to be kept as the constraint's error, got error=%v compiled=%v", constraint.Error(), constraint.Compiled())
     }
 
-    validationError := constraint.Validate("anything", "field")
+    validationError := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, "anything")
     if nil == validationError || ConstraintRegexErrorInvalidPattern != validationError.Code() {
         t.Fatalf("expected a non-empty value to be refused as an invalid pattern, got %v", validationError)
     }
 
-    if validationError := constraint.Validate("", "field"); nil != validationError {
+    if validationError := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, ""); nil != validationError {
         t.Fatalf("expected the empty string to stay optional under the empty pattern, got %v", validationError)
     }
 }

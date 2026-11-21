@@ -17,7 +17,7 @@ var (
 
 type Alphanumeric struct{}
 
-func (instance *Alphanumeric) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *Alphanumeric) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     if nil == value {
         return nil
     }
@@ -29,7 +29,7 @@ func (instance *Alphanumeric) Validate(value any, field string) validationcontra
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return NewValidationError(field, "value must be a string", ConstraintAlphanumericErrorNotAlphanumeric, nil)
+        return NewValidationError(validationContext.Field, "value must be a string", ConstraintAlphanumericErrorNotAlphanumeric, nil)
     }
 
     if "" == stringValue {
@@ -37,7 +37,7 @@ func (instance *Alphanumeric) Validate(value any, field string) validationcontra
     }
 
     if false == alphanumericRegexInstance.MatchString(stringValue) {
-        return NewValidationError(field, "this field must contain only letters and numbers", ConstraintAlphanumericErrorNotAlphanumeric, nil)
+        return NewValidationError(validationContext.Field, "this field must contain only letters and numbers", ConstraintAlphanumericErrorNotAlphanumeric, nil)
     }
 
     return nil

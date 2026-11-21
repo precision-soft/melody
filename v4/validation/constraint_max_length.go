@@ -35,7 +35,7 @@ type MaxLength struct {
     max int
 }
 
-func (instance *MaxLength) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *MaxLength) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     resolved, ok := dereferenceValue(value)
     if false == ok {
         return nil
@@ -44,13 +44,13 @@ func (instance *MaxLength) Validate(value any, field string) validationcontract.
     stringValue, isString := resolved.(string)
     if false == isString {
         /* a length constraint measures a string, never a Go rendering of another value */
-        return NewValidationError(field, "value must be a string", ConstraintMaxLengthErrorTooLong, nil)
+        return NewValidationError(validationContext.Field, "value must be a string", ConstraintMaxLengthErrorTooLong, nil)
     }
 
     length := utf8.RuneCountInString(stringValue)
     if length > instance.max {
         return NewValidationError(
-            field,
+            validationContext.Field,
             fmt.Sprintf("this field must not exceed %d characters", instance.max),
             ConstraintMaxLengthErrorTooLong,
             map[string]any{

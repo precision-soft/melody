@@ -477,6 +477,14 @@ The six `service.<module>` names of a module's principal service, `service.cache
 
 **Remedy.** A listener whose failure must keep every listener behind it from running declares `FailureEndsDispatch: true`. Read every failure through `errors.Is` / `errors.As`, or through `Unwrap() []error` on a joined answer. A listener that answers a request returns nil.
 
+### Validation: a constraint receives a validation context, and the validator takes the runtime
+
+**What changed.** [`validationcontract.Constraint`](../validation/contract/constraint.go) is `Validate(validationContext ValidationContext, value any) ValidationError`, where it took `(value, field)`: the context carries `Runtime`, `Field`, the path the error reports, and `Owner`, the struct that holds the field as a value, so a cross-field rule reads its sibling. [`Validator.Validate(runtimeInstance, data)`](../validation/validator.go) takes the runtime its constraints are handed, a nil one refused with "the runtime is nil or carries no context"; `Request.BindJsonAndValidate` and the json handler hand the request's. A fresh validator registers `min`, `max`, `regex`, `greaterThan` and `lessThan` as zero templates.
+
+**Symptom.** `*C does not implement validationcontract.Constraint (wrong type for method Validate)`; `not enough arguments in call to validator.Validate`.
+
+**Remedy.** Write a constraint as `func (c *C) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError`, reading `validationContext.Field` where it read `field`; call `validator.Validate(runtimeInstance, data)` with the runtime the code holds.
+
 ### Messagebus, openapi: one constructor per command, and the retry policy has one source
 
 **What changed.** [`messagebus.NewConsumeCommand(config)`](../messagebus/consume_command.go) is the body of the removed `NewConsumeCommandFromContainer`: it resolves the bus and the transports from the run's scope; the eager `NewConsumeCommand(bus, transports, config)` is removed. [`openapi.NewGenerateCommand()`](../openapi/generate_command.go) resolves the `Info` and the `Registry` the same way, the eager `NewGenerateCommand(info, registry)` and `NewGenerateCommandFromContainer` removed. `messagebus.ServiceRetryPolicy` and `RetryPolicyFromResolver` are removed: the retry policy of the framework's consume command is [`ApplicationConfig.MessageBus`](../application/application_new.go)`.Retry`, a `MessageBusConfig`, validated by `NewApplication`, where a policy registered in the container won over the command's config.

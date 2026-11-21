@@ -1,6 +1,7 @@
 package validation
 
 import (
+    validationcontract "github.com/precision-soft/melody/v4/validation/contract"
     "testing"
 )
 
@@ -8,7 +9,7 @@ func TestCurrencyCode_AdmitsThreeUpperCaseLettersAndLeavesABlankToNotBlank(t *te
     constraint := &CurrencyCode{}
 
     for _, value := range []any{"EUR", "RON", "", nil} {
-        if validationErr := constraint.Validate(value, "code"); nil != validationErr {
+        if validationErr := constraint.Validate(validationcontract.ValidationContext{Field: "code"}, value); nil != validationErr {
             t.Fatalf("expected %v admitted, got %v", value, validationErr)
         }
     }
@@ -18,7 +19,7 @@ func TestCurrencyCode_RefusesAnythingElseWithTheRulesMessage(t *testing.T) {
     constraint := &CurrencyCode{}
 
     for _, value := range []any{"eur", "EU", "EURO", "E1R", " EUR", 978} {
-        validationErr := constraint.Validate(value, "code")
+        validationErr := constraint.Validate(validationcontract.ValidationContext{Field: "code"}, value)
         if nil == validationErr {
             t.Fatalf("expected %v refused", value)
         }
@@ -34,11 +35,11 @@ func TestNewValidator_CarriesTheCurrencyCodeRule(t *testing.T) {
         Code string `validate:"notBlank,currencyCode"`
     }
 
-    if validationErr := NewValidator().Validate(subject{Code: "EUR"}); nil != validationErr {
+    if validationErr := NewValidator().Validate(testValidationRuntime(), subject{Code: "EUR"}); nil != validationErr {
         t.Fatalf("expected EUR admitted, got %v", validationErr)
     }
 
-    if validationErr := NewValidator().Validate(subject{Code: "eu"}); nil == validationErr {
+    if validationErr := NewValidator().Validate(testValidationRuntime(), subject{Code: "eu"}); nil == validationErr {
         t.Fatal("expected eu refused by the registered rule")
     }
 }

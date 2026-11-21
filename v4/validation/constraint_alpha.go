@@ -17,7 +17,7 @@ var (
 
 type Alpha struct{}
 
-func (instance *Alpha) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *Alpha) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     if nil == value {
         return nil
     }
@@ -29,7 +29,7 @@ func (instance *Alpha) Validate(value any, field string) validationcontract.Vali
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return NewValidationError(field, "value must be a string", ConstraintAlphaErrorNotAlpha, nil)
+        return NewValidationError(validationContext.Field, "value must be a string", ConstraintAlphaErrorNotAlpha, nil)
     }
 
     if "" == stringValue {
@@ -37,7 +37,7 @@ func (instance *Alpha) Validate(value any, field string) validationcontract.Vali
     }
 
     if false == alphaRegexInstance.MatchString(stringValue) {
-        return NewValidationError(field, "this field must contain only letters", ConstraintAlphaErrorNotAlpha, nil)
+        return NewValidationError(validationContext.Field, "this field must contain only letters", ConstraintAlphaErrorNotAlpha, nil)
     }
 
     return nil

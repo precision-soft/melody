@@ -42,7 +42,7 @@ type Regex struct {
     err      error
 }
 
-func (instance *Regex) Validate(value any, field string) validationcontract.ValidationError {
+func (instance *Regex) Validate(validationContext validationcontract.ValidationContext, value any) validationcontract.ValidationError {
     if nil == value {
         return nil
     }
@@ -54,7 +54,7 @@ func (instance *Regex) Validate(value any, field string) validationcontract.Vali
 
     stringValue, isString := resolved.(string)
     if false == isString {
-        return NewValidationError(field, "value must be a string", ConstraintRegexErrorMismatch, nil)
+        return NewValidationError(validationContext.Field, "value must be a string", ConstraintRegexErrorMismatch, nil)
     }
 
     if "" == stringValue {
@@ -62,11 +62,11 @@ func (instance *Regex) Validate(value any, field string) validationcontract.Vali
     }
 
     if nil != instance.err || nil == instance.compiled {
-        return NewValidationError(field, "invalid validation pattern", ConstraintRegexErrorInvalidPattern, nil)
+        return NewValidationError(validationContext.Field, "invalid validation pattern", ConstraintRegexErrorInvalidPattern, nil)
     }
 
     if false == instance.compiled.MatchString(stringValue) {
-        return NewValidationError(field, "this field does not match the required pattern", ConstraintRegexErrorMismatch, nil)
+        return NewValidationError(validationContext.Field, "this field does not match the required pattern", ConstraintRegexErrorMismatch, nil)
     }
 
     return nil

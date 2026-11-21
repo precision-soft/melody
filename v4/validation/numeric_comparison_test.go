@@ -1,6 +1,7 @@
 package validation
 
 import (
+    validationcontract "github.com/precision-soft/melody/v4/validation/contract"
     "math"
     "testing"
 )
@@ -40,7 +41,7 @@ func TestCompareFloat64ToIntBound_IsExactAtEveryMagnitude(t *testing.T) {
 func TestGreaterThan_JudgesAFloatAgainstTheDeclaredBoundNotTheRoundedOne(t *testing.T) {
     constraint := NewGreaterThan(9007199254740995)
 
-    validationError := constraint.Validate(9007199254740996.0, "field")
+    validationError := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, 9007199254740996.0)
     if nil != validationError {
         t.Fatalf("expected 9007199254740996.0 to pass greaterThan 9007199254740995, got %s", validationError.Error())
     }
@@ -49,7 +50,7 @@ func TestGreaterThan_JudgesAFloatAgainstTheDeclaredBoundNotTheRoundedOne(t *test
 func TestLessThan_JudgesAFloatAgainstTheDeclaredBoundNotTheRoundedOne(t *testing.T) {
     constraint := NewLessThan(9007199254740993)
 
-    validationError := constraint.Validate(9007199254740992.0, "field")
+    validationError := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, 9007199254740992.0)
     if nil != validationError {
         t.Fatalf("expected 9007199254740992.0 to pass lessThan 9007199254740993, got %s", validationError.Error())
     }

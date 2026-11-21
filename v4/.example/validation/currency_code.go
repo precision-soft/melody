@@ -17,14 +17,14 @@ var currencyCodeRegexInstance = regexp.MustCompile(`^[A-Z]{3}$`)
 /* CurrencyCode is the rule of a currency's code: three upper-case letters, the shape of an ISO 4217 alphabetic code. A blank value is left to notBlank, so the two rules report one refusal each. */
 type CurrencyCode struct{}
 
-func (instance *CurrencyCode) Validate(value any, field string) melodyvalidationcontract.ValidationError {
+func (instance *CurrencyCode) Validate(validationContext melodyvalidationcontract.ValidationContext, value any) melodyvalidationcontract.ValidationError {
     if nil == value {
         return nil
     }
 
     stringValue, isString := value.(string)
     if false == isString {
-        return melodyvalidation.NewValidationError(field, "value must be a string", ConstraintCurrencyCodeErrorNotACode, nil)
+        return melodyvalidation.NewValidationError(validationContext.Field, "value must be a string", ConstraintCurrencyCodeErrorNotACode, nil)
     }
 
     if "" == stringValue {
@@ -32,7 +32,7 @@ func (instance *CurrencyCode) Validate(value any, field string) melodyvalidation
     }
 
     if false == currencyCodeRegexInstance.MatchString(stringValue) {
-        return melodyvalidation.NewValidationError(field, "must be a three-letter upper-case ISO 4217 code", ConstraintCurrencyCodeErrorNotACode, nil)
+        return melodyvalidation.NewValidationError(validationContext.Field, "must be a three-letter upper-case ISO 4217 code", ConstraintCurrencyCodeErrorNotACode, nil)
     }
 
     return nil

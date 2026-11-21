@@ -237,7 +237,7 @@ func ApiRefusalOfInvalidBody(
     request melodyhttpcontract.Request,
     body any,
 ) melodyhttpcontract.Response {
-    validationErr := melodyvalidation.ValidatorMustFromRuntime(runtimeInstance).Validate(body)
+    validationErr := melodyvalidation.ValidatorMustFromRuntime(runtimeInstance).Validate(runtimeInstance, body)
     if nil == validationErr {
         return nil
     }

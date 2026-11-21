@@ -1,6 +1,7 @@
 package validation
 
 import (
+    validationcontract "github.com/precision-soft/melody/v4/validation/contract"
     "testing"
 )
 
@@ -9,23 +10,23 @@ func TestNotEmpty_MeasuresThroughPointersAndInterfaces(t *testing.T) {
 
     filled := []string{"one"}
 
-    if nil != constraint.Validate(filled, "field") {
+    if nil != constraint.Validate(validationcontract.ValidationContext{Field: "field"}, filled) {
         t.Fatalf("expected a filled slice to pass")
     }
 
-    if nil != constraint.Validate(&filled, "field") {
+    if nil != constraint.Validate(validationcontract.ValidationContext{Field: "field"}, &filled) {
         t.Fatalf("expected a pointer to a filled slice to pass")
     }
 
     empty := []string{}
 
-    if nil == constraint.Validate(&empty, "field") {
+    if nil == constraint.Validate(validationcontract.ValidationContext{Field: "field"}, &empty) {
         t.Fatalf("expected a pointer to an empty slice to be refused")
     }
 
     var holder any = filled
 
-    if nil != constraint.Validate(holder, "field") {
+    if nil != constraint.Validate(validationcontract.ValidationContext{Field: "field"}, holder) {
         t.Fatalf("expected an interface holding a filled slice to pass")
     }
 }
@@ -34,7 +35,7 @@ func TestNotEmpty_RefusesEveryEmptyMeasurableKind(t *testing.T) {
     constraint := NewNotEmpty()
 
     for _, probe := range []any{"", []string{}, map[string]string{}, [0]int{}} {
-        validationErr := constraint.Validate(probe, "field")
+        validationErr := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, probe)
         if nil == validationErr {
             t.Fatalf("expected the empty %T to be refused", probe)
         }
@@ -49,7 +50,7 @@ func TestNotEmpty_RefusesEveryEmptyMeasurableKind(t *testing.T) {
     }
 
     for _, probe := range []any{"x", []string{"x"}, map[string]string{"k": "v"}, [1]int{1}} {
-        if nil != constraint.Validate(probe, "field") {
+        if nil != constraint.Validate(validationcontract.ValidationContext{Field: "field"}, probe) {
             t.Fatalf("expected the filled %T to pass", probe)
         }
     }
@@ -63,7 +64,7 @@ func TestNotEmpty_EveryShapeOfNilIsRefusedAsEmpty(t *testing.T) {
     var nilPointer *string
 
     for _, probe := range []any{nil, nilSlice, nilMap, nilPointer} {
-        validationErr := constraint.Validate(probe, "field")
+        validationErr := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, probe)
         if nil == validationErr {
             t.Fatalf("expected the nil %T to be refused", probe)
         }
@@ -78,7 +79,7 @@ func TestNotEmpty_AnUnmeasurableKindIsRefusedForWhatItIs(t *testing.T) {
     constraint := NewNotEmpty()
 
     for _, probe := range []any{42, 2.5, true, struct{}{}} {
-        validationErr := constraint.Validate(probe, "field")
+        validationErr := constraint.Validate(validationcontract.ValidationContext{Field: "field"}, probe)
         if nil == validationErr {
             t.Fatalf("expected the unmeasurable %T to be refused", probe)
         }
