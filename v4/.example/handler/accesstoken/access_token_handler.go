@@ -17,6 +17,7 @@ import (
     melodyhttp "github.com/precision-soft/melody/v4/http"
     melodyhttpcontract "github.com/precision-soft/melody/v4/http/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -56,7 +57,7 @@ func IssueHandler(deviceIdentifierMaximumBytes int) melodyhttpcontract.Handler {
         if false == validDeviceIdentifier(body.DeviceIdentifier, deviceIdentifierMaximumBytes) {
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusBadRequest, deviceIdentifierRefusal(deviceIdentifierMaximumBytes)), nil
         }
-        store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+        store := examplesecurity.TokenStoreFromRuntime(runtimeInstance)
 
         tokenString, tokenErr := newOpaqueToken()
         if nil != tokenErr {
@@ -64,7 +65,6 @@ func IssueHandler(deviceIdentifierMaximumBytes int) melodyhttpcontract.Handler {
         }
 
         if putErr := store.Put(
-            runtimeInstance,
             tokenString,
             melodysecuritycontract.Claims{
                 UserIdentifier:   principal.UserIdentifier(),
@@ -79,26 +79,26 @@ func IssueHandler(deviceIdentifierMaximumBytes int) melodyhttpcontract.Handler {
         /* a deletion between the session's resolution and the write released the tokens before this one existed */
         account, accountFound, accountErr := repository.MustGetUserRepository(runtimeInstance.Context(), runtimeInstance.Scope()).FindById(runtimeInstance.Context(), principal.UserIdentifier())
         if nil != accountErr {
-            withdrawMintedToken(runtimeInstance, store, tokenString)
+            withdrawMintedToken(store, tokenString)
 
             return nil, accountErr
         }
 
         if false == accountFound || nil == account {
-            withdrawMintedToken(runtimeInstance, store, tokenString)
+            withdrawMintedToken(store, tokenString)
 
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusUnauthorized, "unauthorized"), nil
         }
 
-        stored, found, lookupErr := store.Lookup(runtimeInstance, tokenString)
+        stored, found, lookupErr := store.Lookup(tokenString)
         if nil != lookupErr {
-            withdrawMintedToken(runtimeInstance, store, tokenString)
+            withdrawMintedToken(store, tokenString)
 
             return nil, lookupErr
         }
 
         if false == found {
-            withdrawMintedToken(runtimeInstance, store, tokenString)
+            withdrawMintedToken(store, tokenString)
 
             return presenter.ApiError(runtimeInstance, request, nethttp.StatusInternalServerError, "the minted token did not resolve"), nil
         }
@@ -148,14 +148,14 @@ func publishBoundary(
     userIdentifier string,
     deviceIdentifier string,
 ) (melodyhttpcontract.Response, error) {
-    store := examplesecurity.TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Scope())
+    store := examplesecurity.TokenStoreFromRuntime(runtimeInstance)
     instant := melodyclock.ClockMustFromRuntime(runtimeInstance).Now()
 
-    if revokeErr := store.RevokeBefore(runtimeInstance, userIdentifier, deviceIdentifier, instant); nil != revokeErr {
+    if revokeErr := store.RevokeBefore(userIdentifier, deviceIdentifier, instant); nil != revokeErr {
         return nil, revokeErr
     }
 
-    published, epochErr := store.RevocationEpoch(runtimeInstance, userIdentifier, deviceIdentifier)
+    published, epochErr := store.RevocationEpoch(userIdentifier, deviceIdentifier)
     if nil != epochErr {
         return nil, epochErr
     }
@@ -167,12 +167,13 @@ func publishBoundary(
     })
 }
 
+/* the withdraw binds the store again over a runtime detached from the request's cancellation, so a client that hung up cannot leave the minted token live */
 func withdrawMintedToken(
-    runtimeInstance melodycontainercontract.Runtime,
-    store melodysecuritycontract.RevocableTokenStore,
+    store melodysecurity.BoundTokenStore,
     tokenString string,
 ) {
-    if deleteErr := store.Delete(examplesecurity.DetachedRuntime(runtimeInstance), tokenString); nil != deleteErr {
+    runtimeInstance := store.Runtime()
+    if deleteErr := melodysecurity.TokenStoreFor(examplesecurity.DetachedRuntime(runtimeInstance), store.TokenStore()).Delete(tokenString); nil != deleteErr {
         examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Error(
             "a minted access token could not be withdrawn",
             map[string]any{"error": deleteErr.Error()},

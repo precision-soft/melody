@@ -8,6 +8,7 @@ import (
     melodycontainercontract "github.com/precision-soft/melody/v4/container/contract"
     melodyruntime "github.com/precision-soft/melody/v4/container/runtime"
     melodyexception "github.com/precision-soft/melody/v4/exception"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -24,7 +25,7 @@ func (instance ResolvedTokenStore) Lookup(
     runtimeInstance melodycontainercontract.Runtime,
     tokenString string,
 ) (melodysecuritycontract.Claims, bool, error) {
-    return TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()).Lookup(runtimeInstance, tokenString)
+    return TokenStoreFromRuntime(runtimeInstance).Lookup(tokenString)
 }
 
 func (instance ResolvedTokenStore) RevokeBefore(
@@ -41,15 +42,12 @@ func (instance ResolvedTokenStore) RevocationEpoch(
     userIdentifier string,
     deviceIdentifier string,
 ) (time.Time, error) {
-    return TokenStoreFromResolver(runtimeInstance.Context(), runtimeInstance.Scope()).RevocationEpoch(
-        runtimeInstance,
-        userIdentifier,
-        deviceIdentifier,
-    )
+    return TokenStoreFromRuntime(runtimeInstance).RevocationEpoch(userIdentifier, deviceIdentifier)
 }
 
-func TokenStoreFromResolver(ctx context.Context, resolver melodycontainercontract.Resolver) melodysecuritycontract.EpochRevocableTokenStore {
-    return melodyrueidis.EpochRevocableTokenStoreMustFromResolver(ctx, resolver)
+/* TokenStoreFromRuntime binds the store the token firewalls read, redis when wired and the process's own otherwise, both registered under the rueidis module's name */
+func TokenStoreFromRuntime(runtimeInstance melodycontainercontract.Runtime) melodysecurity.BoundTokenStore {
+    return melodysecurity.TokenStoreFromRuntime(runtimeInstance, melodyrueidis.ServiceTokenStore)
 }
 
 var _ melodysecuritycontract.TokenStore = ResolvedTokenStore{}

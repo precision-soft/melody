@@ -381,7 +381,7 @@ func TestWithdrawMintedToken_ACancelledRequestStillWithdrawsTheToken(t *testing.
     cancel()
     containerInstance := melodycontainer.NewContainer(melodycontainer.ContainerConfig{})
 
-    withdrawMintedToken(melodyruntime.NewRequest(cancelledContext, containerInstance.NewScope()), store, "minted")
+    withdrawMintedToken(melodysecurity.TokenStoreFor(melodyruntime.NewRequest(cancelledContext, containerInstance.NewScope()), store), "minted")
 
     if _, found, _ := store.Lookup(accessTokenTestRuntime(), "minted"); true == found {
         t.Fatalf("expected the minted token withdrawn although the request was cancelled")

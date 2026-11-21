@@ -10,6 +10,7 @@ import (
     melodyevent "github.com/precision-soft/melody/v4/event"
     melodyeventcontract "github.com/precision-soft/melody/v4/event/contract"
     melodylogging "github.com/precision-soft/melody/v4/logging"
+    melodysecurity "github.com/precision-soft/melody/v4/security"
     melodysecuritycontract "github.com/precision-soft/melody/v4/security/contract"
 )
 
@@ -43,10 +44,10 @@ func (instance *AccessTokenReleaseSubscriber) onUserDeleted() melodyeventcontrac
             return nil
         }
 
-        store := instance.storeSource(runtimeInstance)
         compensationRuntime := examplesecurity.DetachedRuntime(runtimeInstance)
-        revokeErr := store.RevokeBefore(compensationRuntime, payloadInstance.UserId(), "", eventValue.Timestamp())
-        released, releaseErr := store.DeleteByUser(compensationRuntime, payloadInstance.UserId())
+        store := melodysecurity.TokenStoreFor(compensationRuntime, instance.storeSource(compensationRuntime))
+        revokeErr := store.RevokeBefore(payloadInstance.UserId(), "", eventValue.Timestamp())
+        released, releaseErr := store.DeleteByUser(payloadInstance.UserId())
         if 0 < released {
             examplejournal.LoggerOr(runtimeInstance, melodylogging.EmergencyLogger()).Info(
                 "the device tokens of a deleted account were released",

@@ -13,6 +13,8 @@ import (
     "reflect"
     "strings"
     "testing"
+    "unicode"
+    "unicode/utf8"
 
     "github.com/precision-soft/melody/v4/container"
     containercontract "github.com/precision-soft/melody/v4/container/contract"
@@ -1060,6 +1062,8 @@ func TestResolveArguments_RefusesARuntimeBoundView(t *testing.T) {
     for _, viewReference := range []*TypeReference{
         {Expression: "melodycache.Bound", Qualifier: "melodycache", ImportPath: "github.com/precision-soft/melody/v4/cache"},
         {Expression: "*melodycache.Bound", Qualifier: "melodycache", ImportPath: "github.com/precision-soft/melody/v4/cache", IsPointer: true},
+        {Expression: "melodysecurity.BoundTokenStore", Qualifier: "melodysecurity", ImportPath: "github.com/precision-soft/melody/v4/security"},
+        {Expression: "*melodysecurity.BoundTokenStore", Qualifier: "melodysecurity", ImportPath: "github.com/precision-soft/melody/v4/security", IsPointer: true},
     } {
         constructor := &Constructor{
             Name:      "NewViewHolder",
@@ -1124,9 +1128,9 @@ func TestViewTypes_ListsEveryBoundViewOfTheFourthMajor(t *testing.T) {
 
                 for _, specification := range general.Specs {
                     typeSpecification := specification.(*ast.TypeSpec)
-                    if _, isStruct := typeSpecification.Type.(*ast.StructType); true == isStruct && "Bound" == typeSpecification.Name.Name {
+                    if _, isStruct := typeSpecification.Type.(*ast.StructType); true == isStruct && true == isViewTypeName(typeSpecification.Name.Name) {
                         relative, _ := filepath.Rel(root, filepath.Dir(path))
-                        declared[filepath.ToSlash(filepath.Join(modulePath, relative))+".Bound"] = true
+                        declared[filepath.ToSlash(filepath.Join(modulePath, relative))+"."+typeSpecification.Name.Name] = true
                     }
                 }
             }
@@ -1142,8 +1146,44 @@ func TestViewTypes_ListsEveryBoundViewOfTheFourthMajor(t *testing.T) {
         t.Fatalf("expected the walk to find the cache view, found %v", declared)
     }
 
+    if false == declared["github.com/precision-soft/melody/v4/security.BoundTokenStore"] {
+        t.Fatalf("expected the walk to find the token store view, found %v", declared)
+    }
+
     if false == reflect.DeepEqual(declared, viewTypes) {
         t.Fatalf("expected viewTypes to list exactly the declared views %v, got %v", declared, viewTypes)
+    }
+}
+
+/* a view is a struct named Bound, or Bound followed by the name of what it binds */
+func isViewTypeName(name string) bool {
+    if false == strings.HasPrefix(name, "Bound") {
+        return false
+    }
+
+    rest := name[len("Bound"):]
+
+    first, _ := utf8.DecodeRuneInString(rest)
+
+    return "" == rest || true == unicode.IsUpper(first)
+}
+
+func TestIsViewTypeName_TakesBoundAndBoundFollowedByANameOnly(t *testing.T) {
+    for name, expected := range map[string]bool{
+        "Bound":           true,
+        "BoundTokenStore": true,
+        "BoundStorage":    true,
+        "BoundÉtat":       true,
+        "Bound2":          false,
+        "Bounded":         false,
+        "Boundary":        false,
+        "MyBound":         false,
+        "UnboundStore":    false,
+        "bound":           false,
+    } {
+        if expected != isViewTypeName(name) {
+            t.Fatalf("%s: expected %v", name, expected)
+        }
     }
 }
 

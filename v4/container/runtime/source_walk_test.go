@@ -125,8 +125,8 @@ var accessorWithoutRuntimeForm = map[string]string{
     "integrations/outbox/v4:NewRelayCommandFromResolver":            "constructor",
     "v4/cache:CacheMustFromResolver":                                "provider",
     "v4/storage:StorageMustFromResolver":                            "view",
-    "integrations/rueidis/v4:TokenStoreMustFromResolver":            "view",
-    "integrations/rueidis/v4:EpochRevocableTokenStoreMustFromResolver": "view",
+    "integrations/rueidis/v4:TokenStoreMustFromResolver":            "provider",
+    "integrations/rueidis/v4:EpochRevocableTokenStoreMustFromResolver": "provider",
 }
 
 func TestSourceWalk_EveryNamedResolverAccessorHasARuntimeFormOrADecision(t *testing.T) {
@@ -203,10 +203,8 @@ var runtimeHeldResolverCallAllowed = map[string]runtimeHeldResolverAllowance{
     "v4/.example/cli/product_list_command.go:MustGetCurrencyService":                 {count: 1, decision: exampleOwnAccessor},
     "v4/.example/cli/product_list_command.go:MustGetProductService":                  {count: 1, decision: exampleOwnAccessor},
     "v4/.example/config/device_token_enricher.go:MustGetUserRepository":              {count: 1, decision: exampleOwnAccessor},
-    "v4/.example/config/event.go:TokenStoreFromResolver":                             {count: 1, decision: exampleOwnAccessor},
     "v4/.example/config/two_factor.go:MustGetUserService":                            {count: 1, decision: exampleOwnAccessor},
     "v4/.example/handler/accesstoken/access_token_handler.go:MustGetUserRepository":  {count: 1, decision: exampleOwnAccessor},
-    "v4/.example/handler/accesstoken/access_token_handler.go:TokenStoreFromResolver": {count: 2, decision: exampleOwnAccessor},
     "v4/.example/handler/category/read_handler.go:MustGetCategoryRepository":         {count: 1, decision: exampleOwnAccessor},
     "v4/.example/handler/currency/create_handler.go:MustGetCurrencyService":          {count: 1, decision: exampleOwnAccessor},
     "v4/.example/handler/currency/delete_handler.go:MustGetCurrencyService":          {count: 1, decision: exampleOwnAccessor},
@@ -222,7 +220,6 @@ var runtimeHeldResolverCallAllowed = map[string]runtimeHeldResolverAllowance{
     "v4/.example/handler/user/delete_handler.go:MustGetUserService":                  {count: 1, decision: exampleOwnAccessor},
     "v4/.example/handler/user/read_handler.go:MustGetUserService":                    {count: 2, decision: exampleOwnAccessor},
     "v4/.example/handler/user/update_handler.go:MustGetUserService":                  {count: 1, decision: exampleOwnAccessor},
-    "v4/.example/security/token_store.go:TokenStoreFromResolver":                     {count: 2, decision: exampleOwnAccessor},
     "v4/.example/subscriber/catalog_change_recorder.go:MustGetCatalogJournalService": {count: 1, decision: exampleOwnAccessor},
 }
 
